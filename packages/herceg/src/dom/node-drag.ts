@@ -193,6 +193,8 @@ export class Controls implements ChartControls {
       const from = key !== undefined && moves?.movable(key) ? moves.pixelOf(key) : undefined;
       if (!from || !moves) return;
       if (!this.#pointer.acquire(event.pointerId)) return;
+      event.preventDefault();
+      root.focus({ preventScroll: true });
       this.#press = { pointer: event.pointerId, panel, key: key!, x, y, from, moved: false };
       root.setPointerCapture?.(event.pointerId);
     });

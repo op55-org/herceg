@@ -580,6 +580,9 @@ leaves the gesture to the page. A gesture may be bound once, and the keys
 the keyboard cursor uses (arrows, Home, End, Page Up and Down, Escape,
 Enter) only with ctrl, alt, or meta.
 
+Live chart drags prevent page text selection. Static charts keep their text
+selectable, and clicks still focus the chart.
+
 `hg.ViewLimits(extent=(start, None), edge=True)` keeps every change of the
 view inside `extent` (numbers, or datetimes on time axes; `None` for no end),
 however it is made, and reports coming near an end, to a live chart's

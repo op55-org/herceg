@@ -3,6 +3,7 @@
 // not import helpers.ts, whose import loads the controller first.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { commands } from "vitest/browser";
 import { MOUSE } from "../../../../scripts/browser/mouse.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, createChart, forgetInteraction } from "../../src/dom/chart.ts";
@@ -22,10 +23,17 @@ beforeEach(() => {
 afterEach(() => {
   host.remove();
   forgetInteraction();
+  window.getSelection()?.removeAllRanges();
 });
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const data = () => table({ t: [0, 1, 2, 3, 4], v: [10, 20, 30, 40, 50] });
+
+function mouse(chart: Chart, type: "move" | "press" | "release", x: number, y: number) {
+  const root = chart.root.getBoundingClientRect();
+  const frame = window.frameElement?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  return commands.mouse({ type, x: frame.left + root.left + x, y: frame.top + root.top + y });
+}
 
 function pointer(chart: Chart, type: string, x: number, y: number, init: PointerEventInit = {}) {
   const rect = chart.root.getBoundingClientRect();
@@ -47,6 +55,72 @@ const tooltipOf = (chart: Chart) =>
   ) as HTMLElement | undefined;
 
 describe("the interaction controller", () => {
+  it("prevents native selection before loading, and replay leaves later focus alone", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    host.style.width = "400px";
+    const chart = createChart(host, {
+      interaction: { pan: "x" },
+      marks: [line(data(), { x: "t", y: "v" })],
+    });
+    window.getSelection()?.removeAllRanges();
+    await mouse(chart, "move", 70, 80);
+    await mouse(chart, "press", 70, 80);
+    try {
+      await mouse(chart, "move", 200, 150);
+      await mouse(chart, "move", 340, 280);
+    } finally {
+      await mouse(chart, "release", 340, 280);
+    }
+    expect(window.getSelection()?.toString()).toBe("");
+    expect(document.activeElement).toBe(chart.root);
+    expect(chart.getViewport().x).toBeNull();
+    const elsewhere = document.createElement("button");
+    host.append(elsewhere);
+    elsewhere.focus();
+    attach(module);
+    await chart.loading;
+    expect(chart.getViewport().x).not.toBeNull();
+    expect(document.activeElement).toBe(elsewhere);
+    chart.destroy();
+  });
+
+  it.each([
+    {},
+    { bindings: [{ gesture: { type: "wheel" }, action: { type: "zoom" } }] },
+    { bindings: [{ gesture: { type: "drag", pointer: "touch" }, action: { type: "pan" } }] },
+    { bindings: [{ gesture: { type: "drag", button: 2 }, action: { type: "pan" } }] },
+    { bindings: [{ gesture: { type: "drag", modifiers: ["ctrl"] }, action: { type: "pan" } }] },
+    { pan: "x", bindings: [{ gesture: { type: "drag" }, action: { type: "pageScroll" } }] },
+    { pan: false, zoom: "x" },
+  ] as const)("leaves unbound mouse selection alone before loading (%j)", async (interaction) => {
+    forgetInteraction(() => new Promise(() => {}));
+    host.style.width = "400px";
+    const chart = createChart(host, {
+      title: "Selectable title",
+      interaction,
+      marks: [line(data(), { x: "t", y: "v" })],
+    });
+    expect(pointer(chart, "pointerdown", 150, 150, { button: 0 }).defaultPrevented).toBe(false);
+    const title = [...chart.root.querySelectorAll("text")]
+      .find((el) => el.textContent === "Selectable title")!
+      .getBoundingClientRect();
+    const root = chart.root.getBoundingClientRect();
+    const x = title.left - root.left + 2;
+    const y = title.top - root.top + title.height / 2;
+    window.getSelection()?.removeAllRanges();
+    await mouse(chart, "move", x, y);
+    await mouse(chart, "press", x, y);
+    try {
+      await mouse(chart, "move", x + title.width - 4, y);
+    } finally {
+      await mouse(chart, "release", x + title.width - 4, y);
+    }
+    expect(window.getSelection()?.toString()).toContain("electable titl");
+    chart.destroy();
+  });
+
   it("loads after the first frame, which draws without it", async () => {
     const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
     expect(chart.root.querySelectorAll("svg g[clip-path] path")).toHaveLength(1);

@@ -4596,12 +4596,14 @@ kit, so it imports nothing a chart's initial chunks hold and bundlers split
 no shared chunk out of them.
 
 Until it is attached, a small gate on the chart's root keeps input for it
-(`#hold`): the latest of consecutive pointer moves (all of them while a
+(`#gate`): the latest of consecutive pointer moves (all of them while a
 press is held, up to 256), keys in order, presses, releases, wheels, double
 clicks, and blurs. It decides in the original event what must be decided
-there: a press in a chart that pans, zooms, brushes, or has bindings
-captures its pointer (touches are captured where they land), and the
-browser's `dragstart` is prevented while a press is kept; a wheel a preset
+there: drag bindings match the press's pointer type, button, and modifiers
+before falling back to presets; `pageScroll` leaves matching presses to the
+page. An accepted drag press, outside buttons, captures its pointer at the
+root (touches included), prevents `pointerdown`'s default to stop native
+text selection, and focuses the chart without scrolling. A wheel a preset
 takes (sideways in a chart that pans x, with Ctrl or ⌘ in one that zooms),
 the keyboard cursor's keys, and in a chart that zooms `+`, `-`, `=`, and `0`
 have their defaults prevented. Bindings of a chart's own are compiled
@@ -4677,6 +4679,11 @@ both ways (a map, a network), whose touches are all its own unless a
 controller, the maps', 3D charts', and networks' controls, and the input
 gate all match the same list, so `interaction.zoom` means the same in every
 chart.
+
+Accepted drag starts cancel the native pointerdown default to prevent page
+text selection, and explicitly focus the chart (the navigator focuses its
+slider). Deferred input replay leaves focus where the user put it afterward.
+Unbound presses keep native text selection and focus behavior.
 
 A press becomes its drag binding's action once it moves 3 px; Escape ends
 a drag, putting a pan back where it started if nothing else moved the view

@@ -3,7 +3,7 @@
 // and emits events to the application. Pointer, wheel, and keyboard input,
 // and what they draw over the chart, are the interaction controller's
 // (interaction.ts), which loads after the first frame; until then the chart
-// keeps the input that arrives (`#hold`).
+// keeps the input that arrives (`#gate`).
 //
 // Layers, bottom to top: a canvas for dense marks (only when used), the SVG
 // layer (grid and marks when not on canvas, rules, axes, title, pointer
@@ -231,7 +231,6 @@ const HELD = [
   "dblclick",
   "keydown",
   "blur",
-  "dragstart",
 ] as const;
 
 /**
@@ -308,7 +307,7 @@ export class MountedChart implements Chart, ExportsScene {
   #controllerLoading: Promise<void> | undefined;
   /** The import this chart attaches to, once started. */
   #attaching: Promise<void> | undefined;
-  /** Input that arrived before the controller, in order (see `#hold`); null once it failed to load. */
+  /** Input that arrived before the controller, in order (see `#gate`); null once it failed to load. */
   #held: Event[] | null = [];
   #canvas: HTMLCanvasElement | null = null;
   #onCanvas = false;
@@ -1811,66 +1810,69 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   /**
-   * Listens for input until the controller is attached, keeping what
-   * arrives for it (`#hold`).
-   */
-  #gate(): void {
-    const hold = (event: Event) => this.#hold(event);
-    for (const type of HELD) {
-      this.root.addEventListener(type, hold, type === "wheel" ? { passive: false } : undefined);
-      this.#cleanup.push(() => this.root.removeEventListener(type, hold));
-    }
-  }
-
-  /**
    * Keeps input that arrives before the controller, which plays it once it
    * is attached: hover as its latest position, presses whole (their start,
    * their path, and their end), keys and wheel steps in order. What the
    * controller would take is taken in the event itself, since it cannot be
-   * later (the browser's default prevented, the pointer captured), as the
-   * presets bind it: the chart's own bindings take input once it is here.
+   * later (the browser's default prevented, the pointer captured). Drag
+   * bindings take matching presses now; wheel presets take matching steps.
    */
-  #hold(event: Event): void {
-    const held = this.#held;
-    if (this.#controller || !held) return;
-    this.#loadController().catch(() => {});
-    const { pan, zoom, brush, bindings } = this.#options.interaction ?? {};
-    const { type } = event;
-    const pressed = held.some((e) => e.type === "pointerdown");
-    if (type === "wheel") {
-      // The wheel sideways pans; with Ctrl or ⌘ held, it zooms.
-      const { deltaX, deltaY, shiftKey, ctrlKey, metaKey } = event as WheelEvent;
-      const panning = pan === false ? undefined : (pan ?? zoom);
-      const sideways = Math.abs(deltaX) > Math.abs(deltaY) || shiftKey;
-      if (sideways ? panning && panning !== "y" : zoom && (ctrlKey || metaKey))
-        event.preventDefault();
-      // Others scroll the page, and only bindings of the chart's own may take them later.
-      else if (!bindings) return;
-    } else if (type === "keydown") {
-      const { key, target } = event as KeyboardEvent;
-      if (target !== this.root) return;
-      // The keys the chart reads, and with zoom + and −, 0: not the page's.
-      const zooms = zoom && ["+", "-", "=", "0"].includes(key);
-      if ((NAVIGATION_KEYS.includes(key) && key !== "Enter") || zooms) event.preventDefault();
-    } else if (type === "pointerdown") {
-      // A press that may become a drag owns its pointer; touches are
-      // captured where they land.
-      const { pointerType, pointerId, target } = event as PointerEvent;
-      const drags = pan || zoom || brush || bindings;
-      if (drags && pointerType !== "touch" && !(target as Element).closest?.("button"))
-        this.root.setPointerCapture?.(pointerId);
-    } else if (type === "dragstart") {
-      // A press held for the controller drags the chart, not the page's selection.
-      if (pressed) event.preventDefault();
-      return;
-    } else if (
-      type === "pointermove" &&
-      held.at(-1)?.type === "pointermove" &&
-      // Without a press, only where the pointer is now matters; a press keeps its path.
-      (!pressed || held.length > HELD_MOVES)
-    )
-      held.pop();
-    held.push(event);
+  #gate(): void {
+    const hold = (event: Event): void => {
+      const held = this.#held;
+      if (this.#controller || !held) return;
+      this.#loadController().catch(() => {});
+      const { pan, zoom, brush, bindings } = this.#options.interaction ?? {};
+      const panning = pan ?? zoom;
+      if (event.type === "wheel") {
+        // The wheel sideways pans; with Ctrl or ⌘ held, it zooms.
+        const wheel = event as WheelEvent;
+        const sideways = Math.abs(wheel.deltaX) > Math.abs(wheel.deltaY) || wheel.shiftKey;
+        if (sideways ? panning && panning !== "y" : zoom && (wheel.ctrlKey || wheel.metaKey))
+          event.preventDefault();
+      } else if (event.type === "keydown") {
+        const key = (event as KeyboardEvent).key;
+        if (event.target !== this.root) return;
+        // The keys the chart reads, and with zoom + and −, 0: not the page's.
+        const zooms = zoom && ["+", "-", "=", "0"].includes(key);
+        if ((NAVIGATION_KEYS.includes(key) && key !== "Enter") || zooms) event.preventDefault();
+      } else if (event.type === "pointerdown") {
+        // Matching drags own their pointer and suppress native text selection.
+        const pointer = event as PointerEvent;
+        const action = bindings?.find(
+          ({ gesture }) =>
+            gesture.type === "drag" &&
+            (gesture.button ?? 0) === pointer.button &&
+            (!gesture.pointer || gesture.pointer === pointer.pointerType) &&
+            (["shift", "ctrl", "alt", "meta"] as const).every(
+              (key) => pointer[`${key}Key`] === !!gesture.modifiers?.includes(key),
+            ),
+        )?.action.type;
+        const drags = action
+          ? action !== "pageScroll"
+          : pointer.button === 0 &&
+            !pointer.ctrlKey &&
+            !pointer.altKey &&
+            !pointer.metaKey &&
+            (panning || brush);
+        if (drags && !(pointer.target as Element).closest?.("button")) {
+          event.preventDefault();
+          this.root.focus({ preventScroll: true });
+          this.root.setPointerCapture?.(pointer.pointerId);
+        }
+      } else if (
+        event.type === "pointermove" &&
+        held.at(-1)?.type === event.type &&
+        // Without a press, only where the pointer is now matters; a press keeps its path.
+        (held.length > HELD_MOVES || !held.some((e) => e.type === "pointerdown"))
+      )
+        held.pop();
+      held.push(event);
+    };
+    for (const type of HELD) {
+      this.root.addEventListener(type, hold);
+      this.#cleanup.push(() => this.root.removeEventListener(type, hold));
+    }
   }
 
   /** Imports the controller, once, and attaches it when it arrives. */

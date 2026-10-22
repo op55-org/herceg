@@ -432,6 +432,8 @@ export class Controls implements ChartControls {
       const action = this.dragAction(event, panel!);
       if (action?.type !== "brush" && action?.type !== "pan") return;
       if (!this.#pointer.acquire(event.pointerId)) return;
+      event.preventDefault();
+      root.focus({ preventScroll: true });
       const mode = action.type === "brush" ? "lasso" : "pan";
       const { plane } = view;
       this.#press = {

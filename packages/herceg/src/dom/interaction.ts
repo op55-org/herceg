@@ -904,8 +904,12 @@ export class Interaction {
       if (mode === "click" && event.button !== 0) return;
       this.#press = { x, y, panel, mode, action, moved: false, from: this.#view(panel) };
       // Touches are captured where they land, at once.
-      if (mode !== "click" && event.pointerType !== "touch")
-        root.setPointerCapture?.(event.pointerId);
+      if (mode !== "click") {
+        // Cancel native selection at its start; replay must not move focus.
+        event.preventDefault();
+        if (event.eventPhase) root.focus({ preventScroll: true });
+        if (event.pointerType !== "touch") root.setPointerCapture?.(event.pointerId);
+      }
     });
     on("pointerup", (event) => {
       this.#touches.delete(event.pointerId);

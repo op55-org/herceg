@@ -192,6 +192,8 @@ export class Controls implements ChartControls {
         .bindings()
         .match("drag", event, ({ type }) => type === "orbit" || type === "pageScroll")?.action;
       if (action?.type !== "orbit") return;
+      event.preventDefault();
+      root.focus({ preventScroll: true });
       this.#press = {
         pointer: event.pointerId,
         x: event.clientX,

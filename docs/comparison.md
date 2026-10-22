@@ -13,7 +13,9 @@ correctness guarantees; equivalent competitor behavior has not been measured
 in the performance scenarios below.
 
 Herceg's Python legends and colorbars accept panel-scoped side placement,
-matching the engine. Equivalent behavior in ECharts, TanStack Charts, Chart.js,
+matching the engine. Browser drag gestures prevent native text selection
+while static chart text remains selectable. These behaviors are covered by
+regression tests; equivalent behavior in ECharts, TanStack Charts, Chart.js,
 and Plotly has not been compared.
 
 Each entry is one of:

@@ -3534,7 +3534,8 @@ A brush that zooms cannot select rows for `rowSelection`; such a binding is
 refused when the chart's brushes select rows. `pageScroll` hands a gesture
 back to the page that a preset would take: `{ gesture: { type: "pinch" },
 action: { type: "pageScroll" } }` leaves pinches to the page in a chart that
-zooms.
+zooms. Drag gestures handled by the chart prevent page text selection;
+static charts keep their text selectable, and clicks still focus the chart.
 
 #### View limits
 

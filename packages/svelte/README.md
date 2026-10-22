@@ -86,6 +86,9 @@ nodes move while zoomed and `setItemPosition` still uses layout units.
 When zoom is on, Alt+Shift+arrows moves the node read; Shift+arrows and 0
 navigate the view. The toolbar restores moved nodes.
 
+Chart drag gestures prevent page text selection. Static charts keep their
+text selectable; clicks still focus the chart and toggle legend entries.
+
 `layout` places a network's nodes: `"force"` (the default; in it, the nodes
 near a moved one settle around it once it is dropped, unless `{ type:
 "force", settle: false }`), `"circular"`, or `"layered"` (for trees and

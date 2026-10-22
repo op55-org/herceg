@@ -8,6 +8,7 @@ to do about it.
 ## Unreleased
 
 - Python `hg.Place` accepts panel-scoped side placements for legends and colorbars, matching the engine's validation.
+- Chart drag gestures prevent native text selection while preserving static text selection, clicks, and focus.
 
 The first public release. What it contains:
 
