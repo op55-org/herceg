@@ -12,6 +12,10 @@ labels. Text halos choose the surface at 3:1 contrast or higher and accept
 correctness guarantees; equivalent competitor behavior has not been measured
 in the performance scenarios below.
 
+Herceg's Python legends and colorbars accept panel-scoped side placement,
+matching the engine. Equivalent behavior in ECharts, TanStack Charts, Chart.js,
+and Plotly has not been compared.
+
 Each entry is one of:
 
 - **Measured** — produced by the benchmark suite in `benchmarks/`; raw data is

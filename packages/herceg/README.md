@@ -1710,6 +1710,9 @@ the notes), — not yet (refused with an error), · not applicable.
   inset and its parent, and is refused otherwise (category axes, layout
   marks). A panel's legend (`legend({ panel })`) lists what its panel draws,
   for every mark with a legend toggle, and hides and shows it there.
+  Legends and colorbars can stand beside one panel with
+  `place: { side: "right", scope: "panel", panel: "heat" }`; omitting
+  `panel` targets the first panel. Python accepts the same placement in `hg.Place`.
 - Lines, rules, and custom shapes support all four dash strings on SVG,
   Canvas (for data marks), and static SVG/PDF export.
 - Series from color: a category `color` names the series, as `series`
@@ -3898,9 +3901,10 @@ createChart(element, {
 A chart's title goes at the top (the default) or with `place: { side:
 "bottom" }` below the plots; its style's `align` puts it at the start,
 center, or end of the chart's width, and `"\n"` breaks it into lines, each
-taking a line of room. A legend's `place` is a side, `{ side, align?, offset? }`
+taking a line of room. A legend's or colorbar's `place` is a side, `{ side, align?, offset?, scope?, panel? }`
 (rows that wrap above or below the plots, a column beside them; `align`
-along the side, `offset` pixels of extra room), or a place inside a plot,
+along the side, `offset` pixels of extra room, beside the whole chart by
+default or beside `panel` with `scope: "panel"`, the first panel if omitted), or a place inside a plot,
 `{ inside, inset?, scope?, panel? }`: a corner or the middle of an edge
 (`"top-left"`, `"top"`, ..., `"left"`) `inset` pixels in (8 by default),
 inside the plot of subplot or facet `panel` (the first by default), or with

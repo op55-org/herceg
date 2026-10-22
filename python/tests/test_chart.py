@@ -2709,7 +2709,6 @@ def test_style_builders_check_their_values_in_python_names():
             lambda: hg.Title("T", place=hg.Place(side="top", offset=20)),
             "Title place: a title takes only side",
         ),
-        (lambda: hg.Place(side="right", scope="panel"), "Place scope: a place on a side"),
     ]
     for make, message in cases:
         with pytest.raises((ValueError, TypeError), match=message):

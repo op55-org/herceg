@@ -7,6 +7,8 @@ to do about it.
 
 ## Unreleased
 
+- Python `hg.Place` accepts panel-scoped side placements for legends and colorbars, matching the engine's validation.
+
 The first public release. What it contains:
 
 **Engine (`herceg`)**

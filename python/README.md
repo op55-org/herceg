@@ -451,9 +451,14 @@ hg.Chart(
 
 A title goes at the top or, with `place=hg.Place(side="bottom")`, below the
 plots, aligned by its style; `"\n"` breaks it into lines. A legend's place
-is a side (`hg.Place(side=..., align=..., offset=...)`) or a corner or edge
+is a side (`hg.Place(side=..., align=..., offset=..., scope=..., panel=...)`) or a corner or edge
 inside a plot (`hg.Place(inside=..., inset=..., scope=..., panel=...)`);
-inside, it takes no room from the plots. Without `padding`, spacing is
+inside, it takes no room from the plots. Legends and colorbars accept
+`scope="panel"` on a side to stand beside `panel` (the first panel when
+omitted), for example `hg.colorbar(place=hg.Place(side="right", scope="panel", panel="heat"))`.
+`panel.legend(place={"side": "right", "scope": "panel"})` stands beside
+that panel. Side placements default to chart scope; inside placements to
+panel scope. Without `padding`, spacing is
 automatic; with it (pixels, or a dict of sides; `0` included), it is the
 whitespace around everything the chart draws.
 

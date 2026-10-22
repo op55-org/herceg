@@ -1481,6 +1481,34 @@ describe("capabilities: legend toggle", () => {
     expect(rampsOf(scene)).toEqual([]);
   });
 
+  it("places a colorbar beside its named panel or the first panel", () => {
+    for (const target of [undefined, "b"]) {
+      const model = new ChartModel(
+        {
+          panels: subplot,
+          marks: [
+            line(samples, { x: "x", y: "y", panel: "a" }),
+            heatmap(field, { x: "x", y: "y", color: "z", panel: "b" }),
+          ],
+          guides: [
+            colorbar({
+              place: { side: "right", scope: "panel", ...(target && { panel: target }) },
+            }),
+          ],
+        },
+        undefined,
+        guides,
+      );
+      model.setSize(800, 600, 1);
+      const scene = model.scene(estimateText);
+      const bar = guidesOf(scene, "colorbar")[0]!.items.find((item) => item.type === "ramp")!;
+      const { plot } = scene.panels[target ? 1 : 0]!;
+      expect(bar.x).toBeGreaterThan(plot.x + plot.width);
+      expect(bar.y).toBeGreaterThanOrEqual(plot.y);
+      expect(bar.y + bar.height).toBeLessThanOrEqual(plot.y + plot.height);
+    }
+  });
+
   it.each(colored.slice(0, 3))("$name leaves its legend with legend: false", (c) => {
     const { scene } = build({ marks: [c.make({ legend: false } as Placement)], legend: true });
     expect(rampsOf(scene)).toEqual([]);

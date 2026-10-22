@@ -2,6 +2,7 @@
 their specs, their errors in Python's names, and their output."""
 
 import datetime as dt
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -9,6 +10,103 @@ import herceg as hg
 
 HOURS = [dt.datetime(2026, 9, 28) + dt.timedelta(hours=i) for i in range(49)]
 WEEK = {"t": HOURS, "v": [i % 7 for i in range(49)]}
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"side": "right", "scope": "panel"},
+        {"side": "left", "scope": "panel", "panel": "heat", "align": "end", "offset": 0},
+        {"inside": "top-right", "scope": "panel", "panel": "heat", "inset": 0},
+        # The engine accepts panel strings independently of scope, even empty strings.
+        {"side": "bottom", "scope": "chart", "panel": ""},
+        {"inside": "left", "scope": "chart", "panel": "heat"},
+        {"side": "top", "panel": "heat"},
+    ],
+)
+def test_place_accepts_the_engines_side_and_inside_options(options):
+    guide = hg.colorbar(place=hg.Place(**options))
+    chart = hg.Chart(WEEK, guides=[guide]).line(x="t", y="v")
+    assert spec_of(chart)["guides"][0]["place"] == options
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({}, "Place: give a side or inside"),
+        ({"side": "right", "inside": "top"}, "Place: give a side or inside"),
+        ({"side": "right", "inset": 2}, "Place inset: places inside a plot only"),
+        ({"inside": "top", "align": "start"}, "Place align: places on a side only"),
+        ({"inside": "top", "offset": 0}, "Place offset: places on a side only"),
+        ({"side": "middle"}, "Place side: expected"),
+        ({"inside": "middle"}, "Place inside: expected"),
+        ({"side": "right", "align": "middle"}, "Place align: expected"),
+        ({"side": "right", "scope": "plot"}, "Place scope: expected"),
+        ({"side": "right", "panel": 1}, "Place panel: expected a string"),
+        ({"side": "right", "offset": -1}, "Place offset: expected a number of at least 0"),
+        ({"side": "right", "offset": float("inf")}, "Place offset: expected a number"),
+        ({"inside": "top", "inset": float("nan")}, "Place inset: expected a number"),
+        ({"inside": "top", "inset": True}, "Place inset: expected a number"),
+    ],
+)
+def test_place_refuses_the_same_invalid_options_as_the_engine(options, message):
+    with pytest.raises((ValueError, TypeError), match=message):
+        hg.Place(**options)
+
+
+@pytest.mark.parametrize("named_panel", [False, True])
+def test_colorbar_renders_beside_one_panel(named_panel):
+    place = hg.Place(side="right", scope="panel", panel="heat" if named_panel else None)
+    chart = hg.Chart(
+        {"x": [0, 1, 0, 1], "y": [0, 0, 1, 1], "v": [0, 2, 5, 10]},
+        width=640,
+        height=600,
+        legend=False,
+        guides=[hg.colorbar(title="Score", place=place)],
+    )
+    top, bottom = chart.rows([1, 1])
+    # The named target is second; without a name placement defaults to the first.
+    top.panel("trend").line(x="x", y="v")
+    bottom.panel("heat").heatmap(x="x", y="y", color="v")
+    assert spec_of(chart)["guides"][0]["place"] == {
+        "side": "right",
+        "scope": "panel",
+        **({"panel": "heat"} if named_panel else {}),
+    }
+    root = ET.fromstring(chart.to_svg())
+    ns = {"s": "http://www.w3.org/2000/svg"}
+    plots = root.findall("s:defs/s:clipPath/s:rect", ns)
+    assert len(plots) == 2
+    target = plots[1 if named_panel else 0]
+    ramp = next(r for r in root.findall(".//s:rect", ns) if "ramp" in r.get("fill", ""))
+    assert float(ramp.attrib["x"]) > float(target.attrib["x"]) + float(target.attrib["width"])
+    assert float(target.attrib["y"]) <= float(ramp.attrib["y"])
+    assert float(ramp.attrib["y"]) + float(ramp.attrib["height"]) <= float(
+        target.attrib["y"]
+    ) + float(target.attrib["height"])
+
+
+def test_panel_legend_accepts_a_panel_scoped_side_place():
+    chart = hg.Chart({"x": [0, 1], "y": [1, 2]}, width=640, height=600, legend=False)
+    top, bottom = chart.rows([1, 1])
+    top.panel("other").line(x="x", y="y")
+    panel = bottom.panel("trend").line(x="x", y="y", label="Trend")
+    panel.legend(place={"side": "right", "scope": "panel"})
+    assert spec_of(chart)["guides"][0] == {
+        "type": "legend",
+        "panel": "trend",
+        "place": {"side": "right", "scope": "panel"},
+    }
+    root = ET.fromstring(chart.to_svg())
+    ns = {"s": "http://www.w3.org/2000/svg"}
+    target = root.findall("s:defs/s:clipPath/s:rect", ns)[1]
+    label = next(t for t in root.findall(".//s:text", ns) if t.text == "Trend")
+    assert float(label.attrib["x"]) > float(target.attrib["x"]) + float(target.attrib["width"])
+    assert (
+        float(target.attrib["y"])
+        <= float(label.attrib["y"])
+        <= float(target.attrib["y"]) + float(target.attrib["height"])
+    )
 
 
 def spec_of(chart: hg.Chart) -> dict:

@@ -448,13 +448,15 @@ def theme_spec(theme: Any) -> Any:
 
 @dataclass
 class Place:
-    """Where a legend goes: outside on a ``side`` (``"top"``, ``"right"``,
+    """Where a legend or colorbar goes: outside on a ``side`` (``"top"``, ``"right"``,
     ``"bottom"``, ``"left"``), at the ``align`` (``"start"``, ``"center"``,
     ``"end"``) of it, ``offset`` pixels farther out than usual; or
     ``inside`` a plot, at a corner or the middle of an edge (``"top-right"``,
     ``"bottom"``, ...), ``inset`` pixels in. ``scope="chart"`` places it
     beside or over the whole figure; ``scope="panel"`` beside or inside the
-    plot of ``panel`` (the first one by default)."""
+    plot of ``panel`` (the first one by default). The default scope is
+    ``"chart"`` on a side and ``"panel"`` inside. ``align`` and ``offset``
+    apply only on a side; ``inset`` only inside."""
 
     side: Side | None = None
     align: Align | None = None
@@ -471,11 +473,6 @@ class Place:
             _choice(self.side, ("top", "right", "bottom", "left"), "Place side")
             if self.inset is not None:
                 raise ValueError("Place inset: places inside a plot only; give offset instead")
-            if self.scope == "panel" or self.panel is not None:
-                raise ValueError(
-                    "Place scope: a place on a side is beside the whole chart; drop scope and "
-                    'panel, or place it inside a panel with inside="..."'
-                )
         if self.inside is not None:
             _choice(self.inside, _INSIDE, "Place inside")
             for name in ("align", "offset"):
@@ -485,6 +482,10 @@ class Place:
             _choice(self.align, ("start", "center", "end"), "Place align")
         if self.scope is not None:
             _choice(self.scope, ("chart", "panel"), "Place scope")
+        if self.panel is not None and not isinstance(self.panel, str):
+            raise TypeError(
+                f"Place panel: expected a string; give a panel name instead of {shown(self.panel)}"
+            )
         for name in ("offset", "inset"):
             if getattr(self, name) is not None:
                 _number(getattr(self, name), f"Place {name}")
