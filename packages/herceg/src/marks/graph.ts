@@ -1476,7 +1476,7 @@ export class GraphMark implements LayoutMark {
             fill: theme.text,
             anchor,
             // Labels lie over links and other nodes; the halo keeps them readable.
-            halo: labelHalo(this.spec.halo, theme.text, frame),
+            halo: labelHalo(this.spec.halo, frame),
             coords: Float32Array.from(sides[anchor].coords),
             labels: sides[anchor].labels,
             count: sides[anchor].labels.length,
@@ -1555,7 +1555,7 @@ export class GraphMark implements LayoutMark {
         key: "graph-link-labels",
         fill: theme.text,
         anchor: "middle",
-        halo: labelHalo(this.spec.halo, theme.text, frame),
+        halo: labelHalo(this.spec.halo, frame),
         coords: Float32Array.from(coords),
         labels,
         count: labels.length,

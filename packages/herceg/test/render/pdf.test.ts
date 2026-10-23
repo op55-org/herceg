@@ -12,7 +12,7 @@ import { rectDrawing } from "../../src/draw/rect.ts";
 import { textDrawing } from "../../src/draw/text.ts";
 import { fontChecksum } from "../../src/fonts/binary.ts";
 import { EMBED_FONTS } from "../../src/fonts/prepared.ts";
-import { parseTrueType } from "../../src/fonts/truetype.ts";
+import { parseSfnt } from "../../src/fonts/sfnt.ts";
 import { type FontOptions, type FontSource, prepareFonts } from "../../src/fonts.ts";
 import { specToPDF, specToSVG } from "../../src/from-spec.ts";
 import { estimateText } from "../../src/layout/text.ts";
@@ -357,6 +357,22 @@ const embedder = (sources: readonly FontSource[], options?: FontOptions): PdfFon
 
 const fontFixture = (name: string) =>
   new Uint8Array(readFileSync(new URL(`../fixtures/pdf-fonts/${name}.ttf`, import.meta.url)));
+/** The sans face with CFF outlines (see the fixtures' README). */
+const cffFixture = () =>
+  new Uint8Array(readFileSync(new URL("../fixtures/pdf-fonts/sans-cff.otf", import.meta.url)));
+/** `data` with its table `from` named `to` in the table directory. */
+function retagged(data: Uint8Array, from: string, to: string): Uint8Array {
+  const view = new DataView(data.buffer, data.byteOffset);
+  for (let i = 0; i < view.getUint16(4); i++) {
+    const at = 12 + i * 16;
+    if (String.fromCharCode(...data.subarray(at, at + 4)) === from)
+      data.set(
+        [...to].map((c) => c.charCodeAt(0)),
+        at,
+      );
+  }
+  return data;
+}
 const embeddedFonts: FontSource[] = [
   { family: "Fixture", data: fontFixture("sans") },
   { family: "Fixture", weight: "bold", data: fontFixture("sans-bold") },
@@ -1428,7 +1444,7 @@ describe("PDF embedded Unicode fonts", () => {
   });
 
   it.each(["ｶﾞ", "ﾊﾟ"])("writes distinct glyphs and extraction scalars for %s", (text) => {
-    const source = parseTrueType(embeddedFonts[0]!.data);
+    const source = parseSfnt(embeddedFonts[0]!.data);
     const data = subsetTrueType(
       source,
       new Map(Array.from(text, (char, i) => [char.codePointAt(0)!, source.glyph(65 + i)])),
@@ -1487,14 +1503,14 @@ describe("PDF embedded Unicode fonts", () => {
         settings,
       ),
     ]) {
-      const programs = embeddedPrograms(readPdf(bytes)).map(parseTrueType);
+      const programs = embeddedPrograms(readPdf(bytes)).map(parseSfnt);
       expect(programs).toHaveLength(2);
       for (const [code, source] of [
         [54, "sans-bold"],
         [87, "sans"],
       ] as const) {
         const program = programs.find((font) => font.glyph(code))!;
-        const expected = parseTrueType(fontFixture(source));
+        const expected = parseSfnt(fontFixture(source));
         expect(program.unitsPerEm).toBe(expected.unitsPerEm);
         expect(program.advances[program.glyph(code)]).toBe(expected.advances[expected.glyph(code)]);
       }
@@ -1523,9 +1539,9 @@ describe("PDF embedded Unicode fonts", () => {
         { fallback: fallback ? ["Decoy"] : [] },
       ),
     );
-    const programs = embeddedPrograms(pdf).map(parseTrueType);
+    const programs = embeddedPrograms(pdf).map(parseSfnt);
     expect(programs).toHaveLength(1);
-    const expected = parseTrueType(fontFixture("sans"));
+    const expected = parseSfnt(fontFixture("sans"));
     expect(programs[0]!.advances[programs[0]!.glyph(87)]).toBe(
       expected.advances[expected.glyph(87)],
     );
@@ -1535,7 +1551,7 @@ describe("PDF embedded Unicode fonts", () => {
     ["Old Uyghur", "𐽰𐽱"],
     ["Duployan", "𛰀𛰁"],
   ])("refuses covered and uncovered %s before replacement", (_script, text) => {
-    const font = parseTrueType(fontFixture("sans"));
+    const font = parseSfnt(fontFixture("sans"));
     const covered = subsetTrueType(
       font,
       new Map([
@@ -1558,7 +1574,7 @@ describe("PDF embedded Unicode fonts", () => {
   it.each(["👍🏽", "🇬🇧", "🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}", "👩\u200d💻"])(
     "refuses emoji sequence %s before coverage, fallback, or replacement",
     (text) => {
-      const font = parseTrueType(fontFixture("sans"));
+      const font = parseSfnt(fontFixture("sans"));
       const codes = Array.from(text, (char) => char.codePointAt(0)!);
       const face = (family: string, values: number[]): FontSource => ({
         family,
@@ -1620,7 +1636,7 @@ describe("PDF embedded Unicode fonts", () => {
     ["Ā", 4],
     ["𝌀", 4],
   ])("classifies Adobe Latin extensions and Unicode scalars in %s", (text, flags) => {
-    const font = parseTrueType(fontFixture("sans"));
+    const font = parseSfnt(fontFixture("sans"));
     const data = subsetTrueType(
       font,
       new Map(Array.from(text, (char) => [char.codePointAt(0)!, font.glyph(65)])),
@@ -1644,7 +1660,7 @@ describe("PDF embedded Unicode fonts", () => {
   it.each([false, true])(
     "classifies the entire format-12 font when subsetting is forbidden, symbolic=%s",
     (symbolic) => {
-      const font = parseTrueType(fontFixture("sans"));
+      const font = parseSfnt(fontFixture("sans"));
       const repertoire = new Map([
         [65, font.glyph(65)],
         [symbolic ? 0x1d300 : 0x0141, font.glyph(66)],
@@ -1734,7 +1750,7 @@ describe("PDF embedded Unicode fonts", () => {
   });
 
   it("keeps a combining sequence in a single covering fallback face", () => {
-    const source = parseTrueType(embeddedFonts[0]!.data);
+    const source = parseSfnt(embeddedFonts[0]!.data);
     const primary = subsetTrueType(source, new Map([[101, source.glyph(101)]])).data;
     const fonts = embedder([{ family: "Primary", data: primary }, embeddedFonts[0]!], {
       fallback: ["Fixture"],
@@ -1775,7 +1791,7 @@ describe("PDF embedded Unicode fonts", () => {
     const fonts = resolver();
     for (const text of ["A·B", "OʼBrien", "ä"])
       expect(fonts.measure(text, "12px Fixture")).toBeGreaterThan(0);
-    const source = parseTrueType(embeddedFonts[0]!.data);
+    const source = parseSfnt(embeddedFonts[0]!.data);
     const codes = [0x11f04, 0x11f34, 0x11f36];
     const data = subsetTrueType(
       source,
@@ -1805,7 +1821,7 @@ describe("PDF embedded Unicode fonts", () => {
   });
 
   it("bounds composite expansion and rejects cycles", () => {
-    const font = parseTrueType(fontFixture("sans"));
+    const font = parseSfnt(fontFixture("sans"));
     const tables = new Map([...font.tables].map(([tag, data]) => [tag, new Uint8Array(data)]));
     const count = font.glyphCount + 25;
     new DataView(tables.get("head")!.buffer).setInt16(50, 1);
@@ -1841,19 +1857,19 @@ describe("PDF embedded Unicode fonts", () => {
     tables.set("glyf", glyf);
     tables.set("loca", loca);
     tables.set("hmtx", hmtx);
-    expect(() => parseTrueType(writeSfnt(tables))).toThrow(/expansion exceeds/);
+    expect(() => parseSfnt(writeSfnt(tables))).toThrow(/expansion exceeds/);
     const cyclic = fontFixture("sans");
-    const [id, refs] = [...parseTrueType(cyclic).components][0]!;
+    const [id, refs] = [...parseSfnt(cyclic).components][0]!;
     new DataView(cyclic.buffer).setUint16(
       fontTableOffset(cyclic, "glyf") + font.offsets[id]! + refs[0]!.offset,
       id,
     );
-    expect(() => parseTrueType(cyclic)).toThrow(/cyclic/);
+    expect(() => parseSfnt(cyclic)).toThrow(/cyclic/);
   });
 
   it("validates instructions flagged on an earlier composite component", () => {
     const data = fontFixture("sans");
-    const font = parseTrueType(data);
+    const font = parseSfnt(data);
     const [id, refs] = [...font.components].find(([, refs]) => refs.length > 1)!;
     const start = fontTableOffset(data, "glyf") + font.offsets[id]!;
     const view = new DataView(data.buffer);
@@ -1864,7 +1880,7 @@ describe("PDF embedded Unicode fonts", () => {
     const instructionAt =
       last + 4 + (flags & 1 ? 4 : 2) + (flags & 8 ? 2 : flags & 64 ? 4 : flags & 128 ? 8 : 0);
     view.setUint16(instructionAt, 65535);
-    expect(() => parseTrueType(data)).toThrow(/outside table bounds/);
+    expect(() => parseSfnt(data)).toThrow(/outside table bounds/);
   });
 
   it("subsets only emitted glyphs, including .notdef and recursive composite components", () => {
@@ -1872,7 +1888,7 @@ describe("PDF embedded Unicode fonts", () => {
     fonts.measure("NeverDrawn", "bold 12px Fixture");
     const pdf = readPdf(renderPdf(unicodeScene("é"), {}, fonts));
     const program = embeddedPrograms(pdf)[0]!;
-    const subset = parseTrueType(program);
+    const subset = parseSfnt(program);
     expect(subset.glyph(0x00e9)).toBeGreaterThan(0);
     expect(subset.glyph(78)).toBe(0);
     expect(subset.components.size).toBeGreaterThan(0);
@@ -1944,7 +1960,7 @@ describe("PDF embedded Unicode fonts", () => {
     const pdf = readPdf(renderPdf(unicodeScene("é"), {}, fonts));
     const program = embeddedPrograms(pdf)[0]!;
     expect(fontChecksum(program)).toBe(0xb1b0afba);
-    expect(parseTrueType(program).glyph(0x00e9)).toBeGreaterThan(0);
+    expect(parseSfnt(program).glyph(0x00e9)).toBeGreaterThan(0);
     expect(data).toEqual(before);
   });
 
@@ -2004,7 +2020,7 @@ describe("PDF embedded Unicode fonts", () => {
 
   it("reports missing coverage and allows an explicit covered replacement", () => {
     expect(() => resolver().measure("雪", "12px Fixture")).toThrow(
-      /U\+96EA.*supply a covering font/,
+      /U\+96EA in "Fixture"; supply a font covering it and add its family to the theme's font list or to fallback, or set missingGlyph to a covered replacement/,
     );
     const fonts = embedder(embeddedFonts, { missingGlyph: "?" });
     expect(fonts.measure("雪", "12px Fixture")).toBe(fonts.measure("?", "12px Fixture"));
@@ -2053,7 +2069,7 @@ describe("PDF embedded Unicode fonts", () => {
   });
 
   it("bounds-checks malformed tables, metrics, cmaps, loca, and composite glyph references", () => {
-    expect(() => parseTrueType(new Uint8Array(3))).toThrow(/Malformed font/);
+    expect(() => parseSfnt(new Uint8Array(3))).toThrow(/Malformed font/);
     const cases: Uint8Array[] = [];
     let data = fontFixture("sans");
     new DataView(data.buffer).setUint32(20, data.length + 100);
@@ -2068,7 +2084,7 @@ describe("PDF embedded Unicode fonts", () => {
     new DataView(data.buffer).setUint16(fontTableOffset(data, "loca") + 2, 65535);
     cases.push(data);
     data = fontFixture("sans");
-    const parsed = parseTrueType(data);
+    const parsed = parseSfnt(data);
     const [id, refs] = [...parsed.components][0]!;
     new DataView(data.buffer).setUint16(
       fontTableOffset(data, "glyf") + parsed.offsets[id]! + refs[0]!.offset,
@@ -2081,19 +2097,49 @@ describe("PDF embedded Unicode fonts", () => {
     const offset = view.getUint32(cmap + 8);
     view.setUint32(cmap + offset + 4, 0xffffffff);
     cases.push(data);
-    for (const malformed of cases) expect(() => parseTrueType(malformed)).toThrow(/Malformed font/);
+    for (const malformed of cases) expect(() => parseSfnt(malformed)).toThrow(/Malformed font/);
   });
 
-  it("rejects CFF outlines clearly and accepts sfnt OpenType with glyf", () => {
-    const data = fontFixture("sans");
-    new DataView(data.buffer).setUint32(0, 0x4f54544f);
-    expect(parseTrueType(data).glyph(101)).toBeGreaterThan(0);
-    const glyf = fontTableOffset(data, "glyf");
-    for (let i = 0; i < new DataView(data.buffer).getUint16(4); i++) {
-      const at = 12 + i * 16;
-      if (new DataView(data.buffer).getUint32(at + 8) === glyf) data.set([67, 70, 70, 32], at);
-    }
-    expect(() => parseTrueType(data)).toThrow(/CFF outlines.*TrueType/);
+  it("reads CFF outlines for measuring, and refuses variable fonts and mixed outlines", () => {
+    const cff = cffFixture();
+    const parsed = parseSfnt(cff);
+    const truetype = parseSfnt(fontFixture("sans"));
+    expect(parsed.outlines).toBe("cff");
+    expect(truetype.outlines).toBe("glyf");
+    expect([...parsed.advances]).toEqual([...truetype.advances]);
+    expect(parsed.glyph(0x48)).toBe(truetype.glyph(0x48));
+    // A CFF face named and marked as TrueType, and CFF2 outlines, read the same.
+    const marked = cffFixture();
+    new DataView(marked.buffer).setUint32(0, 0x00010000);
+    expect(parseSfnt(marked).outlines).toBe("cff");
+    expect(parseSfnt(retagged(cffFixture(), "CFF ", "CFF2")).outlines).toBe("cff");
+    expect(() => parseSfnt(retagged(cffFixture(), "post", "fvar"))).toThrow(
+      "variable fonts are unsupported; supply a static instance (fontTools varLib.instancer makes one)",
+    );
+    expect(() => parseSfnt(retagged(fontFixture("sans"), "post", "CFF "))).toThrow(
+      /both glyf and CFF outlines/,
+    );
+    // An sfnt OpenType signature with glyf outlines is TrueType.
+    const otto = fontFixture("sans");
+    new DataView(otto.buffer).setUint32(0, 0x4f54544f);
+    expect(parseSfnt(otto).outlines).toBe("glyf");
+  });
+
+  it("measures and draws SVG with CFF faces, and PDF refuses them with the alternative", () => {
+    const fonts = prepareFonts([{ family: "Fixture", data: cffFixture() }]);
+    const truetype = prepareFonts([{ family: "Fixture", data: fontFixture("sans") }]);
+    expect(fonts.measure("Latency p99", "12px Fixture")).toBe(
+      truetype.measure("Latency p99", "12px Fixture"),
+    );
+    const options = {
+      ...latency,
+      idPrefix: "chart",
+      theme: { style: { text: { font: "Fixture" } } },
+    };
+    expect(renderToSVG({ ...options, fonts })).toBe(renderToSVG({ ...options, fonts: truetype }));
+    expect(() => renderToPDF({ ...options, fonts })).toThrow(
+      'renderToPDF fonts: the "Fixture" normal face has CFF outlines; PDF embedding needs TrueType (glyf) outlines; SVG and PNG accept this font',
+    );
   });
 });
 

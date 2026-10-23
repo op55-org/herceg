@@ -2,12 +2,20 @@
 // no browser or supplied fonts measure it), and text broken into lines and
 // boxed as guides draw it.
 
-import { plainColor } from "../scale/color.ts";
 import type { Rect, TextItem } from "../scene/scene.ts";
 import { haloOf, type ResolvedHalo, type TextPaint } from "../style/style.ts";
 
-/** Returns the width in CSS pixels of `text` drawn with a CSS `font`. */
+/**
+ * Returns the width in CSS pixels of `text` drawn with a CSS `font`: of
+ * its widest line, for text "\n" breaks into lines, so a line break never
+ * reaches a measurer's fonts (see `widestLine`).
+ */
 export type MeasureText = (text: string, font: string) => number;
+
+/** The width of `text`'s widest line, each measured by `measure`. */
+export function widestLine(text: string, measure: (line: string) => number): number {
+  return text.includes("\n") ? Math.max(...text.split("\n").map(measure)) : measure(text);
+}
 
 // Advance widths of ASCII 32..126 in Helvetica / Arial, in 1/1000 em. Used to
 // lay out charts where no browser is available (server rendering, exports).
@@ -57,19 +65,21 @@ export function fontKind(family: string): "monospace" | "serif" | "sans" {
 export const estimateText: MeasureText = (text, font) => {
   const { size, family } = parseFont(font);
   const monospace = fontKind(family) === "monospace";
-  let units = 0;
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    units +=
-      code >= 0x2e80
-        ? 1000
-        : monospace
-          ? 600
-          : code >= 32 && code <= 126
-            ? WIDTHS[code - 32]!
-            : 556;
-  }
-  return (units / 1000) * size * 1.1;
+  return widestLine(text, (line) => {
+    let units = 0;
+    for (let i = 0; i < line.length; i++) {
+      const code = line.charCodeAt(i);
+      units +=
+        code >= 0x2e80
+          ? 1000
+          : monospace
+            ? 600
+            : code >= 32 && code <= 126
+              ? WIDTHS[code - 32]!
+              : 556;
+    }
+    return (units / 1000) * size * 1.1;
+  });
 };
 
 /** Measures with a 2D canvas context, caching results per font and string. */
@@ -83,7 +93,7 @@ export function canvasMeasurer(context: {
     let width = cache.get(key);
     if (width === undefined) {
       if (context.font !== font) context.font = font;
-      width = context.measureText(text).width;
+      width = widestLine(text, (line) => context.measureText(line).width);
       if (cache.size > 5000) cache.clear();
       cache.set(key, width);
     }
@@ -111,8 +121,25 @@ export function fitText(text: string, width: number, measure: MeasureText, font:
  * fewer than three characters, which say too little to be worth it.
  */
 export function labelFor(name: string, width: number, measure: MeasureText, font: string): string {
-  const text = fitText(name, width, measure, font);
-  return text === name || Array.from(text).length >= 4 ? text : "";
+  const line = oneLineText(name);
+  const text = fitText(line, width, measure, font);
+  return text === line || Array.from(text).length >= 4 ? text : "";
+}
+
+/**
+ * `text` on one line, its breaks read as spaces: names layouts fit to a
+ * room of one line (slices', nodes', stages', and spokes' names, and 3D
+ * axes' labels), which are shortened rather than broken.
+ */
+export function oneLineText(text: string): string {
+  return text.includes("\n") ? text.replaceAll("\n", " ") : text;
+}
+
+/** How many lines "\n" breaks `text` into, without making them: labels are counted scene after scene. */
+export function lineCount(text: string): number {
+  let count = 1;
+  for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) count++;
+  return count;
 }
 
 /** Text broken into lines at "\n", and how far they reach. */
@@ -165,10 +192,10 @@ export function textWidth(text: string, paint: TextPaint, measure: MeasureText):
   return measure(text, paint.css) + (paint.background ? left + right : 0);
 }
 
-/** How tall a line of text in `paint` is drawn: its line height, and its box's padding. */
-export function textHeight(paint: TextPaint): number {
+/** How tall `text` (a line by default) in `paint` is drawn: its lines' height, and its box's padding. */
+export function textHeight(paint: TextPaint, text = ""): number {
   const [top, , bottom] = paint.padding;
-  return paint.lineHeight + (paint.background ? top + bottom : 0);
+  return lineCount(text) * paint.lineHeight + (paint.background ? top + bottom : 0);
 }
 
 /**
@@ -181,6 +208,14 @@ function padded(at: TextAt, [top, right, bottom, left]: TextPaint["padding"]): T
   return moved(at, dx, at.baseline === "hanging" ? top : (top - bottom) / 2);
 }
 
+/**
+ * Where the first of `text`'s lines in `paint` goes for their middle to be
+ * at `at`, as they go down the text's own turn.
+ */
+export function centeredLines(text: string, at: TextAt, paint: TextPaint): TextAt {
+  return moved(at, 0, ((1 - lineCount(text)) * paint.lineHeight) / 2);
+}
+
 /** `at` moved `dx` along its text and `dy` down it, in the text's own turn. */
 function moved(at: TextAt, dx: number, dy: number): TextAt {
   const turn = (at.angle * Math.PI) / 180;
@@ -189,19 +224,9 @@ function moved(at: TextAt, dx: number, dy: number): TextAt {
   return { ...at, x: at.x + dx * cos - dy * sin, y: at.y + dx * sin + dy * cos };
 }
 
-/**
- * The halo of guide text in `paint` drawn over `surface`, or over its box
- * when it has one. Guides read colors without the CSS color table, which
- * only text marks carry.
- */
+/** The halo of guide text in `paint` drawn over `surface`, or over its box when it has one. */
 export function textHalo(paint: TextPaint, surface: string): ResolvedHalo | undefined {
-  return haloOf(
-    paint.halo,
-    paint.color,
-    paint.background?.fill ?? surface,
-    paint.color,
-    plainColor,
-  );
+  return haloOf(paint.halo, paint.background?.fill ?? surface);
 }
 
 /**
@@ -237,34 +262,4 @@ export function textItem(
   if (halo) item.halo = halo;
   if (box) item.box = box;
   return item;
-}
-
-/**
- * A guide's `text` at `at` in `paint`, a line each as "\n" breaks it,
- * stacked as `textBox` says (turned with the text): each with the paint's
- * halo over `surface`, and the first with the box behind them all when the
- * paint has a background.
- */
-export function textItems(
-  text: string,
-  at: TextAt,
-  paint: TextPaint,
-  surface: string,
-  measure: MeasureText,
-): TextItem[] {
-  if (!text.includes("\n")) return [textItem(text, at, paint, surface, measure)];
-  const lines = text.split("\n");
-  if (paint.background) at = padded(at, paint.padding);
-  const box = paint.background ? textBox(textLines(text, paint, measure), at, paint) : undefined;
-  // Later lines go down the text's own way.
-  return lines.map((line, i) =>
-    textItem(
-      line,
-      moved(at, 0, paint.lineHeight * i),
-      paint,
-      surface,
-      undefined,
-      i === 0 ? box : undefined,
-    ),
-  );
 }

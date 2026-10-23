@@ -1,11 +1,14 @@
 // Supplied fonts in a live chart: text measured with them, their faces
-// registered with the document once, and PNG exports drawn in them.
+// registered with the document once, and PNG exports drawn in them, which
+// refuse text they do not cover.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
+import { hydrateChart } from "../../src/dom/hydrate.ts";
 import { svgToPng } from "../../src/dom/png-export.ts";
 import { prepareFonts } from "../../src/fonts.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { renderToSnapshot } from "../../src/render/snapshot.ts";
 import { modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -20,10 +23,10 @@ afterEach(() => {
   host.remove();
 });
 
-const fixture = async (name: string) =>
+const fixture = async (name: string, extension = "ttf") =>
   new Uint8Array(
     await (
-      await fetch(new URL(`../fixtures/pdf-fonts/${name}.ttf`, import.meta.url))
+      await fetch(new URL(`../fixtures/pdf-fonts/${name}.${extension}`, import.meta.url))
     ).arrayBuffer(),
   );
 
@@ -76,6 +79,47 @@ describe("fonts", () => {
     });
     expect(() => fonts.measure("雪", "12px Fixture")).toThrow(/do not cover/);
     expect(host.textContent).toContain("雪 report");
+    chart.destroy();
+  });
+
+  it("refuse in the chart's exports text they lack, which the page drew and an image cannot", async () => {
+    const fonts = prepareFonts([{ family: "Fixture", data: await fixture("sans") }]);
+    const options = {
+      theme: { style: { text: { font: "Fixture, sans-serif" } } },
+      title: "雪 report",
+      marks: [bar(sites, { x: "gain", y: "site" })],
+      fonts,
+    };
+    // A snapshot is drawn by the page, as the chart hydrating it is.
+    const initial = renderToSnapshot(options, { width: 600, height: 300, idPrefix: "snow", fonts });
+    host.innerHTML = initial.html;
+    const chart = hydrateChart(host, options, initial);
+    await chart.loading;
+    expect(host.textContent).toContain("雪 report");
+    const refusal =
+      /^fonts do not cover U\+96EA in "Fixture, sans-serif"; supply a font covering it/;
+    expect(() => chart.toSVG()).toThrow(refusal);
+    expect(() => chart.toPNG()).toThrow(refusal);
+    chart.update({ ...options, title: "Snow report" });
+    expect(chart.toSVG()).toContain("Snow report");
+    chart.destroy();
+  });
+
+  it("with CFF outlines, register with the page and measure as their TrueType twins do", async () => {
+    const fonts = prepareFonts([{ family: "Cff Fixture", data: await fixture("sans-cff", "otf") }]);
+    const twin = prepareFonts([{ family: "Twin", data: await fixture("sans") }]);
+    const chart = createChart(host, {
+      theme: { style: { text: { font: '"Cff Fixture", sans-serif' } } },
+      marks: [bar(sites, { x: "gain", y: "site" })],
+      fonts,
+    });
+    await chart.loading;
+    const face = [...document.fonts].find((f) => f.family.replace(/"/g, "") === "Cff Fixture");
+    expect(face?.status).toBe("loaded");
+    expect(fonts.measure("Charlie", "12px 'Cff Fixture'")).toBe(
+      twin.measure("Charlie", "12px Twin"),
+    );
+    expect((await chart.toPNG()).size).toBeGreaterThan(100);
     chart.destroy();
   });
 

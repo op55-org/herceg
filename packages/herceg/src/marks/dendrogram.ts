@@ -16,6 +16,7 @@ import {
   type Mark,
   type MarkKey,
   type Palette,
+  painted,
   requireField,
 } from "./mark.ts";
 import { TableCache } from "./series.ts";
@@ -205,7 +206,7 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
         key: JSON.stringify([key, "dendrogram"]),
         coords,
         count,
-        stroke: spec.stroke ?? frame.theme.muted,
+        stroke: painted(frame.paint, spec.stroke, "dendrogram stroke") ?? frame.theme.muted,
         strokeWidth: spec.strokeWidth ?? 1,
       },
     ];

@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseTrueType } from "../../src/fonts/truetype.ts";
+import { parseSfnt } from "../../src/fonts/sfnt.ts";
 import { subsetTrueType, writeSfnt } from "../../src/render/pdf-font-subset.ts";
 
 const fixture = () =>
-  parseTrueType(
+  parseSfnt(
     new Uint8Array(readFileSync(new URL("../fixtures/pdf-fonts/sans.ttf", import.meta.url))),
   );
 function tables(): Map<string, Uint8Array> {
@@ -100,7 +100,7 @@ describe("PDF composite attachments", () => {
   const aPoints = pointCount(65);
   const bPoints = pointCount(66);
   const parse = (children: Component[]) =>
-    parseTrueType(withGlyphs(new Map([[parent, composite(children)]])));
+    parseSfnt(withGlyphs(new Map([[parent, composite(children)]])));
 
   it("requires XY placement for the first component", () => {
     expect(() => parse([{ glyph: a, flags: 1 }])).toThrow(/first composite component.*XY/);
@@ -133,7 +133,7 @@ describe("PDF composite attachments", () => {
         { glyph: a, flags: 1, parent: aPoints + bPoints - 1, child: aPoints - 1 },
       ]);
       const subset = subsetTrueType(parsed, new Map([[233, parent]]));
-      expect(parseTrueType(subset.data).components.get(subset.glyphs.get(parent)!)).toHaveLength(3);
+      expect(parseSfnt(subset.data).components.get(subset.glyphs.get(parent)!)).toHaveLength(3);
     }
   });
 
@@ -152,9 +152,9 @@ describe("PDF composite attachments", () => {
           ],
         ]),
       );
-    expect(() => parseTrueType(data(aPoints + 3, aPoints + bPoints + 3))).not.toThrow();
-    expect(() => parseTrueType(data(aPoints + 4, 0))).toThrow(/composite.*point/);
-    expect(() => parseTrueType(data(0, aPoints + bPoints + 4))).toThrow(/composite.*point/);
+    expect(() => parseSfnt(data(aPoints + 3, aPoints + bPoints + 3))).not.toThrow();
+    expect(() => parseSfnt(data(aPoints + 4, 0))).toThrow(/composite.*point/);
+    expect(() => parseSfnt(data(0, aPoints + bPoints + 4))).toThrow(/composite.*point/);
   });
 
   it.each([8 | 64, 8 | 128, 64 | 128, 8 | 64 | 128, 0x800 | 0x1000])(
@@ -175,9 +175,9 @@ describe("PDF OS/2 versions", () => {
     [4, 96],
     [5, 100],
   ])("accepts version %s at its minimum length %s", (version, length) => {
-    const font = parseTrueType(os2Fixture(version, length));
+    const font = parseSfnt(os2Fixture(version, length));
     const subset = subsetTrueType(font, new Map([[65, font.glyph(65)]]));
-    expect(parseTrueType(subset.data).tables.get("OS/2")).toHaveLength(length);
+    expect(parseSfnt(subset.data).tables.get("OS/2")).toHaveLength(length);
   });
 
   it.each([
@@ -189,16 +189,16 @@ describe("PDF OS/2 versions", () => {
     [5, 78],
     [5, 99],
   ])("rejects version %s truncated to %s bytes", (version, length) => {
-    expect(() => parseTrueType(os2Fixture(version, length))).toThrow(/truncated OS\/2/);
+    expect(() => parseSfnt(os2Fixture(version, length))).toThrow(/truncated OS\/2/);
   });
 
   it.each([0, 1])("ignores bitmap and no-subsetting bits in version %s", (version) => {
-    const font = parseTrueType(os2Fixture(version, version === 0 ? 68 : 86, 0x300));
+    const font = parseSfnt(os2Fixture(version, version === 0 ? 68 : 86, 0x300));
     expect(font.noSubset).toBe(false);
     expect(subsetTrueType(font, new Map([[65, font.glyph(65)]])).data.length).toBeLessThan(
       font.data.length,
     );
     // Embedding permissions are read here and checked where a PDF embeds the face.
-    expect(parseTrueType(os2Fixture(version, version === 0 ? 68 : 86, 2)).fsType).toBe(2);
+    expect(parseSfnt(os2Fixture(version, version === 0 ? 68 : 86, 2)).fsType).toBe(2);
   });
 });

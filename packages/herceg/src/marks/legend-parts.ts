@@ -4,7 +4,7 @@
 
 import { escapeXml, n, rectMarkup } from "../draw/markup.ts";
 import { formatNumber } from "../format/format.ts";
-import { textHeight, textItem, textWidth } from "../layout/text.ts";
+import { centeredLines, textHeight, textItem, textWidth } from "../layout/text.ts";
 import type { LegendFlowItem, LegendOut, LegendPart, LegendText } from "../model/legend.ts";
 import { fraction } from "../scale/color.ts";
 import {
@@ -24,10 +24,11 @@ const KEY_GAP = 12;
 const RAMP_WIDTH = 120;
 
 /** A legend's line of text, starting at x and vertically centered on y. */
+/** Text at the middle of its row, its lines centered there. */
 const label = (x: number, y: number, line: string, paint: TextPaint, text: LegendText): TextItem =>
   textItem(
     line,
-    { x, y, anchor: "start", baseline: "middle", angle: 0 },
+    centeredLines(line, { x, y, anchor: "start", baseline: "middle", angle: 0 }, paint),
     paint,
     text.surface,
     text.measure,
@@ -101,7 +102,7 @@ export function rampLegend(ramp: ColorRamp): LegendPart {
       return [
         {
           width: titleWidth + lowWidth + RAMP_WIDTH + 6 + textWidth(high, text.value, measure),
-          height: Math.max(lineHeight, textHeight(text.title), textHeight(text.value)),
+          height: Math.max(lineHeight, textHeight(text.title, title), textHeight(text.value)),
           gap: LEGEND_GAP,
           place: (x, y) => {
             out.guides[at] = placeRamp(x, y);
@@ -153,7 +154,7 @@ export function keyLegend(key: GlyphKey): LegendPart {
       const items: LegendFlowItem[] = [
         {
           width: textWidth(title, text.title, measure),
-          height: Math.max(lineHeight, textHeight(text.title)),
+          height: Math.max(lineHeight, textHeight(text.title, title)),
           gap: KEY_GAP,
           breaks: true,
           place: (x, y) => {
@@ -166,7 +167,7 @@ export function keyLegend(key: GlyphKey): LegendPart {
         const size = Math.max(LEGEND_SWATCH, r * 2);
         items.push({
           width: size + 6 + textWidth(entry, text.value, measure),
-          height: Math.max(lineHeight, size + 2, textHeight(text.value)),
+          height: Math.max(lineHeight, size + 2, textHeight(text.value, entry)),
           gap: KEY_GAP,
           place: (x, y) =>
             legend.entries.push({

@@ -7,7 +7,7 @@
 import type { Table } from "../../data/table.ts";
 import type { RowPaint } from "../../model/features.ts";
 import type { EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
-import type { Theme } from "../../theme.ts";
+import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
 import type { Series } from "../series.ts";
 import {
@@ -58,9 +58,11 @@ export class RowStyles {
   readonly #width: Channel<number> | undefined;
   readonly #opacity: Channel<number> | undefined;
   readonly #by: { field: string; map: StyleMapSpec["map"] } | undefined;
+  readonly #path: string;
   /** Whether rows have looks of their own; otherwise looks are by series, through the palette. */
   readonly byRow: boolean;
   #theme: Theme | undefined;
+  #paint: PaintReader = (value) => value;
   /** Each series' looks, by its key, for the rows' looks they were found from. */
   readonly #rows = new Map<
     string,
@@ -71,10 +73,9 @@ export class RowStyles {
       parts: { paints: readonly RowPaint[]; of(row: number): number };
     }
   >();
-  #key: { version: number; theme: Theme | undefined; key: GlyphKey | undefined } | undefined;
-  #looks:
-    | { version: number; theme: Theme | undefined; of: Int32Array; paints: RowPaint[] }
-    | undefined;
+  /** Kept for a table version, until the theme or paint reader changes (`use`). */
+  #key: { version: number; key: GlyphKey | undefined } | undefined;
+  #looks: { version: number; of: Int32Array; paints: RowPaint[] } | undefined;
 
   constructor(
     spec: RowStyleSpec,
@@ -85,6 +86,7 @@ export class RowStyles {
   ) {
     this.#table = table;
     this.#spec = spec;
+    this.#path = path;
     const encode = spec.encode ?? {};
     const both = (flat: keyof RowStyleSpec, channel: keyof EncodingsSpec) => {
       if (spec[flat] !== undefined && encode[channel] !== undefined)
@@ -128,8 +130,26 @@ export class RowStyles {
       this.#by !== undefined;
   }
 
-  use(theme: Theme): void {
+  /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
+  use(theme: Theme, paint: PaintReader): void {
+    if (theme !== this.#theme || paint !== this.#paint) {
+      this.#key = undefined;
+      this.#looks = undefined;
+    }
     this.#theme = theme;
+    this.#paint = paint;
+  }
+
+  /** A look with its colors read, as the mark's. */
+  #painted(look: RowPaint): RowPaint {
+    const { fill, stroke } = look;
+    if (fill === undefined && stroke === undefined) return look;
+    const path = this.#path;
+    return {
+      ...look,
+      ...(fill !== undefined && { fill: this.#paint(fill, `${path} fill`) }),
+      ...(stroke !== undefined && { stroke: this.#paint(stroke, `${path} stroke`) }),
+    };
   }
 
   /**
@@ -166,7 +186,7 @@ export class RowStyles {
     if (fill?.kind !== "field" || fill.field === this.#spec.series) return undefined;
     const table = this.#table;
     const theme = this.#theme;
-    if (this.#key?.version === table.version && this.#key.theme === theme) return this.#key.key;
+    if (this.#key?.version === table.version) return this.#key.key;
     const { codes, dictionary } = table.categories(fill.field as never);
     const held = new Uint8Array(dictionary.length);
     for (let row = 0; row < codes.length; row++) if (codes[row]! >= 0) held[codes[row]!] = 1;
@@ -183,11 +203,11 @@ export class RowStyles {
             label,
             glyph: "M-4.5 -4.5h9v9h-9Z",
             r: 4.5,
-            color: fill.scale.output(label, palette, muted),
+            color: this.#paint(fill.scale.output(label, palette, muted), `${this.#path} fill`),
           })),
         }
       : undefined;
-    this.#key = { version: table.version, theme, key };
+    this.#key = { version: table.version, key };
     return key;
   }
 
@@ -238,9 +258,11 @@ export class RowStyles {
     const series = this.seriesStyle(name);
     if (!looks) {
       const paint = { ...all, ...(series && definedOf(series)) };
-      return Object.keys(paint).length ? { paints: [paint], of: () => 0 } : undefined;
+      return Object.keys(paint).length
+        ? { paints: [this.#painted(paint)], of: () => 0 }
+        : undefined;
     }
-    // Kept per series while the data and theme are the same.
+    // Kept per series while the rows' looks are the same.
     const kept = this.#rows.get(s.key);
     if (kept && kept.looks === looks && kept.rows === s.rows && kept.length === s.length)
       return kept.parts;
@@ -255,6 +277,7 @@ export class RowStyles {
       let paint = looks.paints[look]!;
       if (all) paint = { ...all, ...definedOf(paint) };
       if (series) paint = { ...paint, ...definedOf(series) };
+      paint = this.#painted(paint);
       const content = JSON.stringify(paint);
       let part = alike.get(content);
       if (part === undefined) {
@@ -273,7 +296,7 @@ export class RowStyles {
     if (!this.byRow) return undefined;
     const table = this.#table;
     const theme = this.#theme;
-    if (this.#looks?.version === table.version && this.#looks.theme === theme) return this.#looks;
+    if (this.#looks?.version === table.version) return this.#looks;
     const palette = theme?.palette ?? [];
     const muted = theme?.muted ?? "#999999";
     const channels = [
@@ -327,7 +350,7 @@ export class RowStyles {
       }
       of[row] = look;
     }
-    this.#looks = { version: table.version, theme, of, paints };
+    this.#looks = { version: table.version, of, paints };
     return this.#looks;
   }
 

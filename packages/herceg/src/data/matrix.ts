@@ -143,6 +143,7 @@ function deferred(source: Column, nx: number, ny: number, across: boolean): Colu
     ...(source.kind === "category" && {
       dictionary: (source as CategoryColumn).dictionary,
       codes: (source as CategoryColumn).codes,
+      revision: 0,
     }),
     get deferred() {
       return buffer ? undefined : { length, byteLength: source.buffer.byteLength };

@@ -3,6 +3,7 @@ import { estimateText, type MeasureText } from "../layout/text.ts";
 import { describeChart } from "../model/describe.ts";
 import { type ChartConfig, ChartModel, STATIC_RASTER_RATIO } from "../model/model.ts";
 import { staticCompilers } from "./compilers.ts";
+import { checkCoverage } from "./coverage.ts";
 import { NO_PAGE } from "./fallbacks.ts";
 import { pngDataUrl } from "./png.ts";
 import { checkSizing, renderSvg, type SvgSizing } from "./svg.ts";
@@ -40,7 +41,13 @@ export function renderToSVG(options: StaticOptions): string {
   model.setSize(options.width, options.height, 1, STATIC_RASTER_RATIO);
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);
-  const scene = model.scene(options.fonts?.measure ?? options.measureText ?? estimateText);
+  const scene = model.scene(
+    options.fonts?.measure ?? options.measureText ?? estimateText,
+    false,
+    NO_PAGE,
+  );
+  // What the fonts do not cover is refused, as PDF export refuses it.
+  if (options.fonts) checkCoverage(scene, options.fonts.measure);
   const { sizing, preserveAspectRatio, strokeScaling } = options;
   return renderSvg(scene, {
     sizing,

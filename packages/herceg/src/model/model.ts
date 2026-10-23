@@ -15,7 +15,14 @@ import type {
   XAxisOptions,
 } from "../guides/options.ts";
 import { aligned, alignedAt, insideAt } from "../layout/place.ts";
-import { fitText, type MeasureText, textHeight, textItems, textWidth } from "../layout/text.ts";
+import {
+  fitText,
+  lineCount,
+  type MeasureText,
+  textHeight,
+  textItem,
+  textWidth,
+} from "../layout/text.ts";
 import { stackTracks, type TrackRequest } from "../layout/tracks.ts";
 import { Polyline } from "../lod/polyline.ts";
 import { isLayoutMark, type LayoutMark } from "../marks/layout-mark.ts";
@@ -55,7 +62,15 @@ import { ChartError } from "../spec/errors.ts";
 import type { InsidePlace, Place, Side, SidePlace } from "../spec/place.ts";
 import type { AnimationSpec, CameraSpec, ChartSpec, ScaleScope } from "../spec/spec.ts";
 import { insets, type TextPaint } from "../style/style.ts";
-import { readNow, resolveTheme, type Theme, type ThemeEnvironment } from "../theme.ts";
+import {
+  type PaintReader,
+  plotSurface,
+  Readings,
+  resolveTheme,
+  surface,
+  type Theme,
+  type ThemeEnvironment,
+} from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import {
   type AxisBreaks,
@@ -73,10 +88,11 @@ import { axisGuide, TICK } from "./axis-guide.ts";
 import type { Facet } from "./facet.ts";
 import { type CompiledFeatures, type FeatureCompiler, needsFeatures } from "./features.ts";
 import { type AxesState, type CompiledGuides, type GuideCompiler, needsGuides } from "./guides.ts";
-import { identityOf, prefixOf, type TableName } from "./identity.ts";
+import { identityOf, keyPrefix, prefixOf, type TableName } from "./identity.ts";
 import type { ItemPanel, ItemViews } from "./item-views.ts";
 import {
   EDGE,
+  entryOf,
   GAP,
   HiddenKeys,
   type LegendContent,
@@ -92,7 +108,7 @@ import type { PanelGrid, PanelLayout, PanelPlacement, PanelSplit } from "./panel
 import type { Panels } from "./panels.ts";
 import type { RowSelection } from "./row-selection.ts";
 import { instanceType, type ScaleName } from "./scales.ts";
-import { type ChartStyles, chartStyles, styleSources } from "./styles.ts";
+import { type ChartStyles, chartStyles } from "./styles.ts";
 import { titleText } from "./titles.ts";
 
 /** Chart options with marks bound to their data. */
@@ -279,8 +295,11 @@ export class ChartModel {
   #theme!: Theme;
   /** Its guides' and panels' styles over the theme. */
   #styles!: ChartStyles;
-  /** The page's colors and fonts in those styles when they were resolved (see `readNow`). */
-  #pageStyles: string | undefined;
+  /**
+   * What the configuration's colors and fonts (its styles, marks' paints,
+   * scales' outputs) read where the chart is shown, as scenes ask for them.
+   */
+  #readings = new Readings();
   width = 640;
   height = 400;
   pixelRatio = 1;
@@ -348,6 +367,11 @@ export class ChartModel {
   #also: LegendEntry[] = [];
   /** Palette slot per identity (or series) key, assigned on first appearance and kept. */
   #slots = new Map<string, number>();
+  /**
+   * The category fields palette slots go by, by their identity keys'
+   * prefix: their root table's dictionary, and how much of it has slots.
+   */
+  #dictionaries = new Map<string, SlotField>();
   /**
    * What each of the configuration's marks' series stand for (see
    * model/identity.ts): the prefix of their identity keys, by index.
@@ -455,20 +479,31 @@ export class ChartModel {
           if (from.name ?? this.#kept(from)) names(from, undefined, index);
         }
     });
+    const dictionaries = new Map<string, SlotField>();
+    // A category field's identity keys, whose slots go by its dictionary.
+    const fieldScope = (root: Table, field: string, place?: MarkKey, index?: number) => {
+      const prefix = prefixOf({ table: names(root, place, index), field });
+      // What had slots keeps them: a table's dictionary is followed on.
+      const kept = this.#dictionaries.get(prefix);
+      if (root.has(field) && root.kind(field) === "category")
+        dictionaries.set(prefix, kept?.table === root ? kept : { table: root, field, count: 0 });
+      return prefix;
+    };
     const scopes = read.marks.map((mark, index) => {
       const root = sources[index];
       const { identity } = mark as Mark;
       if (!root || !identity) return undefined;
-      const table = names(root, mark.spec.id ?? index, index);
-      return prefixOf(identity.field === undefined ? { table } : { table, field: identity.field });
+      const place = mark.spec.id ?? index;
+      return identity.field === undefined
+        ? prefixOf({ table: names(root, place, index) })
+        : fieldScope(root, identity.field, place, index);
     });
     const featured = this.#features?.compile(read, marks, this.#featured, {
       scopes: positions.map((i) => scopes[i]),
       positions,
-      field: (table, field) => prefixOf({ table: names(rootOf(table, [field])), field }),
+      field: (table, field) => fieldScope(rootOf(table, [field]), field),
     });
     const theme = resolveTheme(read.theme, page);
-    const styles = readNow(styleSources(read), page ?? {});
     // Nothing is kept of a configuration refused, so the last scene stays valid.
     for (const [table, name] of named)
       if (typeof name === "object" && name !== this.#kept(table)) {
@@ -486,7 +521,10 @@ export class ChartModel {
       scopes,
     ];
     this.#config = read;
-    this.#style(theme, styles);
+    this.#dictionaries = dictionaries;
+    // What was read of the page is read again: an update follows changes there.
+    if (page) this.#readings = this.#readings.again(page);
+    this.#style(theme);
   }
 
   /** Which of the guide compiler and the feature compiler the configuration needs and the model lacks. */
@@ -511,14 +549,12 @@ export class ChartModel {
   }
 
   /**
-   * Takes the theme and the guides' and panels' styles, resolved in the
-   * page: what they read of it is read then, as styles resolve when scenes
-   * ask for them.
+   * Takes the theme, and the guides' and panels' styles over it, whose
+   * colors and fonts are read as scenes ask for them.
    */
-  #style(theme: Theme, styles: ReturnType<typeof readNow>): void {
+  #style(theme: Theme): void {
     this.#theme = theme;
-    this.#styles = chartStyles(theme, this.#config, styles.environment);
-    this.#pageStyles = styles.reading;
+    this.#styles = chartStyles(theme, this.#config, this.#readings);
     this.#layoutKey = "";
   }
 
@@ -535,17 +571,28 @@ export class ChartModel {
     return this.#theme;
   }
 
-  /** Resolves a theme and styles that follow the page again; whether they changed. */
+  /**
+   * Resolves the theme, and the colors and fonts the chart read of the page,
+   * again; whether they changed.
+   */
   refreshTheme(page: ThemeEnvironment): boolean {
     const theme = resolveTheme(this.#config.theme, page);
-    const styles = readNow(styleSources(this.#config), page);
-    if (
-      JSON.stringify(theme) === JSON.stringify(this.#theme) &&
-      styles.reading === this.#pageStyles
-    )
+    const readings = this.#readings.again(page);
+    if (JSON.stringify(theme) === JSON.stringify(this.#theme) && readings === this.#readings)
       return false;
-    this.#style(theme, styles);
+    this.#readings = readings;
+    this.#style(theme);
     return true;
+  }
+
+  /** Reads the colors the configuration gives, as renderers read them (see `Readings`). */
+  get paint(): PaintReader {
+    return this.#readings.color;
+  }
+
+  /** Whether the colors and fonts the chart has read depend on the page, which then may change them. */
+  get readsPage(): boolean {
+    return this.#readings.readsPage;
   }
 
   /** Lets the next scene lay its margins out afresh, as when text measures differently. */
@@ -743,6 +790,7 @@ export class ChartModel {
       zone: this.#config.timeZone ?? "local",
       locale: this.#config.locale,
       theme: this.#theme,
+      paint: this.#readings.color,
       features: this.#featured,
     };
   }
@@ -752,13 +800,33 @@ export class ChartModel {
 
   /** The palette slot of an identity (or series) key, given the first time it is asked for. */
   #slot = (key: string): number => {
-    let slot = this.#slots.get(key);
-    if (slot === undefined) {
-      slot = this.#slots.size;
-      this.#slots.set(key, slot);
+    if (!this.#slots.has(key)) {
+      // A category field's values take their slots in its dictionary's
+      // order, shown or not, the first time one asks, so each has one
+      // color whatever the data, a view, or a facet shows of them, and
+      // whether its color splits series or not; values added later come
+      // after. Fields asking for none (marks of their own colors) take none.
+      const prefix = keyPrefix(key) ?? "";
+      const field = this.#dictionaries.get(prefix);
+      if (field) {
+        const { dictionary, revision } = field.table.categories(field.field as never);
+        // A dictionary grows at its end, so only what it gained since
+        // needs slots, unless a rolling window compacted it.
+        const grown = field.of === dictionary && field.revision === revision;
+        for (let k = grown ? field.count : 0; k < dictionary.length; k++)
+          this.#take(identityOf(prefix, dictionary[k]!));
+        field.of = dictionary;
+        field.count = dictionary.length;
+        field.revision = revision;
+      }
+      this.#take(key);
     }
-    return slot;
+    return this.#slots.get(key)!;
   };
+
+  #take(key: string): void {
+    if (!this.#slots.has(key)) this.#slots.set(key, this.#slots.size);
+  }
 
   /**
    * The type of a scale every panel shares, from its declared type
@@ -808,7 +876,7 @@ export class ChartModel {
   #resolveSeries(bands: Bands, context: BandContext): MarkSeries[] {
     const layout = this.#panels;
     const { hidden } = this;
-    this.#featured?.update(this.#theme, this.#slot);
+    this.#featured?.update(this.#theme, this.#slot, this.#readings.color);
     return this.#marks.map((mark, index) => {
       const scope = this.#scopes[this.#positions[index]!];
       const partition = mark.identity?.field !== undefined;
@@ -817,13 +885,21 @@ export class ChartModel {
       // as the last scene found it, where the feature compiler finds it from
       // their rows (a line colored by another field), so that stacks leave
       // out what is hidden.
+      // A color of the mark's own is read as renderers read it (a CSS
+      // variable's in the page), named in messages by the option giving it.
+      const own = (color: string | undefined) => {
+        if (color === undefined) return undefined;
+        const spec = mark.spec as unknown as Record<string, unknown>;
+        const option = ["stroke", "fill", "color"].find((name) => spec[name] === color) ?? "color";
+        return this.#readings.color(color, `${mark.spec.type} ${option}`);
+      };
       let palette: Palette = scope
         ? (key, label, color, entry) => {
             const identity = entry ?? hidden.groups.get(key) ?? identityOf(scope, label ?? key);
             hidden.join(key, identity);
-            return this.#palette(identity, label, color);
+            return this.#palette(identity, label, own(color));
           }
-        : this.#palette;
+        : (key, label, color) => this.#palette(key, label, own(color));
       if (features) palette = features.palette(palette);
       const resolve = () => {
         let moved = false;
@@ -892,7 +968,7 @@ export class ChartModel {
   /** A layout mark's legend entries, named by what their items stand for. */
   #itemEntries(mark: LayoutMark, id: MarkKey, theme: Theme): LegendEntry[] {
     return mark
-      .legend(id, this.#itemColor, theme)
+      .legend(id, this.#itemColor, theme, this.#readings.color)
       .map((item) => ({ ...item, key: this.hidden.groups.get(item.key) ?? item.key }));
   }
 
@@ -1082,11 +1158,14 @@ export class ChartModel {
   }
 
   /**
-   * Builds the scene for the current data, size, and view state. With
-   * `clouds`, large point series are left to a GPU painter (see PointCloud).
+   * Builds the scene for the current data, size, and view state, its text
+   * measured with `measure`. With `clouds`, large point series are left to
+   * a GPU painter (see PointCloud). Colors and fonts read of where the
+   * chart is shown are read in `page` (the page, while it lends its
+   * reader, or output without one).
    */
-  scene(measure: MeasureText, clouds = false): Scene {
-    const scene = this.#sceneOf(measure, clouds);
+  scene(measure: MeasureText, clouds = false, page?: ThemeEnvironment): Scene {
+    const scene = this.#readings.in(page, () => this.#sceneOf(measure, clouds));
     // Series and items a stream left behind let go of what they stood for.
     this.hidden.prune();
     return scene;
@@ -1106,7 +1185,7 @@ export class ChartModel {
     const layout = this.#panels;
     if (!layout && this.#layouts.length > 0) {
       // Layout marks' items read the compiler's scales too.
-      this.#featured?.update(this.#theme, this.#slot);
+      this.#featured?.update(this.#theme, this.#slot, this.#readings.color);
       return this.#layoutScene(measure, clouds);
     }
     this.#items?.clear();
@@ -1184,10 +1263,17 @@ export class ChartModel {
     const panelCount = split.keys.length;
     // Rows of text take their style's line height (and box), at least the base text's.
     const panelIndexes = split.keys.map((_, i) => i);
-    const tallest = (paints: readonly TextPaint[]) =>
-      Math.max(lineHeight, ...paints.map(textHeight));
+    const tallest = (paints: readonly TextPaint[], texts?: readonly (string | undefined)[]) =>
+      Math.max(lineHeight, ...paints.map((paint, k) => textHeight(paint, texts?.[k])));
     const grid = layout
-      ? layout.grid(split, tallest(panelIndexes.map((i) => styles.panelTitle(i))))
+      ? layout.grid(
+          split,
+          tallest(
+            panelIndexes.map((i) => styles.panelTitle(i)),
+            panelIndexes.map((i) => titleText(config.panels?.list[i]?.title)),
+          ),
+          styles.panelTitle(0).lineHeight,
+        )
       : ONE_PANEL;
     const { columns, header, columnHeader } = grid;
     // Where the panels go: a facet's uniform grid, or subplots' layout of cells.
@@ -1301,7 +1387,7 @@ export class ChartModel {
     const parts = new Map<string, LegendPart>(legends ? this.items?.legends() : undefined);
     for (const { mark, series } of legends ? base : []) {
       if (mark.spec.legend === false) continue;
-      for (const part of mark.legends?.(series, theme, format) ?? [])
+      for (const part of mark.legends?.(series, theme, format, this.#readings.color) ?? [])
         if (!parts.has(part.key)) parts.set(part.key, part);
     }
 
@@ -1318,16 +1404,8 @@ export class ChartModel {
       const { mark, series } = base[along++]!;
       if (mark.spec.legend === false) return [];
       return series.flatMap((s) => {
-        const entry = mark.legendEntry ? mark.legendEntry(s, theme) : { color: s.color };
-        if (!entry) return [];
-        const item: LegendEntry = {
-          key: s.entry ?? s.key,
-          label: s.entryLabel ?? s.label,
-          color: entry.color,
-        };
-        if (entry.glyph) item.glyph = entry.glyph;
-        if (entry.stroke) item.stroke = entry.stroke;
-        return first(item) ? [item] : [];
+        const item = entryOf(mark, s, theme, this.#readings.color);
+        return item && first(item) ? [item] : [];
       });
     });
     const showY = config.y?.show ?? true;
@@ -1402,7 +1480,7 @@ export class ChartModel {
     const axesState = (y: boolean[], yRight: boolean[]): AxesState => ({
       measure,
       styles,
-      surface: theme.background,
+      surface: surface(theme),
       width,
       height,
       columns,
@@ -1431,7 +1509,17 @@ export class ChartModel {
     const across = guided?.across(axesState([], []));
     // Panels' layouts keep room for listed axes above the panels drawing them.
     const top = head.top + (placement ? 0 : (across?.top ?? 0));
-    const xLabelHeight = tallest(xLabelPaints) + (across?.bottom ?? 0);
+    // Category labels of several lines take their lines' room; number and
+    // time labels are planned after it is kept, and keep to one line.
+    let xLines = 1;
+    for (const i of xShown)
+      if (xContexts[xGroupAt[i]!]!.type === "band")
+        for (const label of bandsOf("x", i).labels)
+          if (label.includes("\n")) xLines = Math.max(xLines, lineCount(label));
+    const xLabelHeight =
+      tallest(xLabelPaints) +
+      (xLines - 1) * Math.max(...xLabelPaints.map((paint) => paint.lineHeight)) +
+      (across?.bottom ?? 0);
     // Each x scale's title goes once, under the last panel labeled with it
     // (see xTitleOf), or in a layout of cells, each labeled panel's own; only
     // those panels' title styles are read.
@@ -1441,7 +1529,10 @@ export class ChartModel {
     const xTitled = placement?.cells
       ? panelIndexes.filter(ownTitle)
       : titleAt.filter((i, h) => i >= 0 && xContexts[h]!.spec?.title);
-    const xTitleHeight = tallest(xTitled.map((i) => styles.axisText("axisTitle", "x", i)));
+    const xTitleHeight = tallest(
+      xTitled.map((i) => styles.axisText("axisTitle", "x", i)),
+      xTitled.map((i) => (placement?.cells ? ownTitle(i) : xContexts[xGroupAt[i]!]!.spec?.title)),
+    );
     const xTitle = xTitled.length ? xTitleHeight + GAP : 0; // y labels' boxes reach below the bottom tick as far as above the top one.
     const below =
       Math.max(
@@ -1670,7 +1761,11 @@ export class ChartModel {
         if (!l) return 0;
         const paint = tickPaint(axis, i);
         const boxed = paint.background ? paint.padding[1] + paint.padding[3] : 0;
-        const widest = Math.max(0, ...labelsOf(i).map((label) => measure(label, paint.css)));
+        // As drawn: automatic axes write number and time labels on one line.
+        const widest = Math.max(
+          0,
+          ...labelsOf(i).map((label) => measure(oneLine(side!.plans[i]!, label), paint.css)),
+        );
         return Math.ceil(widest + (widest && boxed)) + GAP + 2;
       });
       const room = Math.max(0, ...reach);
@@ -1680,7 +1775,10 @@ export class ChartModel {
       const titled = panelIndexes.filter(
         (i) => labeled[i] && (config.panels || i === first) && panelAxis(i, axis)?.title,
       );
-      const titleHeight = tallest(titled.map((i) => styles.axisText("axisTitle", axis, i)));
+      const titleHeight = tallest(
+        titled.map((i) => styles.axisText("axisTitle", axis, i)),
+        titled.map((i) => panelAxis(i, axis)?.title),
+      );
       const title = titled.length ? titleHeight + GAP : 0;
       return {
         labeled,
@@ -1930,10 +2028,13 @@ export class ChartModel {
         end: plot.y,
         tickLength: 0,
         gap: 8,
-        surface: theme.background,
+        surface: surface(theme),
         paints: axisPaints(scale, i, !!title),
       };
-      const ticks = labels.map((label, k) => ({ position: plan.scale.map(plan.ticks[k]!), label }));
+      const ticks = labels.map((label, k) => ({
+        position: plan.scale.map(plan.ticks[k]!),
+        label: oneLine(plan, label),
+      }));
       // Along its span from its bottom on the left (the title reads upward)
       // and its top on the right.
       const [low, high] = at.span;
@@ -2084,11 +2185,13 @@ export class ChartModel {
         const paint = styles.plot(i);
         const frame = {
           theme,
+          paint: this.#readings.color,
+          read: styles.read,
           locale,
           measure,
           hidden: hiddenIn(key),
           color: this.#itemColor,
-          surface: paint?.fill,
+          surface: plotSurface(paint?.fill),
         };
         const drawn = this.#items.panel({ key, label, plot }, item, frame);
         return paint ? { ...drawn, frame: paint } : drawn;
@@ -2104,11 +2207,11 @@ export class ChartModel {
           end: plot.x + plot.width,
           tickLength: TICK,
           gap: xGap(paints.label),
-          surface: theme.background,
+          surface: surface(theme),
           paints,
         };
         const ticks = xHas[h]
-          ? xAt.ticks.map((t, k) => ({ position: x.map(t), label: xAt.labels[k]! }))
+          ? xAt.ticks.map((t, k) => ({ position: x.map(t), label: oneLine(xAt, xAt.labels[k]!) }))
           : [];
         axes.push(axisGuide(`x|${i}`, "x", placement, ticks, title, measure));
       }
@@ -2152,7 +2255,9 @@ export class ChartModel {
         pixelRatio: this.pixelRatio,
         rasterRatio: this.rasterRatio,
         theme,
-        surface: plotPaint?.fill,
+        paint: this.#readings.color,
+        read: styles.read,
+        surface: plotSurface(plotPaint?.fill),
         locale,
         hidden: panelHidden,
         groupSeries: groupsIn(panelHidden),
@@ -2278,7 +2383,7 @@ export class ChartModel {
     });
     if (strip) panels.push(navigator!.panel(this, views, planX, xContexts[0]!, strip, head.lift));
     // What insets make of the panels: their boxes, borders, and indicators.
-    const layers = placement?.finish?.(panels, views, theme, this.pixelRatio);
+    const layers = placement?.finish?.(panels, views, theme, this.pixelRatio, this.#readings.color);
 
     let vertices = 0;
     for (const panel of panels) for (const item of panel.marks) vertices += item.draw.size(item);
@@ -2370,8 +2475,9 @@ export class ChartModel {
       value: styles.legend("tickLabel"),
       lineHeight,
       locale: config.locale,
-      surface: theme.background,
+      surface: surface(theme),
       read: styles.read,
+      paint: this.#readings.color,
     };
     // Rows across the chart above or below the plots (or a subplot's); a
     // column beside or in them.
@@ -2471,13 +2577,15 @@ export class ChartModel {
         text: title,
         x,
         y,
-        items: textItems(
-          title,
-          { x, y: y - (breaks * paint.lineHeight) / 2, anchor, baseline: "middle", angle: 0 },
-          paint,
-          theme.background,
-          measure,
-        ),
+        items: [
+          textItem(
+            title,
+            { x, y: y - (breaks * paint.lineHeight) / 2, anchor, baseline: "middle", angle: 0 },
+            paint,
+            surface(theme),
+            measure,
+          ),
+        ],
       });
     }
     this.#legendNotes = legends.flatMap(({ notes }) => notes ?? []);
@@ -2547,7 +2655,7 @@ export class ChartModel {
             `chart legend.place.panel: no panel "${name}"; name one of ${panels.map(({ key }) => `"${key}"`).join(", ")}`,
           );
         box = panel.plot;
-        surface = panel.frame?.fill;
+        surface = plotSurface(panel.frame?.fill);
       }
       return insideBox([{ place, measured }], box, surface);
     });
@@ -2558,7 +2666,7 @@ export class ChartModel {
     const theme = this.#theme;
     const { locale, marks } = this.#config;
     const mark = this.#layouts[0]!;
-    const parts = mark.legends?.(theme, locale) ?? [];
+    const parts = mark.legends?.(theme, locale, this.#readings.color) ?? [];
     const header = this.#furniture(
       this.#listItems(this.#itemEntries(mark, mark.spec.id ?? 0, theme), this.#lister()),
       parts,
@@ -2578,15 +2686,18 @@ export class ChartModel {
     const items = this.items!;
     items.fields = this.fields?.(locale, this.#config.timeZone ?? "local", numberFormatter(locale));
     const paint = this.#styles.plot(0);
+    const under = plotSurface(paint?.fill);
     const { guides, box, inside } = header;
     const room = {
       guides,
       box,
-      inside: inside.length ? (at: Rect) => insideBox(inside, at) : undefined,
+      inside: inside.length ? (at: Rect) => insideBox(inside, at, under) : undefined,
     };
     const scene = items.scene(room, mark, marks, {
       theme,
-      surface: paint?.fill,
+      paint: this.#readings.color,
+      read: this.#styles.read,
+      surface: under,
       locale,
       measure,
       // A copy, which items found before the next scene still read.
@@ -3021,4 +3132,23 @@ function oriented(
 ): [number, number] {
   const [lo, hi] = viewport;
   return domain && domain[0] > domain[1] ? [hi, lo] : [lo, hi];
+}
+
+/** A category field whose values take palette slots in its dictionary's order (see `ChartModel#slot`). */
+interface SlotField {
+  table: Table;
+  field: string;
+  /** The dictionary slots were last taken from, how much of it, and its revision then. */
+  of?: readonly string[];
+  count: number;
+  revision?: number;
+}
+
+/**
+ * A tick label as the automatic axes draw it: categories in their lines,
+ * numbers and times a format writes in lines on one, as their room is kept
+ * before they are planned (listed axes lay them out in rows).
+ */
+function oneLine(plan: AxisPlan, label: string): string {
+  return plan.within ? label.replaceAll("\n", " ") : label;
 }

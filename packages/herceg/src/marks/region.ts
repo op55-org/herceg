@@ -1,11 +1,13 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
 import { rectDrawing } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
+import { lineCount } from "../layout/text.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RectGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec } from "../spec/encoding.ts";
 import type { AnnotationPosition, Clip, Frozen, RegionRange, RegionSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
+import type { TextPaint } from "../style/style.ts";
 import {
   AnnotationData,
   labelOf,
@@ -25,6 +27,7 @@ import {
   type MARK,
   type Mark,
   type MarkKey,
+  painted,
   type RowParts,
   seriesKey,
 } from "./mark.ts";
@@ -197,7 +200,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     const size = data.size(rows);
     const rects = frame.floats(id, "rect", size * 4);
     const placed: PlacedLabel[] = [];
-    const paint = label && labelPaint(theme, theme.text, label.style);
+    const paint =
+      label &&
+      labelPaint(theme, theme.text, label.style && frame.read(label.style, "region label.style"));
     let count = 0;
     data.each(rows, (i) => {
       // Each region is clipped to the plot, so a label stays in its visible part.
@@ -219,7 +224,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
                 anchor: "start",
                 baseline: "middle",
               }
-            : this.#place(text, across, down, paint.size),
+            : this.#place(text, across, down, paint),
         );
       }
       count++;
@@ -228,7 +233,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       kind: "rect",
       draw: rectDrawing,
       key: id,
-      fill: this.spec.fill ?? theme.muted,
+      fill: painted(frame.paint, this.spec.fill, "region fill") ?? theme.muted,
       fillOpacity: this.spec.fillOpacity ?? 0.15,
       rects,
       count,
@@ -239,7 +244,17 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       const halo = label?.style?.halo ?? this.spec.halo;
       out.push(
         this.#plain || plainText(paint, theme)
-          ? textGeometry(labelKey, placed, paint.color, halo, frame)
+          ? textGeometry(
+              labelKey,
+              // Placed by their first lines, drawn by their middles.
+              placed.map((at) => ({
+                ...at,
+                y: at.y + ((lineCount(at.text) - 1) * paint.lineHeight) / 2,
+              })),
+              paint.color,
+              halo,
+              frame,
+            )
           : labelsGeometry(labelKey, placed, paint, halo, frame),
       );
     }
@@ -249,20 +264,27 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
   /**
    * Where a region's label goes: along the edge `side` names (top by
    * default), at its start, middle, or end, inside the region or outside it.
+   * Its point is its first line's: a label of several lines grows away from
+   * the edge it is beside, and is centered where it is centered.
    */
   #place(
     text: string,
     [left, right]: [number, number],
     [top, bottom]: [number, number],
-    size: number,
+    { size, lineHeight }: TextPaint,
   ): PlacedLabel {
     const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
     const side = place.side ?? "top";
     const attachment = place.attachment ?? "start";
     const gap = PADDING + (place.offset ?? 0);
     const out = place.outside ? -1 : 1;
+    // The block's lines after the first.
+    const rest = (lineCount(text) - 1) * lineHeight;
     if (side === "top" || side === "bottom") {
-      const y = side === "top" ? top + out * (gap + size / 2) : bottom - out * (gap + size / 2);
+      const y =
+        side === "top"
+          ? top + out * (gap + size / 2) - (out < 0 ? rest : 0)
+          : bottom - out * (gap + size / 2) - (out > 0 ? rest : 0);
       return attachment === "start"
         ? { text, x: left + PADDING, y, anchor: "start", baseline: "middle" }
         : attachment === "end"
@@ -273,8 +295,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       attachment === "start"
         ? top + PADDING + size / 2
         : attachment === "end"
-          ? bottom - PADDING - size / 2
-          : (top + bottom) / 2;
+          ? bottom - PADDING - size / 2 - rest
+          : (top + bottom - rest) / 2;
     return side === "left"
       ? {
           text,

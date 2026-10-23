@@ -4,7 +4,6 @@
 // Resolving a role's levels gives a paint: plain values renderers read,
 // made once per configuration and shared by every element of the role.
 
-import { type ColorReader, colorContrast, readsLight } from "../scale/color.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { Halo, Insets, PlotStyle, StrokeStyle, TextBox, TextStyle } from "../spec/style.ts";
 
@@ -41,25 +40,14 @@ export interface ResolvedHalo {
 export const HALO_WIDTH = 3;
 
 /**
- * The halo of text colored `color` over `surface`, as `halo` asks; none
- * for false. "auto" takes the surface where the text contrasts with it at
- * 3:1 or more, else white behind dark text and black behind light text,
- * at 0.85 (by `text`, the theme's text color, for colors `read` cannot read).
+ * The halo of text over `surface`, as `halo` asks: none for false; for
+ * "auto", the surface's own color, so the text keeps clear of lines and
+ * fills under it whatever its color; or a color of its own.
  */
-export function haloOf(
-  halo: Halo,
-  color: string,
-  surface: string,
-  text: string,
-  read: ColorReader,
-): ResolvedHalo | undefined {
+export function haloOf(halo: Halo, surface: string): ResolvedHalo | undefined {
   if (halo === false) return undefined;
-  if (halo !== "auto")
-    return { color: halo.color, width: halo.width ?? HALO_WIDTH, opacity: halo.opacity ?? 1 };
-  if ((colorContrast(color, surface, read) ?? 0) >= 3)
-    return { color: surface, width: HALO_WIDTH, opacity: 1 };
-  const light = readsLight(color, read) ?? readsLight(text, read);
-  return { color: light ? "#000000" : "#ffffff", width: HALO_WIDTH, opacity: 0.85 };
+  if (halo === "auto") return { color: surface, width: HALO_WIDTH, opacity: 1 };
+  return { color: halo.color, width: halo.width ?? HALO_WIDTH, opacity: halo.opacity ?? 1 };
 }
 
 /** A line as resolved. */

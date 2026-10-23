@@ -491,7 +491,7 @@ def _letter_statistics(
 
     def table_of(keys: list[tuple[int, ...]], stats: dict[str, list[float]]) -> dict[str, Column]:
         out: dict[str, Column] = {
-            name: category_column([k[i] for k in keys], variable.labels)
+            name: variable.column([k[i] for k in keys])
             for i, (name, variable) in enumerate(zip(columns, variables, strict=True))
         }
         for name, column in stats.items():
@@ -702,7 +702,7 @@ def _box_statistics(
         stats["outliers"].append(float(first + len(sample) - 1 - last))
     columns = [*layout.variables, layout.category]
     table: dict[str, Column] = {
-        name: category_column([k[i] for k in keys], variable.labels)
+        name: variable.column([k[i] for k in keys])
         for i, (name, variable) in enumerate(zip(columns, variables, strict=True))
     }
     for name, column in stats.items():

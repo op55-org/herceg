@@ -35,7 +35,6 @@ import {
 import type { NavigatorControls } from "../model/navigator.ts";
 import type { RowLink, RowSelectionChange } from "../model/row-selection.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
-import { styleSources } from "../model/styles.ts";
 import { titleText } from "../model/titles.ts";
 import { canvasRasterUrl, paintCanvas } from "../render/canvas.ts";
 import { EXPORT_FONTS, EXPORT_SCENE, type ExportsScene } from "../render/export-scene.ts";
@@ -1107,6 +1106,8 @@ export class MountedChart implements Chart, ExportsScene {
 
   /** The SVG export of a scene of the chart. */
   #svgOf(scene: Scene, model: ChartModel, sizing: SvgSizing = {}): string {
+    // The page's fonts draw what the chart's do not cover; an export has only the chart's.
+    this.#page?.check(scene);
     const document = this.root.ownerDocument;
     return renderSvg(scene, {
       ...sizing,
@@ -1143,7 +1144,8 @@ export class MountedChart implements Chart, ExportsScene {
     }
     if (drawn) this.#succeed();
     try {
-      return use(this.#model.scene(this.#measure()), this.#model);
+      const measure = this.#measure();
+      return use(this.#sceneOf(measure, false), this.#model);
     } finally {
       // Listeners hear of the frame once the export is made (or failed):
       // what they change then is drawn on the next frame, as after any other.
@@ -1513,6 +1515,11 @@ export class MountedChart implements Chart, ExportsScene {
     this.#fontsLoading = loaded;
   }
 
+  /** The model's scene, its colors and fonts read of the page. */
+  #sceneOf(measure: MeasureText, clouds: boolean): Scene {
+    return readPage(this.#container, (page) => this.#model.scene(measure, clouds, page));
+  }
+
   /** What the chart measures text with: its fonts, or its document's canvas. */
   #measure(): MeasureText {
     return this.#fontsMeasure ?? this.#snapshotMeasure ?? measurer(this.root.ownerDocument);
@@ -1587,9 +1594,16 @@ export class MountedChart implements Chart, ExportsScene {
         this.#live,
       ) ?? this.#rows?.dispose();
     this.#loadControls();
-    // Themes that follow the page re-read it when it may have switched themes.
-    // So do charts whose guides' and subplots' styles read it.
-    const follows = themeReadsPage(options.theme, styleSources(options));
+    this.#followPage();
+  }
+
+  /**
+   * Watches the page for a switch of themes while the chart's theme follows
+   * it, or the colors and fonts the chart has read of it (its styles', its
+   * marks', its scales') may change with it; reads it again then.
+   */
+  #followPage(): void {
+    const follows = themeReadsPage(this.#options.theme) || this.#model.readsPage;
     if (follows && !this.#unwatchPage) {
       this.#unwatchPage = watchPage(this.#container.ownerDocument, () => {
         this.#pageChanged = true;
@@ -1673,7 +1687,7 @@ export class MountedChart implements Chart, ExportsScene {
     const animation = this.#animation;
     if (animation?.playing) {
       const plan = () => {
-        this.#model.scene(measure, cloudsAllowed);
+        this.#sceneOf(measure, cloudsAllowed);
         return this.#model.panels()[0];
       };
       if (animation.step(plan, this.#drawTime)) this.#invalidate(false);
@@ -1681,10 +1695,12 @@ export class MountedChart implements Chart, ExportsScene {
     const started = performance.now();
     // Changed values on their way draw the scene they move to, which stays
     // the model's last, with its marks and axes between.
-    const build = () => this.#model.scene(measure, cloudsAllowed);
+    const build = () => this.#sceneOf(measure, cloudsAllowed);
     const scene = this.#values?.frame(build, this.#drawTime) ?? build();
     if (this.#values?.playing) this.#invalidate(false);
     this.#scene = scene;
+    // What the scene read of the page may change with it.
+    if (!this.#unwatchPage) this.#followPage();
     const clouds = cloudsIn(scene);
     // A null painter means WebGL is unavailable; it is not loaded again.
     const waiting =

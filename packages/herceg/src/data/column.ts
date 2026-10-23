@@ -40,6 +40,8 @@ export interface CategoryColumn {
   readonly dictionary: string[];
   /** Code lookup for the dictionary; built lazily on first append. */
   codes: Map<string, number> | undefined;
+  /** How many times the codes were renumbered (see `Table.categories`). */
+  revision: number;
   readonly check?: undefined;
   readonly deferred?: Deferred | undefined;
 }
@@ -190,6 +192,7 @@ function createEncodedCategory(codes: Int32Array, dictionary: readonly string[])
     owned: false,
     dictionary: [...dictionary],
     codes: lookup,
+    revision: 0,
   };
 }
 
@@ -202,6 +205,7 @@ export function createCategory(
     owned: true,
     dictionary: [],
     codes: new Map(),
+    revision: 0,
   };
   for (let i = 0; i < values.length; i++) column.buffer[i] = encode(column, values[i]);
   return column;

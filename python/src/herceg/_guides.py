@@ -503,8 +503,9 @@ def scales_spec(value: Any) -> Any:
 @dataclass
 class ScaleRef:
     """A scale a mark owns: the mark's ``id`` (``mark``) and the ``channel``
-    (``"series"`` colors, a ``"color"`` field's ramp or colors, ``"size"``,
-    or ``"symbol"``)."""
+    (``"series"`` colors, a ``"color"`` field's ramp or colors, which are
+    its series' where ``color=`` splits them, ``"size"``, or ``"symbol"``).
+    Guides naming a mark show it whatever its ``legend`` setting."""
 
     mark: str
     channel: Channel

@@ -8,6 +8,7 @@ import { symbolPath } from "../draw/symbols.ts";
 import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberTickLabels } from "../format/format.ts";
 import { fitTickLabels, placeSpokeLabels, type SpokeLabel } from "../layout/radar-labels.ts";
+import { oneLineText } from "../layout/text.ts";
 import { Polyline } from "../lod/polyline.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
@@ -264,7 +265,14 @@ export class RadarMark implements LayoutMark {
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
     const angles = Float64Array.from({ length: count }, (_, k) => START + (k * TAU) / count);
-    const labeled = placeSpokeLabels(spokes, angles, bounds, measure, font, lineHeight);
+    const labeled = placeSpokeLabels(
+      spokes.map(oneLineText),
+      angles,
+      bounds,
+      measure,
+      font,
+      lineHeight,
+    );
     const radius = labeled.radius;
     // Rings about 25 pixels apart.
     const tickCount = Math.max(2, Math.min(6, Math.round(radius / 25)));
@@ -548,7 +556,7 @@ export class RadarMark implements LayoutMark {
       key: "radar-ticks",
       fill: frame.theme.muted,
       anchor: "start",
-      halo: labelHalo(this.spec.halo, frame.theme.muted, frame),
+      halo: labelHalo(this.spec.halo, frame),
       coords: Float32Array.from(fitted.flatMap(({ x, y }) => [x, y])),
       labels: fitted.map(({ text }) => text),
       count: fitted.length,

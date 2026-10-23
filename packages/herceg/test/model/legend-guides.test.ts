@@ -2,17 +2,19 @@
 // titles, entries of your own, swatches as the marks look, one entry for
 // the same value across marks, and legends of the scales they name.
 import { describe, expect, it } from "vitest";
-import { category } from "../../src/data/column.ts";
+import { category, encodedCategory } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { legend } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
+import { candlestick } from "../../src/marks/candlestick.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { region } from "../../src/marks/region.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -137,6 +139,15 @@ describe("swatches as the marks look", () => {
     const fill = filled!.sample!.items[0]!;
     expect(fill.type === "rect" && fill.opacity).toBe(0.25);
     expect(symbol!.sample!.items[0]!.type).toBe("shape");
+  });
+
+  it("draw a mark left out of legends as it looks where a legend names it", () => {
+    const { scene } = build({
+      marks: [line(data, { x: "t", y: "a", dash: "--", id: "dashed", legend: false })],
+      guides: [legend({ scales: [{ mark: "dashed", channel: "series" }], swatches: "mark" })],
+    });
+    const stroke = entriesOf(scene)[0]!.sample!.items[0]!;
+    expect(stroke.type === "segments" && stroke.paint.dash.length).toBe(2);
   });
 });
 
@@ -274,6 +285,153 @@ describe("legends of the scales they name", () => {
     const columns = new Set(key.entries.map((e) => Math.round(e.x / 10)));
     expect(rows.size).toBe(3);
     expect(columns.size).toBe(2);
+  });
+
+  it("show a mark left out of legends where they name it, and nowhere else", () => {
+    const sites = table({ t: [0, 1, 0, 1], v: [1, 2, 3, 4], site: category(["N", "N", "S", "S"]) });
+    const hidden = [
+      line(data, { x: "t", y: "a", id: "first" }),
+      line(sites, { x: "t", y: "v", color: "site", id: "curves", legend: false }),
+    ];
+    const { scene } = build({
+      marks: hidden,
+      guides: [
+        legend({ scales: [{ mark: "curves", channel: "series" }], place: { side: "right" } }),
+      ],
+    });
+    // The automatic legend, of one series, draws none.
+    expect(entriesOf(scene).map((e) => e.label)).toEqual(["N", "S"]);
+    // A legend naming nothing leaves it out, as the automatic one does.
+    const all = build({ marks: hidden, guides: [legend({ place: { side: "bottom" } })] });
+    expect(entriesOf(all.scene).map((e) => e.label)).toEqual(["a"]);
+  });
+
+  it("take a mark's color for its series where its color splits them", () => {
+    const sites = table({ t: [0, 1, 0, 1], v: [1, 2, 3, 4], site: category(["N", "N", "S", "S"]) });
+    const both = [
+      line(data, { x: "t", y: "a", id: "first" }),
+      line(sites, { x: "t", y: "v", color: "site", id: "curves" }),
+    ];
+    for (const channel of ["color", "series"] as const) {
+      const { scene } = build({
+        marks: both,
+        guides: [legend({ scales: [{ mark: "curves", channel }], place: { side: "right" } })],
+      });
+      const [automatic, listed] = guidesOf(scene, "legend");
+      expect(
+        listed!.entries.map((e) => e.label),
+        channel,
+      ).toEqual(["N", "S"]);
+      // The automatic legend leaves them to it.
+      expect(
+        automatic!.entries.map((e) => e.label),
+        channel,
+      ).toEqual(["a"]);
+    }
+  });
+
+  it("refuse a scale the mark does not have, naming those it has", () => {
+    expect(() =>
+      build({ marks, guides: [legend({ scales: [{ mark: "first", channel: "color" }] })] }),
+    ).toThrow(
+      'chart guides[0].scales[0].channel: mark "first" has no "color" scale; name one it has, as channel: "series"',
+    );
+    const cells = table({ x: [0, 1], y: category(["a", "b"]), v: [1, 2] });
+    expect(() =>
+      build({
+        marks: [heatmap(cells, { x: "x", y: "y", color: "v", id: "h" })],
+        guides: [legend({ scales: [{ mark: "h", channel: "series" }] })],
+      }),
+    ).toThrow('mark "h" has no "series" scale; name one it has, as channel: "color"');
+    // A mark coloring series by a field owns them, whichever values its rows hold.
+    const unknown = table({
+      t: [0, 1],
+      v: [1, 2],
+      k: encodedCategory(new Int32Array([-1, -1]), ["A"]),
+    });
+    for (const channel of ["color", "series"] as const)
+      expect(() =>
+        build({
+          marks: [line(unknown, { x: "t", y: "v", color: "k", id: "l" })],
+          guides: [legend({ scales: [{ mark: "l", channel }] })],
+        }),
+      ).not.toThrow();
+    // A mark of rows but no series owns no scale either.
+    const events = table({ t: [1], note: ["deploy"] });
+    expect(() =>
+      build({
+        marks: [...marks, rule(events, { x: "t", label: "note", id: "events" })],
+        guides: [legend({ scales: [{ mark: "events", channel: "size" }] })],
+      }),
+    ).toThrow(
+      'mark "events" has no "size" scale, nor another a legend shows; name a mark that colors',
+    );
+    // Rows or none: a point without a size field has no size scale.
+    const empty = table({ t: new Float64Array(0), v: new Float64Array(0) });
+    expect(() =>
+      build({
+        marks: [point(empty, { x: "t", y: "v", id: "p" })],
+        guides: [legend({ scales: [{ mark: "p", channel: "size" }] })],
+      }),
+    ).toThrow('mark "p" has no "size" scale; name one it has, as channel: "series"');
+    expect(() =>
+      build({
+        marks: [...marks, rule(table({ t: new Float64Array(0) }), { x: "t", id: "none" })],
+        guides: [legend({ scales: [{ mark: "none", channel: "color" }] })],
+      }),
+    ).toThrow('mark "none" has no "color" scale, nor another a legend shows');
+  });
+
+  it("accept the scales a mark's options give it, showing them once its rows give them values", () => {
+    const points = table({
+      x: [0, 1],
+      y: [1, 2],
+      k: encodedCategory(new Int32Array([-1, -1]), ["A"]),
+      s: [1, 2],
+      shape: category(["a", "b"]),
+    });
+    const { model, scene } = build({
+      marks: [
+        point(points, {
+          x: "x",
+          y: "y",
+          color: "k",
+          size: "s",
+          symbol: { field: "shape" },
+          id: "p",
+        }),
+      ],
+      legend: false,
+      guides: [
+        legend({
+          scales: [
+            { mark: "p", channel: "size" },
+            { mark: "p", channel: "symbol" },
+          ],
+        }),
+      ],
+    });
+    const keys = (scene: Scene) => guidesOf(scene, "key").map((key) => key.title.text);
+    expect(keys(scene)).toEqual([]);
+    const rows = { x: [0, 1], y: [1, 2], k: ["A", "A"], s: [1, 2], shape: category(["a", "b"]) };
+    points.reset(rows);
+    expect(keys(model.scene(estimateText))).toEqual(["s", "shape"]);
+    points.reset({ ...rows, x: [], y: [], k: [], s: [], shape: category([]) });
+    expect(keys(model.scene(estimateText))).toEqual([]);
+  });
+
+  it("show a candlestick's series where a legend names it", () => {
+    const prices = table({ t: [0, 1], open: [1, 2], high: [3, 4], low: [0, 1], close: [2, 3] });
+    const ticker = { x: "t", open: "open", high: "high", low: "low", close: "close" } as const;
+    const { scene } = build({
+      marks: [
+        candlestick(prices, { ...ticker, label: "ACME", id: "c" }),
+        candlestick(prices, { ...ticker, label: "Other" }),
+      ],
+      guides: [legend({ scales: [{ mark: "c", channel: "series" }] })],
+    });
+    const listed = guidesOf(scene, "legend").map((g) => g.entries.map((entry) => entry.label));
+    expect(listed.sort()).toEqual([["ACME"], ["Other"]]);
   });
 
   it("refuse a mark id no mark has", () => {

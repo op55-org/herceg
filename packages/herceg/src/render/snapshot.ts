@@ -8,7 +8,7 @@ import { entryId, Legend } from "../dom/legend.ts";
 import { hash, panelDrawing, SvgLayer } from "../dom/svg-layer.ts";
 import { checkFonts } from "../fonts/prepared.ts";
 import type { Fonts } from "../fonts/registry.ts";
-import { estimateText } from "../layout/text.ts";
+import { estimateText, type MeasureText } from "../layout/text.ts";
 import { chartDescription } from "../model/describe.ts";
 import { type ChartConfig, ChartModel } from "../model/model.ts";
 import { titleText } from "../model/titles.ts";
@@ -42,7 +42,11 @@ export interface SnapshotOptions {
    * time the page is made, so the server's markup and the browser's agree.
    */
   idPrefix: string;
-  /** Fonts to measure with, the same the browser's chart is given; Helvetica estimates by default. */
+  /**
+   * Fonts to measure with, the same the browser's chart is given; Helvetica
+   * estimates by default, and for text the fonts do not cover, which the
+   * page draws in its own fonts and the browser's chart measures again.
+   */
   fonts?: Fonts;
   /** When the chart's options set none: "en-US" and "UTC" by default ("local" is the server's own zone). */
   locale?: string;
@@ -90,7 +94,7 @@ export function renderToSnapshot(options: ChartConfig, env: SnapshotOptions): Ch
   model.setSize(width, height, 1);
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);
-  const scene = model.scene(fonts?.measure ?? estimateText);
+  const scene = model.scene(fonts ? pageMeasure(fonts) : estimateText, false, NO_PAGE);
   const document = new ShimDocument();
   const encodeRaster: SvgContext["encodeRaster"] = (raster) =>
     pngDataUrl(raster.columns, raster.rows, raster.pixels);
@@ -338,4 +342,15 @@ class ShimElement {
 
 function escapeAttribute(value: string): string {
   return value.replace(/[&"<]/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+/** Measures with `fonts` where they cover the text, as a mounted chart does, and with estimates where not. */
+function pageMeasure(fonts: Fonts): MeasureText {
+  return (text, font) => {
+    try {
+      return fonts.measure(text, font);
+    } catch {
+      return estimateText(text, font);
+    }
+  };
 }

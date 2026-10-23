@@ -19,7 +19,7 @@ import {
 import type { PointBatch3D } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, Point3DSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type { View } from "../three/camera.ts";
 import { ScreenGrid } from "../three/hit.ts";
 import {
@@ -176,7 +176,7 @@ export class Point3DMark implements Layer3D {
           message: `point3d color: "${spec.color}" holds categories, which color 3D points by series; leave series out (or give series: "${spec.color}"), or color by a number field`,
         });
     }
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point3d colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point3d colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "point3d");
     if (spec.radius !== undefined && !(spec.radius > 0 && Number.isFinite(spec.radius)))
       throw new RangeError(
@@ -219,13 +219,14 @@ export class Point3DMark implements Layer3D {
     return { field, kind, extent };
   }
 
-  #scale(theme: Theme): SequentialScale | undefined {
+  #scale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     if (this.#toneField === undefined) return undefined;
     const domain = spec.colorDomain ?? this.table.extent(this.#toneField as never);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "point3d colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   /**
@@ -246,18 +247,23 @@ export class Point3DMark implements Layer3D {
     return groups;
   }
 
-  legend(id: string | number, color: (key: string) => string, theme: Theme): LegendEntry[] {
+  legend(
+    id: string | number,
+    color: (key: string) => string,
+    theme: Theme,
+    paint: PaintReader,
+  ): LegendEntry[] {
     const glyph = symbolPath("circle", 0, 0, LEGEND_RADIUS);
     const muted = this.#toneField !== undefined;
     return this.#groups().map(({ label, category }) => {
       const key = groupKey(id, category);
-      const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key));
+      const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key), paint, "point3d fill");
       return { key, label, color: fill, glyph };
     });
   }
 
-  scales(theme: Theme): [ColorRamp[], GlyphKey[]] {
-    const scale = this.#scale(theme);
+  scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
+    const scale = this.#scale(theme, paint);
     if (!scale) return [[], []];
     const { domain, midpoint } = scale;
     return [[{ stops: scale.legendStops(), domain, midpoint, title: this.spec.color! }], []];
@@ -271,11 +277,11 @@ export class Point3DMark implements Layer3D {
   batch(frame: Frame3D): PointBatch3D | undefined {
     const { spec, table } = this;
     if ((spec.fillOpacity ?? 1) < 1) return undefined;
-    const { theme, hidden, id } = frame;
-    const scale = this.#scale(theme);
+    const { theme, paint, hidden, id } = frame;
+    const scale = this.#scale(theme, paint);
     const groups = this.#groups();
     const fills = groups.map((group) =>
-      ownOr(spec.fill, frame.color(groupKey(id, group.category))),
+      ownOr(spec.fill, frame.color(groupKey(id, group.category)), paint, "point3d fill"),
     );
     const shown = groups.map((group) => !hidden.has(groupKey(id, group.category)));
     const palette = this.#toneField === undefined ? fills : (scale?.colors() ?? []);
@@ -406,7 +412,7 @@ export class Point3DMark implements Layer3D {
 
   items(frame: Frame3D): Items3D {
     const { spec, table } = this;
-    const { axes, view, id, theme } = frame;
+    const { axes, view, id, theme, paint } = frame;
     const { rows, count } = this.#reading(frame);
     const [xs, ys, zs] = this.#fields.map((field) => table.numbers(field as never));
     const names =
@@ -414,7 +420,7 @@ export class Point3DMark implements Layer3D {
     const series = spec.series === undefined ? undefined : table.categories(spec.series as never);
     const tones =
       this.#toneField === undefined ? undefined : table.numbers(this.#toneField as never);
-    const scale = this.#scale(theme);
+    const scale = this.#scale(theme, paint);
     const offset = table.rowOffset;
     const radius = spec.radius ?? RADIUS;
     const out = new Float64Array(2);
@@ -454,7 +460,7 @@ export class Point3DMark implements Layer3D {
         color:
           tones && scale
             ? scale.color(tones[row]!)
-            : ownOr(spec.fill, frame.color(groupKey(id, group))),
+            : ownOr(spec.fill, frame.color(groupKey(id, group)), paint, "point3d fill"),
         value: values[2]!,
         text: parts.join(", "),
         px,
@@ -485,14 +491,14 @@ export class Point3DMark implements Layer3D {
   }
 
   place(frame: FaceFrame3D): Placed3D {
-    const { view, axes, faces, rank, theme, id } = frame;
+    const { view, axes, faces, rank, theme, paint, id } = frame;
     const { spec, table } = this;
     const { rows, count } = this.#reading(frame);
     const [xs, ys, zs] = this.#fields.map((field) => table.numbers(field as never));
     const radius = spec.radius ?? RADIUS;
     const opacity = spec.fillOpacity ?? 1;
     // Each series' style, or with `color` each ramp entry's or palette color's.
-    const scale = this.#scale(theme);
+    const scale = this.#scale(theme, paint);
     const tones =
       this.#toneField === undefined ? undefined : table.numbers(this.#toneField as never);
     const ramp = scale && tones ? scale.colors() : undefined;
@@ -503,7 +509,12 @@ export class Point3DMark implements Layer3D {
     const styleOfCode = new Int32Array(series ? series.dictionary.length : 1).fill(-1);
     if (!ramp)
       for (const group of this.#groups()) {
-        const fill = ownOr(spec.fill, frame.color(groupKey(id, group.category)));
+        const fill = ownOr(
+          spec.fill,
+          frame.color(groupKey(id, group.category)),
+          paint,
+          "point3d fill",
+        );
         styleOfCode[Math.max(0, group.code)] = faces.styleOf(fill, opacity, radius);
       }
     const out = new Float64Array(2);

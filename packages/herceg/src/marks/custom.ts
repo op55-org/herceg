@@ -334,19 +334,25 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   }
 
   geometry(series: readonly Series[], frame: Frame, key: MarkKey): ShapesGeometry[] {
-    const { theme } = frame;
+    const { theme, paint } = frame;
     const shapes: (PathShape | TextShape)[] = [];
+    // Shapes' colors are read as the chart's other colors are: each distinct one once.
     const path = (d: string, style: ShapeStyle = {}) => {
       // A stroke of "none" or of no width is no stroke, on Canvas as in SVG.
       const width = style.strokeWidth ?? 1;
       const stroke =
         style.stroke !== undefined && style.stroke !== "none" && width > 0 && width < Infinity
-          ? style.stroke
+          ? paint(style.stroke, "custom stroke")
           : undefined;
       const opacity = style.opacity ?? 1;
       shapes.push({
         d,
-        fill: style.fill ?? (stroke === undefined ? theme.text : "none"),
+        fill:
+          style.fill === undefined
+            ? stroke === undefined
+              ? theme.text
+              : "none"
+            : paint(style.fill, "custom fill"),
         stroke,
         strokeWidth: stroke === undefined ? 0 : width,
         opacity: opacity >= 0 && opacity <= 1 ? opacity : opacity > 1 ? 1 : 0,
@@ -379,7 +385,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
           fill: "none",
         }),
       text: (x, y, text, style = {}) => {
-        const fill = style.fill ?? theme.text;
+        const fill = style.fill === undefined ? theme.text : paint(style.fill, "custom text fill");
         if (fill === "none") return;
         shapes.push({ text, x, y, fill, anchor: style.anchor ?? "middle" });
       },

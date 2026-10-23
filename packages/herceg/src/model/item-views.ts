@@ -841,7 +841,9 @@ export class ItemViews {
     const model = this.#model;
     const { theme, config } = model;
     return model.layouts.flatMap((mark) =>
-      (mark.legends?.(theme, config.locale) ?? []).map((part) => [part.key, part] as const),
+      (mark.legends?.(theme, config.locale, model.paint) ?? []).map(
+        (part) => [part.key, part] as const,
+      ),
     );
   }
 

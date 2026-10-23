@@ -16,7 +16,7 @@ import type { ChartConfig } from "../model/model.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PolygonGeometry, ShapeTransform } from "../scene/scene.ts";
 import type { Frozen, GeoShapeSpec } from "../spec/spec.ts";
-import { surface, type Theme } from "../theme.ts";
+import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { type GeoLayer, joinLayers, type MapFrame } from "./geo.ts";
 import {
   type ItemSources,
@@ -35,6 +35,7 @@ import {
   frozen,
   type GlyphKey,
   type MARK,
+  painted,
   requireField,
 } from "./mark.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -140,7 +141,7 @@ export class GeoShapeMark implements GeoLayer {
       throw new Error(
         "geoshape colors: colors, colorDomain, and colorMidpoint need a number color field; drop them",
       );
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "geoshape colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "geoshape colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "geoshape");
     if (spec.fillOpacity !== undefined && !(spec.fillOpacity >= 0 && spec.fillOpacity <= 1))
       throw new RangeError(
@@ -175,13 +176,14 @@ export class GeoShapeMark implements GeoLayer {
   }
 
   /** The continuous scale of a number `color`, with the current data. */
-  #scale(theme: Theme): SequentialScale | undefined {
+  #scale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     if (this.#colorKind !== "number") return undefined;
     const domain = spec.colorDomain ?? this.table.extent(spec.color as never);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "geoshape colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   /** The categories of a category `color` that rows hold, in dictionary order. */
@@ -200,8 +202,8 @@ export class GeoShapeMark implements GeoLayer {
     });
   }
 
-  scales(theme: Theme): [ColorRamp[], GlyphKey[]] {
-    const scale = this.#scale(theme);
+  scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
+    const scale = this.#scale(theme, paint);
     if (!scale) return [[], []];
     const { domain, midpoint } = scale;
     return [[{ stops: scale.legendStops(), domain, midpoint, title: this.spec.color! }], []];
@@ -227,7 +229,7 @@ export class GeoShapeMark implements GeoLayer {
   }
 
   place(frame: MapFrame): LayoutResult {
-    const { theme, hidden, locale, plan, transform, projected, bounds } = frame;
+    const { theme, paint, hidden, locale, plan, transform, projected, bounds } = frame;
     const id = frame.id;
     const { spec, table } = this;
     const { codes, set } = table.geometries(this.field);
@@ -249,8 +251,8 @@ export class GeoShapeMark implements GeoLayer {
     const margin = this.reach + CURVE_REACH;
     const [left, top] = [bounds.x - margin, bounds.y - margin];
     const [right, bottom] = [bounds.x + bounds.width + margin, bounds.y + bounds.height + margin];
-    const noData = spec.fill ?? theme.grid;
-    const ramp = this.#scale(theme);
+    const noData = painted(paint, spec.fill, "geoshape fill") ?? theme.grid;
+    const ramp = this.#scale(theme, paint);
     const values = this.#colorKind === "number" ? table.numbers(spec.color as never) : undefined;
     const categories =
       this.#colorKind === "category" ? table.categories(spec.color as never) : undefined;
@@ -319,7 +321,7 @@ export class GeoShapeMark implements GeoLayer {
       colors,
       colorIndex: drawn.colorIndex,
       fillOpacity: spec.fillOpacity ?? 1,
-      stroke: spec.stroke ?? surface(theme),
+      stroke: painted(paint, spec.stroke, "geoshape stroke") ?? surface(theme),
       strokeWidth: spec.strokeWidth ?? STROKE_WIDTH,
       transform: move,
     };

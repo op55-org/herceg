@@ -29,7 +29,7 @@ import type { ChartConfig } from "../model/model.ts";
 import { LinearScale } from "../scale/scale.ts";
 import type { Rect } from "../scene/scene.ts";
 import type { ProjectionName, ProjectionSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type {
   LayoutControls,
   LayoutFrame,
@@ -79,7 +79,7 @@ export interface GeoLayer extends LayoutMark {
   /** Draws the layer; `frame.id` is the layer's identity among the map's layers. */
   place(frame: MapFrame): LayoutResult;
   /** The layer's continuous color scales and size keys for the legend. */
-  scales(theme: Theme, locale: string | undefined): [ColorRamp[], GlyphKey[]];
+  scales(theme: Theme, locale: string | undefined, paint: PaintReader): [ColorRamp[], GlyphKey[]];
 }
 
 export function isGeoLayer(mark: LayoutMark): mark is GeoLayer {
@@ -157,16 +157,21 @@ export class GeoMap implements LayoutMark {
     return zoom ? PAN_ZOOM : pan ? PAN : brush || bindings?.length ? LASSO : undefined;
   }
 
-  legend(_id: string | number, color: (key: string) => string, theme: Theme): LegendEntry[] {
-    return this.layers.flatMap((layer, i) => layer.legend(this.#id(i), color, theme));
+  legend(
+    _id: string | number,
+    color: (key: string) => string,
+    theme: Theme,
+    paint: PaintReader,
+  ): LegendEntry[] {
+    return this.layers.flatMap((layer, i) => layer.legend(this.#id(i), color, theme, paint));
   }
 
   /**
    * Every layer's scales, each with a legend of its own: fields of the same
    * name in different layers may measure different things.
    */
-  legends(theme: Theme, locale: string | undefined): LegendPart[] {
-    return this.layers.flatMap((layer) => legendParts(...layer.scales(theme, locale)));
+  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
+    return this.layers.flatMap((layer) => legendParts(...layer.scales(theme, locale, paint)));
   }
 
   /**

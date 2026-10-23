@@ -20,6 +20,7 @@ import { NO_PAGE } from "../../src/render/fallbacks.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import { gridStrokes } from "../../src/scene/grid.ts";
 import type { Panel, Rect, Scene, TextItem } from "../../src/scene/scene.ts";
+import { drawnLines } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 800, height = 600) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -295,9 +296,11 @@ describe("insets", () => {
     // Every line of text drawn, down: its box, or its glyphs about its middle.
     const drawnIn = (scene: Scene, key: string) => {
       const { cover, axes } = byKey(scene.panels)[key]!;
-      const texts = axes
-        .flatMap(({ items }) => items)
-        .filter((item): item is TextItem => item.type === "text" && item.angle === 0);
+      const texts = drawnLines(
+        axes
+          .flatMap(({ items }) => items)
+          .filter((item): item is TextItem => item.type === "text" && item.angle === 0),
+      );
       for (const { y, paint, text, box } of texts) {
         const [top, bottom] = box
           ? [box.y, box.y + box.height]

@@ -15,7 +15,7 @@ import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/co
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { CellReduce, Clip, Frozen, HeatmapSpec, Weekday } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { type Calendar, type CalendarLayout, placeCalendar } from "./heatmap-calendar.ts";
 import {
   type AxisCells,
@@ -269,6 +269,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   readonly spec: Frozen<HeatmapSpec>;
   readonly table: Table<Schema>;
   readonly tooltip = "cell";
+  readonly legendScales = ["ramp"] as const;
   readonly bandPadding = 0;
   /** Automatic y domains end at the cells' edges rather than at round values. */
   readonly tight = true;
@@ -373,7 +374,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       this.#layout = { calendar, weekStart };
     }
     requireField(table, spec.color, NUMERIC, "heatmap color");
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "heatmap colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "heatmap colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "heatmap");
     if (spec.reduce !== undefined && !REDUCERS.includes(spec.reduce)) {
       throw new TypeError(
@@ -472,7 +473,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   ): Series[] {
     const { spec, table } = this;
     const values = table.numbers(spec.color as never);
-    const ramp = spec.colors ?? context.theme.sequential;
+    // Its color, as tooltips and hover dots show it: the ramp's last, read as the cells' are.
+    const ramp = rampOf(spec.colors, context.theme.sequential, context.paint, "heatmap colors");
     // Band axes place rows by band index; others by their values.
     const position = (axis: "x" | "y") => {
       const keys = bands[axis]?.keys ?? [];
@@ -712,8 +714,13 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   }
 
   /** The legend of the scale coloring cells. */
-  legends(series: readonly Series[], theme: Theme): LegendPart[] {
-    const scale = series[0] && this.#colorScale(theme, series[0]);
+  legends(
+    series: readonly Series[],
+    theme: Theme,
+    _format: unknown,
+    paint: PaintReader,
+  ): LegendPart[] {
+    const scale = series[0] && this.#colorScale(theme, paint, series[0]);
     if (!scale) return [];
     const title = this.spec.label ?? this.spec.color;
     const { domain, midpoint } = scale;
@@ -725,12 +732,13 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    * extent, or with `reduce: "sum"`, the extent of its cells' sums (with
    * facets, of every panel's).
    */
-  #colorScale(theme: Theme, s: Series): SequentialScale | undefined {
+  #colorScale(theme: Theme, paint: PaintReader, s: Series): SequentialScale | undefined {
     const { spec } = this;
     const domain = spec.colorDomain ?? this.#valueExtent(s);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "heatmap colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   #valueExtent(s: Series): readonly [number, number] | undefined {
@@ -811,7 +819,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     const s = series[0];
     // Drawn so, no selection is drawn with the series.
     if (s) this.#selected.delete(s);
-    const colors = s && this.#colorScale(frame.theme, s);
+    const colors = s && this.#colorScale(frame.theme, frame.paint, s);
     if (!s || s.length === 0 || frame.hidden.has(s.key) || !colors) return [];
     return this.#image(s, frame, colors, s.key);
   }
@@ -823,7 +831,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    */
   selectedGeometry(series: readonly Series[], frame: Frame, drawing: SelectionDrawing): Geometry[] {
     const s = series[0];
-    const colors = s && this.#colorScale(frame.theme, s);
+    const colors = s && this.#colorScale(frame.theme, frame.paint, s);
     if (!s || s.length === 0 || frame.hidden.has(s.key) || !colors) return [];
     const whole = this.geometry(series, frame).flatMap(drawing.dim);
     const across = this.#resolve(s, "x", frame.x);

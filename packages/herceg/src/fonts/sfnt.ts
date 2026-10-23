@@ -1,15 +1,23 @@
 import { FontReader, fontError } from "./binary.ts";
 
-/** A validated static TrueType face, read-only once parsed, so exports and charts share it. */
-export interface TrueTypeFont {
+/**
+ * A validated static OpenType face, read-only once parsed, so exports and
+ * charts share it. Measuring needs only its metrics and character map, so
+ * faces with CFF outlines measure, and SVG and PNG draw them; PDF export
+ * embeds TrueType (glyf) outlines only.
+ */
+export interface SfntFont {
   data: Uint8Array;
   tables: ReadonlyMap<string, Uint8Array>;
+  /** The outlines' format: "glyf" (TrueType), or "cff" (a CFF or CFF2 table). */
+  outlines: "glyf" | "cff";
   unitsPerEm: number;
   glyphCount: number;
   advances: Uint16Array;
   bearings: Int16Array;
+  /** Where each glyph's outline starts in glyf, and where the last ends; empty for CFF outlines. */
   offsets: Uint32Array;
-  /** Component glyph ids and the offsets at which they occur in each glyph. */
+  /** Component glyph ids and the offsets at which they occur in each glyph (TrueType outlines). */
   components: ReadonlyMap<number, readonly { glyph: number; offset: number }[]>;
   bbox: readonly number[];
   ascent: number;
@@ -24,14 +32,14 @@ export interface TrueTypeFont {
   characterCodes(): Iterable<number>;
 }
 
-export function parseTrueType(data: Uint8Array): TrueTypeFont {
+export function parseSfnt(data: Uint8Array): SfntFont {
   if (!(data instanceof Uint8Array)) throw new TypeError("font data must be a Uint8Array");
   if (data.length > 32 * 1024 * 1024) throw new Error("font exceeds the 32 MiB limit");
   const input = new FontReader(data);
   const signature = input.u32(0);
   if (signature !== 0x00010000 && signature !== 0x74727565 && signature !== 0x4f54544f)
     throw new Error(
-      "fonts must be single sfnt TrueType fonts; WOFF and collections are unsupported",
+      "fonts must be single sfnt fonts (TrueType or OpenType); WOFF and collections are unsupported",
     );
   const count = input.u16(4);
   if (count < 1 || count > 128) fontError("invalid table count");
@@ -51,23 +59,23 @@ export function parseTrueType(data: Uint8Array): TrueTypeFont {
   ranges.sort((a, b) => a.start - b.start);
   for (let i = 1; i < ranges.length; i++)
     if (ranges[i]!.start < ranges[i - 1]!.end) fontError("overlapping tables");
-  if (tables.has("CFF ") || tables.has("CFF2"))
-    throw new Error("OpenType CFF outlines are unsupported; supply a TrueType (glyf) font");
+  const outlines = tables.has("CFF ") || tables.has("CFF2") ? "cff" : "glyf";
+  if (outlines === "cff" && tables.has("glyf")) fontError("both glyf and CFF outlines");
+  // A variable font's widths change along its axes, which measuring with its
+  // default instance would not follow.
   if (tables.has("fvar"))
-    throw new Error("variable fonts are unsupported; instantiate a static TrueType font first");
-  const table = (tag: string, minimum: number) => {
-    const bytes = tables.get(tag);
-    if (!bytes || bytes.length < minimum) fontError(`missing or truncated ${tag} table`);
-    return new FontReader(bytes);
-  };
+    throw new Error(
+      "variable fonts are unsupported; supply a static instance (fontTools varLib.instancer makes one)",
+    );
+  const table = (tag: string, minimum: number) => tableOf(tables, tag, minimum);
   const head = table("head", 54);
   if (head.u32(12) !== 0x5f0f3cf5) fontError("invalid head magic");
   const unitsPerEm = head.u16(18);
   if (unitsPerEm < 16 || unitsPerEm > 16384) fontError("invalid unitsPerEm");
-  const format = head.i16(50);
-  if (format !== 0 && format !== 1) fontError("invalid loca format");
-  const maxp = table("maxp", 32);
-  if (maxp.u32(0) !== 0x00010000) fontError("invalid TrueType maxp version");
+  // CFF faces carry the short maxp, version 0.5, with the glyph count alone.
+  const maxp = table("maxp", outlines === "cff" ? 6 : 32);
+  if (maxp.u32(0) !== (outlines === "cff" ? 0x00005000 : 0x00010000))
+    fontError(`invalid ${outlines === "cff" ? "CFF" : "TrueType"} maxp version`);
   const glyphCount = maxp.u16(4);
   if (!glyphCount) fontError("empty glyph set");
   const hhea = table("hhea", 36);
@@ -80,8 +88,59 @@ export function parseTrueType(data: Uint8Array): TrueTypeFont {
     advances[i] = hmtx.u16(Math.min(i, metrics - 1) * 4);
     bearings[i] = hmtx.i16(i < metrics ? i * 4 + 2 : metrics * 4 + (i - metrics) * 2);
   }
-  const loca = table("loca", (glyphCount + 1) * (format === 0 ? 2 : 4));
-  const glyf = table("glyf", 0);
+  const { offsets, components } =
+    outlines === "glyf"
+      ? readGlyf(tables, head.i16(50), glyphCount)
+      : { offsets: new Uint32Array(0), components: new Map() };
+  const os2 = table("OS/2", 2);
+  const version = os2.u16(0);
+  const minimum = [68, 86, 96, 96, 96, 100][version];
+  if (minimum === undefined) fontError("unsupported OS/2 version");
+  table("OS/2", minimum);
+  // Bits 4–15 were unassigned in versions 0–1 and must be ignored.
+  const fsType = os2.u16(8) & (version < 2 ? 0x000f : 0xffff);
+  const post = tables.get("post");
+  const postReader = post && post.length >= 16 ? new FontReader(post) : undefined;
+  return {
+    data,
+    tables,
+    outlines,
+    unitsPerEm,
+    glyphCount,
+    advances,
+    bearings,
+    offsets,
+    components,
+    bbox: [head.i16(36), head.i16(38), head.i16(40), head.i16(42)],
+    ascent: hhea.i16(4),
+    descent: hhea.i16(6),
+    capHeight: os2.u16(0) >= 2 && os2.bytes.length >= 90 ? os2.i16(88) : hhea.i16(4),
+    italicAngle: postReader ? postReader.view.getInt32(4) / 65536 : 0,
+    fixedPitch: !!postReader?.u32(12),
+    noSubset: !!(fsType & 0x0100),
+    fsType,
+    ...readCmap(table("cmap", 4), glyphCount),
+  };
+}
+
+function tableOf(tables: ReadonlyMap<string, Uint8Array>, tag: string, minimum: number) {
+  const bytes = tables.get(tag);
+  if (!bytes || bytes.length < minimum) fontError(`missing or truncated ${tag} table`);
+  return new FontReader(bytes);
+}
+
+/**
+ * The glyph offsets and composite components of TrueType outlines, checked
+ * so that embedding and subsetting can trust them.
+ */
+function readGlyf(
+  tables: ReadonlyMap<string, Uint8Array>,
+  format: number,
+  glyphCount: number,
+): Pick<SfntFont, "offsets" | "components"> {
+  if (format !== 0 && format !== 1) fontError("invalid loca format");
+  const loca = tableOf(tables, "loca", (glyphCount + 1) * (format === 0 ? 2 : 4));
+  const glyf = tableOf(tables, "glyf", 0);
   const offsets = new Uint32Array(glyphCount + 1);
   for (let i = 0; i <= glyphCount; i++) {
     const offset = format === 0 ? loca.u16(i * 2) * 2 : loca.u32(i * 4);
@@ -142,34 +201,7 @@ export function parseTrueType(data: Uint8Array): TrueTypeFont {
     return below;
   };
   for (const id of components.keys()) visit(id, 0);
-  const os2 = table("OS/2", 2);
-  const version = os2.u16(0);
-  const minimum = [68, 86, 96, 96, 96, 100][version];
-  if (minimum === undefined) fontError("unsupported OS/2 version");
-  table("OS/2", minimum);
-  // Bits 4–15 were unassigned in versions 0–1 and must be ignored.
-  const fsType = os2.u16(8) & (version < 2 ? 0x000f : 0xffff);
-  const post = tables.get("post");
-  const postReader = post && post.length >= 16 ? new FontReader(post) : undefined;
-  return {
-    data,
-    tables,
-    unitsPerEm,
-    glyphCount,
-    advances,
-    bearings,
-    offsets,
-    components,
-    bbox: [head.i16(36), head.i16(38), head.i16(40), head.i16(42)],
-    ascent: hhea.i16(4),
-    descent: hhea.i16(6),
-    capHeight: os2.u16(0) >= 2 && os2.bytes.length >= 90 ? os2.i16(88) : hhea.i16(4),
-    italicAngle: postReader ? postReader.view.getInt32(4) / 65536 : 0,
-    fixedPitch: !!postReader?.u32(12),
-    noSubset: !!(fsType & 0x0100),
-    fsType,
-    ...readCmap(table("cmap", 4), glyphCount),
-  };
+  return { offsets, components };
 }
 
 function validateGlyph(
@@ -232,7 +264,7 @@ function validateGlyph(
 function readCmap(
   cmap: FontReader,
   glyphCount: number,
-): Pick<TrueTypeFont, "glyph" | "characterCodes"> {
+): Pick<SfntFont, "glyph" | "characterCodes"> {
   if (cmap.u16(0) !== 0) fontError("invalid cmap version");
   const count = cmap.u16(2);
   cmap.check(4, count * 8);

@@ -27,7 +27,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, niceTimeDomain, timeTicks } from "../scale/time.ts";
 import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { BinSpec, Clip, Frozen, Histogram2DSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
 import { paint, rasterAxes } from "./heatmap-raster.ts";
 import { histogramFormError, perAxisBins } from "./histogram-input.ts";
@@ -179,6 +179,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   readonly spec: Frozen<Histogram2DSpec>;
   readonly table: Table<Schema>;
   readonly tooltip = "cell";
+  readonly legendScales = ["ramp"] as const;
   readonly summarizes = true;
   readonly bandPadding = 0;
   /** Automatic y domains end at the bins' edges rather than at round values. */
@@ -217,7 +218,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
       return Array.isArray(given) ? Float64Array.from(given as readonly number[]) : undefined;
     };
     this.#explicit = { x: explicit("x"), y: explicit("y") };
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "histogram colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "histogram colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "histogram");
   }
 
@@ -242,7 +243,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     split = false,
   ): Series[] {
     const id = seriesKey(key, "cells");
-    if (split) return [this.#empty(id, context.theme)];
+    if (split) return [this.#empty(id, context.theme, context.paint)];
     const { table } = this;
     const zone = context.zone;
     const cached = this.#binned.get(zone);
@@ -252,7 +253,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const xEdges = this.#edges("x", rx, zone);
     const yEdges = this.#edges("y", ry, zone);
     const scale = { max: 0 };
-    const s = this.#count(id, context.theme, xEdges, yEdges, undefined, scale);
+    const s = this.#count(id, context, xEdges, yEdges, undefined, scale);
     this.#binned.set(zone, { version: table.version, zone, series: s });
     return [s];
   }
@@ -305,7 +306,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const yEdges = yRanges.map((range) => (range ? this.#edges("y", range, zone) : NO_BINS));
     const scale = { max: 0 };
     const series = rows.map((panel, p) =>
-      this.#count(id, context.theme, xEdges[xGroupOf[p]!]!, yEdges[yGroupOf[p]!]!, panel, scale),
+      this.#count(id, context, xEdges[xGroupOf[p]!]!, yEdges[yGroupOf[p]!]!, panel, scale),
     );
     this.#panels.set(key, { version: table.version, zone, rows, groups, series });
     this.#rosters.set(roster[0]!, series);
@@ -333,7 +334,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
    */
   #count(
     key: string,
-    theme: Theme,
+    { theme, paint }: Pick<BandContext, "theme" | "paint">,
     xEdges: Float64Array,
     yEdges: Float64Array,
     rows: Uint32Array | undefined,
@@ -403,7 +404,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const s: Series = {
       key,
       label: this.#label(),
-      color: this.#ramp(theme).at(-1)!,
+      color: this.#ramp(theme, paint).at(-1)!,
       x,
       y,
       y0: undefined,
@@ -446,18 +447,18 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     return this.spec.label ?? MEASURES[this.spec.normalize ?? "count"];
   }
 
-  #ramp(theme: Theme): readonly string[] {
+  #ramp(theme: Theme, paint: PaintReader): readonly string[] {
     const fallback = this.spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return rampOf(this.spec.colors, fallback);
+    return rampOf(this.spec.colors, fallback, paint, "histogram colors");
   }
 
   /** A series of no cells (yet), with its own empty values, for split charts' rosters. */
-  #empty(key: string, theme: Theme): Series {
+  #empty(key: string, theme: Theme, paint: PaintReader): Series {
     const values = new Float64Array(0);
     return {
       key,
       label: this.#label(),
-      color: this.#ramp(theme).at(-1)!,
+      color: this.#ramp(theme, paint).at(-1)!,
       x: NO_BINS,
       y: values,
       y0: undefined,
@@ -536,7 +537,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const s = series[0];
     const cells = s && this.#cellsOf(s);
     if (!s || !cells || s.length === 0 || frame.hidden.has(s.key)) return [];
-    const colors = this.#colorScale(cells, frame.theme);
+    const colors = this.#colorScale(cells, frame.theme, frame.paint);
     if (!colors) return [];
     const whole = this.geometry(series, frame).flatMap(drawing.dim);
     const picked = this.#picked(cells, drawing.selected, s.values);
@@ -577,11 +578,15 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   }
 
   /** The scale coloring cells: over `colorDomain`, or from 0 to the fullest cell. */
-  #colorScale(cells: Cells | undefined, theme: Theme): SequentialScale | undefined {
+  #colorScale(
+    cells: Cells | undefined,
+    theme: Theme,
+    paint: PaintReader,
+  ): SequentialScale | undefined {
     const domain =
       this.spec.colorDomain ?? (cells && cells.scale.max > 0 ? [0, cells.scale.max] : undefined);
     if (!domain) return undefined;
-    return new SequentialScale(domain, this.#ramp(theme), this.spec.colorMidpoint);
+    return new SequentialScale(domain, this.#ramp(theme, paint), this.spec.colorMidpoint);
   }
 
   /**
@@ -589,11 +594,16 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
    * counts set; a split chart's roster names it through the cells of the
    * panels it was counted with.
    */
-  legends(series: readonly Series[], theme: Theme): LegendPart[] {
+  legends(
+    series: readonly Series[],
+    theme: Theme,
+    _format: unknown,
+    paint: PaintReader,
+  ): LegendPart[] {
     const s = series[0];
     if (!s) return [];
     const cells = this.#cellsOf(s) ?? this.#rosterCells(s);
-    const scale = this.#colorScale(cells, theme);
+    const scale = this.#colorScale(cells, theme, paint);
     if (!scale) return [];
     const { domain, midpoint } = scale;
     return [rampLegend({ stops: scale.legendStops(), domain, title: this.#label(), midpoint })];
@@ -646,7 +656,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     if (s) this.#selected.delete(s);
     const cells = s && this.#cellsOf(s);
     if (!s || !cells || s.length === 0 || frame.hidden.has(s.key)) return [];
-    const colors = this.#colorScale(cells, frame.theme);
+    const colors = this.#colorScale(cells, frame.theme, frame.paint);
     if (!colors) return [];
     return this.#image(s, frame, cells, colors, s.values, s.key);
   }
@@ -775,8 +785,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   }
 
   /** The color a cell is drawn in. */
-  pointColor(s: Series, row: number, theme: Theme): string {
-    return this.#colorScale(this.#cellsOf(s), theme)?.color(s.values[row]!) ?? s.color;
+  pointColor(s: Series, row: number, theme: Theme, paint: PaintReader): string {
+    return this.#colorScale(this.#cellsOf(s), theme, paint)?.color(s.values[row]!) ?? s.color;
   }
 
   /** A cell's bins, by field. */

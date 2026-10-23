@@ -124,7 +124,7 @@ export function renderToPDF(
       model.setSize(options.width, options.height, 1, STATIC_RASTER_RATIO);
       // What the bound stores hold now is drawn as a mounted chart draws it.
       options.rowSelection?.highlight(model);
-      const scene = model.scene(resolver?.measure ?? measurePdfText);
+      const scene = model.scene(resolver?.measure ?? measurePdfText, false, NO_PAGE);
       add(scene, model, page);
     }
   }

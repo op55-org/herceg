@@ -8,7 +8,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import type { Rect, ShapesGeometry } from "../scene/scene.ts";
 import type { Coordinate, InsetAnchor, InsetSpec } from "../spec/spec.ts";
 import { dashPattern } from "../style/style.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { layoutError } from "./compile.ts";
 
 /** Pixels an inset placed at a corner or edge stands in from its parent's plot. */
@@ -226,7 +226,8 @@ export interface PanelScales {
  * with lines from two of its corners to the same corners of the inset's
  * `cover`, the pair that runs outside both boxes; none where the parent
  * shows none of those ranges. Throws where the scales cannot place one's
- * values on the other: categories, or times against numbers.
+ * values on the other: categories, or times against numbers. Its stroke is
+ * read by `paint`, as marks' colors are.
  */
 export function indicator(
   spec: InsetSpec,
@@ -236,6 +237,7 @@ export function indicator(
   inset: PanelScales | undefined,
   cover: Rect,
   theme: Theme,
+  paint: PaintReader,
 ): ShapesGeometry | undefined {
   for (const axis of ["x", "y"] as const) {
     const [from, to] = [parent?.[axis].type ?? "none", inset?.[axis].type ?? "none"];
@@ -280,7 +282,7 @@ export function indicator(
       {
         d,
         fill: "none",
-        stroke: style.stroke ?? theme.muted,
+        stroke: style.stroke ? paint(style.stroke, `${path}.indicator.style.stroke`) : theme.muted,
         strokeWidth,
         opacity: style.opacity ?? 1,
         dash: dashPattern(style.dash, strokeWidth),

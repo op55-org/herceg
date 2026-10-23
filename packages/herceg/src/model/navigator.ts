@@ -133,6 +133,8 @@ interface StripState {
   key: string;
   config: ChartConfig | undefined;
   theme: Theme | undefined;
+  /** What colors were read by: readings change when the page's do. */
+  paint: Frame["paint"] | undefined;
   measure: Frame["measure"] | undefined;
   overview: Geometry[];
   labels: TextGeometry | undefined;
@@ -298,6 +300,7 @@ export class Navigator {
         key: "",
         config: undefined,
         theme: undefined,
+        paint: undefined,
         measure: undefined,
         overview: [],
         labels: undefined,
@@ -361,11 +364,13 @@ export class Navigator {
       key === state.key &&
       state.config === owner.config &&
       state.theme === theme &&
+      state.paint === frame.paint &&
       state.measure === frame.measure;
     if (!same) {
       state.key = key;
       state.config = owner.config;
       state.theme = theme;
+      state.paint = frame.paint;
       state.measure = frame.measure;
       state.overview = overview(drawn, sources, scale, strip, owner.config, context, state.buffers);
       ({ grid: state.grid, labels: state.labels } = labeled
@@ -774,7 +779,8 @@ function stripTicks(
       key: "navigator-labels",
       fill: theme.muted,
       anchor: "start",
-      halo: labelHalo(halo, theme.muted, frame),
+      // The strip is outside the plot, on the chart's surface.
+      halo: labelHalo(halo, { ...frame, surface: undefined }),
       coords: Float32Array.from(shown.flatMap(({ at }) => [at + 4, y])),
       labels: shown.map(({ label }) => label),
       count: shown.length,

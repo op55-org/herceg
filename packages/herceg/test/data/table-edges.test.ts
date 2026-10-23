@@ -96,6 +96,18 @@ describe("drops", () => {
       Array.from({ length: 10 }, (_, i) => `host-${9_990 + i}`),
     );
   });
+
+  it("counts the renumberings of a dictionary in its revision, which appends keep", () => {
+    const t = table({ name: category(["a"]) }, { maxRows: 10 });
+    const before = t.categories("name");
+    for (let i = 0; i < 82; i++) t.appendRow({ name: `host-${i}` });
+    expect(t.categories("name")).toMatchObject({ dictionary: before.dictionary, revision: 0 });
+    t.appendRow({ name: "host-82" });
+    const { dictionary, revision } = t.categories("name");
+    expect([dictionary.length, revision]).toEqual([10, 1]);
+    // Compacted in place: the array is the one read before.
+    expect(dictionary).toBe(before.dictionary);
+  });
 });
 
 describe("empty and tagged columns", () => {

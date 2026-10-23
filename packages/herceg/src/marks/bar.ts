@@ -4,7 +4,7 @@ import { labelHalo } from "../draw/label-halo.ts";
 import { BOTTOM, LEFT, RIGHT, rectDrawing, TOP } from "../draw/rect.ts";
 import { labelsDrawing, textDrawing } from "../draw/text.ts";
 import { type Formatter, numberFormatter } from "../format/format.ts";
-import { estimateText, textItem } from "../layout/text.ts";
+import { centeredLines, estimateText, lineCount, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import { headroomDomain } from "../model/axis.ts";
 import { asksFeatures, type RowPaint } from "../model/features.ts";
@@ -39,6 +39,7 @@ import {
   type Frame,
   fieldBands,
   frozen,
+  type LegendScale,
   type MARK,
   type Mark,
   type MarkKey,
@@ -46,6 +47,7 @@ import {
   NUMERIC,
   ownColor,
   type Palette,
+  painted,
   requireField,
   requireSeriesFields,
   SeriesSplitter,
@@ -198,6 +200,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
   readonly bandPadding = 0.2;
   readonly featured: boolean;
   readonly identity: MarkSources;
+  readonly legendScales: readonly LegendScale[];
   /**
    * Series stand side by side: unless `dodge: false` or a stack piles them,
    * or the series field is the position field (one series a position).
@@ -315,6 +318,15 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       spec.series === undefined,
     );
     this.identity = { field: series, values: lengths };
+    // A field other than the series' coloring rows has a key of its colors
+    // (the feature compiler's, see row-styles.ts).
+    const { encode } = spec;
+    const fill =
+      spec.fill === undefined
+        ? (encode?.fill ?? encode?.color ?? (table.has(spec.color ?? "") && { field: spec.color }))
+        : undefined;
+    this.legendScales =
+      fill && "field" in fill && fill.field !== series ? ["series", "key"] : ["series"];
     this.zero = this.#horizontal ? "x" : "y";
     this.tooltip = this.#horizontal ? "y" : "x";
     if (spec.stack === "fill")
@@ -575,7 +587,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     // A look's opacities replace the mark's.
     const fillOpacityOf = (look: RowPaint) =>
       (look.fillOpacity ?? spec.fillOpacity ?? 1) * (look.opacity ?? spec.opacity ?? 1);
-    const edge = this.#edge(frame.theme);
+    const edge = this.#edge(frame);
     const radius = frame.theme.style.bar.radius;
     // Charts that animate changed values learn where each bar stands and
     // ends; stacks, labeled bars, bars of several looks, and log axes show
@@ -687,7 +699,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           rounded: rounding && { radius, ends: rounding[part]! },
           bars: shown && { horizontal, at: shown, span: span! },
         };
-        const outline = lookEdge ? this.#edge(frame.theme, look) : edge;
+        const outline = lookEdge ? this.#edge(frame, look) : edge;
         if (outline) bars.edge = outline;
         out.push(bars);
       }
@@ -701,15 +713,15 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
    * width) at their width (1 by default), opacity, and dash; `look`, a
    * bar's own, over them. Undefined for bars without edges.
    */
-  #edge(theme: Theme, look?: RowPaint): RectGeometry["edge"] {
+  #edge(frame: Frame, look?: RowPaint): RectGeometry["edge"] {
     const { spec } = this;
-    const stroke = look?.stroke ?? spec.stroke;
+    const stroke = look?.stroke ?? painted(frame.paint, spec.stroke, "bar stroke");
     const width = look?.strokeWidth ?? spec.strokeWidth;
     if (stroke === undefined && width === undefined) return undefined;
     const strokeWidth = width ?? 1;
     if (strokeWidth <= 0) return undefined;
     return {
-      stroke: stroke ?? surface(theme),
+      stroke: stroke ?? surface(frame.theme),
       width: strokeWidth,
       // A look's opacity replaces the mark's, and fades its outline too.
       opacity:
@@ -924,15 +936,17 @@ class ValueLabels {
     this.#horizontal = horizontal;
     this.#stacked = stacked;
     this.#halo = halo;
-    const paint = labelPaint(theme, options.style);
+    const style = options.style && frame.read(options.style, "bar labels.style");
+    const paint = labelPaint(theme, style);
     this.#paint = paint;
-    this.#color = options.style?.color;
+    this.#color = style?.color;
     this.#plain =
       paint.font === theme.font &&
       paint.size === theme.fontSize &&
       paint.weight === 400 &&
       !paint.italic &&
       paint.opacity === 1 &&
+      paint.lineHeight === theme.style.text.lineHeight &&
       !paint.background;
     this.#minLength = options.minLength ?? 0;
     // Labels in boxes take their boxes' room: their line height and padding.
@@ -1008,11 +1022,11 @@ class ValueLabels {
     cap: number,
   ) {
     if (Math.abs(tip - root) < this.#minLength) return;
-    const size = this.#size;
     if (!this.#horizontal) {
       if (!this.#inPlot(middle, tip)) return;
       const text = written(label);
       const width = this.#width(text);
+      const size = this.#height(text);
       // Wider labels would run into the neighboring bars' labels.
       if (width + LABEL_GAP > spacing) return;
       const up = tip <= root;
@@ -1034,6 +1048,7 @@ class ValueLabels {
     if (!this.#inPlot(tip, middle)) return;
     const text = written(label);
     const width = this.#width(text);
+    const size = this.#height(text);
     const forward = tip >= root;
     const past = forward ? tip + LABEL_GAP : tip - LABEL_GAP;
     const top = middle - size / 2;
@@ -1082,11 +1097,12 @@ class ValueLabels {
     if (length <= 0 || (!this.#horizontal && length < this.#size + 2)) return;
     const text = written(label);
     const textWidth = this.#width(text);
+    const size = this.#height(text);
     const room = this.#horizontal ? length - LABEL_GAP : width - 2;
-    if (textWidth > room) return;
+    if (textWidth > room || (!this.#horizontal && length < size + 2)) return;
     // From the visible root or tip, the gap and half the text along the bar.
     const toward = tip >= root ? 1 : -1;
-    const inset = LABEL_GAP + (this.#horizontal ? textWidth : this.#size) / 2;
+    const inset = LABEL_GAP + (this.#horizontal ? textWidth : size) / 2;
     const along =
       attachment === "center"
         ? (a + b) / 2
@@ -1094,7 +1110,7 @@ class ValueLabels {
           ? (toward > 0 ? a : b) + toward * inset
           : (toward > 0 ? b : a) - toward * inset;
     const [x, y] = this.#horizontal ? [along, middle] : [middle, along];
-    if (this.#fits(x - textWidth / 2, y - this.#size / 2, textWidth, this.#size))
+    if (this.#fits(x - textWidth / 2, y - size / 2, textWidth, size))
       this.#inside("middle", fill, opacity, x, y, text);
   }
 
@@ -1103,7 +1119,11 @@ class ValueLabels {
     const out: Geometry[] = [];
     const frame = this.#frame;
     for (const [stage, group] of this.#groups) {
-      const halo = group.halo ? labelHalo(this.#halo, group.fill, frame) : undefined;
+      // Labels in boxes are drawn on their boxes.
+      const box = this.#paint.background;
+      const halo = group.halo
+        ? labelHalo(this.#halo, box ? { ...frame, surface: box.fill } : frame)
+        : undefined;
       if (!this.#plain) {
         const paint = { ...this.#paint, color: group.fill };
         const items = group.items.map((item) => {
@@ -1114,11 +1134,12 @@ class ValueLabels {
             baseline: "middle",
             angle: 0,
           } as const;
+          // Placed by their middle, labels are drawn from their first line.
           const made = textItem(
             item.text,
-            at,
+            centeredLines(item.text, at, paint),
             paint,
-            frame.surface ?? frame.theme.background,
+            frame.surface ?? surface(frame.theme),
             frame.measure,
           );
           return halo ? { ...made, halo } : made;
@@ -1156,6 +1177,11 @@ class ValueLabels {
 
   #width(text: string): number {
     return this.#frame.measure(text, this.#paint.css) + this.#padding;
+  }
+
+  /** How tall a label is: its box's, or its text's, with its lines after the first. */
+  #height(text: string): number {
+    return this.#size + (lineCount(text) - 1) * this.#paint.lineHeight;
   }
 
   #inPlot(x: number, y: number): boolean {

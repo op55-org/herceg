@@ -152,7 +152,7 @@ export function measureColorbar(
   // a colorbar's own room keeps its labels inside the chart.
   const probe = layered(kit, axis, base, read, measure, along(0), undefined);
   const reach = outward(axis.layers);
-  const titleHeight = heading ? kit.textHeight(heading) + TITLE_GAP : 0;
+  const titleHeight = heading && title ? kit.textHeight(heading, title.text) + TITLE_GAP : 0;
   const titleWidth = heading && title ? kit.textWidth(title.text, heading, measure) : 0;
   const labeled = probe.some(({ layer }) => layer.labels);
   const rows = rowDepths(kit, probe, measure);

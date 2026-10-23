@@ -321,12 +321,8 @@ const ROLES = [
  * depend on the page anywhere in its tokens and styles (a font family named
  * like a system color counts too, which costs only a read of the page).
  */
-export function themeReadsPage(
-  theme: ThemeName | ThemeSpec | undefined,
-  styles?: unknown,
-): boolean {
+export function themeReadsPage(theme: ThemeName | ThemeSpec | undefined): boolean {
   if (theme === "auto") return true;
-  if (styles !== undefined && PAGE_COLOR.test(JSON.stringify(styles))) return true;
   if (theme === undefined || typeof theme === "string") return false;
   return theme.extends === "auto" || PAGE_COLOR.test(JSON.stringify(theme));
 }
@@ -334,10 +330,13 @@ export function themeReadsPage(
 /** How an environment reads colors: CSS values in any syntax as renderers read them. */
 function colorsOf(environment: ThemeEnvironment): (value: string, key: string) => string {
   return (value, key) =>
-    HEX.test(value) || value === "transparent" || !environment.color
+    HEX.test(value) || SAME.has(value) || !environment.color
       ? value
       : environment.color(value, key);
 }
+
+/** Paints every renderer reads as they are: no color at all, which a page would read as inherited. */
+const SAME = new Set(["transparent", "none", ""]);
 
 /**
  * A copy of a style with its colors (color, fill, stroke, and those of its
@@ -362,35 +361,77 @@ export function readStyle<T extends object>(
 }
 
 /**
- * What `environment` reads now of the colors and fonts in `value` (a
- * chart's guide and panel styles): an environment answering from those
- * readings, for styles resolved after a page's reader is gone, and the
- * readings, to compare to learn whether a change of the page changed them.
- * A value that cannot be read now (a variable without a fallback, without
- * a page) is read, and refused, only where it is used.
+ * Reads a color a chart's options give (a mark's paint, a scale's output, a
+ * style's color) as renderers read it: as the page computes it, for a chart
+ * in one, and otherwise with its variables' fallbacks. `path` names the
+ * option in messages. Hex colors and SVG's "none" come back as they are.
  */
-export function readNow(
-  value: unknown,
-  environment: ThemeEnvironment,
-): { environment: ThemeEnvironment; reading: string } {
-  const color = colorsOf(environment);
-  const colors = new Map<string, string>();
-  const fonts = new Map<string, string>();
-  JSON.stringify(value, (key, v) => {
+export type PaintReader = (value: string, path: string) => string;
+
+/**
+ * The colors and fonts a chart's options read where it is shown (its
+ * `ThemeEnvironment`): read the first time a scene asks for each, in the
+ * environment the scene is built in (`in`), and kept. A page's reader lasts
+ * only while it is lent, so values first asked for outside a scene come
+ * back as they are; a page that may have changed is read again (`again`).
+ */
+export class Readings {
+  /** Each value read, by what it is read as ("c:" for a color, "f:" for a font) and the value. */
+  readonly #kept = new Map<string, string>();
+  #environment: ThemeEnvironment | undefined;
+
+  /** Whether a value read depends on the page, which the chart then watches. */
+  get readsPage(): boolean {
+    for (const key of this.#kept.keys()) if (PAGE_COLOR.test(key)) return true;
+    return false;
+  }
+
+  readonly color: PaintReader = (value, path) =>
+    HEX.test(value) || SAME.has(value)
+      ? value
+      : this.#read(`c:${value}`, (page) => page.color?.(value, path));
+
+  readonly font = (value: string): string =>
+    VARIABLE.test(value) ? this.#read(`f:${value}`, (page) => page.font?.(value)) : value;
+
+  #read(key: string, read: (environment: ThemeEnvironment) => string | undefined): string {
+    let reading = this.#kept.get(key);
+    if (reading === undefined) {
+      reading = this.#environment && read(this.#environment);
+      if (reading === undefined) return key.slice(2);
+      // Readings of the page stay, as what `again` reads again.
+      if (this.#kept.size >= 1024)
+        for (const kept of this.#kept.keys()) if (!PAGE_COLOR.test(kept)) this.#kept.delete(kept);
+      this.#kept.set(key, reading);
+    }
+    return reading;
+  }
+
+  /** What `use` returns, reading in `environment` what is not read yet while it runs. */
+  in<T>(environment: ThemeEnvironment | undefined, use: () => T): T {
+    const before = this.#environment;
+    this.#environment = environment;
     try {
-      if (typeof v === "string" && /^(color|fill|stroke)$/.test(key)) colors.set(v, color(v, key));
-      else if (key === "font" && environment.font && VARIABLE.test(v))
-        fonts.set(v, environment.font(v));
-    } catch {}
-    return v;
-  });
-  return {
-    environment: {
-      color: (v, key) => colors.get(v) ?? color(v, key),
-      font: (v) => fonts.get(v) ?? environment.font?.(v) ?? v,
-    },
-    reading: JSON.stringify([...colors, ...fonts]),
-  };
+      return use();
+    } finally {
+      this.#environment = before;
+    }
+  }
+
+  /**
+   * These readings made again in `page`: new readings when any value reads
+   * differently now (so caches of what was read from them let go), else these.
+   */
+  again(page: ThemeEnvironment): Readings {
+    const fresh = new Readings();
+    const changed = fresh.in(page, () =>
+      [...this.#kept].some(([key, was]) => {
+        const value = key.slice(2);
+        return (key[0] === "c" ? fresh.color(value, value) : fresh.font(value)) !== was;
+      }),
+    );
+    return changed ? fresh : this;
+  }
 }
 
 /** Built-in themes, resolved once: they read no page, and keep their identity across updates. */
@@ -516,6 +557,14 @@ export const HIGH_CONTRAST_DARK: Theme = /* @__PURE__ */ resolveTheme("high-cont
 
 export function paletteColor(theme: Theme, index: number): string {
   return theme.palette[index % theme.palette.length]!;
+}
+
+/**
+ * What text in a plot filled with `fill` is drawn on, where that is not the
+ * chart's surface: the fill, unless there is none or it is transparent.
+ */
+export function plotSurface(fill: string | undefined): string | undefined {
+  return fill === "transparent" ? undefined : fill;
 }
 
 /**

@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 const fontModules = [
   "fonts/registry.ts",
-  "fonts/truetype.ts",
+  "fonts/sfnt.ts",
   "fonts/binary.ts",
   "fonts/clusters.ts",
   "render/pdf-font-embed.ts",

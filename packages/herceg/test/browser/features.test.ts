@@ -66,7 +66,8 @@ describe("charts drawing marks' features", () => {
       marks: [line(sites, { x: "t", y: "v", color: "rebeccapurple" })],
     });
     await chart.loading;
-    expect(strokes()).toContain("rebeccapurple");
+    // Read as the page computes it, as every color the chart draws is.
+    expect(strokes()).toContain("#663399");
     expect(() =>
       chart.update({
         marks: [line(sites, { x: "t", y: "v", color: "stie" as never })],

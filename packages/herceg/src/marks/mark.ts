@@ -15,7 +15,7 @@ import { TIME_UNIT_MS, type TimeUnit } from "../scale/time.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import {
   isSortedSubset,
   rowsByCode,
@@ -96,6 +96,8 @@ export interface BandContext {
   zone: TimeZone;
   locale: string | undefined;
   theme: Theme;
+  /** Reads the colors marks' options give, as renderers read them (see `PaintReader`). */
+  paint: PaintReader;
   /** The marks' compiled features, when the chart draws any (see model/features.ts). */
   features?: CompiledFeatures | undefined;
 }
@@ -147,6 +149,10 @@ export interface Frame {
   /** Pixels per CSS pixel of images (heatmap rasters): the pixel ratio, or more for static output. */
   rasterRatio: number;
   theme: Theme;
+  /** Reads the colors the mark's options give, as renderers read them (see `PaintReader`). */
+  paint: PaintReader;
+  /** `style` (a label's) with its colors and font read as `paint` reads colors, `path` naming it. */
+  read: <T extends object>(style: T, path: string) => T;
   /** What the plot draws on, for halos: its fill, or the chart's background when absent. */
   surface?: string | undefined;
   /** Locale for numbers the mark formats as text; undefined uses the runtime's. */
@@ -273,6 +279,9 @@ export interface MarkIdentity {
   readonly tooltip?: Frozen<MarkTooltipSpec> | undefined;
 }
 
+/** A scale of a mark that guides may name (see `Mark.legendScales`). */
+export type LegendScale = "series" | "ramp" | "key" | "size" | "symbol";
+
 /** What a mark's series stand for (see `Mark.identity`). */
 export interface MarkSources {
   readonly field?: string | undefined;
@@ -338,6 +347,13 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * whose series stand for neither (contours, heatmaps, annotations).
    */
   readonly identity?: MarkSources | undefined;
+  /**
+   * The scales of the mark a legend or colorbar may name (`{ mark, channel
+   * }`), by its options, whatever its rows hold now: its series' colors, a
+   * color ramp (which colorbars show) or key of colors, and keys of sizes
+   * and symbols. By default, its series' colors where it has an identity.
+   */
+  readonly legendScales?: readonly LegendScale[];
   /**
    * Pixels the mark's glyphs reach past their data position along each
    * axis, such as a point's radius. Automatic domains leave this much room
@@ -531,7 +547,7 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    */
   pointAnchor?(series: Series, row: number, frame: Frame): readonly [number, number] | undefined;
   /** The color a row is drawn in, for marks coloring rows by a field rather than by series. */
-  pointColor?(series: Series, row: number, theme: Theme): string;
+  pointColor?(series: Series, row: number, theme: Theme, paint: PaintReader): string;
   /**
    * The values a row's drawing covers along the axis its values are on,
    * for marks drawing more than their series value (box plots, from
@@ -604,6 +620,7 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   legendEntry?(
     series: Series,
     theme: Theme,
+    paint: PaintReader,
   ): { color: string; glyph?: string; stroke?: string } | false;
   /**
    * Legends of the color scales, sizes, or shapes the mark encodes by field
@@ -613,6 +630,7 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
     series: readonly Series[],
     theme: Theme,
     format: (value: number) => string,
+    paint: PaintReader,
   ): LegendPart[];
 }
 
@@ -711,6 +729,18 @@ export function seriesOf(
   return field !== undefined && table.has(field) && table.kind(field) === "category"
     ? field
     : undefined;
+}
+
+/**
+ * A color a mark's option gives (`value`), read with `paint` as renderers
+ * read it; `path` names the option in messages. Undefined without one.
+ */
+export function painted(
+  paint: PaintReader,
+  value: string | undefined,
+  path: string,
+): string | undefined {
+  return value === undefined ? undefined : paint(value, path);
 }
 
 /**

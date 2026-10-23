@@ -2,7 +2,7 @@
 // take their fallbacks, and "auto" is light. Kept out of theme.ts so charts
 // in a page, which read variables from it, do not carry this parser.
 
-import { named } from "../scale/css-color.ts";
+import { cssColor } from "../scale/css-color.ts";
 import type { ThemeEnvironment } from "../theme.ts";
 
 /**
@@ -59,14 +59,20 @@ function closing(value: string, open: number, key: string): { end: number; comma
 const VARIABLE = /\bvar\(/;
 
 /**
- * The environment of output without a page. Named colors become hex, as a
- * page computes them, so what reads only hex and `rgb()` (guides' halos)
- * reads them too.
+ * The environment of output without a page. Colors CSS's syntax writes
+ * become hex (or `rgba()`), as a page computes them, so ramps, which take
+ * hex, read them, and what parses colors (Canvas, PDF) draws what SVG does;
+ * others (`color-mix()`, `currentColor`) are left for SVG to read.
  */
 export const NO_PAGE: ThemeEnvironment = {
   color: (value, key) => {
     const color = VARIABLE.test(value) ? withFallbacks(value, key) : value;
-    return named(color.trim().toLowerCase()) ?? color;
+    const rgba = cssColor(color);
+    if (!rgba) return color;
+    const [r, g, b, a] = rgba;
+    if (a === 0) return "transparent";
+    if (a < 1) return `rgba(${r}, ${g}, ${b}, ${a})`;
+    return `#${[r, g, b].map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
   },
   font: (value) => withFallbacks(value, "font"),
 };

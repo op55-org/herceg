@@ -103,7 +103,7 @@ describe("custom marks", () => {
     });
     const clipped = svg.slice(svg.indexOf("<g clip-path"), svg.indexOf("</g>"));
     expect(clipped).toMatch(
-      /<path d="M[\d.]+ [\d.]+h10v10h-10Z" fill="#000" stroke="red" stroke-width="1" stroke-dasharray="2 2" fill-opacity="0.5" stroke-opacity="0.5"\/>/,
+      /<path d="M[\d.]+ [\d.]+h10v10h-10Z" fill="#000" stroke="#ff0000" stroke-width="1" stroke-dasharray="2 2" fill-opacity="0.5" stroke-opacity="0.5"\/>/,
     );
     // Text sits on the alphabetic baseline 0.35 font sizes below its middle, as on Canvas.
     expect(clipped).toMatch(

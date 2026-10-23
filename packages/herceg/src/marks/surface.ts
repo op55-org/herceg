@@ -17,7 +17,7 @@ import type { ChartConfig } from "../model/model.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { TriangleBatch3D } from "../scene/scene.ts";
 import type { Frozen, SurfaceSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { clipToBox } from "../three/clip.ts";
 import { monotone, rayInBox, walkGrid } from "../three/hit.ts";
 import { crossing, Traversal } from "../three/traversal.ts";
@@ -180,7 +180,7 @@ export class SurfaceMark implements Layer3D {
     requireField(table, spec.y, ["number", "time", "category"], "surface y");
     requireField(table, spec.z, ["number"], "surface z");
     if (spec.color !== undefined) requireField(table, spec.color, ["number"], "surface color");
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "surface colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "surface colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "surface");
     if (spec.fillOpacity !== undefined && !(spec.fillOpacity >= 0 && spec.fillOpacity <= 1))
       throw new RangeError(
@@ -294,12 +294,13 @@ export class SurfaceMark implements Layer3D {
     return extent;
   }
 
-  #scale(theme: Theme): SequentialScale | undefined {
+  #scale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     const domain = spec.colorDomain ?? this.#toneDomain();
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "surface colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   /** Surfaces have no legend entries; their colors have a color legend. */
@@ -307,8 +308,8 @@ export class SurfaceMark implements Layer3D {
     return [];
   }
 
-  scales(theme: Theme): [ColorRamp[], GlyphKey[]] {
-    const scale = this.#scale(theme);
+  scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
+    const scale = this.#scale(theme, paint);
     if (!scale) return [[], []];
     const { domain, midpoint } = scale;
     const title = this.spec.color ?? this.spec.z;
@@ -477,7 +478,7 @@ export class SurfaceMark implements Layer3D {
     if ((spec.fillOpacity ?? 1) < 1 || spec.wireframe) return undefined;
     const reading = this.#reading(frame);
     if (!monotone(reading.u) || !monotone(reading.v)) return undefined;
-    const scale = this.#scale(frame.theme);
+    const scale = this.#scale(frame.theme, frame.paint);
     const half = frame.view.half;
     const aspect = half.join();
     let mesh = meshes.get(frame);
@@ -683,7 +684,7 @@ export class SurfaceMark implements Layer3D {
    */
   pick(frame: Frame3D, px: number, py: number): Hit3D | undefined {
     const reading = this.#reading(frame);
-    if (!this.#scale(frame.theme)) return undefined;
+    if (!this.#scale(frame.theme, frame.paint)) return undefined;
     const { view } = frame;
     const { nx } = this.#build();
     const { u, v, w } = reading;
@@ -727,7 +728,7 @@ export class SurfaceMark implements Layer3D {
   }
 
   place(frame: FaceFrame3D): Placed3D {
-    const { view, faces, theme } = frame;
+    const { view, faces, theme, paint } = frame;
     const { spec } = this;
     const grid = this.#build();
     if (grid.nx * grid.ny > MAX_CPU_GRID_POINTS) {
@@ -755,7 +756,7 @@ export class SurfaceMark implements Layer3D {
       depth[p] = view.project(a, b, c, out, 0);
       vertexOf[p] = faces.vertex(out[0]!, out[1]!, depth[p]!);
     }
-    const scale = this.#scale(theme);
+    const scale = this.#scale(theme, paint);
     const tones = this.#tones();
     const opacity = spec.fillOpacity ?? 1;
     const shading = spec.shading ?? true;
@@ -868,7 +869,7 @@ export class SurfaceMark implements Layer3D {
     const { nx } = grid;
     const z = table.numbers(spec.z as never);
     const tones = spec.color === undefined ? undefined : table.numbers(spec.color as never);
-    const scale = this.#scale(frame.theme);
+    const scale = this.#scale(frame.theme, frame.paint);
     const offset = table.rowOffset;
     const out = new Float64Array(2);
     /** Where a read grid point is on screen: at its place, or (outside the box) its anchor's. */

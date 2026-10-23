@@ -49,14 +49,16 @@ function exported(run: () => string): string | { error: string; info: ChartError
         try {
           return run();
         } catch (error) {
-          const problem = (error instanceof Error ? error.message : String(error))
-            .replace(
-              "; supply a covering font and fallback family, or set missingGlyph to a covered replacement",
-              "",
-            )
-            .replace("; match the theme's font or add an explicit fallback family", "");
+          const message = error instanceof Error ? error.message : String(error);
+          // Text they do not cover is refused with its fix, as PDF export refuses it.
+          if (message.startsWith("fonts do not cover"))
+            throw new Error(`fonts: ${message.slice("fonts ".length)}`);
+          const problem = message.replace(
+            "; match the theme's font or add an explicit fallback family",
+            "",
+          );
           throw new Error(
-            `fonts: ${problem}; supply supported TrueType fonts covering the text and matching the theme's font`,
+            `fonts: ${problem}; supply static OpenType fonts covering the text and matching the theme's font`,
           );
         }
       };

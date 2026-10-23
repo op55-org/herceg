@@ -47,6 +47,7 @@ import {
   type MarkSources,
   NUMERIC,
   type Palette,
+  painted,
   requireField,
   type SelectionDrawing,
   SeriesSplitter,
@@ -275,7 +276,8 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     const roster = sources.map((source) => {
       const id = seriesKey(key, source.id);
       const color = palette(id, source.label, this.spec.fill);
-      return { key: id, label: source.label, color: this.spec.fill ?? color };
+      const own = painted(context.paint, this.spec.fill, "histogram fill");
+      return { key: id, label: source.label, color: own ?? color };
     });
     if (split) return roster.map(({ key, label, color }) => withoutBins(key, label, color));
     const { edges, centers, counted } = this.#binsIn(context.zone);

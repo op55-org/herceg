@@ -3,7 +3,7 @@
 // module turns a placement and ticks into the items every renderer draws,
 // and value transitions place the ticks between two scenes the same way.
 
-import { type MeasureText, type TextAt, textItem } from "../layout/text.ts";
+import { centeredLines, type MeasureText, type TextAt, textItem } from "../layout/text.ts";
 import { strokeKey } from "../scene/grid.ts";
 import type {
   AxisGuide,
@@ -49,30 +49,37 @@ export function axisItems(
   }
   const text = (label: string, at: TextAt, paint: TextPaint) =>
     items.push(textItem(label, at, paint, placement.surface, measure));
-  for (const { position, label } of ticks) {
-    // One line, as it is drawn, its box too: a line break is a space here.
+  // Labels of several lines go down from below the axis, and are centered on their tick beside it.
+  for (const { position, label } of ticks)
     text(
-      label.replaceAll("\n", " "),
+      label,
       below
         ? { x: position, y: edge + gap, anchor: "middle", baseline: "hanging", angle: 0 }
-        : {
-            x: placement.edge + (side === "left" ? -gap : gap),
-            y: position,
-            anchor: side === "left" ? "end" : "start",
-            baseline: "middle",
-            angle: 0,
-          },
+        : centeredLines(
+            label,
+            {
+              x: placement.edge + (side === "left" ? -gap : gap),
+              y: position,
+              anchor: side === "left" ? "end" : "start",
+              baseline: "middle",
+              angle: 0,
+            },
+            paints.label,
+          ),
       paints.label,
     );
-  }
   if (title) {
     // Titles beside a plot read bottom to top on the left, top to bottom on the right.
     const angle = below ? 0 : side === "left" ? -90 : 90;
-    text(
-      title.text,
-      { x: title.x, y: title.y, anchor: title.anchor ?? "middle", baseline: "middle", angle },
-      paints.title,
-    );
+    // The title's point is its lines' middle.
+    const at: TextAt = {
+      x: title.x,
+      y: title.y,
+      anchor: title.anchor ?? "middle",
+      baseline: "middle",
+      angle,
+    };
+    text(title.text, centeredLines(title.text, at, paints.title), paints.title);
   }
   return items;
 }

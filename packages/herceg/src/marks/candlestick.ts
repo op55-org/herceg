@@ -25,6 +25,7 @@ import {
   type MarkKey,
   NUMERIC,
   type Palette,
+  painted,
   requireField,
   type SelectionDrawing,
   SeriesSplitter,
@@ -121,6 +122,8 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
   readonly spec: Frozen<CandlestickSpec>;
   readonly table: Table<Schema>;
   readonly tooltip = "x";
+  /** Its one series, named by its label, though it stands for no field. */
+  readonly legendScales = ["series"] as const;
   readonly #categorical: boolean;
   readonly #split: SeriesSplitter;
   readonly #slots: Slots | undefined;
@@ -170,7 +173,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     const positions = this.#categorical
       ? bandIndices(table, spec.x, bands.x?.keys ?? [], context)
       : table.numbers(spec.x as never);
-    const color = spec.rise ?? context.theme.rise;
+    const color = painted(context.paint, spec.rise, "candlestick rise") ?? context.theme.rise;
     return buildSeries(table, this.#split.sources(), positions, key, palette, color);
   }
 
@@ -271,8 +274,8 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     const { x, y, plot } = frame;
     const prices = this.#prices();
     const log = y.type === "log";
-    const rise = this.spec.rise ?? frame.theme.rise;
-    const fall = this.spec.fall ?? frame.theme.fall;
+    const rise = painted(frame.paint, this.spec.rise, "candlestick rise") ?? frame.theme.rise;
+    const fall = painted(frame.paint, this.spec.fall, "candlestick fall") ?? frame.theme.fall;
     const candle = this.#candle;
     const ohlc = this.spec.variant === "ohlc";
     // Candles at times an axis break leaves out are not drawn.

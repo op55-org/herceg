@@ -38,7 +38,7 @@ import type { ChartConfig } from "../model/model.ts";
 import { TIME_UNIT_MS } from "../scale/time.ts";
 import type { Batch3D, Batches3D, FaceGeometry, Geometry, Rect } from "../scene/scene.ts";
 import type { CameraSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { type Axis3D, boxGeometry, boxMargin } from "../three/axes.ts";
 import {
   type Camera,
@@ -141,7 +141,7 @@ export interface Layer3D extends LayoutMark {
   /** The layer's data along axis `k`; `log` when the axis is logarithmic. */
   axisData(k: number, log: boolean): AxisData;
   /** Continuous color scales for the legend. */
-  scales(theme: Theme, locale: string | undefined): [ColorRamp[], GlyphKey[]];
+  scales(theme: Theme, locale: string | undefined, paint: PaintReader): [ColorRamp[], GlyphKey[]];
   /** A surface: what orders the chart's faces when it is the only one (see FaceFrame3D.rank). */
   ranker?(frame: Frame3D): Ranker;
   /**
@@ -265,13 +265,18 @@ export class Plot3D implements LayoutMark {
     return resolveCamera(spec, base);
   }
 
-  legend(_id: string | number, color: (key: string) => string, theme: Theme): LegendEntry[] {
-    return this.layers.flatMap((layer, i) => layer.legend(this.#id(i), color, theme));
+  legend(
+    _id: string | number,
+    color: (key: string) => string,
+    theme: Theme,
+    paint: PaintReader,
+  ): LegendEntry[] {
+    return this.layers.flatMap((layer, i) => layer.legend(this.#id(i), color, theme, paint));
   }
 
   /** Every layer's scales, each with a legend of its own. */
-  legends(theme: Theme, locale: string | undefined): LegendPart[] {
-    return this.layers.flatMap((layer) => legendParts(...layer.scales(theme, locale)));
+  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
+    return this.layers.flatMap((layer) => legendParts(...layer.scales(theme, locale, paint)));
   }
 
   /**

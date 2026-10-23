@@ -3,6 +3,7 @@
 // charts without fonts load none of it.
 
 import type { MeasureText } from "../layout/text.ts";
+import type { Scene } from "../scene/scene.ts";
 import type { Fonts } from "./registry.ts";
 
 /** The key of what a PDF export embeds (see `Fonts`). */
@@ -20,6 +21,11 @@ export interface PageFonts {
    * (dom/measurers.ts).
    */
   readonly loaded: Promise<void> | undefined;
+  /**
+   * Throws for text in `scene` the fonts do not cover: the chart's SVG and
+   * PNG exports refuse it, as output made without a page does.
+   */
+  readonly check: (scene: Scene) => void;
 }
 
 /** Throws unless `fonts` is undefined or fonts from `prepareFonts`, naming `where` (such as "renderToSVG"). */

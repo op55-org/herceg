@@ -14,7 +14,7 @@ import type { ChartConfig } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
 import type { CameraSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import type { MovedNodes, NodeMoves } from "./graph.ts";
 import { type ChartMark, type Mark, seriesOf } from "./mark.ts";
@@ -55,12 +55,17 @@ export function withSeries<T extends { readonly series?: string | false | undefi
 }
 
 /**
- * `own`, a mark's paint of its own, else `color`, its item's: asked for
- * either way, since asking registers what the item stands for, which the
- * legend and hiding read.
+ * An item's color: the mark's own (`own`, read with `paint` as renderers
+ * read it, `path` naming the option), or `color`, the chart's for it, which
+ * callers ask for either way so that the item's identity is registered.
  */
-export function ownOr(own: string | undefined, color: string): string {
-  return own ?? color;
+export function ownOr(
+  own: string | undefined,
+  color: string,
+  paint: PaintReader,
+  path: string,
+): string {
+  return own === undefined ? color : paint(own, path);
 }
 
 /**
@@ -111,6 +116,10 @@ export interface LayoutFrame {
    */
   fitRows?: readonly (Uint32Array | undefined)[] | undefined;
   theme: Theme;
+  /** Reads the colors the mark's options give, as renderers read them (see `PaintReader`). */
+  paint: PaintReader;
+  /** `style` (a label's) with its colors and font read as `paint` reads colors, `path` naming it. */
+  read: <T extends object>(style: T, path: string) => T;
   /** What the panel draws on, for halos: its plot's fill, or the chart's background when absent. */
   surface?: string | undefined;
   locale: string | undefined;
@@ -254,9 +263,14 @@ export interface LayoutMark extends ChartMark {
    */
   readonly identity?: ItemSources | undefined;
   /** Entries for the legend, which toggles items by key; `id` as in `LayoutFrame`. */
-  legend(id: string | number, color: (key: string) => string, theme: Theme): LegendEntry[];
+  legend(
+    id: string | number,
+    color: (key: string) => string,
+    theme: Theme,
+    paint: PaintReader,
+  ): LegendEntry[];
   /** Legends of color scales and size keys, for marks encoding values that way. */
-  legends?(theme: Theme, locale: string | undefined): LegendPart[];
+  legends?(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[];
   draw(frame: LayoutFrame): LayoutResult;
   /**
    * Marks that can share a chart (maps' layers) give the one mark that draws

@@ -3,7 +3,7 @@
 
 import type { Face, FontRegistry, GlyphRun, ResolvedText, TextPolicy } from "../fonts/registry.ts";
 import type { MeasureText } from "../layout/text.ts";
-import { parseFont } from "../layout/text.ts";
+import { parseFont, widestLine } from "../layout/text.ts";
 import { num, type PdfObjectWriter } from "./pdf-document.ts";
 import { subsetTrueType } from "./pdf-font-subset.ts";
 
@@ -123,13 +123,16 @@ export class PdfFontResolver {
   constructor(registry: FontRegistry, policy: TextPolicy) {
     this.#registry = registry;
     this.#policy = policy;
-    this.measure =
+    const measure: MeasureText =
       policy.fallback.length || policy.replacement !== undefined
         ? (text, font) => {
             const { size, bold, family } = parseFont(font);
-            return registry.resolve(text, family, bold, policy).width * size;
+            return (
+              widestLine(text, (line) => registry.resolve(line, family, bold, policy).width) * size
+            );
           }
         : registry.measure;
+    this.measure = (text, font) => withPdfFixes(() => measure(text, font));
   }
 
   resolve(
@@ -137,7 +140,7 @@ export class PdfFontResolver {
     family: string,
     bold: boolean,
   ): Omit<ResolvedText, "runs"> & { runs: PdfGlyphRun[] } {
-    const resolved = this.#registry.resolve(text, family, bold, this.#policy);
+    const resolved = withPdfFixes(() => this.#registry.resolve(text, family, bold, this.#policy));
     return {
       ...resolved,
       runs: resolved.runs.map((run) => ({ ...run, face: this.#embed(run.face) })),
@@ -151,5 +154,19 @@ export class PdfFontResolver {
       this.#faces.set(face, embedded);
     }
     return embedded;
+  }
+}
+
+/**
+ * `run`, whose refusal of text the fonts do not cover names the fixes PDF
+ * export adds to every format's: its fallback families and replacement.
+ */
+function withPdfFixes<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("fonts do not cover"))
+      error.message += " or to fallback, or set missingGlyph to a covered replacement";
+    throw error;
   }
 }

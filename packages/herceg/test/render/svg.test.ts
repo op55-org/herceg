@@ -1,12 +1,18 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
+import { prepareFonts } from "../../src/fonts.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { custom } from "../../src/marks/custom.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
+import { text } from "../../src/marks/text.ts";
+import { renderToPDF } from "../../src/pdf.ts";
+import { renderToSnapshot } from "../../src/render/snapshot.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 
 const start = Date.UTC(2026, 9, 7, 8);
@@ -173,5 +179,74 @@ describe("renderToSVG for bars and heatmaps", () => {
     expect(svg).toContain("<image");
     expect(svg).toContain("data:image/png;base64,iVBOR");
     expect(svg).toContain('<linearGradient id="cells-ramp-0">');
+  });
+});
+
+describe("renderToSVG with fonts", () => {
+  const font = (name: string) =>
+    new Uint8Array(readFileSync(new URL(`../fixtures/pdf-fonts/${name}`, import.meta.url)));
+  // Latin text, and a star only the symbols face has.
+  const fonts = prepareFonts([
+    { family: "Fixture", data: font("sans.ttf") },
+    { family: "Symbols", data: font("symbols.ttf") },
+  ]);
+  const chart = (family: string, marks = [line(metrics, { x: "t", y: "api" })]) => ({
+    width: 320,
+    height: 200,
+    fonts,
+    theme: { style: { text: { font: family } } },
+    x: { title: "Rank \u2605" },
+    marks,
+  });
+  const refusal =
+    'fonts do not cover U+2605 in "Fixture"; supply a font covering it and add its family to the theme\'s font list';
+
+  it("fall back along the theme's font list glyph by glyph, as PDF export does", () => {
+    const svg = renderToSVG(chart("Fixture, Symbols"));
+    expect(svg).toContain("Rank \u2605");
+    expect(svg).toContain('font-family="Fixture, Symbols"');
+    expect(renderToPDF(chart("Fixture, Symbols")).byteLength).toBeGreaterThan(0);
+  });
+
+  it("refuse text no font in the list covers, wherever it is drawn, as PDF export does", () => {
+    // An axis title, which nothing measures for its layout.
+    expect(() => renderToSVG(chart("Fixture"))).toThrow(refusal);
+    expect(() => renderToPDF(chart("Fixture"))).toThrow(
+      `${refusal} or to fallback, or set missingGlyph to a covered replacement`,
+    );
+    const quiet = { ...chart("Fixture"), x: {} };
+    for (const [kind, mark] of [
+      ["rule", rule({ y: 150, label: "\u2605" })],
+      ["text", text({ x: start, y: 150, label: "\u2605" })],
+      ["custom", custom({ draw: (c) => c.text(10, 10, "\u2605") })],
+    ] as const)
+      expect(
+        () => renderToSVG({ ...quiet, marks: [line(metrics, { x: "t", y: "api" }), mark] }),
+        kind,
+      ).toThrow(refusal);
+    expect(() => renderToSVG({ ...quiet, title: "\u2605" })).toThrow(refusal);
+    expect(() =>
+      renderToSVG({
+        ...quiet,
+        marks: [line(metrics, { x: "t", y: ["api", "db"] })],
+        legend: { title: "\u2605" },
+      }),
+    ).toThrow(refusal);
+  });
+
+  it("leave text they do not cover to the page in snapshots, which a page draws", () => {
+    const { html } = renderToSnapshot(
+      {
+        ...chart("Fixture"),
+        y: { format: () => "\u2605" },
+        marks: [
+          line(metrics, { x: "t", y: ["api", "db"] }),
+          text({ x: start, y: 150, label: "\u2605" }),
+        ],
+        legend: { title: "\u2605" },
+      },
+      { width: 320, height: 200, idPrefix: "stars", fonts },
+    );
+    expect(html.split("\u2605").length).toBeGreaterThan(4);
   });
 });

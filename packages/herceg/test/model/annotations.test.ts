@@ -644,25 +644,20 @@ describe("annotations in static SVG", () => {
     expect(svg).toContain(">a &#60; b</text>");
   });
 
-  it("chooses the halo by the label's own color", () => {
+  it("haloes labels in the surface's color, whatever their own", () => {
     const svg = renderToSVG({
       width: 400,
       height: 200,
+      theme: { tokens: { background: "#1c2333" } },
       marks: [
         line(metrics, { x: "time", y: "value" }),
         text({
           x: start + 3 * hour,
           y: 110,
-          label: { text: "light", style: { color: "#ffffff" } },
+          label: { text: "dark", style: { color: "rgb(0 0 0)" } },
         }),
       ],
     });
-    expect(svg).toContain('<g fill="#ffffff" text-anchor="middle" stroke="#000000"');
-    const functional = renderToSVG({
-      width: 400,
-      height: 200,
-      marks: [text({ x: 1, y: 1, label: { text: "light", style: { color: "rgb(255 255 255)" } } })],
-    });
-    expect(functional).toContain('stroke="#000000"');
+    expect(svg).toContain('<g fill="#000000" text-anchor="middle" stroke="#1c2333"');
   });
 });

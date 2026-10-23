@@ -13,7 +13,7 @@ import {
   type SankeyGraph,
   type SankeyLayout,
 } from "../layout/sankey.ts";
-import { labelFor } from "../layout/text.ts";
+import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { isLightColor } from "../scale/color.ts";
@@ -670,7 +670,7 @@ function sankeyLabels(
       const shared = across >= 0 && heights[across]!.some(near);
       const width = shared ? gap / 2 - LABEL_GAP - 2 : gap - 2 * LABEL_GAP;
       if (width <= 0) continue;
-      const name = names[node]!;
+      const name = oneLineText(names[node]!);
       const full = `${name} ${formatNumber(value(node), locale)}`;
       const text = measure(full, font) <= width ? full : labelFor(name, width, measure, font);
       if (!text) continue;
@@ -693,7 +693,7 @@ function sankeyLabels(
           fill: theme.text,
           anchor,
           // Labels lie over links; the halo keeps them readable.
-          halo: labelHalo(halo, theme.text, frame),
+          halo: labelHalo(halo, frame),
           coords: Float32Array.from(sides[anchor].coords),
           labels: sides[anchor].labels,
           count: sides[anchor].labels.length,

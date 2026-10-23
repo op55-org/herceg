@@ -23,7 +23,7 @@ import { linearTicks } from "../scale/ticks.ts";
 import type { PointGeometry } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, GeoPointSpec } from "../spec/spec.ts";
-import { surface, type Theme } from "../theme.ts";
+import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { type GeoLayer, joinLayers, type MapFrame } from "./geo.ts";
 import {
   type ItemSources,
@@ -44,6 +44,7 @@ import {
   frozen,
   type GlyphKey,
   type MARK,
+  painted,
   requireField,
 } from "./mark.ts";
 import { rowsByCode } from "./series.ts";
@@ -190,7 +191,7 @@ export class GeoPointMark implements GeoLayer {
           message: `geopoint color: "${spec.color}" holds categories, which color map points by series; leave series out (or give series: "${spec.color}"), or color by a number field`,
         });
     }
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "geopoint colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "geopoint colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "geopoint");
     const range = spec.radiusRange ?? RADIUS_RANGE;
     if (!(range[0] >= 0 && range[1] > range[0] && Number.isFinite(range[1])))
@@ -254,13 +255,14 @@ export class GeoPointMark implements GeoLayer {
     };
   }
 
-  #scale(theme: Theme): SequentialScale | undefined {
+  #scale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     if (this.#toneField === undefined) return undefined;
     const domain = spec.colorDomain ?? this.table.extent(this.#toneField as never);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "geopoint colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   /** The sets of points: one per category of `series` that rows hold, or one. */
@@ -276,20 +278,25 @@ export class GeoPointMark implements GeoLayer {
   }
 
   /** Entries per series; with a number `color` coloring the points, in a neutral color. */
-  legend(id: string | number, color: (key: string) => string, theme: Theme): LegendEntry[] {
+  legend(
+    id: string | number,
+    color: (key: string) => string,
+    theme: Theme,
+    paint: PaintReader,
+  ): LegendEntry[] {
     const glyph = symbolPath("circle", 0, 0, LEGEND_RADIUS);
     const muted = this.#toneField !== undefined;
     return this.#groups().map(({ label, category }) => {
       const key = groupKey(id, category);
-      const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key));
+      const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key), paint, "geopoint fill");
       return { key, label, color: fill, glyph };
     });
   }
 
-  scales(theme: Theme, locale: string | undefined): [ColorRamp[], GlyphKey[]] {
+  scales(theme: Theme, locale: string | undefined, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
     const ramps: ColorRamp[] = [];
     const keys: GlyphKey[] = [];
-    const scale = this.#scale(theme);
+    const scale = this.#scale(theme, paint);
     if (scale) {
       const { domain, midpoint } = scale;
       ramps.push({ stops: scale.legendStops(), domain, midpoint, title: this.spec.color! });
@@ -372,11 +379,11 @@ export class GeoPointMark implements GeoLayer {
   }
 
   place(frame: MapFrame): LayoutResult {
-    const { theme, hidden, plan, transform: t, bounds, id } = frame;
+    const { theme, paint, hidden, plan, transform: t, bounds, id } = frame;
     const { spec, table } = this;
     const { xy } = this.#project(plan);
     const radiusOf = this.#radius();
-    const scale = this.#scale(theme);
+    const scale = this.#scale(theme, paint);
     const tones =
       this.#toneField === undefined ? undefined : table.numbers(this.#toneField as never);
     const ramp = scale && tones ? scale.colors() : undefined;
@@ -384,7 +391,12 @@ export class GeoPointMark implements GeoLayer {
     const ringWidth = spec.strokeWidth ?? RING;
     // Rings keep points apart from each other and from the regions under them.
     const ring =
-      ringWidth > 0 ? { color: spec.stroke ?? surface(theme), width: ringWidth } : undefined;
+      ringWidth > 0
+        ? {
+            color: painted(paint, spec.stroke, "geopoint stroke") ?? surface(theme),
+            width: ringWidth,
+          }
+        : undefined;
     // Every point drawn, with its radius and its color's index into `ramp`
     // (with a number `color`), the theme's palette (a category one), or the
     // series' colors.
@@ -400,7 +412,7 @@ export class GeoPointMark implements GeoLayer {
     for (const group of drawable ? this.#groups() : []) {
       const key = groupKey(id, group.category);
       if (hidden.has(key)) continue;
-      const fill = ownOr(spec.fill, frame.color(key));
+      const fill = ownOr(spec.fill, frame.color(key), paint, "geopoint fill");
       let fillIndex = fills.indexOf(fill);
       if (fillIndex < 0) fillIndex = fills.push(fill) - 1;
       const all = group.rows ?? Uint32Array.from({ length: table.length }, (_, i) => i);

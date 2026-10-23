@@ -4,7 +4,7 @@
 
 import type { AxisOptions, ChartAxisOptions } from "../guides/options.ts";
 import type { Align } from "../layout/place.ts";
-import { fitText, type MeasureText, textItem } from "../layout/text.ts";
+import { centeredLines, fitText, type MeasureText, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import {
   copyTrace,
@@ -29,7 +29,7 @@ import { ChartError } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
 import type { ChartSpec, InteractionSpec, ScaleScope, XAxisSpec } from "../spec/spec.ts";
 import type { TextPaint } from "../style/style.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type { AxisType } from "./axis.ts";
 import type { AxesState } from "./guides.ts";
 import type { MarkSeries } from "./inspect.ts";
@@ -67,8 +67,12 @@ export function headerGuides(
   places: (fit: (text: string, room: number) => string) => HeaderPlace[],
 ): HeaderGuide[] {
   const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
+  // Each line shortened to the room.
   const fit = (text: string, room: number) =>
-    fitText(text, room - left - right, measure, paint.css);
+    text
+      .split("\n")
+      .map((line) => fitText(line, room - left - right, measure, paint.css))
+      .join("\n");
   return places(fit).map(({ text, x, y, anchor, angle }, k) => ({
     kind: "header",
     key: `header|${key}|${k}`,
@@ -77,7 +81,16 @@ export function headerGuides(
     y,
     anchor,
     angle,
-    items: [textItem(text, { x, y, anchor, baseline: "middle", angle }, paint, surface, measure)],
+    // A header's point is its lines' middle.
+    items: [
+      textItem(
+        text,
+        centeredLines(text, { x, y, anchor, baseline: "middle", angle }, paint),
+        paint,
+        surface,
+        measure,
+      ),
+    ],
   }));
 }
 
@@ -510,14 +523,15 @@ export interface PanelPlacement {
    * inset's box over the panels drawn before it (`cover`) and its border, a
    * panel's plot left visible by the insets over it (`visible`) and its grid
    * lines' spans there, at `ratio` device pixels to a CSS pixel, and their
-   * indicators among its marks, with `theme`; returns the scene's layers
-   * (see `Scene.layers`).
+   * indicators among its marks, with `theme` and their colors read by
+   * `paint`; returns the scene's layers (see `Scene.layers`).
    */
   finish?(
     panels: Panel[],
     views: readonly InsetView[],
     theme: Theme,
     ratio: number,
+    paint: PaintReader,
   ): Panel[][] | undefined;
   /** In a layout of cells, where the guides' axes go (see `AxesState.cells`). */
   cells?(
@@ -568,7 +582,11 @@ export interface PanelLayout {
   /** In subplots, the error for numbers sharing scale `scale` with another mark's categories (see `mixedPanels`). */
   mixed?(numbers: Mark, categories: Mark, scale: ScaleName): Error;
   splitter(): PanelSplitter;
-  grid(split: PanelSplit, lineHeight: number): PanelGrid;
+  /**
+   * Where `split`'s panels go and the room their headers take: a line of
+   * header text `lineHeight` tall, and each line after the first, `step`.
+   */
+  grid(split: PanelSplit, lineHeight: number, step: number): PanelGrid;
   /**
    * The headers panel `index`, named by `values`, at `plot`, carries, in
    * `paint` on `surface` (see `headerGuides`); `aside` is the room right of

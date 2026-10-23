@@ -33,3 +33,17 @@ export function rampsOf(scene: Pick<Scene, "guides">): RampGuide[] {
 export function keysOf(scene: Pick<Scene, "guides">): KeyGuide[] {
   return guidesOf(scene, "key");
 }
+
+/**
+ * Unturned text items as their lines are drawn: a line each as "\n" breaks
+ * an item's text, each a line height below the last (see `textElement`).
+ */
+export function drawnLines<T extends { text: string; y: number; paint: { lineHeight: number } }>(
+  items: readonly T[],
+): T[] {
+  return items.flatMap((item) =>
+    item.text
+      .split("\n")
+      .map((text, i) => ({ ...item, text, y: item.y + i * item.paint.lineHeight })),
+  );
+}

@@ -4,7 +4,7 @@
 // come from Adobe's font metrics (AFM) for the same fonts; PDF layout
 // measures text with them (`measurePdfText`), so labels fit as drawn.
 
-import { fontKind, type MeasureText, parseFont } from "../layout/text.ts";
+import { fontKind, type MeasureText, parseFont, widestLine } from "../layout/text.ts";
 
 export type PdfFont =
   | "Helvetica"
@@ -134,5 +134,5 @@ export function standardFont(family: string, bold: boolean): PdfFont {
 /** Text widths in the standard fonts a PDF draws with: exact, since every viewer has them. */
 export const measurePdfText: MeasureText = (text, font) => {
   const { size, bold, family } = parseFont(font);
-  return textWidth(encodeText(text), standardFont(family, bold)) * size;
+  return widestLine(text, (line) => textWidth(encodeText(line), standardFont(family, bold))) * size;
 };

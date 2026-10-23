@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { graphemeClusters } from "../../src/fonts/clusters.ts";
 import { EMBED_FONTS } from "../../src/fonts/prepared.ts";
-import { parseTrueType } from "../../src/fonts/truetype.ts";
+import { parseSfnt } from "../../src/fonts/sfnt.ts";
 import { type FontOptions, type FontSource, prepareFonts } from "../../src/fonts.ts";
 import type { PdfFontResolver } from "../../src/render/pdf-font-embed.ts";
 import { subsetTrueType } from "../../src/render/pdf-font-subset.ts";
@@ -10,7 +10,7 @@ import { subsetTrueType } from "../../src/render/pdf-font-subset.ts";
 const data = new Uint8Array(
   readFileSync(new URL("../fixtures/pdf-fonts/sans.ttf", import.meta.url)),
 );
-const source = parseTrueType(data);
+const source = parseSfnt(data);
 function face(family: string, text: string): FontSource {
   return {
     family,

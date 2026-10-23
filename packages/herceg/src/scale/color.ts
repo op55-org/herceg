@@ -3,18 +3,23 @@
 // diverging ramp maps a midpoint to its middle color, and each side of the
 // midpoint onto its own half of the ramp.
 
+import type { PaintReader } from "../theme.ts";
+
 /** Odd, so one entry is the ramp's exact middle, and below 256, so an index fits a byte. */
 const LUT_SIZE = 255;
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const VARIABLE = /\bvar\(/;
 
 /**
  * Checks that every stop of a color ramp is a `#rgb` or `#rrggbb` color, the
- * syntax both the raster painter and the legend read the same way.
+ * syntax both the raster painter and the legend read the same way; with
+ * `given`, a mark's option, which may hold CSS variables, checked once they
+ * are read (`rampOf`).
  */
-export function checkRamp(stops: readonly string[], what: string): void {
+export function checkRamp(stops: readonly string[], what: string, given = false): void {
   if (stops.length < 2) throw new RangeError(`${what}: expected at least two colors`);
-  const bad = stops.find((stop) => !HEX.test(stop));
+  const bad = stops.find((stop) => !HEX.test(stop) && !(given && VARIABLE.test(stop)));
   if (bad !== undefined) {
     throw new TypeError(`${what}: expected "#rrggbb" colors; received ${JSON.stringify(bad)}`);
   }
@@ -44,20 +49,26 @@ export function checkColorScale(
 }
 
 /**
- * A ramp from a mark's colors, or `fallback`. Scheme names in specs are
- * resolved by the spec loader, which keeps the scheme table out of charts
- * that do not load specs.
+ * A ramp from a mark's colors, or `fallback`, its CSS variables read with
+ * `paint` (`what` naming the option) and checked as they read. Scheme names
+ * in specs are resolved by the spec loader, which keeps the scheme table
+ * out of charts that do not load specs.
  */
 export function rampOf(
   colors: string | readonly string[] | undefined,
   fallback: readonly string[],
+  paint: PaintReader,
+  what: string,
 ): readonly string[] {
   if (typeof colors === "string") {
     throw new TypeError(
       `colors: scheme "${colors}" is unresolved; load the spec with loadSpec, or pass its colors (import { ${colors} } from "herceg")`,
     );
   }
-  return colors ?? fallback;
+  if (!colors?.some((stop) => VARIABLE.test(stop))) return colors ?? fallback;
+  const read = colors.map((stop, i) => paint(stop, `${what}[${i}]`));
+  checkRamp(read, what);
+  return read;
 }
 
 /**
@@ -105,36 +116,6 @@ export function isOpaqueColor(color: string): boolean {
 export function isLightColor(color: string): boolean | undefined {
   const rgba = parseColor(color.trim().toLowerCase());
   return rgba && luminance([rgba[0], rgba[1], rgba[2]]) > 0.179;
-}
-
-/** Reads a CSS color: channels from 0 to 255, alpha from 0 to 1. */
-export type ColorReader = (color: string) => [number, number, number, number] | undefined;
-
-/**
- * Reads hex, `rgb()`, and `hsl()` colors; not names, which need the full
- * CSS color table (`cssColor`), which charts that draw no text marks leave out.
- */
-export const plainColor: ColorReader = (color) => parseColor(color.trim().toLowerCase());
-
-/** Whether a color `read` reads is light (see `isLightColor`); undefined when it cannot read it. */
-export function readsLight(color: string, read: ColorReader): boolean | undefined {
-  const rgba = read(color);
-  return rgba && luminance([rgba[0], rgba[1], rgba[2]]) > 0.179;
-}
-
-/** WCAG contrast of a color over an opaque surface, as `read` reads them; undefined for unreadable colors. */
-export function colorContrast(
-  fill: string,
-  backdrop: string,
-  read: ColorReader,
-): number | undefined {
-  const top = read(fill);
-  const bottom = read(backdrop);
-  if (!top || !bottom || bottom[3] < 1) return undefined;
-  const mixed = top.slice(0, 3).map((c, i) => c * top[3] + bottom[i]! * (1 - top[3]));
-  const a = luminance(mixed as [number, number, number]) + 0.05;
-  const b = luminance([bottom[0], bottom[1], bottom[2]]) + 0.05;
-  return Math.max(a, b) / Math.min(a, b);
 }
 
 /**
