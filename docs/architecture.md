@@ -2190,7 +2190,18 @@ Bars on number or time x are 80% as wide as the smallest gap between
 neighboring distinct x values in view, across all series (capped at 64 px).
 Those distinct values are sorted once per table version. Stacked series split
 by a category field share one pair of table-sized top and base arrays, since
-each row belongs to one series.
+each row belongs to one series. Bars with `width: { px }` are that many
+pixels thick across their value direction whatever their band's width, in
+either orientation and through dodging (grouped bars keep their slots'
+centers); drawing, picking, the navigator's bars, and exports read the
+same rectangles. Outlines (`stroke`, `strokeWidth`) draw every side, or
+with `strokeSides` those named as they stand on screen, so `["top"]` caps
+bars whichever way their values go: a rectangle geometry's `edge.sides`
+holds a mask (`sideMask`, draw/rect.ts) for every rectangle or one each,
+which every renderer traces (`traceSides`), and bars outlined on some
+sides only keep square ends. Regions take the same outlines (`stroke`,
+`strokeWidth`, `strokeSides`), stroking only their own edges, not where the
+view or a log scale's low end cuts them.
 
 Heatmaps are rasterized into an RGBA image (colors from a lookup table) that
 renderers stretch over the cells in view, clipped to the plot. Canvas draws it
@@ -3299,10 +3310,11 @@ marks (see The chart handle).
 
 Geometry carries its drawing (`Drawing` in `scene/scene.ts`, implementations
 in `src/draw/`): its SVG markup, optionally the same output as a few SVG
-elements with attributes, and its size (for choosing a renderer). Data
-drawings also paint on a canvas (`canvas`); guide drawings (rules, text)
-have `canvas: false` and draw only in SVG, above the data, and are not cut
-to the plot unless their mark says so (`defaultClip: false`). The mark
+elements with attributes, its size (for choosing a renderer), and its
+canvas painter (`canvas`). Guide drawings (rules, text, labels) are not cut
+to the plot unless their mark says so (`defaultClip: false`). A drawing
+without a canvas painter (`canvas: false`, another library's) keeps its
+chart's scene in SVG, where everything paints in its order. The mark
 that emits the geometry attaches the drawing,
 so the SVG and Canvas renderers know no geometry kinds and a bundle only
 contains drawing code for the marks it imports (a line chart does not carry
@@ -3324,6 +3336,60 @@ hold erases that pairing. Each scene can be drawn four ways:
 - `drawPdfPage` (`render/pdf.ts`) draws a scene into a PDF page; `renderPdf`
   wraps it in a one-page PDF 1.4 document. The default page is measured in
   points (0.75 per CSS pixel).
+
+### Paint order
+
+Every renderer paints a panel in one order (`scene/paint.ts`): its grid
+batches (`GridBatch`, one per axis, at `grid: { zIndex }`, -1 by default)
+and its geometry (at its mark's `zIndex`, 0 by default), lower first, ties
+as listed, grid lines before geometry and geometry as its marks are
+declared. The order is local to the panel, as a CSS stacking context is,
+and apart from clipping (`clipOf`) and from the logical order the
+keyboard, descriptions, and tooltips keep. A panel has a plan
+(`Panel.paint`, indexes into its grid batches and then its geometry) only
+where `zIndex` values reorder it, kept while they stay (`planPanels` in
+`guides/paint.ts`, pruned as panels go): charts giving marks or grid
+lines a `zIndex` load it with the guide compiler (`needsGuides`), so the
+line chart's first chunk carries only the walk renderers share
+(`eachPainted`).
+Panels paint one after another, each its cover and plot background and
+then its plan, so an inset's drawings go over its parent's; only the
+chart's background is under every panel, and plot borders, axes, and the
+pointer's overlays are over them all. Rules, text, and labels have canvas
+painters, so a canvas paints the plan on its one plane with no second
+backing store for annotations between data. Picking takes the topmost
+target: hover and clicks visit marks in paint order and series in theirs,
+and of one series' points equally near, the one painted last (opaque
+points of several colors paint color by color: `Mark.paintsOver` says
+which of two paints over the other). Targets within a thousandth of a
+pixel of the nearest are equally near (`model/nearest.ts`): points are
+placed in 32-bit floats, lines' observations in doubles, and points
+alike about the pointer round apart. Hover hands one `Nearest` every
+target in paint order (point marks through `Mark.nearby`, each point
+their grid indexes find near enough), and clicks one per mark; `settle`
+searches again, knowing the least distance, only where a nearer target
+left the winner behind after the winner beat a tying one. With a
+selection highlighted, its rows paint over the mark's others (`Frame.highlighted`), and win its ties
+before series and paint order; static titles of a line's observations go
+in that order too. Overlapping bars (pixel widths) are clicked as they
+paint: by series, look by look, then by row.
+
+Static SVG can carry native tooltips: `titlesOf(model, measure)`
+(`render/titles.ts`, loaded only by exports asking for them) draws the
+model's scene with its bars and points saying which position of their
+series each item draws (`Frame.attributed`, set through the model's
+`highlight` hook, so no other scene stores it) and gives `renderSvg`
+(`SvgOptions.titles`, through `SvgContext.titles`) markup after each
+geometry: an invisible pointer target per bar, point, and observation of
+a line drawn, with a `<title>` holding the tooltip's text for that row,
+its `tooltip.fields` too (read as a mounted chart's controller reads them).
+The drawing stays as packed as without titles; targets follow their
+geometry in its items' paint order (a line's after its markers), so what
+paints over an item takes the pointer as on screen. A target is the
+item's shape with its outline, joined as painted (points round), and
+stroked invisibly: WebKit's pointer reaches no further than a fill
+without a stroke. Over a budget of targets (5,000 by default) it refuses
+with `unsupported`.
 
 The optional public `renderToPDF` (`src/pdf.ts`, exported from `herceg/pdf`)
 accepts one mounted chart, DOM-free options, or a nonempty list. It reads
@@ -4152,14 +4218,22 @@ ends follow, as monotonic passes bounded by a quarter of the chart's width
 its legends and colorbars, each a track of its own in the order the
 legends are listed (the automatic legend first); axes the guides list take
 their room through the axes hooks (see Scales and guides). Marks that
-label outside their plots (a rule's label beside the y axis) ask for room
-(`Mark.room`): the widest on each side is a track of its own, innermost,
-and its marks draw their labels at its inner edge (`Frame.outside`).
-Tracks are the chart's. Legends beside one subplot (a side place with
-`scope: "panel"`, or a panel's legend) take room beside that panel's plot
-in the layout of cells instead (see Layouts of panels); in facets such a
-place is refused. Marks' labels outside panels other than the first and
-last columns' take no room.
+label outside their plots (a rule's label beside the y axis, labels
+following series) ask for room (`Mark.room`): the widest on each side is a
+track of its own, innermost, and its marks draw their labels at its inner
+edge (`Frame.outside`). These tracks only grow while the chart's size and
+settings stay (`#labelRoom`), as margins do, so labels following streaming
+data do not move the plots back and forth. Marks that measure their labels
+as they place them (`Mark.roomPlaced`) say their room right after drawing
+in each panel, kept by panel and mark (`#placedRooms`); when a panel's is
+more than its tracks kept, the scene is laid out once more. Tracks
+are the chart's. Beside panels that are not at the chart's sides, the same
+room goes in the gaps between a facet grid's columns, or beside the panel
+in a layout of cells (`HorizontalPlacing.labels`), beyond its y labels,
+where `Frame.outside` puts the labels. Legends beside one subplot (a side
+place with `scope: "panel"`, or a panel's legend) take room beside that
+panel's plot in the layout of cells instead (see Layouts of panels); in
+facets such a place is refused.
 
 ## Scales and guides
 
@@ -4272,9 +4346,22 @@ three lines, and rotation candidates take the first angle at which
 neighbors do not overlap (boxes compared along and across the labels'
 direction). Labels along y stay inside the chart's height, where the
 plot's ends leave no room for a layer's taller ones, and are compared
-where they are drawn. Axes the compiler draws carry `AxisGuide.layers`; a change of
-values that moves their scale is shown at once, since their layers are
-planned with the scene.
+where they are drawn. A layer's labels may go inside the plot (`inside`),
+beside their ticks, rows advancing inward and taking no room outside (an x
+axis on its default side with no labels outside gives back the room the
+model keeps for them, `AxesState.xRoom`), and stand `gap` pixels past the
+ends of the ticks on their side (4 inside by default, outside as the
+default axes place them). Flat labels inside the plot, and outside where
+their style aligns them, are blocks at their ticks (`anchorBlock`): along
+x as `align` says, along y as `verticalAlign` does, centered inside by
+default; collisions, priority (which also compares labels' distances off
+the line), the margins (`ends`), and the choice of a turn read them so.
+Turned labels inside turn away from the plot's edge. Default axes whose
+tick label styles align (a theme's, an axis short form's, a subplot's:
+`alignsTickLabels`) are drawn as listed axes, which the chart then loads
+the compiler for. Colorbars refuse `inside` and `gap`. Axes the compiler
+draws carry `AxisGuide.layers`; a change of values that moves their scale
+is shown at once, since their layers are planned with the scene.
 
 **Legends** (`guides/legends.ts`) are the automatic legend (the short form's
 settings) and the legends `guides` lists, each showing the scales its
@@ -4366,6 +4453,69 @@ lands on a named scale, which the caller provides, so the resolver knows no
 scale types. Categories are placed by their values, never their codes.
 Annotations resolve their places through it (see Annotations).
 
+Marks of rows take the same forms for each row's place (`bindRows`,
+`marks/row-bindings.ts`): `{ field }` on the axis, moved by an `offset`
+in pixels, or on a scale of the chart's own (`scale`), and `{ fraction:
+{ field } }` or `{ px: { field } }` in a frame. A mark keeps how each
+direction binds (`Mark.bound`; a direction absent is on its axis); the
+feature compiler, which charts with such places load, checks them whole
+and draws each mark in a frame of its own (`boundFrame`,
+`marks/features/positions.ts`): a frame's linear scale, the chart's own
+scale, or the axis', moved by its offset. Each runs over the plot's
+pixels, as the axes' scales do, and its domain is what those show (for a
+share of the chart, the part the plot shows), so tracing, culling,
+indexing, and inspection read the rows moved into view as any frame's.
+Moved scales reach the scale they move through it rather than inheriting
+from it, so scales with private state (log, broken time) move too.
+Directions placed off their axis (in a frame, on a scale of the chart's
+own) count toward no domain of the axis and keep no room on it, and their
+points are inspected nearest only; rows placed off x alone still give y
+values to label and grid. Offsets move what is drawn, not what
+scales fit: y fits rows by their x values (see Padding), while
+inspection, cursors, and brushes find rows where they are drawn.
+
+Position scales of the chart's own (`scales: { depth: { type: "linear" }
+}`, also "log" and "time"; `guides/positions.ts`) place what marks name
+them for (`{ field, scale }`, `{ data, scale }`). Each has a domain per
+instance (the chart's, or with `scope: "panel"` each panel's) from what
+the marks there draw on it (their own extents, `continuity` and `where`
+included, of the series shown), kept while the marks, their tables'
+versions, views' revisions, row parts, and shown series stay; it projects
+over each panel's plot along x or y, padded as its settings say, by
+default with room for what marks draw past their values over the
+shortest plot sharing the instance. Nothing zooms it. An axis guide naming
+it goes on the right (along y) or the top (along x), by each instance (in
+subplots, the outer panels of those sharing one: `OwnScales.groupOf`),
+draws no grid lines, and gives its `format` to the scale's values in
+tooltips, as x and y have their home axis'.
+
+A position scale's `padding` is room between its data and the plot's
+edges: "auto" (the default) leaves room at each end of a domain fitted to
+the data for what marks draw past their values there (glyphs at both ends,
+`Mark.inset`; bars' labels at ends away from zero, `Mark.headroom`), the
+most any mark asks, solved once for the plot's size by the solver they
+carry (`clearDomain`, `model/clearance.ts`), and keeps set domains and
+views exact; a share widens the domain by that share of its span at each
+end, in the scale's transformed space; `{ px }` keeps that many pixels; 0
+turns automatic room off. The guide compiler checks the settings
+(`paddingPath` names where they were set) and the model applies them to
+domains and views (`AxisPadding.pad`), over the pixels the plan was
+padded over (`AxisPlan.padded`: the shortest plot sharing the scale).
+Whatever reads a drawn range back as a view (gestures, the navigator's
+window, `edge` events) goes through `model/view-padding.ts`, which takes
+the padding off as it was put on. Ranges drawn already (a change of view
+playing, which carries its axes' tick ranges too, `ViewDomains.ticks`;
+a navigator's rail around the plots' ranges: `RangeSource` "drawn") are
+shown as they are, their ticks inside the padding. A domain padded past
+what numbers hold is refused rather than drawn unpadded or infinite,
+which no view could be read back from. y
+fits the x data window: the rows whose x values are in x's view, domain,
+or data extent, before padding, nicing, and marks' offsets, which are
+room and placement rather than data. Rows they bring into view are drawn
+where they fall, cut by the plot like any value outside y's domain. So y
+depends on no layout: a width change, an offset, or a label crossing a
+pixel never rescales it, and every scene lays out once.
+
 ## Clipping
 
 A mark's `clip` says what its drawing is cut to: `"plot"`, `"chart"`, or
@@ -4415,6 +4565,28 @@ on the automatic axes number and time labels are written on one line,
 since their room is kept before they are planned (listed axes plan rows),
 and layout marks write the names they fit to a room of one line on one
 (`oneLineText`), shortened rather than broken.
+
+Text placed at a point is a block: `anchorBlock` (`layout/block.ts`) puts
+the block of its lines, padded as its box is, by its start, middle, or end
+along its lines (`align`) and its top, middle, or bottom across them
+(`verticalAlign`) at the point, then turns it about the point, and gives
+the first line's place and the box, which `textItem` takes as they are.
+Text marks, rules' and regions' labels with a style's `verticalAlign`,
+flat tick labels inside the plot or aligned by their style, and labels
+attached to series are placed so; without one, rules and regions keep
+their natural placements (above a horizontal rule, beside a region's
+edge). Titles and legends fill rows of their own, where `verticalAlign`
+does not move them. Labels attached to another mark's series
+(`marks/attachments.ts`, made by the marks that label series) are placed
+by `placeAttached` (`layout/attached.ts`): inside the plot as blocks
+beside their point (after it for `align: "start"`, before it for "end",
+over it for "center", where `verticalAlign` moves them below or above),
+4 pixels and their offset away; outside it in the side tracks
+(`Frame.outside`, before their series' start on the left, else on the
+right), reserving room there unless `reserve` is false; labels of one
+column spread apart along y within the plot, in the order of their points,
+as painted (halos included). A column taller than the plot keeps the
+labels that fit from its top and leaves the rest out.
 
 A font registry (`fonts/registry.ts`, `prepareFonts` in `herceg/fonts`)
 holds OpenType faces parsed once (`fonts/sfnt.ts`, `fonts/binary.ts`)
@@ -5045,8 +5217,13 @@ that ends a path reaches half the stroke width further, over its round
 cap), so each pixel is painted once and the highlighted part is the very
 curve, level-of-detail reduction, and stack the mark drew; a layer of a
 series field's stack, drawn through the union's edges, reaches the union's
-ends past its own first and last rows. A line's runs of one row drawn are
-dots. Lines whose x does not ascend, and rows at one x that no span tells
+ends past its own first and last rows. Series draw in turn, each its
+selected parts over its own dimmed ones (keyed `\u0001on` and `\u0001off`,
+clipped ones too), so a translucent color selected whole shows as it is;
+picking ranks a line's or area's highlighted rows over its series' own
+only, and marks of a glyph per row's over every series' (`litOverSeries`).
+A line's runs of one row drawn are dots, drawn after the series' own
+parts. Lines whose x does not ascend, and rows at one x that no span tells
 apart (a vertical run of selected rows, or other rows drawn at the x where
 a run ends, past rows the line breaks at), draw whole and dimmed with
 a copy of their values over them, the unselected rows' missing, drawn at
@@ -5187,7 +5364,8 @@ refuses others before changing what it holds.
   stops at the series `ChartModel.keyboardStops` lists per panel. An
   inspection along x (lines, areas, vertical bars) or y reports every series
   with a point at exactly that place, so series sharing their positions
-  (fields of one table) share a stop; other series, and each series of
+  (fields of one table) share a stop; other series, each placed off that
+  axis (in a frame, or on a scale of the chart's own), and each series of
   points or cells, are stops of their own. Up and Down move between stops
   and panels. Heatmaps step cell by cell through `Mark.stepCell` (a scan per
   key press), skipping empty cells and reading the row drawn in each.
@@ -5451,13 +5629,10 @@ builders agree on their shapes while their drawing lands. A chart refuses
 each such option, rather than ignoring it, with a `ChartError` of code
 `unsupported` at its path: "not drawn as given yet", and what to give
 instead. Marks refuse theirs as they are made, through the tables in
-`marks/pending.ts`, and the model refuses `zIndex` and `verticalAlign`
-wherever the chart's options hold them (`refuseZIndex`,
-`refuseVerticalAlign`; `textPaint` refuses, without a path, what the
-options do not hold in plain objects); the guide compiler refuses scales',
-axes', and tick labels' options, the legends their `include`, `entries`,
-and targets (`guides/legends.ts`), and the feature compiler identity and
-scoped scales. Python refuses the same options with the same
+`marks/pending.ts`; the guide compiler refuses colorbars' scales by name,
+the legends their `include`, `entries`, and targets
+(`guides/legends.ts`), and the feature compiler identity and scoped
+scales. Python refuses the same options with the same
 codes and paths (`_pending.py`): marks' as they are added, the chart's in
 `to_spec`. Each refusal goes when its option is drawn. A malformed value
 is refused first, for good, as `invalid-option` at its own path: by the
@@ -5468,33 +5643,21 @@ whose checks stay (point sizes, bar widths, region outlines, scales' and
 it whole, whatever its value, and the change that draws it adds the
 mark function's checks of its values.
 
-Refused so far: `zIndex` other than 0 on marks and other than -1 on grid
-lines (`grid: { zIndex }`); scales' `padding` other than `"auto"`; position
-scales of the chart's own under other names (`scales: { depth: { type:
-"linear" } }`) and the positions and axis guides naming them; `verticalAlign` in text styles;
-tick labels' `inside` and `gap`; positions read from fields as shares or
-pixels (`{ fraction: { field } }`, `{ px: { field } }`); bars' `width: { px
-}` and `strokeSides`; regions' `stroke`, `strokeWidth`, and `strokeSides`;
-identity scales (`{ type: "identity" }`, named or on a channel) and ordinal
-scales' `scope`; lines' and areas' `labels`, label `content` made of parts,
-and text `from`; annotations' `legend: true`; and in legends, entries after
-included scales, `include` of a mark whole or a scale by name, and targets
-of rows by value. 3D boxes refuse for good `zIndex` on their marks and
-grid lines, and `padding`: they draw by depth and fit their data. Bars
-placed by coordinates keep the orientation rule fields have: a category
-`y`, by name or as `{ field }`, makes them horizontal, and any other
-position, a frame's share or pixels included, centers vertical bars on x.
+Refused so far: identity scales (`{ type: "identity" }`, named or on a
+channel) and ordinal scales' `scope`; lines' and areas' `labels`, label
+`content` made of parts, and text `from`; annotations' `legend: true`;
+colorbars' scales by name; and in legends, entries after included scales,
+`include` of a mark whole or a scale by name, and targets of rows by
+value. Refused for good: on 3D boxes, `zIndex` on their marks and grid
+lines, and `padding` (they draw by depth and fit their data); grid lines
+of an axis on a scale of the chart's own; and tick labels' `inside` and
+`gap` on colorbars. Bars placed by coordinates keep the orientation rule
+fields have: a category `y`, by name or as `{ field }`, makes them
+horizontal, and any other position, a frame's share or pixels included,
+centers vertical bars on x.
 
-The forms the drawing and exports will read are stated and tested, though
-no renderer reads them yet. `scene/paint.ts` orders a panel's painting:
-its grid batches (`GridBatch`, one per axis) and its geometry by `zIndex`
-(marks 0, grid lines -1), ties as listed with grids first (`paintOrder`),
-local to the panel, apart from clipping and from the logical order the
-keyboard and descriptions keep. `spec/positions.ts` binds a position
-option, in any form, to one `PositionBinding`: on a scale (the axis' own or
-one the chart names) or in a frame (a share or pixels), from a field or a
-constant, with its offset, so placement, domains, inspection, and
-selection read every form alike. `spec/channels.ts` binds a mark's channel
+Some forms are stated and tested before every reader reads them.
+`spec/channels.ts` binds a mark's channel
 options, in whatever form they come (a constant, a field's name, `{ field,
 scale }`, the series' names through a scale, a condition, `encode`), to one
 `ChannelBinding` each, keeping the option each came from for messages,
@@ -5506,9 +5669,8 @@ each mark takes.
 `marks/attachments.ts` states where text attached to another mark's series
 goes (`Attachment`: the panel, the series, the observation owning the
 point, the value drawn there, and whether the series is shown), and the
-rules for `first`, `last`, and the visible ends of a series.
-`anchorBlock` (`layout/text.ts`) places a block of text lines, and its box,
-by its sides or middle along and across its lines, turned about its anchor.
+rules for `first`, `last`, and the visible ends of a series;
+`placeAttached` places such labels (see Text and fonts).
 `planExport` (`spec/export.ts`; Python's `plan_export`) checks export
 settings (format, size in a unit, dpi, quality, background, tooltips)
 against `EXPORT_LIMITS` and says what an export draws: the layout size in

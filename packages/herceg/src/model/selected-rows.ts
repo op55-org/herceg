@@ -47,9 +47,11 @@ import { STILL } from "../marks/dodge.ts";
 import type { HistogramMark } from "../marks/histogram.ts";
 import type { LayoutResult } from "../marks/layout-mark.ts";
 import type { BandList, Frame, Mark } from "../marks/mark.ts";
+import { rowField } from "../marks/row-bindings.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "../marks/series.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { ChartModel, DrawnPanel } from "./model.ts";
+import { settle } from "./nearest.ts";
 
 /**
  * What a brush selected, in data values (as the chart keeps it: see
@@ -106,6 +108,8 @@ interface Drawn {
   hidden: boolean;
   /** The keys its panel drew hidden, as its mark's frame there had them. */
   hiddenKeys: ReadonlySet<string>;
+  /** Its mark's frame in the panel, whose scales place the mark's own series. */
+  frame: Frame;
 }
 
 /** Where a row is placed along an axis: a field's value, or the span between two values. */
@@ -130,16 +134,18 @@ function drawnIn(model: ChartModel, panels: readonly DrawnPanel[], table?: Table
       if (!SELECTS.has(mark.spec.type) || (table && mark.table !== table)) continue;
       const hiddenKeys = frame.hidden;
       for (const series of drawn) {
-        const y = model.onRight(series) ? panel.yRight : panel.y;
+        // Marks placing rows in a frame or on a scale of the chart's own are read with those scales.
+        const y = mark.bound ? frame.y : model.onRight(series) ? panel.yRight : panel.y;
         if (!y) continue;
         out.push({
           mark,
           series,
           panel,
-          x: panel.x,
+          x: mark.bound ? frame.x : panel.x,
           y,
           hidden: hiddenKeys.has(series.key),
           hiddenKeys,
+          frame,
         });
       }
     }
@@ -157,7 +163,12 @@ const list = (fields: string | readonly string[]) =>
 
 /** What a mark's series place along x and y, as conditions read them. */
 function readingsOf(mark: Mark): Reading[] {
-  const spec = mark.spec as unknown as Record<string, string | readonly string[] | undefined>;
+  const spec = { ...mark.spec } as unknown as Record<
+    string,
+    string | readonly string[] | undefined
+  >;
+  // Positions as the fields they read: coordinates a field gives read it.
+  for (const key of ["x", "y", "x1", "x2", "y1", "y2"]) spec[key] = rowField(spec[key]);
   const f = (name: string) => ["field", spec[name] as string] as const;
   const along = mark.tooltip === "y" ? "y" : "x";
   const across = along === "x" ? "y" : "x";
@@ -257,7 +268,8 @@ function bandValues(
   to: number,
 ): (string | number)[] {
   const values: (string | number)[] = [];
-  for (let place = from; place <= to; place++) {
+  // Bands' centers inside the range: read through an offset, its ends fall between them.
+  for (let place = Math.ceil(from); place <= Math.floor(to); place++) {
     const band = places ? places.band(place) : place;
     const key = bands?.keys[band];
     if (key === undefined) continue;
@@ -295,26 +307,27 @@ const any = (parts: Expression[]): Expression =>
   parts.length === 0 ? false : parts.length === 1 ? parts[0]! : ["or", ...parts];
 
 /**
- * A range of the left y axis as the same pixels read on the axis `y` (the
- * right one). A range of categories covers their slots, as the brush draws
- * it: half a step past their centers, within the axis.
+ * A range of a panel's axis `axis` as the same pixels read on `drawn`, the
+ * scale rows are drawn with: the right y axis', or one an offset moves. A
+ * range of categories covers their slots, as the brush draws it: half a
+ * step past their centers, within the axis.
  */
 function onAxis(
   range: readonly [number, number],
-  left: PositionScale,
-  y: PositionScale,
+  axis: PositionScale,
+  drawn: PositionScale,
 ): readonly [number, number] {
-  if (y === left) return range;
+  if (drawn === axis) return range;
   let [lo, hi] = [
-    Math.min(...range.map((v) => left.map(v))),
-    Math.max(...range.map((v) => left.map(v))),
+    Math.min(...range.map((v) => axis.map(v))),
+    Math.max(...range.map((v) => axis.map(v))),
   ];
-  if (left.type === "band") {
-    const half = Math.abs(left.map(1) - left.map(0)) / 2;
-    lo = Math.max(Math.min(...left.range), lo - half);
-    hi = Math.min(Math.max(...left.range), hi + half);
+  if (axis.type === "band") {
+    const half = Math.abs(axis.map(1) - axis.map(0)) / 2;
+    lo = Math.max(Math.min(...axis.range), lo - half);
+    hi = Math.min(Math.max(...axis.range), hi + half);
   }
-  const [a, b] = [y.invert(lo), y.invert(hi)];
+  const [a, b] = [drawn.invert(lo), drawn.invert(hi)];
   return a <= b ? [a, b] : [b, a];
 }
 
@@ -377,19 +390,21 @@ function brushCondition(
           const place = reading[axis];
           if (!place)
             throw new Error(`${mark.spec.type} brush: rows cannot be brushed along ${axis} yet`);
+          // Read on the scale the rows are drawn with: a right axis', or moved by an offset.
           const scale = axis === "x" ? d.x : d.y;
-          const ranged = axis === "y" ? onAxis(range, d.panel.y, scale) : range;
+          const ranged = onAxis(range, d.panel[axis], scale);
           const bands = () =>
-            bandValues(model.bands[axis], d.series.places?.[axis], range[0], range[1]);
+            bandValues(model.bands[axis], d.series.places?.[axis], ranged[0], ranged[1]);
           parts.push(within(place, ranged, scale, bands));
         }
         return all(parts);
       }),
     );
-  // On right axes, which panels may have of their own, each panel's rows meet
-  // the brush's range as read on that panel's axis.
+  // Rows read on scales of their own (a right axis, which panels may have of
+  // their own; a frame, or an offset, which are as many values as each
+  // plot's pixels say) meet the brush's range as read in each panel.
   const own = new Map<string, Drawn>();
-  if (selection.y && first.y !== first.panel.y)
+  if ((selection.y && first.y !== first.panel.y) || (selection.x && first.x !== first.panel.x))
     for (const d of shown) if (!own.has(d.panel.key)) own.set(d.panel.key, d);
   const conditions =
     own.size > 1
@@ -427,6 +442,7 @@ function inRange(value: number, range: readonly [number, number] | null): boolea
 function rowsInRanges(parts: readonly Drawn[], selection: Brushed, out: number[]): void {
   for (const d of parts) {
     if (d.hidden) continue;
+    const x = selection.x && onAxis(selection.x, d.panel.x, d.x);
     const y = selection.y && onAxis(selection.y, d.panel.y, d.y);
     const s = d.series;
     // A calendar's cells are found at their centers (see `anchorOf`), read back as values.
@@ -441,12 +457,7 @@ function rowsInRanges(parts: readonly Drawn[], selection: Brushed, out: number[]
       if (cells && !anchor) continue;
       const at = anchor ? value(d.x, anchor[0]) : drawnAt(d, "x", row);
       const top = anchor ? value(d.y, anchor[1]) : drawnAt(d, "y", row);
-      if (
-        Number.isFinite(at) &&
-        Number.isFinite(top) &&
-        inRange(at, selection.x) &&
-        inRange(top, y)
-      )
+      if (Number.isFinite(at) && Number.isFinite(top) && inRange(at, x) && inRange(top, y))
         out.push(row);
     }
   }
@@ -535,9 +546,8 @@ function byMark(drawn: readonly Drawn[]): MarkParts[] {
   for (const d of drawn) {
     let entry = out.find((e) => e.mark === d.mark && e.parts[0]!.panel === d.panel);
     if (!entry) {
-      // What marks' lookups (picks, anchors) read of a frame: scales, plot, hidden series.
-      const frame = { x: d.x, y: d.y, plot: d.panel.plot, hidden: d.hiddenKeys };
-      entry = { mark: d.mark, parts: [], series: [], frame: frame as unknown as Frame };
+      // The mark's frame, with the scales its series are read with.
+      entry = { mark: d.mark, parts: [], series: [], frame: { ...d.frame, x: d.x, y: d.y } };
       out.push(entry);
     }
     entry.parts.push(d);
@@ -710,8 +720,11 @@ export function clickedRows(
   const drawn = drawnIn(model, [panel]).filter(
     (d) => !d.hidden && d.mark.table && tables.has(d.mark.table),
   );
-  // Marks drawn later are on top.
-  for (const entry of byMark(drawn).reverse()) {
+  // Marks painted later are on top: by zIndex, ties as declared.
+  const z = ({ mark }: MarkParts) => mark.spec.zIndex ?? 0;
+  for (const entry of byMark(drawn)
+    .reverse()
+    .sort((a, b) => z(b) - z(a))) {
     const { mark, series, frame } = entry;
     let found: { series: Series; position: number } | undefined;
     const type = mark.spec.type;
@@ -734,40 +747,43 @@ export function clickedRows(
   return undefined;
 }
 
-/** The point of a mark's series nearest a pixel, within `reach` pixels of it. */
+/**
+ * The point of a mark's series nearest a pixel, within `reach` pixels of
+ * it (glyphs sized by a field, within their own size); of points tying
+ * with it, the one on top (model/nearest.ts).
+ */
 function nearest(
   entry: MarkParts,
   px: number,
   py: number,
   reach: number,
 ): { series: Series; position: number } | undefined {
-  let best: { series: Series; position: number } | undefined;
-  let distance = reach;
-  for (const d of entry.parts) {
-    const s = d.series;
-    let [start, end] = [0, s.length];
-    // Sorted series need only the points within reach along x (marks
-    // drawing along one axis place theirs themselves).
-    if (s.sorted && d.x.type !== "band" && !entry.mark.place) {
-      const [a, b] = [d.x.invert(px - reach), d.x.invert(px + reach)];
-      start = lower(s, Math.min(a, b));
-      end = lower(s, Math.max(a, b), true);
-    }
-    const glyph = entry.mark.reach;
-    for (let k = start; k < end; k++) {
-      const row = rowOf(s, k);
-      const point = anchorOf(entry, d, row);
-      if (!point) continue;
-      const away = Math.hypot(point[0] - px, point[1] - py);
-      // Glyphs sized by a field are clicked within their own size.
-      const within = glyph ? glyph.call(entry.mark, row) + CLICK_SLOP : reach;
-      if (away <= Math.min(distance, within)) {
-        distance = away;
-        best = { series: s, position: k };
+  const { mark } = entry;
+  const glyph = mark.reach;
+  const lit = mark.table && entry.frame.highlighted?.(mark.table);
+  return settle((found) => {
+    for (const d of entry.parts) {
+      const s = d.series;
+      let [start, end] = [0, s.length];
+      // Sorted series need only the points within reach along x (marks
+      // drawing along one axis place theirs themselves).
+      if (s.sorted && d.x.type !== "band" && !mark.place) {
+        const [a, b] = [d.x.invert(px - reach), d.x.invert(px + reach)];
+        start = lower(s, Math.min(a, b));
+        end = lower(s, Math.max(a, b), true);
+      }
+      const over = mark.paintsOver?.(entry.series, s, entry.frame);
+      for (let k = start; k < end; k++) {
+        const row = rowOf(s, k);
+        const point = anchorOf(entry, d, row);
+        if (!point) continue;
+        const away = Math.hypot(point[0] - px, point[1] - py);
+        const within = glyph ? Math.min(reach, glyph.call(mark, row) + CLICK_SLOP) : reach;
+        if (away <= within)
+          found.take({ series: s, position: k, distance: away }, mark, lit?.[row] ?? 0, over);
       }
     }
-  }
-  return best;
+  });
 }
 
 /** The scales a bar mark's bars are placed along and measured across, and the shown series. */
@@ -807,24 +823,40 @@ function barHit(
   const { horizontal, along, across, visible } = barAxes(mark, entry);
   const [pa, pc] = horizontal ? [py, px] : [px, py];
   const { width, offset } = mark.placement(visible, along);
-  for (let group = visible.length - 1; group >= 0; group--) {
-    const s = visible[group]!;
-    const from = offset(s);
-    const [start, end] = mark.range(s, entry.frame);
-    for (let k = end - 1; k >= start; k--) {
-      const ends = mark.ends(s, rowOf(s, k), along, across);
-      if (!ends) continue;
-      const { center, tip, root } = ends;
-      if (
-        pa >= center + from &&
-        pa <= center + from + width &&
-        pc >= Math.min(tip, root) &&
-        pc <= Math.max(tip, root)
-      )
-        return { series: s, position: k };
+  // Bars wider than their places may overlap: the last painted is on top,
+  // highlighted rows over the others, then by series, a series' looks in
+  // turn (a geometry each), and rows.
+  const { table } = mark;
+  const lit = table && entry.frame.highlighted?.(table);
+  const hit = (want?: number) => {
+    for (let group = visible.length - 1; group >= 0; group--) {
+      const s = visible[group]!;
+      const from = offset(s);
+      const looks = s.features?.rows;
+      const lookOf = (row: number) => ((looks?.paints.length ?? 1) > 1 ? looks!.of(row) : 0);
+      const [start, end] = mark.range(s, entry.frame);
+      let top: { position: number; look: number } | undefined;
+      for (let k = end - 1; k >= start; k--) {
+        const row = rowOf(s, k);
+        if (want !== undefined && (lit![row] ?? 0) !== want) continue;
+        const look = lookOf(row);
+        if (top && look <= top.look) continue;
+        const ends = mark.ends(s, row, along, across);
+        if (!ends) continue;
+        const { center, tip, root } = ends;
+        if (
+          pa >= center + from &&
+          pa <= center + from + width &&
+          pc >= Math.min(tip, root) &&
+          pc <= Math.max(tip, root)
+        )
+          top = { position: k, look };
+      }
+      if (top) return { series: s, position: top.position };
     }
-  }
-  return undefined;
+    return undefined;
+  };
+  return lit ? (hit(1) ?? hit(0)) : hit();
 }
 
 /** The histogram bin under a pixel, inside what its series draws: the topmost series'. */

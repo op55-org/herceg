@@ -15,6 +15,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { AxisGuide, Scene, SegmentsItem, TextItem } from "../../src/scene/scene.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { drawnLines } from "../helpers/guides.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
@@ -66,7 +67,7 @@ describe("listed axes on the default side", () => {
     expect(sideOf(scene, "bottom")).toBeUndefined();
     expect(sideOf(scene, "top")).toBeDefined();
     // Grid lines stay with the scale.
-    expect(scene.panels[0]!.grid.y.length).toBeGreaterThan(0);
+    expect(gridAt(scene.panels[0]!, "y").length).toBeGreaterThan(0);
   });
 });
 
@@ -118,9 +119,9 @@ describe("axes on other sides", () => {
         y: { nice: false },
         guides: [axis({ scale: "y", place: { side: "right" }, ticks: { values: [2, 8] }, grid })],
       }).scene.panels[0]!;
-    expect(moved(false).grid.y).toEqual([]);
+    expect(gridAt(moved(false), "y")).toEqual([]);
     const lines = moved(true);
-    expect(lines.grid.y).toHaveLength(2);
+    expect(gridAt(lines, "y")).toHaveLength(2);
     expect(texts(lines.axes.find((a) => a.side === "right")).map((t) => t.text)).toEqual([
       "2",
       "8",
@@ -140,7 +141,7 @@ describe("axes on other sides", () => {
       ],
     }).scene.panels[0]!;
     const right = unit.axes.find((a) => a.side === "right")!;
-    expect(unit.grid.y).toEqual(right.ticks.map((t) => t.position));
+    expect(gridAt(unit, "y")).toEqual(right.ticks.map((t) => t.position));
     // Moved, it leaves out repeated labels as its layers do.
     expect(right.ticks.map((t) => t.label)).toEqual(["0", "1"]);
   });

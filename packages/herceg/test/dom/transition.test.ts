@@ -59,8 +59,9 @@ describe("view transitions", () => {
   it("count each chart once toward the first frame of the charts moving together", () => {
     const model = { setTransitionDomains() {} } as unknown as ChartModel;
     const scale = (domain: number[]) => ({ type: "linear", domain }) as unknown as DrawnPanel["x"];
-    const panel = { x: scale([0, 100]), y: scale([0, 10]) } as DrawnPanel;
-    const plan = () => ({ x: scale([20, 40]), y: scale([0, 5]) }) as DrawnPanel;
+    const plans = { x: {}, y: {} } as DrawnPanel["plans"];
+    const panel = { x: scale([0, 100]), y: scale([0, 10]), plans } as DrawnPanel;
+    const plan = () => ({ x: scale([20, 40]), y: scale([0, 5]), plans }) as DrawnPanel;
     const animation = new ViewAnimation(model, null);
     // Asked for twice before a frame, a 3 ms chart still plans one view and draws one frame.
     expect(animation.start(panel, true, 3)).toBe(true);

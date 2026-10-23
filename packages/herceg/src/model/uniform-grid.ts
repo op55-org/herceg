@@ -117,7 +117,19 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
         side.own ? columnGap(side.labeled, after, columns, side.room, 0) : 0;
       // Axes the guides list on the right of panels before the last of a row.
       const inner = beside?.after.some((drawn, i) => drawn && i % columns !== columns - 1);
-      const labelRoom = room(leftSide, false) + room(rightSide, true) + (inner ? beside!.right : 0);
+      // Marks' labels outside the plots right of panels before the last of
+      // a row, and left of those after the first, beyond their y labels.
+      const marks = [0, 0];
+      for (let i = 0; i < count && columns > 1; i++) {
+        const [before, after] = h.labels(i);
+        if (i % columns > 0) marks[0] = Math.max(marks[0]!, before);
+        if (i % columns < columns - 1) marks[1] = Math.max(marks[1]!, after);
+      }
+      const labelRoom =
+        room(leftSide, false) +
+        room(rightSide, true) +
+        (inner ? beside!.right : 0) +
+        marks.reduce((sum, size) => sum + (size && size + GAP), 0);
       let gapAcross = columns > 1 ? Math.max(16, labelRoom, sameLayout ? kept.columnGap : 0) : 0;
       if (frozen) gapAcross = kept.columnGap;
       const weighted = grid.columnWeights !== undefined;

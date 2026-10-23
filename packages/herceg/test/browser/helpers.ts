@@ -7,7 +7,9 @@ import type { MouseInput } from "../../../../scripts/browser/commands.ts";
 export { MOUSE } from "../../../../scripts/browser/mouse.ts";
 
 import { type Chart, MountedChart } from "../../src/dom/chart.ts";
+import { estimateText } from "../../src/layout/text.ts";
 import type { ChartModel } from "../../src/model/model.ts";
+import type { LabelsGeometry, ShapesGeometry, TextGeometry } from "../../src/scene/scene.ts";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
@@ -69,4 +71,32 @@ export const dateTimes = (text: string) => text.replace(/(\d{4}) at (\d)/g, "$1,
 /** The model a chart draws from, for what no public method reports. */
 export function modelOf(chart: Chart): ChartModel {
   return MountedChart.modelOf(chart);
+}
+
+/**
+ * The groups of what a chart's panels paint in its SVG layer, in paint
+ * order (after its backgrounds; an inset's box group before its own).
+ */
+export function panelGroups(root: Element): Element[] {
+  const children = [...root.querySelector("svg")!.children];
+  // Defs and backgrounds first, guides and the pointer's overlay last.
+  return children.slice(2, -2);
+}
+
+/** The text a chart's marks draw, as its scene holds it: a canvas holds no text to read. */
+export function labelsOf(chart: Chart): string[] {
+  return modelOf(chart)
+    .scene(estimateText)
+    .panels.flatMap((panel) => panel.marks)
+    .flatMap((mark) =>
+      mark.kind === "text"
+        ? (mark as TextGeometry).labels
+        : mark.kind === "labels"
+          ? (mark as LabelsGeometry).items.map((item) => item.text)
+          : mark.kind === "shapes"
+            ? (mark as ShapesGeometry).shapes.flatMap((shape) =>
+                "text" in shape ? [shape.text] : [],
+              )
+            : [],
+    );
 }

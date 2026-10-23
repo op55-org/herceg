@@ -32,6 +32,7 @@ import type {
   RectGeometry,
   SegmentGeometry,
 } from "../../src/scene/scene.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>, options?: { maxRows?: number }): Table =>
@@ -186,6 +187,71 @@ describe("highlighting", () => {
       [n - 10, DIM, n - 10],
       [10, 1, 10],
     ]);
+  });
+
+  contractTest("highlight.lines.order", () => {
+    // Each line's selected rows over its own dimmed ones, series by series:
+    // a later series' dimmed markers over an earlier one's selected markers,
+    // where picking finds them.
+    const two = table({ x: [0, 1, 0, 1], y: [5, 5, 5, 5], s: ["a", "a", "b", "b"] });
+    const { store, highlighter, model } = highlighted(two, [
+      line(two, { x: "x", y: "y", series: "s", markers: true }),
+    ]);
+    model.layoutHighlight = (source) => highlighter.selected(source);
+    store.set("focus", selectRows(new RowSet(two).addAll([0, 1])));
+    const keys = model.scene(estimateText).panels[0]!.marks.map(({ key }) => key);
+    const litA = keys.findIndex((key) => key.includes('"a"') && key.includes("\u0001on"));
+    const ofB = keys.map((key) => key.includes('"b"'));
+    expect(litA).toBeGreaterThan(-1);
+    expect(litA).toBeLessThan(ofB.lastIndexOf(true));
+    const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(5)];
+    expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(3);
+    // A lone selected row's dot too: over its own line, under later series.
+    const plain = highlighted(two, [line(two, { x: "x", y: "y", series: "s" })]);
+    plain.model.layoutHighlight = (source) => plain.highlighter.selected(source);
+    plain.store.set("focus", selectRows(new RowSet(two).add(1)));
+    const drawn = plain.model.scene(estimateText).panels[0]!.marks.map(({ key }) => key);
+    const dot = drawn.findIndex((key) => key.includes('"a"') && key.endsWith("-dots"));
+    expect(dot).toBeGreaterThan(-1);
+    expect(dot).toBeLessThan(drawn.map((key) => key.includes('"b"')).lastIndexOf(true));
+    expect(plain.model.inspect(px, py, "nearest")!.points[0]!.row).toBe(3);
+  });
+
+  contractTest("highlight.clouds.order", () => {
+    // Every series' dimmed cloud, then every series' selected rows: a later
+    // series' dimmed points never cover an earlier one's selected rows.
+    const n = 100_000;
+    const source = table({
+      x: Float64Array.from({ length: 2 * n }, (_, i) => i % n),
+      y: new Float64Array(2 * n),
+      s: Array.from({ length: 2 * n }, (_, i) => (i < n ? "a" : "b")),
+    });
+    const { store, model } = highlighted(source, [point(source, { x: "x", y: "y", series: "s" })]);
+    store.set("focus", selectWhere(col("x").lt(10)));
+    const marks = model.scene(estimateText, true).panels[0]!.marks as PointGeometry[];
+    expect(marks.map((g) => [g.key.split("\u0001")[0], g.fillOpacity])).toEqual([
+      [expect.stringContaining("a"), DIM],
+      [expect.stringContaining("b"), DIM],
+      [expect.stringContaining("a"), 1],
+      [expect.stringContaining("b"), 1],
+    ]);
+    // A series of a few points drawn on the CPU before a cloud keeps its
+    // place: under it, where picking finds the later series' point.
+    const mixed = table({
+      x: Float64Array.from({ length: n + 1 }, (_, i) => (i === 0 ? 5 : i - 1)),
+      y: new Float64Array(n + 1),
+      s: Array.from({ length: n + 1 }, (_, i) => (i === 0 ? "few" : "many")),
+    });
+    const both = highlighted(mixed, [point(mixed, { x: "x", y: "y", series: "s" })]);
+    both.store.set("focus", selectWhere(true));
+    const drawn = both.model.scene(estimateText, true).panels[0]!.marks as PointGeometry[];
+    const lit = drawn.filter((g) => g.key.includes("\u0001on"));
+    expect(lit.map((g) => [Boolean(g.cloud), g.key.includes("few")])).toEqual([
+      [false, true],
+      [true, false],
+    ]);
+    const [px, py] = [both.model.xScale()!.map(5), both.model.yScale()!.map(0)];
+    expect(both.model.inspect(px, py, "nearest")!.points[0]!.row).toBe(6);
   });
 
   it("dims outlined points' rings too, and draws translucent clouds' points once", () => {

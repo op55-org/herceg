@@ -891,15 +891,7 @@ const textStyle: Check = (v, path) => {
     opacity: fraction,
     lineHeight: positive,
     align: oneOf("start", "center", "end"),
-    verticalAlign: (a, at) => {
-      oneOf("top", "middle", "bottom")(a, at);
-      // Round 2 freezes it before stream R draws it (marks/pending.ts).
-      throw refusal(
-        at,
-        "not drawn as given yet (round 2 stream R adds it); drop verticalAlign",
-        "unsupported",
-      );
-    },
+    verticalAlign: oneOf("top", "middle", "bottom"),
     halo,
     background: textBox,
     padding: insets,
@@ -1695,10 +1687,28 @@ const markAnchor: Check = (v, path) => {
   } satisfies ChecksOf<MarkAnchorSpec>);
 };
 
-/** A mark's place for each row along an axis: a field's name, or a coordinate. */
-const rowPosition: Check = (v, path) => (isRecord(v) ? coordinate(v, path) : field(v, path));
+/**
+ * A coordinate a mark of rows places each row by: a field's, or a number
+ * field's share or pixels. One place for every row is a rule's or text's.
+ */
+const rowCoordinate: Check = (v, path) => {
+  coordinate(v, path);
+  const c = v as Record<string, unknown>;
+  for (const key of ["data", "fraction", "px"])
+    if (key in c && !isRecord(c[key]))
+      fail(
+        key === "data" ? path : `${path}.${key}`,
+        key === "data"
+          ? "{ field }, { fraction: { field } }, or { px: { field } }: each row is placed by its own value"
+          : "{ field }: each row is placed by its own value",
+        key === "data" ? v : c[key],
+      );
+};
+
+/** A mark's place for each row along an axis: a field's name, or a coordinate a field gives. */
+const rowPosition: Check = (v, path) => (isRecord(v) ? rowCoordinate(v, path) : field(v, path));
 /** As `rowPosition`, or several fields drawn side by side. */
-const rowPositions: Check = (v, path) => (isRecord(v) ? coordinate(v, path) : fields(v, path));
+const rowPositions: Check = (v, path) => (isRecord(v) ? rowCoordinate(v, path) : fields(v, path));
 
 /** The shapes points and markers take. */
 const SYMBOL_NAMES = [

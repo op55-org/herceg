@@ -12,6 +12,7 @@ import { facet } from "../../src/model/facet.ts";
 import { rangeNavigator } from "../../src/model/navigator.ts";
 import { panels } from "../../src/model/panels.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import {
   dateTimes,
   MOUSE,
@@ -295,6 +296,45 @@ describe("a navigator's sliders", () => {
     const live = group(chart).querySelector('[aria-live="polite"]')!;
     await frame();
     expect(live.textContent).toMatch(/^Showing 200(\.\d+)? to 400(\.\d+)?\.$/);
+  });
+
+  contractTest("navigator.padding", async () => {
+    // The window shows x's range with its padding; what it moves to is a
+    // view without it, padded once when drawn.
+    for (const padding of [0.1, { px: 20 }] as const) {
+      const chart = await mount({ x: { padding } });
+      chart.setViewport([400, 600]);
+      await frame();
+      const [start, middle, end] = sliders(chart);
+      // Keys pan the view, keeping its width.
+      key(middle!, "ArrowRight");
+      key(middle!, "ArrowRight");
+      const [x0, x1] = chart.getViewport().x!;
+      expect(x1 - x0).toBeCloseTo(200, 6);
+      expect(x0).toBeGreaterThan(400);
+      // Dragging the start edge leaves the window's end where it is.
+      await frame();
+      const shownEnd = () => Number(end!.getAttribute("aria-valuenow"));
+      const before = shownEnd();
+      const strip = stripBox(chart);
+      const edge = strip.x + Number.parseFloat(start!.style.left) + 1;
+      drag(chart, start!, edge, edge - 40);
+      const [y0, y1] = chart.getViewport().x!;
+      expect(y0).toBeLessThan(x0 - 10);
+      await frame();
+      expect(shownEnd()).toBeCloseTo(before, 6);
+      // Escape takes a drag back to the view it started from.
+      await frame();
+      const y = strip.y + strip.height / 2;
+      const at = strip.x + Number.parseFloat(middle!.style.left) + 2;
+      pointer(chart, middle!, "pointerdown", at, y);
+      pointer(chart, middle!, "pointermove", at + 30, y);
+      expect(chart.getViewport().x![0]).toBeGreaterThan(y0);
+      key(middle!, "Escape");
+      expect(chart.getViewport().x).toEqual([y0, y1]);
+      pointer(chart, middle!, "pointerup", at + 30, y);
+      chart.destroy();
+    }
   });
 
   it("follow the wheel, setViewport, and synced charts", async () => {

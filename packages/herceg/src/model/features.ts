@@ -10,12 +10,14 @@ import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { Polyline } from "../lod/polyline.ts";
 import type { Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts";
+import type { RowBindings } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
 import type { TraceFrame } from "../marks/trace.ts";
 import type { Geometry } from "../scene/scene.ts";
 import type { FormatSpec, SwatchSpec } from "../spec/guides.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import type { clearDomain } from "./clearance.ts";
 import type { GuideKit } from "./guides.ts";
 import type { ChartConfig } from "./model.ts";
 
@@ -72,6 +74,8 @@ export interface Identities {
 export interface CompiledFeatures {
   /** What `mark` takes from the features; undefined for a mark that uses none. */
   of(mark: Mark): MarkFeatures | undefined;
+  /** `frame` with the scales placing a mark's rows where `bound` binds them (marks/row-bindings.ts). */
+  frame(frame: Frame, bound: RowBindings): Frame;
   /**
    * Before each scene's series: the categorical scales' values, from every
    * mark's rows, `slot`, the chart's palette slot of an identity key (for
@@ -95,6 +99,10 @@ export interface CompiledFeatures {
 
 /** One mark's compiled features. */
 export interface MarkFeatures {
+  /** Pixels a line's markers reach past their observations along each axis, as `Mark.inset`. */
+  readonly inset?: { readonly x: number; readonly y: number } | undefined;
+  /** Automatic padding's solver, as `Mark.clearDomain`, with `inset`. */
+  readonly clearDomain?: typeof clearDomain | undefined;
   /** The mark's series' colors: by value through its color channel, by series through `style.by`. */
   palette(palette: Palette): Palette;
   /** What a series of the mark draws with, set on it as it is resolved. */
@@ -228,13 +236,14 @@ export function asksFeatures(
 
 /**
  * Whether a configuration uses what only the feature compiler draws:
- * categorical scales, or marks whose options need it (`Mark.featured`).
+ * categorical scales, or marks whose options need it (`Mark.featured`)
+ * or that place rows by coordinates (`Mark.bound`).
  * Without it, such a configuration draws without its marks' features, so
  * charts load it first and static output brings it.
  */
 export function needsFeatures(config: ChartConfig): boolean {
   return (
     Object.keys(config.scales ?? {}).some((name) => !/^(x|y|yRight)$/.test(name)) ||
-    config.marks.some((mark) => (mark as Mark).featured)
+    config.marks.some((mark) => (mark as Mark).featured || (mark as Mark).bound)
   );
 }

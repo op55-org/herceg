@@ -6,6 +6,7 @@
 // layers of its own (minor ticks, a row of day boundaries), tick marks
 // pointing in or out, a line, and labels turned or kept apart.
 
+import { anchorBlock } from "../layout/block.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { AxisPlan } from "../model/axis.ts";
 import type { AxesState, CompiledAxes, GuideKit } from "../model/guides.ts";
@@ -27,6 +28,8 @@ import { countOf, tickPlanner } from "./ticks.ts";
 
 /** The side each scale's automatic axis is on. */
 const HOME: Record<ScaleName, Side> = { x: "bottom", y: "left", yRight: "right" };
+/** Whether `scale` is x, y, or yRight, not one of the chart's own (which may be named "constructor"). */
+const builtIn = (scale: string): scale is ScaleName => Object.hasOwn(HOME, scale);
 /** The default x axes' tick marks' length, which their labels' room keeps (axis-guide.ts). */
 export const TICK = 5;
 /** Pixels between rows of labels. */
@@ -37,6 +40,8 @@ const GAP = 6;
 const PAD = 4;
 /** Pixels from a y axis' line to its labels, as the default axes draw them. */
 const Y_GAP = 8;
+/** Pixels from labels inside the plot to the ends of the ticks on their side, by default. */
+const INSIDE_GAP = 4;
 
 /** A layer of an axis' ticks, resolved. */
 export interface Layer {
@@ -60,7 +65,8 @@ export interface ListedAxis {
   key: string;
   /** Where it is listed, for messages. */
   path: string;
-  scale: ScaleName;
+  /** x, y, yRight, or a position scale of the chart's own. */
+  scale: string;
   side: Side;
   /** On its scale's default side, where the model's plan gives its major ticks. */
   home: boolean;
@@ -82,6 +88,8 @@ export interface ListedAxis {
   plain: boolean;
   /** For a y axis on the right: whether the panels of each row share y, so the last one's axis is theirs. */
   rows: boolean;
+  /** For an x axis above the plots: whether the panels of each column share x, so the first one's axis is theirs. */
+  columns: boolean;
   /** Where panels sharing its scale draw it: on their outer edge, or "all" of them. */
   repeat: "outer" | "all" | undefined;
 }
@@ -90,18 +98,33 @@ export interface ListedAxis {
  * The axes `config.guides` lists, and the short forms as the model reads
  * them: each scale's settings with those of its listed axis on its default
  * side, or with the automatic axis hidden when the scale's axes are all
- * elsewhere. Undefined when the guides list no axes.
+ * elsewhere. With tick labels `aligned` at their ticks, which listed axes
+ * draw, a scale the guides list no axis of has one on its default side.
+ * Undefined when there are no axes to list.
  */
 export function listedAxes(
   config: ChartConfig,
+  aligned = false,
 ): { read: Partial<Record<ScaleName, ChartAxisOptions>>; axes: ListedAxis[] } | undefined {
-  const guides = config.guides ?? [];
+  const right = config.marks.some((mark) => mark.spec.axis === "right");
+  const given = config.guides ?? [];
+  const guides = aligned
+    ? [
+        ...given,
+        ...(["x", "y", ...(right ? ["yRight" as const] : [])] as const).flatMap((scale) =>
+          given.some((guide) => guide.type === "axis" && guide.scale === scale)
+            ? []
+            : [{ type: "axis", scale } as AxisGuideOptions],
+        ),
+      ]
+    : given;
   if (!guides.some((guide) => guide.type === "axis")) return undefined;
   const read: Partial<Record<ScaleName, ChartAxisOptions>> = {};
   const axes: ListedAxis[] = [];
-  const right = config.marks.some((mark) => mark.spec.axis === "right");
   const yScope = config.y?.scope ?? (config.panels ? "panel" : "chart");
   const rows = yScope === "chart" || yScope === "row";
+  const xScope = config.x?.scope ?? (config.panels ? "panel" : "chart");
+  const columns = xScope === "chart" || xScope === "column";
   for (const scale of ["x", "y", "yRight"] as const) {
     const short = config[scale];
     const sides = new Set<Side>();
@@ -130,9 +153,13 @@ export function listedAxes(
       sides.add(side);
       first ??= guide;
       if (side === HOME[scale]) home = guide;
+      const axis = resolve(guide, scale, side, short, `chart guides[${i}]`);
       axes.push({
-        ...resolve(guide, scale, side, short, `chart guides[${i}]`),
+        ...axis,
+        // Aligned labels are the guides' to draw: the model's automatic axes do not align them.
+        plain: axis.plain && !aligned,
         rows,
+        columns,
         repeat: guide.repeat ?? short?.repeat,
       });
     });
@@ -175,18 +202,41 @@ export function listedAxes(
       ...(style && { style }),
     };
   }
+  // Axes of the chart's own position scales go where they are placed: along
+  // y on the right, or along x above the plots, where no other axis is.
+  guides.forEach((guide, i) => {
+    if (guide.type !== "axis" || builtIn(guide.scale)) return;
+    const path = `chart guides[${i}]`;
+    const side = guide.place?.side;
+    if (side !== "right" && side !== "top")
+      throw new Error(
+        `${path}.place.side: an axis of a scale of the chart's own goes on the "right" (along y) or the "top" (along x); ${side ? `received "${side}"` : "give place: { side }"}`,
+      );
+    if (axes.some((axis) => axis.side === side) || (side === "right" && right))
+      throw new Error(`${path}.place.side: the ${side} has an axis already; give its other side`);
+    // The panels of a row (or a column) share the scale's instance where
+    // the chart or each row (column) has one.
+    const scope = (config.scales?.[guide.scale] as { scope?: unknown } | undefined)?.scope;
+    const shared = scope === undefined || scope === "chart";
+    axes.push({
+      ...resolve(guide, guide.scale, side, undefined, path),
+      rows: shared || scope === "row",
+      columns: shared || scope === "column",
+      repeat: guide.repeat,
+    });
+  });
   return { read, axes };
 }
 
 function resolve(
   guide: AxisGuideOptions,
-  scale: ScaleName,
+  scale: string,
   side: Side,
   short: ChartAxisOptions | undefined,
   path: string,
-): Omit<ListedAxis, "rows" | "repeat"> {
-  const home = side === HOME[scale];
-  const across = scale === "x";
+): Omit<ListedAxis, "rows" | "columns" | "repeat"> {
+  const home = builtIn(scale) && side === HOME[scale];
+  const across = side === "top" || side === "bottom";
   const layers = resolveLayers(
     { ...guide, ticks: guide.ticks ?? short?.ticks, format: guide.format ?? short?.format },
     { across, home, path, name: `${scale} axis`, tick: across ? TICK : 3 },
@@ -237,6 +287,7 @@ export function resolveLayers(
     name,
     tick: minor,
     major = across && { direction: "out", length: TICK },
+    beside = true,
   }: {
     across: boolean;
     home: boolean;
@@ -244,6 +295,8 @@ export function resolveLayers(
     name: string;
     tick: number;
     major?: TickMarkSpec | false;
+    /** Whether labels may go inside the plot and apart from their ticks, as axes' may, not colorbars'. */
+    beside?: boolean;
   },
 ): Layer[] {
   const tick = (spec: TickMarkSpec | false | undefined, fallback: TickMarkSpec | false) => {
@@ -272,6 +325,11 @@ export function resolveLayers(
     if (spec?.collision === "wrap" && spec.rotation !== undefined)
       throw new Error(
         `${where}.collision: "wrap" breaks labels that lie flat; drop rotation, or keep turned labels apart with "hide" or "stagger"`,
+      );
+    const placing = spec?.inside ? "inside" : spec?.gap !== undefined ? "gap" : undefined;
+    if (!beside && placing)
+      throw new Error(
+        `${where}.${placing}: a colorbar's labels stand beside its ramp; drop ${placing}`,
       );
     return { ...spec, row };
   };
@@ -323,9 +381,19 @@ export interface Placed {
   lane: readonly number[];
   /** Along y, where each tick's label is drawn, inside the chart. */
   at: readonly number[] | undefined;
+  /**
+   * For flat labels inside the plot, or aligned by their style: which of
+   * their blocks' ends, or middle, is at their tick, in screen order along
+   * the axis (left to right, top to bottom), as their style's align (x) or
+   * verticalAlign (y) says.
+   */
+  align: Align | undefined;
   label: TextPaint;
   tick: StrokePaint;
 }
+
+/** A block's end at a point along an axis, in screen order: it reaches on from there ("start"), back ("end"), or both ways. */
+type Align = "start" | "center" | "end";
 
 /** The compiled axes of `listed`, planned and drawn with the chart's code `kit`. */
 export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): CompiledAxes {
@@ -337,13 +405,16 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
   // more (turned labels choosing a steeper angle in narrower plots), the
   // room grows for scenes of this width, as margins do, and the model lays
   // the scene out again.
-  let kept = { width: Number.NaN, top: 0, bottom: 0 };
+  // Room below may be less than none: an axis on the default side with no
+  // labels outside the plot gives back what the model keeps for them.
+  let kept = { width: Number.NaN, top: 0, bottom: Number.NEGATIVE_INFINITY };
   let reserved = { top: 0, bottom: 0 };
   return {
     across(state) {
-      if (kept.width !== state.width) kept = { width: state.width, top: 0, bottom: 0 };
+      if (kept.width !== state.width)
+        kept = { width: state.width, top: 0, bottom: Number.NEGATIVE_INFINITY };
       let top = 0;
-      let bottom = 0;
+      let bottom = Number.NEGATIVE_INFINITY;
       const home = changed("x");
       state.labeled.x.forEach((shows, i) => {
         if (shows && home)
@@ -364,6 +435,11 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
           throw new Error(
             `${axis.path}.place.side: an x axis above the plots needs panels without titles or headers; place it on the "bottom"`,
           );
+        const rowCount = Math.ceil(state.labeled.x.length / state.columns);
+        if (!state.cells && rowCount > 1 && !axis.columns && axis.repeat !== "all")
+          throw new Error(
+            `${axis.path}.place.side: an x axis above the plots stands over each column's first panel, so the panels of a column must share ${axis.scale}; give ${axis.scale} scope "column" or "chart", ${builtIn(axis.scale) ? 'repeat "all" for one above every panel, or keep the axis at the bottom' : 'or repeat "all" for one above every panel'}`,
+          );
         for (let i = 0; i < over.length; i++)
           if (drawsIn(axis, state, i)) {
             over[i] = true;
@@ -379,7 +455,8 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
             );
           }
       }
-      reserved = { top: Math.max(top, kept.top), bottom: Math.max(bottom, kept.bottom) };
+      bottom = Math.max(bottom, kept.bottom);
+      reserved = { top: Math.max(top, kept.top), bottom: Number.isFinite(bottom) ? bottom : 0 };
       return { ...reserved, over };
     },
     beside(state) {
@@ -388,20 +465,26 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
       for (const scale of ["y", "yRight"] as const) {
         const home = changed(scale);
         if (!home) continue;
-        // Ticks pointing out, and labels of other layers wider than the model's.
-        let reach = 0;
+        // What its ticks and labels outside the plot take, over the room
+        // the model keeps for its labels (as wide as the major layer's).
+        let needs = Number.NEGATIVE_INFINITY;
+        let keeps = Number.NEGATIVE_INFINITY;
         state.labeled[scale].forEach((shows, i) => {
-          if (shows) reach = Math.max(reach, widerBy(kit, home, state, i));
+          if (!shows) return;
+          const placed = placedLayers(kit, home, state, i, state.plan(scale, i, 0));
+          needs = Math.max(needs, outsideBreadth(kit, placed, state.measure));
+          keeps = Math.max(keeps, Math.ceil(widest(kit, [placed[0]!], state.measure)) + Y_GAP);
         });
-        if (scale === "y") left = outward(home.layers) + reach;
-        else right = outward(home.layers) + reach;
+        const extra = Number.isFinite(needs) ? needs - keeps : outward(home.layers);
+        if (scale === "y") left = extra;
+        else right = extra;
       }
       const after = state.drawsY.map(() => false);
       for (const axis of elsewhere) {
         if (axis.side !== "right") continue;
         if (!state.cells && state.columns > 1 && !axis.rows && axis.repeat !== "all")
           throw new Error(
-            `${axis.path}.place.side: a y axis on the right stands beside each row's last panel, so the panels of a row must share y; give y scope "row" or "chart", repeat "all" for one beside every panel, or keep the axis on the left`,
+            `${axis.path}.place.side: a y axis on the right stands beside each row's last panel, so the panels of a row must share ${axis.scale}; give ${axis.scale} scope "row" or "chart", ${builtIn(axis.scale) ? 'repeat "all" for one beside every panel, or keep the axis on the left' : 'or repeat "all" for one beside every panel'}`,
           );
         state.drawsY.forEach((_, i) => {
           if (!drawsIn(axis, state, i)) return;
@@ -415,9 +498,9 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
       const { measure } = state;
       let lo = Infinity;
       let hi = -Infinity;
-      const add = (tick: AxisTick, paint: TextPaint, angle: number, run: Run) => {
+      const add = (tick: AxisTick, paint: TextPaint, angle: number, run: Run, align?: Align) => {
         if (!tick.label) return;
-        const [from, to] = extent(tick, paint, angle, run, measure);
+        const [from, to] = extent(tick, paint, angle, run, measure, align);
         lo = Math.min(lo, from);
         hi = Math.max(hi, to);
       };
@@ -425,7 +508,8 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
       if (state.labeled.x[i]) {
         if (home)
           for (const placed of placedLayers(kit, home, state, i, plan))
-            for (const tick of placed.ticks) add(tick, placed.label, placed.angle, "below");
+            for (const tick of placed.ticks)
+              add(tick, placed.label, placed.angle, runOf(home, placed.layer), placed.align);
         else {
           // The default axis' labels, centered on their ticks.
           const paint = state.styles.axisText("tickLabel", "x", i);
@@ -436,13 +520,14 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
       }
       for (const axis of elsewhere)
         if (axis.side === "top" && drawsIn(axis, state, i))
-          for (const placed of placedLayers(kit, axis, state, i, plan))
-            for (const tick of placed.ticks) add(tick, placed.label, placed.angle, "above");
+          for (const placed of placedLayers(kit, axis, state, i, over(state, axis, i, plan)))
+            for (const tick of placed.ticks)
+              add(tick, placed.label, placed.angle, runOf(axis, placed.layer), placed.align);
       return lo > hi ? undefined : [lo, hi];
     },
     fits(state, planOf) {
       let top = 0;
-      let bottom = 0;
+      let bottom = Number.NEGATIVE_INFINITY;
       const home = changed("x");
       state.labeled.x.forEach((shows, i) => {
         if (shows && home)
@@ -457,7 +542,13 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
             if (drawsIn(axis, state, i))
               top = Math.max(
                 top,
-                depthOf(kit, axis, state, i, placedLayers(kit, axis, state, i, planOf(i))),
+                depthOf(
+                  kit,
+                  axis,
+                  state,
+                  i,
+                  placedLayers(kit, axis, state, i, over(state, axis, i, planOf(i))),
+                ),
               );
       if (top <= reserved.top + 0.5 && bottom <= reserved.bottom + 0.5) return true;
       kept = {
@@ -475,14 +566,23 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
               kit,
               guide,
               axis,
-              placedLayers(kit, axis, state, index, plans[axis.scale]),
+              // Axes on their scale's default side are of x, y, and yRight.
+              placedLayers(kit, axis, state, index, plans[axis.scale as ScaleName]),
               state,
               index,
             )
           : guide;
       });
       for (const axis of elsewhere) {
-        const plan = plans[axis.scale];
+        const plan = builtIn(axis.scale)
+          ? plans[axis.scale]
+          : plans.own?.plan(
+              axis.scale,
+              index,
+              axis.across ? plot.width : plot.height,
+              axis.across,
+              axis.across ? plot.x : plot.y,
+            );
         if (!plan) continue;
         if (drawsIn(axis, state, index))
           out.push(
@@ -498,8 +598,8 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
  * Whether panel `i` draws `axis`, an axis elsewhere: an x axis above each
  * panel of the first row, a y axis beside the last panel of each row that
  * draws along y (in a layout of cells, the outer panels of those sharing
- * the scale), or with `repeat` "all" every panel; unless the panel's own
- * settings hide the scale's axis.
+ * the instance of the axis' scale), or with `repeat` "all" every panel;
+ * unless the panel's own settings hide the scale's axis.
  */
 function drawsIn(axis: ListedAxis, state: AxesState, i: number): boolean {
   if (axis.off?.[i]) return false;
@@ -517,6 +617,36 @@ function lastInRow(state: AxesState, i: number): boolean {
   return i % state.columns === state.columns - 1 || i === state.drawsY.length - 1;
 }
 
+/** How far tick marks reach into the plot from the axis line. */
+function inward(layers: readonly Layer[]): number {
+  let reach = 0;
+  for (const { tick } of layers)
+    if (tick)
+      reach = Math.max(
+        reach,
+        tick.direction === "in" ? tick.length : tick.direction === "cross" ? tick.length / 2 : 0,
+      );
+  return reach;
+}
+
+/**
+ * Pixels from the axis line to a layer's first row of labels: past the
+ * ticks on their side by their `gap`; without one, as default axes place
+ * labels outside (`gap` from the line, and past ticks longer than theirs
+ * along x), or inside, a few pixels past the ticks.
+ */
+function firstRow(
+  labels: TickLabelsSpec,
+  gap: number,
+  across: boolean,
+  layers: readonly Layer[],
+): number {
+  if (labels.inside) return inward(layers) + (labels.gap ?? INSIDE_GAP);
+  const reach = outward(layers);
+  if (labels.gap !== undefined) return reach + labels.gap;
+  return gap + (across ? Math.max(0, reach - TICK) : reach);
+}
+
 /** How far tick marks reach out from the axis line. */
 export function outward(layers: readonly Layer[]): number {
   let reach = 0;
@@ -527,6 +657,16 @@ export function outward(layers: readonly Layer[]): number {
         tick.direction === "out" ? tick.length : tick.direction === "cross" ? tick.length / 2 : 0,
       );
   return reach;
+}
+
+/**
+ * The plan of `axis`, above or below panel `i`, over the pixels x's `plan`
+ * spans there: x's own, or its scale's (a scale of the chart's own).
+ */
+function over(state: AxesState, axis: ListedAxis, i: number, plan: AxisPlan): AxisPlan | undefined {
+  if (axis.scale === "x") return plan;
+  const [a, b] = plan.scale.range;
+  return state.plan(axis.scale, i, Math.abs(b - a), Math.min(a, b));
 }
 
 /** The x plan an axis' room is measured with before x is planned: over a column's share of the width. */
@@ -581,8 +721,8 @@ export function layered(
    */
   within: readonly [number, number] | undefined,
 ): Placed[] {
-  const run: Run = axis.across ? (axis.above ? "above" : "below") : "along";
   const placed = axis.layers.map((layer): Placed => {
+    const run = runOf(axis, layer);
     const at = `${layer.path}.style`;
     const label = restyle(kit, read, base.label, layer.style?.tickLabel, `${at}.tickLabel`);
     const tick = restroke(kit, read, base.tick, layer.style?.tick, `${at}.tick`);
@@ -606,6 +746,7 @@ export function layered(
     let lanes = 1;
     let lane: number[] = [];
     let labelAt: number[] | undefined;
+    let align: Align | undefined;
     const labels = layer.labels;
     if (labels) {
       // Labels that may turn are written on one line.
@@ -613,7 +754,12 @@ export function layered(
         ticks = ticks.map((t) =>
           t.label.includes("\n") ? { ...t, label: t.label.replaceAll("\n", " ") } : t,
         );
-      angle = angleOf(labels, ticks, label, measure, run);
+      // Flat labels stand at their ticks as their style aligns them: inside
+      // the plot centered by default, outside it where the style says.
+      const aligned = (axis.across ? label.align : label.verticalAlign) !== undefined;
+      const flat = labels.inside || aligned ? alignAt(axis.across, label) : undefined;
+      angle = angleOf(labels, ticks, label, measure, run, flat);
+      if (!angle) align = flat;
       const collision = labels.collision ?? "show";
       if (collision === "wrap") ticks = wrapped(ticks, label, measure);
       if (collision === "stagger") lanes = 2;
@@ -625,6 +771,8 @@ export function layered(
         labelAt = ticks.map(({ position, label: text }) => {
           if (!text) return position;
           const { height } = boxOf(text, label, measure);
+          // From the tick to its block's middle.
+          const middle = align === "start" ? height / 2 : align === "end" ? -height / 2 : 0;
           if (height > hi - lo + 0.5)
             throw new kit.ChartError({
               code: "layout-failed",
@@ -632,53 +780,107 @@ export function layered(
               path: layer.path,
               message: `${layer.path}: a label ${Math.ceil(height)} px tall does not fit the ${Math.floor(hi - lo)} px down it stays inside; make the chart or inset taller, or its labels smaller or of fewer lines`,
             });
-          return Math.min(Math.max(position, lo + height / 2), hi - height / 2);
+          return Math.min(Math.max(position + middle, lo + height / 2), hi - height / 2) - middle;
         });
       }
       if (collision === "hide" || collision === "stagger") {
         const drawnAt = labelAt;
         const shown = drawnAt ? ticks.map((t, k) => ({ ...t, position: drawnAt[k]! })) : ticks;
-        const result = kept(shown, label, measure, angle, lanes, run);
+        const result = kept(shown, label, measure, angle, lanes, run, align);
         ticks = ticks.map((t, k) => ({ ...t, label: result.ticks[k]!.label }));
         lane = result.lane;
       }
     }
-    return { layer, ticks, angle, lanes, lane, at: labelAt, label, tick };
+    return { layer, ticks, angle, lanes, lane, at: labelAt, align, label, tick };
   });
-  return prioritized(placed, measure, run);
+  // Labels stand off the line as default axes place them, by the gap for their size.
+  const gap = axis.across ? kit.tickLabelGap(base.label.size) : Y_GAP;
+  return prioritized(kit, placed, measure, axis, gap);
 }
 
 /** How an axis' labels lie: side by side below or above the plots, or one above another along y. */
 type Run = "below" | "above" | "along";
 
+/** How `layer`'s labels lie on `axis`: those inside the plot on the line's other side. */
+function runOf(axis: { across: boolean; above: boolean }, layer: Layer): Run {
+  if (!axis.across) return "along";
+  return axis.above !== (layer.labels ? !!layer.labels.inside : false) ? "above" : "below";
+}
+
+/**
+ * Where flat labels stand at their ticks along the axis, in screen order:
+ * as their style's `align` says along x, `verticalAlign` along y.
+ */
+function alignAt(across: boolean, paint: TextPaint): Align {
+  if (across) return paint.align ?? "center";
+  return paint.verticalAlign === "top"
+    ? "start"
+    : paint.verticalAlign === "bottom"
+      ? "end"
+      : "center";
+}
+
 /**
  * The layers with labels that overlap a label of a layer of higher
  * priority in their row left out, as a day's date at midnight in place of
- * the hour there.
+ * the hour there: where they meet along the axis and off it (their gaps
+ * past the ticks, `gap` by default, and their lanes).
  */
-function prioritized(layers: Placed[], measure: MeasureText, run: Run): Placed[] {
+function prioritized(
+  kit: GuideKit,
+  layers: Placed[],
+  measure: MeasureText,
+  axis: { across: boolean; above: boolean },
+  gap: number,
+): Placed[] {
   const rank = (placed: Placed) => (placed.layer.labels ? (placed.layer.labels.priority ?? 0) : 0);
+  const inside = ({ layer }: Placed) => (layer.labels ? !!layer.labels.inside : false);
+  const all = layers.map(({ layer }) => layer);
+  // Each label's box, as drawn: its extent along the axis, in its layer's
+  // paint, turn, and alignment, and how far it stands off the line to how
+  // far it reaches. Measured once a layer is compared.
+  const boxes = new Map<Placed, ([number, number, number, number] | undefined)[]>();
+  const boxesOf = (of: Placed) => {
+    let found = boxes.get(of);
+    if (found) return found;
+    const run = runOf(axis, of.layer);
+    const lane = laneDepth(kit, of, measure);
+    const first = firstRow(of.layer.labels || {}, gap, axis.across, all);
+    found = of.ticks.map((tick, k) => {
+      if (!tick.label) return undefined;
+      const at = of.at ? { ...tick, position: of.at[k]! } : tick;
+      const [lo, hi] = extent(at, of.label, of.angle, run, measure, of.align);
+      const near = first + (of.lane[k] ?? 0) * (lane + ROW_GAP);
+      const depth = axis.across
+        ? labelDepth(kit, of, tick.label, measure)
+        : kit.textWidth(tick.label, of.label, measure);
+      return [lo, hi, near, near + depth];
+    });
+    boxes.set(of, found);
+    return found;
+  };
   return layers.map((placed) => {
     const { labels } = placed.layer;
     if (!labels) return placed;
+    // Rows inside the plot and outside it are apart.
     const above = layers.filter(
       (other) =>
-        other.layer.labels && other.layer.labels.row === labels.row && rank(other) > rank(placed),
+        other.layer.labels &&
+        other.layer.labels.row === labels.row &&
+        inside(other) === inside(placed) &&
+        rank(other) > rank(placed),
     );
     if (above.length === 0) return placed;
-    // Each label's extent along the axis, where it is drawn, in its own
-    // layer's paint and turn.
-    const extentOf = (tick: AxisTick, k: number, of: Placed) =>
-      extent(of.at ? { ...tick, position: of.at[k]! } : tick, of.label, of.angle, run, measure);
+    const own = boxesOf(placed);
     const ticks = placed.ticks.map((tick, k) => {
-      if (!tick.label) return tick;
-      const [lo, hi] = extentOf(tick, k, placed);
+      const box = own[k];
+      if (!box) return tick;
+      const [lo, hi, near, far] = box;
       const meets = above.some((other) =>
-        other.ticks.some((kept, j) => {
-          if (!kept.label) return false;
-          const [from, to] = extentOf(kept, j, other);
-          return lo < to + PAD && from < hi + PAD;
-        }),
+        boxesOf(other).some(
+          (kept) =>
+            !!kept && lo < kept[1] + PAD && kept[0] < hi + PAD && near < kept[3] && kept[2] < far,
+        ),
       );
       return meets ? { ...tick, label: "" } : tick;
     });
@@ -686,16 +888,28 @@ function prioritized(layers: Placed[], measure: MeasureText, run: Run): Placed[]
   });
 }
 
-/** Where a label reaches along its axis: its box's extent, as it turns from its tick. */
+/**
+ * Where a label reaches along its axis: its box's extent, as it turns from
+ * its tick, or for flat labels inside the plot, as `align` puts it there.
+ */
 export function extent(
   tick: AxisTick,
   paint: TextPaint,
   angle: number,
   run: Run,
   measure: MeasureText,
+  align?: Align,
 ): [number, number] {
   const { width, height } = boxOf(tick.label, paint, measure);
   const at = tick.position;
+  if (align) {
+    const size = run === "along" ? height : width;
+    return align === "start"
+      ? [at, at + size]
+      : align === "end"
+        ? [at - size, at]
+        : [at - size / 2, at + size / 2];
+  }
   if (run === "along") return [at - height / 2, at + height / 2];
   const { anchor, cos, sin } = turned(angle, run === "above");
   const along = width * cos;
@@ -768,6 +982,7 @@ function angleOf(
   paint: TextPaint,
   measure: MeasureText,
   run: Run,
+  flat?: Align,
 ): number {
   const rotation = labels.rotation;
   if (typeof rotation !== "object") return rotation ?? 0;
@@ -776,7 +991,15 @@ function angleOf(
   for (const angle of rotation.candidates) {
     let fits = true;
     for (let k = 1; k < shown.length && fits; k++)
-      fits = !overlaps(shown[k - 1]!, shown[k]!, paint, measure, angle, run);
+      fits = !overlaps(
+        shown[k - 1]!,
+        shown[k]!,
+        paint,
+        measure,
+        angle,
+        run,
+        angle ? undefined : flat,
+      );
     if (fits) return angle;
   }
   return rotation.candidates.at(-1)!;
@@ -794,10 +1017,17 @@ function overlaps(
   measure: MeasureText,
   angle: number,
   run: Run,
+  align?: Align,
 ): boolean {
   if (!first.label || !second.label) return false;
   // In pixel order, `a` before `b`, as reversed axes have them otherwise.
   const [a, b] = first.position <= second.position ? [first, second] : [second, first];
+  // Blocks aligned at their ticks meet where their extents do.
+  if (align) {
+    const [, end] = extent(a, paint, angle, run, measure, align);
+    const [start] = extent(b, paint, angle, run, measure, align);
+    return start < end + (run === "along" ? 0 : PAD);
+  }
   const d = b.position - a.position;
   // Labels in boxes take their padding too.
   const { width: wa, height: tall } = boxOf(a.label, paint, measure);
@@ -822,12 +1052,13 @@ function kept(
   angle: number,
   lanes: number,
   run: Run,
+  align?: Align,
 ): { ticks: AxisTick[]; lane: number[] } {
   for (let every = 1; every <= ticks.length; every++) {
     const shown = ticks.filter((tick, k) => tick.label && k % every === 0);
     let fits = true;
     for (let k = lanes; k < shown.length && fits; k++)
-      fits = !overlaps(shown[k - lanes]!, shown[k]!, paint, measure, angle, run);
+      fits = !overlaps(shown[k - lanes]!, shown[k]!, paint, measure, angle, run, align);
     if (fits) {
       let n = 0;
       const lane = ticks.map((tick, k) => (tick.label && k % every === 0 ? n++ % lanes : 0));
@@ -861,17 +1092,24 @@ function wrapped(ticks: AxisTick[], paint: TextPaint, measure: MeasureText): Axi
 }
 
 /** How tall a layer's row of labels is: a line (or a wrapped label's lines), or turned labels' extent. */
-function laneDepth(kit: GuideKit, { ticks, angle, label }: Placed, measure: MeasureText): number {
+function laneDepth(kit: GuideKit, placed: Placed, measure: MeasureText): number {
+  let deepest = labelDepth(kit, placed, "", measure);
+  for (const { label } of placed.ticks)
+    deepest = Math.max(deepest, labelDepth(kit, placed, label, measure));
+  return deepest;
+}
+
+/** How far `text`, a label of `placed` on an x axis, reaches from its row's start, as turned. */
+function labelDepth(
+  kit: GuideKit,
+  { angle, label }: Placed,
+  text: string,
+  measure: MeasureText,
+): number {
   const height = kit.textHeight(label);
-  if (!angle) {
-    const lines = Math.max(1, ...ticks.map((tick) => tick.label.split("\n").length));
-    return height + (lines - 1) * label.lineHeight;
-  }
+  if (!angle) return height + (text.split("\n").length - 1) * label.lineHeight;
   const { cos, sin } = turned(angle);
-  let widest = 0;
-  for (const { label: text } of ticks)
-    widest = Math.max(widest, kit.textWidth(text, label, measure));
-  return widest * sin + height * cos;
+  return kit.textWidth(text, label, measure) * sin + height * cos;
 }
 
 /** Each row's depth: the deepest of the layers labeled in it, their lanes included. */
@@ -879,11 +1117,12 @@ export function rowDepths(
   kit: GuideKit,
   layers: readonly Placed[],
   measure: MeasureText,
+  inside = false,
 ): number[] {
   const rows: number[] = [];
   for (const placed of layers) {
     const { labels } = placed.layer;
-    if (!labels) continue;
+    if (!labels || !!labels.inside !== inside) continue;
     const lane = laneDepth(kit, placed, measure);
     const depth = lane * placed.lanes + (placed.lanes - 1) * ROW_GAP;
     rows[labels.row] = Math.max(rows[labels.row] ?? 0, depth);
@@ -891,7 +1130,48 @@ export function rowDepths(
   return Array.from(rows, (row) => row ?? 0);
 }
 
-/** Pixels an x axis' ticks and rows of labels, `layers` placed in panel `i`, take out from the line. */
+/**
+ * Pixels `layers`' tick marks and labels outside the plot take out from
+ * the line of an x axis: its ticks, and each row of labels past them, the
+ * first `gap` from the line unless its layer gives its own. Labels inside
+ * the plot take none.
+ */
+function outsideDepth(
+  kit: GuideKit,
+  layers: readonly Placed[],
+  measure: MeasureText,
+  gap: number,
+): number {
+  const all = layers.map(({ layer }) => layer);
+  const rows = rowDepths(kit, layers, measure);
+  let depth = outward(all);
+  for (const { layer } of layers) {
+    const { labels } = layer;
+    if (!labels || labels.inside) continue;
+    let away = firstRow(labels, gap, true, all);
+    for (let row = 0; row < labels.row; row++) away += (rows[row] ?? 0) + ROW_GAP;
+    depth = Math.max(depth, away + (rows[labels.row] ?? 0));
+  }
+  return depth;
+}
+
+/**
+ * Pixels a y axis' tick marks and labels outside the plot take beside its
+ * line: its ticks, and its widest labels past them. Labels inside take none.
+ */
+function outsideBreadth(kit: GuideKit, layers: readonly Placed[], measure: MeasureText): number {
+  const all = layers.map(({ layer }) => layer);
+  let breadth = outward(all);
+  for (const placed of layers) {
+    const { labels } = placed.layer;
+    if (!labels || labels.inside) continue;
+    const away = firstRow(labels, Y_GAP, false, all);
+    breadth = Math.max(breadth, away + Math.ceil(widest(kit, [placed], measure)));
+  }
+  return breadth;
+}
+
+/** Pixels an x axis' ticks, rows of labels outside the plot, and title, `layers` placed in panel `i`, take out from the line. */
 function depthOf(
   kit: GuideKit,
   axis: ListedAxis,
@@ -899,26 +1179,28 @@ function depthOf(
   i: number,
   layers: readonly Placed[],
 ): number {
-  const rows = rowDepths(kit, layers, state.measure);
-  const labels = rows.reduce((sum, row) => sum + row + ROW_GAP, -ROW_GAP);
   const text = titleOf(axis, i);
   const title = text ? kit.textHeight(titlePaint(kit, axis, state, i), text) + GAP : 0;
-  // As drawn: labels clear the line by the gap and the ticks longer than the default axes'.
-  const reach = Math.max(0, outward(axis.layers) - TICK);
-  return kit.tickLabelGap(layers[0]!.label.size) + reach + Math.max(0, labels) + title;
+  return outsideDepth(kit, layers, state.measure, kit.tickLabelGap(layers[0]!.label.size)) + title;
 }
 
-/** Pixels the x axis on the default side, `layers` placed, takes beyond what the model keeps for one line of labels. */
+/**
+ * Pixels the x axis on the default side, `layers` placed, takes beyond
+ * what the model keeps for its ticks and one line of labels: less than
+ * none with no labels outside the plot, whose room it gives back.
+ */
 function extraDepth(
   kit: GuideKit,
   axis: ListedAxis,
   state: AxesState,
   layers: readonly Placed[],
 ): number {
-  const rows = rowDepths(kit, layers, state.measure);
-  const labels = rows.reduce((sum, row) => sum + row + ROW_GAP, -ROW_GAP);
-  const line = kit.textHeight(layers[0]!.label);
-  return Math.max(0, outward(axis.layers) - TICK) + Math.max(0, labels - line);
+  if (!layers.some(({ layer }) => layer.labels && !layer.labels.inside))
+    return outward(axis.layers) - state.xRoom;
+  const gap = kit.tickLabelGap(layers[0]!.label.size);
+  const ticks = Math.max(0, outward(axis.layers) - TICK);
+  const labels = outsideDepth(kit, layers, state.measure, gap) - gap - ticks;
+  return ticks + Math.max(0, labels - kit.textHeight(layers[0]!.label));
 }
 
 /** The widest of `layers`' labels. */
@@ -929,22 +1211,15 @@ export function widest(kit: GuideKit, layers: readonly Placed[], measure: Measur
   return most;
 }
 
-/** Pixels a y axis on the right takes beside its plot: ticks, labels, and title. */
+/** Pixels a y axis on the right takes beside its plot: ticks, labels outside it, and title. */
 function breadth(kit: GuideKit, axis: ListedAxis, state: AxesState, i: number): number {
   const layers = placedLayers(kit, axis, state, i, state.plan(axis.scale, i, 0));
   const text = titleOf(axis, i);
   const title = text ? kit.textHeight(titlePaint(kit, axis, state, i), text) + GAP : 0;
-  return (
-    outward(axis.layers) + Y_GAP + Math.ceil(widest(kit, layers, state.measure)) + GAP + 2 + title
-  );
-}
-
-/** How much wider than the major layer's labels, which the model keeps room for, a y axis' other layers' are. */
-function widerBy(kit: GuideKit, axis: ListedAxis, state: AxesState, i: number): number {
-  const [major, ...others] = placedLayers(kit, axis, state, i, state.plan(axis.scale, i, 0));
-  if (others.length === 0) return 0;
-  const { measure } = state;
-  return Math.max(0, Math.ceil(widest(kit, others, measure) - widest(kit, [major!], measure)));
+  const reach = outward(axis.layers);
+  const beside = outsideBreadth(kit, layers, state.measure);
+  // Room past the labels, as the default axes keep.
+  return beside + (beside > reach ? GAP + 2 : 0) + title;
 }
 
 /** Panel `i`'s default axis `guide` drawn as the listed axis `axis` asks, its layers placed. */
@@ -1149,20 +1424,53 @@ export function drawn(
       coords.push(...point(where, edge + out * from!), ...point(where, edge + out * to!));
     if (coords.length > 0) items.push({ type: "segments", coords, paint });
   }
-  // Labels clear the outward ticks longer than the default axes keep room for.
-  const reach = outward(layers.map(({ layer }) => layer));
-  const rows = rowDepths(kit, layers, measure);
+  // Rows of labels from the line outward, or inward for labels inside the plot.
+  const rows = [false, true].map((inside) => rowDepths(kit, layers, measure, inside));
   for (const placed of layers) {
-    const { layer, ticks, angle, lane: lanes, label: paint } = placed;
+    const { layer, ticks, angle, lane: lanes, label: paint, align } = placed;
     const labels = layer.labels;
     if (!labels) continue;
-    let away = placement.gap + (across ? Math.max(0, reach - TICK) : reach);
-    for (let row = 0; row < labels.row; row++) away += (rows[row] ?? 0) + ROW_GAP;
+    const inner = !!labels.inside;
+    const dir = inner ? -out : out;
+    let away = firstRow(
+      labels,
+      placement.gap,
+      across,
+      layers.map(({ layer }) => layer),
+    );
+    for (let row = 0; row < labels.row; row++) away += (rows[+inner]![row] ?? 0) + ROW_GAP;
     const lane = laneDepth(kit, placed, measure) + ROW_GAP;
-    const { anchor, cos } = turned(angle, side === "top");
+    const { anchor, cos } = turned(angle, dir < 0);
     ticks.forEach(({ position, label }, k) => {
       if (!label) return;
       const distance = away + (lanes[k] ?? 0) * lane;
+      if (align) {
+        // Flat labels aligned at their ticks: blocks as their style aligns
+        // them along the axis, standing off the line on their side.
+        const point = across
+          ? { x: position, y: edge + dir * distance }
+          : { x: placement.edge + dir * distance, y: placed.at?.[k] ?? position };
+        const block = anchorBlock(
+          kit.textLines(label, paint, measure),
+          {
+            ...point,
+            align: across ? align : dir > 0 ? "start" : "end",
+            verticalAlign: across
+              ? dir > 0
+                ? "top"
+                : "bottom"
+              : align === "start"
+                ? "top"
+                : align === "end"
+                  ? "bottom"
+                  : "middle",
+            angle: 0,
+          },
+          paint,
+        );
+        items.push(kit.textItem(label, block.at, paint, placement.surface, measure, block.box));
+        return;
+      }
       let at: Parameters<GuideKit["textItem"]>[1];
       if (!across) {
         // As the default y axes place labels: from the axis' line as given,
@@ -1178,14 +1486,14 @@ export function drawn(
       } else if (angle)
         at = {
           x: position,
-          y: edge + out * (distance + (kit.textHeight(paint) / 2) * cos),
+          y: edge + dir * (distance + (kit.textHeight(paint) / 2) * cos),
           anchor,
           baseline: "middle",
           angle,
         };
       else
         at =
-          side === "bottom"
+          dir > 0
             ? {
                 x: inside(position, label, paint, measure, labels.row, width),
                 y: edge + distance,

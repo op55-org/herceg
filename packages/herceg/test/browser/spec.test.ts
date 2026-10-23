@@ -41,7 +41,7 @@ describe("chartFromSpec", () => {
         .series()
         .map((s) => s.label),
     ).toEqual(["web"]);
-    expect(chart.root.querySelectorAll("svg g[clip-path] path")).toHaveLength(1);
+    expect(chart.root.querySelectorAll("svg path[clip-path]")).toHaveLength(1);
     chart.destroy();
   });
 });

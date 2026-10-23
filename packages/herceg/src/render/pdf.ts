@@ -16,14 +16,15 @@ import { hasIsolated, traceLine } from "../draw/line.ts";
 import { KAPPA, type PathSink } from "../draw/markup.ts";
 import { placeCloud } from "../draw/point.ts";
 import { tracePolygon } from "../draw/polygons.ts";
-import { traceRects } from "../draw/rect.ts";
+import { traceRects, traceSides } from "../draw/rect.ts";
 import { ruleLabel } from "../draw/rule.ts";
 import { MIDDLE_TO_BASELINE, shapeLines } from "../draw/shapes.ts";
 import { SYMBOLS, symbolPath } from "../draw/symbols.ts";
 import { parseFont } from "../layout/text.ts";
 import { isLightColor } from "../scale/color.ts";
 import { cssColor } from "../scale/css-color.ts";
-import { gridStrokes } from "../scene/grid.ts";
+import { gridLines } from "../scene/grid.ts";
+import { eachPainted, type GridBatch } from "../scene/paint.ts";
 import {
   clipOf,
   type Geometry,
@@ -533,16 +534,24 @@ function paintMark(
     case "rect": {
       traceRects(path, mark);
       const { edge } = mark;
+      const stroke = edge && {
+        stroke: edge.stroke,
+        strokeWidth: edge.width,
+        strokeOpacity: edge.opacity,
+        dash: edge.dash,
+      };
+      // An outline of some sides is a path of its own over the fill.
+      const sides = edge?.sides;
       paint(page, path, {
         fill: mark.fill,
         fillOpacity: mark.fillOpacity,
-        ...(edge && {
-          stroke: edge.stroke,
-          strokeWidth: edge.width,
-          strokeOpacity: edge.opacity,
-          dash: edge.dash,
-        }),
+        ...(sides === undefined && stroke),
       });
+      if (sides !== undefined) {
+        const outline = new PathBuilder();
+        traceSides(outline, mark, sides);
+        paint(page, outline, stroke!);
+      }
       return;
     }
     case "segments": {
@@ -834,70 +843,64 @@ export function drawPdfPage(scene: Scene, page: PdfPage, locale?: string): PdfPa
     paint(page, background, { fill: surface({ ...theme, text: ink }) });
   }
 
-  const [base, ...insets] = scene.layers ?? [scene.panels];
-  /** The plots' backgrounds and grid lines of `panels`. */
-  const under = (panels: readonly Panel[]) => {
-    for (const { plot, frame, visible } of panels) {
-      if (!frame?.fill) continue;
-      const back = new PathBuilder();
-      for (const { x, y, width, height } of visible ?? [plot]) back.rect(x, y, width, height);
-      paint(page, back, { fill: frame.fill });
-    }
-    for (const stroke of gridStrokes(panels, theme)) paintItem(page, stroke);
-  };
-  under(base!);
-  // One figure owns the complete chart, including panels, labels, and legends.
-  page.write("EMC\n/Figure << /MCID 0 >> BDC\n");
-
-  if (lang) page.write(`/Span <<${lang} >> BDC\n`);
-
+  const chart = { x: 0, y: 0, width, height };
   const cut = (boxes: readonly Rect[]) => {
     page.write("q ");
     for (const box of boxes)
       page.write(`${num(box.x)} ${num(box.y)} ${num(box.width)} ${num(box.height)} re `);
     page.write("W n\n");
   };
-  const chart = { x: 0, y: 0, width, height };
-  // Layer by layer: the panels in cells, then each inset over its box. A
-  // panel with insets over it draws only where they leave its plot visible.
-  // Axes and borders go over every layer: an inset sits in its parent's plot, clear of its axes.
-  for (const panels of [base!, ...insets]) {
-    const cover = panels[0]?.cover;
-    if (cover) {
-      if (theme.background !== "transparent") {
-        const box = new PathBuilder();
-        box.rect(cover.x, cover.y, cover.width, cover.height);
-        paint(page, box, { fill: surface({ ...theme, text: ink }) });
-      }
-      under(panels);
+  const grid = (panel: Panel) => (batch: GridBatch) =>
+    paintItem(page, {
+      type: "segments",
+      coords: gridLines(batch, panel.plot),
+      paint: batch.paint ?? theme.style.grid,
+    });
+  // One figure owns the complete chart, including panels, labels, and legends.
+  page.write("EMC\n/Figure << /MCID 0 >> BDC\n");
+
+  if (lang) page.write(`/Span <<${lang} >> BDC\n`);
+
+  // Panels in paint order: those in cells, then each inset over its box,
+  // each its plot's background, then its plan. A panel with insets over it
+  // draws only where they leave its plot visible, and what it does not cut
+  // to its plot keeps off them too. Axes and borders go over every panel:
+  // an inset sits in its parent's plot, clear of its axes.
+  for (const panel of scene.painted ?? scene.panels) {
+    const { plot, visible, keep, cover, frame } = panel;
+    if (cover && theme.background !== "transparent") {
+      const box = new PathBuilder();
+      box.rect(cover.x, cover.y, cover.width, cover.height);
+      paint(page, box, { fill: surface({ ...theme, text: ink }) });
     }
-    for (const { plot, marks, visible } of panels) {
-      cut(visible ?? [plot]);
-      for (const mark of marks)
-        if (mark.draw.canvas && clipOf(mark) === "plot")
-          paintGeometry(page, mark, plot, theme, regular);
-      page.write("Q\n");
+    if (frame?.fill) {
+      const back = new PathBuilder();
+      for (const { x, y, width, height } of visible ?? [plot]) back.rect(x, y, width, height);
+      paint(page, back, { fill: frame.fill });
     }
-    // Then what the plot does not cut: data, then guides, each cut as its
-    // mark says, and off the insets over the panel (out of its plot, or in
-    // the parts of it they leave).
-    for (const { plot, marks, visible } of panels) {
-      if (visible) {
-        page.write("q ");
-        for (const box of [chart, plot, ...visible])
-          page.write(`${num(box.x)} ${num(box.y)} ${num(box.width)} ${num(box.height)} re `);
-        page.write("W* n\n");
-      }
-      for (const guides of [false, true])
-        for (const mark of marks) {
-          const clip = clipOf(mark);
-          if (!mark.draw.canvas !== guides || (clip === "plot" && !guides)) continue;
-          if (clip) cut(clip === "plot" ? (visible ?? [plot]) : [chart]);
-          paintGeometry(page, mark, plot, theme, regular);
-          if (clip) page.write("Q\n");
-        }
-      if (visible) page.write("Q\n");
-    }
+    // Entries one after another cut alike share one cut.
+    let open: string | undefined;
+    const to = (clip: string | undefined, boxes?: readonly Rect[]) => {
+      if (clip === open) return;
+      if (open) page.write("Q\n");
+      if (clip) cut(boxes!);
+      open = clip;
+    };
+    eachPainted(
+      panel,
+      (batch) => {
+        to(undefined);
+        grid(panel)(batch);
+      },
+      (mark) => {
+        const clip = clipOf(mark);
+        if (clip === "plot") to(clip, visible ?? [plot]);
+        else if (keep) to("keep", keep);
+        else to(clip || undefined, [chart]);
+        paintGeometry(page, mark, plot, theme, regular);
+      },
+    );
+    to(undefined);
   }
   for (const { plot, frame, axes } of scene.panels) {
     for (const axis of axes) paintItems(page, axis.items);

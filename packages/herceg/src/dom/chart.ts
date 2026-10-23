@@ -1708,8 +1708,12 @@ export class MountedChart implements Chart, ExportsScene {
     // Changed values on their way draw the scene they move to, which stays
     // the model's last, with its marks and axes between.
     const build = () => this.#sceneOf(measure, cloudsAllowed);
-    const scene = this.#values?.frame(build, this.#drawTime) ?? build();
+    let scene = this.#values?.frame(build, this.#drawTime) ?? build();
     if (this.#values?.playing) this.#invalidate(false);
+    // A drawing without a canvas painter (another library's) keeps the
+    // scene in SVG, where everything paints in its order: points too, on the CPU.
+    const svg = scene.panels.some((panel) => panel.marks.some((mark) => !mark.draw.canvas));
+    if (svg && cloudsIn(scene)) scene = this.#sceneOf(measure, false);
     this.#scene = scene;
     // What the scene read of the page may change with it.
     if (!this.#unwatchPage) this.#followPage();
@@ -1726,9 +1730,10 @@ export class MountedChart implements Chart, ExportsScene {
 
     const renderer = this.#options.renderer ?? "auto";
     this.#onCanvas =
-      renderer === "canvas" ||
-      (renderer === "auto" &&
-        (this.#onCanvas ? scene.vertices >= SVG_BELOW : scene.vertices > CANVAS_ABOVE));
+      !svg &&
+      (renderer === "canvas" ||
+        (renderer === "auto" &&
+          (this.#onCanvas ? scene.vertices >= SVG_BELOW : scene.vertices > CANVAS_ABOVE)));
     if (this.#onCanvas) {
       if (!this.#canvas) {
         this.#canvas = this.root.ownerDocument.createElement("canvas");

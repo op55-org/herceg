@@ -6,7 +6,7 @@
 import { labelHalo } from "../draw/label-halo.ts";
 import { labelsDrawing, textDrawing } from "../draw/text.ts";
 import { type TextAt, textItem } from "../layout/text.ts";
-import type { LabelsGeometry, TextGeometry } from "../scene/scene.ts";
+import type { LabelsGeometry, Rect, TextGeometry } from "../scene/scene.ts";
 import type { Frozen } from "../spec/spec.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
 import { type TextPaint, textPaint } from "../style/style.ts";
@@ -49,6 +49,8 @@ export interface PlacedLabel {
   y: number;
   anchor: "start" | "middle" | "end";
   baseline: TextAt["baseline"];
+  /** The box behind it, where placed with it (see `anchorBlock`); else padded about the text. */
+  box?: Rect | undefined;
 }
 
 /**
@@ -69,9 +71,9 @@ export function labelsGeometry(
     paint.background ? { ...frame, surface: paint.background.fill } : frame,
   );
   const under = frame.surface ?? surface(frame.theme);
-  const items = labels.map(({ text, x, y, anchor, baseline }) => {
+  const items = labels.map(({ text, x, y, anchor, baseline, box }) => {
     const at: TextAt = { x, y, anchor, baseline, angle: 0 };
-    const item = textItem(text, at, paint, under, frame.measure);
+    const item = textItem(text, at, paint, under, frame.measure, box);
     return ring ? { ...item, halo: ring } : item;
   });
   return { kind: "labels", draw: labelsDrawing, key, items };

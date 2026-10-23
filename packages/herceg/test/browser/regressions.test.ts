@@ -247,13 +247,13 @@ describe("runtime regressions", () => {
         throw new Error("broken chart");
       },
     });
-    const before = chart.root.querySelector("svg g[clip-path] path")!.getAttribute("d");
+    const before = chart.root.querySelector("svg path[clip-path]")!.getAttribute("d");
     data.setColumn("y", [1, 0]);
     await frame();
     await Promise.resolve();
     window.removeEventListener("error", onError);
     expect(errors).toHaveLength(1);
-    expect(chart.root.querySelector("svg g[clip-path] path")!.getAttribute("d")).not.toBe(before);
+    expect(chart.root.querySelector("svg path[clip-path]")!.getAttribute("d")).not.toBe(before);
     chart.destroy();
   });
 

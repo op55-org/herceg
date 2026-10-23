@@ -619,7 +619,7 @@ export class ItemViews {
     // Every panel of a state draws the same root and layout: the first says what they are.
     if (this.#views.findIndex((view) => view.state === key) === this.#views.length - 1)
       settle(state, result);
-    return { key: panel.key, plot, grid: { x: [], y: [] }, axes: [], marks: result.geometry };
+    return { key: panel.key, plot, grids: [], axes: [], marks: result.geometry };
   }
 
   #state(key: string): ItemState {

@@ -54,17 +54,21 @@ export interface TextStyle {
   lineHeight?: number;
   /**
    * Where text sits in the span it is placed in: the chart's width for its
-   * title, the plot's for a panel's title, an axis' length for its title.
-   * Each text has a natural alignment when this is left out (a chart's
-   * title starts at the left, an axis title is centered).
+   * title, the plot's for a panel's title, an axis' length for its title;
+   * for text placed at a point (text marks, labels of rules, regions, and
+   * series, flat tick labels along x), which side of its block, or its
+   * middle, is there. Each text has a natural alignment when this is left
+   * out (a chart's title starts at the left, an axis title is centered).
    */
   align?: "start" | "center" | "end";
   /**
    * Where a block of text stands across its lines from the point it is
    * placed at: that point at its top, middle, or bottom (its box's edge,
-   * when it has a background), before any turn. Each text has a natural
-   * placement when this is left out (a rule's label above it, tick labels
-   * away from their axis).
+   * when it has a background), before any turn. For text marks, labels of
+   * rules, regions, and series, and flat tick labels along y (at their
+   * ticks). Each text has a natural placement when this is left out (a
+   * rule's label above it, tick labels centered on their ticks); titles and
+   * legends fill rows of their own, which it does not move them in.
    */
   verticalAlign?: "top" | "middle" | "bottom";
   halo?: Halo;

@@ -30,7 +30,7 @@ import type {
   TicksSpec,
 } from "./guides.ts";
 import type { LayoutSpec } from "./layout.ts";
-import type { Coordinate, Position, Side } from "./place.ts";
+import type { Coordinate, Position, RowCoordinate, Side } from "./place.ts";
 import type {
   AxisStyles,
   Halo,
@@ -1028,11 +1028,11 @@ interface MarkBase {
 
 /**
  * Where a mark drawing rows places them along an axis: a field, or a
- * coordinate (see `Coordinate`): `{ field, scale }` on a position scale of
- * the chart's `scales`, `{ fraction: { field } }` of the plot, `{ px: {
- * field } }` from its edge, each moved `offset` pixels.
+ * coordinate a field gives (see `RowCoordinate`): `{ field, scale }` on a
+ * position scale of the chart's `scales`, `{ fraction: { field } }` of the
+ * plot, `{ px: { field } }` from its edge, each moved `offset` pixels.
  */
-export type RowPosition = Field | Coordinate;
+export type RowPosition = Field | RowCoordinate;
 
 /** What a mark that legends show gives them. */
 interface Legended {

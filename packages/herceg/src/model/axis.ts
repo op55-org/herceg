@@ -4,6 +4,7 @@ import {
   numberTickLabels,
   timeFormatter,
   timeTickLabels,
+  timeValueFormatter,
 } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { AxisOptions } from "../guides/options.ts";
@@ -16,7 +17,13 @@ import {
   niceLogDomain,
   type PositionScale,
 } from "../scale/scale.ts";
-import { type CalendarScale, niceTimeDomain, TimeScale } from "../scale/time.ts";
+import {
+  type CalendarScale,
+  niceTimeDomain,
+  TIME_UNIT_MS,
+  TimeScale,
+  type TimeUnit,
+} from "../scale/time.ts";
 import type { Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { XAxisSpec } from "../spec/spec.ts";
 
@@ -34,6 +41,12 @@ export interface AxisPlan {
    */
   context?: AxisContext;
   count?: number;
+  /**
+   * The pixels its domain was padded over (`AxisContext.padding`): the
+   * shortest of the plots sharing it, over which views read back from
+   * any of them are unpadded.
+   */
+  padded?: number | undefined;
 }
 
 export interface AxisContext {
@@ -53,6 +66,20 @@ export interface AxisContext {
     | undefined;
   /** How one value is written, where the guide compiler writes them. */
   formatValue?: Formatter | undefined;
+  /**
+   * Padding the axis' settings give (the guide compiler's, other than
+   * "auto"), in place of the room marks ask for at its ends.
+   */
+  padding?: AxisPadding | undefined;
+}
+
+/**
+ * An axis' explicit padding (guides/padding.ts): the domain shown for a
+ * domain or view over `pixels`, and the view a domain shown is padding.
+ */
+export interface AxisPadding {
+  pad(domain: readonly [number, number], pixels: number): [number, number];
+  unpad(domain: readonly [number, number], pixels: number): [number, number];
 }
 
 /** A time axis' breaks as axes use them; implemented by scale/breaks.ts. */
@@ -90,58 +117,6 @@ export function usableDomain(
   if (type === "time") return [lo - 3_600_000, lo + 3_600_000];
   const pad = lo === 0 ? 1 : Math.abs(lo) * 0.1;
   return [lo - pad, lo + pad];
-}
-
-/**
- * Widens an automatic domain so glyphs reaching `inset` pixels past their
- * data position stay inside a plot `pixels` long. Applied after rounding to
- * nice values, so ticks stay round and the axis ends just past them. Log
- * domains widen in log space.
- */
-export function insetDomain(
-  domain: [number, number],
-  inset: number,
-  pixels: number,
-  type: AxisType,
-): [number, number] {
-  // Tiny plots keep the data domain rather than shrinking the data to a point.
-  if (!(inset > 0) || pixels <= 4 * inset) return domain;
-  const log = type === "log";
-  const lo = log ? Math.log10(domain[0]) : domain[0];
-  const hi = log ? Math.log10(domain[1]) : domain[1];
-  const pad = ((hi - lo) * inset) / (pixels - 2 * inset);
-  const widened: [number, number] = log
-    ? [10 ** (lo - pad), 10 ** (hi + pad)]
-    : [lo - pad, hi + pad];
-  // Domains near the limits of floating point keep their data ends.
-  const usable = widened.every((v) => Number.isFinite(v) && (!log || v > 0));
-  return usable ? widened : domain;
-}
-
-/**
- * Widens the ends of an automatic domain that lie away from zero (on log
- * axes, the high end) so marks drawing `pixels` past their data there, such
- * as bar labels, stay inside a plot `plotPixels` long. A zero end stays put,
- * so bars keep their baseline on the axis.
- */
-export function headroomDomain(
-  domain: [number, number],
-  pixels: number,
-  plotPixels: number,
-  type: AxisType,
-): [number, number] {
-  if (!(pixels > 0)) return domain;
-  const log = type === "log";
-  const low = !log && domain[0] < 0;
-  const high = log || domain[1] > 0;
-  const sides = Number(low) + Number(high);
-  if (sides === 0 || plotPixels <= 4 * sides * pixels) return domain;
-  const lo = log ? Math.log10(domain[0]) : domain[0];
-  const hi = log ? Math.log10(domain[1]) : domain[1];
-  const pad = ((hi - lo) * pixels) / (plotPixels - sides * pixels);
-  const ends: [number, number] = [low ? lo - pad : lo, high ? hi + pad : hi];
-  const widened: [number, number] = log ? [10 ** ends[0], 10 ** ends[1]] : ends;
-  return widened.every((v) => Number.isFinite(v) && (!log || v > 0)) ? widened : domain;
 }
 
 /** Applies the axis' nice option to a domain. */
@@ -250,6 +225,49 @@ export function valueFormatter(context: AxisContext, fallback: Formatter): Forma
   return context.type === "time"
     ? timeFormatter(format as Intl.DateTimeFormatOptions, context.zone, context.locale)
     : numberFormatter(format as Intl.NumberFormatOptions, context.locale);
+}
+
+/**
+ * How tooltips write values of a continuous axis of `context` over
+ * `scale`: as its settings say, else times as precisely as the scale
+ * resolves them and numbers by `numbers`.
+ */
+export function tooltipFormatter(
+  context: AxisContext,
+  scale: PositionScale,
+  numbers: Formatter,
+): Formatter {
+  return valueFormatter(
+    context,
+    context.type === "time"
+      ? timeValueFormatter(timeUnitFor(scale), context.zone, context.locale)
+      : numbers,
+  );
+}
+
+/**
+ * Precision for time values in tooltips: finer when each pixel covers less
+ * time (on axes with breaks, less time shown).
+ */
+function timeUnitFor(scale: PositionScale): TimeUnit {
+  const perPixel = Math.abs(1 / scale.mapping().factor);
+  if (perPixel < TIME_UNIT_MS.second) return "millisecond";
+  if (perPixel < TIME_UNIT_MS.minute) return "second";
+  if (perPixel < TIME_UNIT_MS.day) return "minute";
+  return "day";
+}
+
+/**
+ * About how many ticks an axis of `context` takes over `size` pixels,
+ * across the plot (x) or along it (y): its count, else one per 80 pixels
+ * across (100 for times) or 45 along.
+ */
+export function tickCountOf({ type, spec }: AxisContext, size: number, across: boolean): number {
+  // Contexts hold counts: the guide compiler plans the other forms.
+  return (
+    (spec?.ticks as number | undefined) ??
+    Math.max(2, Math.round(size / (across ? (type === "time" ? 100 : 80) : 45)))
+  );
 }
 
 /**

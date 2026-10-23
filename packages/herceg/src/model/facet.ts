@@ -246,6 +246,14 @@ export class Facet implements PanelLayout {
     return scopesOf(config, "chart");
   }
 
+  instances(scope: ScaleScope | undefined, split: PanelSplit, columns: number, path: string) {
+    if (typeof scope === "object")
+      throw new Error(
+        `${path}: facets share a scale across the chart, by panel, row, or column; scopes naming layout grids or panels are for subplots`,
+      );
+    return groupsOf(scope ?? "chart", split.panels.length, columns);
+  }
+
   /** A grid's rows and columns are its fields' values; wrapped panels can be rearranged. */
   get remedy(): string {
     return this.field !== undefined

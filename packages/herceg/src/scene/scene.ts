@@ -13,6 +13,7 @@ import type { Polyline } from "../lod/polyline.ts";
 import type { Clip } from "../spec/spec.ts";
 import type { PlotPaint, ResolvedHalo, StrokePaint, TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
+import type { GridBatch } from "./paint.ts";
 
 export interface Rect {
   x: number;
@@ -59,9 +60,9 @@ export interface Drawing<G extends Geometry> {
   readonly opacity?: number | undefined;
   readonly clip?: readonly number[] | undefined;
   /**
-   * Paints onto a canvas in CSS pixels; or false for a drawing in SVG only
-   * (rules, text), which a chart drawing its data on a canvas draws as SVG
-   * above it, so it stays crisp and readable.
+   * Paints onto a canvas in CSS pixels; or false for a drawing only SVG
+   * writes (another library's), which keeps its chart's scene in SVG, where
+   * everything paints in its order.
    */
   readonly canvas:
     | ((context: CanvasRenderingContext2D, geometry: G, options: CanvasOptions) => void)
@@ -88,15 +89,13 @@ export interface Geometry {
   readonly draw: Drawing<any>;
   /** What the drawing is cut to, as its mark's `clip` says; see `clipOf`. */
   readonly clip?: Clip | undefined;
+  /** Where it paints among its panel's grid lines and geometry, as its mark's `zIndex` says (0 when absent). */
+  readonly zIndex?: number | undefined;
   /** For geometry of a series with a key of its own (a line's markers), the series' key. */
   readonly of?: string | undefined;
 }
 
-/**
- * What a geometry is cut to: its mark's `clip`, or its drawing's default.
- * Data not cut to the plot is drawn above the data that is, and drawings
- * in SVG only above both.
- */
+/** What a geometry is cut to: its mark's `clip`, or its drawing's default. */
 export function clipOf(geometry: Geometry): Clip {
   return geometry.clip ?? geometry.draw.defaultClip ?? "plot";
 }
@@ -111,12 +110,16 @@ export interface SvgContext {
   theme: Theme;
   /** Encodes raster pixels as an image URL; rasters are left out without one. */
   encodeRaster: ((raster: RasterGeometry) => string) | undefined;
+  /** Markup after a geometry's own: its titled pointer targets (render/titles.ts), where it has some. */
+  titles?: ((mark: Geometry) => string | undefined) | undefined;
 }
 
 export interface CanvasOptions {
   plot: Rect;
   pixelRatio: number;
   clouds: CloudOptions;
+  /** The chart's theme, whose font text without a paint of its own is drawn in. */
+  theme: Theme;
 }
 
 /** How point clouds are painted on a canvas. */
@@ -268,8 +271,18 @@ export interface RectGeometry extends Geometry {
   draw: Drawing<RectGeometry>;
   fill: string;
   fillOpacity: number;
-  /** An outline of every rectangle (bars' edges): its color, width, opacity, and dash. */
-  edge?: { stroke: string; width: number; opacity: number; dash: readonly number[] | undefined };
+  /**
+   * An outline of every rectangle (bars' edges): its color, width,
+   * opacity, and dash, and the sides it draws where not all of them (a
+   * mask of draw/rect.ts's side bits, for every rectangle or for each).
+   */
+  edge?: {
+    stroke: string;
+    width: number;
+    opacity: number;
+    dash: readonly number[] | undefined;
+    sides?: number | Uint8ClampedArray | undefined;
+  };
   rects: Float32Array;
   count: number;
   /**
@@ -279,6 +292,8 @@ export interface RectGeometry extends Geometry {
   rounded?: { radius: number; ends: Uint8ClampedArray } | undefined;
   /** Bars in scenes of charts that animate changed values: what identifies each and where it ends. */
   bars?: BarItems | undefined;
+  /** In scenes that write titles (`Frame.attributed`), the table row each rectangle draws. */
+  rows?: Uint32Array | undefined;
 }
 
 /**
@@ -336,6 +351,8 @@ export interface PointGeometry extends Geometry {
   cloud?: PointCloud;
   /** Points in scenes that animate changed values: their row identities or explicit keys. */
   items?: PointItems | undefined;
+  /** In scenes that write titles (`Frame.attributed`), the table row each point draws. */
+  rows?: Uint32Array | undefined;
 }
 
 /**
@@ -967,8 +984,8 @@ export type Guide =
   | ColorbarGuide;
 
 /**
- * One plotting area: its data, clipped to `plot`, its guides (rules and
- * text, drawn above all data and not clipped), and the grid and axes around it.
+ * One plotting area: its plot, its grid lines and geometry painted in the
+ * order `paint` gives, and the axes around it.
  */
 export interface Panel {
   /** Unique within a scene and the same from one scene to the next. */
@@ -980,22 +997,17 @@ export interface Panel {
    * drawn over the data; undefined when it has neither.
    */
   frame?: PlotPaint | undefined;
-  /** Pixel positions of vertical and horizontal grid lines, and how each kind is drawn. */
-  grid: {
-    x: number[];
-    y: number[];
-    xPaint?: StrokePaint | undefined;
-    yPaint?: StrokePaint | undefined;
-    /**
-     * With insets over the plot, the spans of each line their boxes leave
-     * clear of its stroke: along y for the lines at `x`, along x for those at `y`.
-     */
-    xSpans?: readonly (readonly (readonly [number, number])[])[] | undefined;
-    ySpans?: readonly (readonly (readonly [number, number])[])[] | undefined;
-  };
+  /** Its grid lines, a batch per axis, painted among its geometry at their `zIndex`. */
+  grids: GridBatch[];
   axes: AxisGuide[];
-  /** Geometry in drawing order; guides among it are drawn above the rest. */
+  /** Geometry in the order its marks emit it. */
   marks: Geometry[];
+  /**
+   * The order its grid batches and geometry are painted in (see
+   * scene/paint.ts), as indexes into them listed one after the other;
+   * without one, its grid batches, then its geometry.
+   */
+  paint?: readonly number[] | undefined;
   /**
    * An inset's box, its title and axes included, which it covers with the
    * chart's background over the panels drawn before it.
@@ -1003,9 +1015,11 @@ export interface Panel {
   cover?: Rect | undefined;
   /**
    * Where a panel with insets over it draws: its plot without their boxes,
-   * as rectangles that do not overlap.
+   * as rectangles that do not overlap; and where what it does not cut to
+   * its plot may draw: the chart without those boxes.
    */
   visible?: readonly Rect[] | undefined;
+  keep?: readonly Rect[] | undefined;
 }
 
 export interface Scene {
@@ -1016,11 +1030,10 @@ export interface Scene {
   /** Plotting areas; a chart without facets has one. */
   panels: Panel[];
   /**
-   * With insets, the panels in the layers they are drawn in: those in cells
-   * (and a navigator's strip) together, then each inset over its box; else
-   * one layer of every panel.
+   * With insets, the panels in the order they are painted: those in cells
+   * (and a navigator's strip), then each inset over its box; else `panels`.
    */
-  layers?: readonly (readonly Panel[])[] | undefined;
+  painted?: readonly Panel[] | undefined;
   /** The title, panels' titles and headers, and legends, in drawing order. */
   guides: Guide[];
   /** Points in all mark geometry after level-of-detail reduction. */

@@ -6,16 +6,19 @@ import type { TimeZone } from "../format/zone.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
+import type { clearDomain } from "../model/clearance.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import { keyPrefix } from "../model/identity.ts";
 import type { MarkSeries } from "../model/inspect.ts";
 import type { LegendPart } from "../model/legend.ts";
+import type { Nearest } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { TIME_UNIT_MS, type TimeUnit } from "../scale/time.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import type { RowBindings } from "./row-bindings.ts";
 import {
   isSortedSubset,
   rowsByCode,
@@ -30,6 +33,16 @@ import type { SplitRows } from "./split.ts";
  * highlights the rows it holds, as a fraction of their own opacity.
  */
 export const DIM = 0.25;
+
+/**
+ * Whether a mark with a selection highlighted draws every series' selected
+ * rows over every series' others, as marks of a glyph per row do; lines
+ * and areas draw each series' over its own (model/highlight.ts).
+ */
+export function litOverSeries(mark: Mark): boolean {
+  const { type } = mark.spec;
+  return type !== "line" && type !== "area";
+}
 
 /**
  * Identifies a mark within a chart: its explicit `id`, or its index. Series
@@ -172,6 +185,8 @@ export interface Frame {
   features?: CompiledFeatures | undefined;
   /** The chart's box, for places in its frame. */
   chart?: Rect | undefined;
+  /** The chart's position scales of its own along x or y over this plot, where it has any. */
+  scaleOf?: ((name: string, axis: "x" | "y") => PositionScale) | undefined;
   /**
    * Where marks' labels outside the plot go: the x where those on the left
    * end and those on the right start, in the tracks the chart keeps for
@@ -184,6 +199,17 @@ export interface Frame {
    * where it ends (BarItems), points the row each shows (PointItems).
    */
   keyed?: boolean;
+  /**
+   * The scene writes titles (render/titles.ts): bars and points say which
+   * table row each item draws (`rows`).
+   */
+  attributed?: boolean | undefined;
+  /**
+   * With a selection highlighted, which of `table`'s rows it holds, 1 each:
+   * drawn over the others (model/highlight.ts), so that of points equally
+   * near, picking takes those.
+   */
+  highlighted?: ((table: Table) => Uint8Array | undefined) | undefined;
   /**
    * A polyline buffer reused across frames, one per series key and stage
    * (for example "line", "upper", "upper-step").
@@ -358,17 +384,15 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   readonly legendScales?: readonly LegendScale[];
   /**
    * Pixels the mark's glyphs reach past their data position along each
-   * axis, such as a point's radius. Automatic domains leave this much room
-   * at the plot edges.
+   * axis, such as a point's radius and outline. Automatic padding leaves
+   * this much room at the plot edges.
    */
-  readonly inset?: { readonly x: number; readonly y: number };
-  /** Domain padding for this mark's glyph inset, carried by marks that need it. */
-  insetDomain?(
-    domain: [number, number],
-    inset: number,
-    pixels: number,
-    type: PositionScale["type"],
-  ): [number, number];
+  readonly inset?: { readonly x: number; readonly y: number } | undefined;
+  /**
+   * Automatic padding's solver (model/clearance.ts), carried by marks that
+   * ask for room (`inset`, `headroom`), so charts of others do not load it.
+   */
+  readonly clearDomain?: typeof clearDomain;
   /**
    * Automatic y domains end at the mark's data rather than at round values
    * unless the axis says `nice` (heatmap cells, which would otherwise leave
@@ -382,6 +406,26 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * in every mode.
    */
   readonly tooltip: "x" | "y" | "point" | "cell";
+  /**
+   * For marks of rows placing them otherwise than plainly on their axes (in
+   * a frame, on a scale of the chart's own, or moved by pixels): how, by
+   * direction (marks/row-bindings.ts). The chart draws and inspects such a
+   * mark with those scales in its frame.
+   */
+  readonly bound?: RowBindings | undefined;
+  /** For annotations: whether a place is on a scale of the chart's own. */
+  readonly scaled?: boolean;
+  /**
+   * For marks placing values on a scale of the chart's own by their places
+   * (annotations): the extent of those along `axis` on scale `name`, of
+   * `rows` (every row without them); with `log`, of positive values only.
+   */
+  scaleExtent?(
+    name: string,
+    axis: "x" | "y",
+    log: boolean,
+    rows?: RowParts,
+  ): readonly [number, number] | undefined;
   /**
    * The series' points summarize rows of the table (histogram bins, box
    * plot groups) rather than being its rows, so inspections name no row.
@@ -498,6 +542,12 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /** Nearest point to a pixel, for marks with a faster lookup than the chart's generic search. */
   pick?(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined;
   /**
+   * Hands `found` each target within its limit of a pixel, in paint order,
+   * for marks with `pick` whose targets tie with others' only to rounding:
+   * hover settles them with the other marks' (model/nearest.ts).
+   */
+  nearby?(series: readonly Series[], px: number, py: number, frame: Frame, found: Nearest): void;
+  /**
    * How many pixels along x and y a row is drawn from where its values
    * place it, for marks spreading rows across their bands (grouped bars,
    * `dodge`, `jitter`, side-by-side boxes and violins, split violins'
@@ -516,6 +566,17 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * is not drawn. Clicks that select rows read it.
    */
   reach?(row: number): number;
+  /**
+   * Of two positions of series `s` (one of `series`), whether the first's
+   * glyph paints over the second's, for marks whose glyphs do not paint in
+   * row order (opaque points of several colors paint color by color).
+   * Clicks that select rows read it where glyphs are equally near.
+   */
+  paintsOver?(
+    series: readonly Series[],
+    s: Series,
+    frame: Frame,
+  ): (a: number, b: number) => boolean;
   /**
    * For marks whose points summarize rows (histogram bins, box plot
    * groups): whether a table row is one of those the point at `position`
@@ -594,20 +655,20 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /**
    * Pixels the mark draws past its data at the ends of its value axis (the
    * `zero` axis) that lie away from zero, such as bar labels; automatic
-   * domains leave that much room.
+   * padding leaves that much room.
    */
   headroom?(series: readonly Series[], context: BandContext): number;
-  /** Domain padding used for the mark's headroom, carried by marks that need it. */
-  headroomDomain?(
-    domain: [number, number],
-    pixels: number,
-    plotPixels: number,
-    type: PositionScale["type"],
-  ): [number, number];
+  /**
+   * Whether `room` is what the mark's last geometry placed (labels that
+   * follow series): the chart asks right after drawing it in each panel,
+   * and keeps what each panel's labels took.
+   */
+  readonly roomPlaced?: boolean;
   /**
    * Pixels the mark's labels outside the plot take beside it, left and
    * right: the chart keeps a track for them on each side, innermost, beside
-   * the y axes (see `Frame.outside`).
+   * the y axes (see `Frame.outside`). With `roomPlaced`, what its last
+   * geometry's labels took (see layout/attached.ts).
    */
   room?(
     measure: MeasureText,

@@ -29,17 +29,23 @@ export interface ChartSnapshot {
   state: SnapshotState;
 }
 
-/** A geometry's nodes: its key and kind, and the count of its elements, or its group's markup hash. */
+/**
+ * A geometry's or grid batch's nodes (a grid batch's kind is "grid"): its
+ * key and kind, and the count of its elements, or its group's markup hash.
+ */
 export type SnapshotGeometry =
   | [key: string, kind: string, elements: number]
   | [key: string, kind: string, elements: -1, hash: number];
 
 /** What the runtime's layers drew, in their order, for taking their nodes over. */
 export interface SnapshotState {
-  /** Each panel's key and the geometry of its data group and of its drawings above. */
-  /** Each panel's drawings, and an inset's the hash of the markup of its box, plot, and grid under them. */
-  panels: [key: string, data: SnapshotGeometry[], above: SnapshotGeometry[], cover?: number][];
-  /** Hashes of the markup under the data (backgrounds, grid) and of the guides. */
+  /**
+   * Each panel, in paint order: its key, what it paints over its plot's
+   * background in order, and when it has a background (its plot's, or an
+   * inset's box), the hash of its markup.
+   */
+  panels: [key: string, content: SnapshotGeometry[], back?: number][];
+  /** Hashes of the markup under every panel (the chart's background) and of the guides. */
   under: number;
   guides: number;
   /** Whether the layer made the chart's own clip path, for marks cut to the chart. */

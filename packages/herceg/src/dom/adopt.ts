@@ -10,7 +10,6 @@ import {
   fontsFingerprint,
   SNAPSHOT_VERSION,
   type SnapshotGeometry,
-  type SnapshotState,
 } from "../render/snapshot-format.ts";
 import type { Entry } from "./legend.ts";
 import type { LayerParts, PanelNodes, Retained } from "./svg-layer.ts";
@@ -69,24 +68,23 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
   const [svg, legend, description, live, ...rest] = root.children;
   if (!(svg instanceof SVGSVGElement) || rest.length) throw unlike();
   const count = state.panels.length;
-  // The layer draws the panels in cells, their data then their annotations,
-  // then each inset: its box, data, and annotations.
-  const bases = state.panels.filter(([, , , cover]) => cover === undefined);
-  const insets = state.panels.filter(([, , , cover]) => cover !== undefined);
+  // After the chart's background, the layer draws each panel in paint
+  // order: its background when it has one, then what it paints.
   const [defs, under, ...groups] = svg.children;
   const overlay = groups.pop();
   const guides = groups.pop();
   // Defs hold the chart's clip, when it has one, then each panel's, and
-  // after a panel's with insets over it, what its annotations keep to.
+  // after a panel's with insets over it, what its other drawings keep to.
   const all = [...(defs?.children ?? [])];
   const chartClip = state.chartClip ? all.shift() : undefined;
   const keeps = new Map(
     all.filter(({ id }) => id.endsWith("-keep")).map((clip) => [clip.id, clip]),
   );
   const clips = all.filter(({ id }) => !keeps.has(id));
+  const backs = state.panels.filter(([, , back]) => back !== undefined).length;
   if (
     defs?.tagName !== "defs" ||
-    groups.length !== 2 * bases.length + 3 * insets.length ||
+    groups.length !== count + backs ||
     clips.length !== count ||
     !overlay ||
     !guides ||
@@ -96,38 +94,23 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
   )
     throw unlike();
   const panels = new Map<string, PanelNodes>();
-  const take = (
-    [key, data, above, cover]: SnapshotState["panels"][number],
-    clip: Element | undefined,
-    marks: Element | undefined,
-    annotations: Element | undefined,
-    box?: Element,
-  ) => {
-    if (clip?.tagName !== "clipPath" || !marks || !annotations) throw unlike();
+  let at = 0;
+  state.panels.forEach(([key, content, back], i) => {
+    const box = back === undefined ? undefined : groups[at++];
+    const group = groups[at++]!;
+    const clip = clips[i];
+    if (clip?.tagName !== "clipPath") throw unlike();
     const keep = keeps.get(`${clip.id}-keep`);
+    const [marks, grids] = retained(group, content, unlike);
     panels.set(key, {
       clip: clip as SVGClipPathElement,
       cut: clip.innerHTML,
-      marks: marks as SVGGElement,
-      annotations: annotations as SVGGElement,
-      markNodes: retained(marks, data, unlike),
-      annotationNodes: retained(annotations, above, unlike),
-      ...(box && { cover: { under: box as SVGGElement, hash: cover! } }),
-      ...(keep && {
-        keep: {
-          clip: keep as SVGClipPathElement,
-          path: keep.firstElementChild?.getAttribute("d") ?? "",
-        },
-      }),
+      content: group as SVGGElement,
+      marks,
+      grids,
+      ...(box && { back: { group: box as SVGGElement, hash: back! } }),
+      ...(keep && { keep: { clip: keep as SVGClipPathElement, cut: keep.innerHTML } }),
     });
-  };
-  // Clips are in the order the layer draws the panels, those in cells first.
-  bases.forEach((entry, i) => {
-    take(entry, clips[i], groups[i], groups[bases.length + i]);
-  });
-  insets.forEach((entry, k) => {
-    const at = 2 * bases.length + 3 * k;
-    take(entry, clips[bases.length + k], groups[at + 1], groups[at + 2], groups[at]);
   });
   const buttons = [...legend.children];
   if (buttons.length !== state.legend.length) throw unlike();
@@ -163,16 +146,20 @@ export function adopt(host: Element, snapshot: ChartSnapshot, fonts?: Fonts): Ad
   };
 }
 
-/** What a panel's group holds, by geometry, as the layer keeps it (see `Retained`). */
+/**
+ * What a panel's group holds, as the layer keeps it (see `Retained`): its
+ * geometry's nodes, and its grid batches'.
+ */
 function retained(
   group: Element,
-  geometry: readonly SnapshotGeometry[],
+  content: readonly SnapshotGeometry[],
   unlike: () => Error,
-): Map<string, Retained> {
+): [Map<string, Retained>, Map<string, Retained>] {
   const nodes = [...group.children];
-  const kept = new Map<string, Retained>();
+  const marks = new Map<string, Retained>();
+  const grids = new Map<string, Retained>();
   let at = 0;
-  for (const [key, kind, elements, hash] of geometry) {
+  for (const [key, kind, elements, hash] of content) {
     const length = elements < 0 ? 1 : elements;
     const taken = nodes.slice(at, at + length);
     at += length;
@@ -181,7 +168,7 @@ function retained(
       taken.some((node) => node.namespaceURI !== SVG || node.getAttribute("data-kind") !== kind)
     )
       throw unlike();
-    kept.set(key, {
+    (kind === "grid" ? grids : marks).set(key, {
       kind,
       nodes: taken,
       hash,
@@ -190,5 +177,5 @@ function retained(
     });
   }
   if (at !== nodes.length) throw unlike();
-  return kept;
+  return [marks, grids];
 }

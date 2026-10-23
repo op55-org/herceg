@@ -17,6 +17,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { AxisGuide, Panel } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
@@ -241,8 +242,8 @@ describe("right axes in subplots", () => {
     expect(axis(b!, "left")).toBeUndefined();
     expect(axis(b!, "right")!.ticks.length).toBeGreaterThan(0);
     const right = model.panels()[1]!.yRight!;
-    expect(b!.grid.y.length).toBeGreaterThan(0);
-    for (const y of b!.grid.y) expect(right.invert(y)).toBeGreaterThanOrEqual(0);
+    expect(gridAt(b!, "y").length).toBeGreaterThan(0);
+    for (const y of gridAt(b!, "y")) expect(right.invert(y)).toBeGreaterThanOrEqual(0);
   });
 
   it("share a right scale when asked, if the panels sharing it agree on it", () => {
@@ -304,7 +305,7 @@ describe("right axes in subplots", () => {
     expect(axis(a!, "left")!.ticks.map(({ label }) => label)).toEqual(["a", "b"]);
     expect(axis(b!, "left")).toBeUndefined();
     expect(axis(b!, "right")!.ticks.length).toBeGreaterThan(0);
-    expect(b!.grid.y.length).toBe(axis(b!, "right")!.ticks.length);
+    expect(gridAt(b!, "y").length).toBe(axis(b!, "right")!.ticks.length);
     expect(model.panels()[1]!.yRight!.domain[1]).toBeGreaterThanOrEqual(3000);
   });
 

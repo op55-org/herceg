@@ -218,8 +218,11 @@ class TextStyle:
     ``line_height`` is a multiple of ``font_size``; ``align`` puts the text
     at the ``"start"``, ``"center"``, or ``"end"`` of the span it is placed
     in (the chart's width for its title, the plot's for a panel's title),
-    and ``vertical_align`` puts the block of its lines' ``"top"``,
-    ``"middle"``, or ``"bottom"`` at its place;
+    or of text placed at a point (text marks, labels of rules, regions, and
+    series, flat tick labels along x) that side of its block there; and
+    ``vertical_align`` puts the block of its lines' ``"top"``, ``"middle"``,
+    or ``"bottom"`` at its place (the same texts, and flat tick labels along
+    y at their ticks; titles and legends fill rows of their own);
     ``halo`` is ``"auto"``, ``False``, or an ``hg.Halo``; ``background`` an
     ``hg.TextBox`` (or ``False``) with ``padding`` around the text in pixels.
     """

@@ -73,7 +73,7 @@
         "v": []
       },
       "horizontal": false,
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"300\" viewBox=\"0 0 600 300\" role=\"img\" font-family=\"ui-sans-serif, system-ui, -apple-system, &#34;Segoe UI&#34;, Roboto, &#34;Helvetica Neue&#34;, Arial, sans-serif\" font-size=\"12\" fill=\"#5d6677\"><defs><clipPath id=\"herceg-svg-clip-0\"><rect x=\"16\" y=\"8\" width=\"572\" height=\"264\"/></clipPath></defs><g clip-path=\"url(#herceg-svg-clip-0)\"></g><g style=\"font-variant-numeric:tabular-nums\"><path d=\"M16 272.5H588\" stroke=\"#cfd5de\" fill=\"none\"/></g></svg>"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"300\" viewBox=\"0 0 600 300\" role=\"img\" font-family=\"ui-sans-serif, system-ui, -apple-system, &#34;Segoe UI&#34;, Roboto, &#34;Helvetica Neue&#34;, Arial, sans-serif\" font-size=\"12\" fill=\"#5d6677\"><defs><clipPath id=\"herceg-svg-clip-0\"><rect x=\"16\" y=\"8\" width=\"572\" height=\"264\"/></clipPath></defs><g style=\"font-variant-numeric:tabular-nums\"><path d=\"M16 272.5H588\" stroke=\"#cfd5de\" fill=\"none\"/></g></svg>"
     },
     {
       "name": "empty",
@@ -83,7 +83,7 @@
         "v": []
       },
       "horizontal": true,
-      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"300\" viewBox=\"0 0 600 300\" role=\"img\" font-family=\"ui-sans-serif, system-ui, -apple-system, &#34;Segoe UI&#34;, Roboto, &#34;Helvetica Neue&#34;, Arial, sans-serif\" font-size=\"12\" fill=\"#5d6677\"><defs><clipPath id=\"herceg-svg-clip-0\"><rect x=\"16\" y=\"8\" width=\"572\" height=\"264\"/></clipPath></defs><g clip-path=\"url(#herceg-svg-clip-0)\"></g><g style=\"font-variant-numeric:tabular-nums\"><path d=\"M16 272.5H588\" stroke=\"#cfd5de\" fill=\"none\"/></g></svg>"
+      "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"300\" viewBox=\"0 0 600 300\" role=\"img\" font-family=\"ui-sans-serif, system-ui, -apple-system, &#34;Segoe UI&#34;, Roboto, &#34;Helvetica Neue&#34;, Arial, sans-serif\" font-size=\"12\" fill=\"#5d6677\"><defs><clipPath id=\"herceg-svg-clip-0\"><rect x=\"16\" y=\"8\" width=\"572\" height=\"264\"/></clipPath></defs><g style=\"font-variant-numeric:tabular-nums\"><path d=\"M16 272.5H588\" stroke=\"#cfd5de\" fill=\"none\"/></g></svg>"
     },
     {
       "name": "log boundary",

@@ -8,6 +8,7 @@
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
 import { numberPattern, timePattern } from "../../format/patterns.ts";
+import { clearDomain } from "../../model/clearance.ts";
 import type {
   CategoryColors,
   CompiledFeatures,
@@ -38,6 +39,7 @@ import {
 import { Topology } from "./continuity.ts";
 import { type MarkScope, scalePrefix, scopeOfMark } from "./identity.ts";
 import { MARKER_RADIUS, markerPath, markers } from "./markers.ts";
+import { boundFrame, checkPositions } from "./positions.ts";
 import { RowStyles } from "./row-styles.ts";
 import { type CategoryScale, IdentityColors, OrdinalScale } from "./scales.ts";
 import { SeriesStyles } from "./series-styles.ts";
@@ -98,15 +100,15 @@ function compile(
         path: `${scalePath(name)}.scope`,
         message: `chart ${scalePath(name)}.scope: expected "chart" or "panel"; received ${JSON.stringify(scope)}`,
       });
+    // Position scales of the chart's own are the guide compiler's (guides/positions.ts).
+    if (spec.type === "linear" || spec.type === "log" || spec.type === "time") continue;
     // Round 2 freezes these before its streams draw them (marks/pending.ts).
     const pending: [string, string, string] | undefined =
       spec.type === "identity"
         ? ["", "C", 'give type: "ordinal"']
         : spec.type === "ordinal" && spec.scope !== undefined
           ? [".scope", "C", "drop scope"]
-          : spec.type === "linear" || spec.type === "log" || spec.type === "time"
-            ? ["", "R", "place values on x, y, and yRight"]
-            : undefined;
+          : undefined;
     if (pending) {
       const [key, stream, instead] = pending;
       const path = scalePath(name) + key;
@@ -186,6 +188,7 @@ function compile(
           ),
           { code: "unsupported" },
         );
+    if (mark.bound) checkPositions(mark, where);
     // On marks whose `color` is a field or a color, a name both says neither
     // (their series would read it as a field), and one that is neither is a mistake.
     const short = PAINTED.includes(spec.type) ? spec.color : undefined;
@@ -260,6 +263,7 @@ function compile(
         theme && paint!(colorScale.output(value, theme.palette, theme.muted), "chart scales.color"),
     },
     of: (mark) => byMark.get(mark),
+    frame: (frame, bound) => boundFrame(kit, frame, bound),
     update(t, slot, p) {
       theme = t;
       paint = p;
@@ -409,12 +413,16 @@ function bandAxis(mark: Mark): "x" | "y" | undefined {
 
 /**
  * Whether a line's or area's positions lie on a log scale, as the chart's
- * settings say (each panel's axis it draws in, the scale's settings, the
- * short form; log scales are never inferred): where every panel it draws
- * in has one, since its runs are measured once for all of them.
+ * settings say (a scale of the chart's own they are placed on; else each
+ * panel's axis it draws in, the scale's settings, the short form; log
+ * scales are never inferred): where every panel it draws in has one, since
+ * its runs are measured once for all of them. Shares and pixels are linear.
  */
 function positionsLog(config: ChartConfig, mark: Mark): boolean {
   const spec = mark.spec as { panel?: string; axis?: string };
+  const bound = mark.bound?.[mark.tooltip !== "y" ? "x" : "y"];
+  if (bound && bound.kind !== "axis")
+    return bound.kind === "scale" && config.scales?.[bound.scale]?.type === "log";
   const name = mark.tooltip !== "y" ? "x" : spec.axis === "right" ? "yRight" : "y";
   const chart = config.scales?.[name]?.type ?? config[name]?.type;
   const list = config.panels?.list ?? [];
@@ -453,21 +461,31 @@ function lineFeatures(
     bandAxis(mark),
   );
   const along = mark.tooltip as "x" | "y";
+  const field = positionField(spec[along]);
   const topology =
     spec.continuity || spec.where !== undefined
-      ? new Topology(kit, table, spec, { field: spec[along], log }, zone, path)
+      ? new Topology(kit, table, spec, { field, log }, zone, path)
       : undefined;
-  topology?.check(
-    mark.channelKind(along) ?? "number",
-    typeof spec.continuity?.maxGap === "object",
-    path,
-  );
+  topology?.check(table.kind(field), typeof spec.continuity?.maxGap === "object", path);
   const symbol: SymbolName = typeof spec.markers === "string" ? spec.markers : "circle";
-  const mapped = Object.values(spec.style?.by?.map ?? {}).some((style) => style.marker);
-  const marked = spec.markers !== false && (spec.markers !== undefined || mapped);
+  const looks = Object.values(spec.style?.by?.map ?? {}).flatMap((style) =>
+    style.marker ? [style.marker] : [],
+  );
+  const marked = spec.markers !== false && (spec.markers !== undefined || looks.length > 0);
+  // Markers reach their symbol's radius and half their outline past their
+  // observations, the furthest of the mark's and its series' looks.
+  let reach = 0;
+  if (marked)
+    for (const look of [{}, ...looks]) {
+      const style = { ...spec.style?.marker, ...look };
+      const outlined = style.stroke !== undefined || style.strokeWidth !== undefined;
+      const r = (style.radius ?? MARKER_RADIUS) * symbolReach(style.symbol ?? symbol);
+      reach = Math.max(reach, r + (outlined ? (style.strokeWidth ?? 1) / 2 : 0));
+    }
   let theme: Theme | undefined;
   let paintOf: PaintReader;
   return {
+    ...(reach > 0 && { inset: { x: reach, y: reach }, clearDomain }),
     use(t, p) {
       theme = t;
       paintOf = p;
@@ -575,6 +593,20 @@ function lineFeatures(
       s.features = features;
     },
   };
+}
+
+/**
+ * The field a line's or area's positions read: its own, or its
+ * coordinate's (marks/row-bindings.ts), whichever scale places it.
+ */
+function positionField(position: unknown): string {
+  if (typeof position !== "object") return position as string;
+  const coordinate = position as {
+    field?: string;
+    fraction?: { field: string };
+    px?: { field: string };
+  };
+  return coordinate.field ?? (coordinate.fraction ?? coordinate.px)!.field;
 }
 
 /** How marks write values in a pattern format (`{ number }`, `{ time }`). */
@@ -697,14 +729,9 @@ function areaFeatures(
       `${path} ${spec.where !== undefined ? "where" : "continuity"}: stacked areas cannot leave rows out yet; drop it or the stack`,
     );
   const along = mark.tooltip as "x" | "y";
-  const topology = asks
-    ? new Topology(kit, table, spec, { field: spec[along], log }, zone, path)
-    : undefined;
-  topology?.check(
-    mark.channelKind(along) ?? "number",
-    typeof spec.continuity?.maxGap === "object",
-    path,
-  );
+  const field = positionField(spec[along]);
+  const topology = asks ? new Topology(kit, table, spec, { field, log }, zone, path) : undefined;
+  topology?.check(table.kind(field), typeof spec.continuity?.maxGap === "object", path);
   let theme: Theme | undefined;
   return {
     use(t, p) {

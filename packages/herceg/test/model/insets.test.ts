@@ -18,8 +18,9 @@ import { brushedRows } from "../../src/model/selected-rows.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { NO_PAGE } from "../../src/render/fallbacks.ts";
 import { renderSvg } from "../../src/render/svg.ts";
-import { gridStrokes } from "../../src/scene/grid.ts";
+import { gridLines } from "../../src/scene/grid.ts";
 import type { Panel, Rect, Scene, TextItem } from "../../src/scene/scene.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { drawnLines } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 800, height = 600) {
@@ -109,7 +110,7 @@ describe("insets", () => {
     const box = zoom!.cover!;
     expect(area).toBeCloseTo(main!.plot.width * main!.plot.height - box.width * box.height, 3);
     // Base panels draw first, then each inset over them.
-    expect(scene.layers!.map((layer) => layer.map((p) => p.key))).toEqual([["main"], ["zoom"]]);
+    expect(scene.painted!.map((p) => p.key)).toEqual(["main", "zoom"]);
   });
 
   it("stay inside their parent's plot, refusing places outside it", () => {
@@ -175,9 +176,19 @@ describe("insets", () => {
     });
     const main = byKey(scene.panels).main!;
     const at = scene.panels.indexOf(main);
-    // Drawn beyond its plot's cut, the rule keeps out of the inset's box.
+    // Drawn beyond its plot's cut, the rule keeps out of the inset's box:
+    // to the chart without it, as rectangles that do not overlap it.
     const svg = renderSvg(scene);
-    expect(svg).toContain(`-keep-${at}"><path clip-rule="evenodd"`);
+    const box = byKey(scene.panels).zoom!.cover!;
+    const overlaps = (r: Rect) =>
+      r.x < box.x + box.width &&
+      box.x < r.x + r.width &&
+      r.y < box.y + box.height &&
+      box.y < r.y + r.height;
+    expect(main.keep!.length).toBeGreaterThan(0);
+    expect(main.keep!.some(overlaps)).toBe(false);
+    const area = main.keep!.reduce((sum, r) => sum + r.width * r.height, 0);
+    expect(area).toBeCloseTo(scene.width * scene.height - box.width * box.height, 3);
     expect(svg).toMatch(new RegExp(`<g clip-path="url\\(#[^)]*-keep-${at}\\)">[^]*#ff0000`));
   });
 
@@ -601,10 +612,10 @@ describe("insets", () => {
     const crosses = (lo: number, hi: number, from: number, to: number) =>
       Math.min(hi, to) - Math.max(lo, from) > 0.01;
     let segments = 0;
-    for (const { coords, paint } of gridStrokes([main!], scene.theme))
-      for (let i = 0; i < coords.length; i += 4) {
+    for (const batch of main!.grids)
+      for (let i = 0, coords = gridLines(batch, main!.plot); i < coords.length; i += 4) {
         const [x0, y0, x1, y1] = coords.slice(i, i + 4) as [number, number, number, number];
-        const half = paint.strokeWidth / 2;
+        const half = batch.paint!.strokeWidth / 2;
         segments++;
         const across = x0 !== x1;
         const meets = across
@@ -631,8 +642,9 @@ describe("insets", () => {
     zoomedOut.setSize(800, 600, 0.5);
     const small = zoomedOut.scene(estimateText);
     const inner = byKey(small.panels).zoom!.cover!;
-    for (const { coords } of gridStrokes([byKey(small.panels).main!], small.theme, 0.5))
-      for (let i = 0; i < coords.length; i += 4) {
+    const { main: small0 } = byKey(small.panels);
+    for (const batch of small0!.grids)
+      for (let i = 0, coords = gridLines(batch, small0!.plot, 0.5); i < coords.length; i += 4) {
         const [x0, y0, x1] = coords.slice(i, i + 3) as [number, number, number];
         if (x0 === x1) continue;
         expect(
@@ -646,9 +658,9 @@ describe("insets", () => {
       x: { domain: [0, 9], grid: true },
       panels: zoomed({ width: { fraction: 0.3 }, height: { fraction: 0.3 } }),
     }).scene.panels.find((p) => p.key === "main")!;
-    const atEdges = edges.grid.x.flatMap((x, i) =>
+    const atEdges = gridAt(edges, "x").flatMap((x, i) =>
       Math.abs(x - edges.plot.x) < 1 || Math.abs(x - edges.plot.x - edges.plot.width) < 1
-        ? [edges.grid.xSpans![i]!]
+        ? [edges.grids.find((batch) => batch.along === "x")!.spans![i]!]
         : [],
     );
     expect(atEdges.length).toBeGreaterThan(0);

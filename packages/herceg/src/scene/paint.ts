@@ -6,13 +6,18 @@
 // in: a panel's grid batches before its geometry at the same `zIndex`,
 // batches among themselves as their axes are listed, and geometry as its
 // marks are declared, then as each mark emits it. Picking takes the
-// topmost of the targets the pointer is over. A plot's background stays
-// under everything, its border, axes, and the pointer's overlays above.
-// Renderers paint what `paintOrder` gives them in one plane: SVG-only
-// drawings among canvas ones need canvas painters, or a renderer that
-// keeps them in order.
+// topmost of the targets the pointer is over. Panels paint one after
+// another, each its plot's background and then its plan, so a later
+// panel's (an inset's over its parent) go over an earlier one's drawings;
+// only the chart's background is under every panel, and plots' borders,
+// axes, and the pointer's overlays are above them all.
+// Renderers paint what the plan gives them (`Panel.paint`, from
+// guides/paint.ts, which charts giving zIndex values load) in one plane:
+// SVG-only drawings among canvas ones need canvas painters, or a renderer
+// that keeps them in order.
 
 import type { StrokePaint } from "../style/style.ts";
+import type { Geometry, Panel } from "./scene.ts";
 
 /** A panel's grid lines along one axis, painted together at their `zIndex`. */
 export interface GridBatch {
@@ -27,23 +32,18 @@ export interface GridBatch {
   readonly spans?: readonly (readonly (readonly [number, number])[])[] | undefined;
 }
 
-/** What a panel paints next: one of its grid batches, or one of its geometries, by index. */
-export type PaintEntry =
-  | { readonly kind: "grid"; readonly index: number }
-  | { readonly kind: "geometry"; readonly index: number };
-
 /**
- * The order to paint `grids` and `geometry` in, each with its `zIndex`
- * (see the module's rules): by `zIndex`, ties as listed, grids first.
+ * Visits what `panel` paints, in order: its grid batches (`grid`) and
+ * geometry (`geometry`), by its plan, or without one its grid batches first.
  */
-export function paintOrder(
-  grids: readonly { readonly zIndex: number }[],
-  geometry: readonly { readonly zIndex: number }[],
-): PaintEntry[] {
-  const entries: (PaintEntry & { zIndex: number })[] = [
-    ...grids.map(({ zIndex }, index) => ({ kind: "grid" as const, index, zIndex })),
-    ...geometry.map(({ zIndex }, index) => ({ kind: "geometry" as const, index, zIndex })),
-  ];
-  // Sorting is stable, so ties keep the order above.
-  return entries.sort((a, b) => a.zIndex - b.zIndex).map(({ kind, index }) => ({ kind, index }));
+export function eachPainted(
+  { paint, grids, marks }: Panel,
+  grid: (batch: GridBatch) => void,
+  geometry: (mark: Geometry) => void,
+): void {
+  for (let i = 0; i < grids.length + marks.length; i++) {
+    const at = paint ? paint[i]! : i;
+    if (at < grids.length) grid(grids[at]!);
+    else geometry(marks[at - grids.length]!);
+  }
 }

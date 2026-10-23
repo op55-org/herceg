@@ -123,7 +123,7 @@ describe("the interaction controller", () => {
 
   it("loads after the first frame, which draws without it", async () => {
     const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
-    expect(chart.root.querySelectorAll("svg g[clip-path] path")).toHaveLength(1);
+    expect(chart.root.querySelectorAll("svg path[clip-path]")).toHaveLength(1);
     expect(tooltipOf(chart)).toBeUndefined();
     const loading = chart.loading;
     expect(loading).toBeInstanceOf(Promise);

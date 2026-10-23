@@ -214,7 +214,7 @@ describe("a layout mark in a subplot", () => {
       expect(trend!.axes.map(({ side }) => side).sort()).toEqual(["bottom", "left"]);
       expect(trend!.axes.find(({ side }) => side === "bottom")!.ticks.length).toBeGreaterThan(0);
       expect(share!.axes).toEqual([]);
-      expect(share!.grid).toEqual({ x: [], y: [] });
+      expect(share!.grids).toEqual([]);
       expect(model.panels().map(({ key }) => key)).toEqual(["trend"]);
       expect(model.allPanels().map(({ key, items }) => [key, items])).toEqual([
         ["trend", false],

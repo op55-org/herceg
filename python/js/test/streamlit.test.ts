@@ -143,7 +143,7 @@ describe("Streamlit component", () => {
     run(parent, lineChart("Latency", []));
     const drawn = figure(parent);
     expect(drawn.getAttribute("aria-label")).toBe("Latency");
-    expect(parent.querySelectorAll("svg g[clip-path] path")).toHaveLength(1);
+    expect(parent.querySelectorAll("svg path:is([clip-path], [clip-path] *)")).toHaveLength(1);
     // The next run delivers equal bytes in a new message.
     const { cleanup } = run(parent, lineChart("Latency", []));
     expect(figure(parent)).toBe(drawn);

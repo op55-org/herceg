@@ -66,17 +66,16 @@ export interface MappedField<S extends Schema> {
 }
 
 /**
- * A place along an axis for each row (see `Coordinate`): a field `F` (any
- * position field, or a number or time one for values) on the axis' scale
- * or on a position scale of the chart's `scales` (`scale`), a share of the
- * plot read from a number field (`{ fraction: { field } }`), pixels from
- * its edge (`{ px: { field } }`), or a constant, each moved `offset` pixels.
+ * A place along an axis for each row (see `RowCoordinate`): a field `F`
+ * (any position field, or a number or time one for values) on the axis'
+ * scale or on a position scale of the chart's `scales` (`scale`), a share
+ * of the plot read from a number field (`{ fraction: { field } }`), or
+ * pixels from its edge (`{ px: { field } }`), each moved `offset` pixels.
  */
 export type FieldCoordinate<S extends Schema, F extends string = PositionField<S>> =
   | { field: F; scale?: string; offset?: number }
-  | { fraction: number | { field: NumberField<S> }; frame?: Frame; offset?: number }
-  | { px: number | { field: NumberField<S> }; frame?: Frame; offset?: number }
-  | { data: number | string; scale?: string; offset?: number };
+  | { fraction: { field: NumberField<S> }; frame?: Frame; offset?: number }
+  | { px: { field: NumberField<S> }; frame?: Frame; offset?: number };
 
 /** A part of a label's text, reading fields `F` (see `LabelPart`). */
 export type LabelPartOf<F extends string> =

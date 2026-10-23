@@ -415,6 +415,12 @@ export interface HorizontalPlacing {
     | undefined;
   readonly kept: Margins;
   readonly keep: Keep;
+  /**
+   * Pixels marks' labels outside panel `i`'s plot (see `Mark.room`) take
+   * left and right of it: at the chart's sides they have tracks of their
+   * own, so a placement keeps this room where panels are beside others.
+   */
+  labels(i: number): readonly [number, number];
   /** Whether x labels may reach past plots: there is data to label, and labels or listed axes. */
   readonly widens: boolean;
   /**
@@ -521,23 +527,27 @@ export interface PanelPlacement {
    * In a layout with insets, a scene's panels (with the navigator's strip
    * after them) and the views of those with axes as insets make them: an
    * inset's box over the panels drawn before it (`cover`) and its border, a
-   * panel's plot left visible by the insets over it (`visible`) and its grid
-   * lines' spans there, at `ratio` device pixels to a CSS pixel, and their
+   * panel's plot left visible by the insets over it (`visible`), the part of
+   * the `chart` its other drawings keep to (`keep`), and its grid lines'
+   * spans there, at `ratio` device pixels to a CSS pixel, and their
    * indicators among its marks, with `theme` and their colors read by
-   * `paint`; returns the scene's layers (see `Scene.layers`).
+   * `paint`; returns the order panels are painted in (see `Scene.painted`).
    */
   finish?(
     panels: Panel[],
     views: readonly InsetView[],
+    chart: Rect,
     theme: Theme,
     ratio: number,
     paint: PaintReader,
-  ): Panel[][] | undefined;
-  /** In a layout of cells, where the guides' axes go (see `AxesState.cells`). */
+  ): Panel[] | undefined;
+  /**
+   * In a layout of cells, where the guides' axes go (see `AxesState.cells`),
+   * by each panel's instance of the scale an axis along x or y shows (`groupOf`).
+   */
   cells?(
-    xGroupOf: readonly number[],
+    groupOf: (scale: string, along: "x" | "y") => readonly number[],
     withAxes: readonly boolean[],
-    yGroupOf: () => readonly number[],
     drawsY: readonly boolean[],
     start: number,
     end: number,
@@ -579,6 +589,17 @@ export interface PanelLayout {
    * the whole chart in facets.
    */
   scopes(config: ScaledConfig): Scopes;
+  /**
+   * Each panel's instance of a position scale of the chart's own under
+   * `scope`, or the layout's default (each subplot its own, facets one),
+   * in a grid of `columns`; `path` says where the scope is set.
+   */
+  instances(
+    scope: ScaleScope | undefined,
+    split: PanelSplit,
+    columns: number,
+    path: string,
+  ): number[];
   /** In subplots, the error for numbers sharing scale `scale` with another mark's categories (see `mixedPanels`). */
   mixed?(numbers: Mark, categories: Mark, scale: ScaleName): Error;
   splitter(): PanelSplitter;

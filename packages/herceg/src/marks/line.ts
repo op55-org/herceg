@@ -45,7 +45,8 @@ import {
   traceSeries,
   untranspose,
 } from "./orient.ts";
-import { coordinates, type FieldPositions, type Pending, refusePending } from "./pending.ts";
+import { type Pending, refusePending } from "./pending.ts";
+import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { IndexUse, tracePath, unionExtent } from "./trace.ts";
@@ -161,15 +162,16 @@ const FEATURES = [
 ] as const;
 
 /** Lines' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [...coordinates("x", "y"), ["labels", "C", "drop labels"]];
+const PENDING: readonly Pending[] = [["labels", "C", "drop labels"]];
 
-export class LineMark implements Mark<FieldPositions<Frozen<LineSpec>>> {
+export class LineMark implements Mark<Frozen<LineSpec>> {
   declare readonly [MARK]: true;
-  readonly spec: FieldPositions<Frozen<LineSpec>>;
+  readonly spec: Frozen<LineSpec>;
   readonly table: Table<Schema>;
   readonly tooltip: "x" | "y";
   readonly featured: boolean;
   readonly identity: MarkSources;
+  readonly bound: RowBindings | undefined;
   readonly #roles: Roles;
   readonly #split: SeriesSplitter;
   readonly #indexes = new IndexUse();
@@ -178,19 +180,21 @@ export class LineMark implements Mark<FieldPositions<Frozen<LineSpec>>> {
 
   constructor(input: LineSpec, table: Table<Schema>) {
     refusePending(input, "line", PENDING);
-    this.spec = frozen(input) as FieldPositions<Frozen<LineSpec>>;
+    this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "line");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    const { fields, bound } = bindRows(spec, table, "line", ["x", "y"]);
+    this.bound = bound;
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "line series");
     const series = seriesOf(spec, table, "stroke");
     this.featured = asksFeatures(spec, FEATURES, table, series);
     const roles = rolesOf(
       table,
       "line",
-      spec.x,
-      spec.y,
+      fields.x!,
+      fields.y!,
       spec.orient,
       series,
       spec.series === undefined,
@@ -213,6 +217,7 @@ export class LineMark implements Mark<FieldPositions<Frozen<LineSpec>>> {
   }
 
   channelKind(axis: "x" | "y") {
+    if (offAxis(this.bound, axis)) return undefined;
     const { orient, position, values } = this.#roles;
     return axis === orient ? this.table.kind(position) : valueKind(this.table, values);
   }

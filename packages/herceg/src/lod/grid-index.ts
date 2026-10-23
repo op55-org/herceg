@@ -1,3 +1,9 @@
+/** What a search of a grid index hands its points to, and how far it reaches. */
+export interface GridQuery {
+  readonly limit: number;
+  take(id: number, distance: number): void;
+}
+
 /**
  * Uniform grid over pixel positions for nearest-point queries. Points are
  * bucketed by cell with a counting sort (two Uint32Arrays, no per-point
@@ -56,24 +62,24 @@ export class GridIndex {
     return row * this.#columns + column;
   }
 
-  /** The id of the point nearest (x, y) within `maxDistance` pixels, with its distance. */
-  nearest(
-    x: number,
-    y: number,
-    maxDistance = Infinity,
-  ): { id: number; distance: number } | undefined {
+  /**
+   * Hands `query` each point within its `limit` of (x, y), nearest cells
+   * first, with its id and distance; the limit is read again after each
+   * point taken, so a query narrowing it as points come stops sooner.
+   */
+  visit(x: number, y: number, query: GridQuery): void {
+    let limit = query.limit;
+    let squared = limit * limit;
     const column = Math.min(
       this.#columns - 1,
       Math.max(0, Math.floor((x - this.#x0) / this.#cell)),
     );
     const row = Math.min(this.#rows - 1, Math.max(0, Math.floor((y - this.#y0) / this.#cell)));
-    let best = -1;
-    let bestDistance = maxDistance * maxDistance;
     const rings = Math.max(this.#columns, this.#rows);
     for (let ring = 0; ring <= rings; ring++) {
       // Points in ring r are at least (r - 1) cells away from the target.
       const reach = (ring - 1) * this.#cell;
-      if (ring > 0 && reach > 0 && reach * reach > bestDistance) break;
+      if (ring > 0 && reach > query.limit) break;
       for (let r = row - ring; r <= row + ring; r++) {
         if (r < 0 || r >= this.#rows) continue;
         const edge = r === row - ring || r === row + ring;
@@ -85,15 +91,14 @@ export class GridIndex {
             const dx = this.#coords[i * 2]! - x;
             const dy = this.#coords[i * 2 + 1]! - y;
             const d = dx * dx + dy * dy;
-            if (d < bestDistance) {
-              bestDistance = d;
-              best = i;
-            }
+            if (d > squared) continue;
+            query.take(this.#ids[i]!, Math.sqrt(d));
+            limit = query.limit;
+            squared = limit * limit;
           }
         }
       }
     }
-    return best < 0 ? undefined : { id: this.#ids[best]!, distance: Math.sqrt(bestDistance) };
   }
 
   /** Bytes held by the index, for memory accounting. */

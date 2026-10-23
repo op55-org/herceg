@@ -11,6 +11,7 @@ import { type DataSelection, type SelectionStore, selectRows } from "../data/sel
 import type { Schema, Table } from "../data/table.ts";
 import { type LayoutMark, tablesOf } from "../marks/layout-mark.ts";
 import type { Mark } from "../marks/mark.ts";
+import { offAxis } from "../marks/row-bindings.ts";
 import type { BrushSpec, SelectionGesture } from "../spec/spec.ts";
 import { Highlighter, membership } from "./highlight.ts";
 import type { ChartConfig, ChartModel } from "./model.ts";
@@ -298,6 +299,12 @@ function refuseBrush(mark: Mark, brush: BrushSpec) {
         `rug brush: its ticks have no ${other} value; brush along ${mark.tooltip} only`,
       );
   }
+  // Rows placed off an axis (in a frame, on a scale of the chart's own) hold none of its values.
+  for (const axis of ["x", "y"] as const)
+    if (offAxis(mark.bound, axis) && (brush === axis || brush === "xy"))
+      throw new Error(
+        `${type} brush: its ${axis} is not on the ${axis} axis, whose values a brush selects by; ${brush === "xy" ? `brush along ${axis === "x" ? "y" : "x"} only` : "lasso its rows"}, or place ${axis} on the axis`,
+      );
   // Cells of a 2D histogram place their rows along x and y both.
   if (!mark.summarizes || mark.tooltip === "cell") return;
   // A summary's values axis holds statistics: a histogram's counts, a box plot's quartiles.

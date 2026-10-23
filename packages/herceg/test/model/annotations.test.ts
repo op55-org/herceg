@@ -355,7 +355,9 @@ describe("text", () => {
       });
       const [label] = of(scene, "text") as TextGeometry[];
       const [leaders] = of(scene, "segments");
-      expect(leaders!.draw.canvas).toBe(false);
+      // Drawn whole, in the mark's place among the others, on a canvas too.
+      expect(leaders!.draw.defaultClip).toBe(false);
+      expect(leaders!.draw.canvas).toBeTypeOf("function");
       expect(leaders!.stroke).toBe(scene.theme.muted);
       expect(leaders!.count).toBeGreaterThan(0);
       expect(leaders!.count).toBeLessThan(label!.count);

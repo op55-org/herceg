@@ -80,9 +80,9 @@ describe("clip", () => {
         label: { field: "name", style: { color: "#00aa00" } },
         ...(clip !== undefined && { clip }),
       });
-    const chart = createChart(host, { renderer: "canvas", legend: false, marks: [labels()] });
+    const chart = createChart(host, { renderer: "svg", legend: false, marks: [labels()] });
     expect(cuts(host.querySelector('[fill="#00aa00"]')!)).toEqual([]);
-    chart.update({ renderer: "canvas", legend: false, marks: [labels("plot")] });
+    chart.update({ renderer: "svg", legend: false, marks: [labels("plot")] });
     chart.render();
     expect(cuts(host.querySelector('[fill="#00aa00"]')!)[0]).toMatch(/-clip-\d+$/);
     chart.destroy();

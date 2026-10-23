@@ -33,7 +33,12 @@ describe("architecture", () => {
   // Legend swatches draw symbols with the markers' code, which the feature
   // compiler loads too: a chunk of the two compilers' own.
   it("the guide compiler imports only types from the chart's modules", () => {
-    const shared = ["format/patterns.ts", "marks/features/markers.ts", "draw/symbol-shapes.ts"];
+    const shared = [
+      "format/patterns.ts",
+      "marks/features/markers.ts",
+      "draw/symbol-shapes.ts",
+      "layout/block.ts",
+    ];
     const own = (path: string) =>
       path.startsWith(join(SRC, "guides")) || shared.some((file) => path === join(SRC, file));
     for (const file of [...files(join(SRC, "guides")), join(SRC, "format/patterns.ts")]) {
@@ -45,15 +50,19 @@ describe("architecture", () => {
 
   // The feature compiler follows the same rule. What it imports besides its
   // own modules no line chart's module imports: expression compilation (the
-  // builders `col` and `when` are data/expr.ts), symbols' shapes, and the
-  // guide compiler's pattern formats. Charts that import these themselves
-  // (grids the first, points the second) get them in a chunk of their own.
+  // builders `col` and `when` are data/expr.ts), symbols' shapes, automatic
+  // padding's solver (for lines' markers), and the guide compiler's pattern
+  // formats. Charts that import these themselves (grids the first, points
+  // the second and third) get them in a chunk of their own.
   // Colors are told from names through the kit (FeatureKit.isColor).
   it("the feature compiler imports only types from the line chart's modules", () => {
     const features = join(SRC, "marks/features");
-    const allowed = ["data/expression.ts", "draw/symbol-shapes.ts", "format/patterns.ts"].map(
-      (path) => join(SRC, path),
-    );
+    const allowed = [
+      "data/expression.ts",
+      "draw/symbol-shapes.ts",
+      "model/clearance.ts",
+      "format/patterns.ts",
+    ].map((path) => join(SRC, path));
     for (const file of files(features)) {
       const source = readFileSync(file, "utf8");
       for (const [, path] of source.matchAll(/^import (?!type )[^;]*?from "([^"]+)"/gm)) {

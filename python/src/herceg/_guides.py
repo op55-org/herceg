@@ -254,9 +254,12 @@ class TickLabels:
     ``"stagger"``, ``"wrap"``), their ``row`` (0 by the axis line, 1
     beyond), ``priority`` where they collide, and whether labels repeating
     the one before them show (``duplicates``). ``inside=True`` draws them
-    inside the plot beside their ticks, aligned by ``style``'s
-    ``tick_label``, and ``gap`` is the pixels between them and their
-    tick's end on their side."""
+    inside the plot beside their ticks, taking no room outside it. Flat
+    labels, inside or out, stand at their ticks along the axis as
+    ``style``'s ``tick_label`` aligns them: its ``align`` on x, its
+    ``vertical_align`` on y; centered by default. ``gap``
+    is the pixels between them and their tick's end on their side (the
+    axis line where the tick does not reach it). Colorbars take neither."""
 
     rotation: float | Sequence[float] | None = None
     collision: Collision | None = None
@@ -416,8 +419,13 @@ class Scale:
     ``"y"``, and ``"y_right"``, over the short forms ``x=``, ``y=``,
     ``y_right=``, and position scales of the chart's own under other
     names (with a ``type``), which marks name in ``hg.DataPosition``.
-    ``padding`` is the room it keeps around its data. Scales of categories
-    are ``hg.OrdinalScale``."""
+    ``padding`` is the room it keeps around its data: ``"auto"`` (the
+    default) as much as marks draw past their data (points' and markers'
+    radius and outline, bar labels and widths; plain lines none), a share
+    of the domain at each end (``0.05``), ``hg.Pixels(n)`` at each end, or
+    ``0`` for none. Padding given also widens a ``domain`` set and a zoomed
+    view; ``"auto"`` leaves those exact. Scales of categories are
+    ``hg.OrdinalScale``."""
 
     type: Literal["linear", "log", "time"] | None = None
     domain: Sequence[Any] | None = None

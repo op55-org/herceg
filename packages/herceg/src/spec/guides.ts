@@ -89,8 +89,10 @@ export interface TickLabelsSpec {
   duplicates?: "hide" | "show";
   /**
    * Draw the labels inside the plot, beside their ticks, rather than
-   * outside it; rows then advance inward. Their alignment along the axis
-   * and across it is `style.tickLabel`'s `align` and `verticalAlign`.
+   * outside it, taking none of the room outside; rows then advance inward.
+   * Flat labels, inside or out, stand at their ticks along the axis as
+   * `style.tickLabel` aligns them: on x its `align`, on y its
+   * `verticalAlign`; centered by default. Not on colorbars.
    */
   inside?: boolean;
   /**

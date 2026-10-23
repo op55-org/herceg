@@ -108,7 +108,14 @@ color schemes and diverging color, built-in themes (light, dark, and high
 contrast on surfaces of their own, and one that follows the page) with
 CSS-variable theming, theme tokens and role styles cascading to axes,
 legends, titles, and subplots, titles above or below the plots and legends
-on any side or inside a plot, explicit padding, clipping per mark, text halos, rule,
+on any side or inside a plot, explicit padding, clipping per mark, paint
+order by `zIndex` (grid lines over data, annotations between marks) in
+every renderer, scale padding (automatic room for markers and bar labels,
+a share, or pixels), tick labels inside the plot or aligned at their
+ticks, text blocks aligned by `verticalAlign`, marks placed by fractions
+or pixels of the plot from fields, by pixel offsets, or on position
+scales of the chart's own, bars of a fixed pixel width and outlines on
+chosen sides, text halos, rule,
 region, and text annotations from constants or data (with labels hidden or
 moved where they would overlap), custom marks drawing
 through the same renderers (with series, legends, and tooltips), colors

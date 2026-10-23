@@ -11,22 +11,17 @@ import type { ScaleName } from "../model/scales.ts";
 import { compiledAxes, listedAxes } from "./axes.ts";
 import { compiledLegends, plannedLegends } from "./legends.ts";
 import type { Format } from "./options.ts";
+import { axisPadding } from "./padding.ts";
+import { type PaintPlan, planPanels } from "./paint.ts";
+import { ownScales } from "./positions.ts";
 import { countOf, tickPlanner, writer } from "./ticks.ts";
 
 /**
- * Refuses what axes and guides ask before round 2's stream R draws it (see
- * marks/pending.ts): scales' padding, grids among the marks, axes of the
- * chart's own position scales, and tick labels inside the plot or apart
- * from their ticks.
+ * Checks what scales, axes, and guides ask, as the validator checks a
+ * spec: malformed settings, names of scales the chart lacks, and grid
+ * lines along scales of the chart's own, which it does not draw.
  */
-function refusePending(kit: GuideKit, config: ChartConfig): void {
-  const refuse = (path: string, correction: string) => {
-    throw new kit.ChartError({
-      code: "unsupported",
-      path,
-      message: `chart ${path}: not drawn as given yet (round 2 stream R adds it); ${correction}`,
-    });
-  };
+function checkSettings(kit: GuideKit, config: ChartConfig): void {
   // 3D boxes refuse their own axes' settings for good (marks/plot3d.ts): a
   // chart's when its marks are 3D, a panel's when its marks are.
   const boxes = config.marks.flatMap((mark) =>
@@ -40,16 +35,7 @@ function refusePending(kit: GuideKit, config: ChartConfig): void {
   const axes: [string, object | undefined][] = [
     ...Object.entries(config.scales ?? {}).flatMap(
       ([name, scale]): [string, object | undefined][] =>
-        box(name)
-          ? []
-          : [
-              [
-                /^[A-Za-z_$][\w$]*$/.test(name)
-                  ? `scales.${name}`
-                  : `scales[${JSON.stringify(name)}]`,
-                scale,
-              ],
-            ],
+        box(name) ? [] : [[scalePath(name), scale]],
     ),
     ...SCALES.flatMap((name): [string, object | undefined][] =>
       box(name) ? [] : [[name, config[name]]],
@@ -107,33 +93,23 @@ function refusePending(kit: GuideKit, config: ChartConfig): void {
         malformed(`${path}.inside`, "true or false", inside);
     }
   });
-  for (const [path, settings] of axes) {
-    const axis = settings as { grid?: unknown; padding?: unknown } | undefined;
-    const z = gridZ(axis?.grid);
-    if (z !== undefined && z !== -1) refuse(`${path}.grid.zIndex`, "drop zIndex");
-    if (axis?.padding !== undefined && axis.padding !== "auto")
-      refuse(`${path}.padding`, 'drop padding, or give "auto"');
-  }
   config.guides?.forEach((guide, i) => {
     if (guide.type === "legend") return;
     const at = `guides[${i}]`;
-    if (guide.type === "axis") {
-      if (!SCALES.includes(guide.scale as ScaleName)) {
-        if (["linear", "log", "time"].includes(config.scales?.[guide.scale]?.type as string))
-          refuse(`${at}.scale`, "name x, y, or yRight");
+    if (guide.type === "axis" && !SCALES.includes(guide.scale as ScaleName)) {
+      if (!["linear", "log", "time"].includes(config.scales?.[guide.scale]?.type as string))
         throw new kit.ChartError({
           code: "unknown-reference",
           path: `${at}.scale`,
-          message: `chart ${at}.scale: the chart has no position scale "${guide.scale}"; name x, y, or yRight`,
+          message: `chart ${at}.scale: the chart has no position scale "${guide.scale}"; name x, y, yRight, or one of its scales of type "linear", "log", or "time"`,
         });
-      }
-      const z = gridZ(guide.grid);
-      if (z !== undefined && z !== -1) refuse(`${at}.grid.zIndex`, "drop zIndex");
-    }
-    for (const [path, spec] of tickLabels(guide, at)) {
-      const { inside, gap } = (spec || {}) as { inside?: boolean; gap?: number };
-      if (inside || gap !== undefined)
-        refuse(`${path}.${inside ? "inside" : "gap"}`, `drop ${inside ? "inside" : "gap"}`);
+      // Grid lines follow x and y.
+      if (guide.grid !== undefined && guide.grid !== false)
+        throw new kit.ChartError({
+          code: "unsupported",
+          path: `${at}.grid`,
+          message: `chart ${at}.grid: an axis of a scale of the chart's own draws no grid lines; drop grid`,
+        });
     }
   });
 }
@@ -186,76 +162,111 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
       throw new Error(
         `chart scales.${name}: marks place values on x, y, and yRight; name one of those, or give type: "ordinal" for a scale of categories`,
       );
-  for (const scale of SCALES) note(scales?.[scale], `scales.${scale}`);
-  refusePending(kit, config);
+  for (const [name, scale] of Object.entries(scales ?? {})) note(scale, scalePath(name));
+  checkSettings(kit, config);
   let read = config;
   // Listed axes: each scale's on its default side read as its short form.
   config.guides?.forEach((guide, i) => {
     note(guide, `guides[${i}]`);
   });
-  const listed = listedAxes(read);
+  const listed = listedAxes(read, kit.alignsTickLabels(read));
   if (listed) read = { ...read, ...listed.read };
   // The duplicates policy of the axis whose ticks the model plans for the
   // scale: an axis moved off the default side leaves out repeats, as its
   // other layers do, unless it says otherwise.
-  const repeats = (scale: ScaleName) => {
+  const repeats = (scale: string) => {
     const axis = listed?.axes.find((one) => one.scale === scale && one.layers[0]!.planned);
     const labels = axis?.layers[0]?.labels;
     return labels ? (labels.duplicates ?? (axis.home ? undefined : "hide")) : undefined;
   };
   const legends = plannedLegends(kit, read);
+  const context = (context: AxisContext, scale: string): AxisContext => {
+    const spec = context.spec;
+    if (!spec) return context;
+    const { ticks, format, tooltipFormat } = spec;
+    // The model reads a count of ticks; the compiler plans the other forms.
+    const count = countOf(ticks);
+    const plannedTicks = ticks !== undefined && count === undefined;
+    const plannedFormat = planned(format);
+    const plannedValue = planned(tooltipFormat) || (tooltipFormat === undefined && plannedFormat);
+    // A duplicates policy of its own has the compiler write the axis' labels too.
+    const policy = context.type !== "band" && repeats(scale) !== undefined;
+    // Padding given replaces the room marks ask for.
+    const given = spec.padding === "auto" ? undefined : spec.padding;
+    const where = given === undefined ? "" : paddingPath(config, scale, given);
+    if (given !== undefined && context.type === "band")
+      throw new kit.ChartError({
+        code: "invalid-option",
+        path: where,
+        message: `chart ${where}: a category axis places its categories in bands, with room of their own; drop padding`,
+      });
+    const padding = given !== undefined ? axisPadding(kit, context, given, where) : undefined;
+    if (!plannedTicks && !plannedFormat && !plannedValue && !policy && ticks === count)
+      return padding ? { ...context, padding } : context;
+    const at = (value: unknown, fallback: string) =>
+      `chart ${paths.get(value as object) ?? `${scale}.${fallback}`}`;
+    // Category axes label every category that fits, and write them as they are.
+    if (context.type === "band" && (plannedTicks || plannedFormat))
+      throw new Error(
+        plannedTicks
+          ? `${at(ticks, "ticks")}: a category axis labels the categories that fit; drop ticks, or give a count`
+          : `${at(format, "format")}: a category axis writes its categories as they are; drop format`,
+      );
+    const plan =
+      plannedTicks || plannedFormat || policy
+        ? tickPlanner(
+            kit,
+            ticks,
+            format,
+            context,
+            scale,
+            { ticks: at(ticks, "ticks"), format: at(format, "format") },
+            repeats(scale),
+          )
+        : undefined;
+    const shown = tooltipFormat ?? format;
+    const formatValue = plannedValue
+      ? writer(kit, shown, context, scale, at(shown, tooltipFormat ? "tooltipFormat" : "format"))
+          ?.value
+      : undefined;
+    const { ticks: _, ...rest } = spec;
+    return {
+      ...context,
+      spec: count === undefined ? rest : { ...rest, ticks: count },
+      plan,
+      formatValue,
+      padding,
+    };
+  };
+  const plans = new Map<string, PaintPlan>();
   return {
+    paint: (panels) => planPanels(panels, plans),
     axes: listed && compiledAxes(kit, listed.axes),
     legends: legends && compiledLegends(kit, legends),
+    scales: ownScales(kit, read, context, scalePath),
     config: read,
-    context(context: AxisContext, scale: ScaleName): AxisContext {
-      const spec = context.spec;
-      if (!spec) return context;
-      const { ticks, format, tooltipFormat } = spec;
-      // The model reads a count of ticks; the compiler plans the other forms.
-      const count = countOf(ticks);
-      const plannedTicks = ticks !== undefined && count === undefined;
-      const plannedFormat = planned(format);
-      const plannedValue = planned(tooltipFormat) || (tooltipFormat === undefined && plannedFormat);
-      // A duplicates policy of its own has the compiler write the axis' labels too.
-      const policy = context.type !== "band" && repeats(scale) !== undefined;
-      if (!plannedTicks && !plannedFormat && !plannedValue && !policy && ticks === count)
-        return context;
-      const at = (value: unknown, fallback: string) =>
-        `chart ${paths.get(value as object) ?? `${scale}.${fallback}`}`;
-      // Category axes label every category that fits, and write them as they are.
-      if (context.type === "band" && (plannedTicks || plannedFormat))
-        throw new Error(
-          plannedTicks
-            ? `${at(ticks, "ticks")}: a category axis labels the categories that fit; drop ticks, or give a count`
-            : `${at(format, "format")}: a category axis writes its categories as they are; drop format`,
-        );
-      const plan =
-        plannedTicks || plannedFormat || policy
-          ? tickPlanner(
-              kit,
-              ticks,
-              format,
-              context,
-              scale,
-              { ticks: at(ticks, "ticks"), format: at(format, "format") },
-              repeats(scale),
-            )
-          : undefined;
-      const shown = tooltipFormat ?? format;
-      const formatValue = plannedValue
-        ? writer(kit, shown, context, scale, at(shown, tooltipFormat ? "tooltipFormat" : "format"))
-            ?.value
-        : undefined;
-      const { ticks: _, ...rest } = spec;
-      return {
-        ...context,
-        spec: count === undefined ? rest : { ...rest, ticks: count },
-        plan,
-        formatValue,
-      };
-    },
+    context,
   };
+}
+
+/**
+ * Where padding `given` on scale `scale` is set, for messages: a subplot's
+ * settings, the scale's in `scales`, or the short form's, which the model
+ * merges `scales` into (equal shares are told apart by where they are
+ * found first).
+ */
+function paddingPath(config: ChartConfig, scale: string, given: unknown): string {
+  const of = (settings: unknown) => (settings as { padding?: unknown } | undefined)?.padding;
+  const panel = config.panels?.declared.findIndex((p) => of(p[scale as ScaleName]) === given) ?? -1;
+  if (SCALES.includes(scale as ScaleName) && panel >= 0) return `panels[${panel}].${scale}.padding`;
+  return of(config.scales?.[scale]) === given || !SCALES.includes(scale as ScaleName)
+    ? `${scalePath(scale)}.padding`
+    : `${scale}.padding`;
+}
+
+/** Where scale `name` is set: `scales.name`, or of an odd name `scales["p.99"]`. */
+function scalePath(name: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(name) ? `scales.${name}` : `scales[${JSON.stringify(name)}]`;
 }
 
 /** A format only the compiler writes: a pattern or a function. */

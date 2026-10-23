@@ -427,6 +427,34 @@ def test_css_variables_export_their_fallbacks_and_refuse_without_one():
     )
 
 
+@pytest.mark.contract("mark.z-index.order.png")
+def test_marks_paint_as_declared_with_z_index_over_that():
+    image = pytest.importorskip("PIL.Image")
+
+    def layered(**red):
+        return (
+            hg.Chart(
+                {"x": [0, 2], "y": [1, 1]},
+                width=200,
+                height=100,
+                x={"show": False, "grid": False},
+                y={"show": False, "grid": False, "domain": [0, 2]},
+            )
+            .line(x="x", y="y", stroke="#ff0000", stroke_width=20, **red)
+            .rule(y=1, stroke="#00ff00", stroke_width=10, dash=[])
+        )
+
+    def middle(chart):
+        pixels = np.asarray(image.open(BytesIO(chart.to_png(scale=1))))
+        return tuple(int(value) for value in pixels[52, 100])
+
+    svg = layered().to_svg()
+    assert svg.index('stroke="#ff0000"') < svg.index('stroke="#00ff00"')
+    # The rule, declared after the line, paints over it; raised, the line covers the rule.
+    assert middle(layered()) == (0, 255, 0, 255)
+    assert middle(layered(z_index=1)) == (255, 0, 0, 255)
+
+
 def test_labels_break_lines_in_every_format_with_supplied_fonts(tmp_path):
     image = pytest.importorskip("PIL.Image")
     rendered = (

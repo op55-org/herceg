@@ -3,9 +3,10 @@
 // drawn by the drawing it carries; guides are drawn from their items, which
 // say where everything goes, so this module places nothing itself.
 
-import { dashAttribute, escapeXml, n, rectMarkup } from "../draw/markup.ts";
+import { dashAttribute, escapeXml, markupOf, n, rectMarkup } from "../draw/markup.ts";
 import { textItemMarkup } from "../draw/text.ts";
-import { gridStrokes } from "../scene/grid.ts";
+import { gridLines } from "../scene/grid.ts";
+import { eachPainted, type GridBatch } from "../scene/paint.ts";
 import {
   type ColorbarGuide,
   clipOf,
@@ -14,49 +15,62 @@ import {
   type GuideItem,
   type Panel,
   type RampGuide,
+  type Rect,
   type Scene,
   type ShapeItem,
   type SvgContext,
+  type SvgElement,
   type TitleGuide,
 } from "../scene/scene.ts";
 import type { StrokePaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 
 /**
- * Markup of a panel's geometry the plot does not cut: data, then guides
- * (rules, text), each in a group cut to the plot (`plot`, a clip path's id)
- * or the chart (`chart`) when its mark asks for that.
+ * Markup of what `panel` paints over its plot's background: its plan, in
+ * order, each geometry cut to the clip path `clip` names for it (none when
+ * undefined); entries one after another cut alike share a group.
  */
-export function uncutMarkup(
-  marks: readonly Geometry[],
+export function contentMarkup(
+  panel: Panel,
   context: SvgContext,
-  plot: string,
-  chart: string,
+  clip: (mark: Geometry) => string | undefined,
 ): string {
-  let data = "";
-  let guides = "";
-  for (const mark of marks) {
-    const clip = clipOf(mark);
-    if (clip === "plot" && mark.draw.canvas) continue;
-    let markup = mark.draw.svg(mark, context);
-    if (clip) markup = `<g clip-path="url(#${clip === "plot" ? plot : chart})">${markup}</g>`;
-    if (!mark.draw.canvas) guides += markup;
-    else data += markup;
-  }
-  return data + guides;
+  let out = "";
+  let open: string | undefined;
+  const cut = (id: string | undefined) => {
+    if (id === open) return;
+    if (open) out += "</g>";
+    if (id) out += `<g clip-path="url(#${id})">`;
+    open = id;
+  };
+  eachPainted(
+    panel,
+    (batch) => {
+      cut(undefined);
+      out += gridMarkup(batch, panel.plot, context.theme);
+    },
+    (mark) => {
+      cut(clip(mark));
+      out += mark.draw.svg(mark, context) + (context.titles?.(mark) ?? "");
+    },
+  );
+  cut(undefined);
+  return out;
 }
 
 /**
- * For a panel with insets over it, the path (filled evenly and oddly) of
- * what it draws beyond its plot's cut keeps to: out of its plot, or in the
- * parts of it the insets leave; "" for other panels.
+ * The id of the clip path `mark` is cut to, of the ids of its panel's
+ * plot's (`plot`), of where what the panel does not cut to its plot keeps
+ * to with insets over it (`keep`), and of the chart's: undefined for none.
  */
-export function keepPath(scene: Scene, { plot, visible }: Panel): string {
-  if (!visible) return "";
-  let d = `M0 0H${scene.width}V${scene.height}H0Z`;
-  for (const { x, y, width, height } of [plot, ...visible])
-    d += `M${x} ${y}h${width}v${height}h${-width}Z`;
-  return d;
+export function clipId(
+  mark: Geometry,
+  plot: string,
+  keep: string | undefined,
+  chart: string,
+): string | undefined {
+  const clip = clipOf(mark);
+  return clip === "plot" ? plot : (keep ?? (clip === "chart" ? chart : undefined));
 }
 
 /** Whether any geometry of the scene is cut to the chart, which needs a clip path of its own. */
@@ -131,30 +145,37 @@ export function itemsMarkup(
   return out;
 }
 
+/** A grid batch as one element: its lines in one stroke. */
+export function gridElement(batch: GridBatch, plot: Rect, theme: Theme): SvgElement {
+  const { stroke, strokeWidth, dash, opacity } = batch.paint ?? theme.style.grid;
+  const attributes: Record<string, string> = { d: segmentPath(gridLines(batch, plot)), stroke };
+  if (strokeWidth !== 1) attributes["stroke-width"] = String(strokeWidth);
+  if (dash.length) attributes["stroke-dasharray"] = dash.join(" ");
+  if (opacity !== 1) attributes["stroke-opacity"] = String(opacity);
+  attributes.fill = "none";
+  return { tag: "path", attributes };
+}
+
+function gridMarkup(batch: GridBatch, plot: Rect, theme: Theme): string {
+  return markupOf([gridElement(batch, plot, theme)]);
+}
+
 /**
- * Markup of what is drawn under the data of `panels` (by default the
- * scene's): the chart's background (an inset's, over its box), the plots'
- * backgrounds, and the grid lines.
+ * Markup of what is painted under every panel, the chart's background; or
+ * under what `panel` paints, its plot's background, and for an inset, over
+ * the panels before it, its box first.
  */
-export function underMarkup(scene: Scene, panels: readonly Panel[] = scene.panels): string {
+export function underMarkup(scene: Scene, panel?: Panel): string {
   const { theme, width, height } = scene;
-  const cover = panels[0]?.cover;
   const background = theme.background !== "transparent" && ` fill="${escapeXml(theme.background)}"`;
-  let out = !background
-    ? ""
-    : cover
-      ? rectMarkup(cover, 0, background)
-      : `<rect width="${width}" height="${height}"${background}/>`;
-  for (const { plot, frame, visible } of panels)
-    if (frame?.fill)
-      for (const rect of visible ?? [plot])
-        out += rectMarkup(rect, 0, ` fill="${escapeXml(frame.fill)}"`);
-  for (const stroke of gridStrokes(panels, theme))
-    out += `<path d="${segmentPath(stroke.coords)}"${strokeAttributes(stroke.paint)} fill="none"/>`;
+  if (!panel) return background ? `<rect width="${width}" height="${height}"${background}/>` : "";
+  let out = background && panel.cover ? rectMarkup(panel.cover, 0, background) : "";
+  if (panel.frame?.fill)
+    for (const rect of panel.visible ?? [panel.plot])
+      out += rectMarkup(rect, 0, ` fill="${escapeXml(panel.frame.fill)}"`);
   return out;
 }
 
-/** Markup of plots' borders, drawn over the data. */
 /**
  * Markup of a scene's axes, plot borders, and guides; without `legend`,
  * not the series legend, which the browser draws as buttons.
@@ -247,6 +268,8 @@ export interface SvgOptions extends SvgSizing {
   description?: string;
   /** Include the legend (the browser runtime renders it as HTML instead). */
   legend?: boolean;
+  /** Bars, points, and lines with native tooltips: `titlesOf` (render/titles.ts) for the scene. */
+  titles?: SvgContext["titles"];
   /**
    * Draw text unkerned and without ligatures, as supplied fonts measure
    * it: glyph after glyph.
@@ -275,37 +298,26 @@ export function renderSvg(scene: Scene, options: SvgOptions = {}): string {
   if (fixed)
     out += `<style>[id="${escapeXml(cssString(id))}"] *{vector-effect:non-scaling-stroke}</style>`;
   out += "<defs>";
-  // A panel with insets over it draws only where they leave its plot visible.
+  // A panel with insets over it draws only where they leave its plot
+  // visible, and what it does not cut there keeps off them too.
+  const rects = (list: readonly Rect[]) => list.map((rect) => rectMarkup(rect, 0, "")).join("");
   scene.panels.forEach((panel, i) => {
-    let rects = "";
-    for (const rect of panel.visible ?? [panel.plot]) rects += rectMarkup(rect, 0, "");
-    out += `<clipPath id="${id}-clip-${i}">${rects}</clipPath>`;
-    // What it draws beyond that keeps off the insets too.
-    const keep = keepPath(scene, panel);
-    if (keep)
-      out += `<clipPath id="${id}-keep-${i}"><path clip-rule="evenodd" d="${keep}"/></clipPath>`;
+    out += `<clipPath id="${id}-clip-${i}">${rects(panel.visible ?? [panel.plot])}</clipPath>`;
+    if (panel.keep) out += `<clipPath id="${id}-keep-${i}">${rects(panel.keep)}</clipPath>`;
   });
   if (cutToChart(scene))
     out += `<clipPath id="${id}-clip-chart"><rect width="${width}" height="${height}"/></clipPath>`;
   out += "</defs>";
-  const context: SvgContext = { theme, encodeRaster: options.encodeRaster };
-  // Layer by layer: the panels in cells, then each inset over its box (and
-  // the axes over every layer: an inset sits in its parent's plot).
-  for (const panels of scene.layers ?? [scene.panels]) {
-    const clip = (panel: Panel) => `${id}-clip-${scene.panels.indexOf(panel)}`;
-    out += underMarkup(scene, panels);
-    for (const panel of panels) {
-      out += `<g clip-path="url(#${clip(panel)})">`;
-      for (const mark of panel.marks)
-        if (mark.draw.canvas && clipOf(mark) === "plot") out += mark.draw.svg(mark, context);
-      out += "</g>";
-    }
-    for (const panel of panels) {
-      const markup = uncutMarkup(panel.marks, context, clip(panel), `${id}-clip-chart`);
-      out += panel.visible
-        ? `<g clip-path="url(#${id}-keep-${scene.panels.indexOf(panel)})">${markup}</g>`
-        : markup;
-    }
+  const context: SvgContext = { theme, encodeRaster: options.encodeRaster, titles: options.titles };
+  // Panels in their paint order: those in cells, then each inset over its
+  // box (axes go over them all: an inset sits in its parent's plot).
+  out += underMarkup(scene);
+  for (const panel of scene.painted ?? scene.panels) {
+    const i = scene.panels.indexOf(panel);
+    out += underMarkup(scene, panel);
+    out += contentMarkup(panel, context, (mark) =>
+      clipId(mark, `${id}-clip-${i}`, panel.keep && `${id}-keep-${i}`, `${id}-clip-chart`),
+    );
   }
   out += guidesMarkup(scene, id, options.legend ?? true);
   return `${out}</svg>`;

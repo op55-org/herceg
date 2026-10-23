@@ -90,7 +90,7 @@ afterEach(() => {
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const metrics = table({ t: [0, 1, 2, 3], a: [1, 2, 3, 4], b: [4, 3, 2, 1] });
-const paths = () => host.querySelectorAll("svg g[clip-path] path");
+const paths = () => host.querySelectorAll("svg path:is([clip-path], [clip-path] *)");
 const components = {
   Contour,
   Graph,
@@ -874,7 +874,7 @@ describe("<Chart>", () => {
       () => ({ prices, view, breaks }),
     );
     expect(optionsOf(chart()).marks[0]!.spec).toMatchObject({ variant: "ohlc" });
-    expect(host.querySelector("svg g[clip-path] rect")).toBeNull();
+    expect(host.querySelector("svg rect:is([clip-path], [clip-path] *)")).toBeNull();
     const updates = spyUpdates(chart());
     // New breaks with the same rules are the same option; other rules are not.
     breaks.value = timeBreaks([{ weekdays: ["sat", "sun"] }]);

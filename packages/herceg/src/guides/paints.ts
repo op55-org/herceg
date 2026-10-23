@@ -36,6 +36,7 @@ export function restyle(
       ? Math.round(size * (style.lineHeight ?? paint.lineHeight / paint.size))
       : paint.lineHeight,
     align: style.align ?? paint.align,
+    verticalAlign: style.verticalAlign ?? paint.verticalAlign,
     halo: style.halo ?? paint.halo,
     background: style.background === undefined ? paint.background : style.background || undefined,
     padding: style.padding === undefined ? paint.padding : kit.insets(style.padding),

@@ -7,6 +7,7 @@
 
 import { markupOf, n } from "../draw/markup.ts";
 import {
+  type Formatter,
   formatNumber,
   numberFormatter,
   numberTickLabels,
@@ -21,17 +22,34 @@ import {
   textHalo,
   textHeight,
   textItem,
+  textLines,
   textWidth,
 } from "../layout/text.ts";
 import { mapValue } from "../lod/m4.ts";
+import type { Mark } from "../marks/mark.ts";
+import type { Series } from "../marks/series.ts";
+import { xExtent } from "../marks/series.ts";
+import { domainExtent, unionExtent } from "../marks/trace.ts";
+import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, timeTicks } from "../scale/time.ts";
 import { strokeKey } from "../scene/grid.ts";
-import { type AxisGuide, type Rect, tickLabelGap } from "../scene/scene.ts";
+import { type AxisGuide, type Panel, type Rect, tickLabelGap } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Place } from "../spec/place.ts";
+import type { ScaleScope } from "../spec/spec.ts";
 import { cssFont, dashPattern, insets } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
-import { type AxisContext, type AxisPlan, planAxis } from "./axis.ts";
+import {
+  type AxisContext,
+  type AxisPlan,
+  createScale,
+  niceAxisDomain,
+  planAxis,
+  tickCountOf,
+  tooltipFormatter,
+  usableDomain,
+} from "./axis.ts";
+import type { clearDomain } from "./clearance.ts";
 import type { MarkSeries } from "./inspect.ts";
 import {
   entryOf,
@@ -42,6 +60,7 @@ import {
   measureLegends,
 } from "./legend.ts";
 import type { ChartConfig, PanelPlans } from "./model.ts";
+import type { PanelSplit } from "./panel-layout.ts";
 import type { ScaleName } from "./scales.ts";
 import type { ChartStyles } from "./styles.ts";
 
@@ -63,6 +82,7 @@ export const GUIDE_KIT = {
   timeTicks,
   planAxis,
   textItem,
+  textLines,
   centeredLines,
   textWidth,
   textHeight,
@@ -79,6 +99,15 @@ export const GUIDE_KIT = {
   markupOf,
   mapValue,
   ChartError,
+  xExtent,
+  domainExtent,
+  unionExtent,
+  usableDomain,
+  niceAxisDomain,
+  createScale,
+  tickCountOf,
+  tooltipFormatter,
+  alignsTickLabels,
 };
 
 export type GuideKit = typeof GUIDE_KIT;
@@ -98,8 +127,15 @@ export interface CompiledGuides {
    * than a count and Intl options.
    */
   context(context: AxisContext, scale: ScaleName): AxisContext;
+  /**
+   * Orders what each of `panels` paints by zIndex (`Panel.paint`; see
+   * scene/paint.ts), keeping a panel's order while its values stay.
+   */
+  paint(panels: readonly Panel[]): void;
   /** The axes `guides` lists, where they change the default ones. */
   readonly axes?: CompiledAxes | undefined;
+  /** The chart's position scales of its own, where `scales` names any (guides/positions.ts). */
+  readonly scales?: CompiledScales | undefined;
   /**
    * The chart's legends, measured, and where each goes, where legend
    * settings or `guides` ask for more than the automatic legend: `content`
@@ -116,6 +152,61 @@ export interface CompiledGuides {
         chart: { readonly width: number; readonly height: number },
       ) => PlacedLegend[])
     | undefined;
+}
+
+/**
+ * Position scales of the chart's own (`scales.depth: { type: "linear" }`),
+ * which marks place values on by name.
+ */
+export interface CompiledScales {
+  /**
+   * Their domains, one per instance (`instances`, each panel's under a
+   * scope, the layout's by default), from what the instance's panels'
+   * marks (`panels[i]`, those it draws by `members[i]`) place on them,
+   * `hidden` series left out; padded by default with the `room` each
+   * mark asks for, over the shortest plot (`length`) of the instance.
+   */
+  resolve(scene: {
+    split: Pick<PanelSplit, "panels" | "members">;
+    hidden: (mark: Mark, series: Series) => boolean;
+    zone: string;
+    locale: string | undefined;
+    instances: (scope: ScaleScope | undefined, path: string) => readonly number[];
+    room: (mark: Mark) => MarkRoom | undefined;
+    /** Pixels `mark` draws past its series' ends away from zero (bars' labels). */
+    headroom: (mark: Mark, series: readonly Series[]) => number;
+    /** Panel `i`'s plot's length along `axis`, read once panels are placed. */
+    length: (i: number, axis: "x" | "y") => number;
+  }): OwnScales;
+}
+
+/** What a mark draws past its values, and how a fitted domain keeps room for it: the mark's or its features'. */
+export interface MarkRoom {
+  readonly inset?: { readonly x: number; readonly y: number } | undefined;
+  readonly clearDomain?: typeof clearDomain | undefined;
+}
+
+/** The chart's position scales of its own for one scene. */
+export interface OwnScales {
+  /** Each panel's instance of scale `name`, as its scope says; undefined for a name the chart has no scale of. */
+  groupOf(name: string): readonly number[] | undefined;
+  /** Scale `name` along `axis` over panel `i`'s `plot`. */
+  scale(name: string, axis: "x" | "y", i: number, plot: Rect): PositionScale;
+  /**
+   * An axis of scale `name` for panel `i` over `size` pixels from `start`,
+   * across the plot (x, left to right) or along it (y, bottom to top);
+   * without `start`, before panels are placed, padded for `size`;
+   * undefined for a name the chart has no scale of.
+   */
+  plan(
+    name: string,
+    i: number,
+    size: number,
+    across: boolean,
+    start?: number,
+  ): AxisPlan | undefined;
+  /** How tooltips write the values `mark` places on these scales over panel `i`'s `plot`, by direction. */
+  formats(mark: Mark, i: number, plot: Rect): { x?: Formatter; y?: Formatter };
 }
 
 /** A legend measured, with where it goes and its track's key. */
@@ -166,8 +257,12 @@ export interface CompiledAxes {
   fits(state: AxesState, planOf: (i: number) => AxisPlan): boolean;
 }
 
-/** How a listed axis is placed among the panels: as its `repeat` says, but where panels' own settings hide it (`off`). */
+/**
+ * How a listed axis of `scale` is placed among the panels: as its `repeat`
+ * says, by the scale's instances, but where panels' own settings hide it (`off`).
+ */
 export interface ListedPlacing {
+  readonly scale: string;
   readonly repeat: "outer" | "all" | undefined;
   readonly off?: readonly boolean[] | undefined;
 }
@@ -188,12 +283,14 @@ export interface AxesState {
   readonly labeled: Readonly<Record<ScaleName, readonly boolean[]>>;
   /** Which panels draw marks along the left y axis, shown or not. */
   readonly drawsY: readonly boolean[];
+  /** Pixels the model keeps below the plots for the x axis' tick marks and labels, its title apart. */
+  readonly xRoom: number;
   /**
    * In a layout of cells, in place of rows of `columns`: whether panel `i`
    * is the highest of the panels with axes lined up with it that share its
-   * x scale (where x axes above the plots go), or the last of those drawing
-   * along y and sharing its y scale in its row (where y axes on the right
-   * go), among the panels `axis` is not hidden in (`off`) and as its
+   * instance of `axis`' scale (where axes above the plots go), or the last
+   * of those drawing along y and sharing it in its row (where axes on the
+   * right go), among the panels `axis` is not hidden in (`off`) and as its
    * `repeat` says; its plot's width at a first guess; and for an inset,
    * the span down its box, which its labels along y stay inside.
    */
@@ -205,9 +302,36 @@ export interface AxesState {
   };
   /**
    * The plan of panel `panel`'s axis of `scale`: for x, one over `pixels`
-   * (for room, before x is planned); for y, its own.
+   * (for room, before x is planned); for y, its own; for a scale of the
+   * chart's own, one over `pixels` across from `start` (0 by default), or
+   * without them along its plot.
    */
-  plan(scale: ScaleName, panel: number, pixels: number): AxisPlan | undefined;
+  plan(scale: string, panel: number, pixels: number, start?: number): AxisPlan | undefined;
+}
+
+/**
+ * Whether tick label styles (a theme's, axes' short forms', subplots',
+ * listed guides'), or the base text styles they start from, align labels
+ * at their ticks: the axes the guides list draw them so, and scales
+ * without one get one on their default side (guides/axes.ts).
+ */
+function alignsTickLabels(config: ChartConfig): boolean {
+  const aligns = (value: unknown): boolean =>
+    typeof value === "object" &&
+    value !== null &&
+    Object.entries(value).some(([key, style]) =>
+      key === "tickLabel" || key === "text"
+        ? (style?.align ?? style?.verticalAlign) !== undefined
+        : typeof style === "object" && aligns(style),
+    );
+  return aligns([
+    config.theme,
+    config.x,
+    config.y,
+    config.yRight,
+    config.panels?.list,
+    config.guides,
+  ]);
 }
 
 /**
@@ -218,7 +342,17 @@ export interface AxesState {
 export function needsGuides(config: ChartConfig): boolean {
   const { x, y, yRight, legend, panels, scales } = config;
   return (
-    !!(config.guides || scales?.x || scales?.y || scales?.yRight) ||
+    // Position scales, the short forms' and the chart's own, are planned there.
+    !!config.guides ||
+    alignsTickLabels(config) ||
+    // Marks painted out of their order, and on scales of the chart's own.
+    (config.marks as readonly Mark[]).some(
+      ({ bound, scaled, spec }) =>
+        scaled || !!spec.zIndex || bound?.x?.kind === "scale" || bound?.y?.kind === "scale",
+    ) ||
+    Object.values(scales ?? {}).some(
+      (scale) => scale?.type !== "ordinal" && scale?.type !== "identity",
+    ) ||
     [
       x,
       y,
@@ -230,7 +364,7 @@ export function needsGuides(config: ChartConfig): boolean {
       (axis) =>
         axis &&
         (typeof axis.ticks === "object" ||
-          // Round 2 freezes these before stream R draws them (guides/compile.ts).
+          // Grid settings and padding, which the guide compiler checks.
           typeof axis.grid === "object" ||
           axis.padding !== undefined ||
           [axis.ticks, axis.format, axis.tooltipFormat].some(

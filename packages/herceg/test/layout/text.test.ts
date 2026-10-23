@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { textItemMarkup } from "../../src/draw/text.ts";
+import { anchorBlock } from "../../src/layout/block.ts";
 import {
-  anchorBlock,
   canvasMeasurer,
   estimateText,
   fontKind,
@@ -116,7 +116,7 @@ describe("text layout", () => {
     // Text in a box is drawn on the box, whatever is under it.
     expect(item.halo).toEqual({ color: "#eeeeee", width: 3, opacity: 1 });
     expect(textItemMarkup(item, resolveTheme("light"))).toContain(
-      '<tspan x="104" y="49">ab</tspan><tspan x="104" y="61">cdef</tspan>',
+      '<tspan x="104" y="49" dominant-baseline="middle">ab</tspan><tspan x="104" y="61" dominant-baseline="middle">cdef</tspan>',
     );
     // Without a background, nothing is measured.
     const plain = textPaint([{ fontSize: 10 }]);
@@ -143,7 +143,7 @@ describe("text layout", () => {
       resolveTheme("light"),
     );
     expect(turned).toContain('transform="rotate(-90 100 50)"');
-    expect(turned).toContain('<tspan x="100" y="62">b</tspan>');
+    expect(turned).toContain('<tspan x="100" y="62" dominant-baseline="middle">b</tspan>');
     // Padded 4 at its start and 1 above against 3 below, read upward: the
     // text moves up by 4 and left by 1.
     const boxed = textItem("a\nb", { ...at, angle: -90 }, paint, "#ffffff", measure);

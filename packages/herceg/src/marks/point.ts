@@ -5,9 +5,10 @@ import { CYCLE, SYMBOLS, type SymbolName, symbolPath, symbolReach } from "../dra
 import { formatNumber } from "../format/format.ts";
 import { GridIndex } from "../lod/grid-index.ts";
 import type { Breaks } from "../lod/m4.ts";
-import { insetDomain } from "../model/axis.ts";
+import { clearDomain } from "../model/clearance.ts";
 import type { CategoryColors } from "../model/features.ts";
 import type { LegendPart } from "../model/legend.ts";
+import { type Nearest, settle } from "../model/nearest.ts";
 import {
   checkColorScale,
   checkRamp,
@@ -23,6 +24,7 @@ import {
   type PointCloud,
   type PointGeometry,
   type PointItems,
+  type Rect,
 } from "../scene/scene.ts";
 import type { ChannelSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -61,13 +63,8 @@ import {
   type SummaryContext,
   seriesOf,
 } from "./mark.ts";
-import {
-  coordinates,
-  type FieldPositions,
-  OBJECT,
-  type Pending,
-  refusePending,
-} from "./pending.ts";
+import { OBJECT, type Pending, refusePending } from "./pending.ts";
+import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { placeAt, rowOf, type Series, valueAt, visibleRange, xExtent, yExtent } from "./series.ts";
 import { offsetOf, Swarms } from "./swarm.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -270,10 +267,10 @@ interface Encoding {
 const streamKeys = new WeakMap<Table, Map<string, Map<string, object>>>();
 
 /**
- * A point spec as points draw it: positions and channels fields or
- * constants, while they refuse coordinates and channel objects (pending.ts).
+ * A point spec as points draw it: channels fields or constants, while
+ * they refuse channel objects (pending.ts).
  */
-type DrawnPointSpec = FieldChannels<FieldPositions<Frozen<PointSpec>>>;
+type DrawnPointSpec = FieldChannels<Frozen<PointSpec>>;
 type FieldChannels<S> = {
   readonly [K in keyof S]: K extends "symbol"
     ? string | { readonly field: string }
@@ -284,7 +281,6 @@ type FieldChannels<S> = {
 
 /** Points' options round 2 freezes before its streams draw them. */
 const PENDING: readonly Pending[] = [
-  ...coordinates("x", "y"),
   ["color", "C", "give a field or a color", OBJECT],
   ["size", "C", "give a field", OBJECT],
   ["fillOpacity", "C", "give a field or a number", OBJECT],
@@ -300,7 +296,7 @@ const PENDING: readonly Pending[] = [
 
 export class PointMark implements Mark<DrawnPointSpec> {
   declare readonly [MARK]: true;
-  readonly insetDomain = insetDomain;
+  readonly clearDomain = clearDomain;
   readonly spec: DrawnPointSpec;
   readonly table: Table<Schema>;
   readonly identity: MarkSources;
@@ -310,6 +306,9 @@ export class PointMark implements Mark<DrawnPointSpec> {
   /** A category `color` colors points through the chart's color scale (see model/features.ts). */
   readonly featured: boolean = false;
   readonly inset: { x: number; y: number };
+  readonly bound: RowBindings | undefined;
+  /** The fields placing points along x and y: their own, or their coordinates'. */
+  readonly #fields: { readonly x: string; readonly y: string };
   readonly #split: SeriesSplitter;
   /** Which positions are categories: each row's band index places it. */
   readonly #banded: { readonly x: boolean; readonly y: boolean };
@@ -353,8 +352,12 @@ export class PointMark implements Mark<DrawnPointSpec> {
     if (view && view.source !== table)
       throw new Error("point: the view must be of the mark's table");
     this.view = view;
-    requireField(table, spec.x, POSITION, "point x");
-    requireField(table, spec.y, POSITION, "point y");
+    const { fields, bound } = bindRows(spec, table, "point", ["x", "y"]);
+    this.bound = bound;
+    const position = fields as { x: string; y: string };
+    this.#fields = position;
+    requireField(table, position.x, POSITION, "point x");
+    requireField(table, position.y, POSITION, "point y");
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "point series");
     // A category color names the series, as on lines and bars.
     const series = seriesOf(spec, table, "fill");
@@ -362,8 +365,8 @@ export class PointMark implements Mark<DrawnPointSpec> {
     if (spec.animationKey !== undefined)
       requireField(table, spec.animationKey, POSITION, "point animationKey");
     this.#banded = {
-      x: table.kind(spec.x) === "category",
-      y: table.kind(spec.y) === "category",
+      x: table.kind(position.x) === "category",
+      y: table.kind(position.y) === "category",
     };
     const { dodge, jitter, swarm } = spec;
     if (swarm !== undefined && typeof swarm !== "boolean")
@@ -387,9 +390,9 @@ export class PointMark implements Mark<DrawnPointSpec> {
       if (swarm) this.#swarms = new Swarms();
     }
     // Points in bands are in no x order.
-    const xField = this.#banded.x ? undefined : spec.x;
-    this.#split = new SeriesSplitter(table, xField, [spec.y], series, spec.label, view);
-    this.identity = { field: series, values: [spec.y] };
+    const xField = this.#banded.x ? undefined : position.x;
+    this.#split = new SeriesSplitter(table, xField, [position.y], series, spec.label, view);
+    this.identity = { field: series, values: [position.y] };
     if (spec.size !== undefined) requireField(table, spec.size, NUMERIC, "point size");
     if (typeof spec.fillOpacity === "string")
       requireField(table, spec.fillOpacity, NUMERIC, "point fillOpacity");
@@ -476,17 +479,18 @@ export class PointMark implements Mark<DrawnPointSpec> {
         `point strokeWidth: expected 0 or more pixels; received ${spec.strokeWidth}`,
       );
     this.#ringWidth = spec.strokeWidth ?? (spec.stroke !== undefined ? 1 : 0);
-    // Outlines reach half their width past the shape.
+    // Outlines reach half their width past the shape, along the axes it is placed on.
     const outline = this.#ringWidth / 2;
-    this.inset = { x: radius * reach + outline, y: radius * reach + outline };
+    const extent = radius * reach + outline;
+    this.inset = { x: extent, y: extent };
   }
 
   channelKind(axis: "x" | "y") {
-    return this.table.kind(axis === "x" ? this.spec.x : this.spec.y);
+    return offAxis(this.bound, axis) ? undefined : this.table.kind(this.#fields[axis]);
   }
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
-    return this.#banded[axis] ? fieldBands(this.table, this.spec[axis], context) : undefined;
+    return this.#banded[axis] ? fieldBands(this.table, this.#fields[axis], context) : undefined;
   }
 
   series(
@@ -497,13 +501,14 @@ export class PointMark implements Mark<DrawnPointSpec> {
     context: BandContext,
   ) {
     const { spec, table } = this;
+    const fields = this.#fields;
     // A category position is each row's band index on the chart's axis.
     const banded = (axis: "x" | "y") =>
-      bandIndices(table, spec[axis], bands[axis]?.keys ?? [], context);
+      bandIndices(table, fields[axis], bands[axis]?.keys ?? [], context);
     return buildSeries(
       table,
       this.#split.sources(),
-      this.#banded.x ? banded("x") : table.numbers(spec.x as never),
+      this.#banded.x ? banded("x") : table.numbers(fields.x as never),
       key,
       palette,
       spec.fill,
@@ -572,7 +577,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
     if (this.#swarms) {
       const radiusOf = this.#radiusScale();
       const values = this.table.numbers(
-        (this.#spread!.axis === "x" ? this.spec.y : this.spec.x) as never,
+        this.#fields[this.#spread!.axis === "x" ? "y" : "x"] as never,
       );
       this.#swarms.offsets(
         series,
@@ -585,6 +590,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
       );
     }
     const placeRow = this.#placer();
+    const box = this.#bounds(frame);
     for (const s of series) {
       if (frame.hidden.has(s.key)) continue;
       const opaque =
@@ -658,6 +664,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
               : { ...identity, ids, key: { field: keyField, kind: keyKind as "number" | "time" } };
         }
       }
+      const attributed = frame.attributed ? new Uint32Array(length) : undefined;
       let count = 0;
       for (let k = start; k < end; k++) {
         const row = rowOf(s, k);
@@ -671,18 +678,18 @@ export class PointMark implements Mark<DrawnPointSpec> {
         const alpha = alphas ? encoding.opacity!(alphas[row]!) : opacity;
         const shape = codes ? (shapeOf![codes[row]!] ?? NONE) : 0;
         if (!(r > 0 && tone >= 0 && Number.isFinite(alpha) && shape >= 0)) continue;
-        // Points whose shape reaches into the plot are drawn.
+        // Points whose shape reaches into what the mark is cut to are drawn.
         const reach = r * (codes ? reachOf[shape]! : fixedReach) + this.#ringWidth / 2;
-        const placed = placeRow(s, row, frame, reach);
+        const placed = placeRow(s, row, frame, reach, box);
         if (!placed) continue;
         const [px, py] = placed;
+        // Device pixels of the plot hold one point each; points past it are all drawn.
         if (occupied) {
-          const cell =
-            Math.floor((py - plot.y) * pixelRatio) * columns +
-            Math.floor((px - plot.x) * pixelRatio);
-          if (cell >= 0 && cell < occupied.length) {
-            if (occupied[cell]) continue;
-            occupied[cell] = 1;
+          const column = Math.floor((px - plot.x) * pixelRatio);
+          const line = Math.floor((py - plot.y) * pixelRatio);
+          if (column >= 0 && column < columns && line >= 0 && line < rows) {
+            if (occupied[line * columns + column]) continue;
+            occupied[line * columns + column] = 1;
           }
         }
         coords[count * 2] = px;
@@ -691,6 +698,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
         if (colorIndex) colorIndex[count] = tone;
         if (opacities) opacities[count] = alpha;
         if (symbols) symbols[count] = shape;
+        if (attributed) attributed[count] = row;
         if (items) {
           if (keyLabels) {
             (items.ids as (string | undefined)[])[count] =
@@ -724,9 +732,36 @@ export class PointMark implements Mark<DrawnPointSpec> {
         symbols,
         ring,
         items,
+        rows: attributed,
       });
     }
     return out;
+  }
+
+  /**
+   * For opaque points of several colors, which paint color by color (see
+   * draw/point.ts): each row's color, by which they paint; undefined for
+   * points painted in row order.
+   */
+  #paintedTone(s: Series, encoding: Encoding): ((row: number) => number) | undefined {
+    const opacity = typeof this.spec.fillOpacity === "number" ? this.spec.fillOpacity : 1;
+    const { palette, categories, color } = encoding;
+    if (
+      !palette ||
+      this.#ringWidth > 0 ||
+      encoding.opacity !== undefined ||
+      opacity < 1 ||
+      (color === undefined && !(categories ? palette.every(isOpaqueColor) : isOpaqueColor(s.color)))
+    )
+      return undefined;
+    const tones =
+      this.#toneField === undefined ? undefined : this.table.numbers(this.#toneField as never);
+    return (row) =>
+      tones
+        ? color!.index(tones[row]!)
+        : categories
+          ? (categories.tones[categories.codes[row]!] ?? NONE)
+          : 0;
   }
 
   /** How sizes, colors, and opacities follow their fields, with the current data. */
@@ -897,7 +932,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
   /** The stream identity of a series of whole columns, for GPU uploads that follow appends. */
   #stream(s: Series): PointCloud["stream"] {
     const { table } = this;
-    const x = this.spec.x as string;
+    const x = this.#fields.x;
     // A series' rows grouped from the table stream as their group does.
     if (s.rows !== undefined) {
       if (!s.stream || s.x !== table.numbers(x as never)) return undefined;
@@ -957,7 +992,29 @@ export class PointMark implements Mark<DrawnPointSpec> {
     );
   }
 
+  paintsOver(
+    series: readonly Series[],
+    s: Series,
+    frame: Frame,
+  ): (a: number, b: number) => boolean {
+    // Colors and highlights are read at the first tie: most pointers meet none.
+    let toneOf: ((row: number) => number) | undefined | null = null;
+    let lit: Uint8Array | undefined | null = null;
+    return (a, b) => {
+      const [rowA, rowB] = [rowOf(s, a), rowOf(s, b)];
+      // Highlighted rows paint over the others, dimmed: translucent, in row order.
+      if (lit === null) lit = frame.highlighted?.(this.table);
+      if (lit && lit[rowA] !== lit[rowB]) return lit[rowA]! > lit[rowB]!;
+      if (lit && !lit[rowA]) return a > b;
+      if (toneOf === null)
+        toneOf = this.#paintedTone(s, this.#encoding(frame, categoriesOf(series)));
+      const [first, second] = toneOf ? [toneOf(rowA), toneOf(rowB)] : [0, 0];
+      return first !== second ? first > second : a > b;
+    };
+  }
+
   /** How far a row's point reaches from its center, in pixels; NaN when it is not drawn. */
+
   reach(row: number): number {
     return this.#reach(row, this.#radiusScale());
   }
@@ -1044,12 +1101,25 @@ export class PointMark implements Mark<DrawnPointSpec> {
       : `${name}: ${among}, x from ${format.x(low)} to ${format.x(high)}`;
   }
 
-  /** Rows of a series in the x domain, widened by how far points reach past it; all on category x. */
+  /**
+   * Rows of a series drawn within what the mark is cut to, widened by how
+   * far points reach past it; all on category x.
+   */
   #visible(s: Series, frame: Frame): [number, number] {
     if (this.#banded.x) return [0, s.length];
-    const { plot, x } = frame;
+    const box = this.#bounds(frame);
     const reach = this.inset.x;
-    return visibleRange(s, x.invert(plot.x - reach), x.invert(plot.x + plot.width + reach));
+    return visibleRange(
+      s,
+      frame.x.invert(box.x - reach),
+      frame.x.invert(box.x + box.width + reach),
+    );
+  }
+
+  /** Where the mark's points show: in its plot, or for a mark not cut to it, the chart. */
+  #bounds(frame: Frame): Rect {
+    const { clip } = this.spec;
+    return clip === undefined || clip === "plot" ? frame.plot : (frame.chart ?? frame.plot);
   }
 
   /** How far a row's point and outline reach from its center, in pixels; NaN when it is not drawn. */
@@ -1084,10 +1154,12 @@ export class PointMark implements Mark<DrawnPointSpec> {
     const spread = this.#spread;
     if (!spread) return placeBanded;
     const along = spread.axis === "x" ? 0 : 1;
-    return (s, row, frame, reach) => {
-      const placed = placeBanded(s, row, frame, reach);
-      if (placed) placed[along] += this.#shift(s, row, frame);
-      return placed;
+    // Culled where spreading puts them: an offset band's rows may be spread into view.
+    return (s, row, frame, reach, box) => {
+      const at = bandedPixel(s, row, frame);
+      if (!at) return undefined;
+      at[along] += this.#shift(s, row, frame);
+      return shows(at[0], at[1], reach, box) ? at : undefined;
     };
   }
 
@@ -1110,48 +1182,57 @@ export class PointMark implements Mark<DrawnPointSpec> {
   /**
    * Nearest drawn point to a pixel position, through a grid index per series.
    * The index covers every visible point (not only those kept by sampling),
-   * so the tooltip reports a real row.
+   * so the tooltip reports a real row. Of points tying with the nearest,
+   * the one painted over the others (see `Nearest`).
    */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
+    return settle((found) => this.nearby(series, px, py, frame, found));
+  }
+
+  /** Hands `found` each drawn point within its limit of a pixel position, in paint order. */
+  nearby(series: readonly Series[], px: number, py: number, frame: Frame, found: Nearest): void {
     let indexes = this.#indexes.get(frame);
     if (!indexes) {
       indexes = new Map();
       this.#indexes.set(frame, indexes);
     }
-    let best: Hit | undefined;
     const radiusOf = this.#radiusScale();
     const placeRow = this.#placer();
+    const lit = frame.highlighted?.(this.table);
     for (const s of series) {
       if (frame.hidden.has(s.key)) continue;
       let index = indexes.get(s.key);
       if (!index) {
-        index = buildIndex(s, frame, this.#visible(s, frame), placeRow, (row) =>
-          this.#reach(row, radiusOf),
+        index = buildIndex(
+          s,
+          frame,
+          this.#visible(s, frame),
+          this.#bounds(frame),
+          placeRow,
+          (row) => this.#reach(row, radiusOf),
         );
         indexes.set(s.key, index);
       }
-      const found = index.nearest(px, py, best?.distance ?? Infinity);
-      if (found && found.distance < (best?.distance ?? Infinity))
-        best = { series: s, position: found.id, distance: found.distance };
+      const over = this.paintsOver(series, s, frame);
+      index.visit(px, py, {
+        get limit() {
+          return found.limit;
+        },
+        take: (position, distance) =>
+          found.take({ series: s, position, distance }, this, lit?.[rowOf(s, position)] ?? 0, over),
+      });
     }
-    return best;
   }
 }
 
-/**
- * Pixel position of a point at `x` and `y`, or undefined when it is not
- * drawn: missing, or farther outside the plot than points reach.
- */
-function pixelOf(x: number, y: number, frame: Frame, reach: number): [number, number] | undefined {
-  // Points inside an axis break are not drawn.
-  if (frame.x.breaks?.hides(x)) return undefined;
-  const px = frame.x.map(x);
-  const py = frame.y.map(y);
-  if (!(Number.isFinite(px) && Number.isFinite(py))) return undefined;
-  const { plot } = frame;
-  if (px < plot.x - reach || px > plot.x + plot.width + reach) return undefined;
-  if (py < plot.y - reach || py > plot.y + plot.height + reach) return undefined;
-  return [px, py];
+/** Whether a point at (px, py) reaching `reach` pixels from it shows in `box`, what its mark is cut to. */
+function shows(px: number, py: number, reach: number, box: Rect): boolean {
+  return (
+    px >= box.x - reach &&
+    px <= box.x + box.width + reach &&
+    py >= box.y - reach &&
+    py <= box.y + box.height + reach
+  );
 }
 
 /**
@@ -1161,21 +1242,47 @@ function pixelOf(x: number, y: number, frame: Frame, reach: number): [number, nu
  */
 type Place = typeof place;
 
-function place(s: Series, row: number, frame: Frame, reach: number): [number, number] | undefined {
-  return pixelOf(s.x[row]!, s.y[row]!, frame, reach);
+function place(
+  s: Series,
+  row: number,
+  frame: Frame,
+  reach: number,
+  box: Rect,
+): [number, number] | undefined {
+  // Culled before a place is made: placing is most of a dense scatter's time.
+  // Points inside an axis break are not drawn.
+  const x = s.x[row]!;
+  if (frame.x.breaks?.hides(x)) return undefined;
+  const px = frame.x.map(x);
+  const py = frame.y.map(s.y[row]!);
+  if (!(Number.isFinite(px) && Number.isFinite(py) && shows(px, py, reach, box))) return undefined;
+  return [px, py];
 }
 
-/** Categories are read at their panel's places; a band index of -1 is a missing one. */
 function placeBanded(
   s: Series,
   row: number,
   frame: Frame,
   reach: number,
+  box: Rect,
 ): [number, number] | undefined {
+  const at = bandedPixel(s, row, frame);
+  return at && shows(at[0], at[1], reach, box) ? at : undefined;
+}
+
+/**
+ * Where a row in bands is drawn, before culling: its categories read at
+ * their panel's places (a band index of -1 is a missing one); undefined
+ * for a missing value, or one in an axis break.
+ */
+function bandedPixel(s: Series, row: number, frame: Frame): [number, number] | undefined {
   const x = placeAt(s, "x", row);
   const y = placeAt(s, "y", row);
   if ((x < 0 && frame.x.type === "band") || (y < 0 && frame.y.type === "band")) return undefined;
-  return pixelOf(x, y, frame, reach);
+  if (frame.x.breaks?.hides(x)) return undefined;
+  const px = frame.x.map(x);
+  const py = frame.y.map(y);
+  return Number.isFinite(px) && Number.isFinite(py) ? [px, py] : undefined;
 }
 
 /**
@@ -1196,11 +1303,12 @@ function bandedExtent(s: Series, axis: "x" | "y", log: boolean): [number, number
   return min <= max ? [min, max] : undefined;
 }
 
-/** A grid index of the rows in [start, end) whose points reach into the plot. */
+/** A grid index of the rows in [start, end) whose points reach into `box`. */
 function buildIndex(
   s: Series,
   frame: Frame,
   [start, end]: [number, number],
+  box: Rect,
   placeRow: Place,
   reachOf: (row: number) => number,
 ): GridIndex {
@@ -1210,14 +1318,14 @@ function buildIndex(
   for (let k = start; k < end; k++) {
     const row = rowOf(s, k);
     const reach = reachOf(row);
-    const placed = reach >= 0 ? placeRow(s, row, frame, reach) : undefined;
+    const placed = reach >= 0 ? placeRow(s, row, frame, reach, box) : undefined;
     if (!placed) continue;
     coords[count * 2] = placed[0];
     coords[count * 2 + 1] = placed[1];
     ids[count] = k;
     count++;
   }
-  return new GridIndex(coords, ids, count, frame.plot);
+  return new GridIndex(coords, ids, count, box);
 }
 
 /**

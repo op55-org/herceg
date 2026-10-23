@@ -317,7 +317,7 @@ describe("layouts in the browser", () => {
         const layer = [...svg.children];
         const path = svg.querySelector('path[stroke="#ff0000"]')!;
         const data = layer.find((group) => group.contains(path))!;
-        const clip = svg.querySelector(`[id="${data.getAttribute("clip-path")!.slice(5, -1)}"]`)!;
+        const clip = svg.querySelector(`[id="${path.getAttribute("clip-path")!.slice(5, -1)}"]`)!;
         const holds = ({ x, y }: { x: number; y: number }) =>
           [...clip.querySelectorAll("rect")].some((rect) => {
             const [rx, ry, w, h] = ["x", "y", "width", "height"].map((a) =>
@@ -390,13 +390,13 @@ describe("layouts in the browser", () => {
       ],
       panels: panels(panel("main", [inset("detail")])),
     });
-    // The layer's groups: the grid under the data, each panel's data and
-    // annotations, an inset's box, then the axes and the overlay.
+    // The layer's groups: the backgrounds and grid lines under the data,
+    // what each panel paints, an inset's box, then the axes and the overlay.
     const groups = () => chart.root.querySelector("svg")!.querySelectorAll(":scope > g").length;
-    expect(groups()).toBe(1 + 2 * 2 + 1 + 2);
+    expect(groups()).toBe(1 + 2 + 1 + 2);
     chart.update({ panels: panels(columns([1, 1], [panel("main"), panel("detail")])) });
     chart.render();
-    expect(groups()).toBe(1 + 2 * 2 + 2);
+    expect(groups()).toBe(1 + 2 + 2);
     chart.destroy();
   });
 

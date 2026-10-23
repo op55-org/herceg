@@ -15,6 +15,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { LineGeometry, RuleGeometry, Scene } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { positionOf } from "../helpers/keyboard.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -53,7 +54,9 @@ describe("right y axis", () => {
     const [, requests] = scene.panels[0]!.marks as LineGeometry[];
     expect(requests!.path.coords[1]).toBeCloseTo(right.map(1200), 3);
     // Grid lines follow the left axis.
-    expect(scene.panels[0]!.grid.y).toEqual(axis(scene, "left")!.ticks.map((t) => t.position));
+    expect(gridAt(scene.panels[0]!, "y")).toEqual(
+      axis(scene, "left")!.ticks.map((t) => t.position),
+    );
   });
 
   it("formats each series' tooltip values by its own axis", () => {
@@ -74,8 +77,11 @@ describe("right y axis", () => {
       marks: [line(traffic, { x: "t", y: "requests", axis: "right" })],
     });
     expect(axis(scene, "left")).toBeUndefined();
-    expect(scene.panels[0]!.grid.y.length).toBeGreaterThan(0);
-    expect(scene.panels[0]!.grid.y[0]).toBeCloseTo(axis(scene, "right")!.ticks[0]!.position, 3);
+    expect(gridAt(scene.panels[0]!, "y").length).toBeGreaterThan(0);
+    expect(gridAt(scene.panels[0]!, "y")[0]).toBeCloseTo(
+      axis(scene, "right")!.ticks[0]!.position,
+      3,
+    );
     expect(model.yRightScale()!.domain[1]).toBeGreaterThanOrEqual(4800);
   });
 

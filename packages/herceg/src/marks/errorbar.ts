@@ -2,9 +2,10 @@ import type { NumericArray } from "../data/column.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
-import { insetDomain } from "../model/axis.ts";
+import { clearDomain } from "../model/clearance.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Rect, SegmentGeometry } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { Clip, ErrorBarSpec, Frozen } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
@@ -32,7 +33,7 @@ import {
   SeriesSplitter,
   valueKind,
 } from "./mark.ts";
-import { coordinates, type FieldPositions, refusePending } from "./pending.ts";
+import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { lowerPosition, rowOf, type Series, TableCache, visibleRange, xExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -173,17 +174,15 @@ type Ends = { low: string; high: string } | { center: string; error: string };
  * both ends; intervals missing an end, or with an end the axis cannot
  * place, are neither drawn nor counted toward the axes.
  */
-/** Error bars' positions round 2 freezes before stream R places rows by them. */
-const PENDING = coordinates("x", "y", "x1", "x2", "y1", "y2");
-
-export class ErrorBarMark implements Mark<FieldPositions<Frozen<ErrorBarSpec>>> {
+export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   declare readonly [MARK]: true;
-  readonly insetDomain = insetDomain;
-  readonly spec: FieldPositions<Frozen<ErrorBarSpec>>;
+  readonly clearDomain = clearDomain;
+  readonly spec: Frozen<ErrorBarSpec>;
   readonly table: Table<Schema>;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
   readonly inset: { x: number; y: number };
+  readonly bound: RowBindings | undefined;
   readonly #horizontal: boolean;
   /** The field intervals stand at: x for vertical bars, y for horizontal ones. */
   readonly #position: string;
@@ -196,29 +195,37 @@ export class ErrorBarMark implements Mark<FieldPositions<Frozen<ErrorBarSpec>>> 
   readonly #shares: BandShares | undefined;
 
   constructor(input: ErrorBarSpec, table: Table<Schema>) {
-    refusePending(input, "errorbar", PENDING);
-    this.spec = frozen(colored(input, table, "stroke")) as FieldPositions<Frozen<ErrorBarSpec>>;
+    this.spec = frozen(colored(input, table, "stroke"));
     checkTooltip(table, this.spec.tooltip, "errorbar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    const { fields, bound } = bindRows(spec, table, "errorbar", ENDS.slice(0, 6));
+    this.bound = bound;
     const form = errorBarForm(spec);
     if (typeof form === "string") throw new Error(form);
     const { horizontal, symmetric } = form;
     this.#horizontal = horizontal;
     const [along, across] = horizontal ? (["y", "x"] as const) : (["x", "y"] as const);
-    const position = spec[along]!;
+    // A symmetric interval's center is a field, as its error is.
+    if (symmetric && typeof spec[across] !== "string")
+      throw new ChartError({
+        code: "invalid-option",
+        path: across,
+        message: `errorbar ${across}: a center with ${across}Error is a field; give a field's name`,
+      });
+    const position = fields[along] as string;
     this.#position = position;
     requireField(table, position, [...NUMERIC, ...CATEGORY], `errorbar ${along}`);
     if (symmetric) {
-      const center = spec[across]!;
+      const center = fields[across] as string;
       const error = spec[`${across}Error`]!;
       requireField(table, center, NUMERIC, `errorbar ${across}`);
       requireField(table, error, NUMERIC, `errorbar ${across}Error`);
       this.#ends = { center, error };
     } else {
-      const low = spec[`${across}1`]!;
-      const high = spec[`${across}2`]!;
+      const low = fields[`${across}1`] as string;
+      const high = fields[`${across}2`] as string;
       requireField(table, low, NUMERIC, `errorbar ${across}1`);
       requireField(table, high, NUMERIC, `errorbar ${across}2`);
       this.#ends = { low, high };
@@ -253,6 +260,7 @@ export class ErrorBarMark implements Mark<FieldPositions<Frozen<ErrorBarSpec>>> 
   }
 
   channelKind(axis: "x" | "y") {
+    if (offAxis(this.bound, axis)) return undefined;
     if ((axis === "y") === this.#horizontal) return this.table.kind(this.#position);
     const ends = this.#ends;
     return valueKind(this.table, "center" in ends ? [ends.center] : [ends.low, ends.high]);

@@ -16,6 +16,7 @@ import { panels } from "../../src/model/panels.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { LineGeometry, Panel, RectGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
@@ -245,8 +246,8 @@ describe("panels", () => {
     const { scene } = build({ marks, panels: own, y: { grid: false, scope: "row" } });
     const [left, right] = scene.panels as [Panel, Panel];
     expect(axis(left, "left")).toBeUndefined();
-    expect(left.grid.y).toEqual([]);
-    expect(right.grid.y.length).toBeGreaterThan(0);
+    expect(gridAt(left, "y")).toEqual([]);
+    expect(gridAt(right, "y").length).toBeGreaterThan(0);
     // The second column's panel keeps its title and labels, sharing its row's scale.
     expect(axis(right, "left")!.title!.text).toBe("requests");
     expect(axis(right, "left")!.ticks.length).toBeGreaterThan(0);

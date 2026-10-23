@@ -168,7 +168,7 @@ export function plannable(motion: AxesMotion): boolean {
  * as the scene plans its own (the same tick count, chosen within the
  * domain before room was added for glyphs, and labeled together).
  */
-export function axesAt(panel: Panel, motion: AxesMotion, t: number): Pick<Panel, "axes" | "grid"> {
+export function axesAt(panel: Panel, motion: AxesMotion, t: number): Pick<Panel, "axes" | "grids"> {
   const { motions, after } = motion;
   const plans: Partial<Record<Axis, AxisPlan>> = {};
   const planOf = (axis: Axis): AxisPlan | undefined => {
@@ -187,17 +187,16 @@ export function axesAt(panel: Panel, motion: AxesMotion, t: number): Pick<Panel,
     // Placed as the scene placed the axis, with the ticks between.
     return motion.axisGuide(guide.key, guide.scale, guide, ticks, guide.title, motion.measure);
   });
-  const lines = (plan: AxisPlan | undefined, drawn: number[]) =>
+  const lines = (plan: AxisPlan | undefined, drawn: readonly number[]) =>
     plan && drawn.length > 0 ? plan.ticks.map((tick) => plan.scale.map(tick)) : drawn;
   const gridAxis =
     after.grid === after.y ? "y" : after.grid === after.yRight ? "yRight" : undefined;
   return {
     axes,
-    grid: {
-      ...panel.grid,
-      x: lines(planOf("x"), panel.grid.x),
-      y: gridAxis ? lines(planOf(gridAxis), panel.grid.y) : panel.grid.y,
-    },
+    grids: panel.grids.map((batch) => {
+      const axis = batch.along === "x" ? "x" : gridAxis;
+      return axis ? { ...batch, at: lines(planOf(axis), batch.at) } : batch;
+    }),
   };
 }
 

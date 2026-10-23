@@ -18,9 +18,11 @@ import { Polyline } from "../lod/polyline.ts";
 import type { BarMark } from "../marks/bar.ts";
 import { isLayoutMark, tablesOf, viewOf } from "../marks/layout-mark.ts";
 import type { Frame, Mark } from "../marks/mark.ts";
+import { offAxis, standsOn } from "../marks/row-bindings.ts";
 import { rowOf, type Series, visibleRange } from "../marks/series.ts";
 import { domainExtent, unionExtent } from "../marks/trace.ts";
 import type { PositionScale } from "../scale/scale.ts";
+import type { GridBatch } from "../scene/paint.ts";
 import type {
   Drawing,
   Geometry,
@@ -36,8 +38,9 @@ import type { Halo } from "../spec/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import { type AxisContext, type AxisPlan, createScale, usableDomain } from "./axis.ts";
 import type { InspectedMark, Inspector, MarkSeries } from "./inspect.ts";
-import type { ChartConfig, ChartModel } from "./model.ts";
+import type { ChartConfig, ChartModel, RangeSource } from "./model.ts";
 import { overviewBars } from "./navigator-bars.ts";
+import { unpadded } from "./view-padding.ts";
 
 /** The strip's height when the options give none, in CSS pixels. */
 const HEIGHT = 40;
@@ -58,10 +61,17 @@ export const NAVIGATOR_PANEL = "navigator";
 
 /**
  * How the model plans the x axis of its first x scale (group 0) along a plot
- * `width` pixels wide over `domain`: rounded and given room for glyphs, as
- * an unzoomed axis is, when `auto`.
+ * `width` pixels wide over `domain`, found as `source` says: rounded and
+ * given room for glyphs when fitted, as an unzoomed axis is; a range drawn
+ * already chose its ticks `within` its view.
  */
-export type XPlan = (width: number, group: 0, domain: [number, number], auto: boolean) => AxisPlan;
+export type XPlan = (
+  width: number,
+  group: 0,
+  domain: [number, number],
+  source: RangeSource,
+  within?: readonly [number, number],
+) => AxisPlan;
 
 /** What the browser's sliders read of the strip the last scene drew. */
 export interface DrawnStrip {
@@ -71,6 +81,11 @@ export interface DrawnStrip {
   rail: PositionScale;
   /** The x range the plots show, ascending: the strip's window. */
   shown: readonly [number, number];
+  /**
+   * The view (as `setViewport` takes it) the plots show as `range`,
+   * ascending: the range without the padding x's settings give.
+   */
+  view(range: readonly [number, number]): [number, number];
   /**
    * The keys of the panels whose x range the window shows, which values
    * are formatted for as the first one's x axis formats them.
@@ -261,6 +276,10 @@ export class Navigator {
         throw new Error(
           `navigator marks: draws line, area, point, bar, and candlestick marks, not ${mark.spec.type} "${id}"`,
         );
+      if (!stripPlaces(mark))
+        throw new Error(
+          `navigator marks: "${id}" places rows off the x axis or on a scale of the chart's own, which the strip has no place for; list another mark`,
+        );
     }
   }
 
@@ -287,7 +306,10 @@ export class Navigator {
    */
   panel(
     owner: Owner & { readonly height: number },
-    views: readonly (Omit<StripSource, "index"> & { readonly xGroup: string })[],
+    views: readonly (Omit<StripSource, "index"> & {
+      readonly xGroup: string;
+      readonly plans: { readonly x: AxisPlan };
+    })[],
     plan: XPlan,
     context: AxisContext,
     room: number,
@@ -327,7 +349,7 @@ export class Navigator {
     const shown = ascending(frame.x.domain);
     const { rail, labeled } = railPlan(
       sources.flatMap(({ inspector }) => inspector.marks),
-      (width, domain, auto) => plan(width, 0, domain, auto),
+      (width, domain, source, within) => plan(width, 0, domain, source, within),
       Math.min(...plots.map((plot) => plot.width)),
       strip.width,
       context,
@@ -377,14 +399,25 @@ export class Navigator {
         ? stripTicks(rail, strip, frame, this.#spec.halo)
         : { grid: [], labels: undefined });
     }
-    state.drawn = { plot: strip, rail: scale, shown, panels: sources.map(({ key }) => key) };
+    const plotsX = sources[0]!.plans.x;
+    state.drawn = {
+      plot: strip,
+      rail: scale,
+      shown,
+      view: (range) => unpadded(plotsX, range),
+      panels: sources.map(({ key }) => key),
+    };
     state.of = owner.panels();
     const marks: Geometry[] = [...state.overview, frameShapes(strip, scale, shown, theme)];
     if (state.labels) marks.push(state.labels);
     // A key no panel has: renderers keep each panel's drawing by its key.
     let name = NAVIGATOR_PANEL;
     while (views.some((view) => view.key === name)) name += "~";
-    return { key: name, plot: strip, grid: { x: state.grid, y: [] }, axes: [], marks };
+    const grids: GridBatch[] =
+      state.grid.length > 0
+        ? [{ key: "x", zIndex: -1, along: "x", at: state.grid, paint: theme.style.grid }]
+        : [];
+    return { key: name, plot: strip, grids, axes: [], marks };
   }
 
   /**
@@ -396,7 +429,9 @@ export class Navigator {
     return sources
       .flatMap(({ inspector }, at) =>
         inspector.marks
-          .filter(({ mark }) => (ids ? ids.includes(mark.spec.id as string) : drawable(mark)))
+          .filter(({ mark }) =>
+            ids ? ids.includes(mark.spec.id as string) : drawable(mark) && stripPlaces(mark),
+          )
           .map((entry) => ({ at, entry })),
       )
       .sort((a, b) => a.entry.index - b.entry.index);
@@ -445,6 +480,14 @@ export class Navigator {
 }
 
 /**
+ * Whether the strip can place a mark's rows: x on the axis, and y on one
+ * or in a frame (the strip's box), not on a scale of the chart's own.
+ */
+function stripPlaces(mark: Mark): boolean {
+  return !offAxis(mark.bound, "x") && mark.bound?.y?.kind !== "scale";
+}
+
+/**
  * Marks the strip can draw: lines, areas, vertical bars, and candlesticks,
  * drawn along x, and points with number or time y values.
  */
@@ -467,7 +510,12 @@ function ascending(domain: readonly [number, number]): [number, number] {
  */
 function railPlan(
   marks: readonly MarkSeries[],
-  plan: (width: number, domain: [number, number], auto: boolean) => AxisPlan,
+  plan: (
+    width: number,
+    domain: [number, number],
+    source: RangeSource,
+    within?: readonly [number, number],
+  ) => AxisPlan,
   narrowest: number,
   width: number,
   context: AxisContext,
@@ -476,24 +524,28 @@ function railPlan(
   const { type, spec, breaks } = context;
   const log = type === "log";
   // As the model finds an unzoomed x domain: no mark is placed along y, so
-  // every series counts, and zero only when the axis asks for it.
+  // every series counts but rows placed off x, and zero only when the axis
+  // asks for it.
   let data = domainExtent(
-    marks.map(({ mark, series, rows }) => [mark, mark.xExtent(series, log, breaks, rows)]),
+    marks.map(({ mark, series, rows }) => [
+      mark,
+      offAxis(mark.bound, "x") ? undefined : mark.xExtent(series, log, breaks, rows),
+    ]),
   );
   if (spec?.zero && !log) data = unionExtent([data, [0, 0]]);
   let domain = usableDomain(spec?.domain ?? data, type);
   if (breaks) domain = breaks.showing(domain, spec?.domain !== undefined);
-  let full = plan(narrowest, domain, spec?.domain === undefined);
+  let full = plan(narrowest, domain, spec?.domain === undefined ? "fit" : "set");
   // A strip wider than the narrowest plot (under columns of panels) keeps
   // that domain, rounded and padded as the plots have it, with ticks for its
   // own width: planned again for the strip, a shown reset could fall short of it.
   const [d0, d1] = full.scale.domain;
-  if (width !== narrowest) full = plan(width, [d0, d1], false);
+  if (width !== narrowest) full = plan(width, [d0, d1], "drawn", full.within);
   const labeled = data !== undefined || spec?.domain !== undefined;
   const [lo, hi] = ascending(full.scale.domain);
   if (shown[0] >= lo && shown[1] <= hi) return { rail: full, labeled };
   const reach: [number, number] = [Math.min(lo, shown[0]), Math.max(hi, shown[1])];
-  return { rail: plan(width, d0 > d1 ? [reach[1], reach[0]] : reach, false), labeled };
+  return { rail: plan(width, d0 > d1 ? [reach[1], reach[0]] : reach, "drawn"), labeled };
 }
 
 /**
@@ -575,13 +627,15 @@ function overview(
     const tag = at ? `~${at}` : "";
     // Hidden and grouped as its panel draws it.
     const drawnWith = frameOf(drawnMark);
-    const own: Frame = {
+    let own: Frame = {
       ...frame,
       hidden: drawnWith.hidden,
       groupSeries: drawnWith.groupSeries,
       x: rail,
       y,
+      // The strip is the overview's plot and its chart, for rows placed in either frame.
       plot: strip,
+      chart: strip,
       theme,
       clouds: false,
       keyed: false,
@@ -590,6 +644,7 @@ function overview(
       doubles: sized(tag, (length) => new Float64Array(length)),
       bytes: sized(tag, (length) => new Uint8ClampedArray(length)),
     };
+    if (mark.bound) own = drawnWith.features?.frame(own, mark.bound) ?? own;
     const geometry =
       mark.spec.type === "point"
         ? samplePoints(series, own)
@@ -623,8 +678,9 @@ function yScale(
   const data = unionExtent(
     marks.map(({ mark, series, hidden }) => {
       const visible = series.filter((s) => !hidden.has(s.key));
-      if (mark.zero === "y" && (visible.length > 0 || mark.seriesless)) stands = true;
-      return mark.yExtent(visible, x0, x1, log, x.breaks);
+      if (standsOn(mark, "y") && (visible.length > 0 || mark.seriesless)) stands = true;
+      // Rows placed in the strip's box tell its y nothing.
+      return offAxis(mark.bound, "y") ? undefined : mark.yExtent(visible, x0, x1, log, x.breaks);
     }),
   );
   const zero = (spec?.zero ?? stands) && !log && data;

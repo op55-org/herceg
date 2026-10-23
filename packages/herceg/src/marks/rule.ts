@@ -1,6 +1,7 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
 import { ruleDrawing } from "../draw/rule.ts";
-import { lineCount, type MeasureText } from "../layout/text.ts";
+import { anchorBlock } from "../layout/block.ts";
+import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import type { Geometry, RuleGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec, LabelSpec } from "../spec/encoding.ts";
@@ -14,7 +15,7 @@ import type {
   RuleSpec,
 } from "../spec/spec.ts";
 import type { TextStyle } from "../spec/style.ts";
-import { dashPattern } from "../style/style.ts";
+import { dashPattern, type TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import {
   ANNOTATION_PENDING,
@@ -195,6 +196,14 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     return this.#data.extent(this.#along("x"), log, undefined, rows);
   }
 
+  get scaled() {
+    return this.#data.scaled;
+  }
+
+  scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
+    return this.#data.extent(this.#along(axis), log, undefined, rows, name);
+  }
+
   yExtent(
     _series: unknown,
     _x0: number,
@@ -260,7 +269,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
     const out: Geometry[] = [];
     const placed: PlacedLabel[] = [];
-    const plain = (text: string | undefined) => this.#plain && !text?.includes("\n");
+    const paint = this.#paint(frame);
+    // Labels placed by verticalAlign are placed as blocks.
+    const blocks = this.#plain && paint.verticalAlign !== undefined;
+    const plain = (text: string | undefined) => this.#plain && !blocks && !text?.includes("\n");
     const [lo, hi] = vertical ? [plot.y, plot.y + plot.height] : [plot.x, plot.x + plot.width];
     data.each(rows, (i) => {
       const at = data.pixel(place, vertical ? "x" : "y", i, scale, frame);
@@ -294,14 +306,14 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
       };
       if (spec.strokeOpacity !== undefined) rule.opacity = spec.strokeOpacity;
       out.push(rule);
-      if (text && !plain(text)) placed.push(this.#place(text, rule, frame));
+      if (text && !plain(text)) placed.push(this.#place(text, rule, frame, paint));
     });
     if (placed.length > 0)
       out.push(
         labelsGeometry(
           `${JSON.stringify(key)}|labels`,
           placed,
-          this.#paint(frame),
+          paint,
           label?.style?.halo ?? false,
           frame,
         ),
@@ -315,67 +327,83 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
    * one; outside, beyond the axis' labels at that end of the plot. Its
    * point is its first line's: a label of several lines grows away from
    * the rule or plot it is beside, and is centered where it is centered.
+   * A style's verticalAlign puts the block's top, middle, or bottom, box
+   * and all, at the place instead: a horizontal rule's label below it, on
+   * it, or above it.
    */
-  #place(text: string, rule: RuleGeometry, frame: Frame): PlacedLabel {
+  #place(text: string, rule: RuleGeometry, frame: Frame, paint: TextPaint): PlacedLabel {
     const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
     const vertical = rule.x1 === rule.x2;
     const attachment = place.attachment ?? (vertical ? "start" : "end");
     const offset = place.offset ?? 0;
-    const { size, lineHeight } = this.#paint({ theme: frame.theme });
+    const { size, lineHeight, verticalAlign } = paint;
     // The block's lines after the first.
     const rest = (lineCount(text) - 1) * lineHeight;
+    /**
+     * The label from `x` as `anchor` says, its block's top, middle, or
+     * bottom (as `natural` unless its style says) at `y`.
+     */
+    const label = (
+      x: number,
+      y: number,
+      anchor: PlacedLabel["anchor"],
+      natural: "top" | "middle" | "bottom",
+    ): PlacedLabel => {
+      if (!verticalAlign) {
+        const dy =
+          natural === "top" ? size / 2 : natural === "middle" ? -rest / 2 : -size / 2 - rest;
+        return { text, x, y: y + dy, anchor, baseline: "middle" };
+      }
+      const { at, box } = anchorBlock(
+        textLines(text, paint, frame.measure),
+        { x, y, align: anchor === "middle" ? "center" : anchor, verticalAlign, angle: 0 },
+        paint,
+      );
+      return { text, x: at.x, y: at.y, anchor, baseline: "middle", box };
+    };
     if (vertical) {
       const x = rule.x1;
-      if (place.outside)
-        return attachment === "start"
-          ? {
-              text,
-              x,
-              y: frame.plot.y - LABEL_GAP - offset - size / 2 - rest,
-              anchor: "middle",
-              baseline: "middle",
-            }
-          : {
-              text,
-              x,
-              y: frame.plot.y + frame.plot.height + LABEL_GAP + offset,
-              anchor: "middle",
-              baseline: "hanging",
-            };
-      const y =
+      if (place.outside) {
+        if (attachment === "start")
+          return label(x, frame.plot.y - LABEL_GAP - offset, "middle", "bottom");
+        const below = frame.plot.y + frame.plot.height + LABEL_GAP + offset;
+        return verticalAlign
+          ? label(x, below, "middle", "top")
+          : { text, x, y: below, anchor: "middle", baseline: "hanging" };
+      }
+      const [y, natural] =
         attachment === "start"
-          ? rule.y1 + LABEL_GAP + offset + size / 2
+          ? [rule.y1 + LABEL_GAP + offset, "top" as const]
           : attachment === "end"
-            ? rule.y2 - LABEL_GAP - offset - size / 2 - rest
-            : (rule.y1 + rule.y2 - rest) / 2;
-      return { text, x: x + LABEL_GAP, y, anchor: "start", baseline: "middle" };
+            ? [rule.y2 - LABEL_GAP - offset, "bottom" as const]
+            : [(rule.y1 + rule.y2) / 2, "middle" as const];
+      return label(x + LABEL_GAP, y, "start", natural);
     }
     const y = rule.y1;
     if (place.outside) {
       // Right-aligned where the labels left of the plot end, or from where those right of it start.
       const edges = frame.outside;
       return attachment === "start"
-        ? {
-            text,
-            x: (edges?.[0] ?? frame.plot.x - LABEL_GAP) - offset,
-            y: y - rest / 2,
-            anchor: "end",
-            baseline: "middle",
-          }
-        : {
-            text,
-            x: (edges?.[1] ?? frame.plot.x + frame.plot.width + LABEL_GAP) + offset,
-            y: y - rest / 2,
-            anchor: "start",
-            baseline: "middle",
-          };
+        ? label((edges?.[0] ?? frame.plot.x - LABEL_GAP) - offset, y, "end", "middle")
+        : label(
+            (edges?.[1] ?? frame.plot.x + frame.plot.width + LABEL_GAP) + offset,
+            y,
+            "start",
+            "middle",
+          );
     }
-    const above = y - LABEL_GAP - offset - size / 2 - rest;
+    // Above the rule by default, below it for "top", on it for "middle".
+    const at =
+      verticalAlign === "top"
+        ? y + LABEL_GAP + offset
+        : verticalAlign === "middle"
+          ? y
+          : y - LABEL_GAP - offset;
     return attachment === "start"
-      ? { text, x: rule.x1 + LABEL_GAP, y: above, anchor: "start", baseline: "middle" }
+      ? label(rule.x1 + LABEL_GAP, at, "start", "bottom")
       : attachment === "end"
-        ? { text, x: rule.x2 - LABEL_GAP, y: above, anchor: "end", baseline: "middle" }
-        : { text, x: (rule.x1 + rule.x2) / 2, y: above, anchor: "middle", baseline: "middle" };
+        ? label(rule.x2 - LABEL_GAP, at, "end", "bottom")
+        : label((rule.x1 + rule.x2) / 2, at, "middle", "bottom");
   }
 }
 

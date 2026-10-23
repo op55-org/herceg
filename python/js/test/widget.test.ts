@@ -61,7 +61,8 @@ const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => r
 const figure = (host: HTMLElement) => host.querySelector('[role="figure"]')!;
 /** Points of the drawn line: one path command per vertex. */
 const vertices = (host: HTMLElement) =>
-  host.querySelector("svg g[clip-path] path")!.getAttribute("d")!.match(/[ML]/g)!.length;
+  host.querySelector("svg path:is([clip-path], [clip-path] *)")!.getAttribute("d")!.match(/[ML]/g)!
+    .length;
 const band = (host: HTMLElement) => host.querySelector('svg path[fill-opacity="0.18"]');
 
 function press(host: HTMLElement, type: string, fraction: number) {
@@ -409,7 +410,7 @@ describe("notebook widget", () => {
     const reports = model.messages("viewport") as { viewport: { x: [number, number] } }[];
     expect(reports).toHaveLength(2);
     const [start, end] = reports[1]!.viewport.x;
-    const shown = host!.querySelector("svg g[clip-path] path");
+    const shown = host!.querySelector("svg path:is([clip-path], [clip-path] *)");
     expect(shown).not.toBeNull();
     expect(end - start).toBeLessThan(2);
   });
@@ -592,7 +593,7 @@ describe("notebook widget", () => {
     );
     await frame();
     // A link and three nodes, named beside them.
-    expect(host!.querySelectorAll("svg g[clip-path] path")).toHaveLength(4);
+    expect(host!.querySelectorAll("svg path:is([clip-path], [clip-path] *)")).toHaveLength(4);
     const labels = [...host!.querySelectorAll("svg text")].map((text) => text.textContent);
     expect(labels).toEqual(expect.arrayContaining(["n0", "n1", "n2"]));
   });

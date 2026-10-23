@@ -11,6 +11,24 @@ function segmentPath(mark: SegmentGeometry): string {
   return d;
 }
 
+function paintSegments(context: CanvasRenderingContext2D, mark: SegmentGeometry): void {
+  if (mark.strokeWidth === 0) return;
+  const c = mark.coords;
+  context.save();
+  context.lineCap = "butt";
+  context.beginPath();
+  for (let i = 0; i < mark.count; i++) {
+    const at = i * 4;
+    context.moveTo(c[at]!, c[at + 1]!);
+    context.lineTo(c[at + 2]!, c[at + 3]!);
+  }
+  context.strokeStyle = mark.stroke;
+  context.lineWidth = mark.strokeWidth;
+  context.globalAlpha *= mark.opacity ?? 1;
+  context.stroke();
+  context.restore();
+}
+
 function segmentElements(mark: SegmentGeometry): SvgElement[] {
   const attributes: Record<string, string> = {
     d: segmentPath(mark),
@@ -28,28 +46,12 @@ export const segmentDrawing: Drawing<SegmentGeometry> = {
   size: (mark) => mark.count,
   elements: segmentElements,
   svg: (mark) => markupOf(segmentElements(mark)),
-  canvas(context, mark) {
-    if (mark.strokeWidth === 0) return;
-    const c = mark.coords;
-    context.save();
-    context.lineCap = "butt";
-    context.beginPath();
-    for (let i = 0; i < mark.count; i++) {
-      const at = i * 4;
-      context.moveTo(c[at]!, c[at + 1]!);
-      context.lineTo(c[at + 2]!, c[at + 3]!);
-    }
-    context.strokeStyle = mark.stroke;
-    context.lineWidth = mark.strokeWidth;
-    context.globalAlpha *= mark.opacity ?? 1;
-    context.stroke();
-    context.restore();
-  },
+  canvas: paintSegments,
 };
 
-/** Segments drawn above the data as guides, such as lines from moved labels to their points. */
+/** Segments drawn whole, such as lines from moved labels to their points. */
 export const guideSegmentDrawing: Drawing<SegmentGeometry> = {
-  canvas: false,
+  canvas: paintSegments,
   defaultClip: false,
   size: () => 0,
   elements: segmentElements,
