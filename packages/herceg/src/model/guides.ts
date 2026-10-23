@@ -16,11 +16,11 @@ import {
 import { fromWall, toWall } from "../format/zone.ts";
 import { aligned } from "../layout/place.ts";
 import {
+  centeredLines,
   type MeasureText,
   textHalo,
   textHeight,
   textItem,
-  textItems,
   textWidth,
 } from "../layout/text.ts";
 import { mapValue } from "../lod/m4.ts";
@@ -34,6 +34,7 @@ import type { Theme } from "../theme.ts";
 import { type AxisContext, type AxisPlan, planAxis } from "./axis.ts";
 import type { MarkSeries } from "./inspect.ts";
 import {
+  entryOf,
   type LegendContent,
   type LegendFlow,
   type LegendText,
@@ -62,7 +63,7 @@ export const GUIDE_KIT = {
   timeTicks,
   planAxis,
   textItem,
-  textItems,
+  centeredLines,
   textWidth,
   textHeight,
   tickLabelGap,
@@ -73,6 +74,7 @@ export const GUIDE_KIT = {
   aligned,
   textHalo,
   measureLegends,
+  entryOf,
   n,
   markupOf,
   mapValue,

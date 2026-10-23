@@ -901,7 +901,8 @@ function depthOf(
 ): number {
   const rows = rowDepths(kit, layers, state.measure);
   const labels = rows.reduce((sum, row) => sum + row + ROW_GAP, -ROW_GAP);
-  const title = titleOf(axis, i) ? kit.textHeight(titlePaint(kit, axis, state, i)) + GAP : 0;
+  const text = titleOf(axis, i);
+  const title = text ? kit.textHeight(titlePaint(kit, axis, state, i), text) + GAP : 0;
   // As drawn: labels clear the line by the gap and the ticks longer than the default axes'.
   const reach = Math.max(0, outward(axis.layers) - TICK);
   return kit.tickLabelGap(layers[0]!.label.size) + reach + Math.max(0, labels) + title;
@@ -931,7 +932,8 @@ export function widest(kit: GuideKit, layers: readonly Placed[], measure: Measur
 /** Pixels a y axis on the right takes beside its plot: ticks, labels, and title. */
 function breadth(kit: GuideKit, axis: ListedAxis, state: AxesState, i: number): number {
   const layers = placedLayers(kit, axis, state, i, state.plan(axis.scale, i, 0));
-  const title = titleOf(axis, i) ? kit.textHeight(titlePaint(kit, axis, state, i)) + GAP : 0;
+  const text = titleOf(axis, i);
+  const title = text ? kit.textHeight(titlePaint(kit, axis, state, i), text) + GAP : 0;
   return (
     outward(axis.layers) + Y_GAP + Math.ceil(widest(kit, layers, state.measure)) + GAP + 2 + title
   );
@@ -1019,9 +1021,9 @@ function beyond(
   let title: AxisGuide["title"];
   const text = titleOf(axis, i);
   if (text) {
-    // Beyond the labels: the axis' room less half the title's line.
+    // Beyond the labels: the axis' room less half the title's lines, at their middle.
     const room = above ? depthOf(kit, axis, state, i, layers) : breadth(kit, axis, state, i);
-    const half = kit.textHeight(paints.title) / 2;
+    const half = kit.textHeight(paints.title, text) / 2;
     // Along the plot as its style aligns it: left to right above, top to bottom on the right.
     const along = kit.aligned(
       paints.title.align ?? "center",
@@ -1072,9 +1074,17 @@ function titleItem(
   measure: MeasureText,
 ): TextItem {
   const angle = side === "left" ? -90 : side === "right" ? 90 : 0;
+  const at = {
+    x: title.x,
+    y: title.y,
+    anchor: title.anchor ?? "middle",
+    baseline: "middle",
+    angle,
+  } as const;
+  // Its point is its lines' middle, in its turn.
   return kit.textItem(
     title.text,
-    { x: title.x, y: title.y, anchor: title.anchor ?? "middle", baseline: "middle", angle },
+    kit.centeredLines(title.text, at, paint),
     paint,
     surface,
     measure,
@@ -1196,7 +1206,7 @@ export function drawn(
                 baseline: "middle",
                 angle: 0,
               };
-      items.push(...kit.textItems(label, at, paint, placement.surface, measure));
+      items.push(kit.textItem(label, at, paint, placement.surface, measure));
     });
   }
   return items;

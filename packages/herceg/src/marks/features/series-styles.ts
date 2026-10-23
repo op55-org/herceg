@@ -9,7 +9,7 @@ import type { FeatureKit } from "../../model/features.ts";
 import type { Drawing, Geometry } from "../../scene/scene.ts";
 import type { ChannelSpec, EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
 import type { Dash } from "../../spec/spec.ts";
-import type { Theme } from "../../theme.ts";
+import type { PaintReader, Theme } from "../../theme.ts";
 import type { Series } from "../series.ts";
 import {
   type Channel,
@@ -122,12 +122,13 @@ export class SeriesStyles {
   /** The series field's codes by value, for one table version (see `#codeOf`). */
   #codes: { version: number; dictionary: readonly string[]; of: Map<string, number> } | undefined;
   #theme: Theme | undefined;
-  /** Each series' paint, by its key, for the table's version and the theme it was found in. */
+  #paint: PaintReader = (value) => value;
+  /** Each series' paint, by its key, for the table's version and the theme and paint reader it was found with. */
   #paints = new Map<
     string,
     { rows: Series["rows"]; length: number; paint: SeriesPaint; color: string }
   >();
-  #paintsOf: { version: number; theme: Theme | undefined } | undefined;
+  #paintsOf: { version: number; theme: Theme | undefined; paint: PaintReader } | undefined;
 
   constructor(
     spec: SeriesStyleSpec,
@@ -246,9 +247,10 @@ export class SeriesStyles {
     this.#colorPath = colorPath;
   }
 
-  /** Reads `theme`'s palette for values the scales do not map. */
-  use(theme: Theme): void {
+  /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
+  use(theme: Theme, paint: PaintReader): void {
     this.#theme = theme;
+    this.#paint = paint;
   }
 
   /** A series' value of a compiled channel, one per series. */
@@ -417,9 +419,14 @@ export class SeriesStyles {
   paint(s: Series, id: string): SeriesPaint {
     const version = this.#table.version;
     const theme = this.#theme;
-    if (this.#paintsOf?.version !== version || this.#paintsOf.theme !== theme) {
+    const paint = this.#paint;
+    if (
+      this.#paintsOf?.version !== version ||
+      this.#paintsOf.theme !== theme ||
+      this.#paintsOf.paint !== paint
+    ) {
       this.#paints.clear();
-      this.#paintsOf = { version, theme };
+      this.#paintsOf = { version, theme, paint };
       // What was checked of rows the table no longer has goes, so series a
       // stream leaves behind are not kept; one that returns is checked afresh.
       const { generation, rowOffset } = this.#table;
@@ -433,22 +440,29 @@ export class SeriesStyles {
       s.color = kept.color;
       return kept.paint;
     }
-    const paint = this.#paintOfSeries(s, id);
-    this.#paints.set(s.key, { rows: s.rows, length: s.length, paint, color: s.color });
-    return paint;
+    const look = this.#paintOfSeries(s, id);
+    this.#paints.set(s.key, { rows: s.rows, length: s.length, paint: look, color: s.color });
+    return look;
   }
 
   #paintOfSeries(s: Series, id: string): SeriesPaint {
     const style = this.#by?.(s, id);
+    const { path } = this.#where;
+    const read = (color: string | undefined, option: string) =>
+      color === undefined ? undefined : this.#paint(color, `${path} ${option}`);
     // A color channel by rows gives every series its color; a style map by
     // another field, the series it maps (the others keep the palette's).
+    const primary = this.#primary;
     if (this.#byRows)
       s.color =
-        style?.[this.#primary] ?? this.#spec[this.#primary] ?? this.#paintOf(s, id) ?? s.color;
-    else if (style?.[this.#primary] !== undefined) s.color = style[this.#primary]!;
+        read(style?.[primary] ?? this.#spec[primary] ?? this.#paintOf(s, id), primary) ?? s.color;
+    else if (style?.[primary] !== undefined) s.color = read(style[primary], primary)!;
     const spec = this.#spec;
     return {
-      stroke: style?.stroke ?? (this.#primary === "stroke" ? undefined : this.#stroke?.(s, id)),
+      stroke: read(
+        style?.stroke ?? (primary === "stroke" ? undefined : this.#stroke?.(s, id)),
+        "stroke",
+      ),
       strokeWidth: style?.strokeWidth ?? this.#width?.(s, id),
       dash: style?.dash ?? this.#dash?.(s, id),
       opacity: style?.opacity ?? this.#opacity?.(s, id) ?? spec.opacity ?? 1,

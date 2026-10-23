@@ -33,30 +33,27 @@ const data = table({ category: ["A", "B", "C"], value: [10, 20, 30] });
 const flows = table({ source: ["A", "B"], target: ["B", "C"], value: [10, 5] });
 
 /** A label's default halo over `theme`'s background: its color and opacity. */
-function textHalo(fill: string, theme: typeof LIGHT) {
-  const { color, opacity, width } = labelHalo(undefined, fill, { theme })!;
+function textHalo(theme: typeof LIGHT) {
+  const { color, opacity, width } = labelHalo(undefined, { theme, paint: (value) => value })!;
   expect(width).toBe(3);
   return { color, opacity };
 }
 
 describe("text halos", () => {
-  it.each(["#e06600", "#949494", "rgb(224 102 0)", "hsl(27.3 100% 43.9%)", "red"])(
-    "uses the white surface for %s at 3:1 contrast, even when black text would contrast more",
-    (fill) => expect(textHalo(fill, LIGHT)).toEqual({ color: LIGHT.background, opacity: 1 }),
-  );
-  it("falls back below 3:1, with transparency, or with an unresolved color", () => {
-    for (const fill of ["#959595", "#F88C3B", "rgba(224,102,0,0.2)"])
-      expect(textHalo(fill, LIGHT)).toEqual({ color: "#000000", opacity: 0.85 });
-    expect(textHalo("var(--ink)", LIGHT)).toEqual({ color: "#ffffff", opacity: 0.85 });
-    expect(textHalo("#000", { ...LIGHT, background: "transparent" }).opacity).toBe(0.85);
-    expect(textHalo("#888", { ...LIGHT, background: "#111111" })).toEqual({
+  it("take the surface's color, whatever the text's contrast with it", () => {
+    // Orange text on white (2.4:1) gets a white halo, as text of any color does.
+    expect(textHalo(LIGHT)).toEqual({ color: LIGHT.background, opacity: 1 });
+    expect(textHalo({ ...LIGHT, background: "#111111" })).toEqual({
       color: "#111111",
       opacity: 1,
     });
-    expect(textHalo("red", { ...LIGHT, background: "white" })).toEqual({
-      color: "white",
-      opacity: 1,
+    const svg = renderToSVG({
+      width: 300,
+      height: 200,
+      marks: [text({ x: 1, y: 1, label: { text: "note", style: { color: "#F88C3B" } } })],
     });
+    expect(svg).toContain('stroke="#ffffff" stroke-opacity="1"');
+    expect(svg).not.toContain('stroke="#000000"');
   });
   it.each([
     ["text", () => text({ x: 1, y: 1, label: "note", halo: false })],

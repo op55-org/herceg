@@ -45,7 +45,8 @@ describe("resolveTheme", () => {
     );
     expect(theme.font).toBe("system-ui, sans-serif");
     expect(theme.text).toBe("#223344");
-    expect(theme.palette).toEqual(["#ff8800", "rgb(0 0 0 / 0.5)"]);
+    // Read as a page computes them: hex, or rgba() with an alpha.
+    expect(theme.palette).toEqual(["#ff8800", "rgba(0, 0, 0, 0.5)"]);
     expect(() => resolveTheme({ tokens: { text: "var(--ink)" } }, NO_PAGE)).toThrow(
       /theme.tokens.text .*var\(--ink\).*fallback/,
     );

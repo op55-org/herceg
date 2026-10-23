@@ -4,7 +4,7 @@ import { segmentDrawing } from "../draw/segments.ts";
 import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { ELBOW, placePieLabels, RUN } from "../layout/pie-labels.ts";
-import { fitText } from "../layout/text.ts";
+import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type {
@@ -191,7 +191,7 @@ export class PieMark implements LayoutMark {
     // Room beside the pie for labels, unless that leaves too small a pie.
     let labeled = (this.spec.labels ?? true) && slices.length > 0;
     const textRoom = Math.min(
-      Math.max(0, ...slices.map(({ label }) => measure(label, font))),
+      Math.max(0, ...slices.map(({ label }) => measure(oneLineText(label), font))),
       bounds.width * 0.25,
     );
     const gutter = textRoom + ELBOW + RUN + 3;
@@ -417,7 +417,7 @@ export class PieMark implements LayoutMark {
         coords[k * 2] = x;
         coords[k * 2 + 1] = y;
         const room = anchor === "start" ? bounds.x + bounds.width - x : x - bounds.x;
-        return fitText(slices[index]!.label, room, measure, font);
+        return fitText(oneLineText(slices[index]!.label), room, measure, font);
       });
       geometry.push({
         kind: "text",

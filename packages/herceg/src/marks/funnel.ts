@@ -10,7 +10,7 @@ import { rectDrawing } from "../draw/rect.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
-import { fitText } from "../layout/text.ts";
+import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
@@ -189,7 +189,8 @@ export class FunnelMark implements LayoutMark {
     const labeled = (this.spec.labels ?? true) && count > 0 && height >= lineHeight;
     let nameRoom = 0;
     if (labeled) {
-      for (const { label } of stages) nameRoom = Math.max(nameRoom, measure(label, font));
+      for (const { label } of stages)
+        nameRoom = Math.max(nameRoom, measure(oneLineText(label), font));
       nameRoom = Math.min(nameRoom, bounds.width * NAME_ROOM);
     }
     const left = bounds.x + (nameRoom > 0 ? nameRoom + NAME_GAP : 0);
@@ -357,7 +358,7 @@ export class FunnelMark implements LayoutMark {
     stages.forEach(({ label, value }, i) => {
       const [x, y, w, h] = box(i);
       const middle = y! + h! / 2;
-      const name = nameRoom > 0 ? fitText(label, nameRoom, measure, font) : "";
+      const name = nameRoom > 0 ? fitText(oneLineText(label), nameRoom, measure, font) : "";
       if (name && name !== "…") {
         groups.names.coords.push(bounds.x + nameRoom, middle);
         groups.names.labels.push(name);
@@ -392,7 +393,7 @@ export class FunnelMark implements LayoutMark {
                 key: `funnel-${part}`,
                 fill: color,
                 anchor,
-                halo: halo ? labelHalo(this.spec.halo, color, frame) : undefined,
+                halo: halo ? labelHalo(this.spec.halo, frame) : undefined,
                 coords: Float32Array.from(coords),
                 labels,
                 count: labels.length,

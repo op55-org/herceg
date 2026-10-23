@@ -508,6 +508,7 @@ export class Panels implements PanelLayout {
   }
 
   grid(split: PanelSplit, lineHeight: number): PanelGrid {
+    // Titles' lines are in `lineHeight`: the model measures them.
     const titled = this.list.some(({ title }) => title);
     return {
       ...lowestWithAxes(split, 1),

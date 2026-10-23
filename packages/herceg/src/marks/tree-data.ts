@@ -17,7 +17,7 @@ import {
 import type { Table } from "../data/table.ts";
 import { textDrawing } from "../draw/text.ts";
 import { formatNumber } from "../format/format.ts";
-import { fitText } from "../layout/text.ts";
+import { fitText, oneLineText } from "../layout/text.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { Rect, TextGeometry } from "../scene/scene.ts";
@@ -394,6 +394,8 @@ export class TreeData {
       for (let at = view.nodes[0]!; at > 0; at = whole.tree.parent[at]!) path.push(at);
     const nodes: (number | null)[] = [null, ...path.reverse()];
     const labelOf = (node: number | null) => (node === null ? ALL : whole.tree.names[node]!);
+    // Steps' names as the strip writes them, on its one line.
+    const oneLine = (node: number | null) => oneLineText(labelOf(node));
     const separator = measure(SEPARATOR, font);
     // What the strip shows: "All", the fold of steps 1 to `folded` (none
     // at 0), then the other steps; the parent and the node drilled into
@@ -401,7 +403,7 @@ export class TreeData {
     const entries = (folded: number) => [
       { steps: [null], text: ALL },
       ...(folded > 0 ? [{ steps: nodes.slice(1, folded + 1), text: FOLD }] : []),
-      ...nodes.slice(folded + 1).map((node) => ({ steps: [node], text: labelOf(node) })),
+      ...nodes.slice(folded + 1).map((node) => ({ steps: [node], text: oneLine(node) })),
     ];
     const wide = (shown: { text: string }[]) =>
       shown.reduce((width, { text }) => width + measure(text, font), 0) +
@@ -419,7 +421,7 @@ export class TreeData {
     if (nodes.length > 1 && least(shown) > bounds.width)
       shown = [
         { steps: nodes.slice(0, -1), text: FOLD },
-        { steps: nodes.slice(-1), text: labelOf(nodes.at(-1)!) },
+        { steps: nodes.slice(-1), text: oneLine(nodes.at(-1)!) },
       ];
     if (least(shown) > bounds.width) shown = [{ steps: nodes, text: FOLD }];
     const rooms = shares(

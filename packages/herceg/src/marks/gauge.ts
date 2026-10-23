@@ -6,12 +6,11 @@ import { ArcPath, arcDrawing, traceSector } from "../draw/arc.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import { textDrawing } from "../draw/text.ts";
 import { type Formatter, formatNumber, numberFormatter } from "../format/format.ts";
-import { fitText } from "../layout/text.ts";
+import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { ArcGeometry, Geometry, ShapesGeometry, TextGeometry } from "../scene/scene.ts";
 import type { Frozen, GaugeBand, GaugeSpec } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
 import { refuseColor } from "./colored.ts";
 import type { LayoutFrame, LayoutItem, LayoutMark, LayoutResult } from "./layout-mark.ts";
 import { type ChartMark, frozen, type MARK, requireField } from "./mark.ts";
@@ -113,13 +112,16 @@ export class GaugeMark implements LayoutMark {
     return -1;
   }
 
-  #bands(theme: Theme): Band[] {
+  #bands({ theme, paint }: Pick<LayoutFrame, "theme" | "paint">): Band[] {
     let from = this.#min;
     return (this.spec.bands ?? []).map(({ to, color }, i) => {
       const band = {
         from,
         to,
-        color: color ?? theme.palette[i % theme.palette.length] ?? theme.text,
+        color:
+          color === undefined
+            ? (theme.palette[i % theme.palette.length] ?? theme.text)
+            : paint(color, `gauge bands[${i}].color`),
       };
       from = to;
       return band;
@@ -137,7 +139,7 @@ export class GaugeMark implements LayoutMark {
       : (v) => formatNumber(v, locale);
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
-    const bands = this.#bands(theme);
+    const bands = this.#bands(frame);
 
     // The dial reaches its outer radius above its center, and half that below
     // it at its ends (30 degrees below level), with the end labels under them.
@@ -205,7 +207,7 @@ export class GaugeMark implements LayoutMark {
       ),
     );
     const valueY = cy - lineHeight * 0.3;
-    const label = fitText(this.spec.label ?? this.spec.value, 1.7 * r0, measure, font);
+    const label = fitText(oneLineText(this.spec.label ?? this.spec.value), 1.7 * r0, measure, font);
     const labels: { text: string; x: number; y: number }[] = [];
     if (label !== "…") labels.push({ text: label, x: cx, y: valueY + size / 2 + lineHeight / 2 });
     geometry.push({

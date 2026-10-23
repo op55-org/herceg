@@ -922,7 +922,7 @@ describe("panel groups", () => {
         model.series().length ? [{ mark: marks[0] as LineMark, series: model.series() }] : [],
         model,
         {},
-        { zone: "UTC", locale: undefined, theme: model.theme },
+        { zone: "UTC", locale: undefined, theme: model.theme, paint: (value) => value },
       );
     const byPanel = layout.groups("panel", split, 2, "x", undefined);
     expect(byPanel.keys).toEqual(['["a"]', '["b"]', '["c"]', '["d"]']);

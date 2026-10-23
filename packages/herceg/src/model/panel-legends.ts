@@ -4,7 +4,7 @@
 // (model/panels.ts), which hand it to the guide compiler's legends.
 
 import { ChartError } from "../spec/errors.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type { LegendContent, LegendEntry, LegendPart } from "./legend.ts";
 
 /** A mark, by its id or index, and the channel of a scale it owns. */
@@ -59,6 +59,8 @@ export class PanelLegends {
     partsOf: PartOwners,
     theme: Theme,
     locale: string | undefined,
+    paint: PaintReader,
+    named: ReadonlySet<string | number>,
   ) {
     this.#content = content;
     this.#owners = owners;
@@ -95,12 +97,12 @@ export class PanelLegends {
         const id = item.mark.spec.id ?? item.index;
         const owner = item.mark.spec.id ?? -1 - item.index;
         drawn.add(owner);
-        for (const entry of item.mark.legend(id, color, theme)) {
+        for (const entry of item.mark.legend(id, color, theme, paint)) {
           const identity = groups?.get(entry.key) ?? entry.key;
           add(identity, entry.key, owner);
           also.push({ ...entry, key: identity });
         }
-        for (const part of item.mark.legends?.(theme, locale) ?? []) parts.add(part.key);
+        for (const part of item.mark.legends?.(theme, locale, paint) ?? []) parts.add(part.key);
       } else
         split.panels[p]!.forEach(({ mark, series }, m) => {
           const id = mark.spec.id ?? m;
@@ -108,7 +110,8 @@ export class PanelLegends {
           if (mark.spec.panel === "*") everywhere.add(id);
           if (split.members?.[p]?.[m] === false || mark.spec.panel === "*") return;
           for (const s of series) keys.add(s.key);
-          if (mark.spec.legend === false) return;
+          // Marks left out of legends are listed where a legend names them.
+          if (mark.spec.legend === false && !named.has(id)) return;
           drawn.add(id);
           for (const s of series) add(s.entry ?? s.key, s.key, id);
         });

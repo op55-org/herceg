@@ -2,6 +2,7 @@ import type { NumericField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { guideSegmentDrawing } from "../draw/segments.ts";
 import { LabelBoxes, segmentMeetsBox, segmentsMeet } from "../layout/label-boxes.ts";
+import { lineCount } from "../layout/text.ts";
 import type { Geometry, SegmentGeometry } from "../scene/scene.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { AnnotationPosition, Clip, Frozen, TextSpec } from "../spec/spec.ts";
@@ -25,6 +26,7 @@ import {
   type MARK,
   type Mark,
   type MarkKey,
+  painted,
   type RowParts,
   seriesKey,
 } from "./mark.ts";
@@ -210,7 +212,11 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     const x = data.place(this.#x);
     const y = data.place(this.#y);
     const label = data.label!;
-    const paint = labelPaint(theme, theme.text, label.style);
+    const paint = labelPaint(
+      theme,
+      theme.text,
+      label.style && frame.read(label.style, "text label.style"),
+    );
     const plain = plainText(paint, theme);
     const align = label.style?.align;
     const anchor = align === "start" ? "start" : align === "end" ? "end" : "middle";
@@ -220,7 +226,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     const moving = overlap === "move";
     const font = paint.css;
     const haloOption = label.style?.halo ?? this.spec.halo;
-    const halo = labelHalo(haloOption, paint.color, frame);
+    const halo = labelHalo(haloOption, frame);
     // Room around each label, which wider halos reach past.
     const room = Math.max(LABEL_GAP, (halo?.width ?? 0) / 2 + 0.5);
     // Half a label's height, with the room kept around it: of a box (its
@@ -230,6 +236,8 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       Math.ceil(
         paint.background ? paint.lineHeight / 2 + Math.max(top, bottom) : paint.size * 0.6,
       ) + room;
+    // A label of several lines is as much taller as its lines after the first.
+    const halfOf = (label: string) => half + ((lineCount(label) - 1) * paint.lineHeight) / 2;
     const inPlot = (x0: number, y0: number, x1: number, y1: number) =>
       x0 >= plot.x && x1 <= plot.x + plot.width && y0 >= plot.y && y1 <= plot.y + plot.height;
     // The points labels belong to, which must be in view; their places' offsets move the labels.
@@ -281,16 +289,17 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     /** Puts an item's label at the first free spot in [from, to); false if none is. */
     const place = (item: number, label: string, width: number, from: number, to: number) => {
       const [px, py] = pointAt(rowAt(item)) as [number, number];
-      // From the anchor to the label's center, and half its box's width.
+      // From the anchor to the label's center, and half its box's width and height.
       const shift = anchor === "start" ? width / 2 : anchor === "end" ? -width / 2 : 0;
       const reach = width / 2 + room;
+      const tall = halfOf(label);
       for (let p = from; p < to; p++) {
         const ring = Math.ceil(p / AROUND.length);
         const [ax, ay] = AROUND[(p - 1) % AROUND.length] ?? [0, 0];
-        const gap = POINT_GAP + (ring - 1) * 2 * half;
+        const gap = POINT_GAP + (ring - 1) * 2 * tall;
         const [cx, cy] =
-          p === 0 ? [px + dx + shift, py + dy] : [px + ax * (gap + reach), py + ay * (gap + half)];
-        const [x0, y0, x1, y1] = [cx - reach, cy - half, cx + reach, cy + half];
+          p === 0 ? [px + dx + shift, py + dy] : [px + ax * (gap + reach), py + ay * (gap + tall)];
+        const [x0, y0, x1, y1] = [cx - reach, cy - tall, cx + reach, cy + tall];
         // Moving labels stay in the plot, and moved ones off other points
         // and the lines leading to other labels.
         if (moving && !inPlot(x0, y0, x1, y1)) continue;
@@ -346,7 +355,9 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     for (let item = 0; item < size; item++) {
       const text = texts[item];
       if (text === undefined) continue;
-      drawn.push({ text, x: at[item * 2]!, y: at[item * 2 + 1]!, anchor, baseline: "middle" });
+      // Placed by their middle, labels in items are drawn from their first line.
+      const y = at[item * 2 + 1]! - (plain ? 0 : ((lineCount(text) - 1) * paint.lineHeight) / 2);
+      drawn.push({ text, x: at[item * 2]!, y, anchor, baseline: "middle" });
     }
     if (drawn.length === 0) return [];
     const out: Geometry[] = [];
@@ -357,7 +368,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
         kind: "segments",
         draw: guideSegmentDrawing,
         key: `${id}|leaders`,
-        stroke: leader?.stroke ?? theme.muted,
+        stroke: painted(frame.paint, leader?.stroke, "text style.leader.stroke") ?? theme.muted,
         strokeWidth,
         coords: Float32Array.from(leaders),
         count: leaders.length / 4,

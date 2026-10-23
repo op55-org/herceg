@@ -1,22 +1,21 @@
-// Halos of marks' labels, resolved with the CSS color table, which only
-// marks that draw labels over data carry (see draw/text.ts for drawing them).
+// Halos of marks' labels (see draw/text.ts for drawing them).
 
-import { cssColor } from "../scale/css-color.ts";
 import type { Halo } from "../spec/style.ts";
 import { haloOf, type ResolvedHalo } from "../style/style.ts";
-import type { Theme } from "../theme.ts";
+import { type PaintReader, surface, type Theme } from "../theme.ts";
 
 /**
- * The halo that keeps a mark's labels colored `fill` readable over lines
- * and fills, as the mark's `halo` asks ("auto" when left out; see
- * `haloOf`), over what its frame draws on: the plot's fill, or the chart's
- * background. Colors given by name are read with the CSS color table.
+ * The halo that keeps a mark's labels readable over lines and fills, as the
+ * mark's `halo` asks ("auto" when left out; see `haloOf`), over what its
+ * frame draws on: the plot's fill, or the surface the chart is drawn on.
  */
 export function labelHalo(
   halo: Halo | undefined,
-  fill: string,
-  frame: { theme: Theme; surface?: string | undefined },
+  frame: { theme: Theme; surface?: string | undefined; paint: PaintReader },
 ): ResolvedHalo | undefined {
-  const { theme } = frame;
-  return haloOf(halo ?? "auto", fill, frame.surface ?? theme.background, theme.text, cssColor);
+  const resolved = haloOf(halo ?? "auto", frame.surface ?? surface(frame.theme));
+  // A color of the halo's own is the mark's option, read as its other colors are.
+  return resolved && typeof halo === "object"
+    ? { ...resolved, color: frame.paint(resolved.color, "halo.color") }
+    : resolved;
 }

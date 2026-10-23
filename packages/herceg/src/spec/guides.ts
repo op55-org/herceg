@@ -138,8 +138,9 @@ export interface ScalesSpec {
 
 /**
  * A scale a mark owns, by the mark's `id` and the channel: its series
- * colors ("series"), a color field's ramp or colors ("color"), its sizes
- * ("size"), or its symbols ("symbol").
+ * colors ("series"), a color field's ramp or colors ("color", which are its
+ * series' where its color splits them), its sizes ("size"), or its symbols
+ * ("symbol"). Guides naming a mark show it whatever its `legend` setting.
  */
 export interface ScaleRef {
   mark: string;

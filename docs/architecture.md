@@ -3234,12 +3234,11 @@ is kept). Labels in a style of their own are positioned text
 geometry as before. Regions are rectangles drawn with the data in mark
 order and clipped to the plot. Rules and text are guides: drawn as SVG
 above the data (over a canvas when the data is on one), not clipped, and
-left out when they fall outside the view. Text halos use the background at
-full opacity when the text's WCAG contrast with it is at least 3:1,
-accounting for color alpha. Otherwise they use the existing light/dark
-fallback at 0.85 opacity. `scale/css-color.ts` parses colors for halo
-contrast and PDF without DOM APIs; its named color table is absent from
-charts without text or PDF output. `halo: false` disables halos on text,
+left out when they fall outside the view. Text halos take the color of the
+surface under the text at full opacity (see Halos). `scale/css-color.ts`
+parses colors without DOM APIs for PDF and for static output, which reads
+named colors as hex (`render/fallbacks.ts`); charts in a page do not
+carry it. `halo: false` disables halos on text,
 region, bar, funnel, radar, Sankey, graph node and link labels, and
 navigator labels. The SVG layer keeps each annotation's nodes by geometry
 key, so a changing label rebuilds neither the axes nor other annotations.
@@ -3805,15 +3804,26 @@ model's hidden set (`HiddenKeys.groups`), and takes the identity's palette
 slot: one allocator per chart, assigning slots to identity keys the first
 time they appear and keeping them for the chart's lifetime, so a value keeps
 its color while others appear, disappear, or are hidden, and while the data
-streams. Explicit colors register the series but take no slot. A series
-counts as hidden when its key or its identity's is, so everything that
-reads visibility by series key sees an entry's state without knowing about
-identities; `setVisibility` given a series key acts on its identity. Hidden
-identity keys stay while a mark draws their scope (`keepsKey`); other keys
-go with their mark. Marks that dodge place series by their partition (the
-identity scope of their series field), so error bars stand on the bars of
-the same field's values even when one mark lacks some of them. Scenes keep
-copies of the hidden set.
+streams. The first time a value of a category field asks for a slot (the
+configuration notes each series, items', and color field's identity scope
+and root table, `SlotField`), every value of the field's dictionary takes
+one in dictionary order, used or not, so a value's slot is its place in
+the dictionary whether its color splits series, colors rows, or colors a
+layout mark's items, and whatever a view or a facet shows; what the
+dictionary gains as data streams takes slots after, from where the last
+asking left off, or once a rolling window compacted the dictionary (its
+`revision` in `Table.categories`), what in it has no slot yet, in its
+order. Slots once taken stay: a table given again with its values in
+another order keeps their colors, and values that came and went between
+askings take slots only when they ask. Fields no color asks for (marks of
+their own colors) take none. Explicit colors register the series but take no slot. A series counts as hidden when
+its key or its identity's is, so everything that reads visibility by series
+key sees an entry's state without knowing about identities; `setVisibility`
+given a series key acts on its identity. Hidden identity keys stay while a
+mark draws their scope (`keepsKey`); other keys go with their mark. Marks
+that dodge place series by their partition (the identity scope of their
+series field), so error bars stand on the bars of the same field's values
+even when one mark lacks some of them. Scenes keep copies of the hidden set.
 
 Lines, areas, bars, and points split series by a category `color` field
 when they have no `series` (`seriesOf`, `marks/mark.ts`; `series: false`
@@ -3981,8 +3991,8 @@ The named themes paint backgrounds of their own (light white, dark
 is drawn to match the surface under it. The SVG layer, the canvas (when it
 holds the marks), and static SVG and PDF paint the background; PDF pages
 are white, so the PDF writer paints a transparent theme with light text in
-the dark surface `surface(theme)` assumes. Text halos take the background
-at 3:1 text contrast or higher, else white or black against the text.
+the dark surface `surface(theme)` assumes. Text halos take the surface's
+color, `surface(theme)` under a transparent background.
 
 Time-axis planning formats tick candidates before finalizing them. Repeated
 custom labels trigger coarser calendar intervals; remaining duplicates are
@@ -4016,17 +4026,29 @@ pattern, opacity). `model/styles.ts` resolves each axis', panel's, title's,
 and legend's paints once per configuration and theme: a role's levels merge
 first, and only then are the colors and font that won read through the
 page or its fallbacks (`readStyle`; a message names the level that set the
-value), so an overridden `var()` needs no fallback. Paints resolve when a
-scene first asks for them, after the page's reader is gone, so what the
-styles read of the page is read with the theme and kept (`readNow`); a
-value that cannot be read then (a variable without a fallback, without a
-page) is read, and refused, only where it wins. Levels that set nothing
-reuse the theme's paint, so a chart without styles allocates none. A chart
-in a page reads those styles again when the page switches themes, and lays
-out and draws again only when what they read changed. Output without a
-page reads named colors as hex (`render/fallbacks.ts`), as a page computes
-them, so guides' halos, which read only hex, `rgb()`, and `hsl()`,
-contrast with them too.
+value), so an overridden `var()` needs no fallback. Levels that set nothing
+reuse the theme's paint, so a chart without styles allocates none.
+
+Every color a chart draws that is not the theme's, and every font, is read
+by one reader, the chart's `Readings` (`theme.ts`): styles' paints, marks'
+paints (`Frame.paint`, `BandContext.paint`, `LayoutFrame.paint`), the colors
+the palette is given, ramps' stops, legend samples, custom marks' shapes,
+and in the feature compiler scale outputs, channel values and conditions,
+looks by value, and markers. A scene is built while the reader is lent the
+page (`Readings.in`; the DOM chart's `readPage`, or `NO_PAGE` for static
+output, whose variables take their fallbacks), so what reads a color
+needs no page of its own. Readings are kept by value, so a color is read
+once however many series or looks take it; hex, `transparent`, and `none`
+pass unread. A value read without a page and without a fallback is
+refused, naming the option (`"line stroke is the CSS variable var(--brand),
+which only a chart in a page can read; give a fallback, ..."`), only where
+it wins. A chart whose readings read the page watches it; when the page
+switches themes it reads the kept values again (`Readings.again`), and only
+when one reads differently does it make new readings, whose identity the
+feature compiler's caches compare, and draw again. Output without a page
+reads named colors as hex (`render/fallbacks.ts`), as a page computes them,
+so Canvas, the GPU painter, and the PDF writer, which parse colors, get the
+same values as SVG.
 Text takes its color from `color`, never `fill`; marks keep their flat paint
 options (`stroke`, `fill`, `strokeWidth`), which win over the theme's
 `line` and `bar` defaults. `TextStyle.align` places text in the span it is
@@ -4259,7 +4281,19 @@ settings) and the legends `guides` lists, each showing the scales it names
 scales, colorbars theirs, and the automatic legend shows the rest. Marks
 with the same scale share one part (a ramp, a key), which any of them
 names. Only the automatic legend leaves out a chart of one series, as the
-default one does; `legend: false` turns it off, not the legends listed. An
+default one does; `legend: false` turns it off, not the legends listed. A
+mark's `legend: false` leaves it out of what legends and colorbars naming
+no mark show (`unlisted`), not of those naming it, whose entries come after
+the listed marks' so that those keep their looks; a mark whose color field
+splits its series (`split`) owns its series' colors as "color" too. What
+a mark owns comes of its options, not of what its rows give it now: each
+mark declares the scales guides may name (`Mark.legendScales`: its series'
+colors, a color ramp, which colorbars show, or key of colors, keys of sizes
+and symbols; a mark with an identity that declares none owns its series'
+colors), so a reference to a scale its mark does not declare is an error
+naming the channels it has, rows or none, and one whose scale has no values
+yet shows nothing until it has some (a colorbar is left out until then).
+The emitted parts give what legends show and which marks share them. An
 automatic legend without layout settings is measured as the default one
 (`measureLegends`); others lay out a title, then their entries in a grid
 (`columns` or `rows`, filled by row or by column) or in rows flowing as the
@@ -4354,29 +4388,50 @@ resized.
 
 ## Text and fonts
 
-`layout/text.ts` measures and lays out guide text. `textLines` breaks text
-at "\n" and measures each line; `textBox` is the box of lines drawn at a
-point (unturned): as wide as the widest line, a line height per line, the
-lines going down from the first, whose middle (or top, for hanging text)
-is at the point, padded by the paint's padding; `textItems` makes a guide's
-text items: one line each when asked for breaks, each with its halo, and
-the first with the box when the paint has a background, placed so the
-box's edge goes where the text's would (`textWidth` and `textHeight` are
-the room a line takes with its box). Text is measured only for a box or a
-break, never on pointer movement. Titles, legends, panel headers, and axis
-labels and titles reserve room for their lines and boxes.
+`layout/text.ts` measures and lays out guide text. "\n" breaks every label
+into lines, and text keeps them whole until it is drawn: geometry and text
+items hold the text as given, and the drawings write a line each a line
+height apart (SVG `tspan`s at absolute positions, so empty lines keep their
+room, and the PDF writer a run per line, each turned with the text), so a
+line break never reaches a font's shaper. Measurers (`MeasureText`) measure
+text of several lines by its widest (`widestLine`), the canvas's, the
+estimate, the PDF standard fonts', and supplied fonts' alike. `textLines`
+breaks text and measures each line; `textBox` is the box of lines drawn at
+a point (unturned): as wide as the widest line, a line height per line, the
+lines going down from the first, whose middle (or top, for hanging text) is
+at the point, padded by the paint's padding; `textItem` makes a guide's
+text item, with its halo and, when the paint has a background, the box
+placed so its edge goes where the text's would; `centeredLines` moves a
+point to the first line of lines centered on it, in the text's own turn
+(`textWidth` and `textHeight(paint, text)` are the room text takes with its
+box). Plain text geometry centers a label's lines on its point; items, as
+annotations place them, go down from their first line, and placements grow
+a block away from what it is beside. Text is measured only for a box or a
+break, never on pointer movement. Titles, legends, panel headers, axis
+titles, and category tick labels reserve room for their lines and boxes;
+on the automatic axes number and time labels are written on one line,
+since their room is kept before they are planned (listed axes plan rows),
+and layout marks write the names they fit to a room of one line on one
+(`oneLineText`), shortened rather than broken.
 
 A font registry (`fonts/registry.ts`, `prepareFonts` in `herceg/fonts`)
-holds TrueType faces parsed once (`fonts/truetype.ts`, `fonts/binary.ts`)
+holds OpenType faces parsed once (`fonts/sfnt.ts`, `fonts/binary.ts`)
 and resolves text into glyph runs: the faces of a CSS family list and
 weight, in order, each grapheme cluster (`fonts/clusters.ts`) in one face,
 glyph after glyph without kerning or shaping. Its `measure` (cached by font
 and text) is what every output lays out with when a chart has `fonts`, and
 every output sets text as it measures: `renderToSVG` and `specToSVG`
-measure with them and name the families, PNG exports load the same faces,
-PDF embeds subsets of them, and a browser chart measures with them where
-they cover the text (falling back to its document's canvas elsewhere, so a
-live chart never refuses text); text in charts with fonts is drawn unkerned
+measure with them, name the families, and before writing measure every
+text the scene draws (`render/coverage.ts`), so that text the family lists
+do not cover is refused there as PDF refuses it, measured for layout or
+not, rather than drawn by a rasterizer as boxes; a mounted chart's
+`toSVG()` and `toPNG()` check their scene so too (`PageFonts.check`), since
+the image `toPNG()` draws sees only the faces it is given. PNG exports load
+the same faces, PDF embeds subsets of them, and a browser chart measures with
+them where they cover the text (falling back to its document's canvas elsewhere, so a
+live chart never refuses text); a snapshot, which the page draws too,
+measures what they do not cover with estimates, and the chart hydrating it
+with the page. Text in charts with fonts is drawn unkerned
 and without ligatures (a style on the SVG root and the chart's element, the
 canvas's `fontKerning`). A PDF, which has no fallback of its own, may set
 text its family lists do not cover in its `fallback` families and as its
@@ -4415,22 +4470,33 @@ with a canvas, static SVG with Helvetica estimates, and PDF with the
 standard fonts' metrics. PDF slants italic text (12 degrees), as the faces
 it draws with have no italics.
 
+Measuring reads only a face's metrics and character map (`head`, `hhea`,
+`hmtx`, `maxp`, `cmap`, `OS/2`), so faces with CFF or CFF2 outlines
+measure, browsers and resvg draw them, and the registry records the
+outlines' format (`SfntFont.outlines`). PDF embedding subsets TrueType
+outlines only, so a PDF export refuses fonts with a CFF face, saying that
+SVG and PNG accept it. Variable fonts (an `fvar` table) are refused
+everywhere: their widths follow axes that measuring with the default
+instance would not, so a static instance is needed.
+
 ## Halos
 
 A halo is an outline of the text's glyphs drawn under them
-(`style/style.ts`, `haloOf`): `"auto"` takes the surface the text is drawn
-on where the text's contrast with it is at least 3:1, else white behind
-dark text and black behind light text at 0.85 opacity; `false` draws none;
+(`style/style.ts`, `haloOf`): `"auto"` takes the color of the surface the
+text is drawn on at full opacity, whatever the text's own color, since its
+job is to keep lines and fills under the text from crossing it (under a
+transparent background, `surface(theme)`: black behind light text, white
+behind dark); `false` draws none;
 an object gives a color, width (3 pixels by default), and opacity. Marks
 that draw text (`text`, `region`, `bar`, `funnel`, `radar`, `sankey`,
 `graph`, and the navigator) take `halo`, "auto" by default where they draw
 halos, and resolve it when they build geometry (`labelHalo` in
-`draw/text.ts`, reading colors with the CSS color table), so geometry holds
-the resolved halo and renderers read it. The surface is the plot's fill
-when the panel has one (`Frame.surface`), else the chart's background.
-Guide text takes its style's `halo` (off by default), resolved against the
-chart's background, or for a legend inside a plot, the plot's fill; guides
-read colors without the named-color table, which only text marks carry.
+`draw/label-halo.ts`, reading a halo color of their own with the chart's
+paint reader), so geometry holds the resolved halo and renderers read it.
+The surface is the plot's fill when the panel has one (`Frame.surface`),
+else the chart's background. Guide text takes its style's `halo` (off by
+default), resolved against the chart's background, or for a legend inside
+a plot, the plot's fill.
 Text marks keep room around labels for their halo's width when they keep
 labels apart.
 

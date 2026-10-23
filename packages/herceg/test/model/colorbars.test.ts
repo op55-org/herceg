@@ -9,6 +9,7 @@ import { colorbar } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { contour } from "../../src/marks/contour.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
+import { point } from "../../src/marks/point.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { renderSvg } from "../../src/render/svg.ts";
@@ -129,6 +130,58 @@ describe("colorbars", () => {
     expect(labels(barOf(scene)).at(-1)).toBe("1.0");
     // The other ramp stays in the automatic legend.
     expect(guidesOf(scene, "ramp")).toHaveLength(1);
+  });
+
+  it("show the scale of a mark left out of legends where they name it", () => {
+    const quiet = heatmap(cells, { x: "hour", y: "host", color: "temp", id: "h", legend: false });
+    const { scene } = build({
+      marks: [quiet],
+      guides: [colorbar({ scale: { mark: "h", channel: "color" } })],
+    });
+    expect(labels(barOf(scene)).length).toBeGreaterThan(1);
+    expect(guidesOf(scene, "ramp")).toHaveLength(0);
+    // A colorbar naming no mark finds none to show.
+    expect(() => build({ marks: [quiet], guides: [colorbar()] })).toThrow(
+      "the chart has no color scale a colorbar shows",
+    );
+    // Without the colorbar, the automatic legend leaves its ramp out.
+    expect(guidesOf(build({ marks: [quiet] }).scene, "ramp")).toHaveLength(0);
+  });
+
+  it("wait for values of a ramp they show, and refuse a mark without one", () => {
+    const later = table({
+      hour: new Float64Array(0),
+      host: category([]),
+      temp: new Float64Array(0),
+    });
+    const { model, scene } = build({
+      marks: [heatmap(later, { x: "hour", y: "host", color: "temp", id: "later" })],
+      guides: [colorbar({ scale: { mark: "later", channel: "color" } })],
+    });
+    expect(guidesOf(scene, "colorbar")).toHaveLength(0);
+    later.reset({ hour: [0, 1], host: category(["a", "b"]), temp: [1, 2] });
+    expect(guidesOf(model.scene(estimateText), "colorbar")).toHaveLength(1);
+    const none = heatmap(table({ hour: [], host: category([]), temp: [] }), {
+      x: "hour",
+      y: "host",
+      color: "temp",
+    });
+    expect(guidesOf(build({ marks: [none], guides: [colorbar()] }).scene, "colorbar")).toEqual([]);
+    // Colors of categories are no ramp, whatever the rows.
+    const sites = table({ t: [0, 1], v: [1, 2], site: category(["N", "S"]) });
+    expect(() =>
+      build({
+        marks: [point(sites, { x: "t", y: "v", color: "site", id: "p" })],
+        guides: [colorbar({ scale: { mark: "p", channel: "color" } })],
+      }),
+    ).toThrow(
+      'chart guides[0].scale: mark "p" has no color scale a colorbar shows; color it by a number field, or name another mark',
+    );
+    expect(() =>
+      build({ marks: [map], guides: [colorbar({ scale: { mark: "heat", channel: "size" } })] }),
+    ).toThrow(
+      'chart guides[0].scale.channel: a colorbar shows a color scale; give channel: "color"',
+    );
   });
 
   it("show the scale marks share, named by any of them", () => {

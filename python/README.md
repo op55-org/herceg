@@ -411,10 +411,11 @@ with the surface showing through; light in static files), or an `hg.Theme`
 (`hg.Tokens`: `background`, `text`, `muted`, `grid`, `axis`, `palette`,
 `sequential`, `diverging`, `rise`, `fall`; `background="transparent"` shows
 what the chart is drawn on) and role styles (`style`, an `hg.Style`). Colors
-and fonts may be CSS variables such as `"var(--brand, #3266d6)"`, which charts
-read from the HTML page that draws them. Notebook outputs are isolated frames
-that do not see the notebook's variables, and static output has no page:
-both use the fallback.
+and fonts may be CSS variables such as `"var(--brand, #3266d6)"`, in themes,
+styles, and every color option of marks and scales, which charts read from
+the HTML page that draws them. Notebook outputs are isolated frames that do
+not see the notebook's variables, and static output has no page: both use
+the fallback, and a variable without one is refused, naming the option.
 
 ```python
 hg.Chart(
@@ -450,7 +451,11 @@ hg.Chart(
 ```
 
 A title goes at the top or, with `place=hg.Place(side="bottom")`, below the
-plots, aligned by its style; `"\n"` breaks it into lines. A legend's place
+plots, aligned by its style; `"\n"` breaks it into lines, as it does every
+label (annotations, bar labels, legends, axis and colorbar titles, facet
+headers, category tick labels, tooltips) in every format, laid out as a
+block; names layout marks fit to one line (pie slices, tree and network
+nodes) are written on one. A legend's place
 is a side (`hg.Place(side=..., align=..., offset=..., scope=..., panel=...)`) or a corner or edge
 inside a plot (`hg.Place(inside=..., inset=..., scope=..., panel=...)`);
 inside, it takes no room from the plots. Legends and colorbars accept
@@ -671,7 +676,12 @@ the same value of the same column of one data (or data made from it, as
 and hidden and shown together. Entries never merge by label alone; an
 `hg.OrdinalScale` the marks share joins different data by value. With
 `swatches="mark"`, an entry that marks draw differently shows each one's
-look. A mark's `legend=False` leaves it out of the legends.
+look. A mark's `legend=False` leaves it out of the legends and colorbars
+that name no mark; those naming it (`hg.ScaleRef(mark=...)`) show it. A
+mark whose `color=` splits its series is named by `channel="color"` or
+`"series"` alike, and a reference to a scale the mark does not have is an
+error naming those it has; what a mark has comes of its options, so a
+scale whose rows give it no values yet is shown once they do.
 
 ```python
 # One legend under a grid of subplots, each site listed once.
@@ -1057,15 +1067,19 @@ candlesticks) refuse it, naming what to give instead. In `herceg.express`,
 `color=` names the series column, as `series=` does, and statistics are
 computed per series.
 
-One value has one color in every mark and panel of the chart, panels
-showing subsets and hidden series included, and keeps it while the data
-streams: marks of the same column of one data agree, layout marks' items
-included (pie slices, top-level treemap and sunburst branches, radar
-series, map regions and points, network node groups, 3D points and lines),
-and so do marks of data made from it (`hg.derive`, express summaries);
-unrelated data's column of the same name has colors of its own unless an
-`hg.OrdinalScale` joins them. Value columns (`y=["p50", "p99"]`) stand for their names, as an area
-labelled "p50" does. `scales` fixes colors by value:
+One value has one color in every mark and panel of the chart, panels showing
+subsets and hidden series included, and keeps it while the data streams.
+Colors follow the column's order, used values or not: a Categorical's
+categories (`pd.Categorical(["C"], categories=["A", "B", "C"])` gives `"C"`
+the palette's third color), whether `color=` splits series or not, in
+express charts too. Marks of the same column of one data agree, layout
+marks' items included (pie slices, top-level treemap and sunburst branches,
+radar series, map regions and points, network node groups, 3D points and
+lines), and so do marks of data made from it (`hg.derive`, express
+summaries); unrelated data's column of the same name has colors of its own
+unless an `hg.OrdinalScale` joins them. Value columns (`y=["p50", "p99"]`)
+stand for their names, as an area labelled "p50" does. `scales` fixes colors
+by value:
 
 ```python
 sites = hg.OrdinalScale(map={"Site A": "#00ab41", "Average": "#222222"})
@@ -1230,9 +1244,9 @@ Horizontal bars behave the same when `series` names their category y.
 
 `Chart.text`, `Chart.region`, and the bar, funnel, radar, Sankey, and graph
 methods and helpers take `halo`, the outline that keeps text readable over
-data: `"auto"` (the default) uses what the text is drawn on (the plot's fill
-or the chart's background) where the text contrasts with it at 3:1 or more,
-else white or black; `False` draws none; `hg.Halo(color, width=..., opacity=...)`
+data: `"auto"` (the default) is the color of what the text is drawn on (the
+plot's fill or the chart's background), whatever the text's own color;
+`False` draws none; `hg.Halo(color, width=..., opacity=...)`
 draws one of your own. `hg.Navigator(halo=...)` takes the same. It is
 serialized as `halo` in the portable spec and works in every renderer and
 static export. Express charts are ordinary `Chart` objects: annotations
@@ -1716,7 +1730,7 @@ chart.save("chart.pdf", fonts=fonts, fallback=["Symbols"])
 
 Python keeps these font arguments: its JavaScript bridge prepares them with
 `prepareFonts` (`herceg/fonts`) before export. SVG and PNG measure text with
-the same TrueType fonts in embedded V8, so all three formats lay out labels with the
+the same fonts in embedded V8, so all three formats lay out labels with the
 supplied faces' horizontal advances, without kerning. PNG also loads those
 faces into resvg, including byte inputs and families registered under an
 alias. It uses temporary local font files, removed after each export, and
@@ -1730,7 +1744,7 @@ put covering families in the theme's font, for example `"Inter, Symbols"`.
 
 TypeScript callers use `fonts: prepareFonts(sources)` from `herceg/fonts`,
 with `fallback` and `missingGlyph` as PDF export settings, as here; plain
-JavaScript PDF exports omit it and bundle no TrueType parser or subsetter.
+JavaScript PDF exports omit it and bundle no font parser or subsetter.
 Charts with fonts draw text unkerned, as it is measured.
 
 Each font is bytes or a filesystem path (`str` or `PathLike`). Nested family
@@ -1750,16 +1764,21 @@ this transport adds temporary copies. Input font checksums are intentionally
 unchecked because real fonts often have incorrect checksums; generated subsets
 receive fresh checksums.
 
-Missing coverage throws an actionable error; `missing_glyph="?"` explicitly
-replaces an uncovered grapheme cluster with one covered standalone scalar.
+Text no family of the theme's font list covers is refused alike by `to_svg`,
+`to_png`, and `to_pdf`, wherever it is drawn, with an error naming the code
+point (PNG would otherwise draw boxes); in PDF, `missing_glyph="?"`
+explicitly replaces an uncovered grapheme cluster with one covered standalone
+scalar.
 Embedded text admits Latin, Greek, Cyrillic, Armenian, Georgian, Han, hiragana,
 katakana, precomposed Hangul syllables, and selected Common/Inherited symbols,
 punctuation, digits, and composable accents, subject to Script_Extensions checks.
 See [the exact allowlist](https://github.com/op55-org/herceg/blob/main/docs/architecture.md). Other scripts, unassigned and
 private-use characters, controls, and default-ignorable characters are refused
-with their code point before coverage or replacement. Static TrueType
-`glyf` outlines are supported; CFF, WOFF, collections, variable fonts, joiners,
-and variation sequences are refused. Emoji modifier, flag, tag, and ZWJ sequences
+with their code point before coverage or replacement. Static OpenType fonts
+are supported: TrueType (`glyf`) outlines everywhere, and CFF outlines (most
+`.otf` files, and some named `.ttf`) in SVG and PNG, which `to_pdf` refuses
+because PDF embeds TrueType outlines only. WOFF, collections, variable fonts,
+joiners, and variation sequences are refused. Emoji modifier, flag, tag, and ZWJ sequences
 are refused before fallback or replacement. The same font format, coverage,
 and simple-text restrictions apply when supplying fonts for SVG or PNG
 measurement. SVG and PNG exported without `fonts` retain their default text behavior.

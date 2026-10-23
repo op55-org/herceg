@@ -18,9 +18,11 @@ export type Insets =
 
 /**
  * An outline drawn around text to keep it readable over lines and fills:
- * "auto" (the default for text over data) takes the surface under the text
- * where the text contrasts with it at 3:1 or more, else black or white;
- * `false` draws none; or a color of its own, 3 pixels wide by default.
+ * "auto" (the default for text over data) is the color of the surface
+ * under the text, whatever the text's own color (under a transparent
+ * background, black behind light text and white behind dark, as the page
+ * likely is); `false` draws none; or a color of its own, 3 pixels wide by
+ * default.
  */
 export type Halo = "auto" | false | { color: string; width?: number; opacity?: number };
 

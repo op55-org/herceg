@@ -15,7 +15,7 @@ import type { TraceFrame } from "../marks/trace.ts";
 import type { Geometry } from "../scene/scene.ts";
 import type { FormatSpec, SwatchSpec } from "../spec/guides.ts";
 import type { Dash } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type { GuideKit } from "./guides.ts";
 import type { ChartConfig } from "./model.ts";
 
@@ -75,10 +75,11 @@ export interface CompiledFeatures {
   of(mark: Mark): MarkFeatures | undefined;
   /**
    * Before each scene's series: the categorical scales' values, from every
-   * mark's rows, and `slot`, the chart's palette slot of an identity key
-   * (for colors by value that no declared scale gives).
+   * mark's rows, `slot`, the chart's palette slot of an identity key (for
+   * colors by value that no declared scale gives), and `paint`, which reads
+   * the colors the options give (scales' maps, channels' values, looks).
    */
-  update(theme: Theme, slot: (key: string) => number): void;
+  update(theme: Theme, slot: (key: string) => number, paint: PaintReader): void;
   /**
    * The prefixes of identity keys the compiler gives series and rows beyond
    * the core's (see marks/features/identity.ts), whose hidden keys stay.

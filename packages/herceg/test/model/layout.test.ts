@@ -17,7 +17,7 @@ import { renderToPDF } from "../../src/pdf.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { AxisGuide, Panel, Rect, Scene, TextItem } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
-import { headersOf, legendOf, titleOf } from "../helpers/guides.ts";
+import { drawnLines, headersOf, legendOf, titleOf } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -392,7 +392,7 @@ describe("guide text", () => {
   it("breaks a chart's title into lines, keeping room for each", () => {
     const one = build({ marks: two, title: "Weekly" }).scene;
     const lines = build({ marks: two, title: "Weekly\nby service" }).scene;
-    const items = titleOf(lines)!.items as TextItem[];
+    const items = drawnLines(titleOf(lines)!.items as TextItem[]);
     expect(items.map((i) => i.text)).toEqual(["Weekly", "by service"]);
     const step = items[0]!.paint.lineHeight;
     expect(items[1]!.y - items[0]!.y).toBe(step);
@@ -945,14 +945,13 @@ describe("style colors", () => {
     ).toThrow("y.style.tickLabel.color is the CSS variable var(--unused)");
   });
 
-  it("read named colors in static output, so guides' halos contrast with them", () => {
+  it("read named colors in static output, haloed in the surface's color", () => {
     const svg = renderToSVG({
       marks: two,
       width: 600,
       height: 300,
       title: { text: "Weekly", style: { color: "yellow", halo: "auto" } },
     });
-    // Yellow on white is light on light: the halo is black, not white.
-    expect(svg).toMatch(/fill="#ffff00"[^>]*stroke="#000000"/);
+    expect(svg).toMatch(/fill="#ffff00"[^>]*stroke="#ffffff"/);
   });
 });

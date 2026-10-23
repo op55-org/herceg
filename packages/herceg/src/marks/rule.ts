@@ -1,6 +1,6 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
 import { ruleDrawing } from "../draw/rule.ts";
-import type { MeasureText } from "../layout/text.ts";
+import { lineCount, type MeasureText } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import type { Geometry, RuleGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec, LabelSpec } from "../spec/encoding.ts";
@@ -29,7 +29,7 @@ import {
 import { labelPaint, labelsGeometry, type PlacedLabel } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame, MARK, Mark, MarkKey, RowParts } from "./mark.ts";
-import { frozen } from "./mark.ts";
+import { frozen, painted } from "./mark.ts";
 
 /** A rule's label: its text, or each row's `field`; where it goes and how it looks. */
 export type RuleLabel<F extends string = string> =
@@ -194,9 +194,17 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     return this.#data.extent(this.#along("y"), log, undefined, rows);
   }
 
-  /** The labels' paint: muted text, the label's style over it. */
-  #paint(theme: Theme) {
-    return labelPaint(theme, theme.muted, this.#data.label?.style);
+  /**
+   * The labels' paint: muted text, the label's style over it, its colors
+   * read as `frame` reads them (layout reads only its size and font).
+   */
+  #paint(frame: Pick<Frame, "theme"> & Partial<Pick<Frame, "read">>) {
+    const style = this.#data.label?.style;
+    return labelPaint(
+      frame.theme,
+      frame.theme.muted,
+      style && frame.read ? frame.read(style, "rule label.style") : style,
+    );
   }
 
   /**
@@ -214,7 +222,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     if (!label || this.spec.y === undefined || !place?.outside || place.reserve === false)
       return [0, 0];
     // As the labels are drawn: written by their format, in their boxes, moved by their offset.
-    const paint = this.#paint(theme);
+    const paint = this.#paint({ theme });
     const write = this.#data.writer(locale, features?.of(this)?.format);
     let widest = 0;
     this.#data.each(undefined, (i) => {
@@ -240,6 +248,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
     const out: Geometry[] = [];
     const placed: PlacedLabel[] = [];
+    const plain = (text: string | undefined) => this.#plain && !text?.includes("\n");
     const [lo, hi] = vertical ? [plot.y, plot.y + plot.height] : [plot.x, plot.x + plot.width];
     data.each(rows, (i) => {
       const at = data.pixel(place, vertical ? "x" : "y", i, scale, frame);
@@ -261,25 +270,26 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         kind: "rule",
         draw: ruleDrawing,
         key: `${JSON.stringify(key)}:${i}`,
-        stroke: spec.stroke ?? frame.theme.muted,
+        stroke: painted(frame.paint, spec.stroke, "rule stroke") ?? frame.theme.muted,
         strokeWidth,
         dash,
         x1: vertical ? at : a,
         x2: vertical ? at : b,
         y1: vertical ? a : at,
         y2: vertical ? b : at,
-        label: this.#plain ? text : undefined,
+        // Labels of several lines are placed as a block, as styled ones are.
+        label: plain(text) ? text : undefined,
       };
       if (spec.strokeOpacity !== undefined) rule.opacity = spec.strokeOpacity;
       out.push(rule);
-      if (text && !this.#plain) placed.push(this.#place(text, rule, frame));
+      if (text && !plain(text)) placed.push(this.#place(text, rule, frame));
     });
     if (placed.length > 0)
       out.push(
         labelsGeometry(
           `${JSON.stringify(key)}|labels`,
           placed,
-          this.#paint(frame.theme),
+          this.#paint(frame),
           label?.style?.halo ?? false,
           frame,
         ),
@@ -290,14 +300,18 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
   /**
    * Where a rule's label goes: at the rule's start, middle, or end (left to
    * right, top to bottom), above a horizontal rule and beside a vertical
-   * one; outside, beyond the axis' labels at that end of the plot.
+   * one; outside, beyond the axis' labels at that end of the plot. Its
+   * point is its first line's: a label of several lines grows away from
+   * the rule or plot it is beside, and is centered where it is centered.
    */
   #place(text: string, rule: RuleGeometry, frame: Frame): PlacedLabel {
     const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
     const vertical = rule.x1 === rule.x2;
     const attachment = place.attachment ?? (vertical ? "start" : "end");
     const offset = place.offset ?? 0;
-    const size = this.#paint(frame.theme).size;
+    const { size, lineHeight } = this.#paint({ theme: frame.theme });
+    // The block's lines after the first.
+    const rest = (lineCount(text) - 1) * lineHeight;
     if (vertical) {
       const x = rule.x1;
       if (place.outside)
@@ -305,7 +319,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
           ? {
               text,
               x,
-              y: frame.plot.y - LABEL_GAP - offset - size / 2,
+              y: frame.plot.y - LABEL_GAP - offset - size / 2 - rest,
               anchor: "middle",
               baseline: "middle",
             }
@@ -320,8 +334,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         attachment === "start"
           ? rule.y1 + LABEL_GAP + offset + size / 2
           : attachment === "end"
-            ? rule.y2 - LABEL_GAP - offset - size / 2
-            : (rule.y1 + rule.y2) / 2;
+            ? rule.y2 - LABEL_GAP - offset - size / 2 - rest
+            : (rule.y1 + rule.y2 - rest) / 2;
       return { text, x: x + LABEL_GAP, y, anchor: "start", baseline: "middle" };
     }
     const y = rule.y1;
@@ -332,19 +346,19 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         ? {
             text,
             x: (edges?.[0] ?? frame.plot.x - LABEL_GAP) - offset,
-            y,
+            y: y - rest / 2,
             anchor: "end",
             baseline: "middle",
           }
         : {
             text,
             x: (edges?.[1] ?? frame.plot.x + frame.plot.width + LABEL_GAP) + offset,
-            y,
+            y: y - rest / 2,
             anchor: "start",
             baseline: "middle",
           };
     }
-    const above = y - LABEL_GAP - offset - size / 2;
+    const above = y - LABEL_GAP - offset - size / 2 - rest;
     return attachment === "start"
       ? { text, x: rule.x1 + LABEL_GAP, y: above, anchor: "start", baseline: "middle" }
       : attachment === "end"

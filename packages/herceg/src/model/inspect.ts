@@ -531,7 +531,7 @@ export class Inspector {
       label: mark.pointLabel?.(s, row, format) ?? s.label,
       row: mark.summarizes ? undefined : row,
       ...(fields && { fields }),
-      color: mark.pointColor?.(s, row, this.#frame.theme) ?? s.color,
+      color: mark.pointColor?.(s, row, this.#frame.theme, this.#frame.paint) ?? s.color,
       value,
       text:
         mark.pointText?.(s, row, format) ??

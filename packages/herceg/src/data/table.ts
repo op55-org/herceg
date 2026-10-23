@@ -294,11 +294,21 @@ export class Table<S extends Schema = Schema> {
     return this.#view(field, column.buffer);
   }
 
-  /** Dictionary codes (-1 for missing) and the dictionary of a category field. */
-  categories(field: CategoryField<S>): { codes: Int32Array; dictionary: readonly string[] } {
+  /**
+   * Dictionary codes (-1 for missing) and the dictionary of a category
+   * field, and its revision: how many times a rolling window renumbered the
+   * codes, compacting the dictionary in place. While the revision holds, the
+   * dictionary has only grown at its end.
+   */
+  categories(field: CategoryField<S>): {
+    codes: Int32Array;
+    dictionary: readonly string[];
+    revision: number;
+  } {
     const column = this.#column(field);
     if (column.kind !== "category") throw new TypeError(`Field "${field}" is not categorical`);
-    return { codes: this.#view(field, column.buffer) as Int32Array, dictionary: column.dictionary };
+    const { dictionary, revision } = column;
+    return { codes: this.#view(field, column.buffer) as Int32Array, dictionary, revision };
   }
 
   /**
@@ -641,6 +651,7 @@ export class Table<S extends Schema = Schema> {
     column.dictionary.length = 0;
     column.dictionary.push(...survivors);
     column.codes = undefined;
+    column.revision++;
   }
 
   /** Makes room for `count` rows after the live slice. */

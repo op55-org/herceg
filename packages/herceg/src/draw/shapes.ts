@@ -1,5 +1,6 @@
 import type { Drawing, PathShape, ShapesGeometry, TextShape } from "../scene/scene.ts";
 import { dashAttribute, escapeXml, n } from "./markup.ts";
+import { textElement } from "./text.ts";
 
 const ALIGN = { start: "start", middle: "center", end: "end" } as const;
 
@@ -12,6 +13,16 @@ export const MIDDLE_TO_BASELINE = 0.35;
 
 function isText(shape: PathShape | TextShape): shape is TextShape {
   return "text" in shape;
+}
+
+/** Where text shapes' lines go: a line height apart, `shape.y` at their middle. */
+export function shapeLines(
+  shape: TextShape,
+  fontSize: number,
+): { lines: string[]; first: number; height: number } {
+  const lines = shape.text.split("\n");
+  const height = Math.round(fontSize * 1.25);
+  return { lines, first: shape.y - ((lines.length - 1) * height) / 2, height };
 }
 
 /**
@@ -30,7 +41,14 @@ export const shapesDrawing: Drawing<ShapesGeometry> = {
     let out = "";
     for (const shape of mark.shapes) {
       if (isText(shape)) {
-        out += `<text x="${n(shape.x)}" y="${n(shape.y + baseline)}" fill="${escapeXml(shape.fill)}" text-anchor="${shape.anchor}"${font}>${escapeXml(shape.text)}</text>`;
+        const { first, height } = shapeLines(shape, mark.fontSize);
+        out += textElement(
+          shape.text,
+          shape.x,
+          first + baseline,
+          height,
+          ` fill="${escapeXml(shape.fill)}" text-anchor="${shape.anchor}"${font}`,
+        );
         continue;
       }
       out += `<path d="${escapeXml(shape.d)}" fill="${escapeXml(shape.fill)}"`;
@@ -54,7 +72,10 @@ export const shapesDrawing: Drawing<ShapesGeometry> = {
         context.globalAlpha = 1;
         context.textAlign = ALIGN[shape.anchor];
         context.fillStyle = shape.fill;
-        context.fillText(shape.text, shape.x, shape.y + baseline);
+        const { lines, first, height } = shapeLines(shape, mark.fontSize);
+        lines.forEach((line, i) => {
+          context.fillText(line, shape.x, first + i * height + baseline);
+        });
         continue;
       }
       context.globalAlpha = shape.opacity;

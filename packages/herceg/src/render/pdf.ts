@@ -18,7 +18,7 @@ import { placeCloud } from "../draw/point.ts";
 import { tracePolygon } from "../draw/polygons.ts";
 import { traceRects } from "../draw/rect.ts";
 import { ruleLabel } from "../draw/rule.ts";
-import { MIDDLE_TO_BASELINE } from "../draw/shapes.ts";
+import { MIDDLE_TO_BASELINE, shapeLines } from "../draw/shapes.ts";
 import { SYMBOLS, symbolPath } from "../draw/symbols.ts";
 import { parseFont } from "../layout/text.ts";
 import { isLightColor } from "../scale/color.ts";
@@ -323,6 +323,28 @@ function text(page: PdfPage, content: string, x: number, y: number, style: TextS
   page.write(`${out}${show(0)}Q\n`);
 }
 
+/**
+ * `content` as `text` draws it, a line each as "\n" breaks it, each
+ * `lineHeight` below the last in the text's turn: the first at (x, y), or
+ * with `centered`, the lines' middle.
+ */
+function textLines(
+  page: PdfPage,
+  content: string,
+  x: number,
+  y: number,
+  style: TextStyle,
+  lineHeight: number,
+  centered = false,
+): void {
+  const lines = content.split("\n");
+  const radians = ((style.angle ?? 0) * Math.PI) / 180;
+  lines.forEach((line, i) => {
+    const down = (i - (centered ? (lines.length - 1) / 2 : 0)) * lineHeight;
+    text(page, line, x - down * Math.sin(radians), y + down * Math.cos(radians), style);
+  });
+}
+
 /** A path sink that moves everything it is given by (dx, dy). */
 function shifted(sink: PathBuilder, dx: number, dy: number): PathSink {
   return {
@@ -592,13 +614,21 @@ function paintMark(
       for (const shape of mark.shapes) {
         if ("text" in shape) {
           const { family, bold } = parseFont(mark.font);
-          text(page, shape.text, shape.x, shape.y, {
-            font: textFont(page, family, bold),
-            size: mark.fontSize,
-            fill: shape.fill,
-            anchor: shape.anchor,
-            baseline: "middle",
-          });
+          const { first, height } = shapeLines(shape, mark.fontSize);
+          textLines(
+            page,
+            shape.text,
+            shape.x,
+            first,
+            {
+              font: textFont(page, family, bold),
+              size: mark.fontSize,
+              fill: shape.fill,
+              anchor: shape.anchor,
+              baseline: "middle",
+            },
+            height,
+          );
           continue;
         }
         const shapePath = new PathBuilder();
@@ -637,14 +667,22 @@ function paintMark(
     case "text": {
       const { halo } = mark;
       for (let i = 0; i < mark.count; i++) {
-        text(page, mark.labels[i]!, mark.coords[i * 2]!, mark.coords[i * 2 + 1]!, {
-          font,
-          size: theme.fontSize,
-          fill: mark.fill,
-          anchor: mark.anchor,
-          baseline: "middle",
-          halo,
-        });
+        textLines(
+          page,
+          mark.labels[i]!,
+          mark.coords[i * 2]!,
+          mark.coords[i * 2 + 1]!,
+          {
+            font,
+            size: theme.fontSize,
+            fill: mark.fill,
+            anchor: mark.anchor,
+            baseline: "middle",
+            halo,
+          },
+          theme.style.text.lineHeight,
+          true,
+        );
       }
       return;
     }
@@ -686,17 +724,24 @@ function paintItem(page: PdfPage, item: GuideItem): void {
         if (item.angle) page.write("Q\n");
       }
       const opacity = style.opacity * (item.opacity ?? 1);
-      text(page, item.text, item.x, item.y, {
-        font: textFont(page, style.font, style.weight >= 600),
-        size: style.size,
-        fill: style.color,
-        ...(opacity !== 1 && { opacity }),
-        anchor: item.anchor,
-        baseline: item.baseline,
-        angle: item.angle,
-        ...(style.italic && { italic: true }),
-        halo: item.halo,
-      });
+      textLines(
+        page,
+        item.text,
+        item.x,
+        item.y,
+        {
+          font: textFont(page, style.font, style.weight >= 600),
+          size: style.size,
+          fill: style.color,
+          ...(opacity !== 1 && { opacity }),
+          anchor: item.anchor,
+          baseline: item.baseline,
+          angle: item.angle,
+          ...(style.italic && { italic: true }),
+          halo: item.halo,
+        },
+        style.lineHeight,
+      );
       return;
     }
     case "segments": {

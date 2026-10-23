@@ -11,8 +11,8 @@ let made: [GuideCompiler, FeatureCompiler] | undefined;
 
 /**
  * Colors static output reads: hex, `rgb()`, `hsl()`, and CSS's names, which
- * it can draw in PDF, and other functions (`color-mix()`, `var()`) and
- * `currentColor`, which SVG passes on.
+ * it can draw in PDF, `var()`, read to its fallback, and other functions
+ * (`color-mix()`) and `currentColor`, which SVG passes on.
  */
 const isColor = (value: string) =>
   cssColor(value) !== undefined ||

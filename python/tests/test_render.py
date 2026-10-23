@@ -226,7 +226,11 @@ def test_unicode_pdf_accepts_paths_and_bytes_and_matches_typescript(tmp_path):
 
 
 def test_unicode_pdf_requires_coverage_and_allows_explicit_replacement():
-    with pytest.raises(Exception, match="U\\+96EA.*supply a covering font"):
+    with pytest.raises(
+        Exception,
+        match='to_pdf fonts: do not cover U\\+96EA in "Fixture"; supply a font covering it and '
+        "add its family to the theme's font list or to fallback, or set missing_glyph",
+    ):
         unicode_chart("雪").to_pdf(fonts=unicode_fonts())
     assert unicode_chart("雪").to_pdf(fonts=unicode_fonts(), missing_glyph="?").startswith(b"%PDF")
     with pytest.raises(
@@ -235,6 +239,30 @@ def test_unicode_pdf_requires_coverage_and_allows_explicit_replacement():
         chart().to_pdf(missing_glyph="?")
     with pytest.raises(ValueError, match="supply fonts, or leave them out"):
         chart().to_pdf(fallback=["Symbols"])
+
+
+def test_uncovered_text_falls_back_and_is_refused_alike_in_every_format(tmp_path):
+    pytest.importorskip("resvg_py")
+
+    def starred(font):
+        return hg.Chart(
+            DATA,
+            width=400,
+            height=200,
+            theme={"style": {"text": {"font": font}}},
+            x=hg.AxisOptions(title="Rank \u2605"),
+        ).line(x="t", y="v")
+
+    # Glyph after glyph along the theme's font list: Symbols has the star.
+    covered = starred("Fixture, Symbols")
+    assert "Rank \u2605" in covered.to_svg(fonts=unicode_fonts())
+    assert covered.to_png(fonts=unicode_fonts()).startswith(b"\x89PNG")
+    assert covered.to_pdf(fonts=unicode_fonts()).startswith(b"%PDF")
+    # Without it, every format refuses the axis title, which nothing measures.
+    refusal = 'fonts: do not cover U\\+2605 in "Fixture"; supply a font covering it'
+    for method in ["to_svg", "to_png", "to_pdf"]:
+        with pytest.raises(ValueError, match=f"{method} {refusal}"):
+            getattr(starred("Fixture"), method)(fonts=unicode_fonts())
 
 
 @pytest.mark.parametrize("title", ["مرحبا", "שלום", "नमस्ते", "\U00010940", "\U00013430", "\u0378"])
@@ -374,6 +402,85 @@ def test_png_export(tmp_path):
         chart().save(str(tmp_path / "chart.gif"))
 
 
+def test_css_variables_export_their_fallbacks_and_refuse_without_one():
+    image = pytest.importorskip("PIL.Image")
+
+    def painted(stroke):
+        return hg.Chart(
+            {"x": [0, 1, 2], "y": [1, 1, 1]},
+            width=200,
+            height=100,
+            x={"show": False, "grid": False},
+            y={"show": False, "grid": False, "domain": [0, 2]},
+        ).line(x="x", y="y", stroke=stroke, stroke_width=10)
+
+    chart = painted("var(--brand, #ff0000)")
+    svg = chart.to_svg()
+    assert "var(" not in svg and 'stroke="#ff0000"' in svg
+    pixels = np.asarray(image.open(BytesIO(chart.to_png(scale=1))))
+    assert tuple(pixels[50, 100]) == (255, 0, 0, 255)
+    with pytest.raises(ValueError) as refused:
+        painted("var(--brand)").to_png()
+    assert str(refused.value) == (
+        "line stroke is the CSS variable var(--brand), which only a chart in a page can "
+        "read; give a fallback, as var(--name, #2a78d6)"
+    )
+
+
+def test_labels_break_lines_in_every_format_with_supplied_fonts(tmp_path):
+    image = pytest.importorskip("PIL.Image")
+    rendered = (
+        hg.Chart(
+            DATA,
+            width=400,
+            height=200,
+            title="Latency\nby host",
+            theme={"style": {"text": {"font": "Fixture"}}},
+        )
+        .line(x="t", y="v")
+        .rule(
+            y=2,
+            label={"text": "Target\n52.8%", "place": {"attachment": "start", "outside": True}},
+        )
+        .text(x=DATA["t"][1], y=2.5, label="two\nlines")
+    )
+    fonts = unicode_fonts()
+    svg = rendered.to_svg(fonts=fonts)
+    for first, second in [("Latency", "by host"), ("Target", "52.8%"), ("two", "lines")]:
+        assert re.search(f">{re.escape(first)}</tspan><tspan[^>]*>{re.escape(second)}<", svg)
+    # Only the title and description elements keep the text whole.
+    assert "\n" not in re.sub(r"<(title|desc)[^<]*</(title|desc)>", "", svg)
+    pixels = np.asarray(image.open(BytesIO(rendered.to_png(fonts=fonts, scale=1))))
+    assert pixels.shape == (200, 400, 4)
+    path = tmp_path / "lines.pdf"
+    rendered.save(path, fonts=fonts)
+    assert path.read_bytes().startswith(b"%PDF")
+
+
+def test_a_categorical_color_field_gives_values_their_dictionary_slots():
+    pd = pytest.importorskip("pandas")
+    import herceg.express as hx
+
+    frame = pd.DataFrame(
+        {"site": pd.Categorical(["C"], categories=["A", "B", "C"]), "x": [1.0], "v": [3.0]}
+    )
+    # The light theme's first and third palette colors: "C" takes the third.
+    first, third = "#3266d6", "#109e7f"
+    charts = [
+        hg.Chart(frame, width=200, height=120).bar(x="site", y="v", color="site", series=False),
+        hg.Chart(frame, width=200, height=120).bar(x="site", y="v", color="site"),
+        hg.Chart(frame, width=200, height=120).line(x="x", y="v", color="site"),
+        hx.lineplot(frame, x="x", y="v", color="site"),
+    ]
+    for chart in charts:
+        svg = chart.to_svg()
+        assert third in svg and first not in svg
+    # Groups that keep no observations make summaries of no rows.
+    missing = frame.assign(v=[float("nan")], k=["a"])
+    for plot in [hx.boxplot, hx.boxenplot, hx.violinplot]:
+        assert plot(missing, x="k", y="v", color="site").to_svg().startswith("<svg")
+
+
 def font_collision_chart():
     labels = [f"{'t' * 20}{i}" for i in range(8)]
     return hg.Chart(
@@ -465,6 +572,51 @@ def test_png_renders_supplied_font_pixels_with_paths_bytes_and_aliases(tmp_path,
     hg.save(rendered, path, fonts=fonts, scale=1)
     assert path.read_bytes() == actual
     assert rendered.to_png(fonts=fonts, scale=1) == actual
+
+
+def test_cff_fonts_measure_and_draw_svg_and_png_and_pdf_refuses_them(tmp_path):
+    import resvg_py
+
+    image = pytest.importorskip("PIL.Image")
+    rendered = hg.Chart(
+        DATA,
+        title="tttttttt latency",
+        width=400,
+        height=200,
+        theme={"style": {"text": {"font": "Brand"}}},
+    ).line(x="t", y="v")
+    # A face with CFF outlines in a file named as TrueType, as brand fonts often are.
+    brand = tmp_path / "Brand-Regular.ttf"
+    brand.write_bytes((FONT_FIXTURES / "sans-cff.otf").read_bytes())
+    fonts = {"Brand": brand}
+    svg = rendered.to_svg(fonts=fonts)
+    same = re.sub(
+        r"herceg-svg-\d+", "id", rendered.to_svg(fonts={"Brand": FONT_FIXTURES / "sans.ttf"})
+    )
+    assert re.sub(r"herceg-svg-\d+", "id", svg) == same
+    actual = rendered.to_png(fonts=fonts, scale=1)
+    expected = resvg_py.svg_to_bytes(
+        svg_string=svg.replace('font-family="Brand"', 'font-family="Noto Sans"'),
+        zoom=1,
+        font_files=[str(FONT_FIXTURES / "sans-cff.otf")],
+        skip_system_fonts=True,
+    )
+    truetype = resvg_py.svg_to_bytes(
+        svg_string=svg.replace('font-family="Brand"', 'font-family="Noto Sans"'),
+        zoom=1,
+        font_files=[str(FONT_FIXTURES / "sans.ttf")],
+        skip_system_fonts=True,
+    )
+    pixels = np.asarray(image.open(BytesIO(actual)))
+    assert np.array_equal(pixels, np.asarray(image.open(BytesIO(expected))))
+    # The text is drawn as the TrueType face draws it: the outlines are the same shapes.
+    assert np.count_nonzero(pixels != np.asarray(image.open(BytesIO(truetype)))) < 400
+    with pytest.raises(hg.ChartError) as refused:
+        rendered.to_pdf(fonts=fonts)
+    assert str(refused.value) == (
+        'to_pdf fonts: the "Brand" normal face has CFF outlines; PDF embedding needs '
+        "TrueType (glyf) outlines; SVG and PNG accept this font"
+    )
 
 
 @pytest.mark.parametrize("fails", [False, True])

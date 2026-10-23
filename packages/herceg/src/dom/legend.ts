@@ -171,10 +171,11 @@ function show(
     : glyph
       ? `<svg width="10" height="10" style="display:block;overflow:visible">${shapeMarkup({ type: "shape", d: glyph, at: [5, 5], fill: item.color, stroke: item.stroke })}</svg>`
       : "";
-  label.style.cssText = box;
+  // Lines a line height apart, as static output draws them.
+  label.style.cssText = `${box};white-space:pre-line;line-height:${paint.lineHeight}px`;
   text.textContent = item.label;
   if (text !== label) text.style.cssText = ink;
-  else if (ink) label.style.cssText = ink;
+  else if (ink) label.style.cssText += `;${ink}`;
   text.style.opacity = String(paint.opacity * fade);
   text.style.textDecoration = item.hidden ? "line-through" : "";
 }

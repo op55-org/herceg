@@ -1,8 +1,8 @@
-// A font registry: TrueType faces parsed once, and the widths of text set
+// A font registry: OpenType faces parsed once, and the widths of text set
 // in them, shared by every output a chart draws. Browser charts measure
 // with it and register its faces with the document (dom/fonts.ts), code
 // that comes with the registry rather than the chart; SVG and PNG exports
-// measure with it and name its families; PDF export embeds subsets of its
+// measure with it and name its families; PDF export embeds subsets of its TrueType
 // faces (render/pdf-font-embed.ts). Text is set as browsers and resvg set
 // it in the theme's family lists, glyph after glyph without kerning; PDF,
 // which has no fallback of its own, may add fallback families and a
@@ -10,17 +10,21 @@
 
 import { claimFaces } from "../dom/font-claims.ts";
 import { fallbackMeasure, registerFonts } from "../dom/fonts.ts";
-import { type MeasureText, parseFont } from "../layout/text.ts";
+import { type MeasureText, parseFont, widestLine } from "../layout/text.ts";
+import { checkCoverage } from "../render/coverage.ts";
 import { PdfFontResolver } from "../render/pdf-font-embed.ts";
 import { checkSimpleText, graphemeClusters } from "./clusters.ts";
 import { EMBED_FONTS, type PageFonts, USE_FONTS } from "./prepared.ts";
-import { parseTrueType, type TrueTypeFont } from "./truetype.ts";
+import { parseSfnt, type SfntFont } from "./sfnt.ts";
 
 export interface FontSource {
   /** Matches names in the theme's font and custom marks' font family lists. */
   family: string;
   weight?: "normal" | "bold";
-  /** A TrueType font file; read, not copied, so it must not change afterward. */
+  /**
+   * An OpenType font file, with TrueType or CFF outlines (PDF export embeds
+   * TrueType only); read, not copied, so it must not change afterward.
+   */
   data: Uint8Array;
 }
 
@@ -65,7 +69,7 @@ export interface Fonts {
    * For a chart in `document`: claims the faces on the page (throwing, and
    * claiming none, when the page has another file for one), starts
    * registering them, and measures with them, and as the page draws it
-   * (glyph after glyph) text they do not cover.
+   * (glyph after glyph) text they do not cover, which its exports refuse.
    */
   readonly [USE_FONTS]: (document: Document) => PageFonts;
 }
@@ -75,10 +79,10 @@ let prepared = 0;
 /** A parsed face and its source. */
 export class Face {
   readonly source: FontSource;
-  readonly font: TrueTypeFont;
+  readonly font: SfntFont;
   constructor(source: FontSource) {
     this.source = source;
-    this.font = parseTrueType(source.data);
+    this.font = parseSfnt(source.data);
   }
   /** The advance of `glyph` in 1/1000 em, rounded once, so layout and PDF widths agree. */
   advance(glyph: number): number {
@@ -153,7 +157,7 @@ class FontRegistry implements Fonts {
       let width = widths.get(key);
       if (width === undefined) {
         const { size, bold, family } = parseFont(font);
-        width = this.resolve(text, family, bold).width * size;
+        width = widestLine(text, (line) => this.resolve(line, family, bold).width) * size;
         if (widths.size > 5000) widths.clear();
         widths.set(key, width);
       }
@@ -166,6 +170,12 @@ class FontRegistry implements Fonts {
   }
 
   [EMBED_FONTS](options: FontOptions = {}): PdfFontResolver {
+    for (const faces of this.#families.values())
+      for (const { font, source } of faces)
+        if (font.outlines === "cff")
+          throw new Error(
+            `renderToPDF fonts: the ${JSON.stringify(source.family)} ${source.weight ?? "normal"} face has CFF outlines; PDF embedding needs TrueType (glyf) outlines; SVG and PNG accept this font`,
+          );
     return new PdfFontResolver(this, this.policy(options));
   }
 
@@ -187,7 +197,11 @@ class FontRegistry implements Fonts {
       }
       return fallbackMeasure(document)(text, font);
     };
-    return { measure, loaded: registerFonts(document, this.faces) };
+    return {
+      measure,
+      loaded: registerFonts(document, this.faces),
+      check: (scene) => checkCoverage(scene, this.measure),
+    };
   }
 
   /** How `options` say text is set, checked: fallback families these fonts have, and a covered standalone replacement. */
@@ -242,7 +256,7 @@ class FontRegistry implements Fonts {
           .map((code) => `U+${code.toString(16).toUpperCase().padStart(4, "0")}`)
           .join(" ");
         throw new Error(
-          `fonts do not cover ${names} in ${JSON.stringify(family)}; supply a covering font and fallback family, or set missingGlyph to a covered replacement`,
+          `fonts do not cover ${names} in ${JSON.stringify(family)}; supply a font covering it and add its family to the theme's font list`,
         );
       }
       let run = runs[runs.length - 1];

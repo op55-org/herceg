@@ -11,7 +11,7 @@ import {
 import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { layoutPartition } from "../layout/partition.ts";
-import { labelFor } from "../layout/text.ts";
+import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
@@ -267,7 +267,7 @@ export class SunburstMark implements LayoutMark {
             return true;
           };
           // The whole name first, then shorter and shorter cuts of it.
-          const name = tree.names[node]!;
+          const name = oneLineText(tree.names[node]!);
           let text = fits(measure(name, font)) ? name : "";
           for (let room = measure(name, font) * 0.8; !text && room >= 12; room *= 0.8) {
             const candidate = labelFor(name, room, measure, font);

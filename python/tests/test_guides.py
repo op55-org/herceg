@@ -295,3 +295,32 @@ def test_legends_and_colorbars_render():
     ).heatmap(x="x", y="y", color="v")
     svg = cells.to_svg()
     assert ">Gain<" in svg and ">+10<" in svg and 'y1="1"' in svg
+
+
+def test_guides_naming_a_mark_show_it_whatever_its_legend_setting():
+    cells = hg.Chart(
+        {"x": [0, 1, 0, 1], "y": [0, 0, 1, 1], "v": [1, 2, 3, 4]},
+        width=480,
+        height=300,
+        guides=[hg.colorbar(title="Gain", scale=hg.ScaleRef(mark="h", channel="color"))],
+    ).heatmap(x="x", y="y", color="v", id="h", legend=False)
+    assert ">Gain<" in cells.to_svg()
+    data = {"t": [0, 1, 0, 1], "site": ["A", "A", "B", "B"], "v": [1, 2, 3, 4]}
+    # A color splitting series is the series' colors: either channel names them.
+    for channel in ["color", "series"]:
+        chart = hg.Chart(
+            data,
+            width=480,
+            height=300,
+            guides=[hg.legend(title="Sites", scales=[hg.ScaleRef(mark="curves", channel=channel)])],
+        ).line(x="t", y="v", color="site", id="curves")
+        svg = chart.to_svg()
+        assert ">Sites<" in svg and ">A<" in svg and ">B<" in svg
+    lone = hg.Chart(
+        data,
+        width=480,
+        height=300,
+        guides=[hg.legend(scales=[hg.ScaleRef(mark="curves", channel="size")])],
+    ).line(x="t", y="v", color="site", id="curves")
+    with pytest.raises(Exception, match='mark "curves" has no "size" scale; name one it has'):
+        lone.to_svg()

@@ -539,6 +539,26 @@ describe("panel legends", () => {
     expect(ramps.every((ramp) => !own.items.includes(ramp.items[0]!))).toBe(true);
   });
 
+  it("list a mark left out of legends where a panel's legend names it, by its color too", () => {
+    const quiet = [
+      line(data, { x: "t", y: "p99", color: "region", panel: "latency", id: "p99", legend: false }),
+      line(data, { x: "t", y: "errors", color: "region", panel: "errors", id: "errors" }),
+    ];
+    const scene = model({
+      marks: quiet,
+      panels: layout,
+      guides: [legend({ panel: "latency", scales: [{ mark: "p99", channel: "color" }] })],
+    }).scene(estimateText);
+    expect(labels(legends(scene).find((g) => g.panel === "latency"))).toEqual(["eu", "us", "ap"]);
+    // A panel's legend naming nothing leaves it out.
+    const plain = model({
+      marks: quiet,
+      panels: layout,
+      guides: [legend({ panel: "latency" })],
+    }).scene(estimateText);
+    expect(legends(plain).find((g) => g.panel === "latency")).toBeUndefined();
+  });
+
   it("leave what a panel's legend names to the chart's legend in the panels without one", () => {
     const named = [
       line(data, { x: "t", y: "p99", color: "region", panel: "latency", id: "p99" }),

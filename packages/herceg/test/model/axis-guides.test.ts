@@ -15,6 +15,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { AxisGuide, Scene, SegmentsItem, TextItem } from "../../src/scene/scene.ts";
+import { drawnLines } from "../helpers/guides.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
 const HOUR = 3_600_000;
@@ -34,8 +35,9 @@ const marks = [line(week, { x: "t", y: "v" })];
 const axesOf = (scene: Scene) => scene.panels[0]!.axes;
 const sideOf = (scene: Scene, side: AxisGuide["side"]) =>
   axesOf(scene).find((a) => a.side === side);
+/** A guide's text, a line at a time. */
 const texts = (guide: AxisGuide | undefined) =>
-  (guide?.items ?? []).filter((item): item is TextItem => item.type === "text");
+  drawnLines((guide?.items ?? []).filter((item): item is TextItem => item.type === "text"));
 const segments = (guide: AxisGuide | undefined) =>
   (guide?.items ?? []).filter((item): item is SegmentsItem => item.type === "segments");
 

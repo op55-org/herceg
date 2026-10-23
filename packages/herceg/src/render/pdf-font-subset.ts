@@ -1,5 +1,5 @@
 import { FontReader, fontChecksum, fontError } from "../fonts/binary.ts";
-import type { TrueTypeFont } from "../fonts/truetype.ts";
+import type { SfntFont } from "../fonts/sfnt.ts";
 
 export interface FontSubset {
   data: Uint8Array;
@@ -9,7 +9,7 @@ export interface FontSubset {
 
 /** Rebuilds only after drawing: measurement never adds glyphs to this set. */
 export function subsetTrueType(
-  font: TrueTypeFont,
+  font: SfntFont,
   characters: ReadonlyMap<number, number>,
 ): FontSubset {
   const used = new Set<number>([0]);
@@ -103,7 +103,7 @@ export function subsetTrueType(
 
 const aligned = (size: number) => Math.ceil(size / 4) * 4;
 
-function fontName(font: TrueTypeFont, ids: readonly number[]): string {
+function fontName(font: SfntFont, ids: readonly number[]): string {
   if (font.noSubset) {
     const bytes = font.tables.get("name");
     if (bytes) {
@@ -190,7 +190,8 @@ export function writeSfnt(tables: ReadonlyMap<string, Uint8Array>): Uint8Array {
     header + entries.reduce((sum, [, data]) => sum + aligned(data.length), 0),
   );
   const view = new DataView(bytes.buffer);
-  view.setUint32(0, 0x00010000);
+  // "OTTO" marks CFF outlines, which the raster fonts of Python's PNG export keep.
+  view.setUint32(0, tables.has("CFF ") || tables.has("CFF2") ? 0x4f54544f : 0x00010000);
   view.setUint16(4, entries.length);
   const power = Math.floor(Math.log2(entries.length));
   view.setUint16(6, 16 * 2 ** power);

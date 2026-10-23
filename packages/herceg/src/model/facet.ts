@@ -9,7 +9,7 @@ import type { NumericArray } from "../data/column.ts";
 import type { Table } from "../data/table.ts";
 import type { AxisOptions } from "../guides/options.ts";
 import { aligned } from "../layout/place.ts";
-import type { MeasureText } from "../layout/text.ts";
+import { lineCount, type MeasureText } from "../layout/text.ts";
 import type { CustomSpec } from "../marks/custom.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
 import { type BandContext, type Bands, type Mark, usesY } from "../marks/mark.ts";
@@ -289,17 +289,22 @@ export class Facet implements PanelLayout {
     return uniformPlacement(grid, split.keys.length, this.remedy);
   }
 
-  /** How a split's panels are placed, with headers a line of text tall. */
-  grid(split: PanelSplit, lineHeight: number): PanelGrid {
+  /** How a split's panels are placed, with headers as tall as their values' lines. */
+  grid(split: PanelSplit, lineHeight: number, step: number): PanelGrid {
     const { rows, columns } = this.shape(split.dimensions.map((values) => values.length));
-    const header = lineHeight + 4;
+    const header = (texts: readonly string[]) => {
+      let lines = 1;
+      for (const text of texts) lines = Math.max(lines, lineCount(text));
+      return lineHeight + (lines - 1) * step + 4;
+    };
     const wrapped = this.field !== undefined;
+    const { values, dimensions } = split;
     return {
       columns,
       rows,
-      header: wrapped ? header : 0,
-      columnHeader: !wrapped && this.column !== undefined ? header : 0,
-      rowHeader: !wrapped && this.row !== undefined ? header : 0,
+      header: wrapped ? header(values.map((named) => named.join(", "))) : 0,
+      columnHeader: !wrapped && this.column !== undefined ? header(dimensions.at(-1) ?? []) : 0,
+      rowHeader: !wrapped && this.row !== undefined ? header(dimensions[0] ?? []) : 0,
       least: leastHeight(rows, undefined, split.keys.length),
     };
   }

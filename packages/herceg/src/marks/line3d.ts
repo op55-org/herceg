@@ -17,6 +17,7 @@ import type { ChartConfig } from "../model/model.ts";
 import { isOpaqueColor } from "../scale/color.ts";
 import type { LineBatch3D } from "../scene/scene.ts";
 import type { Frozen, Line3DSpec } from "../spec/spec.ts";
+import type { PaintReader } from "../theme.ts";
 import type { View } from "../three/camera.ts";
 import { cutSegment } from "../three/clip.ts";
 import { ScreenGrid } from "../three/hit.ts";
@@ -201,10 +202,15 @@ export class Line3DMark implements Layer3D {
     return groups;
   }
 
-  legend(id: string | number, color: (key: string) => string): LegendEntry[] {
+  legend(
+    id: string | number,
+    color: (key: string) => string,
+    _theme: unknown,
+    paint: PaintReader,
+  ): LegendEntry[] {
     return this.#groups().map(({ label, category }) => {
       const key = groupKey(id, category);
-      return { key, label, color: ownOr(this.spec.stroke, color(key)) };
+      return { key, label, color: ownOr(this.spec.stroke, color(key), paint, "line3d stroke") };
     });
   }
 
@@ -335,7 +341,12 @@ export class Line3DMark implements Layer3D {
   /** The colors of the paths: `stroke`, or each series'. */
   #palette(frame: Frame3D): string[] {
     return this.#groups().map((group) =>
-      ownOr(this.spec.stroke, frame.color(groupKey(frame.id, group.category))),
+      ownOr(
+        this.spec.stroke,
+        frame.color(groupKey(frame.id, group.category)),
+        frame.paint,
+        "line3d stroke",
+      ),
     );
   }
 

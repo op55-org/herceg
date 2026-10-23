@@ -37,6 +37,7 @@ import {
   NUMERIC,
   ownColor,
   type Palette,
+  painted,
   requireField,
   SeriesSplitter,
   seriesOf,
@@ -926,7 +927,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       upper,
       lower,
       baseline,
-      stroke: outline ? (this.spec.stroke ?? s.color) : null,
+      stroke: outline ? (painted(frame.paint, this.spec.stroke, "area stroke") ?? s.color) : null,
       strokeWidth,
     };
   }

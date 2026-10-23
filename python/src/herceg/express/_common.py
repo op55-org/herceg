@@ -434,19 +434,33 @@ def values(column: Column) -> np.ndarray:
 @dataclass(frozen=True)
 class Levels:
     """A column read as categories: each row's level (-1 where it has none,
-    or its value is not in the order given) and the levels' labels, in order."""
+    or its value is not in the order given) and the levels' labels, in order.
+    Series levels of a category column keep its whole ``dictionary`` too
+    (pandas' unused categories), and each level's place in it."""
 
     codes: np.ndarray
     labels: tuple[str, ...]
+    dictionary: tuple[str, ...] | None = None
+    places: np.ndarray | None = None
 
     def __len__(self) -> int:
         return len(self.labels)
 
+    def column(self, codes: Sequence[int] | np.ndarray) -> Column:
+        """A category column of levels by code: over the whole dictionary
+        where the levels keep one, so its values keep their color slots."""
+        if self.dictionary is None or self.places is None:
+            return category_column(codes, self.labels)
+        return category_column(
+            np.append(self.places, -1)[np.asarray(codes, dtype=np.int64)], self.dictionary
+        )
 
-def levels(column: Column, order: Sequence[Any] | None = None) -> Levels:
+
+def levels(column: Column, order: Sequence[Any] | None = None, *, whole: bool = False) -> Levels:
     """Categories from a column: category labels in the column's order
     (pandas' categories, or first appearance), or distinct numbers and
-    times ascending; with ``order``, those levels in that order."""
+    times ascending; with ``order``, those levels in that order. With
+    ``whole``, levels of a category column keep its dictionary."""
     if column.kind == "category":
         codes = column.values.astype(np.int64)
         labels = list(column.dictionary)
@@ -474,6 +488,8 @@ def levels(column: Column, order: Sequence[Any] | None = None) -> Levels:
         remap = np.full(len(labels) + 1, -1, dtype=np.int64)
         remap[kept] = np.arange(len(kept))
         codes = remap[codes]
+        if whole and column.kind == "category":
+            return Levels(codes, tuple(labels[i] for i in kept), tuple(labels), kept)
         labels = [labels[i] for i in kept]
     return Levels(codes, tuple(labels))
 
@@ -603,7 +619,9 @@ def variables_of(
                 f"{function} {role}: column {name!r} is also plotted on an axis; to group by "
                 "it, pass a copy of the column under another name"
             )
-        out[name] = levels(source.column(name, f"{function} {role}"), given)
+        # Series keep their column's dictionary, whose order gives their colors.
+        column = source.column(name, f"{function} {role}")
+        out[name] = levels(column, given, whole=role == "series")
     return out
 
 
@@ -701,10 +719,7 @@ def number_column(data: Sequence[float] | np.ndarray, kind: str = "number") -> C
 
 def rows_table(variables: Mapping[str, Levels], rows: np.ndarray) -> dict[str, Column]:
     """Category columns of the grouping variables at source rows."""
-    return {
-        name: category_column(variable.codes[rows], variable.labels)
-        for name, variable in variables.items()
-    }
+    return {name: variable.column(variable.codes[rows]) for name, variable in variables.items()}
 
 
 def keyed_table(
@@ -716,8 +731,7 @@ def keyed_table(
         return {}
     stacked = np.asarray(keys, dtype=np.int64).reshape(-1, len(variables))
     return {
-        name: category_column(stacked[:, i], variable.labels)
-        for i, (name, variable) in enumerate(variables.items())
+        name: variable.column(stacked[:, i]) for i, (name, variable) in enumerate(variables.items())
     }
 
 

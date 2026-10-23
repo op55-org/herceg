@@ -66,7 +66,7 @@ const requests = table({
   status: category([200, 503]), // numbers as categories: "200", "503"
 });
 requests.numbers("latency"); // Float64Array view of the live rows
-requests.categories("service"); // { codes: Int32Array, dictionary: string[] }
+requests.categories("service"); // { codes: Int32Array, dictionary: string[], revision: number }
 requests.value("latency", 0); // number | null, typed by the field
 requests.value("time", 0); // epoch milliseconds
 requests.value("status", 1); // "503"
@@ -121,6 +121,12 @@ live.replace("cpu", 0, [0.1, 0.2]); // overwrite rows 0 and 1
 live.dropBefore("time", Date.now() - 60_000);
 live.reset({ time: newTimes, cpu: newValues });
 ```
+
+A rolling window keeps category dictionaries bounded: once a dictionary
+holds more than twice as many entries as there are rows (and 64 more), the
+values no row holds leave it and the codes of the rest are renumbered, in
+order. `categories(field).revision` counts these renumberings: while it
+holds, the dictionary has only grown at its end.
 
 ### Derived tables
 
@@ -674,19 +680,23 @@ nodes' `color` field) and refuse it with what to give instead.
 
 A series stands for a value, and the value has one color and one legend
 entry in every mark and panel of the chart, panels showing subsets and
-hidden series included, keeping its color while the data streams: lines,
-areas, bars, and points colored by the same table's `"site"` agree, and the
-items of layout marks of it do too: a pie's slices, a treemap's or
+hidden series included, keeping its color while the data streams. Colors
+follow the field's dictionary order (a `category()` column's, a pandas
+Categorical's, an Arrow dictionary's; first appearance for strings), used
+values or not, whether color splits series or colors rows: a Categorical of
+`["A", "B", "C"]` holding only `"C"` gives it the palette's third color.
+Lines, areas, bars, and points colored by the same table's `"site"` agree,
+and the items of layout marks of it do too: a pie's slices, a treemap's or
 sunburst's top-level branches (its first `path` field), a radar's series, a
-map's regions and points, a network's node groups, and 3D points and lines. Tables made from that table
-(derived tables, row views, and spec tables naming it as their `origin`)
-are the same table for this (two other tables of one `name` in a chart are
-refused); an unrelated table's `"site"` is another
-field, with colors and entries of its own, unless both marks read their
-colors through one named scale (below). Value fields (`y: ["p50", "p99"]`)
-stand for their labels, as a band labelled `"p50"` does, so a line of p50
-and a band labelled p50 share an entry. Fix colors by value with a scale
-of categories:
+map's regions and points, a network's node groups, and 3D points and lines.
+Tables made from that table (derived tables, row views, and spec tables
+naming it as their `origin`) are the same table for this (two other tables
+of one `name` in a chart are refused); an unrelated table's `"site"` is
+another field, with colors and entries of its own, unless both marks read
+their colors through one named scale (below). Value fields
+(`y: ["p50", "p99"]`) stand for their labels, as a band labelled `"p50"`
+does, so a line of p50 and a band labelled p50 share an entry. Fix colors by
+value with a scale of categories:
 
 ```ts
 const scales = {
@@ -1745,7 +1755,8 @@ the notes), — not yet (refused with an error), · not applicable.
 - Every built-in mark exports through `renderToPDF`; each chart is one page and
   one Figure, including its facets or subplots.
 - Marks with legend entries or a color legend take `legend: false`, which
-  leaves them out of the chart's legends while they still draw. Heatmaps,
+  leaves them out of the chart's legends while they still draw; legends and
+  colorbars naming the mark show it. Heatmaps,
   2D histograms, contours, and points colored by a number field show their
   color scale in a colorbar (`guides: [colorbar()]`; see Scales and guides).
 - Selected rows and Highlight are what charts bound to a selection store do
@@ -3847,11 +3858,16 @@ createChart(element, {
 | `sequential`, `diverging` | Hex ramps for color scales, low to high. |
 | `rise`, `fall` | Candlestick colors. |
 
-Colors and fonts may use CSS variables. Charts in a page read them, and
-colors in any CSS syntax, from the page; they read the page again when the
-class, style, or data attributes of its root or body element change (call
+Colors and fonts may use CSS variables: in themes, styles, and every color
+option of marks, scales, channels, styles by value, markers, legends'
+samples, and custom marks. Charts in a page read them, and colors in any CSS
+syntax, from the page, so the canvas, the GPU painter, tooltips, and hover
+dots get the same colors as SVG; they read the page again when the class,
+style, or data attributes of its root or body element change (call
 `update({})` after other theme changes). Static output (`renderToSVG`, PNG,
-and PDF) has no page: each variable takes its fallback, and `"auto"` is light.
+and PDF) has no page: each variable takes its fallback, a variable without
+one is refused with the option that set it, and `"auto"` is light. Exported
+SVG holds no `var()`.
 PDF output reads hex, `rgb()`, `hsl()`, and named colors. PDF pages are
 white: a transparent theme with light text (a dark theme without its
 background, or `"auto"` on a dark page) gets the dark surface it was meant
@@ -3899,10 +3915,22 @@ createChart(element, {
 
 ### Titles, legends, and padding
 
-A chart's title goes at the top (the default) or with `place: { side:
-"bottom" }` below the plots; its style's `align` puts it at the start,
-center, or end of the chart's width, and `"\n"` breaks it into lines, each
-taking a line of room. A legend's or colorbar's `place` is a side, `{ side, align?, offset?, scope?, panel? }`
+A chart's title goes at the top (the default) or with
+`place: { side: "bottom" }` below the plots; its style's `align` puts it at
+the start, center, or end of the chart's width, and `"\n"` breaks it into
+lines, each taking a line of room. Every label breaks at `"\n"` the same
+way, in SVG, Canvas, PNG, and PDF, its lines a line height
+(`style.lineHeight`) apart and laid out as one block: annotations' labels
+(placed by the block, which grows away from the rule, region edge, or point
+it is beside, and kept apart by its size), bars' and other marks' labels,
+legend labels and titles, axis and colorbar titles, subplot titles, category
+tick labels, and tooltips. On the automatic axes, number and time labels a
+format writes in lines are written on one, as their room is kept before they
+are planned; listed axes (`guides: [axis(...)]`) lay them out in rows. Names
+layout marks fit to a room of one line (pie slices', treemap, sunburst,
+Sankey, and network nodes', funnel stages', radar spokes', 3D axes' labels)
+are written on one line too, shortened rather than broken. A legend's or
+colorbar's `place` is a side, `{ side, align?, offset?, scope?, panel? }`
 (rows that wrap above or below the plots, a column beside them; `align`
 along the side, `offset` pixels of extra room, beside the whole chart by
 default or beside `panel` with `scope: "panel"`, the first panel if omitted), or a place inside a plot,
@@ -4044,7 +4072,13 @@ table's `"eu"` is an entry of its own unless both marks read their colors
 through one named scale. With `swatches: "mark"`, an entry that marks draw
 differently shows each one's look, a line over a bar's box. Entries of your
 own (`entries`) group anything else. A mark's `legend: false` leaves its
-series, ramps, and keys out of the legends.
+series, ramps, and keys out of the legends and colorbars that name no mark;
+those naming it in `scales` or `scale` show it. A mark whose color field
+splits its series is named by `channel: "color"` or `"series"` alike, and a
+reference to a scale the mark does not have is an error naming those it has.
+What a mark has comes of its options, whatever its rows hold: a point with
+a `size` field has a size scale before its rows give it values, and a
+legend or colorbar naming it shows it once they do.
 
 ```ts
 createChart(element, {
@@ -4083,9 +4117,10 @@ createChart(element, {
 
 Text drawn over data has a halo, an outline in the color of what it is
 drawn on, so it stays readable over lines: `halo: "auto"` (the default)
-takes that surface (the plot's `fill`, or the chart's background) where the
-text contrasts with it at 3:1 or more, else white behind dark text and
-black behind light text. `false` draws none, and `{ color, width?, opacity? }`
+takes that surface's color (the plot's `fill`, or the chart's background)
+whatever the text's own color; under a transparent background it is black
+behind light text and white behind dark, as the page likely is. `false`
+draws none, and `{ color, width?, opacity? }`
 (3 pixels wide by default) draws one of your own. `text`, `region`, `bar`,
 `funnel`, `radar`, `sankey`, `graph` (node and link labels), and
 `rangeNavigator` take `halo`; marks that draw halos only where needed (bar
@@ -4404,7 +4439,7 @@ They remain outside chart bundles that do not import PDF. The
 `herceg-pdf-document` measures an actual report, beside the line PDF entries.
 
 PDF export is a separate entry point, `herceg/pdf`. Fonts from
-`herceg/fonts` bring the optional TrueType parser, subsetter, and
+`herceg/fonts` bring the optional font parser, TrueType subsetter, and
 embedded-font writer; plain PDF exports bundle none of them. The `herceg-pdf` and
 `herceg-pdf-fonts` size benchmarks include scene compilation and a line
 mark, without and with embedded-font support respectively (about 46 and
@@ -4423,9 +4458,12 @@ Without `fonts`, a browser chart measures text with its canvas and draws it
 in the page's fonts; static SVG estimates widths from Helvetica's; and PDF
 uses Helvetica, Times, or Courier (regular/bold) with the Windows-1252
 encoding, uncovered characters printing as "?". For the same layout in
-every output, and Unicode in PDF, prepare static TrueType fonts with
+every output, and Unicode in PDF, prepare static OpenType fonts with
 families matching the theme's font, and give them to the chart and its
-exports as `fonts`:
+exports as `fonts`. Faces with TrueType (`glyf`) outlines work everywhere;
+faces with CFF outlines (most `.otf` files, and some named `.ttf`) measure
+and draw in the browser, SVG, and PNG, while PDF export, which embeds
+TrueType outlines only, refuses them and says so:
 
 ```ts
 import { prepareFonts } from "herceg/fonts";
@@ -4462,9 +4500,14 @@ that give one family different files are refused. `renderToPDF(chart)`
 embeds a mounted chart's own fonts.
 `chart.toPNG()` puts the faces in the SVG it draws, which sees none of the
 page's fonts. Static SVG names the fonts' families and does not embed them:
-viewers need the fonts. PDF embeds subsets of the faces used. Exports
-refuse text the fonts do not cover and text that needs shaping (see below),
-where a live chart falls back to the browser.
+viewers need the fonts. PDF embeds subsets of the faces used. Every export
+(`renderToSVG`, `specToSVG`, PDF, a chart's `toSVG()` and `toPNG()`, and
+Python's SVG, PNG, and PDF) refuses text the fonts do not cover and text
+that needs shaping (see below), every text it draws, measured or not, since
+an image or a viewer has only the fonts; what a page draws, a live chart
+and the markup of a snapshot, draws such text in the browser's fonts. A
+snapshot lays it out at Helvetica estimates, and the chart hydrating it
+measures it again.
 
 Charts and exporters take prepared fonts and reject a plain array with
 guidance to wrap it in `prepareFonts(...)`. Prepared fonts parse their faces
@@ -4498,10 +4541,11 @@ Fonts larger than 32 MiB and registries larger than 64 faces are refused.
 Input font checksums are intentionally unchecked because real fonts often have
 incorrect checksums; generated subsets receive fresh checksums.
 
-- Missing embedded-font coverage throws an error naming the Unicode scalar.
-  Add a covering family to the theme's font, a `fallback` family to the PDF
-  export, or explicitly set its `missingGlyph: "?"` (one covered standalone
-  scalar, replacing each uncovered grapheme cluster).
+- Text no face of the theme's font list covers throws in SVG and PDF export
+  alike, wherever it is drawn (an axis title nothing measures too), with an
+  error naming the Unicode scalar. Add a covering font and its family to the
+  theme's font, or in PDF export a `fallback` family or `missingGlyph: "?"`
+  (one covered standalone scalar, replacing each uncovered grapheme cluster).
 - Embedded text admits Latin, Greek, Cyrillic, Armenian, Georgian, Han,
   hiragana, katakana, precomposed Hangul syllables, and selected Common/Inherited
   punctuation, digits, symbols, and composable accents. Shared characters must
@@ -4511,8 +4555,9 @@ incorrect checksums; generated subsets receive fresh checksums.
   error naming the code point before fallback or replacement. Emoji modifier,
   flag, tag, and ZWJ sequences are refused before fallback or replacement.
   Joiners and variation sequences are also unsupported. Export these labels without
-  `fonts` (SVG and PNG then draw them with system fonts). CFF outlines, WOFF,
-  font collections, and uninstantiated variable fonts are refused.
+  `fonts` (SVG and PNG then draw them with system fonts). WOFF, font
+  collections, and variable fonts (instantiate a static font first) are
+  refused, and CFF outlines in PDF.
 - Font fallback selects one face per extended grapheme cluster. `Intl.Segmenter`
   supplies the boundaries when available. Otherwise conservative grouping joins
   combining marks, Grapheme_Extend characters (including halfwidth kana voiced
@@ -4549,7 +4594,7 @@ const chart = hydrateChart(host, options, initial);
 | --- | --- | --- |
 | `width`, `height` | CSS pixels | The size it is laid out at, which the browser's chart keeps until its host's size differs |
 | `idPrefix` | a name, `[A-Za-z][\w-]*` | Starts every id in the markup (clip paths, the description): unique in the page, and the same each time the page is made, so server and browser agree |
-| `fonts` | `prepareFonts(...)` from `herceg/fonts` | Fonts to measure text with; Helvetica estimates by default. The browser's chart must get the same fonts. |
+| `fonts` | `prepareFonts(...)` from `herceg/fonts` | Fonts to measure text with; Helvetica estimates by default, and for text they do not cover, which the page draws in its fonts and the browser's chart measures again. The browser's chart must get the same fonts. |
 | `locale`, `timeZone` | as the chart options | Used where the options set none: `"en-US"` and `"UTC"` by default. `"local"` is refused, as the server's zone need not be the reader's. |
 
 The snapshot is plain JSON: `html`, the chart's element; its size, ids,

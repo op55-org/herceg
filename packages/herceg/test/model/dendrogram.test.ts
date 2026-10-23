@@ -235,6 +235,8 @@ describe("dendrogram", () => {
       bytes: (_key: string, _stage: string, count: number) => new Uint8ClampedArray(count),
       plot: { x: 0, y: 0, width: 300, height: 100 },
       theme: LIGHT,
+      paint: (value: string) => value,
+      read: (style) => style,
       doubles: (_key: string, _stage: string, count: number) => new Float64Array(count),
       floats: (_key: string, _stage: string, count: number) => new Float32Array(count),
     } satisfies Frame;

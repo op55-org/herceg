@@ -25,7 +25,7 @@ import {
   type PointItems,
 } from "../scene/scene.ts";
 import type { Clip, Frozen, PointSpec } from "../spec/spec.ts";
-import { surface, type Theme } from "../theme.ts";
+import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { Appearance, scaleKey } from "./appearance.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
 import { legendParts } from "./legend-parts.ts";
@@ -45,12 +45,14 @@ import {
   frozen,
   type GlyphKey,
   type Hit,
+  type LegendScale,
   type MARK,
   type Mark,
   type MarkKey,
   type MarkSources,
   NUMERIC,
   type Palette,
+  painted,
   requireField,
   SeriesSplitter,
   type SummaryContext,
@@ -199,6 +201,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   readonly spec: Frozen<PointSpec>;
   readonly table: Table<Schema>;
   readonly identity: MarkSources;
+  readonly legendScales: readonly LegendScale[];
   readonly view: RowView | undefined;
   readonly tooltip = "point";
   /** A category `color` colors points through the chart's color scale (see model/features.ts). */
@@ -303,7 +306,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         if (spec.color !== series) this.#colorField = spec.color;
       }
     }
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "point");
     if (spec.radius !== undefined && !(spec.radius > 0 && Number.isFinite(spec.radius)))
       throw new RangeError(
@@ -346,6 +349,14 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
       this.#shapes = new Appearance(field);
       this.#symbol = "circle";
     }
+    // What guides may name: the series, and the fields that color, size,
+    // and shape points (a symbol field splitting series shows in its entries).
+    const scales: LegendScale[] = ["series"];
+    if (this.#toneField !== undefined) scales.push("ramp");
+    if (this.#colorField !== undefined) scales.push("key");
+    if (this.#sizeField !== undefined) scales.push("size");
+    if (this.#symbolField !== undefined && this.#symbolField !== series) scales.push("symbol");
+    this.legendScales = scales;
     const radius = this.#sizeField !== undefined ? range[1] : (spec.radius ?? DEFAULT_RADIUS);
     // Pointed shapes reach past the radius of a circle of the same area.
     const reach =
@@ -411,7 +422,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   }
 
   geometry(series: readonly Series[], frame: Frame): PointGeometry[] {
-    const encoding = this.#encoding(frame.theme, categoriesOf(series));
+    const encoding = this.#encoding(frame, categoriesOf(series));
     // With no color value at all, no point has the value it encodes.
     if (this.#toneField !== undefined && !encoding.color) return [];
     const radius = this.#radius;
@@ -443,7 +454,10 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     // Outlined points are drawn one by one, each outline over its point, on the CPU.
     const ring =
       this.#ringWidth > 0
-        ? { color: this.spec.stroke ?? surface(frame.theme), width: this.#ringWidth }
+        ? {
+            color: painted(frame.paint, this.spec.stroke, "point stroke") ?? surface(frame.theme),
+            width: this.#ringWidth,
+          }
         : undefined;
     const keyField = frame.keyed ? this.spec.animationKey : undefined;
     const keyKind = keyField === undefined ? undefined : this.table.kind(keyField);
@@ -612,7 +626,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   }
 
   /** How sizes, colors, and opacities follow their fields, with the current data. */
-  #encoding(theme: Theme, categories: CategoryColors | undefined): Encoding {
+  #encoding(frame: Frame, categories: CategoryColors | undefined): Encoding {
     const { table } = this;
     const out: Encoding = {};
     const radius = this.#radiusScale();
@@ -624,7 +638,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         return MIN_OPACITY + (1 - MIN_OPACITY) * fraction(value, lo, hi);
       };
     }
-    const color = this.#colorScale(theme);
+    const color = this.#colorScale(frame.theme, frame.paint);
     if (color) {
       out.color = color;
       out.palette = this.#palette(color);
@@ -653,13 +667,14 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   }
 
   /** The continuous color scale of a number or time `color` field, with the current data. */
-  #colorScale(theme: Theme): SequentialScale | undefined {
+  #colorScale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     if (this.#toneField === undefined) return undefined;
     const domain = spec.colorDomain ?? this.table.extent(this.#toneField as never);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "point colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   /** The scale's colors, kept while the scale's ramp, domain, and midpoint are unchanged. */
@@ -676,8 +691,9 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     series: readonly Series[],
     theme: Theme,
     format: (value: number) => string,
+    paint: PaintReader,
   ): LegendPart[] {
-    const scale = series.length > 0 ? this.#colorScale(theme) : undefined;
+    const scale = series.length > 0 ? this.#colorScale(theme, paint) : undefined;
     const ramps: ColorRamp[] = scale
       ? [
           {
@@ -696,12 +712,16 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
    * neutral color. An outline in a color of its own shows too, so hollow
    * points have a swatch; one in the background color only keeps points apart.
    */
-  legendEntry(s: Series, theme: Theme): { color: string; glyph: string; stroke?: string } {
+  legendEntry(
+    s: Series,
+    theme: Theme,
+    paint: PaintReader,
+  ): { color: string; glyph: string; stroke?: string } {
     const entry = {
       color: this.#toneField === undefined && !this.#colorField ? s.color : theme.muted,
       glyph: legendGlyph(this.#legendSymbol(s)).glyph,
     };
-    const stroke = this.spec.stroke;
+    const stroke = painted(paint, this.spec.stroke, "point stroke");
     return stroke !== undefined && this.#ringWidth > 0 ? { ...entry, stroke } : entry;
   }
 
@@ -820,7 +840,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   }
 
   /** The color a row's point is drawn in: its series', or from the `color` field. */
-  pointColor(s: Series, row: number, theme: Theme): string {
+  pointColor(s: Series, row: number, theme: Theme, paint: PaintReader): string {
     const categories = this.#colorField !== undefined ? s.features?.categories : undefined;
     if (categories) {
       const tone = categories.tones[categories.codes[row]!] ?? NONE;
@@ -828,7 +848,8 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     }
     if (this.#toneField === undefined) return s.color;
     return (
-      this.#colorScale(theme)?.color(this.table.numbers(this.#toneField as never)[row]!) ?? s.color
+      this.#colorScale(theme, paint)?.color(this.table.numbers(this.#toneField as never)[row]!) ??
+      s.color
     );
   }
 

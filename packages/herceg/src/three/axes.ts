@@ -8,7 +8,7 @@
 
 import { lineDrawing } from "../draw/line.ts";
 import { textDrawing } from "../draw/text.ts";
-import type { MeasureText } from "../layout/text.ts";
+import { type MeasureText, oneLineText } from "../layout/text.ts";
 import { Polyline } from "../lod/polyline.ts";
 import type { LineGeometry, Rect, TextGeometry } from "../scene/scene.ts";
 import type { Theme } from "../theme.ts";
@@ -227,7 +227,7 @@ function labelGeometry(
       axis.ticks.forEach((tick, i) => {
         const t = axis.place(tick);
         if (!(Math.abs(t) <= 1 + 1e-9)) return;
-        const text = axis.labels[i]!;
+        const text = oneLineText(axis.labels[i]!);
         const width = measure(text, font);
         const [px, py] = along(t);
         const [x, y] = pushed(px, py, width, height, GAP);
@@ -236,9 +236,10 @@ function labelGeometry(
       });
     }
     if (axis.title) {
-      const width = measure(axis.title, font);
+      const text = oneLineText(axis.title);
+      const width = measure(text, font);
       const [x, y] = pushed(mx, my, width, height, GAP + (extent > 0 ? extent + GAP : 0));
-      titles.push({ text: axis.title, x, y, width, height });
+      titles.push({ text, x, y, width, height });
     }
   }
   // Titles first, then each axis' labels thinned to every n-th until none

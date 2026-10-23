@@ -307,7 +307,7 @@ export class Cells {
         return { x: plot.x + plot.width + after[index]! - LEGEND_GAP - width - nearer, y };
       },
 
-      finish: (panels, views, theme, ratio) => {
+      finish: (panels, views, theme, ratio, paint) => {
         if (!layout.places.some(({ inset }) => inset)) return undefined;
         this.#apart();
         const viewOf = (i: number) => views.find(({ key }) => key === layout.order[i]);
@@ -362,6 +362,7 @@ export class Cells {
               scalesOf(j),
               this.#box(j),
               theme,
+              paint,
             );
             if (shown) panel.marks.push(shown);
           }

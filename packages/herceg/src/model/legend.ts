@@ -3,10 +3,20 @@
 // wrapping at its right edge; parts that break start a row of their own.
 
 import { type Align, alignedAt } from "../layout/place.ts";
-import { type MeasureText, textHalo, textHeight, textItem, textWidth } from "../layout/text.ts";
-import type { ColorRamp } from "../marks/mark.ts";
+import {
+  centeredLines,
+  lineCount,
+  type MeasureText,
+  textHalo,
+  textHeight,
+  textItem,
+  textWidth,
+} from "../layout/text.ts";
+import type { ColorRamp, Mark } from "../marks/mark.ts";
+import type { Series } from "../marks/series.ts";
 import { type Guide, type GuideItem, LEGEND_SWATCH, type LegendItem } from "../scene/scene.ts";
 import type { TextPaint } from "../style/style.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import type { PanelSplit } from "./panel-layout.ts";
 import type { PanelLegends } from "./panel-legends.ts";
 
@@ -18,6 +28,20 @@ const LEGEND_GAP = 16;
 
 /** A series' legend item before layout. */
 export type LegendEntry = Omit<LegendItem, "hidden" | "x" | "y">;
+
+/**
+ * The legend entry of `mark`'s series `s`: its identity's key and label in
+ * the mark's look; none for marks whose series' colors mean nothing.
+ */
+export function entryOf(
+  mark: Mark,
+  s: Series,
+  theme: Theme,
+  paint: PaintReader,
+): LegendEntry | undefined {
+  const entry = mark.legendEntry ? mark.legendEntry(s, theme, paint) : { color: s.color };
+  return entry ? { key: s.entry ?? s.key, label: s.entryLabel ?? s.label, ...entry } : undefined;
+}
 
 /**
  * The keys of series, items, and identities hidden through the legend and
@@ -89,6 +113,8 @@ export interface LegendText {
   surface: string;
   /** Reads the colors and font of styles legends set (see `ChartStyles.read`). */
   read?: <T extends object>(style: T, path: string) => T;
+  /** Reads the colors marks' options give, for their swatches (see `PaintReader`). */
+  paint?: PaintReader;
 }
 
 /**
@@ -210,11 +236,12 @@ export function measureLegends(
   text = { ...text };
   const { measure, label, lineHeight } = text;
   const legend: LegendItem[] = [];
-  // A row is as tall as the base text's line, or the labels' line and box.
+  // A row is as tall as the base text's line, or the labels' line and box,
+  // and a label's lines after the first.
   const entryHeight = Math.max(lineHeight, textHeight(label));
   const items: LegendFlowItem[] = content.entries.map((entry) => ({
     width: LEGEND_SWATCH + 6 + textWidth(entry.label, label, measure),
-    height: entryHeight,
+    height: entryHeight + (lineCount(entry.label) - 1) * label.lineHeight,
     gap: LEGEND_GAP,
     place: (x, y) => legend.push({ ...entry, hidden: content.hidden.has(entry.key), x, y }),
   }));
@@ -309,9 +336,17 @@ function entryItems(entries: readonly LegendItem[], text: LegendText): GuideItem
             opacity,
           },
     );
+    // Lines centered on the swatch.
+    const at = {
+      x: entry.x + LEGEND_SWATCH + 6,
+      y: entry.y,
+      anchor: "start",
+      baseline: "middle",
+      angle: 0,
+    } as const;
     const label = textItem(
       entry.label,
-      { x: entry.x + LEGEND_SWATCH + 6, y: entry.y, anchor: "start", baseline: "middle", angle: 0 },
+      centeredLines(entry.label, at, text.label),
       text.label,
       text.surface,
       text.measure,

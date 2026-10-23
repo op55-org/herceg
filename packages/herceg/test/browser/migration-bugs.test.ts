@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
+import { legend } from "../../src/guides/options.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import { text } from "../../src/marks/text.ts";
 import { modelOf } from "./helpers.ts";
@@ -110,3 +112,101 @@ it.each(["svg", "canvas"] as const)(
     chart.destroy();
   },
 );
+
+it("breaks labels into lines in Canvas text, the legend, and the tooltip", async () => {
+  const data = table({ x: [0, 1], y: [1, 2], s: ["North\nregion", "North\nregion"] });
+  const chart = createChart(host, {
+    renderer: "canvas",
+    legend: true,
+    theme: { tokens: { background: "transparent" } },
+    marks: [
+      line(data, { x: "x", y: "y", series: "s" }),
+      custom({ draw: (c) => c.text(300, 150, "WWWW\nWWWW", { fill: "#000000" }) }),
+    ],
+  });
+  try {
+    await chart.loading;
+    // Two lines of text on the canvas: ink at the middle of each, none between them.
+    const canvas = chart.root.querySelector("canvas")!;
+    const ratio = canvas.width / 600;
+    const ink = (y: number) => {
+      const row = canvas
+        .getContext("2d")!
+        .getImageData(
+          Math.floor(280 * ratio),
+          Math.floor(y * ratio),
+          Math.ceil(40 * ratio),
+          1,
+        ).data;
+      return row.some((value, i) => i % 4 === 3 && value > 0);
+    };
+    expect(ink(150 - 7.5)).toBe(true);
+    expect(ink(150 + 7.5)).toBe(true);
+    expect(ink(150)).toBe(false);
+    // The legend's entry writes its label in lines, as static output draws it.
+    const label = chart.root.querySelector<HTMLElement>("button span:last-child")!;
+    expect(label.textContent).toBe("North\nregion");
+    expect(getComputedStyle(label).whiteSpace).toBe("pre-line");
+    expect(label.getBoundingClientRect().height).toBeGreaterThan(25);
+    const model = modelOf(chart);
+    const rect = chart.root.getBoundingClientRect();
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + model.xScale()!.map(0),
+        clientY: rect.top + model.yScale()!.map(1),
+      }),
+    );
+    chart.render();
+    const box = [...chart.root.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+      (div) => div.style.display === "block",
+    )!;
+    const row = box.children[1] as HTMLElement;
+    expect(row.textContent).toContain("North\nregion");
+    expect(getComputedStyle(row).whiteSpace).toBe("pre");
+  } finally {
+    chart.destroy();
+  }
+});
+
+it.each(["svg", "canvas"] as const)(
+  "lists a mark left out of legends where a legend names its color, in %s",
+  async (renderer) => {
+    const data = table({ x: [0, 1, 0, 1], y: [1, 2, 3, 4], site: ["N", "N", "S", "S"] });
+    const chart = createChart(host, {
+      renderer,
+      guides: [legend({ scales: [{ mark: "curves", channel: "color" }] })],
+      marks: [line(data, { x: "x", y: "y", color: "site", id: "curves", legend: false })],
+    });
+    try {
+      await chart.loading;
+      const buttons = [...chart.root.querySelectorAll("button")].map((b) => b.textContent);
+      expect(buttons).toEqual(["N", "S"]);
+      expect(chart.toSVG()).toContain(">S<");
+    } finally {
+      chart.destroy();
+    }
+  },
+);
+
+it("keeps a legend label's lines under its halo", async () => {
+  const data = table({
+    x: [0, 1, 0, 1],
+    y: [1, 2, 3, 4],
+    s: ["two\nlines", "two\nlines", "b", "b"],
+  });
+  const chart = createChart(host, {
+    renderer: "svg",
+    theme: { style: { legendLabel: { halo: "auto" } } },
+    marks: [line(data, { x: "x", y: "y", series: "s" })],
+  });
+  try {
+    await chart.loading;
+    const label = chart.root.querySelector<HTMLElement>("button span:last-child")!;
+    expect(label.textContent).toBe("two\nlines");
+    expect(getComputedStyle(label).whiteSpace).toBe("pre-line");
+    expect(label.style.textShadow || label.style.webkitTextStroke).not.toBe("");
+  } finally {
+    chart.destroy();
+  }
+});

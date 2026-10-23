@@ -4,11 +4,14 @@ import { describe, expect, it } from "vitest";
 import { encodedCategory } from "../../src/data/column.ts";
 import { derive } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
+import { rowView } from "../../src/data/row-view.ts";
 import { table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
+import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
+import { point } from "../../src/marks/point.ts";
 import { needsFeatures } from "../../src/model/features.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
@@ -90,11 +93,85 @@ describe("colors by category", () => {
       site: encodedCategory(new Int32Array([2, 2, 1, 1]), dictionary),
     });
     const marks = [line(coded, { x: "t", y: "v", series: "site", color: "site" })];
-    // The series' order, the dictionary's, not the rows': the first color for the first drawn.
-    expect(strokes(build({ marks }))).toEqual([palette[0], palette[1]]);
-    // A declared color scale gives each value the place it has in the dictionary.
+    // Each value takes the slot of its place in the dictionary, used or not,
+    // as a declared color scale gives it.
+    expect(strokes(build({ marks }))).toEqual([palette[1], palette[2]]);
     const declared = build({ scales: { color: { type: "ordinal" } }, marks });
     expect(strokes(declared)).toEqual([palette[1], palette[2]]);
+  });
+
+  it("follow the dictionary of the field that colors, beside another splitting series", () => {
+    const coded = table({
+      t: [0, 1],
+      v: [1, 2],
+      group: ["g", "g"],
+      site: encodedCategory(new Int32Array([2, 2]), ["A", "B", "C"]),
+    });
+    const fills = (scene: Scene) =>
+      scene.panels[0]!.marks.flatMap((g) => ("fill" in g ? [g.fill] : []));
+    for (const marks of [
+      [line(coded, { x: "t", y: "v", series: "group", color: "site" })],
+      [line(coded, { x: "t", y: "v", color: "site" })],
+    ])
+      expect(strokes(build({ marks }))).toEqual([palette[2]]);
+    expect(
+      fills(build({ marks: [bar(coded, { x: "group", y: "v", series: "group", color: "site" })] })),
+    ).toContain(palette[2]);
+    // A mark of its own color takes no slots: the next mark's values start the palette.
+    const plain = table({ t: [0, 1], v: [1, 2], k: ["x", "x"] });
+    const scene = build({
+      marks: [
+        line(coded, { x: "t", y: "v", series: "site", stroke: "#999999" }),
+        line(plain, { x: "t", y: "v", color: "k" }),
+      ],
+    });
+    expect(strokes(scene)).toEqual(["#999999", palette[0]]);
+  });
+
+  it("give values a dictionary gains while data streams the slots after the others", () => {
+    const sites = table({ t: [0], v: [1], site: ["A"] }, { maxRows: 2 });
+    const chart = model({ marks: [line(sites, { x: "t", y: "v", color: "site" })] });
+    expect(strokes(chart.scene(estimateText))).toEqual([palette[0]]);
+    sites.append({ t: [1], v: [2], site: ["B"] });
+    // C arrives, and A and B leave, before the next scene draws B.
+    sites.append({ t: [2, 3], v: [3, 4], site: ["C", "C"] });
+    expect(strokes(chart.scene(estimateText))).toEqual([palette[2]]);
+  });
+
+  it("give values of a dictionary its table compacted the slots after the others", () => {
+    const keys = table({ t: [0], v: [1], k: ["K0"] }, { maxRows: 2 });
+    // Every row is drawn; the view below leaves out the rows of v 0.
+    const chart = model({
+      marks: [point(rowView(keys, { filter: col("v").gt(0.5) }), { x: "t", y: "v", color: "k" })],
+    });
+    const fills = (scene: Scene) =>
+      scene.panels[0]!.marks.flatMap((g) =>
+        g.kind === "point" ? [(g as PointGeometry).fill] : [],
+      );
+    chart.scene(estimateText);
+    for (let i = 1; i < 67; i++) keys.append({ t: [i], v: [1], k: [`K${i}`] });
+    chart.scene(estimateText);
+    // Two more go over the dictionary's limit: it keeps the live rows' K67 and K68.
+    keys.append({ t: [67, 68], v: [0, 1], k: ["K67", "K68"] });
+    expect(keys.categories("k").dictionary).toEqual(["K67", "K68"]);
+    expect(fills(chart.scene(estimateText))).toEqual([palette[68 % palette.length]]);
+  });
+
+  it("give values of a dictionary compacted and grown again between scenes their slots in its order", () => {
+    const keys = table({ t: [0, 1], v: [1, 1], k: ["A", "H"] }, { maxRows: 2 });
+    const chart = model({ marks: [point(keys, { x: "t", y: "v", color: "k" })] });
+    const fills = (scene: Scene) =>
+      scene.panels[0]!.marks.flatMap((g) =>
+        g.kind === "point" ? [(g as PointGeometry).fill] : [],
+      );
+    expect(fills(chart.scene(estimateText))).toEqual([palette[0], palette[1]]);
+    for (let i = 0; i < 65; i++) keys.append({ t: [2 + i], v: [1], k: [`X${i}`] });
+    keys.append({ t: [67, 68], v: [1, 1], k: ["B", "B"] });
+    keys.append({ t: [69, 70], v: [1, 1], k: ["H", "C"] });
+    // H is where it was, after B: B and C take the slots after A's and H's.
+    const { dictionary, revision } = keys.categories("k");
+    expect([dictionary, revision]).toEqual([["B", "H", "C"], 1]);
+    expect(fills(chart.scene(estimateText))).toEqual([palette[1], palette[3]]);
   });
 
   it("give a value one color across marks and panels that show different subsets", () => {

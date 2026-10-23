@@ -23,7 +23,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import { linearTicks, niceDomain } from "../scale/ticks.ts";
 import type { LineGeometry, PolygonGeometry } from "../scene/scene.ts";
 import type { Clip, ContourSpec, Frozen } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { contourFormError } from "./contour-input.ts";
 import { bandRings, GridTracer, type ScalarGrid, type Traced } from "./contour-trace.ts";
 import { distinct } from "./heatmap-cells.ts";
@@ -35,11 +35,13 @@ import {
   type Frame,
   frozen,
   type Hit,
+  type LegendScale,
   type MARK,
   type Mark,
   type MarkKey,
   NUMERIC,
   type Palette,
+  painted,
   requireField,
   type SummaryContext,
   seriesKey,
@@ -153,6 +155,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   readonly spec: Frozen<ContourSpec>;
   readonly table: Table<Schema>;
   readonly tooltip = "cell";
+  readonly legendScales: readonly LegendScale[];
   readonly summarizes = true;
   /** Automatic y domains end at the grid's edges rather than at round values. */
   readonly tight = true;
@@ -177,10 +180,12 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
         `contour variant: expected "lines" or "bands"; received ${JSON.stringify(variant)}`,
       );
     this.#bands = variant === "bands";
+    // Lines of one stroke color have no scale to show (see `legends`).
+    this.legendScales = this.#bands || spec.stroke === undefined ? ["ramp"] : [];
     const form = contourFormError(spec);
     if (form) throw new TypeError(form);
     checkThresholds(spec.thresholds);
-    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "contour colors");
+    if (Array.isArray(spec.colors)) checkRamp(spec.colors, "contour colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "contour");
     if (
       spec.strokeWidth !== undefined &&
@@ -255,10 +260,10 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   }
 
   /** The series' names and keys: a band per neighboring thresholds, or a line per threshold. */
-  #roster(key: MarkKey, theme: Theme, locale: string | undefined) {
+  #roster(key: MarkKey, { theme, paint, locale }: BandContext) {
     const levels = this.#levels();
     const f = (value: number) => formatNumber(value, locale);
-    const scale = this.#colorScale(theme);
+    const scale = this.#colorScale(theme, paint);
     if (this.#bands)
       return levels.slice(0, -1).map((lo, i) => {
         const hi = levels[i + 1]!;
@@ -272,7 +277,8 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     return levels.map((level) => ({
       key: seriesKey(key, `${level}`),
       label: f(level),
-      color: this.spec.stroke ?? scale?.color(level) ?? theme.text,
+      color:
+        painted(paint, this.spec.stroke, "contour stroke") ?? scale?.color(level) ?? theme.text,
       level,
     }));
   }
@@ -285,7 +291,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     context: BandContext,
     split = false,
   ): Series[] {
-    const roster = this.#roster(key, context.theme, context.locale);
+    const roster = this.#roster(key, context);
     if (split) return roster.map((entry) => withoutParts(entry.key, entry.label, entry.color));
     return this.#seriesOf(roster, undefined);
   }
@@ -450,12 +456,13 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   }
 
   /** The scale coloring contours: over `colorDomain`, or the field's extent. */
-  #colorScale(theme: Theme): SequentialScale | undefined {
+  #colorScale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     const domain = spec.colorDomain ?? this.#valueExtent();
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
-    return new SequentialScale(domain, rampOf(spec.colors, fallback), spec.colorMidpoint);
+    const ramp = rampOf(spec.colors, fallback, paint, "contour colors");
+    return new SequentialScale(domain, ramp, spec.colorMidpoint);
   }
 
   /** Contours are colored by value: the legend lists the bands, or the lines of the ramp. */
@@ -468,7 +475,12 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
    * level; a colorbar of it draws the bands at their levels, or the lines'
    * ramp.
    */
-  legends(series: readonly Series[], theme: Theme): LegendPart[] {
+  legends(
+    series: readonly Series[],
+    theme: Theme,
+    _format: unknown,
+    paint: PaintReader,
+  ): LegendPart[] {
     if (series.length === 0 || (!this.#bands && this.spec.stroke !== undefined)) return [];
     const glyph = this.#bands ? "M-5,-5h10v10h-10Z" : "M-6,-1h12v2h-12Z";
     const title = this.spec.label ?? this.spec.color;
@@ -477,7 +489,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       channel: "color",
       entries: series.map((s) => ({ label: s.label, glyph, r: 5, color: s.color })),
     });
-    const scale = this.#colorScale(theme);
+    const scale = this.#colorScale(theme, paint);
     const colorbar: LegendPart["colorbar"] = this.#bands
       ? { kind: "steps", title, levels: this.#levels(), colors: series.map((s) => s.color) }
       : scale &&

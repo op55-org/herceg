@@ -35,6 +35,7 @@ import {
   type MarkSources,
   NUMERIC,
   type Palette,
+  painted,
   requireField,
   type SelectionDrawing,
   SeriesSplitter,
@@ -582,7 +583,8 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
         const id = seriesKey(key, name);
         const series = this.spec.series === undefined ? label : name;
         const color = palette(id, series, this.spec.fill);
-        return this.#series(id, series, this.spec.fill ?? color, NO_ROWS, NO_ROWS, NO_ROWS, 0);
+        const own = painted(context.paint, this.spec.fill, `${this.spec.type} fill`);
+        return this.#series(id, series, own ?? color, NO_ROWS, NO_ROWS, NO_ROWS, 0);
       });
     }
     const summary = this.#wholeSummary();

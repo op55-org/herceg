@@ -4,7 +4,7 @@
 
 import { checkSimpleText, graphemeClusters } from "../fonts/clusters.ts";
 import type { FontSource } from "../fonts/registry.ts";
-import { canvasMeasurer, type MeasureText, parseFont } from "../layout/text.ts";
+import { canvasMeasurer, type MeasureText, parseFont, widestLine } from "../layout/text.ts";
 import { faceKey } from "./font-claims.ts";
 import { facesLoaded } from "./measurers.ts";
 
@@ -52,7 +52,7 @@ export function fallbackMeasure(document: Document): MeasureText {
       return width;
     };
     const widths = new Map<string, number>();
-    measure = (text, css) => {
+    const line: MeasureText = (text, css) => {
       const key = `${css}|${text}`;
       let width = widths.get(key);
       if (width === undefined) {
@@ -75,6 +75,7 @@ export function fallbackMeasure(document: Document): MeasureText {
       }
       return width;
     };
+    measure = (text, css) => widestLine(text, (one) => line(one, css));
     fallbacks.set(document, measure);
   }
   return measure;

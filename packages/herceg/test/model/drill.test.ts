@@ -106,6 +106,19 @@ describe("drilled treemaps", () => {
     );
   });
 
+  it("write the path's steps on one line, as wide as that line", () => {
+    const places = table({ region: ["North\nEurope", "South"], city: ["Oslo", "Rome"], v: [2, 1] });
+    const { model } = build({
+      marks: [treemap(places, { path: ["region", "city"], value: "v" })],
+      interaction: { zoom: true },
+    });
+    model.items!.setDrillRoot('[0,"North\\nEurope"]');
+    const next = model.scene(estimateText);
+    const labels = texts(next).flatMap((t) => t.labels);
+    expect(labels).toContain("North Europe");
+    expect(labels.some((label) => label.includes("\n"))).toBe(false);
+  });
+
   it("fold a deep path into the room, every step still a crumb", () => {
     // Department 1 holds Department 2, and so on down to 9, each with a team of its own.
     const names = Array.from({ length: 9 }, (_, i) => `Department ${i + 1}`);

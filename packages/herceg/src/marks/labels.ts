@@ -10,7 +10,7 @@ import type { LabelsGeometry, TextGeometry } from "../scene/scene.ts";
 import type { Frozen } from "../spec/spec.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
 import { type TextPaint, textPaint } from "../style/style.ts";
-import type { Theme } from "../theme.ts";
+import { surface, type Theme } from "../theme.ts";
 import type { Frame } from "./mark.ts";
 
 /**
@@ -33,11 +33,16 @@ export function plainText(paint: TextPaint, theme: Theme): boolean {
     paint.weight === 400 &&
     !paint.italic &&
     paint.opacity === 1 &&
+    paint.lineHeight === theme.style.text.lineHeight &&
     !paint.background
   );
 }
 
-/** A label to draw: its text and where its anchor is, with its anchor and baseline. */
+/**
+ * A label to draw: its text and where its anchor is, with its anchor and
+ * baseline. A label of several lines is placed by its first line, the
+ * others following a line height apart.
+ */
 export interface PlacedLabel {
   text: string;
   x: number;
@@ -58,17 +63,24 @@ export function labelsGeometry(
   halo: Halo | undefined,
   frame: Frame,
 ): LabelsGeometry {
-  const ring = labelHalo(halo, paint.color, frame);
-  const surface = frame.surface ?? frame.theme.background;
+  // Text in a box is drawn on the box.
+  const ring = labelHalo(
+    halo,
+    paint.background ? { ...frame, surface: paint.background.fill } : frame,
+  );
+  const under = frame.surface ?? surface(frame.theme);
   const items = labels.map(({ text, x, y, anchor, baseline }) => {
     const at: TextAt = { x, y, anchor, baseline, angle: 0 };
-    const item = textItem(text, at, paint, surface, frame.measure);
+    const item = textItem(text, at, paint, under, frame.measure);
     return ring ? { ...item, halo: ring } : item;
   });
   return { kind: "labels", draw: labelsDrawing, key, items };
 }
 
-/** The geometry of labels in plain text of one color, anchor, and vertical middle. */
+/**
+ * The geometry of labels in plain text of one color, anchor, and vertical
+ * middle, each label's lines centered on its point (its `y` is their middle).
+ */
 export function textGeometry(
   key: string,
   labels: readonly PlacedLabel[],
@@ -87,7 +99,7 @@ export function textGeometry(
     key,
     fill,
     anchor: labels[0]?.anchor ?? "middle",
-    halo: labelHalo(halo, fill, frame),
+    halo: labelHalo(halo, frame),
     coords,
     labels: labels.map((label) => label.text),
     count: labels.length,

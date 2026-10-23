@@ -40,11 +40,12 @@ export class Tooltip {
     const document = element.ownerDocument;
     const header = document.createElement("div");
     header.textContent = inspection.label;
-    header.style.cssText = `color:${theme.muted};margin-bottom:2px`;
+    // Line breaks in labels break the tooltip's lines too.
+    header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
     element.append(header);
     for (const point of inspection.points) {
       const row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:6px";
+      row.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
       const swatch = document.createElement("span");
       swatch.style.cssText = `width:8px;height:8px;border-radius:2px;background:${point.color};flex:none`;
       const label = document.createElement("span");

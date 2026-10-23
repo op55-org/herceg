@@ -83,11 +83,12 @@ export function ownContent(tooltip: Tooltip, render: () => RenderTooltip | undef
   const builtIn = (inspection: Inspection, theme: Theme) => {
     const header = document.createElement("div");
     header.textContent = inspection.label;
-    header.style.cssText = `color:${theme.muted};margin-bottom:2px`;
+    // Line breaks in labels break the tooltip's lines too.
+    header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
     element.append(header);
     const row = (name: string, text: string, color?: string) => {
       const line = document.createElement("div");
-      line.style.cssText = "display:flex;align-items:center;gap:6px";
+      line.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
       const swatch = document.createElement("span");
       swatch.style.cssText = `width:8px;height:8px;border-radius:2px;background:${color ?? "none"};flex:none`;
       const label = document.createElement("span");

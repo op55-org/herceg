@@ -28,3 +28,10 @@ versions 2–4 at 96 bytes, and version 5 at 100 bytes, plus truncated variants.
 It sets legacy bitmap/no-subsetting bits to test that versions 0–1 ignore them.
 The same tests rebuild composite glyphs with XY placement, point attachments,
 nested outlines, phantom-point boundaries, and conflicting transform flags.
+
+`sans-cff.otf` is the sans face with CFF outlines, for tests of faces that
+measure and draw in SVG and PNG but do not embed in PDF. It was made from
+`sans.ttf` with fontTools 4.66.1 (`FontBuilder.setupCFF`, each glyph drawn
+through `T2CharStringPen`, so its outlines are the TrueType ones as cubic
+curves), keeping `sans.ttf`'s glyph order, character map, horizontal metrics,
+OS/2 values, and name table.

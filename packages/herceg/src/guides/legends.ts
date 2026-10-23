@@ -4,6 +4,7 @@
 // Each legend claims the scales it shows; the automatic legend shows the
 // rest.
 
+import type { LegendScale } from "../marks/mark.ts";
 import type { SeriesSwatch } from "../model/features.ts";
 import type { GuideKit, PlacedLegend } from "../model/guides.ts";
 import type { MarkSeries } from "../model/inspect.ts";
@@ -29,9 +30,12 @@ import type {
   ScaleRef,
   SwatchSpec,
 } from "../spec/spec.ts";
-import type { Theme } from "../theme.ts";
+import type { PaintReader, Theme } from "../theme.ts";
 import { type ColorbarPlan, measureColorbar, plannedColorbars } from "./colorbars.ts";
 import { type Read, restyle } from "./paints.ts";
+
+/** Colors as given, for legends laid out without a chart reading them. */
+const same: PaintReader = (value) => value;
 
 /** The square swatch, as the automatic legend draws it, and a line sample's length. */
 const SWATCH = 10;
@@ -123,6 +127,9 @@ function placeOf(guide: LegendGuideSpec): Place {
     : { ...place, scope: "panel", panel };
 }
 
+/** What guides may name of a mark with an identity that declares nothing (see `Mark.legendScales`). */
+const SERIES: readonly LegendScale[] = ["series"];
+
 /** The legends of `plans`, measured as the model asks (see `CompiledGuides.legends`). */
 export function compiledLegends(
   kit: GuideKit,
@@ -141,7 +148,42 @@ export function compiledLegends(
     chart: { readonly width: number; readonly height: number },
   ): PlacedLegend[] => {
     const owners = ownersOf(marks);
-    const partsOf = partOwners(kit, marks, theme, text.locale);
+    const paint = text.paint ?? same;
+    const partsOf = partOwners(kit, marks, theme, text.locale, paint);
+    // Marks left out of legends (`legend: false`) are left out of those
+    // that show what no guide names; guides naming them show them. Their
+    // entries come after the others', which keep their looks.
+    const unlisted = new Set<string | number>();
+    // Marks whose color field splits their series: their colors are the series'.
+    const split = new Set<string | number>();
+    const entries = [...content.entries];
+    const keys = new Set(entries.map(({ key }) => key));
+    marks.forEach(({ mark, series }, index) => {
+      const id = mark.spec.id ?? index;
+      const { color, encode } = mark.spec as {
+        color?: string;
+        encode?: { color?: { field?: string } };
+      };
+      const field = mark.identity?.field;
+      if (field !== undefined && (encode?.color?.field ?? color) === field) split.add(id);
+      if (mark.spec.legend !== false) return;
+      unlisted.add(id);
+      for (const s of series) {
+        const entry = kit.entryOf(mark, s, theme, paint);
+        if (!entry || keys.has(entry.key)) continue;
+        keys.add(entry.key);
+        entries.push(entry);
+      }
+    });
+    const allParts = [...content.parts];
+    for (const [key, { part }] of partsOf)
+      if (!allParts.some((shown) => shown.key === key)) allParts.push(part);
+    // Whether a scale a mark owns is one `ref` names: a mark's "color" is
+    // its series' where its color splits them.
+    const names = (ref: ScaleRef, mark: string | number, channel: string) =>
+      ref.mark === mark &&
+      (ref.channel === channel ||
+        (ref.channel === "color" && channel === "series" && split.has(mark)));
     // Panels' legends list what their panels draw, and the chart's what they
     // do not; where panels show or hide series of their own, the chart's
     // entries say so (see model/panel-legends.ts, loaded with subplots).
@@ -153,40 +195,80 @@ export function compiledLegends(
         path: `${ofPanels.path}.panel`,
         message: `${ofPanels.path}.panel: lists a subplot's marks, and the chart has no subplots; drop panel`,
       });
+    // Marks legends name, which panels' legends list whatever their `legend`.
+    const named = new Set(plans.flatMap((plan) => plan.sources?.map(({ mark }) => mark) ?? []));
     const inPanels =
       Legends && (ofPanels || content.hidden.panels?.size)
-        ? new Legends(content, owners, partsOf, theme, text.locale)
+        ? new Legends(content, owners, partsOf, theme, text.locale, paint, named)
         : undefined;
     for (const plan of plans) if (plan.panel !== undefined) inPanels!.check(plan.panel, plan.path);
-    const named = (ref: ScaleRef, path: string) => {
+    // A reference names a mark and a scale its options give it (see
+    // `Mark.legendScales`), whatever its rows hold now: one naming no such
+    // scale is a mistake, not an empty legend; one whose scale shows
+    // nothing yet shows nothing until it does.
+    const resolve = (ref: ScaleRef, path: string): readonly LegendScale[] => {
       if (layouts.has(ref.mark))
         throw new Error(
           `${path}: mark "${ref.mark}" draws its own layout, whose scales the automatic legend shows; drop the reference`,
         );
-      if (!marks.some(({ mark }) => mark.spec.id === ref.mark))
+      const target = marks.find(({ mark }) => mark.spec.id === ref.mark);
+      if (!target)
         throw new Error(`${path}: no mark has id "${ref.mark}"; give the mark id: "${ref.mark}"`);
+      const { mark } = target;
+      const scales = mark.legendScales ?? (mark.identity ? SERIES : []);
+      const owned = new Set<string>(
+        scales.map((scale) => (scale === "ramp" || scale === "key" ? "color" : scale)),
+      );
+      // A color splitting series is theirs.
+      if (split.has(ref.mark)) owned.add("color");
+      if (owned.has(ref.channel)) return scales;
+      const has = [...owned].map((channel) => `channel: "${channel}"`).join(" or ");
+      throw new Error(
+        `${path}.channel: mark "${ref.mark}" has no "${ref.channel}" scale${
+          has
+            ? `; name one it has, as ${has}`
+            : ", nor another a legend shows; name a mark that colors, sizes, or shapes by a field, or drop the reference"
+        }`,
+      );
     };
     // Colorbars claim the color scales they show from every legend.
     const barred = new Set<string>();
-    const bars = colorbars.map((plan): PlacedLegend => {
-      if (plan.scale) named(plan.scale, `${plan.path}.scale`);
-      const part = colorbarPart(plan, partsOf, content.parts);
+    const bars = colorbars.flatMap((plan): PlacedLegend[] => {
+      const ref = plan.scale;
+      if (ref && ref.channel !== "color")
+        throw new Error(
+          `${plan.path}.scale.channel: a colorbar shows a color scale; give channel: "color"`,
+        );
+      if (ref && !resolve(ref, `${plan.path}.scale`).includes("ramp"))
+        throw new Error(
+          `${plan.path}.scale: mark "${ref.mark}" has no color scale a colorbar shows; color it by a number field, or name another mark`,
+        );
+      // A ramp of no values yet is drawn once it has some.
+      const part = colorbarPart(plan, partsOf, content.parts, unlisted, () =>
+        marks.some(
+          ({ mark }, index) =>
+            !unlisted.has(mark.spec.id ?? index) && !!mark.legendScales?.includes("ramp"),
+        ),
+      );
+      if (!part) return [];
       barred.add(part.key);
-      return {
-        key: plan.key,
-        place: plan.place,
-        measured: measureColorbar(kit, plan, part.colorbar!, text, theme, chart),
-      };
+      return [
+        {
+          key: plan.key,
+          place: plan.place,
+          measured: measureColorbar(kit, plan, part.colorbar!, text, theme, chart),
+        },
+      ];
     });
     // What the chart's listed legends show, which the automatic one leaves
     // to them; a panel's legend covers what it lists in its panel only (see
     // the automatic legend's below).
-    const claimed = new Set<string>();
+    const claimed: ScaleRef[] = [];
     const all = plans.some((plan) => !plan.automatic && !plan.sources && plan.panel === undefined);
     for (const plan of plans)
       plan.sources?.forEach((ref, k) => {
-        named(ref, `${plan.path}.scales[${k}]`);
-        if (plan.panel === undefined) claimed.add(`${ref.mark}|${ref.channel}`);
+        resolve(ref, `${plan.path}.scales[${k}]`);
+        if (plan.panel === undefined) claimed.push(ref);
       });
     // What each legend lists: entries (of what its panel draws, for a
     // panel's) and parts that the marks it shows own.
@@ -194,13 +276,17 @@ export function compiledLegends(
       // What a listed legend shows, of what marks own (an entry, a part
       // marks share): the automatic legend shows what none of them claims.
       const shows = (owned: readonly { mark: string | number; channel: string }[]) =>
-        plan.automatic
-          ? !all && !owned.some(({ mark, channel }) => claimed.has(`${mark}|${channel}`))
-          : !plan.sources ||
-            owned.some(({ mark, channel }) =>
-              plan.sources!.some((ref) => ref.mark === mark && ref.channel === channel),
-            );
-      const parts = content.parts.filter((part) => {
+        plan.sources
+          ? owned.some(({ mark, channel }) =>
+              plan.sources!.some((ref) => names(ref, mark, channel)),
+            )
+          : owned.some(({ mark }) => !unlisted.has(mark)) &&
+            (!plan.automatic ||
+              (!all &&
+                !owned.some(({ mark, channel }) =>
+                  claimed.some((ref) => names(ref, mark, channel)),
+                )));
+      const parts = allParts.filter((part) => {
         const shared = partsOf.get(part.key);
         return !barred.has(part.key) && (!shared || shows(shared.owners));
       });
@@ -216,17 +302,20 @@ export function compiledLegends(
           plan,
           ...inPanels!.listed(
             plan.panel,
-            content.entries,
+            entries,
             parts,
             shows,
             targeted && new Set(targeted.map(({ key }) => key)),
           ),
         };
       }
-      const entries = content.entries.filter(({ key }) =>
-        shows((owners.get(key) ?? [""]).map((mark) => ({ mark, channel: "series" }))),
-      );
-      return { plan, entries, parts };
+      return {
+        plan,
+        entries: entries.filter(({ key }) =>
+          shows((owners.get(key) ?? [""]).map((mark) => ({ mark, channel: "series" }))),
+        ),
+        parts,
+      };
     });
     return listed
       .map(({ plan, entries, parts }): PlacedLegend => {
@@ -266,30 +355,28 @@ export function compiledLegends(
 
 /**
  * The legend part of the color scale a colorbar shows: of the mark its
- * `scale` names, or the chart's only one.
+ * `scale` names (a ramp, checked), or the chart's only one; none while the
+ * ramp has no values, or while no mark of one (`ramped`) has.
  */
 function colorbarPart(
   plan: ColorbarPlan,
   owners: ReturnType<typeof partOwners>,
   shown: readonly LegendPart[],
-): LegendPart {
+  unlisted: ReadonlySet<string | number>,
+  ramped: () => boolean,
+): LegendPart | undefined {
   const ref = plan.scale;
-  if (ref && ref.channel !== "color")
-    throw new Error(
-      `${plan.path}.scale.channel: a colorbar shows a color scale; give channel: "color"`,
-    );
   const candidates = new Map<string, LegendPart>();
   for (const [key, shared] of owners)
-    if (shared.part.colorbar && (!ref || shared.owners.some(({ mark }) => mark === ref.mark)))
+    if (
+      shared.part.colorbar &&
+      shared.owners.some(({ mark }) => (ref ? mark === ref.mark : !unlisted.has(mark)))
+    )
       candidates.set(key, shared.part);
   // Layout marks' color scales (a choropleth's) are among the parts the chart shows.
   if (!ref) for (const part of shown) if (part.colorbar) candidates.set(part.key, part);
   const found = [...candidates.values()];
-  if (found.length === 1) return found[0]!;
-  if (ref)
-    throw new Error(
-      `${plan.path}.scale: mark "${ref.mark}" has no color scale a colorbar shows; color it by a number field, or name another mark`,
-    );
+  if (ref || found.length === 1 || (found.length === 0 && ramped())) return found[0];
   throw new Error(
     found.length === 0
       ? `${plan.path}: the chart has no color scale a colorbar shows; color a heatmap, contour, or points by a number field`
@@ -322,6 +409,7 @@ function partOwners(
   marks: readonly MarkSeries[],
   theme: Theme,
   locale: string | undefined,
+  paint: PaintReader,
 ) {
   const owners = new Map<
     string,
@@ -329,9 +417,7 @@ function partOwners(
   >();
   const format = (value: number) => kit.formatNumber(value, locale);
   marks.forEach(({ mark, series }, index) => {
-    // Marks left out of legends are left out of colorbars too.
-    if (mark.spec.legend === false) return;
-    for (const part of mark.legends?.(series, theme, format) ?? []) {
+    for (const part of mark.legends?.(series, theme, format, paint) ?? []) {
       // Keys of sizes and shapes say so; ramps and color keys show color.
       const channel: ScaleRef["channel"] =
         part.channel === "size" ? "size" : part.channel === "shape" ? "symbol" : "color";
@@ -406,6 +492,7 @@ function measureLegend(
   const text: LegendText = { ...shared, ...paints(kit, shared, options.style, `${path}.style`) };
   const { measure } = text;
   const looks = drawn ? marks.filter(({ mark }, m) => drawn.has(mark.spec.id ?? m)) : marks;
+  const paint = text.paint ?? same;
   let rows = options.entries
     ? custom(
         kit,
@@ -415,17 +502,17 @@ function measureLegend(
         theme,
         path,
         text.read ?? ((given) => given),
+        paint,
         plan.panel,
       )
-    : derived(kit, options, content, looks, theme);
+    : derived(kit, options, content, looks, theme, paint, plan.sources);
   if (targets && !options.entries)
     rows = rows.map((row) => ({ ...row, targets: targets.get(row.key) ?? row.targets }));
   // Every entry's swatch takes the widest one's room, and its row the tallest's.
   const swatch = Math.max(SWATCH, ...rows.map((row) => row.sample?.width ?? 0));
   const entryHeight = Math.max(
     text.lineHeight,
-    kit.textHeight(text.label),
-    ...rows.map((row) => row.sample?.height ?? 0),
+    ...rows.map((row) => Math.max(kit.textHeight(text.label, row.label), row.sample?.height ?? 0)),
   );
   const widths = rows.map(
     (row) => swatch + LABEL_GAP + kit.textWidth(row.label, text.label, measure),
@@ -447,7 +534,7 @@ function measureLegend(
     title?.style,
     `${path}.title.style`,
   );
-  const titleHeight = title ? kit.textHeight(titlePaint) : 0;
+  const titleHeight = title ? kit.textHeight(titlePaint, title.text) : 0;
   const entriesHeight = entryRows ? entryRows * entryHeight + (entryRows - 1) * ROW_GAP : 0;
   // The parts (color ramps, keys) flow under the entries, each as its flow items say.
   const out: LegendOut = { guides: [], finish: [] };
@@ -589,18 +676,24 @@ function derived(
   content: LegendContent,
   marks: readonly MarkSeries[],
   theme: Theme,
+  paint: PaintReader,
+  sources: readonly ScaleRef[] | undefined,
 ): Row[] {
-  // The marks and series each entry stands for, for their looks.
+  // The marks and series each entry stands for, for their looks: of marks
+  // left out of legends too, where the legend names them.
   const shown = new Map<
     string,
     { mark: MarkSeries["mark"]; series: MarkSeries["series"][number] }[]
   >();
+  const listed = (mark: MarkSeries["mark"]) =>
+    mark.spec.legend !== false || !!sources?.some((ref) => ref.mark === mark.spec.id);
   if (options.swatches === "mark")
     for (const { mark, series } of marks)
-      for (const s of mark.spec.legend === false ? [] : series) {
-        const key = s.entry ?? s.key;
-        shown.set(key, [...(shown.get(key) ?? []), { mark, series: s }]);
-      }
+      if (listed(mark))
+        for (const s of series) {
+          const key = s.entry ?? s.key;
+          shown.set(key, [...(shown.get(key) ?? []), { mark, series: s }]);
+        }
   // Layout marks' items standing for an entry, in their colors and glyphs.
   const items = new Map<string, LegendEntry[]>();
   if (options.swatches === "mark")
@@ -614,12 +707,20 @@ function derived(
         // as their mark lists them (a point's symbol, a line's stroke).
         const own = series.features?.swatch?.(theme);
         if (own) return swatchItems(kit, own);
-        const listed = mark.legendEntry ? mark.legendEntry(series, theme) : { color: series.color };
+        const listed = mark.legendEntry
+          ? mark.legendEntry(series, theme, paint)
+          : { color: series.color };
         return listed
-          ? sampleOf(kit, mark.spec, { key: entry.key, label: entry.label, ...listed }, theme)
+          ? sampleOf(
+              kit,
+              mark.spec,
+              { key: entry.key, label: entry.label, ...listed },
+              theme,
+              paint,
+            )
           : undefined;
       }),
-      ...(items.get(entry.key) ?? []).map((item) => sampleOf(kit, undefined, item, theme)),
+      ...(items.get(entry.key) ?? []).map((item) => sampleOf(kit, undefined, item, theme, paint)),
     ];
     // Marks drawing it differently each show their look, once: a line over
     // boxes, a box under lines, and looks that would hide one another (boxes
@@ -672,6 +773,7 @@ function custom(
   theme: Theme,
   path: string,
   read: Read,
+  paint: PaintReader,
   /** A panel's legend's: it toggles marks of that panel only. */
   panel: string | undefined,
 ): Row[] {
@@ -705,7 +807,8 @@ function custom(
       const { mark, series } = find(spec.sample.mark, `${at}.sample.mark`);
       // As the mark's own entries look: its first series' color, and a point's symbol.
       const s = series[0];
-      const look = (s && mark.legendEntry?.(s, theme)) || (s && { color: s.color }) || undefined;
+      const look =
+        (s && mark.legendEntry?.(s, theme, paint)) || (s && { color: s.color }) || undefined;
       color = look?.color ?? color;
       sample = sampleOf(
         kit,
@@ -718,6 +821,7 @@ function custom(
           ...(look?.stroke && { stroke: look.stroke }),
         },
         theme,
+        paint,
       );
     }
     return {
@@ -742,6 +846,7 @@ function sampleOf(
   spec: object | undefined,
   entry: LegendEntry,
   theme: Theme,
+  paint: PaintReader,
 ): Row["sample"] {
   const mark = (spec ?? {}) as {
     type?: string;
@@ -781,14 +886,14 @@ function sampleOf(
     case "rule":
       return swatchItems(kit, {
         type: "line",
-        stroke: mark.stroke ?? theme.muted,
+        stroke: mark.stroke === undefined ? theme.muted : paint(mark.stroke, "rule stroke"),
         strokeWidth: mark.strokeWidth ?? 1,
         dash: mark.dash ?? [4, 4],
       });
     case "region":
       return swatchItems(kit, {
         type: "rect",
-        fill: mark.fill ?? theme.muted,
+        fill: mark.fill === undefined ? theme.muted : paint(mark.fill, "region fill"),
         opacity: mark.fillOpacity ?? 0.15,
       });
     case "area": {
@@ -802,7 +907,8 @@ function sampleOf(
       return swatchItems(kit, {
         type: "rect",
         fill: entry.color,
-        ...(mark.type === "bar" && mark.stroke !== undefined && { stroke: mark.stroke }),
+        ...(mark.type === "bar" &&
+          mark.stroke !== undefined && { stroke: paint(mark.stroke, "bar stroke") }),
         ...(mark.fillOpacity !== undefined && { fillOpacity: mark.fillOpacity }),
         ...(mark.opacity !== undefined && { opacity: mark.opacity }),
       });
@@ -959,9 +1065,11 @@ function entryItems(
       fill: entry.color,
       opacity,
     });
+  // Lines centered on the swatch.
+  const y = entry.y - ((entry.label.split("\n").length - 1) * text.label.lineHeight) / 2;
   const label = kit.textItem(
     entry.label,
-    { x: entry.x + swatch + LABEL_GAP, y: entry.y, anchor: "start", baseline: "middle", angle: 0 },
+    { x: entry.x + swatch + LABEL_GAP, y, anchor: "start", baseline: "middle", angle: 0 },
     text.label,
     text.surface,
     text.measure,

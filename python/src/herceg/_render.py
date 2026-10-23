@@ -362,12 +362,16 @@ def pdf(
     try:
         encoded = _call("hercegStatic.pdf", json.dumps(spec), encoded_buffers, json.dumps(options))
     except ChartError as error:
+        message = str(error)
+        # Text the fonts do not cover is refused as SVG and PNG export refuse it.
+        if message.startswith("fonts do not cover"):
+            message = "to_pdf fonts: " + message.removeprefix("fonts ")
         raise _reworded(
             error,
-            str(error)
-            .replace("renderToPDF", "to_pdf")
+            message.replace("renderToPDF", "to_pdf")
             .replace("specToPDF", "to_pdf")
-            .replace("pageSize", "page_size"),
+            .replace("pageSize", "page_size")
+            .replace("missingGlyph", "missing_glyph"),
         ) from None
     return base64.b64decode(encoded)
 

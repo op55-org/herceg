@@ -24,7 +24,7 @@ import type { ChannelSpec, OrdinalScaleSpec, SymbolName } from "../../spec/encod
 import type { ChartErrorCode } from "../../spec/errors.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
 import type { AreaSpec, BarSpec, LineSpec, PointSpec } from "../../spec/spec.ts";
-import type { Theme } from "../../theme.ts";
+import type { PaintReader, Theme } from "../../theme.ts";
 import type { Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
 import {
@@ -125,7 +125,7 @@ function compile(
       });
     };
   const zone = config.timeZone ?? "local";
-  const byMark = new Map<Mark, MarkFeatures & { use(theme: Theme): void }>();
+  const byMark = new Map<Mark, MarkFeatures & { use(theme: Theme, paint: PaintReader): void }>();
   const declared = config.scales?.color !== undefined;
   // What series and rows stand for beyond the core's scopes, whose hidden keys stay.
   const prefixes = new Set<string>();
@@ -204,6 +204,7 @@ function compile(
   }
   // Layout marks' items follow a declared color scale too, reading their fields' values into it.
   let theme: Theme | undefined;
+  let paint: PaintReader | undefined;
   const colorScale = declared ? (scales.get("color") ?? scaleOf("color", undefined)) : undefined;
   if (colorScale) prefixes.add(scalePrefix("color"));
   if (colorScale)
@@ -217,14 +218,16 @@ function compile(
     scopes: prefixes,
     items: colorScale && {
       prefix: scalePrefix("color"),
-      color: (value) => theme && colorScale.output(value, theme.palette, theme.muted),
+      color: (value) =>
+        theme && paint!(colorScale.output(value, theme.palette, theme.muted), "chart scales.color"),
     },
     of: (mark) => byMark.get(mark),
-    update(t, slot) {
+    update(t, slot, p) {
       theme = t;
+      paint = p;
       chart.slot = slot;
       for (const scale of scales.values()) scale.update();
-      for (const features of byMark.values()) features.use(t);
+      for (const features of byMark.values()) features.use(t, p);
     },
   };
   return compiled;
@@ -307,7 +310,7 @@ function scaledPalette(
 function scaledFeatures(
   scale: CategoryScale,
   scope: MarkScope,
-): MarkFeatures & { use(theme: Theme): void } {
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   let theme: Theme | undefined;
   return {
     use(t) {
@@ -398,7 +401,7 @@ function lineFeatures(
   { scope, path, read, scale, where }: At,
   zone: string,
   log: boolean,
-): MarkFeatures & { use(theme: Theme): void } {
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as LineSpec;
   const table = mark.table!;
   const styles = new SeriesStyles(
@@ -425,10 +428,12 @@ function lineFeatures(
   const mapped = Object.values(spec.style?.by?.map ?? {}).some((style) => style.marker);
   const marked = spec.markers !== false && (spec.markers !== undefined || mapped);
   let theme: Theme | undefined;
+  let paintOf: PaintReader;
   return {
-    use(t) {
+    use(t, p) {
       theme = t;
-      styles.use(t);
+      paintOf = p;
+      styles.use(t, p);
     },
     palette: (base) =>
       scaledPalette(
@@ -446,6 +451,10 @@ function lineFeatures(
         marked && (spec.markers || paint.style?.marker)
           ? { ...spec.style?.marker, ...paint.style?.marker }
           : undefined;
+      if (marker?.fill !== undefined)
+        marker.fill = paintOf(marker.fill, `${path} style.marker.fill`);
+      if (marker?.stroke !== undefined)
+        marker.stroke = paintOf(marker.stroke, `${path} style.marker.stroke`);
       // The observations the last trace kept, which markers stand at.
       let kept: Float32Array = new Float32Array(0);
       let count = 0;
@@ -549,7 +558,7 @@ function barFeatures(
   mark: Mark,
   { scope, path, read, scale }: At,
   zone: string,
-): MarkFeatures & { use(theme: Theme): void } {
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as BarSpec;
   const styles = new RowStyles(resolved<BarSpec>(mark), mark.table!, read, path, kit.isColor);
   const format = formatOf(kit, zone);
@@ -559,10 +568,12 @@ function barFeatures(
   if (pattern?.number !== undefined || pattern?.time !== undefined)
     format(labels!.format!, undefined, `${path} labels.format`);
   let theme: Theme | undefined;
+  let paintOf: PaintReader;
   return {
-    use(t) {
+    use(t, p) {
       theme = t;
-      styles.use(t);
+      paintOf = p;
+      styles.use(t, p);
     },
     palette: (base) =>
       scaledPalette(
@@ -578,6 +589,7 @@ function barFeatures(
       if (!rows) return;
       // A series of bars of one look shows it in legends that draw marks' looks.
       const look = rows.paints.length === 1 ? rows.paints[0] : undefined;
+      const stroke = look?.stroke ?? (spec.stroke && paintOf(spec.stroke, `${path} stroke`));
       s.features = {
         rows,
         key: () => styles.key(),
@@ -585,9 +597,7 @@ function barFeatures(
           ? () => ({
               type: "rect",
               fill: look.fill ?? s.color,
-              ...((look.stroke ?? spec.stroke) !== undefined && {
-                stroke: look.stroke ?? spec.stroke,
-              }),
+              ...(stroke !== undefined && { stroke }),
               fillOpacity: look.fillOpacity ?? spec.fillOpacity ?? 1,
               opacity: look.opacity ?? spec.opacity ?? 1,
             })
@@ -604,7 +614,7 @@ function labelFeatures(
   mark: Mark,
   zone: string,
   path: string,
-): MarkFeatures & { use(theme: Theme): void } {
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const format = formatOf(kit, zone);
   const label = (mark.spec as { label?: unknown }).label;
   const pattern = typeof label === "object" ? (label as { format?: FormatSpec }).format : undefined;
@@ -622,7 +632,7 @@ function areaFeatures(
   { scope, path, read, scale, where }: At,
   zone: string,
   log: boolean,
-): MarkFeatures & { use(theme: Theme): void } {
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as AreaSpec & { stack?: unknown };
   const table = mark.table!;
   const styles = new SeriesStyles(
@@ -659,9 +669,9 @@ function areaFeatures(
   );
   let theme: Theme | undefined;
   return {
-    use(t) {
+    use(t, p) {
       theme = t;
-      styles.use(t);
+      styles.use(t, p);
     },
     palette: (base) =>
       scaledPalette(
@@ -716,7 +726,7 @@ function pointFeatures(
   kit: FeatureKit,
   mark: Mark,
   { scope, path, read }: At,
-): MarkFeatures & { use(theme: Theme): void } {
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as PointSpec;
   const table = mark.table!;
   const field = spec.color as string;
@@ -728,13 +738,23 @@ function pointFeatures(
     color(scale.spec.unknown, `chart scales.color.unknown (read by ${path} color)`);
   scale.read(table, field);
   let theme: Theme | undefined;
-  let last: { version: number; theme: Theme; categories: CategoryColors } | undefined;
+  let paint: PaintReader;
+  let last:
+    | { version: number; theme: Theme; paint: PaintReader; categories: CategoryColors }
+    | undefined;
   // Each value's color slot, kept while the data streams: values never change colors.
-  let slots: { theme: Theme; colors: string[]; tone: Map<string, number>; of: Map<string, number> };
+  let slots: {
+    theme: Theme;
+    paint: PaintReader;
+    colors: string[];
+    tone: Map<string, number>;
+    of: Map<string, number>;
+  };
   const categories = (): CategoryColors => {
-    if (last?.version === table.version && last.theme === theme) return last.categories;
-    if (slots?.theme !== theme)
-      slots = { theme: theme!, colors: [], tone: new Map(), of: new Map() };
+    if (last?.version === table.version && last.theme === theme && last.paint === paint)
+      return last.categories;
+    if (slots?.theme !== theme || slots.paint !== paint)
+      slots = { theme: theme!, paint, colors: [], tone: new Map(), of: new Map() };
     const { colors, tone, of } = slots;
     const { codes, dictionary } = table.categories(field as never);
     const held = new Uint8Array(dictionary.length);
@@ -753,7 +773,7 @@ function pointFeatures(
       if (slot === undefined) {
         // Values outside an explicit domain take `unknown`, or the muted color, as other marks
         // do; past 254 colors of their own, the muted color too.
-        let color = scale.output(value, palette, muted);
+        let color = paint(scale.output(value, palette, muted), `${path} color`);
         if (!tone.has(color) && colors.length >= 254) color = muted;
         if (!tone.has(color)) tone.set(color, colors.push(color) - 1);
         slot = tone.get(color)!;
@@ -766,13 +786,15 @@ function pointFeatures(
     last = {
       version: table.version,
       theme: theme!,
+      paint,
       categories: { field, dictionary, codes, tones, colors, order },
     };
     return last.categories;
   };
   return {
-    use(t) {
+    use(t, p) {
       theme = t;
+      paint = p;
     },
     // Colored by their series field, series take its values' colors; colored
     // by another, their rows do, and the series take none of the palette's.
