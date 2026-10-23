@@ -212,6 +212,14 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     return this.#data.extent([this.#x], log, undefined, rows);
   }
 
+  get scaled() {
+    return this.#data.scaled;
+  }
+
+  scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
+    return this.#data.extent([axis === "x" ? this.#x : this.#y], log, undefined, rows, name);
+  }
+
   yExtent(
     _series: unknown,
     x0: number,
@@ -222,7 +230,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
   ) {
     // Only labels inside the x view count toward y.
     const x = this.#data.place(this.#x);
-    if (x.kind !== "value") return this.#data.extent([this.#y], log, undefined, rows);
+    if (x.kind !== "value" || x.scale) return this.#data.extent([this.#y], log, undefined, rows);
     const lo = Math.min(x0, x1);
     const hi = Math.max(x0, x1);
     const inView = (i: number) => {
@@ -271,6 +279,14 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       ) + room;
     // A label of several lines is as much taller as its lines after the first.
     const halfOf = (label: string) => half + ((lineCount(label) - 1) * paint.lineHeight) / 2;
+    // From its point to its block's middle (its box's, which labels in
+    // boxes are placed by): the block's top, middle (by default), or bottom
+    // at the point, as its style's verticalAlign says.
+    const { verticalAlign } = paint;
+    const lift = (label: string) => {
+      const block = (lineCount(label) * paint.lineHeight + top + bottom) / 2;
+      return verticalAlign === "top" ? block : verticalAlign === "bottom" ? -block : 0;
+    };
     const inPlot = (x0: number, y0: number, x1: number, y1: number) =>
       x0 >= plot.x && x1 <= plot.x + plot.width && y0 >= plot.y && y1 <= plot.y + plot.height;
     // The points labels belong to, which must be in view; their places' offsets move the labels.
@@ -331,7 +347,9 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
         const [ax, ay] = AROUND[(p - 1) % AROUND.length] ?? [0, 0];
         const gap = POINT_GAP + (ring - 1) * 2 * tall;
         const [cx, cy] =
-          p === 0 ? [px + dx + shift, py + dy] : [px + ax * (gap + reach), py + ay * (gap + tall)];
+          p === 0
+            ? [px + dx + shift, py + dy + lift(label)]
+            : [px + ax * (gap + reach), py + ay * (gap + tall)];
         const [x0, y0, x1, y1] = [cx - reach, cy - tall, cx + reach, cy + tall];
         // Moving labels stay in the plot, and moved ones off other points
         // and the lines leading to other labels.
@@ -372,7 +390,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       if (!inPlot(px, py, px, py)) continue;
       const label = data.text(row, frame.locale, write);
       if (!placed) {
-        add(item, label, px + dx, py + dy);
+        add(item, label, px + dx, py + dy + lift(label));
         continue;
       }
       // Empty labels draw nothing, so they take no room.

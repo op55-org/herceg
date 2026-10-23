@@ -321,7 +321,8 @@ export class Sliders {
   }
 
   /**
-   * Shows an ascending x range, or with null the data, at once: drawn now,
+   * Shows an ascending x view (a range the strip shows goes through
+   * `DrawnStrip.view`), or with null the data, at once: drawn now,
    * so an animated chart does not move there gradually, as it would to a
    * view an application asks for.
    */
@@ -346,11 +347,12 @@ export class Sliders {
     if (!range) return;
     // Before the window is drawn there, which may move the strip.
     drag.last = x;
-    this.#show(range);
+    const view = drag.strip.view(range);
+    this.#show(view);
     // Listeners may have ended the drag, removed the navigator, or more.
     if (this.#disposed || this.#drag !== drag) return;
     const now = this.#chart.getViewport().x;
-    if (!sameRange(now, range)) this.#end();
+    if (!sameRange(now, view)) this.#end();
     else drag.set = now;
   }
 
@@ -410,7 +412,7 @@ export class Sliders {
             : pan(by);
     const range = rangeOf(strip, span, move(span));
     if (!range) return;
-    this.#show(range);
+    this.#show(strip.view(range));
     this.#announceLater();
   }
 }

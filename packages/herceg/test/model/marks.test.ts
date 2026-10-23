@@ -16,6 +16,7 @@ import type {
   Scene,
   TextGeometry,
 } from "../../src/scene/scene.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { legendOf, rampsOf } from "../helpers/guides.ts";
 import { axisOf, positionOf } from "../helpers/keyboard.ts";
 
@@ -458,8 +459,8 @@ describe("horizontal bar", () => {
     }
     // The x axis measures lengths: it starts at zero, ends on a round tick, and has grid lines.
     expect(x.domain).toEqual([0, 30]);
-    expect(scene.panels[0]!.grid.x.length).toBeGreaterThan(0);
-    expect(scene.panels[0]!.grid.y).toEqual([]);
+    expect(gridAt(scene.panels[0]!, "x").length).toBeGreaterThan(0);
+    expect(gridAt(scene.panels[0]!, "y")).toEqual([]);
   });
 
   it("groups series top to bottom within each band", () => {

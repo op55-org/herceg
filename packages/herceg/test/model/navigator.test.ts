@@ -35,6 +35,7 @@ import type {
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
 
 const HOUR = 3_600_000;
@@ -263,7 +264,7 @@ describe("a navigator's strip", () => {
     model.setViewport([100, 200]);
     const strip = stripOf(model.scene(estimateText));
     expect(labels(strip)).toEqual(before);
-    expect(strip.grid.x).toEqual(stripOf(scene).grid.x);
+    expect(gridAt(strip, "x")).toEqual(gridAt(stripOf(scene), "x"));
     expect(unzoomed).toEqual([0, 996]);
   });
 
@@ -336,7 +337,7 @@ describe("a navigator's strip", () => {
     const strip = stripOf(
       build({ marks: [line(empty, { x: "t", y: "v" })], navigator: rangeNavigator() }).scene,
     );
-    expect(strip.grid.x).toEqual([]);
+    expect(gridAt(strip, "x")).toEqual([]);
     expect(strip.marks.map(({ kind }) => kind)).toEqual(["line", "shapes"]);
   });
 
@@ -348,16 +349,16 @@ describe("a navigator's strip", () => {
       y: { show: false },
       navigator: rangeNavigator({ marks: [] }),
     });
-    expect(stripOf(scene).grid.x.length).toBeGreaterThan(0);
+    expect(gridAt(stripOf(scene), "x").length).toBeGreaterThan(0);
     const unset = build({
       marks: [line(data, { x: "t", y: "v" })],
       x: { show: false },
       y: { show: false },
       navigator: rangeNavigator({ marks: [] }),
     });
-    expect(stripOf(unset.scene).grid.x).toEqual([]);
+    expect(gridAt(stripOf(unset.scene), "x")).toEqual([]);
     data.append({ t: [0, 1], v: [1, 2] });
-    expect(stripOf(unset.model.scene(estimateText)).grid.x.length).toBeGreaterThan(0);
+    expect(gridAt(stripOf(unset.model.scene(estimateText)), "x").length).toBeGreaterThan(0);
   });
 
   it("samples points on the strip's ends, on any axis, and none past them", () => {
@@ -404,7 +405,7 @@ describe("a navigator's strip", () => {
       navigator: rangeNavigator({ height: 16 }),
     });
     const strip = stripOf(scene);
-    expect(strip.grid.x.length).toBeGreaterThan(0);
+    expect(gridAt(strip, "x").length).toBeGreaterThan(0);
     expect(strip.marks.some(({ kind }) => kind === "text")).toBe(false);
   });
 
@@ -657,9 +658,9 @@ describe("a navigator's strip under panels", () => {
     // column, is the strip's: unzoomed, nothing is faded.
     expect(faded(strip)).toHaveLength(0);
     // Ticks for the strip's width, more than the narrow column has.
-    const narrow = scene.panels[0]!.grid.x.length;
-    expect(strip.grid.x.length).toBeGreaterThan(narrow);
-    for (const at of strip.grid.x) {
+    const narrow = gridAt(scene.panels[0]!, "x").length;
+    expect(gridAt(strip, "x").length).toBeGreaterThan(narrow);
+    for (const at of gridAt(strip, "x")) {
       expect(at).toBeGreaterThanOrEqual(strip.plot.x);
       expect(at).toBeLessThanOrEqual(strip.plot.x + strip.plot.width);
     }

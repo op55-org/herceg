@@ -4,7 +4,6 @@
 // Resolving a role's levels gives a paint: plain values renderers read,
 // made once per configuration and shared by every element of the role.
 
-import { ChartError } from "../spec/errors.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { Halo, Insets, PlotStyle, StrokeStyle, TextBox, TextStyle } from "../spec/style.ts";
 
@@ -19,8 +18,9 @@ export interface TextPaint {
   readonly opacity: number;
   /** Pixels from one line's baseline to the next. */
   readonly lineHeight: number;
-  /** Undefined: the text's own natural alignment. */
+  /** Undefined: the text's own natural alignment, along its lines and across them. */
   readonly align: "start" | "center" | "end" | undefined;
+  readonly verticalAlign: "top" | "middle" | "bottom" | undefined;
   /** Resolved against the surface under the text where it is drawn (see `haloOf`). */
   readonly halo: Halo;
   readonly background: TextBox | undefined;
@@ -94,14 +94,6 @@ export function cssFont(font: string, size: number, weight = 400, italic = false
  */
 export function textPaint(levels: Levels<TextStyle>): TextPaint {
   const style = cascade(levels);
-  // Round 2 freezes it before stream R draws it (marks/pending.ts, which
-  // refuses it at its path where the chart's options hold it).
-  if (style.verticalAlign)
-    throw new ChartError({
-      code: "unsupported",
-      message:
-        "verticalAlign: not drawn as given yet (round 2 stream R adds it); drop verticalAlign",
-    });
   const font = style.font ?? "sans-serif";
   const size = style.fontSize ?? 12;
   const weight = style.fontWeight ?? 400;
@@ -116,6 +108,7 @@ export function textPaint(levels: Levels<TextStyle>): TextPaint {
     opacity: style.opacity ?? 1,
     lineHeight: Math.round(size * (style.lineHeight ?? 1.25)),
     align: style.align,
+    verticalAlign: style.verticalAlign,
     halo: style.halo ?? false,
     background,
     padding: insets(style.padding),

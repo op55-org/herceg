@@ -43,11 +43,13 @@ describe("clip", () => {
     expect(svg).not.toContain("-clip-chart");
   });
 
-  it("leaves markers whole with false, drawing them above the data the plot cuts", () => {
+  it("leaves markers whole with false, in their place among the marks", () => {
     const svg = renderToSVG(sparkline([markers(false), line(values, { x: "x", y: "y" })]));
     expect(cutOf(svg, "#ff0000")).toBe("");
-    // The line, cut to the plot, comes first though the markers were listed first.
-    expect(svg.indexOf('stroke="#3266d6"')).toBeLessThan(svg.indexOf('fill="#ff0000"'));
+    // Clipping does not change the order: markers listed first are painted under the line.
+    expect(svg.indexOf('fill="#ff0000"')).toBeLessThan(svg.indexOf('stroke="#3266d6"'));
+    const after = renderToSVG(sparkline([line(values, { x: "x", y: "y" }), markers(false)]));
+    expect(after.indexOf('stroke="#3266d6"')).toBeLessThan(after.indexOf('fill="#ff0000"'));
     // The chart does not grow: the markers at its edges are still cut by its size.
     expect(svg).toContain('width="140" height="48" viewBox="0 0 140 48"');
   });
@@ -87,7 +89,8 @@ describe("clip", () => {
       marks: [bar(bars, { x: "k", y: "v", fill: "#0000aa", labels: true, clip: "chart" })],
     });
     expect(cutOf(labelled, "#0000aa")).toMatch(/-clip-chart$/);
-    expect((labelled.match(/clip-path="url\(#[^)]+-clip-chart\)"/g) ?? []).length).toBe(2);
+    // The bars and their labels, one after the other and cut alike, in one group.
+    expect((labelled.match(/clip-path="url\(#[^)]+-clip-chart\)"/g) ?? []).length).toBe(1);
   });
 
   it("cuts PDF output the same way", () => {
@@ -101,11 +104,11 @@ describe("clip", () => {
     const cuts = (options: StaticOptions) => content(options).match(/ re W n/g)?.length ?? 0;
     const plotted = sparkline([markers()]);
     expect(cuts(plotted)).toBe(1);
-    expect(cuts(sparkline([markers(false)]))).toBe(1);
+    expect(cuts(sparkline([markers(false)]))).toBe(0);
     expect(content(sparkline([markers("chart")]))).toContain("q 0 0 140 48 re W n");
-    // Only the panel's plot is cut, and the markers are painted after it is restored.
-    const free = content(sparkline([markers(false)]));
-    expect(free.lastIndexOf("1 0 0 rg")).toBeGreaterThan(free.indexOf("Q\n"));
+    // Marks one after another cut alike share one cut.
+    expect(cuts(sparkline([markers(), line(values, { x: "x", y: "y" })]))).toBe(1);
+    expect(cuts(sparkline([markers(), markers(false), markers()]))).toBe(2);
   });
 
   it("is refused in specs unless it is a known boundary", () => {

@@ -522,7 +522,7 @@ describe("renderPdf", () => {
         {
           key: "",
           plot: { x: 10, y: 5, width: 80, height: 40 },
-          grid: { x: [], y: [25] },
+          grids: [{ key: "y", zIndex: -1, along: "y", at: [25], paint: undefined }],
           axes: [],
           marks,
         },
@@ -539,13 +539,13 @@ describe("renderPdf", () => {
         "0 0 100 50 re",
         "f",
         "Q",
+        "EMC",
+        "/Figure << /MCID 0 >> BDC",
         "q 0.91 0.922 0.941 RG 1 w 0 J 0 j 4 M",
         "10 25.5 m",
         "90 25.5 l",
         "S",
         "Q",
-        "EMC",
-        "/Figure << /MCID 0 >> BDC",
         "q 10 5 80 40 re W n",
         "q 1 0 0 RG 2 w 1 J 1 j [4 2] 0 d",
         "10 40 m",
@@ -589,7 +589,7 @@ describe("renderPdf", () => {
         {
           key: "",
           plot: { x: 0, y: 0, width: 10, height: 10 },
-          grid: { x: [], y: [] },
+          grids: [],
           axes: [],
           marks,
         },
@@ -695,10 +695,12 @@ describe("renderToPDF", () => {
       expect(figureAlt(pdf)).toBe(`${options.title} ${describeChart(model)}`);
       expect(pdf.catalog).toContain("/Lang (en-US)");
       const decoration = /\/Artifact BMC\n([\s\S]*?)EMC\n/.exec(pdf.content)![1]!;
+      // The chart's background is decoration; its panels, grid lines among
+      // them, paint in the figure in their order.
       expect(decoration).toContain("0 0 480 240 re\n");
-      expect(decoration).toContain(`RG 1 w 0 J 0 j 4 M\n`);
-      expect(decoration).not.toMatch(/\/MCID|\bBT\b|\bDo\b/);
+      expect(decoration).not.toMatch(/\/MCID|\bBT\b|\bDo\b|\bRG\b/);
       const drawing = /\/Figure << \/MCID 0 >> BDC\n([\s\S]*)EMC\n$/.exec(pdf.content)![1]!;
+      expect(drawing).toContain(`RG 1 w 0 J 0 j 4 M\n`);
       expect(drawing).toContain(" re W n\n");
       expect(drawing).toContain(" Tj ET\n");
       expect([...pdf.objects.values()].some((o) => o.dictionary.includes("/Subtype /Type0"))).toBe(
@@ -1981,7 +1983,7 @@ describe("PDF embedded Unicode fonts", () => {
       {
         key: "",
         plot: { x: 0, y: 0, width: 320, height: 120 },
-        grid: { x: [], y: [] },
+        grids: [],
         axes: [],
         marks: [labels],
       },

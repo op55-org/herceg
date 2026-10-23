@@ -23,7 +23,7 @@ import { sankey } from "../../src/marks/sankey.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import type { ArcGeometry, ShapesGeometry, TextShape } from "../../src/scene/scene.ts";
 import { resolveTheme } from "../../src/theme.ts";
-import { bandBox, MOUSE, modelOf } from "./helpers.ts";
+import { bandBox, labelsOf, MOUSE, modelOf } from "./helpers.ts";
 
 /** Without a background, the canvas holds what marks paint alone. */
 const CLEAR = { tokens: { background: "transparent" } } as const;
@@ -55,7 +55,7 @@ function series(n: number, seriesCount = 2) {
   return table(columns);
 }
 
-const markPaths = (chart: Chart) => chart.root.querySelectorAll("svg g[clip-path] path");
+const markPaths = (chart: Chart) => chart.root.querySelectorAll("svg path[clip-path]");
 
 describe("mounting", () => {
   it("renders small charts as SVG with an accessible name and description", () => {
@@ -470,8 +470,8 @@ describe("events and brushing", () => {
     press(chart.root, "pointerup", x.map(1), y.map(5));
     press(chart.root, "pointerdown", x.map(2), y.map(6));
     press(chart.root, "pointerup", x.map(2), y.map(6));
-    // Of rows drawn at one place, the first is the one reported.
-    expect(clicked).toEqual(["o1", "o2"]);
+    // Of rows drawn at one place, the one on top, drawn last, is reported.
+    expect(clicked).toEqual(["o1", "o3"]);
     // The keyboard reaches the other, and hover reports it: its row is a change.
     press(chart.root, "pointerleave", 0, 0);
     chart.root.focus();
@@ -1118,16 +1118,15 @@ describe("gauges and funnels", () => {
     expect(at((end! + start! + (4 / 3) * Math.PI) / 2, middle)).toEqual([232, 235, 240, 255]);
     const [, , b0, b1, a0, a1] = arcs("gauge-bands").subarray(0, 6) as unknown as number[];
     expect(at((a0! + a1!) / 2, (b0! + b1!) / 2)).toEqual([0, 255, 0, 255]);
-    // The value is painted on the canvas; the labels stay in SVG.
+    // The value is painted on the canvas, its labels with it.
     const value = marks.find((m) => m.kind === "shapes") as ShapesGeometry;
     const { x, y } = value.shapes[0] as TextShape;
     let inked = 0;
     for (let dx = -value.fontSize; dx <= value.fontSize; dx++)
       inked += +(pixel(x + dx, y)[3]! > 200);
     expect(inked).toBeGreaterThan(4);
-    const svg = chart.root.querySelector("svg")!.textContent;
-    expect(svg).toContain("cpu");
-    expect(svg).not.toContain("73");
+    expect(chart.root.querySelector("svg")!.textContent).not.toContain("cpu");
+    expect(labelsOf(chart)).toContain("cpu");
     chart.destroy();
   });
 
@@ -1913,7 +1912,7 @@ describe("radars", () => {
     shown.destroy();
   });
 
-  it("paint on a canvas, with their labels in SVG", () => {
+  it("paint on a canvas, their labels too", () => {
     const painted = createChart(host, {
       renderer: "canvas",
       marks: [radar(players, { fields: ["speed", "power", "range"], series: "name" })],
@@ -1925,9 +1924,10 @@ describe("radars", () => {
     const pixel = canvas
       .getContext("2d")!
       .getImageData(Math.round(px * ratio), Math.round(py * ratio), 1, 1).data;
-    // An opaque dot at Ana's speed; the spokes' names stay text.
+    // An opaque dot at Ana's speed; the spokes' names on the canvas too.
     expect(pixel[3]).toBe(255);
-    expect(painted.root.querySelector("svg")!.textContent).toContain("power");
+    expect(painted.root.querySelector("svg")!.textContent).not.toContain("power");
+    expect(labelsOf(painted)).toContain("power");
     painted.destroy();
   });
 

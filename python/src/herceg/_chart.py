@@ -159,6 +159,26 @@ class HeatmapSampling(TypedDict, total=False):
 
 _NUMERIC = ("number", "time")
 
+
+@dataclass(frozen=True)
+class _RowPlaces:
+    """A mark of rows' positions (see ``Chart._places``): the column each
+    option reads, the coordinates given by option, and each direction's
+    binding where it is not plainly its axis'."""
+
+    columns: dict[str, str | Sequence[str]]
+    specs: dict[str, dict[str, Any]]
+    bound: dict[str, tuple[Any, ...]]
+
+    def column(self, name: str) -> str | None:
+        """The one column option ``name`` reads, if given: positions of several are values'."""
+        return cast("str | None", self.columns.get(name))
+
+    def spec(self, name: str, checked: Any) -> Any:
+        """What the spec writes for option ``name``: its coordinate, or its checked column(s)."""
+        return self.specs.get(name, checked)
+
+
 # The spec format version charts are written in: the only one so far.
 _SPEC_VERSION = 1
 
@@ -853,8 +873,7 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
         for name in kwargs:
             if name not in known:
                 raise TypeError(_unknown_option(function, name, known))
-        # Text styles' vertical_align, which round 2 draws from stream R on,
-        # is checked where it is given, before what refuses it (_pending.py).
+        # Text styles' vertical_align is checked where it is given.
         # Styles are in dicts and options objects (and the guides' list),
         # never in data, scales, or other lists, which may be long.
         for name, value in kwargs.items():
@@ -1379,8 +1398,10 @@ class Chart:
         ``where`` leaves rows out as gaps, meeting the line where the
         condition changes.
         """
-        x, y = self._field("line", "x", x), self._field("line", "y", y)
+        places = self._places("line", {"x": x, "y": y}, axis == "right")
+        x, y = places.columns["x"], places.columns["y"]
         table = self._mark_table(data)
+        self._check_places(table, "line", places)
         along, x_spec, y_spec = self._oriented(table, "line", x, y, orient)
         _left_along_y("line", along, axis)
         channels = encodings_spec(encode, _LINE_CHANNELS, "line")
@@ -1395,8 +1416,8 @@ class Chart:
         return self._add(
             {
                 "type": "line",
-                "x": x_spec,
-                "y": y_spec,
+                "x": places.spec("x", x_spec),
+                "y": places.spec("y", y_spec),
                 "orient": orient,
                 "series": series,
                 "dodge": dodge or None,
@@ -1504,10 +1525,14 @@ class Chart:
             raise ValueError(
                 f"area stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
-        x, y = self._field("area", "x", x), self._field("area", "y", y)
-        y1, y2 = self._field("area", "y1", y1), self._field("area", "y2", y2)
-        x1, x2 = self._field("area", "x1", x1), self._field("area", "x2", x2)
+        places = self._places(
+            "area", {"x": x, "y": y, "x1": x1, "x2": x2, "y1": y1, "y2": y2}, axis == "right"
+        )
+        x, y = places.columns.get("x"), places.columns.get("y")
+        x1, x2 = places.column("x1"), places.column("x2")
+        y1, y2 = places.column("y1"), places.column("y2")
         table = self._mark_table(data)
+        self._check_places(table, "area", places)
         channels = encodings_spec(encode, _AREA_CHANNELS, "area")
         self._refuse_identity(channels, "area")
         self._check_colors(table, color, channels, "area")
@@ -1579,12 +1604,12 @@ class Chart:
         return self._add(
             {
                 "type": "area",
-                "x": x_spec,
-                "y": y_spec,
-                "y1": y1,
-                "y2": y2,
-                "x1": x1,
-                "x2": x2,
+                "x": places.spec("x", x_spec),
+                "y": places.spec("y", y_spec),
+                "y1": places.spec("y1", y1),
+                "y2": places.spec("y2", y2),
+                "x1": places.spec("x1", x1),
+                "x2": places.spec("x2", x2),
                 "orient": orient,
                 "series": series,
                 "stack": _spec(stacking) if isinstance(stacking, Stack) else stack or None,
@@ -1659,7 +1684,11 @@ class Chart:
         column as ``color`` is the series column unless ``series`` says
         otherwise (``color="region"`` groups bars by region); with
         ``series=False`` it colors each bar and places nothing apart.
-        ``stroke`` and ``stroke_width`` outline each bar.
+        ``stroke`` and ``stroke_width`` outline each bar; ``stroke_sides``
+        draws only the sides it lists as they stand on screen
+        (``["top"]`` caps every bar), and such bars have square ends.
+        ``width=hg.Pixels(n)`` makes every bar ``n`` pixels thick whatever
+        its band, centered in its slot when grouped.
         ``labels=True`` writes each value at its bar's end (inside each segment
         when stacked); ``hg.BarLabels`` formats, styles, and filters them
         (white or black text by contrast with the bar unless its style sets a
@@ -1698,8 +1727,10 @@ class Chart:
             raise ValueError(
                 f"bar stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
-        x, y = self._field("bar", "x", x), self._field("bar", "y", y)
+        places = self._places("bar", {"x": x, "y": y}, axis == "right")
+        x, y = places.columns["x"], places.columns["y"]
         table = self._mark_table(data)
+        self._check_places(table, "bar", places)
         channels = encodings_spec(encode, _BAR_CHANNELS, "bar")
         self._refuse_identity(channels, "bar")
         self._check_colors(table, color, channels, "bar")
@@ -1730,8 +1761,8 @@ class Chart:
             {
                 "type": "bar",
                 "halo": _halo(halo, "bar"),
-                "x": xs,
-                "y": ys,
+                "x": places.spec("x", xs),
+                "y": places.spec("y", ys),
                 "series": series,
                 "stack": stack or None,
                 "dodge": dodge,
@@ -1891,10 +1922,23 @@ class Chart:
             raise ValueError(
                 'error_bar axis: horizontal error bars have no right axis; drop axis="right"'
             )
-        x, y = self._field("error_bar", "x", x), self._field("error_bar", "y", y)
-        x1, x2 = self._field("error_bar", "x1", x1), self._field("error_bar", "x2", x2)
-        y1, y2 = self._field("error_bar", "y1", y1), self._field("error_bar", "y2", y2)
+        places = self._places(
+            "error_bar", {"x": x, "y": y, "x1": x1, "x2": x2, "y1": y1, "y2": y2}, axis == "right"
+        )
+        # A symmetric interval's center is a column, as its error is.
+        center_at = "x" if horizontal else "y"
+        if (x_error if horizontal else y_error) is not None and center_at in places.specs:
+            raise ChartError(
+                f"error_bar {center_at}: a center with {center_at}_error is a column; "
+                "give a column's name",
+                code="invalid-option",
+                path=self._path("error_bar", center_at),
+            )
+        x, y = places.column("x"), places.column("y")
+        x1, x2 = places.column("x1"), places.column("x2")
+        y1, y2 = places.column("y1"), places.column("y2")
         table = self._mark_table(data)
+        self._check_places(table, "error_bar", places)
         along, other = ("y", "x") if horizontal else ("x", "y")
         position = y if horizontal else x
         if position is None:
@@ -1940,12 +1984,12 @@ class Chart:
         return self._add(
             {
                 "type": "errorbar",
-                "x": x,
-                "y": y,
-                "x1": x1,
-                "x2": x2,
-                "y1": y1,
-                "y2": y2,
+                "x": places.spec("x", x),
+                "y": places.spec("y", y),
+                "x1": places.spec("x1", x1),
+                "x2": places.spec("x2", x2),
+                "y1": places.spec("y1", y1),
+                "y2": places.spec("y2", y2),
                 "xError": x_error,
                 "yError": y_error,
                 "series": series,
@@ -2039,7 +2083,8 @@ class Chart:
         problem = _point_size_problem(radius, size, radius_range, encode)
         if problem:
             raise ChartError(problem[1], path=self._path("point", problem[0]))
-        x, y = self._field("point", "x", x), self._field("point", "y", y)
+        places = self._places("point", {"x": x, "y": y}, axis == "right")
+        x, y = cast("str", places.columns["x"]), cast("str", places.columns["y"])
         # Round 2 binds points' channels from stream C on (_pending.py), as
         # the engine does: any channel form of color, size, and fill_opacity;
         # a symbol's but a column's alone (hg.Channel(field=...) or
@@ -2084,6 +2129,7 @@ class Chart:
         fill_opacity = cast("float | str | None", fill_opacity)
         symbol = cast("str | Mapping[str, str] | None", symbol)
         table = self._mark_table(data)
+        self._check_places(table, "point", places)
         self._require(table, x, (*_NUMERIC, "category"), "point x")
         self._require(table, y, (*_NUMERIC, "category"), "point y")
         # A category color names the series, as on lines and bars; series=False keeps one.
@@ -2130,8 +2176,8 @@ class Chart:
         return self._add(
             {
                 "type": "point",
-                "x": x,
-                "y": y,
+                "x": places.spec("x", x),
+                "y": places.spec("y", y),
                 "series": series,
                 "animationKey": animation_key,
                 "radius": radius,
@@ -4343,9 +4389,13 @@ class Chart:
         row; ``hg.Fraction``, ``hg.Pixels``, and ``hg.DataPosition`` place
         an edge as they do rules. ``label`` is text or an ``hg.Label``,
         along the ``side`` its place names (top by default), inside or
-        outside the region. Add regions before the marks they highlight to
-        draw them underneath. Regions count toward the axes' domains only
-        with ``contribute_domain=True``.
+        outside the region. ``stroke`` and ``stroke_width`` outline each
+        region (in its fill's color, 1 pixel wide, by default), and
+        ``stroke_sides`` draws only the sides it lists; edges the plot cuts
+        and the sides of a span across the whole plot are never drawn. Add
+        regions before the marks they highlight to draw them underneath, or
+        give ``z_index``. Regions count toward the axes' domains only with
+        ``contribute_domain=True``.
         """
         for start, end, name in ((x1, x2, "x"), (y1, y2, "y")):
             if (start is None) != (end is None):
@@ -4353,8 +4403,7 @@ class Chart:
                 raise ValueError(f"region {missing}: needs both {name}1 and {name}2, or neither")
         if x1 is None and y1 is None:
             raise ValueError("region: needs x1 and x2, y1 and y2, or both")
-        # Outlines are well formed before they are refused (_pending.py), as
-        # the engine checks a spec before what it draws.
+        # Outlines are checked here, as the engine checks a spec.
         if stroke is not None and not isinstance(stroke, str):
             raise ChartError(
                 f"region stroke: expected a color; received {shown(stroke)}",
@@ -4575,9 +4624,30 @@ class Chart:
 
     def _check_scale_references(self) -> None:
         """Refuses a channel naming a scale the chart's ``scales`` does not
-        have (the default ``"color"``, ``"symbol"``, and ``"dash"`` it makes)."""
+        have (the default ``"color"``, ``"symbol"``, and ``"dash"`` it makes),
+        and a place naming a position scale it does not have."""
         declared = scales_spec(self._settings.get("scales")) or {}
+        positions = [
+            name
+            for name, scale in declared.items()
+            if isinstance(scale, Mapping) and scale.get("type") in ("linear", "log", "time")
+        ]
         for index, (mark, _) in enumerate(self._marks):
+            places = {name: mark.get(name) for name in ("x", "y", "x1", "x2", "y1", "y2")}
+            places.update({f"span[{i}]": place for i, place in enumerate(mark.get("span") or ())})
+            places.update({f"at.{name}": place for name, place in (mark.get("at") or {}).items()})
+            for at, place in places.items():
+                scale = place.get("scale") if isinstance(place, Mapping) else None
+                if not isinstance(scale, str) or scale in ("x", "y", "yRight", *positions):
+                    continue
+                raise ChartError(
+                    f"chart marks[{index}].{at}.scale: the chart has no position scale "
+                    f'"{scale}"; name "x", "y", or "y_right", or add '
+                    f'scales={{"{scale}": hg.Scale(type="linear")}}',
+                    code="unknown-reference",
+                    path=f"marks[{index}].{at}.scale",
+                    mark=index if mark.get("id") is None else mark["id"],
+                )
             for name, channel in (mark.get("encode") or {}).items():
                 scale = channel.get("scale") if isinstance(channel, dict) else None
                 if (
@@ -5136,12 +5206,99 @@ class Chart:
         except (ValueError, TypeError) as error:
             raise ChartError(str(error), code="invalid-option", path=self._path(role)) from None
 
-    def _field(self, mark: str, name: str, value: _T | RowPosition) -> _T:
-        """A position given as a column (or columns), refusing a coordinate,
-        which round 2's stream R places rows by (see _pending.py)."""
-        if isinstance(value, (Fraction, Pixels, DataPosition)):
-            _pending.refuse(f"{mark} {name}", "R", "give a column", self._path(mark, name))
-        return cast("_T", value)
+    def _places(self, mark: str, places: Mapping[str, Any], right: bool = False) -> _RowPlaces:
+        """A mark of rows' positions by option (``x``, ``y1``, ...), checked as
+        the engine checks them (marks/row-bindings.ts): a coordinate reads a
+        column (``hg.Fraction(field=...)``, not ``hg.Fraction(0.5)``), on the
+        axis' own scale or one of the chart's own, and positions along one
+        direction are placed alike."""
+        found: dict[str, tuple[str, tuple[Any, ...] | None]] = {}
+        columns: dict[str, str | Sequence[str]] = {}
+        specs: dict[str, dict[str, Any]] = {}
+        bound: dict[str, tuple[Any, ...]] = {}
+        for name, value in places.items():
+            if value is None:
+                continue
+            axis = name[0]
+            binding: tuple[Any, ...] | None = None
+            if isinstance(value, (Fraction, Pixels, DataPosition)):
+                spec = value._spec()
+                form = (
+                    "field"
+                    if isinstance(value, DataPosition)
+                    else "fraction"
+                    if isinstance(value, Fraction)
+                    else "px"
+                )
+                if value.field is None:
+                    # One place for every row is a rule's or text's.
+                    at = name if form == "field" else f"{name}.{form}"
+                    expected = (
+                        "{ field }, { fraction: { field } }, or { px: { field } }"
+                        if form == "field"
+                        else "{ field }"
+                    )
+                    received = json.dumps(
+                        spec if form == "field" else spec[form], separators=(",", ":")
+                    )
+                    raise ChartError(
+                        f"{mark} {at}: expected {expected}: each row is placed by its own "
+                        f"value; received {received}",
+                        code="invalid-option",
+                        path=self._path(mark, at),
+                    )
+                columns[name] = value.field
+                specs[name] = spec
+                offset = spec.get("offset", 0)
+                own = "x" if axis == "x" else "yRight" if right else "y"
+                if form != "field":
+                    binding = ("frame", form, spec.get("frame", "plot"), offset)
+                elif spec.get("scale", own) in ("x", "y", "yRight"):
+                    scale = spec.get("scale", own)
+                    if scale != own:
+                        fix = 'give axis="right"' if scale == "yRight" else f'name "{own}"'
+                        raise ChartError(
+                            f'{mark} {name}.scale: "{scale}" is not this {axis} axis\' scale '
+                            f'("{own}"); {fix}',
+                            code="invalid-option",
+                            path=self._path(mark, f"{name}.scale"),
+                        )
+                    binding = ("axis", offset) if offset else None
+                else:
+                    binding = ("scale", spec["scale"], offset)
+            else:
+                columns[name] = value
+            first = found.setdefault(axis, (name, binding))
+            if first[1] != binding:
+                raise ChartError(
+                    f"{mark} {name}: placed otherwise than {first[0]}; place {first[0]} and "
+                    f"{name} alike, on one scale or in one frame, with one offset",
+                    code="unsupported",
+                    path=self._path(mark, name),
+                )
+            if binding is not None:
+                bound[axis] = binding
+        y = found.get("y")
+        if right and y and y[1] and y[1][0] != "axis":
+            raise ChartError(
+                f'{mark} axis: "right" places y on yRight\'s scale, which {y[0]} is not on; '
+                "drop axis",
+                code="invalid-option",
+                path=self._path(mark, "axis"),
+            )
+        return _RowPlaces(columns, specs, bound)
+
+    def _check_places(self, table: int, mark: str, places: _RowPlaces) -> None:
+        """Checks the columns placed off their axes: shares and pixels read
+        numbers, a scale of the chart's own numbers and times."""
+        for name in places.specs:
+            binding = places.bound.get(name[0])
+            if binding is None or binding[0] == "axis":
+                continue
+            frame = binding[0] == "frame"
+            role = f"{mark} {name}.{binding[1]}.field" if frame else f"{mark} {name}.field"
+            column = cast("str", places.columns[name])
+            self._require(table, column, ("number",) if frame else _NUMERIC, role)
 
     def _single_or_series(
         self, fields: str | list[str], series: str | None, role: str, inferred: bool = False
@@ -5222,9 +5379,9 @@ class Chart:
         return color
 
     def _check_annotation_scales(self, spec: Mapping[str, Any]) -> None:
-        """Refuses an annotation's place on a scale other than its axis' own,
-        as the engine does: y_right needs axis="right", and position scales
-        of the chart's own wait for round 2's stream R (_pending.py)."""
+        """Refuses an annotation's place on another axis' scale, as the engine
+        does: y_right needs axis="right". Scales of the chart's own are its
+        own ``scales``'."""
         mark = spec["type"]
         own = {"x": "x", "y": "yRight" if spec.get("axis") == "right" else "y"}
         # A rule's span lies across it.
@@ -5236,16 +5393,15 @@ class Chart:
             scale = place.get("scale") if isinstance(place, Mapping) else None
             letter = name.removeprefix("at.")[0]
             axis = letter if letter in own else across
-            if scale is None or scale == own[axis]:
+            if scale not in ("x", "y", "yRight") or scale == own[axis]:
                 continue
-            path = self._path(mark, f"{name}.scale")
-            if scale == "yRight":
-                raise ChartError(
-                    f'{mark} {name}.scale: "y_right" is not this {axis} axis\' scale; '
-                    'give axis="right"',
-                    path=path,
-                )
-            _pending.refuse(f"{mark} {name}.scale", "R", "drop scale", path)
+            fix = 'give axis="right"' if scale == "yRight" else f'name "{own[axis]}"'
+            raise ChartError(
+                f'{mark} {name}.scale: "{python_path(scale)}" is not this {axis} axis\' scale '
+                f'("{python_path(own[axis])}"); {fix}',
+                code="invalid-option",
+                path=self._path(mark, f"{name}.scale"),
+            )
 
     def _series_labels(self, labels: Any, mark: str) -> Any:
         """A line's or area's ``labels`` as the spec takes them, refused at
@@ -5580,7 +5736,13 @@ class Chart:
             return None
         table = self._mark_table(data)
         for name, field in fields.items():
-            self._require(table, field, _NUMERIC, f"{role} {name}")
+            # Shares and pixels are numbers; values on a scale, numbers or times.
+            value = positions[name]
+            if isinstance(value, (Fraction, Pixels)):
+                share = "fraction" if isinstance(value, Fraction) else "px"
+                self._require(table, field, ("number",), f"{role} {name}.{share}.field")
+            else:
+                self._require(table, field, _NUMERIC, f"{role} {name}")
         self._require(table, text, ("category", "number"), f"{role} label field")
         return table
 
@@ -6595,13 +6757,30 @@ def _fields(spec: dict[str, Any]) -> set[str]:
             fields.add(value)
         elif isinstance(value, list):
             fields.update(value)
-        elif isinstance(value, dict) and isinstance(value.get("field"), str):
-            fields.add(value["field"])
+        elif (field := coordinate_field_spec(value)) is not None:
+            # A column's place, or the share or pixels a column gives.
+            fields.add(field)
+    # Text's places in `at`, and a rule's span.
+    for place in [*(spec.get("at") or {}).values(), *(spec.get("span") or ())]:
+        field = coordinate_field_spec(place)
+        if field is not None:
+            fields.add(field)
     # Columns only tooltips show travel too.
     for entry in (spec.get("tooltip") or {}).get("fields", ()):
         fields.add(entry if isinstance(entry, str) else entry["field"])
     fields |= _feature_fields(spec)
     return fields
+
+
+def coordinate_field_spec(place: Any) -> str | None:
+    """The column a place in a spec reads: its own, or its share's or pixels'."""
+    if isinstance(place, str):
+        return place
+    if isinstance(place, dict):
+        share = place.get("fraction", place.get("px", place))
+        if isinstance(share, dict) and isinstance(share.get("field"), str):
+            return cast("str", share["field"])
+    return None
 
 
 def _feature_fields(spec: dict[str, Any]) -> set[str]:

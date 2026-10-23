@@ -11,7 +11,7 @@ import {
   type Table,
   table,
 } from "../data/table.ts";
-import { insetDomain } from "../model/axis.ts";
+import { clearDomain } from "../model/clearance.ts";
 import type { Geometry } from "../scene/scene.ts";
 import type { BoxenSpec, BoxPlotSpec, Clip, Frozen, ViolinSpec } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
@@ -149,7 +149,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   implements Mark<Frozen<T>>
 {
   declare readonly [MARK]: true;
-  readonly insetDomain = insetDomain;
+  readonly clearDomain = clearDomain;
   readonly spec: Frozen<T>;
   readonly table: Table;
   readonly identity: MarkSources;

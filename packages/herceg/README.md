@@ -869,7 +869,11 @@ bar(sales, {
 | `place` | `{ outside: false, attachment }` puts labels inside the bars at their root, middle, or tip (`"start"`, `"center"`, `"end"`, the default); by default they go past each bar's end (just inside where that would leave the plot), and inside stacked bars' segments, centered. |
 
 Bars take `stroke`, `strokeWidth`, `strokeOpacity`, and `dash` for
-outlines, drawn along each bar's edge.
+outlines, drawn along each bar's edge, or with `strokeSides` along the
+sides named as they stand on screen: `strokeSides: ["top"]` caps bars
+whichever way their values go (such bars keep square ends). `width: { px:
+8 }` makes each bar that many pixels thick whatever its band's width, in
+either orientation; grouped bars keep their slots' centers.
 
 ### Annotations
 
@@ -909,7 +913,7 @@ text(peaks, {
 | `"text"` | Constant text: short for `{ text }`. |
 | `text` or `field` | Constant text, or each row's value of a category or number field. |
 | `format` | How numbers are written: Intl options, or `{ number }` / `{ time }` patterns. |
-| `style` | A text style: `fontSize`, `fontWeight`, `color`, `halo`, `background` (a box: `fill`, `stroke`, `radius`), `padding`, and for text `align` (`"start"`, `"center"`, `"end"` at its point). |
+| `style` | A text style: `fontSize`, `fontWeight`, `color`, `halo`, `background` (a box: `fill`, `stroke`, `radius`), `padding`, for text `align` (`"start"`, `"center"`, `"end"` at its point), and `verticalAlign` (`"top"`, `"middle"`, `"bottom"`: which of the block's edges, box and all, is at its place; a horizontal rule's label goes below, on, or above it, a region's below, on, or above its edge). |
 | `place.attachment` | Where on a rule (`"start"`, `"center"`, `"end"`, left to right or top to bottom; the end by default) or along a region's side. |
 | `place.side` | A region's edge the label goes along (top by default). |
 | `place.outside` | A rule's label outside the plot, beside the axis at its start or end; the chart keeps room for it there unless `reserve: false`. A region's label outside its edge. |
@@ -922,10 +926,14 @@ nothing else gives the axes its values. On a category axis, a number is a
 band index (0 is the first band's center, -0.5 its edge); `{ data: "Feb" }`
 places at a band by its value.
 
-Regions are drawn in mark order (list them first to shade underneath the
-data); rules and text are drawn above the data, as SVG even when the data
-is on a canvas. Text and region labels have halos to stay readable over
-lines (see Text halos). Annotations outside the view are left out. Text
+Annotations paint in mark order, as every mark does (see [Paint
+order](#paint-order)): list a region first to shade underneath the data,
+or a rule after it to draw over it, on a canvas as in SVG. Regions take
+`stroke` and `strokeWidth` for an outline (1 pixel in their fill's color
+by default once either is given) and `strokeSides` for some of its sides;
+an edge the view cuts is not outlined. Text and region labels have halos to
+stay readable over lines (see Text halos). Annotations outside the view are
+left out. Text
 labels that would cover an earlier label of the same mark, in row order,
 are drawn anyway by default. With `overlap: "hide"` they are left out. With
 `overlap: "move"`, a label goes where its place and `align` put it if that
@@ -945,10 +953,48 @@ keep off the labels of their own panel only (see [Small
 multiples](#small-multiples)).
 
 Charts that use channels beyond constants, scales of categories, styles by
-value, markers, continuity, `where`, or label patterns load the feature
-compiler, as charts with listed axes load the guide
+value, markers, continuity, `where`, label patterns, or the places below
+load the feature compiler, as charts with listed axes load the guide
 compiler: a live chart draws once it is here (`chart.loading` settles with
 that frame), and static output brings it along. Other charts never load it.
+
+Marks of rows (lines, areas, bars, points, error bars, ...) take
+coordinates for each row's place too: `{ field, offset }` moves every row
+that many pixels along its axis, `{ fraction: { field } }` and `{ px: {
+field } }` place rows in the plot (or with `frame: "chart"` the chart) by a
+share or pixels, and `{ field, scale }` on a position scale of the chart's
+own:
+
+```ts
+point(events, { x: "time", y: { fraction: { field: "lane" } } }); // lanes by share of the plot's height
+line(latency, { x: { field: "time", offset: 4 }, y: "p99" }); // moved 4 pixels right
+line(depths, { x: "time", y: { field: "depth", scale: "depth" } }); // on a scale of its own
+// with scales: { depth: { type: "linear" } } and, for its axis, guides: [axis({ scale: "depth", place: { side: "right" } })]
+```
+
+Rows placed in a frame or on a scale of the chart's own count toward no
+axis' domain and are inspected nearest the pointer; moved rows are
+inspected and selected where they are drawn. Offsets move what is drawn,
+not what scales fit: y fits the rows whose x values are in x's domain or
+view, wherever offsets (or x's padding) put them; to fit rows an offset
+brings into view, widen x's domain or give y one. A position scale of
+the chart's own (`"linear"`, `"log"`, or `"time"`) has a domain from what
+marks place on it, per panel with `scope: "panel"`, and padding as other
+scales have; tooltips write its values in its axis' `format` unless it
+gives a `tooltipFormat`. Nothing zooms it, and its axis draws no grid
+lines.
+
+### Paint order
+
+A panel paints its grid lines and its marks in one order in every
+renderer (SVG, Canvas, PDF, PNG): each at its `zIndex` (marks 0, grid
+lines -1), lower first, ties as listed, grid lines before marks and marks
+as declared. `zIndex: 1` lifts a mark over those declared after it;
+`grid: { zIndex: 1 }` on an axis draws its grid lines over the data. The
+order is the panel's own, apart from clipping and from the order the
+keyboard, descriptions, and tooltips read. Hovering and clicking find
+what is on top: the mark painted last, and of points of several colors
+painted color by color, the one painted over the others.
 
 ### Normalized stacks and streamgraphs
 
@@ -1752,6 +1798,13 @@ the notes), — not yet (refused with an error), · not applicable.
   (the default of rules and text, which leave out what lies outside the
   plot). With `false` or `"chart"`, markers at the plot's edge show whole;
   the chart does not grow, so what passes its edges is still cut there.
+- Every mark on the chart's scales takes `zIndex` and paints in that order
+  on every renderer and export (see Paint order); 3D marks refuse it, as a
+  3D box draws by depth.
+- Lines, areas, bars, points, and error bars take coordinates for their
+  rows' places (`{ field, offset }`, `{ fraction: { field } }`, `{ px: {
+  field } }`, `{ field, scale }` on a position scale of the chart's own);
+  annotations take coordinates for theirs. Other marks take field names.
 - Every built-in mark exports through `renderToPDF`; each chart is one page and
   one Figure, including its facets or subplots.
 - Marks with legend entries or a color legend take `legend: false`, which
@@ -4172,7 +4225,8 @@ subplot's map, network, or tree (`viewport`, `select`, `drill`, and
 `itemMove` events). `drill` and `itemMove` events follow
 `setDrillRoot` and `setItemPosition` too, as `camera` events follow
 `setCamera`. `edge` events (see View limits) give the `scale`, the `side`
-(`"start"`, its low values, or `"end"`), the `domain` in view, the `bound`
+(`"start"`, its low values, or `"end"`), the `domain` in view (the view,
+without the scale's padding), the `bound`
 it came near, and the `cause` that moved the view there or moved the end:
 `"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, or
 `"options"`. An

@@ -2,11 +2,13 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { legend } from "../../src/guides/options.ts";
+import { estimateText } from "../../src/layout/text.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import { text } from "../../src/marks/text.ts";
+import type { TextGeometry } from "../../src/scene/scene.ts";
 import { modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -78,16 +80,27 @@ it.each(["svg", "canvas"] as const)(
       renderer,
       marks: [text({ x: 1, y: 1, label: { text: "note", style: { color: "#e06600" } } })],
     });
-    const label = chart.root.querySelector('g[fill="#e06600"]')!;
-    expect(label.getAttribute("stroke")).toBe("#ffffff");
-    expect(label.getAttribute("stroke-opacity")).toBe("1");
+    // The label's halo: in SVG its group's stroke; on a canvas, what the canvas strokes.
+    const halo = () => {
+      if (renderer === "svg") {
+        const label = chart.root.querySelector('g[fill="#e06600"]')!;
+        return label.hasAttribute("stroke")
+          ? [label.getAttribute("stroke"), Number(label.getAttribute("stroke-opacity"))]
+          : undefined;
+      }
+      const label = modelOf(chart)
+        .scene(estimateText)
+        .panels[0]!.marks.find((mark) => mark.kind === "text") as TextGeometry;
+      return label.halo && [label.halo.color, label.halo.opacity];
+    };
+    expect(halo()).toEqual(["#ffffff", 1]);
     chart.update({
       marks: [
         text({ x: 1, y: 1, label: { text: "note", style: { color: "#e06600" } }, halo: false }),
       ],
     });
     chart.render();
-    expect(chart.root.querySelector('g[fill="#e06600"]')!.hasAttribute("stroke")).toBe(false);
+    expect(halo()).toBeUndefined();
     chart.destroy();
   },
 );

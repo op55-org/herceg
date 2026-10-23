@@ -9,12 +9,14 @@
 
 import type { AxisFormat } from "../marks/mark.ts";
 import type { lowerPosition, placeAt, rowOf, Series, samePositions, xAt } from "../marks/series.ts";
+import type { AxisPlan } from "../model/axis.ts";
 import { type Binding, Bindings } from "../model/bindings.ts";
 import { cursorAxis, inspectPosition, keyboardStops, stepCell } from "../model/keyboard.ts";
 import type { ChartModel, DrawnPanel, Inspection, YViewport } from "../model/model.ts";
 import type { RowLink } from "../model/row-selection.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
 import { inspectSnapped } from "../model/snap.ts";
+import { padded, unpadded } from "../model/view-padding.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { PlotRect, Scene, tickLabelGap } from "../scene/scene.ts";
 import type { CursorShowSpec, CursorSnap, ZoomSpec } from "../spec/spec.ts";
@@ -602,7 +604,9 @@ export class Interaction {
         // The data bounds a zoomed x scale every panel shares (not an inset's own).
         const zoomed = name === "x" && model.sharesX && !group && model.viewportOf(panel.key);
         const data = zoomed ? model.dataXExtent() : undefined;
-        const domain = [Math.min(...scale.domain), Math.max(...scale.domain)] as const;
+        // The view shown, without the padding drawn around it.
+        const [a, b] = unpadded(panel.plans[name], scale.domain as [number, number]);
+        const domain = [Math.min(a, b), Math.max(a, b)] as const;
         // Log axes measure by ratios, where ends that are not positive bound nothing (as limits do).
         const to = scale.type === "log" ? Math.log : Number;
         const span = to(domain[1]) - to(domain[0]);
@@ -1026,12 +1030,8 @@ export class Interaction {
     const along = this.#axes(axes, panel);
     // Along y first: a y range the chart refuses changes nothing.
     this.#change(() => {
-      if (along.y) this.#zoomY(shown, plot.y + plot.height + dy, plot.y + dy);
-      if (along.x)
-        this.#host.model.setViewport(
-          [shown.x(plot.x + dx), shown.x(plot.x + plot.width + dx)],
-          panel.key,
-        );
+      if (along.y) this.#zoomY(shown, plot.y + plot.height + dy, plot.y + dy, true);
+      if (along.x) this.#zoomX(shown, plot.x + dx, plot.x + plot.width + dx);
     }, along.x);
   }
 
@@ -1058,12 +1058,9 @@ export class Interaction {
     // The pixels of what the view shows now that its edges will show.
     const edge = (side: number, from: number, next: number) => from + (side - next) * scale;
     this.#change(() => {
-      if (along.y) this.#zoomY(shown, edge(plot.y + plot.height, py, qy), edge(plot.y, py, qy));
-      if (along.x)
-        this.#host.model.setViewport(
-          [shown.x(edge(plot.x, px, qx)), shown.x(edge(plot.x + plot.width, px, qx))],
-          panel.key,
-        );
+      if (along.y)
+        this.#zoomY(shown, edge(plot.y + plot.height, py, qy), edge(plot.y, py, qy), true);
+      if (along.x) this.#zoomX(shown, edge(plot.x, px, qx), edge(plot.x + plot.width, px, qx));
     }, along.x);
   }
 
@@ -1110,11 +1107,15 @@ export class Interaction {
       return this.#drawn(this.#find(drawn) ?? drawn);
     }
     const panel = drawn;
+    const { plans } = panel;
+    // Views asked for show with their axes' padding, as drawing them will.
+    const shows = (plan: AxisPlan | undefined, view: readonly [number, number] | null) =>
+      view && padded(plan, view);
     return {
       panel,
-      x: inverter(panel.x, x),
-      y: inverter(panel.y, y),
-      yRight: panel.yRight && inverter(panel.yRight, yRight),
+      x: inverter(panel.x, shows(plans.x, x)),
+      y: inverter(panel.y, shows(plans.y, y)),
+      yRight: panel.yRight && inverter(panel.yRight, shows(plans.yRight, yRight)),
     };
   }
 
@@ -1248,14 +1249,30 @@ export class Interaction {
   }
 
   /**
-   * Shows the y values between two pixels of a panel: on the left axis, and
-   * on the right axis what the same pixels show there.
+   * Shows the x values a panel shows between two pixels at the plot's
+   * edges: the view whose padding shows them.
    */
-  #zoomY(shown: Shown, bottom: number, top: number) {
-    const { yRight } = shown;
+  #zoomX(shown: Shown, left: number, right: number) {
+    const { panel } = shown;
+    const view = unpadded(panel.plans.x, [shown.x(left), shown.x(right)]);
+    this.#host.model.setViewport(view, panel.key);
+  }
+
+  /**
+   * Shows the y values between two pixels of a panel: on the left axis, and
+   * on the right axis what the same pixels show there. Pixels at the plot's
+   * `edges` show the view's padding too.
+   */
+  #zoomY(shown: Shown, bottom: number, top: number, edges = false) {
+    const { panel, yRight } = shown;
+    const { plans } = panel;
+    const view = (plan: AxisPlan | undefined, y: (pixel: number) => number) => {
+      const values: [number, number] = [y(bottom), y(top)];
+      return edges ? unpadded(plan, values) : values;
+    };
     this.#host.model.setYViewport({
-      y: [shown.y(bottom), shown.y(top)],
-      yRight: yRight ? [yRight(bottom), yRight(top)] : null,
+      y: view(plans.y, shown.y),
+      yRight: yRight ? view(plans.yRight, yRight) : null,
     });
   }
 

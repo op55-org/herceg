@@ -72,13 +72,17 @@ export function chartStyles(theme: Theme, config: ChartConfig, environment: Them
   const plot = plotPaint([roles.plot]);
   const text = (role: TextRole, key: string, levels: () => Level[]): TextPaint =>
     paint(key, style[role], levels, (own) => textPaint([roles.text, roles[role], own]));
-  /** An axis role's levels in panel `panel`: the chart's axis, the subplot, the subplot's own axis. */
-  const axisLevels = (role: keyof AxisStyles, axis: ScaleName, panel: number) => (): Level[] => {
+  /**
+   * An axis role's levels in panel `panel`: the chart's axis, the subplot,
+   * the subplot's own axis; for a scale of the chart's own, the subplot's.
+   */
+  const axisLevels = (role: keyof AxisStyles, axis: string, panel: number) => (): Level[] => {
     const own = panels[panel];
+    const scale = axis as ScaleName;
     return [
-      [config[axis]?.style?.[role], `${axis}.style.${role}`],
+      [config[scale]?.style?.[role], `${axis}.style.${role}`],
       [own?.style?.[role], `panels[${panel}].style.${role}`],
-      [own?.[axis]?.style?.[role], `panels[${panel}].${axis}.style.${role}`],
+      [own?.[scale]?.style?.[role], `panels[${panel}].${axis}.style.${role}`],
     ];
   };
   return {
@@ -86,10 +90,10 @@ export function chartStyles(theme: Theme, config: ChartConfig, environment: Them
     read: <T extends object>(style: T, path: string): T =>
       readStyle(style, (name) => `${path}.${name}`, environment),
     /** How axis `axis` of panel `panel` writes its tick labels or title. */
-    axisText: (role: "tickLabel" | "axisTitle", axis: ScaleName, panel: number): TextPaint =>
+    axisText: (role: "tickLabel" | "axisTitle", axis: string, panel: number): TextPaint =>
       text(role, `${role} ${axis} ${panel}`, axisLevels(role, axis, panel)),
     /** How axis `axis` of panel `panel` draws its line, ticks, or grid lines. */
-    axisStroke: (role: "axisLine" | "tick" | "grid", axis: ScaleName, panel: number): StrokePaint =>
+    axisStroke: (role: "axisLine" | "tick" | "grid", axis: string, panel: number): StrokePaint =>
       paint(`${role} ${axis} ${panel}`, style[role], axisLevels(role, axis, panel), (own) =>
         strokePaint([roles[role], own]),
       ),

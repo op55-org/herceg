@@ -71,6 +71,16 @@ export type Coordinate =
   | { fraction: number | { field: string }; frame?: Frame; offset?: number }
   | { px: number | { field: string }; frame?: Frame; offset?: number };
 
+/**
+ * A place each row of a mark of rows has along an axis, read from its own
+ * value: a field on a scale (the axis' own by default), or a number field's
+ * share of a frame or pixels from its edge, as in `Coordinate`.
+ */
+export type RowCoordinate =
+  | { field: string; scale?: string; offset?: number }
+  | { fraction: { field: string }; frame?: Frame; offset?: number }
+  | { px: { field: string }; frame?: Frame; offset?: number };
+
 /** A constant share of a frame or pixels from its edge: where furniture such as an inset is placed. */
 export type FrameCoordinate =
   | { fraction: number; frame?: Frame; offset?: number }

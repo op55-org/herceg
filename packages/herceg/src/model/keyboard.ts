@@ -12,8 +12,8 @@ import type { ChartModel } from "./model.ts";
  * along x (or y) reports every series with a point at exactly that place,
  * so series inspected along an axis share a stop when they share their
  * positions along it (several fields of one table); every other shown
- * series, and each inspected point by point or cell by cell, is a stop of
- * its own.
+ * series, each placed off that axis (read alone), and each inspected
+ * point by point or cell by cell, is a stop of its own.
  */
 export function keyboardStops(
   inspector: Inspector | undefined,
@@ -24,6 +24,8 @@ export function keyboardStops(
     series.filter((s) => {
       const axis = mark.tooltip;
       if (axis !== "x" && axis !== "y") return true;
+      const bound = mark.bound?.[axis];
+      if (bound !== undefined && bound.kind !== "axis") return true;
       if (shared.some((p) => p.axis === axis && same(p.series, s, axis))) return false;
       shared.push({ axis, series: s });
       return true;
@@ -84,16 +86,22 @@ export function inspectPosition(
   const inspector = at === undefined ? undefined : model.inspectorOf(at);
   if (!inspector) return undefined;
   const series = inspector.marks.flatMap(({ visible }) => visible);
-  const ownerOf = (s: Series) => inspector.marks.find(({ series }) => series.includes(s))!.mark;
+  const ownerOf = (s: Series) => inspector.marks.find(({ series }) => series.includes(s))!;
   const anchor = series.find((s) => s.key === key);
   if (!anchor || position < 0 || position >= anchor.length) return undefined;
-  const axis = ownerOf(anchor).tooltip === "y" ? "y" : "x";
+  const owner = ownerOf(anchor);
+  const axis = owner.mark.tooltip === "y" ? "y" : "x";
   const value = placeAt(anchor, axis, rowOf(anchor, position));
+  // A point placed off the axis (in a frame, on a scale of the chart's own) is read alone.
+  const off = (s: Series) => {
+    const bound = ownerOf(s).mark.bound?.[axis];
+    return bound !== undefined && bound.kind !== "axis";
+  };
   // The cursor needs a place along its axis; a point that is not drawn
   // there (a zero on a log axis, say) leaves the other series' points.
-  const scale = inspector.frame[axis];
+  const scale = (off(anchor) ? owner.frame : inspector.frame)[axis];
   if (!Number.isFinite(scale.map(value)) || (scale.type === "band" && value < 0)) return undefined;
-  const along = series.filter((s) => ownerOf(s).tooltip === axis);
+  const along = series.filter((s) => ownerOf(s).mark.tooltip === axis && !off(s));
   const inspection = inspector.inspectAt(
     axis,
     value,

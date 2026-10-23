@@ -94,19 +94,29 @@ describe("mark functions", () => {
   };
 
   contractTest("text.position.at-path.factory", () => {
+    // Text's places in `at` are named there.
     expect(
-      refusal(() => text(rows, { at: { x: { fraction: { field: "v" } }, y: 1 }, label: "a" })),
-    ).toMatchObject({ code: "unsupported", path: "at.x.fraction" });
+      refusal(() =>
+        text(rows, { at: { x: { fraction: { field: "region" as never } }, y: 1 }, label: "a" }),
+      ),
+    ).toMatchObject({ code: "field-type", path: "at.x.fraction.field" });
   });
 
   contractTest("mark.z-index.order.factory", () => {
-    // Every mark function keeps zIndex, which the chart refuses until it paints it.
+    // Every mark function keeps zIndex, which orders the panel's painting.
     const cells = heatmap(rows, { x: "t", y: "region", color: "v", zIndex: 2 });
     expect(cells.spec.zIndex).toBe(2);
-    expect(refusal(() => new ChartModel({ marks: [cells] }))).toMatchObject({
-      code: "unsupported",
-      path: "marks[0].zIndex",
-    });
+    const model = new ChartModel(
+      { marks: [cells, rule({ x: 1 })] },
+      undefined,
+      ...staticCompilers(),
+    );
+    model.setSize(300, 200, 1);
+    const [panel] = model.scene(estimateText).panels;
+    const order = panel!.paint!.map((i) =>
+      i < panel!.grids.length ? "grid" : panel!.marks[i - panel!.grids.length]!.kind,
+    );
+    expect(order.at(-1)).toBe("raster");
   });
 
   contractTest("mark.z-index.finite.factory", () => {
@@ -174,10 +184,33 @@ describe("mark functions", () => {
     const cases: [() => unknown, string][] = [
       [() => point(rows, { x: "t", y: "v", size: { value: -1 } }), "size"],
       [() => line(rows, { x: "t", y: "v", labels: { at: "last", content: [] } }), "labels"],
-      [() => line(rows, { x: { fraction: "a" as never }, y: "v" }), "x"],
     ];
     for (const [make, path] of cases)
       expect(thrown(make)).toMatchObject({ code: "unsupported", path });
+  });
+
+  contractTest("position.coordinate.malformed.factory", () => {
+    // Marks of rows check the coordinates they place rows by, at the
+    // validator's paths: a field as they are made, the rest as the chart compiles.
+    const cases: [object, string][] = [
+      [{ fraction: "a" }, "x.fraction"],
+      [{ fraction: 0.5 }, "x.fraction"],
+      [{ data: 3 }, "x"],
+    ];
+    for (const [x, path] of cases)
+      expect(thrown(() => line(rows, { x: x as never, y: "v" }))).toMatchObject({
+        code: "invalid-option",
+        path,
+      });
+    const compiled: [object, string][] = [
+      [{ px: { field: "t" }, frame: "page" }, "marks[0].x.frame"],
+      [{ field: "t", offset: Number.NaN }, "marks[0].x.offset"],
+    ];
+    for (const [x, path] of compiled) {
+      const marks = [line(rows, { x: x as never, y: "v" })];
+      const draw = () => new ChartModel({ marks }, undefined, ...staticCompilers());
+      expect(thrown(draw)).toMatchObject({ code: "invalid-option", path });
+    }
   });
 
   contractTest("scale.settings.malformed.factory", () => {
@@ -244,42 +277,25 @@ describe("mark functions", () => {
       code: "invalid-option",
       path: "scales.depth.padding",
     });
-    expect(thrown(box(depth(0.1)))).toMatchObject({
-      code: "unsupported",
-      path: "scales.depth.padding",
-    });
+    expect(box(depth(0.1))).not.toThrow();
   });
 
   contractTest("text.vertical-align.factory", () => {
-    // Refused where the chart's options hold it, at its path.
+    // Taken wherever text styles are, and malformed values refused by the validator.
     const lines = line(rows, { x: "t", y: "v" });
-    const config = (options: object) => () => new ChartModel({ marks: [lines], ...options });
-    expect(
-      refusal(
-        () =>
-          new ChartModel({
-            marks: [rule({ y: 1, label: { text: "SLO", style: { verticalAlign: "top" } } })],
-          }),
-      ),
-    ).toMatchObject({ code: "unsupported", path: "marks[0].label.style.verticalAlign" });
-    expect(
-      refusal(config({ title: { text: "Latency", style: { verticalAlign: "top" } } })),
-    ).toMatchObject({ path: "title.style.verticalAlign" });
-    expect(
-      refusal(config({ y: { style: { tickLabel: { verticalAlign: "top" } } } })),
-    ).toMatchObject({ path: "y.style.tickLabel.verticalAlign" });
-    expect(
-      refusal(config({ theme: { style: { text: { verticalAlign: "bottom" } } } })),
-    ).toMatchObject({ path: "theme.style.text.verticalAlign" });
-    expect(
-      refusal(
-        config({
-          marks: [
-            bar(rows, { x: "region", y: "v", labels: { style: { verticalAlign: "middle" } } }),
-          ],
-        }),
-      ),
-    ).toMatchObject({ path: "marks[0].labels.style.verticalAlign" });
+    const build = (options: object) => {
+      const model = new ChartModel({ marks: [lines], ...options });
+      model.setSize(300, 200, 1);
+      return model.scene(estimateText);
+    };
+    expect(() =>
+      build({
+        marks: [rule({ y: 1, label: { text: "SLO", style: { verticalAlign: "top" } } })],
+        title: { text: "Latency", style: { verticalAlign: "top" } },
+        y: { style: { tickLabel: { verticalAlign: "top" } } },
+        theme: { style: { text: { verticalAlign: "bottom" } } },
+      }),
+    ).not.toThrow();
   });
 });
 

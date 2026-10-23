@@ -1,12 +1,12 @@
 import type { NumericArray } from "../data/column.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
-import { BOTTOM, LEFT, RIGHT, rectDrawing, TOP } from "../draw/rect.ts";
+import { ALL_SIDES, BOTTOM, LEFT, RIGHT, rectDrawing, sideMask, TOP } from "../draw/rect.ts";
 import { labelsDrawing, textDrawing } from "../draw/text.ts";
 import { type Formatter, numberFormatter } from "../format/format.ts";
 import { centeredLines, estimateText, lineCount, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
-import { headroomDomain } from "../model/axis.ts";
+import { clearDomain } from "../model/clearance.ts";
 import { asksFeatures, type RowPaint } from "../model/features.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
@@ -57,8 +57,9 @@ import {
   SeriesSplitter,
   seriesOf,
 } from "./mark.ts";
-import { coordinates, type FieldPositions, type Pending, refusePending } from "./pending.ts";
+import { type Pending, refusePending } from "./pending.ts";
 import { PositionStack } from "./position-stack.ts";
+import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { rowOf, type Series, TableCache, visibleRange, xExtent, yExtent } from "./series.ts";
 import { Slots } from "./slots.ts";
 import { RowStack, type StackedLayers } from "./stack.ts";
@@ -149,14 +150,22 @@ interface BarStyle<S extends Schema> {
 export interface VerticalBarOptions<S extends Schema> extends BarStyle<S> {
   /** Category field (one band per value), a numeric or time field, or a coordinate. */
   x: PositionField<S> | FieldCoordinate<S>;
-  /** Bar lengths: one field, or several fields drawn side by side or stacked. */
-  y: NumericField<S> | readonly NumericField<S>[];
+  /**
+   * Bar lengths: one field, or several fields drawn side by side or
+   * stacked; or one field as a coordinate (a share of the plot, a scale of
+   * the chart's own).
+   */
+  y: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
 }
 
 /** Horizontal bars: one band per category of y, lengths on x. */
 export interface HorizontalBarOptions<S extends Schema> extends BarStyle<S> {
-  /** Bar lengths: one field, or several fields drawn side by side or stacked. */
-  x: NumericField<S> | readonly NumericField<S>[];
+  /**
+   * Bar lengths: one field, or several fields drawn side by side or
+   * stacked; or one field as a coordinate (a share of the plot, a scale of
+   * the chart's own).
+   */
+  x: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
   /** A category field, or as a coordinate, `{ field }` on y or a scale of the chart's. */
   y: CategoryField<S> | { field: CategoryField<S>; scale?: string; offset?: number };
   /** Positions along y are on the left axis; only vertical bars use the right one. */
@@ -206,20 +215,17 @@ interface Stack {
 const FEATURES = ["encode", "style"];
 
 /** Bars' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [
-  ...coordinates("x", "y"),
-  ["width", "R", "drop width"],
-  ["strokeSides", "R", "drop strokeSides"],
-  ["labels.content", "C", "give a field or the value"],
-];
+const PENDING: readonly Pending[] = [["labels.content", "C", "give a field or the value"]];
 
 /** What value labels are asked for: `labels`' settings, and whether their format is a pattern. */
 type LabelOptions = Frozen<BarLabelsSpec> & { pattern: boolean };
 
-export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
+export class BarMark implements Mark<Frozen<BarSpec>> {
   declare readonly [MARK]: true;
-  readonly headroomDomain = headroomDomain;
-  readonly spec: FieldPositions<Frozen<BarSpec>>;
+  readonly clearDomain = clearDomain;
+  /** Room automatic padding keeps for bars of a width of their own (see `Mark.inset`). */
+  readonly inset: { x: number; y: number } | undefined;
+  readonly spec: Frozen<BarSpec>;
   readonly table: Table<Schema>;
   readonly zero: "x" | "y";
   readonly tooltip: "x" | "y";
@@ -228,6 +234,7 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
   readonly featured: boolean;
   readonly identity: MarkSources;
   readonly legendScales: readonly LegendScale[];
+  readonly bound: RowBindings | undefined;
   /**
    * Series stand side by side: unless `dodge: false` or a stack piles them,
    * or the series field is the position field (one series a position).
@@ -240,6 +247,8 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
   /** The field bars are placed by: x for vertical bars, y for horizontal ones. */
   readonly #position: string;
   readonly #categorical: boolean;
+  /** The sides outlines draw (draw/rect.ts), where not all of them. */
+  readonly #sides: number | undefined;
   readonly #split: SeriesSplitter;
   /** Each grouped series' slot in its positions, as geometry last placed it. */
   readonly #shares = new BandShares();
@@ -284,11 +293,13 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
         strokeSides,
       );
     refusePending(input, "bar", PENDING);
-    this.spec = frozen(input) as FieldPositions<Frozen<BarSpec>>;
+    this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "bar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    const sides = spec.strokeSides && sideMask(spec.strokeSides);
+    this.#sides = sides === ALL_SIDES ? undefined : sides;
     const problem = stackError(spec.stack, false);
     if (problem) throw new Error(problem);
     if (spec.dodge && spec.stack)
@@ -333,8 +344,10 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
       spec.stack === "fill" ? { offset: { resolve: fillLayers, fill: true } } : {},
     );
     this.#positionStack = new PositionStack(spec.stack === "fill");
-    const xs = typeof spec.x === "string" ? [spec.x] : spec.x;
-    const ys = typeof spec.y === "string" ? [spec.y] : spec.y;
+    const { fields, bound } = bindRows(spec, table, "bar", ["x", "y"]);
+    this.bound = bound;
+    const xs = typeof fields.x === "string" ? [fields.x] : fields.x!;
+    const ys = typeof fields.y === "string" ? [fields.y] : fields.y!;
     this.#horizontal = ys.length === 1 && table.has(ys[0]!) && table.kind(ys[0]!) === "category";
     let lengths: readonly string[];
     if (this.#horizontal) {
@@ -372,6 +385,10 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
     if (spec.stack === "fill")
       this.pointText = (s, row, format) => stackPointText(s, row, this.tooltip, format);
     this.#categorical = table.kind(this.#position) === "category";
+    // Bars of a width of their own reach half of it past their positions
+    // along a continuous axis, beyond the half slot their extent keeps.
+    const px = spec.width?.px;
+    if (px && !this.#categorical && !this.#horizontal) this.inset = { x: px / 2, y: 0 };
     this.#split = new SeriesSplitter(
       table,
       this.#categorical ? undefined : this.#position,
@@ -383,6 +400,7 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
   }
 
   channelKind(axis: "x" | "y") {
+    if (offAxis(this.bound, axis)) return undefined;
     return (axis === "y") === this.#horizontal ? this.table.kind(this.#position) : "number";
   }
 
@@ -651,6 +669,19 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
       const rects = Array.from({ length: parts }, (_, part) =>
         frame.floats(keyOf(part), "rect", sizes[part]! * 4),
       );
+      // Each look's outline, its own or the mark's. Bars outlined on some
+      // sides only are square, so no fill rounds past their outline.
+      const outlines = Array.from({ length: parts }, (_, part) => {
+        const look = looks?.paints[part];
+        const own =
+          look?.stroke !== undefined ||
+          look?.strokeWidth !== undefined ||
+          look?.dash !== undefined ||
+          look?.strokeOpacity !== undefined ||
+          look?.opacity !== undefined;
+        return own ? this.#edge(frame, look) : edge;
+      });
+      const square = outlines.map((outline) => outline?.sides !== undefined);
       // Unstacked bars round the corners at their value's end. The buffer
       // matches the rectangles' capacity, so it grows only when they do.
       const rounding =
@@ -661,6 +692,9 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
       const shown = items ? frame.doubles(s.key, "at", end - start) : undefined;
       const span = items ? frame.floats(s.key, "span", (end - start) * 2) : undefined;
       const counts = new Uint32Array(parts);
+      const attributed = frame.attributed
+        ? rects.map((r) => new Uint32Array(r.length / 4))
+        : undefined;
       // Bars of one look (the common case) read no arrays of looks per row.
       const one = parts === 1;
       const rects0 = rects[0]!;
@@ -694,6 +728,7 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
             : tip < root
               ? TOP
               : BOTTOM;
+        if (attributed) attributed[part]![count] = row;
         if (shown) {
           shown[count] = at;
           span![count * 2] = root;
@@ -704,7 +739,8 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
           const middle = center + offset + width / 2;
           const value = spec.stack === "fill" ? stackShare(s, row) : s.values[row]!;
           const alpha = look ? fillOpacityOf(look) : opacity;
-          const cap = rounding ? Math.min(radius, width / 2, Math.abs(root - tip)) : 0;
+          const cap =
+            rounding && !square[part] ? Math.min(radius, width / 2, Math.abs(root - tip)) : 0;
           labeled.add(
             labeled.text(value, row),
             middle,
@@ -722,12 +758,6 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
       if (one) counts[0] = drawn;
       for (let part = 0; part < parts; part++) {
         const look = looks?.paints[part];
-        const lookEdge =
-          look?.stroke !== undefined ||
-          look?.strokeWidth !== undefined ||
-          look?.dash !== undefined ||
-          look?.strokeOpacity !== undefined ||
-          look?.opacity !== undefined;
         const bars: RectGeometry = {
           kind: "rect",
           draw: rectDrawing,
@@ -736,10 +766,11 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
           fillOpacity: look ? fillOpacityOf(look) : opacity,
           rects: rects[part]!,
           count: counts[part]!,
-          rounded: rounding && { radius, ends: rounding[part]! },
+          rounded: rounding && !square[part] ? { radius, ends: rounding[part]! } : undefined,
           bars: shown && { horizontal, at: shown, span: span! },
+          rows: attributed?.[part],
         };
-        const outline = lookEdge ? this.#edge(frame, look) : edge;
+        const outline = outlines[part];
         if (outline) bars.edge = outline;
         out.push(bars);
       }
@@ -759,7 +790,7 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
     const width = look?.strokeWidth ?? spec.strokeWidth;
     if (stroke === undefined && width === undefined) return undefined;
     const strokeWidth = width ?? 1;
-    if (strokeWidth <= 0) return undefined;
+    if (strokeWidth <= 0 || this.#sides === 0) return undefined;
     return {
       stroke: stroke ?? surface(frame.theme),
       width: strokeWidth,
@@ -767,6 +798,7 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
       opacity:
         (look?.strokeOpacity ?? spec.strokeOpacity ?? 1) * (look?.opacity ?? spec.opacity ?? 1),
       dash: dashPattern(look?.dash ?? spec.dash, strokeWidth),
+      sides: this.#sides,
     };
   }
 
@@ -802,20 +834,32 @@ export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
     const shares = this.#shares;
     const groups = stack || !visible[0] ? 1 : shares.slotOf(visible[0]).count;
     const share = slot / groups;
-    const width = groups > 1 ? share * (1 - GROUP_GAP) : share;
+    // A width of the bars' own, whatever their share; else their share, less a gap between groups.
+    const width = this.spec.width?.px ?? (groups > 1 ? share * (1 - GROUP_GAP) : share);
     return {
       slot,
       share,
       width,
       groups,
-      offset: (s) =>
-        stack ? -slot / 2 : -slot / 2 + share * shares.slotOf(s).index + (share - width) / 2,
+      // Centered in the series' share of the slot (stacks fill the slot).
+      offset: (s) => -slot / 2 + (stack ? 0 : share * shares.slotOf(s).index) + (share - width) / 2,
     };
   }
 
-  /** The positions of a series to draw: those in view along x for vertical bars. */
+  /**
+   * The positions of a series to draw: those in view along x for vertical
+   * bars, and beside the view as far as bars of a width of their own reach
+   * into it.
+   */
   range(s: Series, frame: Frame): readonly [number, number] {
-    return this.#horizontal ? [0, s.length] : visibleRange(s, frame.x.domain[0], frame.x.domain[1]);
+    if (this.#horizontal) return [0, s.length];
+    const { x } = frame;
+    const px = this.#categorical ? undefined : this.spec.width?.px;
+    if (!px) return visibleRange(s, x.domain[0], x.domain[1]);
+    // As far as a bar's far edge from its position: its width, beside half a slot.
+    const reach = px / 2 + this.#slot(x) / 2;
+    const [a, b] = x.range;
+    return visibleRange(s, x.invert(Math.min(a, b) - reach), x.invert(Math.max(a, b) + reach));
   }
 
   /**

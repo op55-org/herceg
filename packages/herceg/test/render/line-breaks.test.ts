@@ -34,7 +34,7 @@ const sans = new Uint8Array(
 
 /** Each line of `svg`'s text elements holding lines: its text and position. */
 const lines = (svg: string) =>
-  [...svg.matchAll(/<tspan x="([\d.-]+)" y="([\d.-]+)">([^<]*)<\/tspan>/g)].map(
+  [...svg.matchAll(/<tspan x="([\d.-]+)" y="([\d.-]+)"[^>]*>([^<]*)<\/tspan>/g)].map(
     ([, x, y, line]) => ({ line, x: Number(x), y: Number(y) }),
   );
 

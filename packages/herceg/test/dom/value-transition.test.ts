@@ -49,6 +49,8 @@ import {
   type SegmentGeometry,
   type TextGeometry,
 } from "../../src/scene/scene.ts";
+import { contractTest } from "../helpers/contracts.ts";
+import { gridAt } from "../helpers/grid.ts";
 
 const clock = vi.hoisted(() => ({ frame: 0 }));
 vi.mock("../../src/dom/scheduler.ts", () => ({ lastFrameTime: () => clock.frame }));
@@ -272,6 +274,46 @@ describe("bars changing values", () => {
     expect(change(model, () => twice.setColumn("a", [11, 13, 25])).tween).toBe(undefined);
   });
 
+  it("change at once beside marks placed in a frame or on a scale of the chart's own", () => {
+    const data = table({ region: ["N", "S"], a: [10, 20], d: [100, 400] });
+    const depth = chart({
+      scales: { depth: { type: "linear" } },
+      guides: [axis({ scale: "depth", place: { side: "right" } })],
+      marks: [
+        bar(data, { x: "region", y: "a" }),
+        line(data, { x: "region", y: { field: "d", scale: "depth" } }),
+      ],
+    });
+    expect(change(depth, () => data.setColumn("a", [30, 60])).tween).toBe(undefined);
+    const lanes = table({ region: ["N", "S"], a: [10, 20], lane: [0.25, 0.75] });
+    const framed = chart({
+      marks: [
+        bar(lanes, { x: "region", y: "a" }),
+        point(lanes, { x: "region", y: { fraction: { field: "lane" } } }),
+      ],
+    });
+    expect(change(framed, () => lanes.setColumn("a", [30, 60])).tween).toBe(undefined);
+  });
+
+  contractTest("position.field.animation", () => {
+    // Coordinates naming only a field, an axis' scale, or no offset place
+    // rows as plain ones do: changed values move.
+    const places = [
+      "region",
+      { field: "region" },
+      { field: "region", scale: "x" },
+      { field: "region", offset: 0 },
+    ] as const;
+    for (const x of places) {
+      const data = table({ region: ["N", "S"], a: [10, 20] });
+      const model = chart({ y: { domain: [0, 100] }, marks: [bar(data, { x, y: "a" })] });
+      expect(
+        change(model, () => data.setColumn("a", [30, 60])).tween,
+        JSON.stringify(x),
+      ).toBeDefined();
+    }
+  });
+
   it("keep copies of what was shown, which later scenes cannot overwrite", () => {
     const data = table({ region: ["N", "S", "E"], sales: [10, 20, 30] });
     const model = chart({
@@ -415,7 +457,7 @@ describe("axes moving with values", () => {
     expect(labels(left)).toEqual(["0", "10", "20", "30", "40"]);
     for (const { label, position } of left.ticks)
       expect(position).toBeCloseTo(placed(Number(label), from, to, HALF), 3);
-    expect(middle.panels[0]!.grid.y).toEqual(left.ticks.map(({ position }) => position));
+    expect(gridAt(middle.panels[0]!, "y")).toEqual(left.ticks.map(({ position }) => position));
     // The bar keeping its value moves only as its axis does; the one changing goes between.
     const [n, , e] = rects(bars(middle)[0]!);
     expect(n![1]).toBeCloseTo(placed(10, from, to, HALF), 3);

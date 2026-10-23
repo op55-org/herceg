@@ -5,6 +5,7 @@
 import type { Formatter } from "../format/format.ts";
 import { STILL } from "../marks/dodge.ts";
 import type { Frame, Hit, Mark, RowParts } from "../marks/mark.ts";
+import { offAxis } from "../marks/row-bindings.ts";
 import {
   lowerPosition,
   placeAt,
@@ -15,6 +16,7 @@ import {
   xAt,
 } from "../marks/series.ts";
 import type { FieldReader, InspectedField } from "../marks/tooltip-fields.ts";
+import { type Nearest, settle } from "./nearest.ts";
 
 /** One point of an inspection: a series' point, or a layout mark's item. */
 export interface InspectedPoint {
@@ -99,11 +101,14 @@ export interface MarkSeries {
 /**
  * A mark a panel inspects: its series there, its index in the chart's
  * marks, and the frame it was drawn with where that is not its axis' (a
- * mark of every panel, by the chart's visibility in a panel with its own).
+ * mark of every panel, by the chart's visibility in a panel with its own;
+ * a mark placing rows in a frame or on a scale of the chart's own), with
+ * how values are written along directions off its axes.
  */
 export interface InspectedMark extends MarkSeries {
   index: number;
   frame?: Frame | undefined;
+  formats?: { readonly x?: Formatter; readonly y?: Formatter } | undefined;
 }
 
 /** A y axis: the frame its marks draw with and the formatter of its values. */
@@ -168,6 +173,8 @@ export class Inspector {
   }
   /** The scene entry owning each series, including its mark and chart index. */
   readonly #ownerOf = new Map<Series, ReadableMark>();
+  /** The marks in the order the panel paints them (see scene/paint.ts), which picking follows. */
+  readonly #painted: readonly ReadableMark[];
 
   constructor(scene: DrawnScene) {
     this.#frame = scene.frame;
@@ -187,6 +194,9 @@ export class Inspector {
       for (const s of series) this.#ownerOf.set(s, owner);
       return owner;
     });
+    // By zIndex, ties as declared; the keyboard and descriptions keep `marks`' order.
+    const z = ({ mark }: ReadableMark) => mark.spec.zIndex ?? 0;
+    this.#painted = this.marks.some(z) ? [...this.marks].sort((a, b) => z(a) - z(b)) : this.marks;
   }
 
   #visibleSeries(filter: (mark: Mark) => boolean): Series[] {
@@ -208,8 +218,12 @@ export class Inspector {
     // Cells are always found under the pointer, so with nothing placed along
     // an axis (heatmaps only) every mode inspects the nearest cell.
     const axis = requested === "nearest-y" ? "y" : "x";
+    // Points placed off the axis (in a frame, on a scale of the chart's own) are found nearest only.
     let series = this.#visibleSeries(
-      (mark) => mark.tooltip !== "cell" && (!mark.place || mark.tooltip === axis),
+      (mark) =>
+        mark.tooltip !== "cell" &&
+        (!mark.place || mark.tooltip === axis) &&
+        !offAxis(mark.bound, axis),
     );
     if (requested === "nearest" || series.length === 0) {
       const hit = this.#nearest(px, py);
@@ -218,11 +232,12 @@ export class Inspector {
       if (!point) return undefined;
       // The heading names where the point is placed: its x, or its y
       // category for marks along y; for a line or region, where it was found.
-      const axis = this.#ownerOf.get(hit.series)!.mark.tooltip === "y" ? "y" : "x";
+      const owner = this.#ownerOf.get(hit.series)!;
+      const axis = owner.mark.tooltip === "y" ? "y" : "x";
       const value = hit.at
-        ? this.#frame[axis].invert(hit.at[axis === "x" ? 0 : 1])
+        ? owner.frame[axis].invert(hit.at[axis === "x" ? 0 : 1])
         : placeAt(hit.series, axis, rowOf(hit.series, hit.position));
-      return this.#inspection(axis, value, [point]);
+      return this.#inspection(axis, value, [point], owner.axis, owner);
     }
     // Snap to the data value nearest the pointer across every visible
     // series, among points drawn in view. Values along y compare within one
@@ -233,16 +248,19 @@ export class Inspector {
       if (left.length > 0) series = left;
       else yAxis = this.#right;
     }
-    const scale = yAxis.frame[axis];
-    const target = scale.invert(axis === "x" ? px : py);
-    const lo = Math.min(scale.domain[0], scale.domain[1]);
-    const hi = Math.max(scale.domain[0], scale.domain[1]);
-    // Distances are compared on screen, where an axis with breaks shows no break.
-    const at = scale.map(target);
     let closest = Infinity;
     let snapped = Number.NaN;
+    let by: ReadableMark | undefined;
     for (const s of series) {
-      const { mark, frame } = this.#ownerOf.get(s)!;
+      const owner = this.#ownerOf.get(s)!;
+      const { mark, frame } = owner;
+      // Each series as drawn: on its axis' scale, moved by its offset, which
+      // shows the values its domain holds.
+      const scale = frame[axis];
+      const { domain } = scale;
+      const lo = Math.min(domain[0], domain[1]);
+      const hi = Math.max(domain[0], domain[1]);
+      const target = scale.invert(axis === "x" ? px : py);
       const position =
         mark.place && mark.pick
           ? (mark.pick([s], px, py, frame)?.position ?? -1)
@@ -251,14 +269,20 @@ export class Inspector {
             : this.#scanNearest(s, axis, target, lo, hi, scale);
       if (position < 0) continue;
       const value = placeAt(s, axis, rowOf(s, position));
-      const distance = Math.abs(scale.map(value) - at);
+      // Distances are compared on screen, where an axis with breaks shows no break.
+      const distance = Math.abs(scale.map(value) - scale.map(target));
       if (distance < closest) {
         closest = distance;
         snapped = value;
+        by = owner;
       }
     }
     if (!Number.isFinite(snapped)) return undefined;
-    return this.inspectAt(axis, snapped, series, yAxis);
+    const inspection = this.inspectAt(axis, snapped, series, yAxis);
+    // The cursor stands where the series snapped to draws the value.
+    return by?.mark.bound?.[axis]
+      ? { ...inspection, position: by.frame[axis].map(snapped) }
+      : inspection;
   }
 
   /**
@@ -365,7 +389,7 @@ export class Inspector {
     const pixels = this.#pixels(s, row);
     const mark = this.#ownerOf.get(s)!.mark;
     if (!pixels || mark.place || mark.tooltip !== "y") return pixels;
-    const { x } = this.#frame;
+    const { x } = this.#ownerOf.get(s)!.frame;
     const end = s.x[row]!;
     const base = s.x0?.[row] ?? (mark.zero === "x" ? 0 : end);
     const [from, to] = mark.span?.(s, row) ?? [Math.min(base, end), Math.max(base, end)];
@@ -410,46 +434,56 @@ export class Inspector {
     return [px + dx, py + dy];
   }
 
+  /** What is drawn nearest a pixel: of what ties with it, the one on top. */
   #nearest(px: number, py: number): Hit | undefined {
-    const { x } = this.#frame;
-    let best: Hit | undefined;
-    const consider = (s: Series, k: number) => {
-      const row = rowOf(s, k);
-      const pixels = this.#drawn(s, row);
-      if (!pixels) return;
-      const distance = Math.hypot(pixels[0] - px, pixels[1] - py);
-      if (distance < (best?.distance ?? Infinity)) best = { series: s, position: k, distance };
-    };
-    const target = x.invert(px);
-    for (const { mark, visible: series, frame } of this.marks) {
-      if (mark.pick) {
-        // Ties go to later marks, which are drawn on top.
-        const hit = mark.pick(series, px, py, frame);
-        if (hit && hit.distance <= (best?.distance ?? Infinity)) best = hit;
+    return settle((found) => this.#visit(px, py, found));
+  }
+
+  /** Hands what is drawn near a pixel to `found`, in paint order, but for what is farther than its limit. */
+  #visit(px: number, py: number, found: Nearest): void {
+    for (const { mark, visible: series, frame } of this.#painted) {
+      const { x } = frame;
+      const target = x.invert(px);
+      if (mark.nearby) {
+        mark.nearby(series, px, py, frame, found);
         continue;
       }
+      if (mark.pick) {
+        const hit = mark.pick(series, px, py, frame);
+        if (hit) found.take(hit, mark);
+        continue;
+      }
+      const lit = mark.table && frame.highlighted?.(mark.table);
       for (const s of series) {
+        const consider = (k: number) => {
+          const row = rowOf(s, k);
+          const pixels = this.#drawn(s, row);
+          if (pixels)
+            found.take(
+              { series: s, position: k, distance: Math.hypot(pixels[0] - px, pixels[1] - py) },
+              mark,
+              lit?.[row],
+            );
+        };
         // Marks spreading rows across their bands draw them up to `reach` off their x.
         const reach = mark.maxDisplacement?.(s, frame) ?? 0;
         if (!s.sorted || reach === Infinity) {
-          for (let k = 0; k < s.length; k++) consider(s, k);
+          for (let k = 0; k < s.length; k++) consider(k);
           continue;
         }
         // Walk outward from the pointer's x on each side until points are
-        // horizontally farther than the best match: screen distance grows
+        // horizontally farther than ties reach: screen distance grows
         // away from it either way, on any scale.
         const after = lowerPosition(s, target);
-        const within = (k: number) =>
-          Math.abs(x.map(xAt(s, k)) - px) - reach <= (best?.distance ?? Infinity);
+        const within = (k: number) => Math.abs(x.map(xAt(s, k)) - px) - reach <= found.limit;
         // Hidden points all sit at their break's seam: they are jumped.
         const breaks = x.breaks;
         const back = (k: number) => (breaks ? breaks.shownBefore(s.x, k, s.rows) : k);
         const ahead = (k: number) => (breaks ? breaks.shownFrom(s.x, k, s.length, s.rows) : k);
-        for (let k = back(after - 1); k >= 0 && within(k); k = back(k - 1)) consider(s, k);
-        for (let k = ahead(after); k < s.length && within(k); k = ahead(k + 1)) consider(s, k);
+        for (let k = back(after - 1); k >= 0 && within(k); k = back(k - 1)) consider(k);
+        for (let k = ahead(after); k < s.length && within(k); k = ahead(k + 1)) consider(k);
       }
     }
-    return best;
   }
 
   /**
@@ -479,7 +513,8 @@ export class Inspector {
       const point = this.#point(s, position);
       if (point) points.push(point);
     }
-    return this.#inspection(axis, value, points, yAxis);
+    // An anchor placed off the axis is headed by its own place.
+    return this.#inspection(axis, value, points, yAxis, anchor && this.#ownerOf.get(anchor));
   }
 
   /** Position of a drawn point of `s` at `value` on `axis`, or -1. */
@@ -493,19 +528,36 @@ export class Inspector {
     return this.#scanNearest(s, axis, value, value, value);
   }
 
+  /**
+   * An inspection at `value` on `axis` (for "y", a value of `yAxis`), or
+   * for a point `owner` places off that axis, at its value there.
+   */
   #inspection(
     axis: "x" | "y",
     value: number,
     points: InspectedPoint[],
     yAxis = this.#left,
+    owner?: ReadableMark,
   ): AxisInspection {
+    const off = owner && offAxis(owner.mark.bound, axis);
     return {
       axis,
       value,
-      position: yAxis.frame[axis].map(value),
-      label: axis === "x" ? this.#formatX(value) : yAxis.formatY(value),
+      // Where the owner draws it: in its frame, or moved by its offset.
+      position: (owner?.mark.bound?.[axis] ? owner.frame : yAxis.frame)[axis].map(value),
+      label: off
+        ? this.#formatOf(owner, axis)(value)
+        : axis === "x"
+          ? this.#formatX(value)
+          : yAxis.formatY(value),
       points,
     };
+  }
+
+  /** How `owner`'s values along `axis` are written: as its axis writes them, or where it places them off it, as there. */
+  #formatOf(owner: ReadableMark, axis: "x" | "y"): Formatter {
+    if (!offAxis(owner.mark.bound, axis)) return axis === "x" ? this.#formatX : owner.axis.formatY;
+    return owner.formats?.[axis] ?? this.#formatValue;
   }
 
   #point(s: Series, position: number, at?: readonly [number, number]): InspectedPoint | undefined {
@@ -515,13 +567,17 @@ export class Inspector {
     const pixels = at ?? this.#pixels(s, row);
     if (!pixels) return undefined;
     const [px, py] = pixels;
-    const { mark, index, axis } = this.#ownerOf.get(s)!;
+    const owner = this.#ownerOf.get(s)!;
+    const { mark, index } = owner;
     // Marks inspected along y (horizontal bars) measure their values on x;
     // marks of cells name and measure their points themselves.
     const along = mark.tooltip === "y";
-    const formatY = axis.formatY;
-    const formatValue = along ? this.#formatX : formatY;
-    const format = { x: this.#formatX, y: formatY, value: this.#formatValue };
+    const format = {
+      x: this.#formatOf(owner, "x"),
+      y: this.#formatOf(owner, "y"),
+      value: this.#formatValue,
+    };
+    const formatValue = along ? format.x : format.y;
     // Summarizing marks' series index rows of their summaries.
     const fields = mark.summarizes ? undefined : this.#fields?.(mark.table, mark.spec.tooltip, row);
     return {

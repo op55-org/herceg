@@ -6,7 +6,7 @@
 import { rootOf } from "../data/origin.ts";
 import type { Table } from "../data/table.ts";
 import type { Fonts } from "../fonts/registry.ts";
-import { type Formatter, formatNumber, timeValueFormatter } from "../format/format.ts";
+import { type Formatter, formatNumber } from "../format/format.ts";
 import type {
   AxisOptions,
   ChartAxisOptions,
@@ -32,6 +32,7 @@ import {
   type BandList,
   type Bands,
   type ChartMark,
+  checkOption,
   type Frame,
   keyOwner,
   type Mark,
@@ -41,13 +42,13 @@ import {
   type RowParts,
   usesY,
 } from "../marks/mark.ts";
-import { refuseVerticalAlign, refuseZIndex } from "../marks/pending.ts";
+import { offAxis, standsOn } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
 import type { FieldReaders } from "../marks/tooltip-fields.ts";
 import { domainExtent, unionExtent } from "../marks/trace.ts";
 import type { TimeBreaks } from "../scale/breaks.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import { TIME_UNIT_MS, type TimeUnit } from "../scale/time.ts";
+import type { GridBatch } from "../scene/paint.ts";
 import {
   type AxisGuide,
   type AxisPlacement,
@@ -82,13 +83,21 @@ import {
   planAxis,
   planBandAxis,
   shiftPlan,
+  tickCountOf,
+  tooltipFormatter,
   usableDomain,
-  valueFormatter,
 } from "./axis.ts";
 import { axisGuide, TICK } from "./axis-guide.ts";
 import type { Facet } from "./facet.ts";
 import { type CompiledFeatures, type FeatureCompiler, needsFeatures } from "./features.ts";
-import { type AxesState, type CompiledGuides, type GuideCompiler, needsGuides } from "./guides.ts";
+import {
+  type AxesState,
+  type CompiledGuides,
+  type GuideCompiler,
+  type MarkRoom,
+  needsGuides,
+  type OwnScales,
+} from "./guides.ts";
 import { identityOf, keyPrefix, prefixOf, type TableName } from "./identity.ts";
 import type { ItemPanel, ItemViews } from "./item-views.ts";
 import {
@@ -195,9 +204,15 @@ export interface PanelPlans {
   y: AxisPlan;
   yRight: AxisPlan | undefined;
   grid: AxisPlan | false | undefined;
+  /** The position scales of the chart's own. */
+  own?: OwnScales | undefined;
 }
 
-/** What a y extent reads: marks' series, within an x range (and its breaks). */
+/**
+ * What a y extent reads: marks' series, within an x range (and its breaks):
+ * the x data window, before padding and offsets, which move what is drawn
+ * rather than what fits.
+ */
 interface YPart {
   marks: readonly MarkSeries[];
   x0: number;
@@ -252,13 +267,23 @@ const NO_Y_VIEW: YViewport = { y: null, yRight: null };
 
 /**
  * Ascending x and y ranges drawn while a change of view plays; null for an
- * axis without one (a category axis, or no right axis).
+ * axis without one (a category axis, or no right axis). With padding, the
+ * ranges inside it its ticks are chosen in (`AxisPlan.within`).
  */
 export interface ViewDomains {
   x: readonly [number, number] | null;
   y: readonly [number, number] | null;
   yRight: readonly [number, number] | null;
+  ticks?: Omit<ViewDomains, "ticks"> | undefined;
 }
+
+/**
+ * Where a continuous axis' range comes from: fitted to its data (rounded,
+ * and padded), set (a domain or a view asked for, padded only as its
+ * settings ask), or drawn already (a change of view playing, or a
+ * navigator's rail around plots' ranges), shown as it is.
+ */
+export type RangeSource = "fit" | "set" | "drawn";
 
 export type {
   AxisInspection,
@@ -522,6 +547,10 @@ export class ChartModel {
       scopes,
     ];
     this.#config = read;
+    this.#placing = marks.some((mark) => mark.roomPlaced);
+    // What labels placed as drawn took is measured afresh: marks and panels may have gone.
+    this.#placedRooms.clear();
+    this.#placedLast.clear();
     this.#dictionaries = dictionaries;
     // What was read of the page is read again: an update follows changes there.
     if (page) this.#readings = this.#readings.again(page);
@@ -1015,7 +1044,7 @@ export class ChartModel {
     const breaks = this.#xBreaks(type, context.zone);
     return domainExtent(
       marks.flatMap(({ mark, series, rows }) =>
-        shares(mark)
+        shares(mark) && !offAxis(mark.bound, "x")
           ? [[mark, mark.xExtent(this.#xSeries(mark, series), type === "log", breaks, rows)]]
           : [],
       ),
@@ -1059,8 +1088,14 @@ export class ChartModel {
       parts.flatMap(({ marks, x0, x1, breaks }) =>
         marks.map(({ mark, series, rows }) => {
           const visible = series.filter((s) => !this.hidden.hiddenIn(s.key, mark.spec.panel));
-          if (mark.zero === "y" && (visible.length > 0 || mark.seriesless)) stands = true;
-          return [mark, mark.yExtent(visible, x0, x1, log, breaks, rows)] as const;
+          if (standsOn(mark, "y") && (visible.length > 0 || mark.seriesless)) stands = true;
+          // Rows placed off the x axis are in view wherever it is; rows
+          // placed off y tell it nothing.
+          const [from, to, cut] = offAxis(mark.bound, "x") ? WHOLE : [x0, x1, breaks];
+          const extent = offAxis(mark.bound, "y")
+            ? undefined
+            : mark.yExtent(visible, from, to, log, cut, rows);
+          return [mark, extent] as const;
         }),
       ),
     );
@@ -1174,13 +1209,14 @@ export class ChartModel {
 
   /**
    * The scene; `again` says what it is laid out again for: the guides'
-   * axes (see `CompiledAxes.fits`), or legends beside panels, how many
-   * times (see `PanelPlacement.again`).
+   * axes (see `CompiledAxes.fits`), legends beside panels, how many
+   * times (see `PanelPlacement.again`), or marks' labels outside the plots
+   * wider than their tracks (see `#furniture`).
    */
   #sceneOf(
     measure: MeasureText,
     clouds: boolean,
-    again: { axes?: boolean; legends?: number } = {},
+    again: { axes?: boolean; legends?: number; labels?: boolean } = {},
   ): Scene {
     const config = this.#config;
     const layout = this.#panels;
@@ -1228,7 +1264,18 @@ export class ChartModel {
       );
 
     const drawn = marks.filter(({ series }) => series.length > 0);
-    // Marks carry the formulas for glyph insets and room past bar labels.
+    // What a mark draws past its values, and how a domain keeps room for
+    // it: the mark's, or its features' (lines' markers).
+    const roomOf = (mark: Mark): MarkRoom => {
+      const features = mark.inset ? undefined : this.#featured?.of(mark);
+      return {
+        inset: mark.inset ?? features?.inset,
+        clearDomain: mark.clearDomain ?? features?.clearDomain,
+      };
+    };
+    // Automatic padding: room at each end for what marks draw past their
+    // data there (glyphs at both, bar labels at ends away from zero, on log
+    // axes the high end), the most any mark asks, by the solver they carry.
     const padDomain = (
       axis: "x" | "y",
       domain: [number, number],
@@ -1236,28 +1283,24 @@ export class ChartModel {
       type: AxisType,
       among = drawn,
     ): [number, number] => {
-      let inset = 0;
-      let room = 0;
-      let insetDomain: Mark["insetDomain"];
-      let headroomDomain: Mark["headroomDomain"];
+      let [low, high] = [0, 0];
+      let clear: Mark["clearDomain"];
       for (const { mark, series } of among) {
-        if (mark.inset) {
-          inset = Math.max(inset, mark.inset[axis]);
-          insetDomain = mark.insetDomain;
-        }
-        if (mark.zero === axis && mark.headroom) {
-          room = Math.max(
-            room,
-            mark.headroom(
-              series.filter((s) => !this.hidden.hiddenIn(s.key, mark.spec.panel)),
-              context,
-            ),
-          );
-          headroomDomain = mark.headroomDomain;
-        }
+        const past = roomOf(mark);
+        // What marks draw off this axis keeps no room on it.
+        const inset = offAxis(mark.bound, axis) ? 0 : (past.inset?.[axis] ?? 0);
+        const room =
+          standsOn(mark, axis) && mark.headroom
+            ? mark.headroom(
+                series.filter((s) => !this.hidden.hiddenIn(s.key, mark.spec.panel)),
+                context,
+              )
+            : 0;
+        if (inset || room) clear = past.clearDomain;
+        low = Math.max(low, inset + (type !== "log" && domain[0] < 0 ? room : 0));
+        high = Math.max(high, inset + (type === "log" || domain[1] > 0 ? room : 0));
       }
-      const widened = headroomDomain?.(domain, room, pixels, type) ?? domain;
-      return insetDomain?.(widened, inset, pixels, type) ?? widened;
+      return clear?.(domain, low, high, pixels, type) ?? domain;
     };
 
     // Panels fill a grid of `columns`; without facets, one cell.
@@ -1277,6 +1320,17 @@ export class ChartModel {
         )
       : ONE_PANEL;
     const { columns, header, columnHeader } = grid;
+    // Position scales of the chart's own, from what each instance's panels draw on them.
+    const ownScales = this.#compiled?.scales?.resolve({
+      split,
+      hidden: (mark, s) => this.hidden.hiddenIn(s.key, mark.spec.panel),
+      zone,
+      locale,
+      instances: (scope, path) => layout?.instances(scope, split, columns, path) ?? [0],
+      room: roomOf,
+      headroom: (mark, series) => mark.headroom?.(series, context) ?? 0,
+      length: (i, axis) => (axis === "x" ? plotWs[i]! : plotHs[i]!),
+    });
     // Where the panels go: a facet's uniform grid, or subplots' layout of cells.
     const placement = layout?.placement(split, grid);
 
@@ -1314,7 +1368,9 @@ export class ChartModel {
     // An x axis measuring bar lengths gets the y axis' defaults: zero, round
     // ends, and grid lines.
     const xMeasures = xMarks.map((among) =>
-      among.some(({ mark, series }) => mark.zero === "x" && (series.length > 0 || mark.seriesless)),
+      among.some(
+        ({ mark, series }) => standsOn(mark, "x") && (series.length > 0 || mark.seriesless),
+      ),
     );
 
     // x domains: viewport, explicit domain, or data extent. Log axes only
@@ -1326,11 +1382,11 @@ export class ChartModel {
     // Whether each group has data to label, and its domain before rounding.
     const xHas: boolean[] = [];
     const xDomains: [number, number][] = [];
-    const autoX: boolean[] = [];
+    const xSources: RangeSource[] = [];
     xContexts.forEach(({ type, spec }, h) => {
       // y extents read band axes' every category.
       xDomains[h] = [-Infinity, Infinity];
-      autoX[h] = false;
+      xSources[h] = "set";
       if (type === "band") {
         xHas[h] = bandsOf("x", xGroupAt.indexOf(h)).keys.length > 0;
         return;
@@ -1340,7 +1396,9 @@ export class ChartModel {
       let dataX = domainExtent(
         xMarks[h]!.map(({ mark, series, rows }) => [
           mark,
-          mark.xExtent(this.#xSeries(mark, series), log, breaks, rows),
+          offAxis(mark.bound, "x")
+            ? undefined
+            : mark.xExtent(this.#xSeries(mark, series), log, breaks, rows),
         ]),
       );
       if ((spec?.zero ?? xMeasures[h]) && !log) dataX = unionExtent([dataX, [0, 0]]);
@@ -1351,10 +1409,10 @@ export class ChartModel {
         type,
       );
       if (breaks) xDomains[h] = breaks.showing(xDomains[h]!, !view && spec?.domain !== undefined);
-      autoX[h] = !view && !spec?.domain;
+      xSources[h] = shown?.x ? "drawn" : view || spec?.domain ? "set" : "fit";
     });
     for (const key of this.#viewports.keys()) if (!xKeys.includes(key)) this.#viewports.delete(key);
-    // What y extents read: marks' series within an x scale's domain.
+    // What y extents read: marks' series within an x scale's domain or view.
     const part = (among: readonly MarkSeries[], h: number): YPart => {
       const [x0, x1] = xDomains[h]!;
       return { marks: among, x0, x1, breaks: xContexts[h]!.breaks };
@@ -1471,15 +1529,28 @@ export class ChartModel {
         yBoxed || paint.background ? yReachAll + 2 + (paint.lineHeight - paint.size) / 2 : 0,
       );
     const xLabels = TICK + GAP + Math.max(...xLabelPaints.map(xGap)) - tickLabelGap(0);
-    const xTicks = ({ type, spec }: AxisContext, size: number) =>
-      (spec?.ticks as number | undefined) ??
-      Math.max(2, Math.round(size / (type === "time" ? 100 : 80)));
+    // Category labels of several lines take their lines' room; number and
+    // time labels are planned after it is kept, and keep to one line.
+    let xLines = 1;
+    for (const i of xShown)
+      if (xContexts[xGroupAt[i]!]!.type === "band")
+        for (const label of bandsOf("x", i).labels)
+          if (label.includes("\n")) xLines = Math.max(xLines, lineCount(label));
+    const xLineHeight =
+      tallest(xLabelPaints) +
+      (xLines - 1) * Math.max(...xLabelPaints.map((paint) => paint.lineHeight));
+    const xTicks = (context: AxisContext, size: number) => tickCountOf(context, size, true);
     // Axes the guides list take room of their own: rows and turned labels
     // below the plots, axes above and beside them (see CompiledAxes).
     const guided = this.#compiled?.axes;
     const xLabeled = split.keys.map((_, i) => labelsX(i));
+    // Each panel's instance of a scale an axis shows: a scale of the
+    // chart's own's, else x's or the left y's (read once planned).
+    const groupOf = (scale: string, along: "x" | "y") =>
+      ownScales?.groupOf(scale) ?? (along === "x" ? xGroupAt : leftY.groupOf);
     const axesState = (y: boolean[], yRight: boolean[]): AxesState => ({
       measure,
+      xRoom: xLabels + xLineHeight,
       styles,
       surface: surface(theme),
       width,
@@ -1490,15 +1561,16 @@ export class ChartModel {
       drawsY: leftIn,
       ...(placement?.cells && {
         cells: placement.cells(
-          xGroupAt,
+          groupOf,
           panelIndexes.map(axesIn),
-          () => leftY.groupOf,
           leftIn,
           head.left + EDGE,
           width - head.right - EDGE,
         ),
       }),
-      plan: (scale, i, pixels) => {
+      plan: (scale, i, pixels, start) => {
+        if (scale !== "x" && scale !== "y" && scale !== "yRight")
+          return ownScales?.plan(scale, i, pixels || plotHs[i]!, !!pixels, start);
         if (scale !== "x") return (scale === "y" ? leftY : rightY)?.plans[i];
         const h = xGroupAt[i]!;
         const context = xContexts[h]!;
@@ -1510,17 +1582,7 @@ export class ChartModel {
     const across = guided?.across(axesState([], []));
     // Panels' layouts keep room for listed axes above the panels drawing them.
     const top = head.top + (placement ? 0 : (across?.top ?? 0));
-    // Category labels of several lines take their lines' room; number and
-    // time labels are planned after it is kept, and keep to one line.
-    let xLines = 1;
-    for (const i of xShown)
-      if (xContexts[xGroupAt[i]!]!.type === "band")
-        for (const label of bandsOf("x", i).labels)
-          if (label.includes("\n")) xLines = Math.max(xLines, lineCount(label));
-    const xLabelHeight =
-      tallest(xLabelPaints) +
-      (xLines - 1) * Math.max(...xLabelPaints.map((paint) => paint.lineHeight)) +
-      (across?.bottom ?? 0);
+    const xLabelHeight = xLineHeight + (across?.bottom ?? 0);
     // Each x scale's title goes once, under the last panel labeled with it
     // (see xTitleOf), or in a layout of cells, each labeled panel's own; only
     // those panels' title styles are read.
@@ -1585,36 +1647,45 @@ export class ChartModel {
     // The first panel's height plans the axes of charts with equal rows.
     const plotHeight = plotHs[0]!;
     const tickCount = (spec: AxisOptions | undefined, size: number) =>
-      // Contexts hold counts: the guide compiler plans the other forms.
-      (spec?.ticks as number | undefined) ?? Math.max(2, Math.round(size / 45));
+      tickCountOf({ spec } as AxisContext, size, false);
     /** How panel `i`'s axis of scale `axis` writes its tick labels. */
     const tickPaint = (axis: ScaleName, i: number) => styles.axisText("tickLabel", axis, i);
-    /** A continuous y axis for the marks on one side, from their data domain `base`. */
+    /** A continuous y axis for the marks on one side, from `base`, found as `source` says. */
     const planValueAxis = (
       axisContext: AxisContext,
       base: [number, number],
       sideMarks: readonly MarkSeries[],
-      zoomed: boolean,
-      size = plotHeight,
+      source: RangeSource,
+      size: number,
+      within?: readonly [number, number] | null,
     ): AxisPlan => {
-      const spec = axisContext.spec;
+      const { spec, padding } = axisContext;
       const count = tickCount(spec, size);
       const sideDrawn = sideMarks.filter(({ series }) => series.length > 0);
-      // Fixed and zoomed domains are shown as they are; others are rounded,
-      // their ticks on the rounded values, then widened for what marks draw
-      // past their values.
-      if (spec?.domain || zoomed)
-        return planAxis(axisContext, base, [plotTop + size, plotTop], count);
-      const nice = spec?.nice ?? !sideDrawn.some(({ mark }) => mark.tight);
-      const rounded = niceAxisDomain(base, axisContext, count, nice);
-      const domain = padDomain("y", rounded, size, axisContext.type, sideDrawn);
-      return planAxis(
-        axisContext,
-        domain,
-        [plotTop + size, plotTop],
-        count,
-        nice ? rounded : domain,
-      );
+      // Domains and views set are shown as they are, unless padding is
+      // given; fitted ones are rounded, their ticks on the rounded values,
+      // then widened by the padding given or for what marks draw past their
+      // values. Ranges drawn already have their padding.
+      const fixed = source !== "fit";
+      const nice = !fixed && (spec?.nice ?? !sideDrawn.some(({ mark }) => mark.tight));
+      const rounded = fixed ? base : niceAxisDomain(base, axisContext, count, nice);
+      const domain =
+        padding && source !== "drawn"
+          ? padding.pad(rounded, size)
+          : fixed
+            ? base
+            : padDomain("y", rounded, size, axisContext.type, sideDrawn);
+      // Ticks go inside the padding: of a range drawn already, where they were.
+      const ticksIn = !padding
+        ? nice
+          ? rounded
+          : domain
+        : source === "drawn"
+          ? (within ?? padding.unpad(base, size))
+          : rounded;
+      const plan = planAxis(axisContext, domain, [plotTop + size, plotTop], count, ticksIn);
+      if (padding) plan.padded = size;
+      return plan;
     };
 
     /** The category y axis of panel `i` over the plot from `y`, `size` tall. */
@@ -1696,12 +1767,15 @@ export class ChartModel {
         const { type: own, spec } = contexts[g]!;
         const zoomed = !groups && view !== undefined;
         const fixed = zoomed ? oriented(view, spec?.domain) : spec?.domain;
+        const source =
+          zoomed && (right ? shown?.yRight : shown?.y) ? "drawn" : fixed ? "set" : "fit";
         // A group shows something when its marks place a value along y,
         // annotations included; the extent of a fixed shared domain is not read.
         const extent = groups || !fixed ? this.#yData(parts, own, spec) : undefined;
         if (groups && !extent) empty.add(g);
         const base = usableDomain(fixed ?? extent, own);
-        plans[g] = planValueAxis(contexts[g]!, base, among, zoomed, heightOf(g));
+        const ticks = shown?.ticks?.[axis];
+        plans[g] = planValueAxis(contexts[g]!, base, among, source, heightOf(g), ticks);
       });
       // Every panel's plan: its group's moved to its row. A row of another
       // height than the group's keeps the group's domain with ticks for its height.
@@ -1715,7 +1789,8 @@ export class ChartModel {
         if (context.type === "band") return planCategories(y, size, i);
         const [d0, d1] = plan.scale.domain;
         const count = tickCount(context.spec, size);
-        return planAxis(context, [d0!, d1!], [y + size, y], count, plan.within);
+        const sized = planAxis(context, [d0!, d1!], [y + size, y], count, plan.within);
+        return { ...sized, padded: plan.padded };
       });
       // Panels show their own labels unless their scale is their row's:
       // beside the row's first panel on the left, its last on the right.
@@ -1730,7 +1805,13 @@ export class ChartModel {
     const leftData =
       !leftY.contexts.every(({ type }) => type === "band") || (bands.y?.keys.length ?? 0) > 0;
     if (!(leftData || rightUsed)) xHas.fill(false);
-    const hasData = xHas.includes(true);
+    // Rows placed off x (in a frame, on a scale of the chart's own) give x
+    // no data, but y labels them.
+    const offX = marks.some(
+      ({ mark, series }) =>
+        series.length > 0 && offAxis(mark.bound, "x") && !offAxis(mark.bound, "y"),
+    );
+    const hasData = xHas.includes(true) || ((leftData || rightUsed) && offX);
     /** Names the scale panel `i` shares on a side: "" when every panel does. */
     const groupKey = (side: typeof leftY, i: number) => side.groups?.keys[side.groupOf[i]!] ?? "";
     // Subplots show, title, and grid each panel's y axes as its own settings
@@ -1830,25 +1911,41 @@ export class ChartModel {
       plotWidth: number,
       h: number,
       shown = xDomains[h]!,
-      auto = autoX[h],
+      source = xSources[h]!,
+      within?: readonly [number, number],
     ): AxisPlan => {
       const context = xContexts[h]!;
-      const { type, spec } = context;
+      const { type, spec, padding } = context;
       if (type === "band") return planCategoriesX(h, [left, left + plotWidth]);
       const count = xTicks(context, plotWidth);
       const range = [left, left + plotWidth] as const;
-      if (!auto) return planAxis(context, shown, range, count);
-      // As for y: ticks on the rounded domain, inside the room for glyphs.
-      const nice = spec?.nice ?? xMeasures[h]!;
-      const rounded = niceAxisDomain(shown, context, count, nice);
+      // As for y: ticks on the rounded domain, inside the padding given or the room for glyphs.
+      const auto = source === "fit";
+      const nice = auto && (spec?.nice ?? xMeasures[h]!);
+      const rounded = auto ? niceAxisDomain(shown, context, count, nice) : shown;
       // Room at the ends is time shown: on axes with breaks, positions.
       const room = (d: [number, number], as: AxisType) =>
         padDomain("x", d, plotWidth, as, xDrawn[h]);
       const { breaks } = context;
-      const domain = breaks
-        ? breaks.inPositions(rounded, (d) => room(d, "linear"))
-        : room(rounded, type);
-      return planAxis(context, domain, range, count, nice ? rounded : domain);
+      const domain =
+        padding && source !== "drawn"
+          ? padding.pad(rounded, plotWidth)
+          : !auto
+            ? shown
+            : breaks
+              ? breaks.inPositions(rounded, (d) => room(d, "linear"))
+              : room(rounded, type);
+      // As for y; a range drawn already says what its ticks were chosen in.
+      const ticksIn = !padding
+        ? nice
+          ? rounded
+          : domain
+        : source === "drawn"
+          ? (within ?? padding.unpad(shown, plotWidth))
+          : rounded;
+      const plan = planAxis(context, domain, range, count, ticksIn);
+      if (padding) plan.padded = plotWidth;
+      return plan;
     };
     let xPlans: AxisPlan[] = [];
     // Where each group's first label starts and last one ends, by plot
@@ -1863,7 +1960,9 @@ export class ChartModel {
         if (axesIn(i)) groupWidths[h] = Math.min(groupWidths[h]!, widths[i]!);
       }
       groupWidths = groupWidths.map((w) => (w < Infinity ? w : widths[0]!));
-      xPlans = xContexts.map((_, h) => planX(groupWidths[h]!, h));
+      // A change of view playing says where its ticks are.
+      const ticks = shown?.ticks?.x ?? undefined;
+      xPlans = xContexts.map((_, h) => planX(groupWidths[h]!, h, undefined, undefined, ticks));
       ends.clear();
     };
     /**
@@ -1877,7 +1976,8 @@ export class ChartModel {
       const range = [left, left + size] as const;
       if (context.type === "band") return planCategoriesX(h, range);
       const [d0, d1] = plan.scale.domain;
-      return planAxis(context, [d0!, d1!], range, xTicks(context, size), plan.within);
+      const sized = planAxis(context, [d0!, d1!], range, xTicks(context, size), plan.within);
+      return { ...sized, padded: plan.padded };
     };
     const labelEnds = (h: number, size: number, i: number) => {
       // Panels' labels differ only by their paints' font and box; where the
@@ -1923,6 +2023,19 @@ export class ChartModel {
       beside,
       kept,
       keep,
+      labels: (i) => {
+        const room: [number, number] = [0, 0];
+        split.panels[i]!.forEach(({ mark }, m) => {
+          if (split.members?.[i]?.[m] === false) return;
+          const size = mark.roomPlaced
+            ? this.#placedRooms.get(`${split.keys[i]}\n${mark.spec.id ?? this.#positions[m]}`)
+            : this.#markRooms.get(mark);
+          if (!size) return;
+          room[0] = Math.max(room[0], size[0]);
+          room[1] = Math.max(room[1], size[1]);
+        });
+        return room;
+      },
       widens,
       ends: reachOf,
       plan: planColumns,
@@ -1991,6 +2104,9 @@ export class ChartModel {
       }
       return plan;
     };
+    /** Where grid lines along an axis of `spec` are painted among the marks: under them by default. */
+    const gridZ = (spec: AxisOptions | undefined) =>
+      (typeof spec?.grid === "object" ? spec.grid.zIndex : undefined) ?? -1;
     // Vertical grid lines where a group has data, as a subplot's own settings say.
     const xGrid = (i: number) => {
       const h = xGroupAt[i]!;
@@ -2063,9 +2179,7 @@ export class ChartModel {
     };
     const mode = modeOf(drawn);
     const valueFormat = (context: AxisContext, scale: PositionScale): Formatter =>
-      context.type === "time"
-        ? valueFormatter(context, timeValueFormatter(timeUnitFor(scale), zone, locale))
-        : valueFormatter(context, formatNumbers);
+      tooltipFormatter(context, scale, formatNumbers);
     // Tooltips show values as precisely as their panel resolves them: x
     // values by one formatter per x group and column width, y values per y
     // group and row height.
@@ -2146,9 +2260,12 @@ export class ChartModel {
       !again.axes && !!placing && !guided.fits(placing, (i) => xPlanOf(xGroupAt[i]!, i));
     if (relegend || reaxis)
       return this.#sceneOf(measure, clouds, {
+        ...again,
         axes: again.axes || reaxis,
         legends: rewrapped + (relegend ? 1 : 0),
       });
+    // What marks' labels placed as they are drawn take in each panel.
+    const rooms = this.#placing ? new Map<string, readonly [number, number]>() : undefined;
     const panels = split.keys.map((key, i): Panel => {
       const row = Math.floor(i / columns);
       const column = i % columns;
@@ -2269,6 +2386,7 @@ export class ChartModel {
         keyed,
         features: this.#featured,
         chart,
+        scaleOf: ownScales && ((name, axis) => ownScales.scale(name, axis, i, plot)),
         // Beside the first and last columns, marks' labels go in their tracks;
         // elsewhere, beyond the panel's y labels.
         outside: [
@@ -2277,6 +2395,7 @@ export class ChartModel {
           ((placement?.edge(i, true) ?? true) && head.labels[1]) ||
             plot.x + plot.width + (rightLabels.labeled[i] ? rightLabels.room : 0) + GAP,
         ],
+        highlighted: this.layoutHighlight,
         ...this.#pools(i),
       };
       // Marks on the right axis draw with its scale.
@@ -2285,6 +2404,8 @@ export class ChartModel {
         let own = (sideOf(mark) === "right" && rightFrame) || frame;
         // Marks of every panel follow the chart's visibility, which panels' legends leave alone.
         if (mark.spec.panel === "*") own = { ...own, hidden, groupSeries };
+        // Marks placing rows in a frame or on a scale of the chart's own draw with those scales.
+        if (mark.bound) own = this.#featured?.frame(own, mark.bound) ?? own;
         // GPU clouds are drawn over the plot only: marks it does not cut place points on the CPU.
         const { clip } = mark.spec;
         return clip !== undefined && clip !== "plot" && own.clouds
@@ -2294,17 +2415,19 @@ export class ChartModel {
       // Marks keep their index in the chart as their identity in every panel.
       const members = split.members?.[i];
       const panelMarks = split.panels[i]!;
-      const geometry = panelMarks.flatMap(({ mark, series, rows }, index) =>
-        members && !members[index]
-          ? []
-          : clipped(
-              mark,
-              draw(mark, series, frameOf(mark), mark.spec.id ?? this.#positions[index]!, rows),
-            ),
-      );
+      const geometry = panelMarks.flatMap(({ mark, series, rows }, index) => {
+        if (members && !members[index]) return [];
+        const id = mark.spec.id ?? this.#positions[index]!;
+        const drawn = paintedAs(mark, draw(mark, series, frameOf(mark), id, rows));
+        // What labels placed as they are drawn took here, asked before the next panel draws them.
+        if (rooms && mark.roomPlaced)
+          rooms.set(`${key}\n${id}`, mark.room!(measure, theme, config.locale, this.#featured));
+        return drawn;
+      });
       if (seams) {
+        // Under the data, with the grid lines.
         const segments = xContexts[h]!.breaks?.seams?.(x, plot, seams, theme.grid);
-        if (segments) geometry.unshift(segments);
+        if (segments) geometry.unshift({ ...segments, zIndex: -1 });
       }
       // Marks of every panel are inspected as drawn, in a panel with a visibility of its own.
       const local = frame.hidden !== hidden;
@@ -2315,7 +2438,11 @@ export class ChartModel {
               {
                 ...entry,
                 index: this.#positions[index]!,
-                ...(local && entry.mark.spec.panel === "*" && { frame: frameOf(entry.mark) }),
+                ...(((local && entry.mark.spec.panel === "*") || entry.mark.bound) && {
+                  frame: frameOf(entry.mark),
+                }),
+                ...(ownScales &&
+                  entry.mark.bound && { formats: ownScales.formats(entry.mark, i, plot) }),
               },
             ],
       );
@@ -2345,26 +2472,58 @@ export class ChartModel {
         inspector,
         plans: { x: xAt, y: yAt, yRight: rightAt, grid: gridAt },
       });
+      // Grid lines, under the marks unless their settings say otherwise;
+      // only lines drawn read their styles.
+      const grids: GridBatch[] = [];
+      if (xGrid(i))
+        grids.push({
+          key: "x",
+          zIndex: gridZ(panelX(i)),
+          along: "x",
+          at: xAt.ticks.map((t) => x.map(t)),
+          paint: styles.axisStroke("grid", "x", i),
+        });
+      if (hasData && gridAt) {
+        const axis = leftIn[i] ? "y" : "yRight";
+        grids.push({
+          key: "y",
+          zIndex: gridZ(panelAxis(i, axis)),
+          along: "y",
+          at: gridAt.ticks.map((t) => gridAt.scale.map(t)),
+          paint: styles.axisStroke("grid", axis, i),
+        });
+      }
       return {
         key,
         plot,
         frame: plotPaint,
-        grid: {
-          x: xGrid(i) ? xAt.ticks.map((t) => x.map(t)) : [],
-          y: hasData && gridAt ? gridAt.ticks.map((t) => gridAt.scale.map(t)) : [],
-          // Only lines drawn read their styles.
-          xPaint: xGrid(i) ? styles.axisStroke("grid", "x", i) : undefined,
-          yPaint:
-            hasData && gridAt
-              ? styles.axisStroke("grid", leftIn[i] ? "y" : "yRight", i)
-              : undefined,
-        },
+        grids,
         axes: placing
-          ? guided.panel(axes, placing, i, plot, { x: xAt, y: yAt, yRight: rightAt, grid: gridAt })
+          ? guided.panel(axes, placing, i, plot, {
+              x: xAt,
+              y: yAt,
+              yRight: rightAt,
+              grid: gridAt,
+              own: ownScales,
+            })
           : axes,
         marks: geometry,
       };
     });
+    // Labels outside the plots placed as they are drawn (labels following
+    // series) may want more room than their panel's tracks kept: once more, wider.
+    if (rooms) {
+      let grew = false;
+      for (const [at, room] of rooms) {
+        const kept = this.#placedRooms.get(at) ?? [0, 0];
+        if (room[0] > kept[0] || room[1] > kept[1]) {
+          this.#placedRooms.set(at, [Math.max(room[0], kept[0]), Math.max(room[1], kept[1])]);
+          grew = true;
+        }
+      }
+      this.#placedLast = rooms;
+      if (grew && !again.labels) return this.#sceneOf(measure, clouds, { ...again, labels: true });
+    }
     // Drop buffers of series that no longer exist.
     const pools = [this.#polylines, this.#floats, this.#doubles, this.#bytes];
     for (const pool of pools as Map<string, unknown>[]) {
@@ -2384,7 +2543,17 @@ export class ChartModel {
     });
     if (strip) panels.push(navigator!.panel(this, views, planX, xContexts[0]!, strip, head.lift));
     // What insets make of the panels: their boxes, borders, and indicators.
-    const layers = placement?.finish?.(panels, views, theme, this.pixelRatio, this.#readings.color);
+    const painted = placement?.finish?.(
+      panels,
+      views,
+      chart,
+      theme,
+      this.pixelRatio,
+      this.#readings.color,
+    );
+    // Then the order each panel paints in where zIndex values change it,
+    // indicators included (on top).
+    this.#compiled?.paint(panels);
 
     let vertices = 0;
     for (const panel of panels) for (const item of panel.marks) vertices += item.draw.size(item);
@@ -2395,10 +2564,51 @@ export class ChartModel {
       pixelRatio: this.pixelRatio,
       theme,
       panels,
-      ...(layers && { layers }),
+      ...(painted && { painted }),
       guides: [...headers, ...head.guides, ...inside],
       vertices,
     };
+  }
+
+  /** Pixels kept left and right of the plots for marks' labels outside them (see `#furniture`). */
+  #labelRoom: readonly [number, number] = [0, 0];
+  /** What each mark's labels outside the plots take left and right, as it last said. */
+  #markRooms = new WeakMap<Mark, readonly [number, number]>();
+  /** Whether some mark places labels as it is drawn (`Mark.roomPlaced`). */
+  #placing = false;
+  /**
+   * What such marks' labels took left and right, by panel and mark
+   * (`${panel}\n${mark}`): kept growing within a layout, as `#labelRoom`
+   * is, and as last drawn, which a new layout starts from.
+   */
+  #placedRooms = new Map<string, readonly [number, number]>();
+  #placedLast = new Map<string, readonly [number, number]>();
+
+  /**
+   * What `marks`' labels outside the plots take left and right, at least
+   * `kept`: the larger of each side's. Labels placed as they are drawn
+   * count with what they took in any panel.
+   */
+  #outsideRoom(
+    marks: readonly MarkSeries[],
+    measure: MeasureText,
+    kept: readonly [number, number],
+  ): readonly [number, number] {
+    let [left, right] = kept;
+    for (const { mark } of marks) {
+      if (mark.roomPlaced) continue;
+      const sizes = mark.room?.(measure, this.#theme, this.#config.locale, this.#featured);
+      if (!sizes) continue;
+      this.#markRooms.set(mark, sizes);
+      left = Math.max(left, sizes[0]);
+      right = Math.max(right, sizes[1]);
+    }
+    if (this.#placedRooms.size > 0)
+      for (const [l, r] of this.#placedRooms.values()) {
+        left = Math.max(left, l);
+        right = Math.max(right, r);
+      }
+    return left === kept[0] && right === kept[1] ? kept : [left, right];
   }
 
   /**
@@ -2535,12 +2745,14 @@ export class ChartModel {
           gap: (along || auto ? 8 : 16) + (place.offset ?? 0),
         });
       }
-    // Marks' labels outside the plots (rules' names) stand innermost, beside the y axes.
-    const outside = [0, 0];
-    for (const { mark } of marks)
-      mark.room?.(measure, theme, config.locale, this.#featured).forEach((size, i) => {
-        outside[i] = Math.max(outside[i]!, size);
-      });
+    // Marks' labels outside the plots (rules' names, labels following
+    // series) stand innermost, beside the y axes, in tracks that only grow
+    // while the chart's size and settings stay, as margins do, so labels
+    // that follow streaming data do not move the plots back and forth.
+    const same = this.#layoutKey === `${width}x${height}`;
+    if (!same) this.#placedRooms = new Map(this.#placedLast);
+    const outside = this.#outsideRoom(marks, measure, same ? this.#labelRoom : [0, 0]);
+    this.#labelRoom = outside;
     outside.forEach((size, i) => {
       if (size)
         requests.push({ key: `labels${i}`, side: i ? "right" : "left", size, gap: auto ? 0 : GAP });
@@ -3021,6 +3233,9 @@ function across(side: Side): boolean {
   return side === "top" || side === "bottom";
 }
 
+/** An x view of every value, with no breaks. */
+const WHOLE = [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, undefined] as const;
+
 /** Where a chart without facets draws: one panel, without headers. */
 const ONE_PANEL: PanelGrid = { columns: 1, rows: 1, header: 0, columnHeader: 0, rowHeader: 0 };
 
@@ -3031,19 +3246,6 @@ function numberFormatter(locale: string | undefined): Formatter {
 /** The category at a band index. */
 function categoryOf(scale: PositionScale): Formatter {
   return (value) => scale.categories?.[Math.round(value)] ?? "";
-}
-
-/**
- * Precision for x values in tooltips: finer when each pixel covers less
- * time (on axes with breaks, less time shown).
- */
-
-function timeUnitFor(scale: PositionScale): TimeUnit {
-  const perPixel = Math.abs(1 / scale.mapping().factor);
-  if (perPixel < TIME_UNIT_MS.second) return "millisecond";
-  if (perPixel < TIME_UNIT_MS.minute) return "second";
-  if (perPixel < TIME_UNIT_MS.day) return "minute";
-  return "day";
 }
 
 /** The y axis a mark's values are on. */
@@ -3062,15 +3264,11 @@ function sideOf(mark: Mark): "left" | "right" {
  * along axes' index among the chart's marks.
  */
 function validate(config: ChartConfig): [Mark[], LayoutMark[], number[]] {
-  refuseZIndex(config.marks);
-  // Marks' specs, subplots' settings, and the chart's plain options but its
-  // scales and fonts (textPaint refuses what lies elsewhere, without a path).
-  for (const [i, { spec }] of config.marks.entries()) refuseVerticalAlign(spec, `marks[${i}]`, []);
-  for (const [i, panel] of (config.panels?.declared ?? []).entries())
-    refuseVerticalAlign(panel, `panels[${i}]`, []);
-  for (const key in config)
-    if (key !== "scales" && key !== "fonts")
-      refuseVerticalAlign(config[key as keyof ChartConfig], key, [key]);
+  for (const [i, { spec }] of config.marks.entries()) {
+    const { zIndex } = spec;
+    const finite = zIndex === undefined || Number.isFinite(zIndex);
+    checkOption(finite, "chart", `marks[${i}].zIndex`, "a finite number", zIndex);
+  }
   const marks: Mark[] = [];
   const positions: number[] = [];
   let layouts: LayoutMark[] = [];
@@ -3124,10 +3322,10 @@ function geometryOf(
   return mark.geometry(series, frame, key, rows);
 }
 
-/** A mark's geometry, cut as its `clip` says when it sets one. */
-function clipped(mark: Mark, geometry: Geometry[]): Geometry[] {
-  const clip = mark.spec.clip;
-  return clip === undefined ? geometry : geometry.map((g) => ({ ...g, clip }));
+/** A mark's geometry, cut and painted as its `clip` and `zIndex` say when it sets them. */
+function paintedAs(mark: Mark, geometry: Geometry[]): Geometry[] {
+  const { clip, zIndex } = mark.spec;
+  return clip === undefined && !zIndex ? geometry : geometry.map((g) => ({ ...g, clip, zIndex }));
 }
 
 /** An ascending range, or null for none or an empty one. */

@@ -357,14 +357,19 @@ export class Highlighter {
     }
     const selection = this.#selection(table)!;
     if (ROWS.has(type)) {
-      const clouds: Geometry[] = [];
+      // Every series' dimmed rows, then every series' selected rows: picking
+      // finds those on top (`Frame.highlighted`).
+      const dimClouds: Geometry[] = [];
+      const litClouds: Geometry[] = [];
       let rest = series;
       if (type === "point" && frame.clouds && series.some((s) => s.length >= CLOUD_POINTS)) {
         const big = series.filter((s) => s.length >= CLOUD_POINTS);
         const drawn = (mark.geometry(big, frame, key) as PointGeometry[]).filter((g) => g.cloud);
         for (const g of drawn) {
           const s = big.find(({ key }) => key === g.key)!;
-          clouds.push(...lightClouds(g, split(s, selected), selection, table));
+          const [off, on] = lightClouds(g, split(s, selected), selection, table);
+          dimClouds.push(off);
+          litClouds.push(on);
         }
         const done = new Set(drawn.map((g) => g.key));
         rest = series.filter((s) => !done.has(s.key));
@@ -372,10 +377,13 @@ export class Highlighter {
       const parts = rest.map((s) => split(s, selected));
       const off = rest.map((s, i) => part(s, OFF, parts[i]!.off));
       const on = rest.map((s, i) => part(s, ON, parts[i]!.on));
+      // Clouds are drawn into the canvas in turn: each part in its series' place.
+      const place = new Map(series.map((s, i) => [s.key, i]));
+      const of = ({ key }: Geometry) => place.get(key.slice(0, key.indexOf("\u0001"))) ?? 0;
+      const inOrder = (parts: Geometry[]) => parts.sort((a, b) => of(a) - of(b));
       return [
-        ...clouds,
-        ...mark.geometry(off, own(OFF), key).map(dim),
-        ...mark.geometry(on, own(ON), key),
+        ...inOrder([...dimClouds, ...mark.geometry(off, own(OFF), key).map(dim)]),
+        ...inOrder([...litClouds, ...mark.geometry(on, own(ON), key)]),
       ];
     }
     const drawn = mark.geometry(series, frame, key);
@@ -419,7 +427,9 @@ export class Highlighter {
         key,
       ))
         lit.set(litKey(g), [...(lit.get(litKey(g)) ?? []), ...over(g)]);
-    // In the mark's order, each part as it paints it: an area's fill, then its outline.
+    // In the mark's order, each part as it paints it: an area's fill, then
+    // its outline; a series' selected rows over its own dimmed ones, so that
+    // translucent colors selected whole show as they are.
     const out: Geometry[] = [];
     const shift = (s: Series) => shiftOf(mark, s, frame);
     for (const g of drawn) {
@@ -435,8 +445,8 @@ export class Highlighter {
       if (spans) {
         // Each pixel is painted once: dimmed outside the selected runs, as drawn inside them.
         for (const dimmed of dimLayer(g))
-          out.push(clipped(dimmed, complement(spans, frame, along), frame, along));
-        if (spans.length > 0) out.push(clipped(g, spans, frame, along));
+          out.push(clipped(dimmed, complement(spans, frame, along), frame, along, OFF));
+        if (spans.length > 0) out.push(clipped(g, spans, frame, along, ON));
         continue;
       }
       // Dimmed, then its selected rows' values over it, part by part.
@@ -446,22 +456,38 @@ export class Highlighter {
         if (values[i]) out.push(values[i]!);
       }
     }
-    // Dots at the opacity each series' line is drawn at, for series without markers.
+    if (type !== "line") return out;
+    // Dots at the opacity each series' line is drawn at, for series without
+    // markers: over the series' own runs, under later series, as its
+    // selected parts are (picking reads them so: `litOverSeries`).
     const opacity = new Map(
       drawn.filter((g) => g.kind === "line").map((g) => [g.key, g.draw.opacity ?? 1] as const),
     );
     const marked = new Set(drawn.map((g) => (g.kind === "point" ? g.of : undefined)));
-    if (type === "line")
-      out.push(
-        ...dots(
-          series.filter((s) => !marked.has(s.key)),
-          runs,
-          frame,
-          shift,
-          (s) => opacity.get(s.key) ?? 1,
-        ),
-      );
-    return out;
+    const dotsOf = new Map(
+      dots(
+        series.filter((s) => !marked.has(s.key)),
+        runs,
+        frame,
+        shift,
+        (s) => opacity.get(s.key) ?? 1,
+      ).map((d) => [d.key.slice(0, d.key.indexOf(ON)), d] as const),
+    );
+    if (dotsOf.size === 0) return out;
+    const ownerOf = (g: Geometry) => g.of ?? g.key.split("\u0001")[0]!;
+    const last = new Map<string, Geometry>();
+    for (const g of out) last.set(ownerOf(g), g);
+    const placed: Geometry[] = [];
+    for (const g of out) {
+      placed.push(g);
+      const owner = ownerOf(g);
+      if (last.get(owner) === g && dotsOf.has(owner)) {
+        placed.push(dotsOf.get(owner)!);
+        dotsOf.delete(owner);
+      }
+    }
+    placed.push(...dotsOf.values());
+    return placed;
   }
 }
 
@@ -496,12 +522,14 @@ function pointsIn(
   };
   const parts = [new Float32Array(g.count * 2), new Float32Array(g.count * 2)];
   const counts = [0, 0];
+  // Points' centers are 32-bit floats, spans' ends 64-bit: their roundings apart.
+  const near = 1e-3;
   for (let i = 0; i < g.count; i++) {
     const p = g.coords[i * 2 + a]!;
     const q = g.coords[i * 2 + 1 - a]!;
     // The span ending at or after p, which holds p if it starts by then.
-    const k = search(ends, p);
-    let inside = k < ends.length && spans[k * 2]! <= p;
+    const k = search(ends, p - near);
+    let inside = k < ends.length && spans[k * 2]! <= p + near;
     for (
       let j = search(places, p - 0.5);
       !inside && j < places.length && places[j]! <= p + 0.5;
@@ -578,7 +606,7 @@ function lightClouds(
   { on, off }: Split,
   selection: DataSelection,
   table: Table,
-): Geometry[] {
+): [dimmed: PointGeometry, lit: PointGeometry] {
   const cloud = g.cloud!;
   const rows = (side: "on" | "off", of: Uint32Array, opacity: number): PointGeometry => ({
     ...g,
@@ -896,6 +924,7 @@ function clipped(
   spans: readonly number[],
   frame: Frame,
   along: "x" | "y",
+  part: typeof ON | typeof OFF,
 ): Geometry {
   const { plot } = frame;
   // Runs of series' data, which canvases draw.
@@ -930,7 +959,7 @@ function clipped(
       context.restore();
     },
   };
-  return { ...geometry, key: `${geometry.key}${ON}${id}`, draw: drawing };
+  return { ...geometry, key: `${geometry.key}${part}${id}`, draw: drawing };
 }
 
 type CanvasPaint = Exclude<Drawing<Geometry>["canvas"], false>;

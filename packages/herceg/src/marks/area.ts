@@ -63,7 +63,8 @@ import {
   untranspose,
   withBands,
 } from "./orient.ts";
-import { coordinates, type FieldPositions, type Pending, refusePending } from "./pending.ts";
+import { type Pending, refusePending } from "./pending.ts";
+import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { type LayerEdges, lowerPosition, rowOf, type Series, xExtent, yExtent } from "./series.ts";
 import { RowStack } from "./stack.ts";
 import { offsetLayers, stackError, stackPointText } from "./stack-offset.ts";
@@ -282,7 +283,7 @@ export function areaFormError(spec: {
       return `area: a band needs both ${low} and ${high}`;
     if (edges[orient] === undefined)
       return `area ${orient}: a band between ${low} and ${high} runs along ${orient}; give ${orient === "x" ? "an" : "a"} ${orient} field`;
-    if (typeof edges[orient] !== "string")
+    if (Array.isArray(edges[orient]))
       return `area ${orient}: a band runs along one ${orient} field; give one field`;
     if (edges[other] !== undefined || mode)
       return `area: ${other} (with stack) or ${low} and ${high}, not both; drop one`;
@@ -302,14 +303,11 @@ export function areaFormError(spec: {
 const FEATURES = ["opacity", "strokeOpacity", "encode", "style", "continuity", "where"] as const;
 
 /** Areas' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [
-  ...coordinates("x", "y", "y1", "y2", "x1", "x2"),
-  ["labels", "C", "drop labels"],
-];
+const PENDING: readonly Pending[] = [["labels", "C", "drop labels"]];
 
-export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
+export class AreaMark implements Mark<Frozen<AreaSpec>> {
   declare readonly [MARK]: true;
-  readonly spec: FieldPositions<Frozen<AreaSpec>>;
+  readonly spec: Frozen<AreaSpec>;
   readonly table: Table<Schema>;
   readonly tooltip: "x" | "y";
   readonly pointText?: (s: Series, row: number, format: AxisFormat) => string;
@@ -342,6 +340,7 @@ export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
   /** With `dodge`, each series' slot in the bands, as last drawn. */
   readonly #shares: BandShares | undefined;
   readonly zero: "x" | "y" | undefined;
+  readonly bound: RowBindings | undefined;
   readonly featured: boolean;
   readonly identity: MarkSources;
   /** How layers stack: `stack`, as `true`, a mode, or an object of its parts. */
@@ -349,7 +348,7 @@ export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
 
   constructor(input: AreaSpec, table: Table<Schema>) {
     refusePending(input, "area", PENDING);
-    this.spec = frozen(input) as FieldPositions<Frozen<AreaSpec>>;
+    this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "area");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -383,6 +382,8 @@ export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
       throw new RangeError(
         `area strokeWidth: expected 0 or more pixels; received ${spec.strokeWidth}`,
       );
+    const { fields, bound } = bindRows(spec, table, "area", ["x", "y", "x1", "x2", "y1", "y2"]);
+    this.bound = bound;
     const problem = areaFormError(spec);
     if (problem) throw new Error(problem);
     const edges =
@@ -394,10 +395,11 @@ export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
     if (edges) {
       // A band's edges are values across the axis it runs along.
       const orient = edges[0] === "y1" ? "x" : "y";
-      const position = (orient === "x" ? spec.x : spec.y) as string;
+      const position = fields[orient] as string;
       requireField(table, position, POSITION, `area ${orient}`);
-      for (const edge of edges) requireField(table, spec[edge]!, NUMERIC, `area ${edge}`);
-      const values = [spec[edges[0]]!, spec[edges[1]]!];
+      for (const edge of edges)
+        requireField(table, fields[edge] as string, NUMERIC, `area ${edge}`);
+      const values = [fields[edges[0]] as string, fields[edges[1]] as string];
       const banded = table.kind(position) === "category";
       this.#roles = { orient, position, values, banded };
       // Bands over categories run in band order, which their series sort by.
@@ -413,8 +415,8 @@ export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
       const roles = rolesOf(
         table,
         "area",
-        spec.x!,
-        spec.y!,
+        fields.x!,
+        fields.y!,
         spec.orient,
         series,
         spec.series === undefined,
@@ -446,6 +448,7 @@ export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
   }
 
   channelKind(axis: "x" | "y") {
+    if (offAxis(this.bound, axis)) return undefined;
     const { orient, position, values } = this.#roles;
     return axis === orient ? this.table.kind(position) : valueKind(this.table, values);
   }

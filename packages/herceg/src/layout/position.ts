@@ -41,10 +41,10 @@ export function coordinateAt(
   } else {
     const box = coordinate.frame === "chart" ? context.chart : context.plot;
     const [start, length] = axis === "x" ? [box.x, box.width] : [box.y, box.height];
-    const share = "fraction" in coordinate ? coordinate.fraction : coordinate.px;
-    // A share read from a field (`{ fraction: { field } }`), which marks
-    // refuse until round 2's stream R places rows by it, has no place yet.
-    if (typeof share !== "number") return undefined;
+    const given = "fraction" in coordinate ? coordinate.fraction : coordinate.px;
+    // A share or pixels a field gives (`{ fraction: { field } }`): the row's.
+    const share = typeof given === "number" ? given : context.field?.(given.field);
+    if (typeof share !== "number" || !Number.isFinite(share)) return undefined;
     at =
       "fraction" in coordinate
         ? start + (axis === "x" ? share : 1 - share) * length

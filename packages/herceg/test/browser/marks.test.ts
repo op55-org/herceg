@@ -23,7 +23,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import { cloudPainter } from "../../src/render/webgl.ts";
 import type { RasterGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
-import { MOUSE, modelOf } from "./helpers.ts";
+import { labelsOf, MOUSE, modelOf, panelGroups } from "./helpers.ts";
 import { hasWebGL2 } from "./webgl.ts";
 
 /** Without a background, the canvas holds what marks paint alone. */
@@ -322,7 +322,7 @@ describe("new marks in the browser", () => {
     const chart = createChart(host, {
       marks: [bar(sales, { x: "region", y: ["a", "b"] })],
     });
-    const paths = () => chart.root.querySelectorAll("svg g[clip-path] path");
+    const paths = () => chart.root.querySelectorAll("svg path[clip-path]");
     expect(paths()).toHaveLength(2);
     chart.root.querySelectorAll("button")[0]!.click();
     chart.render();
@@ -470,7 +470,7 @@ describe("new marks in the browser", () => {
     other.remove();
   });
 
-  it("draws regions with the data and text in the SVG overlay", () => {
+  it("draws regions, data, and text in their order, in SVG or on a canvas", () => {
     const series = table({ t: [0, 1, 2, 3], v: [1, 3, 2, 4] });
     const marks = [
       region({ x1: 1, x2: 2, label: "window" }),
@@ -478,18 +478,22 @@ describe("new marks in the browser", () => {
       text({ x: { data: 3, offset: -6 }, y: 4, label: { text: "last", style: { align: "end" } } }),
     ];
     const svgChart = createChart(host, { marks, renderer: "svg" });
-    const clipped = svgChart.root.querySelector("svg g[clip-path]")!;
-    expect([...clipped.children].map((node) => node.getAttribute("data-kind"))).toEqual([
+    const [painted] = panelGroups(svgChart.root);
+    // Grid lines under all of it, then the marks as declared.
+    expect([...painted!.children].map((node) => node.getAttribute("data-kind"))).toEqual([
+      "grid",
       "rect",
+      "text",
       "line",
+      "text",
     ]);
     const labels = () => [...host.querySelectorAll("svg text")].map((node) => node.textContent);
     expect(labels()).toEqual(expect.arrayContaining(["window", "last"]));
     svgChart.destroy();
-    // On canvas the region is painted with the data; labels stay in SVG.
+    // On a canvas, all of it is painted there, in the same order.
     const canvasChart = createChart(host, { marks, renderer: "canvas" });
-    expect(canvasChart.root.querySelector("svg g[clip-path]")!.children).toHaveLength(0);
-    expect(labels()).toEqual(expect.arrayContaining(["window", "last"]));
+    expect(panelGroups(canvasChart.root)[0]!.children).toHaveLength(0);
+    expect(labels()).not.toContain("window");
     canvasChart.destroy();
   });
 
@@ -533,11 +537,11 @@ describe("new marks in the browser", () => {
     expect(Array.from(pixel)).toEqual([255, 0, 0, 255]);
     canvasChart.destroy();
     const svgChart = createChart(host, { marks, renderer: "svg" });
-    expect(host.querySelector('svg g[clip-path] [data-kind="shapes"] path')).not.toBeNull();
+    expect(host.querySelector('svg [data-kind="shapes"][clip-path] path')).not.toBeNull();
     svgChart.destroy();
   });
 
-  it("paints Sankey nodes and links on a canvas, with labels in SVG", () => {
+  it("paints Sankey nodes, links, and labels on a canvas", () => {
     const flows = table({ from: ["a", "a"], to: ["b", "c"], v: [3, 1] });
     const chart = createChart(host, {
       marks: [sankey(flows, { source: "from", target: "to", value: "v" })],
@@ -556,11 +560,13 @@ describe("new marks in the browser", () => {
     const [r, g, b, alpha] = pixel([0, "a", "b"]);
     expect([r, g, b]).toEqual([255, 0, 0]);
     expect(alpha! / 255).toBeCloseTo(0.35, 1);
-    expect(host.querySelector("svg g[text-anchor='start']")!.textContent).toBe("a 4");
+    // Its labels paint on the canvas too, above the nodes and links.
+    expect(host.querySelector("svg g[text-anchor='start']")).toBeNull();
+    expect(labelsOf(chart)).toContain("a 4");
     chart.destroy();
   });
 
-  it("paints network nodes and links on a canvas, with names in SVG", () => {
+  it("paints network nodes, links, and names on a canvas", () => {
     // Equal values: both links are the widest, 6 px.
     const links = table({ from: ["a", "b"], to: ["b", "c"], v: [1, 1] });
     const chart = createChart(host, {
@@ -580,8 +586,7 @@ describe("new marks in the browser", () => {
     const [r, g, b, alpha] = pixel([0, "a", "b"]);
     expect([r, g, b]).toEqual([0, 0, 255]);
     expect(alpha! / 255).toBeCloseTo(0.45, 1);
-    const names = [...host.querySelectorAll("svg text")].map((text) => text.textContent);
-    expect(names).toEqual(expect.arrayContaining(["a", "b", "c"]));
+    expect(labelsOf(chart)).toEqual(expect.arrayContaining(["a", "b", "c"]));
     chart.destroy();
   });
 
@@ -663,9 +668,7 @@ describe("new marks in the browser", () => {
     buttons[1]!.click();
     chart.render();
     expect(drawn.at(-1)).toEqual(["a"]);
-    expect(chart.root.querySelectorAll("svg g[clip-path] [data-kind='shapes'] path")).toHaveLength(
-      6,
-    );
+    expect(chart.root.querySelectorAll("svg [data-kind='shapes'][clip-path] path")).toHaveLength(6);
     chart.destroy();
   });
 
@@ -675,15 +678,16 @@ describe("new marks in the browser", () => {
       renderer: "svg",
       marks: [line(data, { x: "x", y: "v", id: "s", stroke: "#ff0000", strokeWidth: 8 })],
     });
-    const plot = () => chart.root.querySelector("svg g[clip-path]")!;
+    const plot = () => panelGroups(chart.root)[0]!;
     expect(plot().querySelector("[stroke='#ff0000']")).not.toBeNull();
     chart.update({
       renderer: "svg",
       marks: [point(data, { x: "x", y: "v", id: "s", fill: "#0000ff" })],
     });
     chart.render();
-    expect(plot().querySelector("[stroke]")).toBeNull();
-    expect(plot().querySelector("[stroke-width]")).toBeNull();
+    // Of the marks' nodes, not the grid lines'.
+    expect(plot().querySelector(":not([data-kind='grid'])[stroke]")).toBeNull();
+    expect(plot().querySelector(":not([data-kind='grid'])[stroke-width]")).toBeNull();
     expect(plot().querySelector("[fill='#0000ff']")).not.toBeNull();
     chart.destroy();
   });

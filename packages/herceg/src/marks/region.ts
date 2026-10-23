@@ -1,7 +1,8 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
-import { rectDrawing } from "../draw/rect.ts";
+import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
-import { lineCount } from "../layout/text.ts";
+import { anchorBlock } from "../layout/block.ts";
+import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RectGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec } from "../spec/encoding.ts";
@@ -139,12 +140,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
         'sides, such as ["top"]',
         strokeSides,
       );
-    refusePending(input, "region", [
-      ...ANNOTATION_PENDING,
-      ["stroke", "R", "drop stroke"],
-      ["strokeWidth", "R", "drop strokeWidth"],
-      ["strokeSides", "R", "drop strokeSides"],
-    ]);
+    refusePending(input, "region", ANNOTATION_PENDING);
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -205,6 +201,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     return this.#data.extent(this.#pair("x"), log, undefined, rows);
   }
 
+  get scaled() {
+    return this.#data.scaled;
+  }
+
+  scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
+    return this.#data.extent(this.#pair(axis), log, undefined, rows, name);
+  }
+
   yExtent(
     _series: unknown,
     x0: number,
@@ -218,9 +222,10 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     // Regions that also span x count toward y only where they overlap the view.
     const lo = Math.min(x0, x1);
     const hi = Math.max(x0, x1);
-    // An edge at a fraction, pixels, or a category is in view wherever x is.
+    // An edge at a fraction, pixels, a category, or on a scale of the
+    // chart's own is in view wherever x is.
     const edge = (place: Place, i: number, end: number) =>
-      place.kind === "value" ? this.#data.value(place, i) : end;
+      place.kind === "value" && !place.scale ? this.#data.value(place, i) : end;
     const overlaps = (i: number) => {
       const p = edge(x[0], i, hi);
       const q = edge(x[1], i, lo);
@@ -240,6 +245,11 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     // Buffers as large as the items drawn: a facet panel's, not the table's.
     const size = data.size(rows);
     const rects = frame.floats(id, "rect", size * 4);
+    const color = painted(frame.paint, this.spec.fill, "region fill") ?? theme.muted;
+    // An outline draws the sides it is given of each region's own edges.
+    const edge = this.#edge(frame, color);
+    const sides = edge && frame.bytes(id, "sides", size);
+    const given = sideMask(this.spec.strokeSides ?? ["top", "right", "bottom", "left"]);
     const placed: PlacedLabel[] = [];
     const paint =
       label &&
@@ -254,10 +264,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       rects[count * 4 + 1] = down[0];
       rects[count * 4 + 2] = across[1] - across[0];
       rects[count * 4 + 3] = down[1] - down[0];
+      // Left and right are x's start and end; top and bottom, y's (in pixels, down).
+      if (sides)
+        sides[count] =
+          given & (((across[2] & 1) << 3) | (across[2] & 2) | (down[2] & 1) | ((down[2] & 2) << 1));
       if (paint) {
         const text = data.text(i, frame.locale, write);
         placed.push(
-          this.#plain
+          this.#plain && paint.verticalAlign === undefined
             ? {
                 text,
                 x: across[0] + PADDING,
@@ -265,7 +279,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
                 anchor: "start",
                 baseline: "middle",
               }
-            : this.#place(text, across, down, paint),
+            : this.#place(text, across, down, paint, frame.measure),
         );
       }
       count++;
@@ -274,11 +288,12 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       kind: "rect",
       draw: rectDrawing,
       key: id,
-      fill: painted(frame.paint, this.spec.fill, "region fill") ?? theme.muted,
+      fill: color,
       fillOpacity: this.spec.fillOpacity ?? 0.15,
       rects,
       count,
     };
+    if (edge) fill.edge = { ...edge, sides: sides! };
     const out: Geometry[] = [fill];
     if (placed.length > 0 && paint) {
       const labelKey = seriesKey(key, "region label");
@@ -303,35 +318,86 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
   }
 
   /**
+   * The regions' outline, given a color or a width: 1 pixel wide and in
+   * their fill's color, `fill`, by default.
+   */
+  #edge(frame: Frame, fill: string): RectGeometry["edge"] {
+    const { stroke, strokeWidth = 1 } = this.spec;
+    if ((stroke === undefined && this.spec.strokeWidth === undefined) || strokeWidth <= 0)
+      return undefined;
+    const color = painted(frame.paint, stroke, "region stroke") ?? fill;
+    return { stroke: color, width: strokeWidth, opacity: 1, dash: undefined };
+  }
+
+  /**
    * Where a region's label goes: along the edge `side` names (top by
    * default), at its start, middle, or end, inside the region or outside it.
    * Its point is its first line's: a label of several lines grows away from
-   * the edge it is beside, and is centered where it is centered.
+   * the edge it is beside, and is centered where it is centered. A style's
+   * verticalAlign puts the block's top, middle, or bottom, box and all, at
+   * the place instead: below a top or bottom edge, on it, or above it; at
+   * the start, middle, or end of a side edge.
    */
   #place(
     text: string,
-    [left, right]: [number, number],
-    [top, bottom]: [number, number],
-    { size, lineHeight }: TextPaint,
+    [left, right]: readonly [number, number, ...number[]],
+    [top, bottom]: readonly [number, number, ...number[]],
+    paint: TextPaint,
+    measure: MeasureText,
   ): PlacedLabel {
     const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
     const side = place.side ?? "top";
     const attachment = place.attachment ?? "start";
     const gap = PADDING + (place.offset ?? 0);
     const out = place.outside ? -1 : 1;
+    const { size, lineHeight, verticalAlign } = paint;
     // The block's lines after the first.
     const rest = (lineCount(text) - 1) * lineHeight;
+    /** The label from `x` as `anchor` says, its block at `y` as its style aligns it. */
+    const block = (x: number, y: number, anchor: PlacedLabel["anchor"]): PlacedLabel => {
+      const { at, box } = anchorBlock(
+        textLines(text, paint, measure),
+        {
+          x,
+          y,
+          align: anchor === "middle" ? "center" : anchor,
+          verticalAlign: verticalAlign!,
+          angle: 0,
+        },
+        paint,
+      );
+      return { text, x: at.x, y: at.y, anchor, baseline: "middle", box };
+    };
     if (side === "top" || side === "bottom") {
+      const [x, anchor]: [number, PlacedLabel["anchor"]] =
+        attachment === "start"
+          ? [left + PADDING, "start"]
+          : attachment === "end"
+            ? [right - PADDING, "end"]
+            : [(left + right) / 2, "middle"];
+      const edge = side === "top" ? top : bottom;
+      if (verticalAlign)
+        return block(
+          x,
+          verticalAlign === "top" ? edge + gap : verticalAlign === "bottom" ? edge - gap : edge,
+          anchor,
+        );
       const y =
         side === "top"
           ? top + out * (gap + size / 2) - (out < 0 ? rest : 0)
           : bottom - out * (gap + size / 2) - (out > 0 ? rest : 0);
-      return attachment === "start"
-        ? { text, x: left + PADDING, y, anchor: "start", baseline: "middle" }
-        : attachment === "end"
-          ? { text, x: right - PADDING, y, anchor: "end", baseline: "middle" }
-          : { text, x: (left + right) / 2, y, anchor: "middle", baseline: "middle" };
+      return { text, x, y, anchor, baseline: "middle" };
     }
+    if (verticalAlign)
+      return block(
+        side === "left" ? left + out * gap : right - out * gap,
+        attachment === "start"
+          ? top + PADDING
+          : attachment === "end"
+            ? bottom - PADDING
+            : (top + bottom) / 2,
+        (side === "left") === !place.outside ? "start" : "end",
+      );
     const y =
       attachment === "start"
         ? top + PADDING + size / 2
@@ -359,7 +425,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
    * Pixel span [start, end] of item i on one axis, clipped to [min, max];
    * the whole range without places; undefined when nothing of it is in
    * view. Values a log scale cannot place (zero or below) sit at its low
-   * end, so a region from zero reaches the axis.
+   * end, so a region from zero reaches the axis. Its third element says
+   * which ends are the region's own edges, which outlines draw, rather than
+   * cut by the view or the range's: 1 its start, 2 its end.
    */
   #span(
     places: [Place, Place] | undefined,
@@ -369,14 +437,16 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     frame: Frame,
     min: number,
     max: number,
-  ): [number, number] | undefined {
-    if (!places) return [min, max];
+  ): [number, number, number] | undefined {
+    if (!places) return [min, max, 0];
     const a = this.#data.pixel(places[0], axis, item, scale, frame, true);
     const b = this.#data.pixel(places[1], axis, item, scale, frame, true);
     if (a === undefined || b === undefined) return undefined;
-    const start = Math.max(min, Math.min(a, b));
-    const end = Math.min(max, Math.max(a, b));
-    return end > start ? [start, end] : undefined;
+    const low = Math.min(a, b);
+    const high = Math.max(a, b);
+    const start = Math.max(min, low);
+    const end = Math.min(max, high);
+    return end > start ? [start, end, (low >= min ? 1 : 0) | (high <= max ? 2 : 0)] : undefined;
   }
 
   #pair(

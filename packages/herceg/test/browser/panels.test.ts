@@ -12,7 +12,8 @@ import type { Scene } from "../../src/scene/scene.ts";
 const model = new ChartModel({
   marks: [
     line(table({ x: [0, 10], y: [5, 5] }), { x: "x", y: "y" }),
-    rule({ y: 5, label: "five" }),
+    // Drawn whole, so apart from the line, which panels cut.
+    rule({ y: 8, label: "eight" }),
   ],
   y: { domain: [0, 10] },
 });
@@ -48,18 +49,21 @@ function mount(): SvgLayer {
   return layer;
 }
 
-/** The layer's data groups (clipped) and annotation groups, in document order. */
+/**
+ * The layer's groups of what each panel paints, in document order (after
+ * the backgrounds, before the guides and the overlay), its clips, and the
+ * left edge of the plot each group's data is cut to.
+ */
 function groups(layer: SvgLayer) {
-  const children = [...layer.svg.children].filter((node) => node.tagName === "g");
-  const clipped = children.filter((node) => node.hasAttribute("clip-path"));
+  const painted = [...layer.svg.children].filter((node) => node.tagName === "g").slice(1, -2);
   const clips = [...layer.svg.querySelectorAll("clipPath")];
-  // Clip rectangles in the order the data groups use them.
-  const rects = clipped.map((group) => {
-    const id = /url\(#(.+)\)/.exec(group.getAttribute("clip-path")!)![1];
+  const rects = painted.map((group) => {
+    const cut = group.querySelector("[clip-path]");
+    const id = cut && /url\(#(.+)\)/.exec(cut.getAttribute("clip-path")!)![1];
     const clip = clips.find((node) => node.id === id);
     return clip ? Number(clip.querySelector("rect")!.getAttribute("x")) : undefined;
   });
-  return { children, clipped, clips, rects };
+  return { painted, clips, rects };
 }
 
 describe("panels", () => {
@@ -70,34 +74,35 @@ describe("panels", () => {
     for (const keys of steps) {
       const scene = sceneOf(keys);
       layer.render(scene, { marks: true });
-      const { children, clipped, clips, rects } = groups(layer);
-      // One clip per panel, each data group clipped to its own panel's plot.
+      const { painted, clips, rects } = groups(layer);
+      // One clip per panel, each panel's data cut to its own plot.
       expect(clips).toHaveLength(keys.length);
       expect(new Set(clips.map((clip) => clip.id)).size).toBe(keys.length);
       expect(rects).toEqual(scene.panels.map((panel) => panel.plot.x));
-      // Data groups in panel order, then annotation groups, then axes.
-      const annotations = children.filter(
-        (node) => node.querySelector("text")?.textContent === "five",
-      );
-      expect(annotations).toHaveLength(keys.length);
-      const lastData = Math.max(-1, ...clipped.map((node) => children.indexOf(node)));
-      for (const node of annotations) expect(children.indexOf(node)).toBeGreaterThan(lastData);
+      // Each panel's group in panel order: its grid lines, then its line and rule, as declared.
+      for (const group of painted)
+        expect([...group.children].map((node) => node.getAttribute("data-kind"))).toEqual([
+          "grid",
+          "line",
+          "rule",
+        ]);
       if (keys.join() === "b,a") {
         // Panel b keeps its nodes when it moves first.
-        expect(clipped[0]).toBe(previous[1]);
-        expect(clipped[1]).toBe(previous[0]);
+        expect(painted[0]).toBe(previous[1]);
+        expect(painted[1]).toBe(previous[0]);
+        expect(painted[0]!.firstElementChild).toBe(previous[1]!.firstElementChild);
       }
-      previous = clipped;
+      previous = painted;
     }
   });
 
-  it("fill data groups when the SVG takes over drawing from a canvas", () => {
+  it("fill their groups when the SVG takes over drawing from a canvas", () => {
     const layer = mount();
     const scene = sceneOf(["a", "b"]);
     layer.render(scene, { marks: false });
-    expect(groups(layer).clipped.map((group) => group.childElementCount)).toEqual([0, 0]);
+    expect(groups(layer).painted.map((group) => group.childElementCount)).toEqual([0, 0]);
     layer.render(scene, { marks: true });
-    expect(groups(layer).clipped.map((group) => group.childElementCount)).toEqual([1, 1]);
+    expect(groups(layer).painted.map((group) => group.childElementCount)).toEqual([3, 3]);
   });
 
   it("clip canvas drawing to each panel, leaving gutters empty", () => {

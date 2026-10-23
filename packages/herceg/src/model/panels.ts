@@ -311,6 +311,10 @@ export class Panels implements PanelLayout {
     return scopeGroups(this.#compiled, scope, `chart ${axis}.scope`);
   }
 
+  instances(scope: ScaleScope | undefined, _split: PanelSplit, _columns: number, path: string) {
+    return scopeGroups(this.#compiled, scope ?? "panel", path);
+  }
+
   /** Whether every panel shares one instance of the scale under `scope`: insets have their own unless named. */
   shares(scope: ScaleScope, axis: PanelAxis): boolean {
     return this.groupsOf(scope, axis).every((g) => g === 0);

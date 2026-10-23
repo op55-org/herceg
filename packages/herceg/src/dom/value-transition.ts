@@ -10,7 +10,7 @@
 
 import type { TableChange } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
-import type { MarkKey } from "../marks/mark.ts";
+import type { Mark, MarkKey } from "../marks/mark.ts";
 import type { planAxis } from "../model/axis.ts";
 import type { axisGuide } from "../model/axis-guide.ts";
 import type { ChartConfig, ChartModel, DrawnPanel } from "../model/model.ts";
@@ -371,17 +371,29 @@ function durationOf(animation: boolean | AnimationSpec | undefined): number {
   return Number.isFinite(duration) && duration > 0 ? duration : 0;
 }
 
-/** Which y scale places a geometry, by its key; "y" when it is not known to be on the right. */
-type Sides = (key: string) => "y" | "yRight";
+/**
+ * Which y scale places a geometry, by its key; "y" when it is not known to
+ * be on the right; undefined for a mark placed otherwise (in a frame, on a
+ * scale of the chart's own, or moved by pixels), which no scale moving
+ * between scenes moves.
+ */
+type Sides = (key: string) => "y" | "yRight" | undefined;
 
 /** The y scale of each mark's geometry, by its key (see `ownerOf`). */
 export function sidesOf(config: Pick<ChartConfig, "marks">): Sides {
   const right = new Set<MarkKey>();
-  config.marks.forEach(({ spec }, i) => {
-    if (spec.axis === "right") right.add(spec.id ?? i);
+  const placed = new Set<MarkKey>();
+  config.marks.forEach((mark, i) => {
+    const { spec, bound, scaled } = mark as Mark;
+    // Coordinates naming only a field, or x or y, place rows as plain ones do.
+    if (bound?.x || bound?.y || scaled) placed.add(spec.id ?? i);
+    else if (spec.axis === "right") right.add(spec.id ?? i);
   });
-  if (right.size === 0) return () => "y";
-  return (key) => (right.has(ownerOf(key) as MarkKey) ? "yRight" : "y");
+  if (right.size === 0 && placed.size === 0) return () => "y";
+  return (key) => {
+    const owner = ownerOf(key) as MarkKey;
+    return placed.has(owner) ? undefined : right.has(owner) ? "yRight" : "y";
+  };
 }
 
 /**
@@ -556,8 +568,9 @@ export function plan(
   const labeled = (list: readonly AxisGuide[]) =>
     list.map(({ side, ticks }) => `${side}${ticks.length > 0}`).join();
   if (axes && (!plannable(axes) || labeled(shown.axes) !== labeled(drawn.axes))) return undefined;
-  // Axes the guides list plan their layers with the scene; they cannot follow a moving scale.
-  if (axes && drawn.axes.some((guide) => guide.layers && motions[guide.scale as Axis].moves))
+  // Axes the guides list plan their layers with the scene; they cannot follow
+  // a moving scale, nor one of the chart's own, which moves on its own.
+  if (drawn.axes.some((guide) => guide.layers && (motions[guide.scale as Axis]?.moves ?? true)))
     return undefined;
   const tween: Tween = {
     start: shown.time,
@@ -593,6 +606,8 @@ export function plan(
     }
     const item = shown.items.get(mark.key);
     const side = sides(mark.key);
+    // Marks placed otherwise change at once, and what moves beside them with them.
+    if (!side) return undefined;
     let moved: { moves: boolean } | undefined;
     if (item?.kind === "bars" && mark.kind === "rect" && (mark as RectGeometry).bars) {
       const bars = moveBars(index, item, mark as RectGeometry, motions, side);

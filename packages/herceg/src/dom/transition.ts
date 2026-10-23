@@ -166,18 +166,28 @@ function startOf(panel: DrawnPanel): ViewStart {
   };
 }
 
-/** The ranges a panel draws, ascending; null for category axes. */
+/** The ranges a panel draws, ascending, and those its ticks are in; null for category axes. */
 function domainsOf(panel: DrawnPanel): ViewDomains {
+  const { x, y, yRight } = panel.plans;
   return {
     x: rangeOf(panel.x),
     y: rangeOf(panel.y),
     yRight: panel.yRight ? rangeOf(panel.yRight) : null,
+    ticks: {
+      x: rangeOf(panel.x, x.within),
+      y: rangeOf(panel.y, y.within),
+      yRight: panel.yRight ? rangeOf(panel.yRight, yRight?.within) : null,
+    },
   };
 }
 
-function rangeOf(scale: PositionScale): readonly [number, number] | null {
+/** A continuous scale's domain (or `range` in it), ascending. */
+function rangeOf(
+  scale: PositionScale,
+  range = scale.domain as readonly number[],
+): readonly [number, number] | null {
   if (scale.type === "band") return null;
-  const [a, b] = scale.domain as readonly [number, number];
+  const [a, b] = range as readonly [number, number];
   return a <= b ? [a, b] : [b, a];
 }
 
@@ -185,11 +195,14 @@ function rangeOf(scale: PositionScale): readonly [number, number] | null {
 export function domainsAt(transition: Transition, to: ViewDomains, elapsed: number): ViewDomains {
   const t = ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
   const { domains: from, log, breaks } = transition;
-  return {
-    x: between(from.x, to.x, t, log.x, breaks),
-    y: between(from.y, to.y, t, log.y),
-    yRight: between(from.yRight, to.yRight, t, log.yRight),
-  };
+  const ranges = (a: Omit<ViewDomains, "ticks">, b: Omit<ViewDomains, "ticks">) => ({
+    x: between(a.x, b.x, t, log.x, breaks),
+    y: between(a.y, b.y, t, log.y),
+    yRight: between(a.yRight, b.yRight, t, log.yRight),
+  });
+  // Ticks move with the ranges, inside their padding.
+  const ticks = from.ticks && to.ticks && ranges(from.ticks, to.ticks);
+  return { ...ranges(from, to), ...(ticks && { ticks }) };
 }
 
 /** Starts quickly and settles without overshooting (cubic ease-out). */

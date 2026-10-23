@@ -62,7 +62,7 @@ afterEach(() => {
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const metrics = table({ t: [0, 1, 2, 3], a: [1, 2, 3, 4], b: [4, 3, 2, 1] });
-const paths = () => host.querySelectorAll("svg g[clip-path] path");
+const paths = () => host.querySelectorAll("svg path:is([clip-path], [clip-path] *)");
 
 /** Mounts a component and runs its effects; changing `props` later updates it. */
 function render<P extends Record<string, unknown>>(component: Component<P>, props: P): void {
@@ -148,7 +148,7 @@ describe("<Chart>", () => {
     });
     render(Prices, props);
     const chart = props.chart!;
-    expect(host.querySelector("svg g[clip-path] rect")).toBeNull();
+    expect(host.querySelector("svg rect:is([clip-path], [clip-path] *)")).toBeNull();
     const [thu, fri, mon] = [0, 1, 4].map(
       (d) => chart.toPixel(Date.UTC(2025, 9, 9) + d * day, { axis: "x" })!,
     );

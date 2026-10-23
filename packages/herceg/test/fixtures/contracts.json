@@ -32,14 +32,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[0].zIndex",
-      "python_path": "marks[0].z_index",
-      "message": "marks[0].zIndex: not drawn as given yet",
-      "python": "line z_index: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "mark.z-index.default",
@@ -278,13 +271,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "stage": "draw",
-      "path": "panels[0].y.padding",
-      "message": "panels[0].y.padding: not drawn as given yet",
-      "python": "panels[0].y.padding: not drawn as given yet"
+      }
     },
     {
       "contract": "scale.padding.beside-box",
@@ -324,14 +311,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "stage": "draw",
-      "path": "scales.depth.padding",
-      "message": "chart scales.depth.padding: not drawn as given yet",
-      "python": "scales.depth.padding: not drawn as given yet",
-      "builder_spec": false
+      }
     },
     {
       "contract": "axis.grid.beside-depth",
@@ -490,14 +470,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "y.grid.zIndex",
-      "python_path": "y.grid.z_index",
-      "message": "y.grid.zIndex: not drawn as given yet",
-      "python": "y.grid.z_index: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "axis.grid.default",
@@ -633,13 +606,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "x.padding",
-      "message": "x.padding: not drawn as given yet",
-      "python": "x.padding: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "scale.padding.share",
@@ -855,12 +822,7 @@
             "panel": "b"
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "stage": "draw",
-      "path": "panels[0].y.padding",
-      "message": "panels[0].y.padding: not drawn as given yet"
+      }
     },
     {
       "contract": "scale.position.named",
@@ -899,13 +861,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "scales.depth",
-      "message": "scales.depth: not drawn as given yet",
-      "python": "scales.depth: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "scale.position.named.path",
@@ -946,13 +902,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "scales[\"p.99\"].padding",
-      "message": "scales[\"p.99\"].padding: not drawn as given yet",
-      "python": "scales[\"p.99\"].padding: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "axis.scale.missing",
@@ -1190,13 +1140,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[1].y.scale",
-      "message": "rule y.scale: not drawn as given yet",
-      "python": "rule y.scale: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "position.scale.other-axis",
@@ -1240,12 +1184,11 @@
           }
         ]
       },
-      "pending": "R",
-      "code": "unsupported",
+      "code": "invalid-option",
       "stage": "load",
       "path": "marks[1].y.scale",
-      "message": "rule y.scale: not drawn as given yet",
-      "python": "rule y.scale: not drawn as given yet"
+      "message": "rule y.scale: \"x\" is not this y axis' scale (\"y\"); name \"y\"",
+      "python": "rule y.scale: \"x\" is not this y axis' scale (\"y\"); name \"y\""
     },
     {
       "contract": "text.vertical-align",
@@ -1299,14 +1242,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[1].label.style.verticalAlign",
-      "python_path": "marks[1].label.style.vertical_align",
-      "message": "marks[1].label.style.verticalAlign: not drawn as given yet",
-      "python": "label.style.vertical_align: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "text.vertical-align.malformed",
@@ -1443,13 +1379,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "guides[0].labels.inside",
-      "message": "guides[0].labels.inside: not drawn as given yet",
-      "python": "guides[0].labels.inside: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "axis.tick-labels.gap",
@@ -1543,13 +1473,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[1].y.fraction",
-      "message": "y.fraction: not drawn as given yet",
-      "python": "y.fraction: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "position.pixels.field",
@@ -1582,25 +1506,56 @@
             }
           }
         ]
+      }
+    },
+    {
+      "contract": "position.row.constant",
+      "name": "a line's x at one share of the plot for every row",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": {
+              "fraction": 0.5
+            },
+            "y": "v"
+          }
+        ]
       },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[0].x",
-      "message": "line x: not drawn as given yet",
-      "python": "line x: not drawn as given yet",
-      "builder_spec": false,
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": {
+                "hg": "Fraction",
+                "args": {
+                  "value": 0.5
+                }
+              },
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "marks[0].x.fraction",
+      "message": "x.fraction: expected { field }: each row is placed by its own value; received 0.5",
+      "python": "x.fraction: expected { field }: each row is placed by its own value; received 0.5",
       "stage": "load"
     },
     {
       "contract": "errorbar.center.field",
-      "name": "a symmetric error bar's center at a share of the plot",
+      "name": "a symmetric error bar's center at shares a field gives",
       "spec": {
         "marks": [
           {
             "type": "errorbar",
             "x": "t",
             "y": {
-              "fraction": 0.3
+              "fraction": {
+                "field": "w"
+              }
             },
             "yError": "w"
           }
@@ -1642,13 +1597,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[0].width",
-      "message": "bar width: not drawn as given yet",
-      "python": "bar width: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "bar.width.positive",
@@ -1714,14 +1663,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[0].strokeSides",
-      "python_path": "marks[0].stroke_sides",
-      "message": "bar strokeSides: not drawn as given yet",
-      "python": "bar stroke_sides: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "region.stroke",
@@ -1759,13 +1701,7 @@
             }
           }
         ]
-      },
-      "pending": "R",
-      "code": "unsupported",
-      "path": "marks[1].stroke",
-      "message": "region stroke: not drawn as given yet",
-      "python": "region stroke: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "region.stroke.width",

@@ -99,7 +99,7 @@ describe("time axes with breaks", () => {
     expect(seam.getAttribute("aria-hidden")).toBe("true");
     expect(seam.getAttribute("pointer-events")).toBe("none");
     expect(seam.getAttribute("focusable")).toBe("false");
-    expect(seam.parentElement!.hasAttribute("clip-path")).toBe(true);
+    expect(seam.hasAttribute("clip-path")).toBe(true);
     expect(seam.nextElementSibling!.getAttribute("data-kind")).toBe("line");
     chart.render();
     expect(chart.root.querySelector('path[data-kind="segments"]')).toBe(seam);

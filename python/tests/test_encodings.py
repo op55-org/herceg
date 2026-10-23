@@ -57,10 +57,8 @@ def test_ordinal_scales_are_scales_of_categories_and_position_scales_place_value
         hg.ChartError, match="Chart scales sites: a position scale of the chart's own says its type"
     ):
         hg.Chart(SITES, scales={"sites": hg.Scale()}).to_spec()
-    with pytest.raises(
-        hg.ChartError, match=r"scales.sites: not drawn as given yet \(round 2 stream R"
-    ):
-        hg.Chart(SITES, scales={"sites": hg.Scale(type="linear")}).to_spec()
+    spec, _ = hg.Chart(SITES, scales={"sites": hg.Scale(type="linear")}).to_spec()
+    assert spec["scales"]["sites"] == {"type": "linear"}
     # A dict of a name other than a position's is an ordinal scale's options.
     spec, _ = hg.Chart(SITES, scales={"sites": {"map": {"A": "#000000"}}}).to_spec()
     assert spec["scales"]["sites"] == {"type": "ordinal", "map": {"A": "#000000"}}

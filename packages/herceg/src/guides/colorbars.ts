@@ -120,6 +120,7 @@ export function measureColorbar(
         name: "colorbar standing beside the plots",
         tick: 2,
         major: { direction: "out", length: TICK },
+        beside: false,
       },
     ),
   };

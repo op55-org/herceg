@@ -35,7 +35,7 @@ import { histogram } from "../../src/marks/histogram.ts";
 import { tablesOf } from "../../src/marks/layout-mark.ts";
 import { line } from "../../src/marks/line.ts";
 import { line3d } from "../../src/marks/line3d.ts";
-import type { ChartMark } from "../../src/marks/mark.ts";
+import type { ChartMark, Mark } from "../../src/marks/mark.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { point3d } from "../../src/marks/point3d.ts";
@@ -471,10 +471,13 @@ const besideLine = (c: MarkCase, extra: Partial<ChartConfig> = {}): ChartConfig 
   ...extra,
 });
 
+/** Whether a panel draws geometry of `kind`: drawings counting no points (rules, text) draw whole. */
 function expectGeometry(panel: Panel, kind: Geometry["kind"]) {
-  expect(panel.marks.some((m) => m.kind === kind && (!m.draw.canvas || m.draw.size(m) > 0))).toBe(
-    true,
-  );
+  expect(
+    panel.marks.some(
+      (m) => m.kind === kind && (m.draw.defaultClip === false || m.draw.size(m) > 0),
+    ),
+  ).toBe(true);
 }
 
 /** The family of controls a chart's layout marks ask for. */
@@ -2212,6 +2215,52 @@ describe("category-colored bars", () => {
         expect(g.rects[horizontal ? 3 : 2]).toBeCloseTo(band.bandwidth!, 3);
     },
   );
+});
+
+it("capabilities: marks on the chart's scales paint at their zIndex", () => {
+  const rows = table({ x: [0, 1, 2], y: [1, 3, 2], lo: [0, 2, 1], hi: [2, 4, 3] });
+  const lifted: ChartMark[] = [
+    bar(rows, { x: "x", y: "y", zIndex: 1 }),
+    point(rows, { x: "x", y: "y", zIndex: 1 }),
+    area(rows, { x: "x", y: "y", zIndex: 1 }),
+    errorBar(rows, { x: "x", y1: "lo", y2: "hi", zIndex: 1 }),
+    histogram(rows, { x: "y", zIndex: 1 }),
+    rule({ y: 2, zIndex: 1 }),
+    region({ y1: 1, y2: 2, zIndex: 1 }),
+    text({ x: 1, y: 2, label: "note", zIndex: 1 }),
+  ];
+  for (const mark of lifted) {
+    // Declared first, it paints after the line declared after it (with the
+    // guide compiler, which charts giving zIndex values load).
+    const model = new ChartModel(
+      { locale: "en-US", marks: [mark, line(rows, { x: "x", y: "y" })] },
+      undefined,
+      ...staticCompilers(),
+    );
+    model.setSize(600, 400, 1);
+    const scene = model.scene(estimateText);
+    const panel = scene.panels[0]!;
+    const order = panel.paint!.map((i) => i - panel.grids.length).filter((i) => i >= 0);
+    const lineAt = panel.marks.findIndex((g) => g.kind === "line");
+    expect(order.indexOf(lineAt), mark.spec.type).toBeLessThan(order.length - 1);
+    expect(order.at(-1), mark.spec.type).not.toBe(lineAt);
+  }
+  // 3D marks take no zIndex (their factories have none; specs are refused,
+  // as fixture case mark.z-index.depth says): a 3D box draws by depth.
+});
+
+it("capabilities: marks of rows take coordinates for their places, others field names", () => {
+  const rows = table({ x: [0, 1], y: [1, 3], s: [0.2, 0.8], lo: [0, 2], hi: [2, 4] });
+  const lane = { fraction: { field: "s" } } as const;
+  for (const mark of [
+    line(rows, { x: "x", y: lane }),
+    area(rows, { x: "x", y: lane }),
+    bar(rows, { x: "x", y: { field: "y", offset: 4 } }),
+    point(rows, { x: { px: { field: "x" } }, y: lane }),
+    errorBar(rows, { x: { field: "x", offset: 2 }, y1: "lo", y2: "hi" }),
+  ])
+    expect((mark as unknown as Mark).bound, mark.spec.type).toBeDefined();
+  expect(() => histogram(rows, { x: lane } as never)).toThrow();
 });
 
 it("capabilities: line styles reach line and rule geometry as width-scaled dashes", () => {

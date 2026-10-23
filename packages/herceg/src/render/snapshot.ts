@@ -5,13 +5,14 @@
 // objects here, so the server's nodes are the ones the browser would make.
 
 import { entryId, Legend } from "../dom/legend.ts";
-import { hash, panelDrawing, SvgLayer } from "../dom/svg-layer.ts";
+import { hash, SvgLayer } from "../dom/svg-layer.ts";
 import { checkFonts } from "../fonts/prepared.ts";
 import type { Fonts } from "../fonts/registry.ts";
 import { estimateText, type MeasureText } from "../layout/text.ts";
 import { chartDescription } from "../model/describe.ts";
 import { type ChartConfig, ChartModel } from "../model/model.ts";
 import { titleText } from "../model/titles.ts";
+import { eachPainted } from "../scene/paint.ts";
 import {
   type Geometry,
   guidesOf,
@@ -148,22 +149,26 @@ function stateOf(
   legends: readonly LegendGuide[],
   context: SvgContext,
 ): SnapshotState {
-  const geometry = (marks: readonly Geometry[]) =>
-    marks.map((mark): SnapshotGeometry => {
-      const elements = mark.draw.elements?.(mark, context);
-      return elements
-        ? [mark.key, mark.kind, elements.length]
-        : [mark.key, mark.kind, -1, hash(mark.draw.svg(mark, context))];
-    });
+  const nodes = (mark: Geometry): SnapshotGeometry => {
+    const elements = mark.draw.elements?.(mark, context);
+    return elements
+      ? [mark.key, mark.kind, elements.length]
+      : [mark.key, mark.kind, -1, hash(mark.draw.svg(mark, context))];
+  };
   return {
-    panels: scene.panels.map((panel) => {
-      const { data, above } = panelDrawing(panel, true);
-      const drawn: SnapshotState["panels"][number] = [panel.key, geometry(data), geometry(above)];
-      // An inset's box, plot, and grid go over the panels before it.
-      if (panel.cover) drawn.push(hash(underMarkup(scene, [panel])));
+    panels: (scene.painted ?? scene.panels).map((panel) => {
+      const content: SnapshotGeometry[] = [];
+      eachPainted(
+        panel,
+        (batch) => content.push([batch.key, "grid", 1]),
+        (mark) => content.push(nodes(mark)),
+      );
+      const drawn: SnapshotState["panels"][number] = [panel.key, content];
+      const back = underMarkup(scene, panel);
+      if (back) drawn.push(hash(back));
       return drawn;
     }),
-    under: hash(underMarkup(scene, (scene.layers ?? [scene.panels])[0])),
+    under: hash(underMarkup(scene)),
     guides: hash(guidesMarkup(scene, idPrefix, false)),
     chartClip: cutToChart(scene),
     legend: legends.flatMap((legend) =>

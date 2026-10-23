@@ -12,6 +12,7 @@ import { aligned } from "../layout/place.ts";
 import type { Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
+import type { ListedPlacing } from "./guides.ts";
 import { EDGE, GAP } from "./legend.ts";
 import type { Keep, PanelGrid, PanelPlacement } from "./panel-layout.ts";
 
@@ -203,6 +204,11 @@ export class Cells {
         for (let i = 0; i < count; i++) {
           before[i]! += legends.left[i]!;
           after[i]! += legends.right[i]!;
+          // Marks' labels outside the plot beside other panels, beyond its y
+          // labels (at the chart's sides they have tracks of their own).
+          const [labelsBefore, labelsAfter] = h.labels(i);
+          if (labelsBefore && !this.edge(i, false)) before[i]! += labelsBefore + GAP;
+          if (labelsAfter && !this.edge(i, true)) after[i]! += labelsAfter + GAP;
         }
         const start = head.left + (head.auto ? EDGE : 0);
         const end = h.width - head.right - (head.auto ? EDGE : 0);
@@ -307,7 +313,7 @@ export class Cells {
         return { x: plot.x + plot.width + after[index]! - LEGEND_GAP - width - nearer, y };
       },
 
-      finish: (panels, views, theme, ratio, paint) => {
+      finish: (panels, views, chart, theme, ratio, paint) => {
         if (!layout.places.some(({ inset }) => inset)) return undefined;
         this.#apart();
         const viewOf = (i: number) => views.find(({ key }) => key === layout.order[i]);
@@ -337,19 +343,21 @@ export class Cells {
           if (boxes.length > 0) {
             const visible = uncovered(plot, boxes);
             panel.visible = visible;
+            // What it does not cut to its plot keeps off the boxes too.
+            panel.keep = uncovered(chart, boxes);
             if (view) view.visible = visible;
             // Its grid lines where their strokes, on pixels, keep clear of the boxes.
-            const { grid } = panel;
             // A line of one pixel is a device pixel wide on a canvas, and
             // snapped to a device pixel's center, moves by up to one.
             const half = ({ strokeWidth } = theme.style.grid) =>
               (strokeWidth === 1 ? Math.max(1, 1 / ratio) : strokeWidth) / 2 +
               1 / Math.min(1, ratio);
-            panel.grid = {
-              ...grid,
-              ySpans: grid.y.map((y) => clearSpans(visible, plot, "y", y, half(grid.yPaint))),
-              xSpans: grid.x.map((x) => clearSpans(visible, plot, "x", x, half(grid.xPaint))),
-            };
+            panel.grids = panel.grids.map((batch) => ({
+              ...batch,
+              spans: batch.at.map((at) =>
+                clearSpans(visible, plot, batch.along === "x" ? "x" : "y", at, half(batch.paint)),
+              ),
+            }));
           }
           for (const [j, other] of layout.places.entries()) {
             const node = other.inset;
@@ -364,16 +372,17 @@ export class Cells {
               theme,
               paint,
             );
-            if (shown) panel.marks.push(shown);
+            // Over everything the parent panel paints.
+            if (shown) panel.marks.push({ ...shown, zIndex: Number.MAX_VALUE });
           }
         });
-        // Panels in cells together, the navigator's strip among them, then each inset over them.
-        const layers = [
-          panels.filter((panel) => !panel.cover),
-          ...panels.filter((p) => p.cover).map((p) => [p]),
+        // Panels in cells, the navigator's strip among them, then each inset over them.
+        const painted = [
+          ...panels.filter((panel) => !panel.cover),
+          ...panels.filter((panel) => panel.cover),
         ];
-        this.#painted = layers.flat().map(({ key, cover }) => ({ key, cover }));
-        return layers;
+        this.#painted = painted.map(({ key, cover }) => ({ key, cover }));
+        return painted;
       },
 
       yTitle: (i, plot, right, size) => ({
@@ -396,19 +405,16 @@ export class Cells {
         };
       },
 
-      cells: (xGroupOf, withAxes, yGroupOf, drawsY, start, end) => {
+      cells: (groupOf, withAxes, drawsY, start, end) => {
         // By axis: where it goes, of the panels it is not hidden in.
         const kept = new Map<object, boolean[]>();
         let guess: Float64Array | undefined;
-        const place = (
-          axis: { repeat: "outer" | "all" | undefined; off?: readonly boolean[] | undefined },
-          along: "x" | "y",
-        ) => {
+        const place = (axis: ListedPlacing, along: "x" | "y") => {
           let found = kept.get(axis);
           if (!found) {
-            const [groupOf, eligible] = along === "x" ? [xGroupOf, withAxes] : [yGroupOf(), drawsY];
+            const eligible = along === "x" ? withAxes : drawsY;
             const shown = eligible.map((drawn, j) => drawn && !axis.off?.[j]);
-            found = labels(along, along === "y", groupOf, shown, axis.repeat);
+            found = labels(along, along === "y", groupOf(axis.scale, along), shown, axis.repeat);
             kept.set(axis, found);
           }
           return found;
