@@ -11,9 +11,11 @@ import { type Formatter, formatNumber, numberFormatter } from "../format/format.
 import { coordinateAt } from "../layout/position.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { LabelSpec } from "../spec/encoding.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { Coordinate } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen } from "../spec/spec.ts";
 import { type Frame, NUMERIC, type RowParts, requireField } from "./mark.ts";
+import type { Pending } from "./pending.ts";
 
 /** Fields whose values can be drawn as text: categories and numbers. */
 export type TextField<S extends Schema> = string extends keyof S
@@ -37,6 +39,12 @@ export function position<P>(value: P): Exclude<P, Date> {
 }
 
 const SUMMARY_ITEMS = 10;
+
+/** Annotations' options round 2 freezes before its streams draw them (see pending.ts). */
+export const ANNOTATION_PENDING: readonly Pending[] = [
+  ["label.content", "C", "give text or a field"],
+  ["legend", "C", "drop legend", (value) => value === true],
+];
 
 /** A position ready to read: a constant, or a column with a value per row. */
 export type Channel = number | NumericArray;
@@ -104,12 +112,30 @@ export class AnnotationData {
       throw new Error(`${role} label: needs one of text and field`);
     for (const [channel, place] of Object.entries(positions)) {
       const scale = typeof place === "object" && "scale" in place ? place.scale : undefined;
-      const axis = channel[0] === "x" || channel[0] === "y" ? channel[0] : across;
+      // Text's `at.x` and `at.y` are named as given.
+      const name = channel.replace("at.", "");
+      const axis = name[0] === "x" || name[0] === "y" ? name[0] : across;
       const own = scales[axis];
-      if (scale !== undefined && scale !== own)
+      if (scale === "yRight" && scale !== own)
         throw new Error(
-          `${role} ${channel}.scale: "${scale}" is not this ${axis} axis' scale ("${own}")${scale === "yRight" ? '; give axis: "right"' : ""}`,
+          `${role} ${channel}.scale: "${scale}" is not this ${axis} axis' scale ("${own}"); give axis: "right"`,
         );
+      if (scale !== undefined && scale !== own)
+        throw new ChartError({
+          code: "unsupported",
+          path: `${channel}.scale`,
+          message: `${role} ${channel}.scale: not drawn as given yet (round 2 stream R adds it); drop scale, or name "${own}"`,
+        });
+      for (const key of ["fraction", "px"])
+        if (
+          typeof place === "object" &&
+          typeof (place as Record<string, unknown>)[key] === "object"
+        )
+          throw new ChartError({
+            code: "unsupported",
+            path: `${channel}.${key}`,
+            message: `${role} ${channel}.${key}: not drawn as given yet (round 2 stream R adds it); give a number`,
+          });
     }
     if (!readsTable(Object.values(positions), text)) {
       this.table = undefined;

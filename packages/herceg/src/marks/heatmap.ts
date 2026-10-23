@@ -90,6 +90,8 @@ interface HeatmapCommon<S extends Schema> {
    * cut to the plot and labels are drawn whole.
    */
   clip?: Clip;
+  /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
@@ -1401,6 +1403,7 @@ export function heatmap<S extends Schema>(
     "facet",
     "panel",
     "clip",
+    "zIndex",
     "colorMidpoint",
     "reduce",
   ]);

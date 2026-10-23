@@ -4,7 +4,7 @@
 // mechanism. Insets are panels drawn over another panel's plot. Pixels are
 // CSS pixels.
 
-import type { Coordinate, Inside } from "./place.ts";
+import type { FrameCoordinate, Inside } from "./place.ts";
 import type { StrokeStyle } from "./style.ts";
 
 /**
@@ -73,8 +73,8 @@ export type InsetPlace =
 
 /** Where an inset's anchor goes: fractions of the parent's plot or the chart, or pixels, not data. */
 export interface InsetPosition {
-  x: Extract<Coordinate, { fraction: number } | { px: number }>;
-  y: Extract<Coordinate, { fraction: number } | { px: number }>;
+  x: FrameCoordinate;
+  y: FrameCoordinate;
 }
 
 /**

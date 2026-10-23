@@ -52,6 +52,8 @@ interface RugStyle<S extends Schema> {
    * cut to the plot and labels are drawn whole.
    */
   clip?: Clip;
+  /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   panel?: string;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
   tooltip?: MarkTooltip<S>;
@@ -322,6 +324,7 @@ export function rug<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
       "id",
     ]),
   } as RugSpec;

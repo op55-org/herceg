@@ -22,6 +22,7 @@ import { rug } from "../../src/marks/rug.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { sankey } from "../../src/marks/sankey.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
+import { text } from "../../src/marks/text.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { violin } from "../../src/marks/violin.ts";
 import type {
@@ -33,6 +34,7 @@ import type {
   HeatmapSpec,
   HistogramSpec,
   LineSpec,
+  PointSpec,
   RegionSpec,
   RugSpec,
   RuleSpec,
@@ -503,3 +505,82 @@ heatmap(days, { date: "hour", color: "n" });
 heatmap(days, { date: "day", color: "n", calendar: "years" });
 // @ts-expect-error a heatmap needs x and y, or a date
 heatmap(days, { x: "hour", color: "n" });
+
+// Points' channels: a number field through the channel's own mapping, or
+// read as outputs through an identity scale; categories through a scale.
+const dots = table({ at: [0, 1], cpu: [1, 2], stage: ["a", "b"], paint: ["red", "blue"] });
+point(dots, { x: "at", y: "cpu", color: { field: "cpu" } });
+point(dots, { x: "at", y: "cpu", size: { field: "cpu" }, fillOpacity: { field: "cpu" } });
+point(dots, { x: "at", y: "cpu", color: { field: "paint", scale: { type: "identity" } } });
+point(dots, { x: "at", y: "cpu", color: { field: "stage", scale: "stages" } });
+point(dots, { x: "at", y: "cpu", encode: { color: { field: "cpu" }, size: { field: "cpu" } } });
+// A number field's values as widths through an identity scale of the chart's.
+line(dots, { x: "at", y: "cpu", encode: { strokeWidth: { field: "cpu", scale: "raw" } } });
+// @ts-expect-error colors map number fields only on points
+line(dots, { x: "at", y: "cpu", encode: { color: { field: "cpu" } } });
+// @ts-expect-error sizes map number fields
+point(dots, { x: "at", y: "cpu", size: { field: "stage", scale: { type: "identity" } } });
+
+// Labels following series: parts of one kind each; an edge only on areas' bands.
+line(dots, {
+  x: "at",
+  y: "cpu",
+  labels: { at: "last", content: [{ series: true }, ": ", { value: true }] },
+});
+// @ts-expect-error a part reads a field or the value, not both
+line(dots, { x: "at", y: "cpu", labels: { at: "last", content: [{ field: "cpu", value: true }] } });
+// @ts-expect-error a line's labels follow the line
+line(dots, { x: "at", y: "cpu", labels: { at: "last", edge: "y1" } });
+// The portable spec alike: an edge is a band's.
+({
+  type: "line",
+  x: "at",
+  y: "cpu",
+  // @ts-expect-error a line's labels follow the line
+  labels: { at: "last", edge: "y1" },
+}) satisfies LineSpec;
+({
+  type: "area",
+  x: "at",
+  y1: "cpu",
+  y2: "cpu",
+  labels: { at: "last", edge: "y2" },
+}) satisfies AreaSpec;
+
+// Text following a mark's series reads that mark's fields, and has no table of its own.
+text({
+  from: { mark: "m", at: "last" },
+  label: { content: [{ field: "cpu" }, " ", { value: true }] },
+});
+text({ from: { mark: "m", at: "last" }, label: "peak" });
+// @ts-expect-error text at a constant place has no fields to read
+text({ x: 1, y: 2, label: { field: "cpu" } });
+// @ts-expect-error following text takes no table of its own
+text(dots, { from: { mark: "m", at: "last" }, label: "peak" });
+
+// Values as coordinates read number or time fields, as fields do.
+line(dots, { x: "at", y: { field: "cpu", offset: 2 } });
+// @ts-expect-error a line's values are numbers or times
+line(dots, { x: "at", orient: "x", y: { field: "stage" } });
+// @ts-expect-error a band's edges alike
+area(dots, { x: "at", y1: { field: "stage" }, y2: "cpu" });
+// @ts-expect-error error bars' ends alike
+errorBar(dots, { x: "at", y1: { field: "stage" }, y2: "cpu" });
+
+// Bars' centers as coordinates: a category y's field makes them horizontal.
+bar(dots, { x: "cpu", y: { field: "stage", offset: 2 } });
+bar(dots, { x: { fraction: { field: "cpu" } }, y: "cpu" });
+// @ts-expect-error horizontal bars' centers are categories
+bar(dots, { x: "cpu", y: { fraction: 0.5 } });
+// @ts-expect-error a constant radius, or a size channel's areas
+point(dots, { x: "at", y: "cpu", radius: 4, encode: { size: { field: "cpu" } } });
+// One size channel, as size or encode.size, whose scale gives the areas.
+point(dots, { x: "at", y: "cpu", encode: { size: { field: "cpu" } } });
+// @ts-expect-error a size channel's scale gives its areas, not radiusRange
+point(dots, { x: "at", y: "cpu", radiusRange: [2, 8], encode: { size: { field: "cpu" } } });
+// @ts-expect-error one size channel
+point(dots, { x: "at", y: "cpu", size: "cpu", encode: { size: { field: "cpu" } } });
+const radiusAndChannel = { radius: 4, encode: { size: { field: "cpu" } } };
+// @ts-expect-error the spec alike: a constant radius, or a size channel's areas
+({ type: "point", x: "at", y: "cpu", ...radiusAndChannel }) satisfies PointSpec;
+({ type: "point", x: "at", y: "cpu", encode: { size: { field: "cpu" } } }) satisfies PointSpec;

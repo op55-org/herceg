@@ -219,10 +219,20 @@ export function needsGuides(config: ChartConfig): boolean {
   const { x, y, yRight, legend, panels, scales } = config;
   return (
     !!(config.guides || scales?.x || scales?.y || scales?.yRight) ||
-    [x, y, yRight, ...(panels?.list.flatMap((p) => [p.x, p.y, p.yRight]) ?? [])].some(
+    [
+      x,
+      y,
+      yRight,
+      ...(panels?.list.flatMap((p) => [p.x, p.y, p.yRight]) ?? []),
+      // Scales of the chart's own, whose settings the guide compiler checks first.
+      ...(Object.values(scales ?? {}) as (typeof x)[]),
+    ].some(
       (axis) =>
         axis &&
         (typeof axis.ticks === "object" ||
+          // Round 2 freezes these before stream R draws them (guides/compile.ts).
+          typeof axis.grid === "object" ||
+          axis.padding !== undefined ||
           [axis.ticks, axis.format, axis.tooltipFormat].some(
             (setting) =>
               typeof setting === "function" ||

@@ -39,9 +39,7 @@ export interface PlotRect {
  * properties rather than methods so that a drawing only fits geometry of its
  * own type.
  */
-export type Drawing<G extends Geometry> = DataDrawing<G> | GuideDrawing<G>;
-
-interface DrawingBase<G extends Geometry> {
+export interface Drawing<G extends Geometry> {
   /** Points or cells drawn, for choosing between SVG and Canvas. */
   readonly size: (geometry: G) => number;
   /** SVG markup, for static output and for the live SVG layer without `elements`. */
@@ -60,22 +58,20 @@ interface DrawingBase<G extends Geometry> {
    */
   readonly opacity?: number | undefined;
   readonly clip?: readonly number[] | undefined;
-}
-
-/** Data, drawn with the other marks in SVG or on a canvas, clipped to the plot. */
-export interface DataDrawing<G extends Geometry> extends DrawingBase<G> {
-  readonly guide?: false;
-  /** Paints onto a canvas in CSS pixels, clipped to the plot. */
-  readonly canvas: (context: CanvasRenderingContext2D, geometry: G, options: CanvasOptions) => void;
-}
-
-/**
- * Guides (rules, text) are drawn as SVG above the data, even when a canvas
- * draws the data, so they stay crisp and readable. They are not clipped to
- * the plot; their marks leave out what lies outside it.
- */
-export interface GuideDrawing<G extends Geometry> extends DrawingBase<G> {
-  readonly guide: true;
+  /**
+   * Paints onto a canvas in CSS pixels; or false for a drawing in SVG only
+   * (rules, text), which a chart drawing its data on a canvas draws as SVG
+   * above it, so it stays crisp and readable.
+   */
+  readonly canvas:
+    | ((context: CanvasRenderingContext2D, geometry: G, options: CanvasOptions) => void)
+    | false;
+  /**
+   * What the geometry is cut to where its mark's `clip` does not say: its
+   * panel's plot ("plot", the default), or nothing (false), for drawings
+   * whose marks leave out what lies outside the plot themselves.
+   */
+  readonly defaultClip?: "plot" | false;
 }
 
 /**
@@ -97,12 +93,12 @@ export interface Geometry {
 }
 
 /**
- * What a geometry is cut to: its mark's `clip`, or by default data to its
- * panel's plot and guides to nothing. Data not cut to the plot is drawn
- * above the data that is, guides above both.
+ * What a geometry is cut to: its mark's `clip`, or its drawing's default.
+ * Data not cut to the plot is drawn above the data that is, and drawings
+ * in SVG only above both.
  */
 export function clipOf(geometry: Geometry): Clip {
-  return geometry.clip ?? (geometry.draw.guide ? false : "plot");
+  return geometry.clip ?? geometry.draw.defaultClip ?? "plot";
 }
 
 /** One SVG element: its tag and attribute values (unescaped). */

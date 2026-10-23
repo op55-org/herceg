@@ -273,7 +273,7 @@ def test_annotations_take_constants_or_columns():
 
 
 def test_annotation_options_are_checked():
-    with pytest.raises(ValueError, match="Label: give text or field, one of them"):
+    with pytest.raises(ValueError, match="Label: give text, field, or content, one of them"):
         hg.Chart(DATA).text(x=1, y=2, label=hg.Label())
     with pytest.raises(ValueError, match="region x2: needs both x1 and x2"):
         hg.Chart(DATA).region(x1=1)
@@ -2011,10 +2011,18 @@ def test_helpers_take_every_keyword_argument_of_their_mark(helper):
     # chart's too, whose fields go to the mark, and its legend (legend=False
     # leaves its one mark's series out as the mark's would).
     skipped = {"self", "data", "facet", "tooltip", "legend", *positional}
+    # A helper's width is its chart's, as in other plotting libraries' helpers;
+    # bars' thickness (width=hg.Pixels(n)) is Chart.bar's.
+    if HELPERS[helper] == "bar":
+        skipped.add("width")
     expected = [name for name in method if name not in skipped]
     assert keywords == expected
     for name in keywords:
         assert function[name][:2] == method[name][:2], name
+    # What it takes positionally, it takes in every form the mark does.
+    for name in positional:
+        if name not in ("data", "self") and name in method:
+            assert function[name][:2] == method[name][:2], name
 
 
 @pytest.mark.parametrize("helper", HELPERS)

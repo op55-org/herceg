@@ -1,7 +1,8 @@
 // Runtime checks of chart specs written outside TypeScript (the Python
 // package, stored JSON), where the type checker cannot help: structure,
-// enumerations, booleans, finite numbers, and field references. Errors name
-// the offending property by its path and say what was expected, as in
+// enumerations, booleans, finite numbers, and field references. Errors are
+// ChartErrors with the offending property's path, saying what was
+// expected, as in
 // `marks[2].inner: expected "box", "quartiles", or "none"; received "quart"`.
 // Properties the format does not have are refused by default, naming the
 // property meant where one is close, so misspellings do not go unnoticed.
@@ -16,19 +17,25 @@ import { checkLeaves, checkLinkage } from "../marks/dendrogram-data.ts";
 import { errorBarForm } from "../marks/errorbar.ts";
 import { heatmapFormError } from "../marks/heatmap.ts";
 import { histogramFormError, perAxisBins } from "../marks/histogram-input.ts";
+import { pointSizeForm } from "../marks/point.ts";
 import { regionFormError } from "../marks/region.ts";
 import { ruleFormError } from "../marks/rule.ts";
 import { treeFormError } from "../marks/tree-data.ts";
 import { Bindings } from "../model/bindings.ts";
 import { GUIDE_KIT } from "../model/guides.ts";
 import { checkBreaks } from "../scale/breaks.ts";
+import { MARK_CHANNELS } from "./channels.ts";
 import type {
+  AreaLabelsSpec,
   BarLabelPlaceSpec,
   BarLabelsSpec,
   ContinuitySpec,
   EncodingsSpec,
+  IdentityScaleSpec,
+  LabelPart,
   LabelPlaceSpec,
   LabelSpec,
+  MarkAnchorSpec,
   MarkerStyle,
   MarkStyleSpec,
   OrdinalScaleSpec,
@@ -36,6 +43,7 @@ import type {
   StackSpec,
   StyleMapSpec,
 } from "./encoding.ts";
+import { ChartError, type ChartErrorCode } from "./errors.ts";
 import {
   type AnimationSpec,
   type AxisGuideSpec,
@@ -52,6 +60,7 @@ import {
   type GeometryColumnSpec,
   type GridFacetSpec,
   type GridLayoutSpec,
+  type GridLinesSpec,
   type InsetIndicatorSpec,
   type InsetSpec,
   type InsidePlace,
@@ -59,7 +68,9 @@ import {
   type LayoutCellSpec,
   type LegendEntrySpec,
   type LegendGuideSpec,
+  type LegendInclude,
   type LegendSpec,
+  type LegendTarget,
   type MarkSpec,
   type NavigatorSpec,
   type PanelLayoutSpec,
@@ -69,7 +80,6 @@ import {
   type ProjectionSpec,
   type RowSelectionSpec,
   type ScaleLimitsSpec,
-  type ScaleRef,
   type ScaleSpec,
   type SidePlace,
   SPEC_VERSION,
@@ -110,8 +120,32 @@ export interface UnknownProperty {
 /** The properties no check knows, collected while `checkSpec` runs. */
 let unknownPaths: UnknownProperty[] | undefined;
 
+/**
+ * The error refusing what is at `path` (as messages name it: `marks[2].inner`,
+ * or `spec.data` for the chart's own options), saying `problem`: its path
+ * in the spec, without the "spec." that only messages start with.
+ */
+function refusal(
+  path: string,
+  problem: string,
+  code: ChartErrorCode = "invalid-option",
+): ChartError {
+  return new ChartError({
+    code,
+    path: path.replace(/^spec\.?/, "") || undefined,
+    message: `${path}: ${problem}`,
+  });
+}
+
+/** An error a check at `path` delegated to, whose message names its place itself. */
+function delegated(path: string, error: unknown): ChartError {
+  const refused = refusal(path, "");
+  refused.message = (error as Error).message;
+  return refused;
+}
+
 function fail(path: string, expected: string, value: unknown): never {
-  throw new TypeError(`${path}: expected ${expected}; received ${describe(value)}`);
+  throw refusal(path, `expected ${expected}; received ${describe(value)}`);
 }
 
 /** Choices in prose: "a", "a or b", or "a, b, or c". */
@@ -163,6 +197,12 @@ const finite: Check = (v, path) => {
 const positive: Check = (v, path) => {
   if (typeof v !== "number" || !(v > 0) || !Number.isFinite(v)) fail(path, "a positive number", v);
 };
+/** Grid lines: true or false, or { zIndex }, where they are painted among the marks. */
+const grid: Check = (v, path) => {
+  if (typeof v === "boolean") return;
+  if (!isRecord(v)) fail(path, "true, false, or { zIndex }", v);
+  properties(v, path, { zIndex: finite } satisfies ChecksOf<GridLinesSpec>);
+};
 const count: Check = (v, path) => {
   if (typeof v !== "number" || !Number.isInteger(v) || v < 1)
     fail(path, "a whole number of at least 1", v);
@@ -190,6 +230,21 @@ const position: Check = (v, path) => {
 const width: Check = (v, path) => {
   if (typeof v !== "number" || !(v >= 0) || !Number.isFinite(v))
     fail(path, "a number of at least 0", v);
+};
+/** Pixels as a length: `{ px }`, 0 or more. */
+const pixels: Check = (v, path) => {
+  if (!isRecord(v)) fail(path, "{ px }, a length in pixels", v);
+  checkProperties(v, path, ["px"], { px: width });
+};
+/** Room a scale keeps around its data: "auto", a share of its domain, or `{ px }`. */
+const padding: Check = (v, path) => {
+  if (v === "auto") return;
+  if (typeof v === "number") {
+    if (!(v >= 0 && v < 0.5)) fail(path, "a share of the domain from 0 up to 0.5, not 0.5", v);
+    return;
+  }
+  if (!isRecord(v)) fail(path, '"auto", a share of the domain from 0 up to 0.5, or { px }', v);
+  pixels(v, path);
 };
 const fraction: Check = (v, path) => {
   if (typeof v !== "number" || !(v >= 0 && v <= 1)) fail(path, "a number from 0 to 1", v);
@@ -260,11 +315,12 @@ function misspelling(
 }
 
 /** The error for a missing `key`, naming its misspelling when there is one. */
-function missing(path: string, key: string, typo: string | undefined): TypeError {
-  return new TypeError(
+function missing(path: string, key: string, typo: string | undefined): ChartError {
+  return refusal(
+    `${path}.${key}`,
     typo === undefined
-      ? `${path}.${key}: required`
-      : `${path}.${key}: required; rename "${typo}", which is not a property, to "${key}"`,
+      ? "required"
+      : `required; rename "${typo}", which is not a property, to "${key}"`,
   );
 }
 
@@ -484,7 +540,7 @@ const transforms: Check = (v, path) => {
     required(step, at, keys, Object.keys(checks));
     // A step naming two transforms is ambiguous; other keys are unknown.
     const other = Object.keys(step).find((key) => key !== kind && Object.hasOwn(TRANSFORMS, key));
-    if (other) throw new TypeError(`${at}.${other}: a step is one transform, here ${kind}`);
+    if (other) throw refusal(`${at}.${other}`, `a step is one transform, here ${kind}`);
     properties(step, at, checks);
   }
 };
@@ -508,7 +564,7 @@ function format(type: unknown): Check {
       if (time) new Intl.DateTimeFormat(undefined, v as Intl.DateTimeFormatOptions);
       if (number) new Intl.NumberFormat(undefined, v as Intl.NumberFormatOptions);
     } catch (error) {
-      throw new TypeError(`${path}: ${(error as Error).message}`);
+      throw refusal(path, (error as Error).message);
     }
     // Intl ignores options it does not know, so misspelled ones are noted here.
     // Without an axis type, either kind of option may be meant.
@@ -578,7 +634,8 @@ function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
     nice: boolean,
     zero: boolean,
     title: string,
-    grid: boolean,
+    grid,
+    padding,
     ticks: ticks(spec.type),
     format: axisFormat(spec.type),
     tooltipFormat: axisFormat(spec.type),
@@ -589,8 +646,7 @@ function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
 
 /** A function where a spec holds data: JavaScript only, never serializable. */
 function noFunction(v: unknown, path: string, instead: string): void {
-  if (typeof v === "function")
-    throw new TypeError(`${path}: a function cannot be in a spec; ${instead}`);
+  if (typeof v === "function") throw refusal(path, `a function cannot be in a spec; ${instead}`);
 }
 
 /**
@@ -641,7 +697,7 @@ function ticks(type: unknown): Check {
         try {
           calendarInterval(e as string, at);
         } catch (error) {
-          throw new TypeError((error as Error).message);
+          throw delegated(at, error);
         }
       },
       anchor: (a, at) => {
@@ -673,7 +729,7 @@ function axisFormat(type: unknown): Check {
         numberPattern(GUIDE_KIT, v.number as string, undefined, `${path}.number`);
       else timePattern(GUIDE_KIT, v.time as string, "UTC", undefined, `${path}.time`);
     } catch (error) {
-      throw new TypeError((error as Error).message);
+      throw delegated(`${path}.${key}`, error);
     }
   };
 }
@@ -714,6 +770,8 @@ const tickLabels: Check = (v, path) => {
     },
     priority: finite,
     duplicates: oneOf("hide", "show"),
+    inside: boolean,
+    gap: width,
   } satisfies ChecksOf<TickLabelsSpec>);
 };
 
@@ -833,6 +891,15 @@ const textStyle: Check = (v, path) => {
     opacity: fraction,
     lineHeight: positive,
     align: oneOf("start", "center", "end"),
+    verticalAlign: (a, at) => {
+      oneOf("top", "middle", "bottom")(a, at);
+      // Round 2 freezes it before stream R draws it (marks/pending.ts).
+      throw refusal(
+        at,
+        "not drawn as given yet (round 2 stream R adds it); drop verticalAlign",
+        "unsupported",
+      );
+    },
     halo,
     background: textBox,
     padding: insets,
@@ -925,6 +992,12 @@ const theme: Check = (v, path) => {
 };
 
 const sides = oneOf("top", "right", "bottom", "left");
+/** Sides of a rectangle, each once, such as those of its outline that are drawn. */
+const sideList: Check = (v, path) => {
+  if (!Array.isArray(v)) fail(path, 'a list of sides, such as ["top", "bottom"]', v);
+  for (const [i, side] of v.entries()) sides(side, `${path}[${i}]`);
+  if (new Set(v).size !== v.length) fail(path, "each side once", v);
+};
 
 /** Where a guide goes: on a side outside the plots, or inside a plot. */
 const place: Check = (v, path) => {
@@ -995,14 +1068,30 @@ const legendTitle: Check = (v, path) => {
   checkProperties(v, path, ["text"], { text: string, style: textStyle });
 };
 
-/** A scale a mark owns, by the mark's id and the channel. */
-const scaleRef: Check = (v, path) => {
-  object(v, path);
-  checkProperties(v as Record<string, unknown>, path, ["mark", "channel"], {
-    mark: string,
-    channel: oneOf("series", "color", "size", "symbol"),
-  } satisfies ChecksOf<ScaleRef>);
-};
+/**
+ * A scale a guide shows (a mark's, by its id and the channel, or one of
+ * the chart's `scales` by name) or, where `whole`, a mark whole by its id.
+ */
+function reference(whole: boolean): Check {
+  return (v, path) => {
+    object(v, path);
+    const ref = v as Record<string, unknown>;
+    const named = "scale" in ref;
+    if (named && ("mark" in ref || "channel" in ref))
+      fail(path, "a mark's scale, { mark, channel }, or a scale's name, { scale }; not both", v);
+    const required = named
+      ? ["scale"]
+      : whole && !("channel" in ref)
+        ? ["mark"]
+        : ["mark", "channel"];
+    checkProperties(ref, path, required, {
+      mark: string,
+      channel: oneOf("series", "color", "size", "symbol"),
+      scale: string,
+    } satisfies ChecksOf<LegendInclude>);
+  };
+}
+const scaleRef = reference(false);
 
 /** A legend entry's swatch: a line, a box, a symbol, or several. */
 const swatch: Check = (v, path) => {
@@ -1025,9 +1114,10 @@ const swatch: Check = (v, path) => {
         stroke: string,
         ...opacity,
       });
-    case "circle":
+    case "symbol":
       return checkProperties(spec, path, ["fill"], {
         type: string,
+        symbol: symbolName,
         fill: string,
         stroke: string,
         size: positive,
@@ -1042,7 +1132,7 @@ const swatch: Check = (v, path) => {
         },
       });
     default:
-      fail(`${path}.type`, '"line", "rect", "circle", or "composite"', spec.type);
+      fail(`${path}.type`, '"line", "rect", "symbol", or "composite"', spec.type);
   }
 };
 
@@ -1060,12 +1150,27 @@ const legendEntry: Check = (v, path) => {
       if (spec.swatch !== undefined) fail(at, "a swatch or a sample, not both", s);
     },
     targets: (t, at) => {
-      if (!Array.isArray(t)) fail(at, "a list of { mark }", t);
+      if (!Array.isArray(t)) fail(at, "a list of targets, such as { mark }", t);
       for (const [i, target] of t.entries()) {
-        object(target, `${at}[${i}]`);
-        checkProperties(target as Record<string, unknown>, `${at}[${i}]`, ["mark"], {
-          mark: string,
-        });
+        const where = `${at}[${i}]`;
+        object(target, where);
+        const spec = target as Record<string, unknown>;
+        if ("scale" in spec && ("mark" in spec || "field" in spec))
+          fail(
+            where,
+            "a mark's rows, { mark, field, values }, or a scale's, { scale, values }; not both",
+            target,
+          );
+        checkProperties(
+          spec,
+          where,
+          "scale" in spec
+            ? ["scale", "values"]
+            : "field" in spec || "values" in spec
+              ? ["mark", "field", "values"]
+              : ["mark"],
+          { mark: string, field, values: strings, scale: string } satisfies ChecksOf<LegendTarget>,
+        );
       }
     },
   } satisfies ChecksOf<LegendEntrySpec>);
@@ -1081,6 +1186,10 @@ function legendOptions(spec: Record<string, unknown>, path: string) {
     rows: count,
     order: oneOf("row", "column"),
     title: legendTitle,
+    include: (v: unknown, at: string) => {
+      if (!Array.isArray(v)) fail(at, "a list of scales or marks, such as { mark, channel }", v);
+      for (const [i, ref] of v.entries()) include(ref, `${at}[${i}]`);
+    },
     entries: (v: unknown, at: string) => {
       if (!Array.isArray(v)) fail(at, "a list of entries", v);
       const keys = new Set<unknown>();
@@ -1113,13 +1222,14 @@ function guideList(typeOf: (scale: unknown) => unknown): Check {
         if (ids.has(guide.id)) fail(`${at}.id`, "an id no other guide has", guide.id);
         ids.add(guide.id);
       }
-      if (guide.type === "axis") axisGuide(guide, at, typeOf(guide.scale));
+      // A scale is looked up by its name only (`axisGuide` refuses others).
+      if (guide.type === "axis")
+        axisGuide(guide, at, typeof guide.scale === "string" ? typeOf(guide.scale) : undefined);
       else if (guide.type === "legend")
         properties(guide, at, {
           ...legendOptions(guide, at),
           type: string,
           id: string,
-          scales: scaleRefs,
           panel: string,
           show: boolean,
         } satisfies ChecksOf<LegendGuideSpec>);
@@ -1145,25 +1255,30 @@ function guideList(typeOf: (scale: unknown) => unknown): Check {
   };
 }
 
-const scaleRefs: Check = (v, path) => {
-  if (!Array.isArray(v) || v.length === 0) fail(path, "a list of scales, { mark, channel }", v);
-  for (const [i, ref] of v.entries()) scaleRef(ref, `${path}[${i}]`);
-};
+const include = reference(true);
 
 /** An axis guide: its scale, side, ticks and their layers, and look. */
 function axisGuide(guide: Record<string, unknown>, path: string, type: unknown): void {
   required(guide, path, ["scale"], Object.keys(guide));
   const scale = guide.scale;
+  // A position scale of the chart's own, which has no side of its own.
+  const own = !["x", "y", "yRight"].includes(scale as string);
+  if (own && typeof scale === "string" && ["linear", "log", "time"].includes(type as string))
+    required(guide, path, ["place"], Object.keys(guide));
   checkProperties(guide, path, ["scale"], {
     type: string,
     id: string,
-    scale: oneOf("x", "y", "yRight"),
+    scale: (v, at) => {
+      // A name, before the scale it names is looked up.
+      if (typeof v !== "string" || (own && !["linear", "log", "time"].includes(type as string)))
+        fail(at, '"x", "y", "yRight", or a position scale of the chart\'s scales', v);
+    },
     place: (p, at) => {
       object(p, at);
       checkProperties(p as Record<string, unknown>, at, ["side"], { side: sides });
       const side = (p as { side: string }).side;
       const across = side === "top" || side === "bottom";
-      if (across !== (scale === "x"))
+      if (!own && across !== (scale === "x"))
         fail(
           `${at}.side`,
           scale === "x" ? '"top" or "bottom" for an x axis' : '"left" or "right" for a y axis',
@@ -1176,7 +1291,7 @@ function axisGuide(guide: Record<string, unknown>, path: string, type: unknown):
     tick: tickMark,
     labels: tickLabels,
     line: boolean,
-    grid: boolean,
+    grid,
     layers: tickLayers(type),
     show: boolean,
     repeat: labelRepeat,
@@ -1348,8 +1463,24 @@ const scaleSettings: Check = (v, path) => {
     nice: boolean,
     zero: boolean,
     scope,
+    padding,
     tooltipFormat: axisFormat(spec.type),
   } satisfies ChecksOf<ScaleSpec>);
+};
+
+/**
+ * A scale of the chart's own: of categories ("ordinal"), of values that
+ * are their own outputs ("identity"), or of positions, its `type` given.
+ */
+const namedScale: Check = (v, path) => {
+  object(v, path);
+  const { type } = v as { type?: unknown };
+  if (type === "identity")
+    return checkProperties(v as Record<string, unknown>, path, ["type"], {
+      type: string,
+    } satisfies ChecksOf<IdentityScaleSpec>);
+  if (type === "linear" || type === "log" || type === "time") return scaleSettings(v, path);
+  ordinalScale(v, path);
 };
 
 /** A scale of categories in `scales`: its domain, fixed outputs, and output for others. */
@@ -1362,11 +1493,12 @@ const ordinalScale: Check = (v, path) => {
   };
   const type = (t: unknown, at: string) => {
     if (t !== "ordinal")
-      fail(at, '"ordinal" (scales other than x, y, and yRight are scales of categories)', t);
+      fail(at, '"ordinal", "identity", or a position scale\'s "linear", "log", or "time"', t);
   };
   type((v as { type?: unknown }).type, `${path}.type`);
   properties(v as Record<string, unknown>, path, {
     type,
+    scope: oneOf("chart", "panel"),
     domain: strings,
     map: (m, at) => {
       object(m, at);
@@ -1405,7 +1537,7 @@ const repeat = oneOf("repeat");
 const clip: Check = (v, path) => {
   if (v !== "plot" && v !== "chart" && v !== false) fail(path, '"plot", "chart", or false', v);
 };
-const placement = { axis: side, facet: repeat, panel: string, clip };
+const placement = { axis: side, facet: repeat, panel: string, clip, zIndex: finite };
 /** A mark's `legend`: only `false`, which leaves it out of the legends. */
 const legended: Check = (v, path) => {
   if (v !== false) fail(path, "false, which leaves the mark out of the legends", v);
@@ -1430,7 +1562,16 @@ const tooltip: Check = (v, path) => {
   });
 };
 
-/** A coordinate: a value on a scale, a field, a fraction of a frame, or pixels, with an offset. */
+/** A coordinate's share of a frame, or its pixels: a number, or a number field's `{ field }`. */
+const amount: Check = (v, path) => {
+  if (!isRecord(v)) return finite(v, path);
+  checkProperties(v, path, ["field"], { field });
+};
+
+/**
+ * A coordinate: a value on a scale, a field, a fraction of a frame, or
+ * pixels (each a constant or a field's), with an offset.
+ */
 const coordinate: Check = (v, path) => {
   object(v, path);
   const c = v as Record<string, unknown>;
@@ -1444,8 +1585,8 @@ const coordinate: Check = (v, path) => {
         fail(at, "a number or a category's value", d);
     },
     field,
-    fraction: finite,
-    px: finite,
+    fraction: amount,
+    px: amount,
     scale: string,
     frame,
     offset: finite,
@@ -1459,29 +1600,105 @@ const coordinate: Check = (v, path) => {
 /** An annotation's place along an axis: a value, a field's name, or a coordinate. */
 const annotationPlace: Check = (v, path) => (isRecord(v) ? coordinate(v, path) : position(v, path));
 
-/** A label: its text, or a label object (text or field, format, style, place). */
+/** Where a label goes beside what it labels. */
+const labelPlace: Check = (p, at) => {
+  object(p, at);
+  properties(p as Record<string, unknown>, at, {
+    attachment: oneOf("start", "center", "end"),
+    side: oneOf("top", "right", "bottom", "left"),
+    outside: boolean,
+    reserve: boolean,
+    offset: finite,
+  } satisfies ChecksOf<LabelPlaceSpec>);
+};
+
+/** A part of a label's text: literal text, a field's value, the series' name, or the value. */
+const labelPart: Check = (v, path) => {
+  if (typeof v === "string") return;
+  object(v, path);
+  const part = v as Record<string, unknown>;
+  if (["field", "series", "value"].filter((key) => key in part).length !== 1)
+    fail(path, "text, { field }, { series: true }, or { value: true }", v);
+  const yes: Check = (t, at) => {
+    if (t !== true) fail(at, "true", t);
+  };
+  properties(part, path, {
+    field,
+    series: yes,
+    value: yes,
+    format: axisFormat(undefined),
+  } satisfies ChecksOf<Exclude<LabelPart, string>>);
+  if ("series" in part && "format" in part)
+    fail(`${path}.format`, "no format: a series' name is written as it is", part.format);
+};
+
+/** A label's text made of parts, at least one. */
+const labelContent: Check = (v, path) => {
+  if (!Array.isArray(v) || v.length === 0)
+    fail(path, 'a list of parts, such as ["Peak: ", { value: true }]', v);
+  for (const [i, part] of v.entries()) labelPart(part, `${path}[${i}]`);
+};
+
+/** Text written with `content` has a format for each part, and none of its own. */
+function contentAlone(l: Record<string, unknown>, path: string): void {
+  if ("content" in l && "format" in l)
+    fail(`${path}.format`, "no format beside content: give each part its own", l.format);
+}
+
+/** A label: its text, or a label object (text, field, or content; format, style, place). */
 const label: Check = (v, path) => {
   if (typeof v === "string") return;
   object(v, path);
   const l = v as Record<string, unknown>;
-  if ("text" in l === "field" in l) fail(path, "a label with one of text and field", v);
+  if (["text", "field", "content"].filter((key) => key in l).length !== 1)
+    fail(path, "a label with one of text, field, and content", v);
+  contentAlone(l, path);
   properties(l, path, {
     text: string,
     field,
+    content: labelContent,
     format: axisFormat(undefined),
     style: textStyle,
-    place: (p, at) => {
-      object(p, at);
-      properties(p as Record<string, unknown>, at, {
-        attachment: oneOf("start", "center", "end"),
-        side: oneOf("top", "right", "bottom", "left"),
-        outside: boolean,
-        reserve: boolean,
-        offset: finite,
-      } satisfies ChecksOf<LabelPlaceSpec>);
-    },
+    place: labelPlace,
   } satisfies ChecksOf<LabelSpec>);
 };
+
+/** Which point of a series a label follows. */
+const labelAt = oneOf("first", "last", "visible-start", "visible-end");
+/** The edge of a band (`y1` and `y2`, or `x1` and `x2`) labels follow. */
+const bandEdge = oneOf("y1", "y2", "x1", "x2");
+
+/** Labels following each series of a line, or with `edge`, of an area's band. */
+function seriesLabels(band: boolean): Check {
+  return (v, path) => {
+    object(v, path);
+    const spec = v as Record<string, unknown>;
+    if (!band && "edge" in spec)
+      fail(`${path}.edge`, "no edge: a line's labels follow the line", spec.edge);
+    checkProperties(spec, path, ["at"], {
+      at: labelAt,
+      content: labelContent,
+      edge: bandEdge,
+      place: labelPlace,
+      style: textStyle,
+    } satisfies ChecksOf<AreaLabelsSpec>);
+  };
+}
+
+/** A place on another mark's series: its id, where along each series, and a band's edge. */
+const markAnchor: Check = (v, path) => {
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["mark", "at"], {
+    mark: string,
+    at: labelAt,
+    edge: bandEdge,
+  } satisfies ChecksOf<MarkAnchorSpec>);
+};
+
+/** A mark's place for each row along an axis: a field's name, or a coordinate. */
+const rowPosition: Check = (v, path) => (isRecord(v) ? coordinate(v, path) : field(v, path));
+/** As `rowPosition`, or several fields drawn side by side. */
+const rowPositions: Check = (v, path) => (isRecord(v) ? coordinate(v, path) : fields(v, path));
 
 /** The shapes points and markers take. */
 const SYMBOL_NAMES = [
@@ -1517,7 +1734,15 @@ function channel(value: Check): Check {
   return (v, path) => {
     object(v, path);
     const c = v as Record<string, unknown>;
-    if ("field" in c) checkProperties(c, path, ["field"], { field, scale: string });
+    if ("field" in c)
+      checkProperties(c, path, ["field"], {
+        field,
+        scale: (s, at) => {
+          if (typeof s === "string") return;
+          if (!isRecord(s)) fail(at, 'a scale\'s name, or { type: "identity" }', s);
+          checkProperties(s, at, ["type"], { type: oneOf("identity") });
+        },
+      });
     else if ("series" in c) {
       checkProperties(c, path, ["series"], {
         series: (s, at) => {
@@ -1527,8 +1752,9 @@ function channel(value: Check): Check {
       });
       // As the feature compiler refuses it (marks/features/channels.ts).
       if (c.scale === undefined)
-        throw new TypeError(
-          `${path}.scale: required, as the channel names series through a scale; give scale, the name of one of the chart's scales`,
+        throw refusal(
+          `${path}.scale`,
+          "required, as the channel names series through a scale; give scale, the name of one of the chart's scales",
         );
     } else if ("value" in c) checkProperties(c, path, ["value"], { value });
     else if ("condition" in c)
@@ -1544,17 +1770,21 @@ function channel(value: Check): Check {
           });
         },
       });
-    else
+    else {
+      // `{ fiel: "kind" }` is a field misspelled, which the error names.
+      const typo = misspelling(c, "field", ["scale"]);
+      if (typo !== undefined) throw missing(path, "field", typo);
       fail(
         path,
         "{ field }, { series: true }, { value }, or { condition: { when, then, otherwise } }",
         v,
       );
+    }
   };
 }
 
 /** A mark's `encode`, of the channels `names` it takes. */
-function encodings(...names: readonly (keyof EncodingsSpec)[]): Check {
+function encodings(names: readonly (keyof EncodingsSpec)[]): Check {
   const checks = Object.fromEntries(names.map((name) => [name, channel(CHANNEL_VALUES[name])]));
   return (v, path) => {
     object(v, path);
@@ -1647,8 +1877,8 @@ const MARKS: MarkChecks = {
       tooltip,
       ...placement,
       legend: legended,
-      x: fields,
-      y: fields,
+      x: rowPositions,
+      y: rowPositions,
       orient: oneOf("x", "y"),
       series: seriesField,
       dodge: boolean,
@@ -1659,8 +1889,9 @@ const MARKS: MarkChecks = {
       strokeOpacity: fraction,
       curve,
       label: string,
+      labels: seriesLabels(false),
       color: string,
-      encode: encodings("color", "stroke", "dash", "strokeWidth", "opacity"),
+      encode: encodings(MARK_CHANNELS.line!.encode),
       style: markStyle("marker"),
       markers,
       continuity,
@@ -1673,12 +1904,12 @@ const MARKS: MarkChecks = {
       tooltip,
       ...placement,
       legend: legended,
-      x: fields,
-      y: fields,
-      y1: field,
-      y2: field,
-      x1: field,
-      x2: field,
+      x: rowPositions,
+      y: rowPositions,
+      y1: rowPosition,
+      y2: rowPosition,
+      x1: rowPosition,
+      x2: rowPosition,
       orient: oneOf("x", "y"),
       series: seriesField,
       dodge: boolean,
@@ -1692,8 +1923,9 @@ const MARKS: MarkChecks = {
           return;
         }
         if (typeof v !== "boolean" && v !== "fill" && v !== "center" && v !== "wiggle")
-          throw new Error(
-            `${path}: expected true, false, "fill", "center", "wiggle", or { offset, order, gaps }; choose a supported stack`,
+          throw refusal(
+            path,
+            'expected true, false, "fill", "center", "wiggle", or { offset, order, gaps }; choose a supported stack',
           );
       },
       fill: string,
@@ -1705,8 +1937,9 @@ const MARKS: MarkChecks = {
       opacity: fraction,
       curve,
       label: string,
+      labels: seriesLabels(true),
       color: string,
-      encode: encodings("color", "fill", "stroke", "opacity"),
+      encode: encodings(MARK_CHANNELS.area!.encode),
       style: markStyle(),
       continuity,
       where: expression,
@@ -1718,6 +1951,7 @@ const MARKS: MarkChecks = {
       facet: repeat,
       panel: string,
       clip,
+      zIndex: finite,
       first: field,
       second: field,
       height: field,
@@ -1726,9 +1960,7 @@ const MARKS: MarkChecks = {
           checkLeaves(v as string[]);
         } catch (error) {
           // The message names the leaves itself.
-          throw new TypeError(
-            `${path.slice(0, path.lastIndexOf("."))}: ${(error as Error).message}`,
-          );
+          throw refusal(path.slice(0, path.lastIndexOf(".")), (error as Error).message);
         }
       },
       side: oneOf("bottom", "top", "left", "right"),
@@ -1753,6 +1985,7 @@ const MARKS: MarkChecks = {
       },
       label,
       contributeDomain: boolean,
+      legend: boolean,
     },
   },
   region: {
@@ -1766,8 +1999,12 @@ const MARKS: MarkChecks = {
       y2: annotationPlace,
       fill: string,
       fillOpacity: fraction,
+      stroke: string,
+      strokeWidth: width,
+      strokeSides: sideList,
       label,
       contributeDomain: boolean,
+      legend: boolean,
     },
   },
   text: {
@@ -1784,10 +2021,12 @@ const MARKS: MarkChecks = {
           y: coordinate,
         });
       },
+      from: markAnchor,
       label,
       overlap: oneOf("show", "hide", "move"),
       style: markStyle("leader"),
       contributeDomain: boolean,
+      legend: boolean,
     },
   },
   bar: {
@@ -1797,13 +2036,14 @@ const MARKS: MarkChecks = {
       tooltip,
       ...placement,
       legend: legended,
-      x: fields,
-      y: fields,
+      x: rowPositions,
+      y: rowPositions,
       series: seriesField,
       stack: (v, path) => {
         if (typeof v !== "boolean" && v !== "fill")
-          throw new Error(
-            `${path}: expected true, false, or "fill"; use an area for "center" or "wiggle"`,
+          throw refusal(
+            path,
+            'expected true, false, or "fill"; use an area for "center" or "wiggle"',
           );
       },
       dodge: boolean,
@@ -1812,17 +2052,24 @@ const MARKS: MarkChecks = {
       stroke: string,
       strokeWidth: width,
       strokeOpacity: fraction,
+      strokeSides: sideList,
+      width: pixels,
       dash,
       opacity: fraction,
       color: string,
-      encode: encodings("color", "fill", "stroke", "strokeWidth", "opacity"),
+      encode: encodings(MARK_CHANNELS.bar!.encode),
       style: markStyle(),
       label: string,
       labels: (v, path) => {
         if (typeof v === "boolean") return;
         object(v, path);
-        properties(v as Record<string, unknown>, path, {
+        const l = v as Record<string, unknown>;
+        if ("content" in l && "field" in l)
+          fail(`${path}.field`, "no field beside content: give it as a part, { field }", l.field);
+        contentAlone(l, path);
+        properties(l, path, {
           field,
+          content: labelContent,
           format: axisFormat(undefined),
           style: textStyle,
           minLength: width,
@@ -1843,26 +2090,35 @@ const MARKS: MarkChecks = {
       tooltip,
       ...placement,
       legend: legended,
-      x: field,
-      y: field,
+      x: rowPosition,
+      y: rowPosition,
       series: seriesField,
       animationKey: field,
       radius: positive,
-      size: field,
+      size: (v, path) => (isRecord(v) ? channel(width)(v, path) : field(v, path)),
       radiusRange: range,
       fill: string,
-      fillOpacity: (v, path) => (typeof v === "string" ? field(v, path) : fraction(v, path)),
+      fillOpacity: (v, path) =>
+        typeof v === "string"
+          ? field(v, path)
+          : isRecord(v)
+            ? channel(fraction)(v, path)
+            : fraction(v, path),
       stroke: string,
       strokeWidth: width,
-      color: field,
+      color: (v, path) => (isRecord(v) ? channel(string)(v, path) : field(v, path)),
       colors: ramp,
       colorDomain: range,
       colorMidpoint: finite,
       symbol: (v, path) => {
         if (typeof v === "string") return;
         if (!isRecord(v)) fail(path, 'a shape\'s name or { field: "..." }', v);
-        checkProperties(v, path, ["field"], { field });
+        // An object of none of a channel's forms is a symbol field's, `{ field }`.
+        if (!["field", "series", "value", "condition"].some((key) => key in v))
+          throw missing(path, "field", misspelling(v, "field", ["scale"]));
+        channel(symbolName)(v, path);
       },
+      encode: encodings(MARK_CHANNELS.point!.encode),
       sampling: oneOf("none", "pixel"),
       label: string,
       dodge: boolean,
@@ -2128,12 +2384,12 @@ const MARKS: MarkChecks = {
       tooltip,
       ...placement,
       legend: legended,
-      x: field,
-      y: field,
-      x1: field,
-      x2: field,
-      y1: field,
-      y2: field,
+      x: rowPosition,
+      y: rowPosition,
+      x1: rowPosition,
+      x2: rowPosition,
+      y1: rowPosition,
+      y2: rowPosition,
       xError: field,
       yError: field,
       series: field,
@@ -2248,6 +2504,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y", "z"],
     checks: {
       panel: string,
+      zIndex: finite,
       tooltip,
       x: field,
       y: field,
@@ -2268,6 +2525,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y", "z"],
     checks: {
       panel: string,
+      zIndex: finite,
       tooltip,
       x: field,
       y: field,
@@ -2282,6 +2540,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y", "z"],
     checks: {
       panel: string,
+      zIndex: finite,
       x: field,
       y: field,
       z: field,
@@ -2467,9 +2726,19 @@ const FORMS: Partial<
   },
   errorbar: (spec) => {
     const form = errorBarForm(spec);
-    return typeof form === "string" ? form : undefined;
+    if (typeof form === "string") return form;
+    // A symmetric interval's center is a field, as its error is.
+    const across = form.horizontal ? "x" : "y";
+    return form.symmetric && typeof spec[across] !== "string"
+      ? `errorbar ${across}: a center with ${across}Error is a field; give a field's name`
+      : undefined;
   },
-  point: (spec) => sizeFormError(spec, "point"),
+  point: (spec) => pointSizeForm(spec)?.message,
+  text: (spec) =>
+    spec.from !== undefined &&
+    (spec.at !== undefined || spec.x !== undefined || spec.y !== undefined)
+      ? "text from: a place on another mark, or at, or x and y; one of them"
+      : undefined,
   geopoint: (spec) => sizeFormError(spec, "geopoint"),
   treemap: (spec) => treeFormError(spec, "treemap"),
   sunburst: (spec) => treeFormError(spec, "sunburst"),
@@ -2492,20 +2761,21 @@ const mark: Check = (v, path) => {
   required(spec, path, kind.required, [...Object.keys(checks), "type"]);
   properties(spec, path, checks, ["type"]);
   if (spec.type === "dendrogram" && spec.axis !== undefined)
-    throw new TypeError(
-      `${path}.axis: a dendrogram's heights are plot-relative, on no y axis; drop axis`,
+    throw refusal(
+      `${path}.axis`,
+      "a dendrogram's heights are plot-relative, on no y axis; drop axis",
     );
   const problem = FORMS[spec.type as MarkSpec["type"]]?.(spec);
-  if (problem) throw new TypeError(`${path}: ${problem}`);
+  if (problem) throw refusal(path, problem);
 };
 
 /**
- * Throws a TypeError naming the first property of `spec` that is not valid,
+ * Throws a ChartError naming the first property of `spec` that is not valid,
  * or that the spec format does not have (`checkSpec` returns those instead).
  */
 export function validateSpec(spec: unknown): asserts spec is ChartSpec {
   const unknown = findUnknown(spec);
-  if (unknown.length > 0) throw new TypeError(unknownError(unknown));
+  if (unknown.length > 0) throw unknownRefusal(unknown);
 }
 
 /**
@@ -2536,6 +2806,13 @@ export function describeUnknown({ path, known }: UnknownProperty): string {
   const name = path.slice(path.lastIndexOf(".") + 1);
   const meant = closest(name, known);
   return meant === undefined ? path : `${path} (did you mean "${meant}"?)`;
+}
+
+/** The error refusing a spec's unknown properties, at the first one's path. */
+export function unknownRefusal(unknown: readonly UnknownProperty[]): ChartError {
+  const refused = refusal(unknown[0]!.path, "");
+  refused.message = unknownError(unknown);
+  return refused;
 }
 
 /** Why a spec with unknown properties is refused, and what to do instead. */
@@ -2594,41 +2871,45 @@ function checkDendrogramData(spec: ChartSpec): void {
     if (mark.type !== "dendrogram") return;
     const path = `marks[${i}]`;
     if (spec.facet && mark.facet !== "repeat")
-      throw new TypeError(
-        `${path}.facet: missing; a dendrogram is drawn whole in every facet panel, so give it facet: "repeat"`,
+      throw refusal(
+        `${path}.facet`,
+        'missing; a dendrogram is drawn whole in every facet panel, so give it facet: "repeat"',
       );
     const names = Object.keys(spec.data ?? {});
     const name = mark.data ?? (names.length === 1 ? names[0] : undefined);
     const data =
       name !== undefined && Object.hasOwn(spec.data ?? {}, name) ? spec.data![name] : undefined;
-    if (!data)
-      throw new TypeError(`${path}.data: no table for the dendrogram; name one of spec.data`);
+    if (!data) throw refusal(`${path}.data`, "no table for the dendrogram; name one of spec.data");
     if ("source" in data) return;
     const fields = [mark.first, mark.second, mark.height] as const;
     const columns = fields.map((field, channel) => {
       const column = Object.hasOwn(data.columns, field) ? data.columns[field] : undefined;
       if (column === undefined)
-        throw new TypeError(
-          `${path}.${["first", "second", "height"][channel]}: no field "${field}" in the dendrogram's table`,
+        throw refusal(
+          `${path}.${["first", "second", "height"][channel]}`,
+          `no field "${field}" in the dendrogram's table`,
+          "unknown-field",
         );
       if (Array.isArray(column)) {
         const bad = column.findIndex((value) => value !== null && typeof value !== "number");
         if (bad >= 0)
-          throw new TypeError(
-            `${path}: dendrogram row ${bad}, field "${field}": expected a number; received ${describe(column[bad])}`,
+          throw refusal(
+            path,
+            `dendrogram row ${bad}, field "${field}": expected a number; received ${describe(column[bad])}`,
           );
         return column as readonly (number | null)[];
       }
       if ((column as { type: string }).type !== "number")
-        throw new TypeError(`${path}: dendrogram field "${field}": expected a number column`);
+        throw refusal(path, `dendrogram field "${field}": expected a number column`);
       return undefined;
     });
     const rows = columns.find((column) => column !== undefined)?.length;
     if (rows === undefined) return;
     for (const [channel, column] of columns.entries())
       if (column && column.length !== rows)
-        throw new TypeError(
-          `${path}: dendrogram row ${Math.min(rows, column.length)}, field "${fields[channel]}": the fields have different row counts; give each one row per merge`,
+        throw refusal(
+          path,
+          `dendrogram row ${Math.min(rows, column.length)}, field "${fields[channel]}": the fields have different row counts; give each one row per merge`,
         );
     try {
       checkLinkage(rows, mark.leaves, fields, (channel, row) => {
@@ -2636,7 +2917,7 @@ function checkDendrogramData(spec: ChartSpec): void {
         return column ? (column[row] ?? NaN) : undefined;
       });
     } catch (error) {
-      throw new TypeError(`${path}: ${(error as Error).message}`);
+      throw refusal(path, (error as Error).message);
     }
   });
 }
@@ -2746,22 +3027,20 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       legend,
       scales: (v, path) => {
         object(v, path);
-        const named = v as Record<string, unknown>;
-        properties(named, path, {
-          x: scaleSettings,
-          y: scaleSettings,
-          yRight: scaleSettings,
-          ...Object.fromEntries(
-            Object.keys(named)
-              .filter((name) => !["x", "y", "yRight"].includes(name))
-              .map((name) => [name, ordinalScale]),
-          ),
-        });
+        for (const [name, scale] of Object.entries(v as Record<string, unknown>)) {
+          if (scale === undefined) continue;
+          // A name that is not an identifier stays whole: `scales["p.99"]`.
+          const at = /^[A-Za-z_$][\w$]*$/.test(name)
+            ? `${path}.${name}`
+            : `${path}[${JSON.stringify(name)}]`;
+          (["x", "y", "yRight"].includes(name) ? scaleSettings : namedScale)(scale, at);
+        }
       },
       guides: guideList((scale) => {
         const name = scale as "x" | "y" | "yRight";
         const scales = chart.scales as Record<string, { type?: unknown } | undefined> | undefined;
-        return scales?.[name]?.type ?? (chart[name] as { type?: unknown } | undefined)?.type;
+        const short = ["x", "y", "yRight"].includes(name) ? chart[name] : undefined;
+        return scales?.[name]?.type ?? (short as { type?: unknown } | undefined)?.type;
       }),
       padding: insets,
       tooltip: (t, path) => {
@@ -2913,7 +3192,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
     try {
       new Bindings(chart.interaction as InteractionSpec, brushesRows);
     } catch (error) {
-      throw new TypeError(`spec.${(error as Error).message}`);
+      throw delegated("interaction", { message: `spec.${(error as Error).message}` });
     }
   }
   // A projection places maps' marks; a chart of other marks has nothing to project.

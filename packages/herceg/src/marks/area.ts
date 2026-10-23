@@ -17,7 +17,15 @@ import type {
   StackSpec,
 } from "../spec/spec.ts";
 import { BandShares, STILL } from "./dodge.ts";
-import type { Condition, Continuity, CssColor, Encodings, MarkStyle } from "./encoding.ts";
+import type {
+  AreaLabels,
+  Condition,
+  Continuity,
+  CssColor,
+  Encodings,
+  FieldCoordinate,
+  MarkStyle,
+} from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -55,6 +63,7 @@ import {
   untranspose,
   withBands,
 } from "./orient.ts";
+import { coordinates, type FieldPositions, type Pending, refusePending } from "./pending.ts";
 import { type LayerEdges, lowerPosition, rowOf, type Series, xExtent, yExtent } from "./series.ts";
 import { RowStack } from "./stack.ts";
 import { offsetLayers, stackError, stackPointText } from "./stack-offset.ts";
@@ -118,8 +127,12 @@ interface AreaCommon<S extends Schema> {
   where?: Condition;
   curve?: Curve;
   label?: string;
+  /** A label following each area's value edge (a band's `edge`). */
+  labels?: AreaLabels<S>;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
+  /** Where the areas are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   id?: string;
 }
 
@@ -162,21 +175,21 @@ export type AreaOptions<S extends Schema> = AreaCommon<S> & {
 } & (
     | (Filled<S> & {
         orient?: "x";
-        /** Positions: a number or time field, or a category field. */
-        x: PositionField<S>;
+        /** Positions: a number or time field, a category field, or a coordinate. */
+        x: PositionField<S> | FieldCoordinate<S>;
         /** Filled down to zero, or stacked with `stack: true`. */
-        y: NumericField<S> | readonly NumericField<S>[];
+        y: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
         /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
         axis?: "left" | "right";
       })
     | (Banded<S> & {
         orient?: "x";
-        x: PositionField<S>;
+        x: PositionField<S> | FieldCoordinate<S>;
         axis?: "left" | "right";
         /** Lower edge of a band. */
-        y1: NumericField<S>;
+        y1: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
         /** Upper edge of a band. */
-        y2: NumericField<S>;
+        y2: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
         y?: never;
         x1?: never;
         x2?: never;
@@ -184,8 +197,8 @@ export type AreaOptions<S extends Schema> = AreaCommon<S> & {
     | (Filled<S> & {
         /** Positions along y, values along x, filled to zero along x. */
         orient: "y";
-        y: PositionField<S>;
-        x: NumericField<S> | readonly NumericField<S>[];
+        y: PositionField<S> | FieldCoordinate<S>;
+        x: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
         /** Areas along y use the left axis, as horizontal bars do. */
         axis?: "left";
       })
@@ -198,12 +211,12 @@ export type AreaOptions<S extends Schema> = AreaCommon<S> & {
       })
     | (Banded<S> & {
         orient?: "y";
-        y: PositionField<S>;
+        y: PositionField<S> | FieldCoordinate<S>;
         axis?: "left";
         /** Left edge of a band along y. */
-        x1: NumericField<S>;
+        x1: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
         /** Right edge of a band along y. */
-        x2: NumericField<S>;
+        x2: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
         x?: never;
         y1?: never;
         y2?: never;
@@ -288,9 +301,15 @@ export function areaFormError(spec: {
 /** Options only the feature compiler draws (see model/features.ts). */
 const FEATURES = ["opacity", "strokeOpacity", "encode", "style", "continuity", "where"] as const;
 
-export class AreaMark implements Mark<Frozen<AreaSpec>> {
+/** Areas' options round 2 freezes before its streams draw them. */
+const PENDING: readonly Pending[] = [
+  ...coordinates("x", "y", "y1", "y2", "x1", "x2"),
+  ["labels", "C", "drop labels"],
+];
+
+export class AreaMark implements Mark<FieldPositions<Frozen<AreaSpec>>> {
   declare readonly [MARK]: true;
-  readonly spec: Frozen<AreaSpec>;
+  readonly spec: FieldPositions<Frozen<AreaSpec>>;
   readonly table: Table<Schema>;
   readonly tooltip: "x" | "y";
   readonly pointText?: (s: Series, row: number, format: AxisFormat) => string;
@@ -329,7 +348,8 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   readonly #stacking: Stacking;
 
   constructor(input: AreaSpec, table: Table<Schema>) {
-    this.spec = frozen(input);
+    refusePending(input, "area", PENDING);
+    this.spec = frozen(input) as FieldPositions<Frozen<AreaSpec>>;
     checkTooltip(table, this.spec.tooltip, "area");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -1043,6 +1063,7 @@ export function area<S extends Schema>(
       "strokeWidth",
       "color",
       ...FEATURES,
+      "labels",
       "curve",
       "label",
       "legend",
@@ -1051,9 +1072,11 @@ export function area<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
     ]),
-    ...(x !== undefined && { x: typeof x === "string" ? x : [...x] }),
-    ...(y !== undefined && { y: typeof y === "string" ? y : [...y] }),
+    // Lists of fields are copied; a field or a coordinate is kept as given.
+    ...(x !== undefined && { x: Array.isArray(x) ? [...x] : x }),
+    ...(y !== undefined && { y: Array.isArray(y) ? [...y] : y }),
   } as unknown as AreaSpec;
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.

@@ -8,17 +8,29 @@
 
 import type { Expression } from "../data/expression.ts";
 import type {
+  AreaLabelsSpec,
   BarLabelsSpec,
+  ChannelSpec,
   ContinuitySpec,
   EncodingsSpec,
   LabelSpec,
+  MarkAnchorSpec,
   MarkStyleSpec,
+  SeriesLabelsSpec,
   StackSpec,
   SymbolName,
 } from "./encoding.ts";
-import type { FormatSpec, GuideSpec, LegendOptionsSpec, ScalesSpec, TicksSpec } from "./guides.ts";
+import type {
+  FormatSpec,
+  GridLinesSpec,
+  GuideSpec,
+  LegendOptionsSpec,
+  ScalePadding,
+  ScalesSpec,
+  TicksSpec,
+} from "./guides.ts";
 import type { LayoutSpec } from "./layout.ts";
-import type { Coordinate, Position } from "./place.ts";
+import type { Coordinate, Position, Side } from "./place.ts";
 import type {
   AxisStyles,
   Halo,
@@ -477,10 +489,15 @@ export interface AxisSpec {
   nice?: boolean;
   /** Include zero in the domain. Default true for the value axis of areas and bars. */
   zero?: boolean;
+  /** Room between the data and the plot's edges: "auto" by default (see `ScalePadding`). */
+  padding?: ScalePadding;
   /** Axis title. */
   title?: string;
-  /** Grid lines across the plot. Default true for y, and for x when it measures horizontal bars. */
-  grid?: boolean;
+  /**
+   * Grid lines across the plot, and where they are drawn among the marks
+   * (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.
+   */
+  grid?: boolean | GridLinesSpec;
   /** Which ticks it draws: about how many (a number), one `every` so often, or exactly `values`. */
   ticks?: TicksSpec;
   /** How tick labels are written: Intl options, or a pattern (`{ number: ",.2f" }`, `{ time: "%H:%M" }`). */
@@ -1001,7 +1018,21 @@ interface MarkBase {
   facet?: "repeat";
   /** With the chart's `panels`, the id of the panel the mark draws in, or "*" for every panel. */
   panel?: string;
+  /**
+   * Where the mark is drawn among the others of its panel: higher above
+   * lower, marks of equal `zIndex` in the order they are listed. 0 by
+   * default; grid lines are at -1. Any finite number.
+   */
+  zIndex?: number;
 }
+
+/**
+ * Where a mark drawing rows places them along an axis: a field, or a
+ * coordinate (see `Coordinate`): `{ field, scale }` on a position scale of
+ * the chart's `scales`, `{ fraction: { field } }` of the plot, `{ px: {
+ * field } }` from its edge, each moved `offset` pixels.
+ */
+export type RowPosition = Field | Coordinate;
 
 /** What a mark that legends show gives them. */
 interface Legended {
@@ -1068,10 +1099,10 @@ export type Orient = "x" | "y";
  */
 export interface LineSpec extends SeriesBase, RowTooltip {
   type: "line";
-  /** Positions along x, or with `orient: "y"` the values: one field or several. */
-  x: Field | readonly Field[];
-  /** Values along x (one field or several), or with `orient: "y"` the positions. */
-  y: Field | readonly Field[];
+  /** Positions along x, or with `orient: "y"` the values: one field or several, or a coordinate. */
+  x: RowPosition | readonly Field[];
+  /** Values along x (one field or several, or a coordinate), or with `orient: "y"` the positions. */
+  y: RowPosition | readonly Field[];
   orient?: Orient;
   /**
    * Category field that splits rows into one line per value. Without it,
@@ -1111,6 +1142,8 @@ export interface LineSpec extends SeriesBase, RowTooltip {
   continuity?: ContinuitySpec;
   /** Rows the lines leave out, as gaps: they draw only where it holds. */
   where?: Expression;
+  /** A label following each line: at its first or last point, or where it enters or leaves the view. */
+  labels?: SeriesLabelsSpec;
 }
 
 interface AreaStyle extends SeriesBase, RowTooltip {
@@ -1145,6 +1178,8 @@ interface AreaStyle extends SeriesBase, RowTooltip {
   where?: Expression;
   curve?: Curve;
   label?: string;
+  /** A label following each area's value edge (a band's `edge`). */
+  labels?: AreaLabelsSpec;
 }
 
 /**
@@ -1172,10 +1207,10 @@ export type StackOrder = "input" | "inside-out";
 export type AreaSpec = AreaStyle &
   (
     | {
-        /** Positions along x, or with `orient: "y"` the values (one field or several). */
-        x: Field | readonly Field[];
-        /** Values filled to zero (one field or several), or with `orient: "y"` the positions. */
-        y: Field | readonly Field[];
+        /** Positions along x, or with `orient: "y"` the values (one field or several, or a coordinate). */
+        x: RowPosition | readonly Field[];
+        /** Values filled to zero (one field or several, or a coordinate), or with `orient: "y"` the positions. */
+        y: RowPosition | readonly Field[];
         /**
          * Category field that splits rows into one area per value. Without
          * it, a category field as `color` splits them; `false` splits by neither.
@@ -1189,11 +1224,11 @@ export type AreaSpec = AreaStyle &
         x2?: never;
       }
     | {
-        x: Field;
+        x: RowPosition;
         /** Lower edge of a band along x. */
-        y1: Field;
+        y1: RowPosition;
         /** Upper edge of a band along x. */
-        y2: Field;
+        y2: RowPosition;
         y?: never;
         x1?: never;
         x2?: never;
@@ -1202,11 +1237,11 @@ export type AreaSpec = AreaStyle &
         stack?: never;
       }
     | {
-        y: Field;
+        y: RowPosition;
         /** Left edge of a band along y. */
-        x1: Field;
+        x1: RowPosition;
         /** Right edge of a band along y. */
-        x2: Field;
+        x2: RowPosition;
         x?: never;
         y1?: never;
         y2?: never;
@@ -1244,6 +1279,12 @@ interface AnnotationBase extends MarkBase {
    * where the data is. Fractions and pixels never count.
    */
   contributeDomain?: boolean;
+  /**
+   * `true` lists the annotation in the chart's legends by its label: one
+   * entry for constant text, one per value of its label's field, which
+   * hide and show what they name. Annotations are left out by default.
+   */
+  legend?: boolean;
 }
 
 interface RuleStyle extends AnnotationBase {
@@ -1297,6 +1338,11 @@ interface RegionStyle extends AnnotationBase {
   fill?: string;
   /** Default 0.15. */
   fillOpacity?: number;
+  /** An outline: its color, and width in pixels (1 by default with a stroke). */
+  stroke?: string;
+  strokeWidth?: number;
+  /** Which of the outline's sides are drawn: top, right, bottom, left (all by default). */
+  strokeSides?: readonly Side[];
   /** Text drawn in every region (in its top left corner by default), constant or each row's `field`. */
   label?: string | LabelSpec;
 }
@@ -1318,6 +1364,12 @@ export interface TextSpec extends AnnotationBase {
   y?: AnnotationPosition;
   /** Where the text is: a coordinate on each axis, of any kinds (a fraction of the plot's width at a data value). */
   at?: Position;
+  /**
+   * Where the text is on another mark's geometry, following it: the series
+   * of mark `from.mark` at `from.at`, such as where a line leaves the view,
+   * one label per series. Not with `x`, `y`, or `at`.
+   */
+  from?: MarkAnchorSpec;
   label: string | LabelSpec;
   /**
    * Labels that would cover an earlier one of this mark: drawn anyway
@@ -1333,8 +1385,10 @@ export interface TextSpec extends AnnotationBase {
 /**
  * Bars. Vertical by default: a category `x` gives one band per category, a
  * number or time `x` centers bars on its values, and `y` holds bar lengths.
- * A category `y` makes them horizontal, with lengths in `x`. Several length
- * fields are drawn side by side or stacked.
+ * A category `y` (its name, or as a coordinate `{ field }`) makes them
+ * horizontal, with lengths in `x`; any other position, a frame's share or
+ * pixels included, centers vertical bars on `x`. Several length fields are
+ * drawn side by side or stacked.
  */
 export interface BarSpec extends SeriesBase, RowTooltip {
   /**
@@ -1343,8 +1397,9 @@ export interface BarSpec extends SeriesBase, RowTooltip {
    */
   halo?: Halo;
   type: "bar";
-  x: Field | readonly Field[];
-  y: Field | readonly Field[];
+  /** Positions (or lengths, for horizontal bars): fields, or as positions a coordinate. */
+  x: RowPosition | readonly Field[];
+  y: RowPosition | readonly Field[];
   /**
    * Category field that splits rows into one bar series per value. Without
    * it, a category field as `color` splits them; `false` splits by
@@ -1365,6 +1420,17 @@ export interface BarSpec extends SeriesBase, RowTooltip {
   strokeWidth?: number;
   strokeOpacity?: number;
   dash?: Dash;
+  /**
+   * Which sides of each bar the outline draws, as they stand on screen
+   * (top, right, bottom, left; all by default), so `["top"]` caps bars
+   * whichever way their values go.
+   */
+  strokeSides?: readonly Side[];
+  /**
+   * Each bar's thickness across its value direction, in pixels, whatever
+   * its band's width; grouped bars stand centered in their slots.
+   */
+  width?: { px: number };
   /** From 0 to 1: the bars', fill and edges. */
   opacity?: number;
   /**
@@ -1412,14 +1478,16 @@ interface RugStyle extends SeriesBase, RowTooltip {
  * Error bars: vertical intervals at each `x`, from `y1` to `y2` or from
  * `y - yError` to `y + yError`; or horizontal intervals at each `y`, from
  * `x1` to `x2` or `x ± xError`. Positions may be category, number, or time
- * fields; ends, centers, and errors are number or time fields.
+ * fields; ends, centers, and errors are number or time fields. Positions
+ * and ends may be coordinates; a center and its error are fields, in the
+ * same units.
  */
 export type ErrorBarSpec = ErrorBarStyle &
   (
     | {
-        x: Field;
-        y1: Field;
-        y2: Field;
+        x: RowPosition;
+        y1: RowPosition;
+        y2: RowPosition;
         y?: never;
         yError?: never;
         x1?: never;
@@ -1427,7 +1495,7 @@ export type ErrorBarSpec = ErrorBarStyle &
         xError?: never;
       }
     | {
-        x: Field;
+        x: RowPosition;
         y: Field;
         yError: Field;
         y1?: never;
@@ -1437,9 +1505,9 @@ export type ErrorBarSpec = ErrorBarStyle &
         xError?: never;
       }
     | {
-        y: Field;
-        x1: Field;
-        x2: Field;
+        y: RowPosition;
+        x1: RowPosition;
+        x2: RowPosition;
         x?: never;
         xError?: never;
         y1?: never;
@@ -1447,7 +1515,7 @@ export type ErrorBarSpec = ErrorBarStyle &
         yError?: never;
       }
     | {
-        y: Field;
+        y: RowPosition;
         x: Field;
         xError: Field;
         x1?: never;
@@ -1964,10 +2032,6 @@ export interface GeoShapeSpec extends RowTooltip {
 }
 
 /**
- * Points of a map at `longitude` and `latitude` (number fields, degrees),
- * sized, colored, and split into series as `point` marks are.
- */
-/**
  * A point's size: a constant `radius` in pixels, or a number field `size`
  * sized by area within `radiusRange` (bubbles); not both.
  */
@@ -1976,8 +2040,9 @@ export type PointSizeSpec =
   | { radius?: never; size?: Field; radiusRange?: readonly [number, number] };
 
 /**
- * Points of a map: `GeoPointStyleSpec` with a radius of 4 pixels, or sizes
- * from 2 to 16 pixels, by default.
+ * Points of a map at `longitude` and `latitude` (number fields, degrees),
+ * sized, colored, and split into series as `point` marks are: a radius of
+ * 4 pixels, or sizes from 2 to 16 pixels, by default.
  */
 export type GeoPointSpec = GeoPointStyleSpec & PointSizeSpec;
 
@@ -2102,15 +2167,37 @@ export interface Histogram2DSpec extends MarkBase, Legended {
   label?: string;
 }
 
-/** Points at (x, y): scatter plots. */
-/** Points: `PointStyleSpec` with a radius of 2.5 pixels, or sizes from 2 to 12 pixels, by default. */
-export type PointSpec = PointStyleSpec & PointSizeSpec;
+/**
+ * Points at (x, y), scatter plots: a radius of 2.5 pixels, or sizes from 2
+ * to 12 pixels, by default.
+ */
+export type PointSpec = PointStyleSpec &
+  (
+    | (PointSizeSpec & { encode?: { size?: never } })
+    | {
+        /**
+         * A channel through one of the chart's scales (`{ field, scale }`),
+         * giving each point's area in square pixels.
+         */
+        size: ChannelSpec<number>;
+        radius?: never;
+        radiusRange?: never;
+        encode?: { size?: never };
+      }
+    | {
+        /** `encode.size` gives each point's area, as a `size` channel does. */
+        encode: { size: ChannelSpec<number> };
+        size?: never;
+        radius?: never;
+        radiusRange?: never;
+      }
+  );
 
 interface PointStyleSpec extends SeriesBase, RowTooltip {
   type: "point";
-  /** A number, time, or category field; a category field places points in its bands. */
-  x: Field;
-  y: Field;
+  /** A number, time, or category field (a category field places points in its bands), or a coordinate. */
+  x: RowPosition;
+  y: RowPosition;
   /**
    * A category field: a series per value. By default a category `color`
    * field; `false` for none, each point colored by its row's `color`.
@@ -2123,13 +2210,18 @@ interface PointStyleSpec extends SeriesBase, RowTooltip {
   /** Outline width in pixels: 1 with only `stroke`, none by default. */
   strokeWidth?: number;
   fill?: string;
-  /** Opacity from 0 to 1, or a number field mapped from 0.15 to 1. */
-  fillOpacity?: number | Field;
+  /**
+   * Opacity from 0 to 1, a number field mapped from 0.15 to 1, or a
+   * channel (`{ field, scale }`, a field through one of the chart's scales).
+   */
+  fillOpacity?: number | Field | ChannelSpec<number>;
   /**
    * A number or time field colored on a continuous scale (see `colors`),
-   * or a category field: its values' colors, and the series it names.
+   * a category field (its values' colors, and the series it names), or a
+   * channel: `{ field, scale }` through one of the chart's scales, or
+   * `{ field, scale: { type: "identity" } }` for colors the data holds.
    */
-  color?: Field;
+  color?: Field | ChannelSpec<string>;
   /** Colors for `color`, low to high, or a scheme name such as "viridis". */
   colors?: readonly string[] | string;
   /** The values at the ends of the color ramp; the field's extent by default. */
@@ -2138,10 +2230,16 @@ interface PointStyleSpec extends SeriesBase, RowTooltip {
   colorMidpoint?: number;
   /**
    * A shape's name ("circle", "square", "triangle", ...), or a category
-   * field with a shape per value: `{ field }`, as herceg writes it, or the
-   * field's name when no shape has it. A name that is both is refused.
+   * field with a shape per value: `{ field }`, as herceg writes it (with
+   * `scale` naming one of the chart's scales that maps values to shapes),
+   * or the field's name when no shape has it. A name that is both is refused.
    */
-  symbol?: string | { field: Field };
+  symbol?: string | ChannelSpec<SymbolName>;
+  /** Channels of each point: color, fill, stroke, strokeWidth, opacity, symbol, and size. */
+  encode?: Pick<
+    EncodingsSpec,
+    "color" | "fill" | "stroke" | "strokeWidth" | "opacity" | "symbol" | "size"
+  >;
   /** "pixel" draws opaque points sharing a device pixel once. Default "none". */
   sampling?: "none" | "pixel";
   /**
@@ -2329,6 +2427,8 @@ export interface HeatmapCalendarSpec extends HeatmapBase {
  */
 export interface Point3DSpec extends RowTooltip {
   type: "point3d";
+  /** 0 only: 3D marks draw by depth (see `MarkBase.zIndex`). */
+  zIndex?: number;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   data?: string;
@@ -2364,6 +2464,8 @@ export interface Point3DSpec extends RowTooltip {
  */
 export interface Line3DSpec extends RowTooltip {
   type: "line3d";
+  /** 0 only: 3D marks draw by depth (see `MarkBase.zIndex`). */
+  zIndex?: number;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   data?: string;
@@ -2389,6 +2491,8 @@ export interface Line3DSpec extends RowTooltip {
  */
 export interface SurfaceSpec {
   type: "surface";
+  /** 0 only: 3D marks draw by depth (see `MarkBase.zIndex`). */
+  zIndex?: number;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   data?: string;

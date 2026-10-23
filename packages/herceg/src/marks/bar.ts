@@ -19,12 +19,13 @@ import {
   type TextGeometry,
 } from "../scene/scene.ts";
 import type { BarLabelPlaceSpec } from "../spec/encoding.ts";
+import type { Side } from "../spec/place.ts";
 import type { BarLabelsSpec, BarSpec, BarStack, Clip, Dash, Frozen } from "../spec/spec.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
 import { dashPattern, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import { BandShares, STILL } from "./dodge.ts";
-import type { BarLabels, CssColor, Encodings, MarkStyle } from "./encoding.ts";
+import type { BarLabels, CssColor, Encodings, FieldCoordinate, MarkStyle } from "./encoding.ts";
 import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -36,9 +37,12 @@ import {
   buildSeries,
   CATEGORY,
   type ChartMark,
+  checkOption,
   type Frame,
   fieldBands,
   frozen,
+  isPixels,
+  isSides,
   type LegendScale,
   type MARK,
   type Mark,
@@ -53,6 +57,7 @@ import {
   SeriesSplitter,
   seriesOf,
 } from "./mark.ts";
+import { coordinates, type FieldPositions, type Pending, refusePending } from "./pending.ts";
 import { PositionStack } from "./position-stack.ts";
 import { rowOf, type Series, TableCache, visibleRange, xExtent, yExtent } from "./series.ts";
 import { Slots } from "./slots.ts";
@@ -104,6 +109,15 @@ interface BarStyle<S extends Schema> {
   strokeOpacity?: number;
   /** Edges' dash: a pixel dash array, or a matplotlib style scaled by their width. */
   dash?: Dash;
+  /** The sides `stroke` outlines, such as ["top"]: every side by default. */
+  strokeSides?: readonly Side[];
+  /**
+   * Each bar's thickness across its value direction, in pixels, in place
+   * of a share of its band; grouped bars keep their centers.
+   */
+  width?: { px: number };
+  /** Where the bars are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** From 0 to 1: the bars', fill and edges. */
   opacity?: number;
   /**
@@ -133,8 +147,8 @@ interface BarStyle<S extends Schema> {
 
 /** Vertical bars: positions on x, lengths on y. */
 export interface VerticalBarOptions<S extends Schema> extends BarStyle<S> {
-  /** Category field (one band per value) or a numeric or time field. */
-  x: PositionField<S>;
+  /** Category field (one band per value), a numeric or time field, or a coordinate. */
+  x: PositionField<S> | FieldCoordinate<S>;
   /** Bar lengths: one field, or several fields drawn side by side or stacked. */
   y: NumericField<S> | readonly NumericField<S>[];
 }
@@ -143,12 +157,17 @@ export interface VerticalBarOptions<S extends Schema> extends BarStyle<S> {
 export interface HorizontalBarOptions<S extends Schema> extends BarStyle<S> {
   /** Bar lengths: one field, or several fields drawn side by side or stacked. */
   x: NumericField<S> | readonly NumericField<S>[];
-  y: CategoryField<S>;
+  /** A category field, or as a coordinate, `{ field }` on y or a scale of the chart's. */
+  y: CategoryField<S> | { field: CategoryField<S>; scale?: string; offset?: number };
   /** Positions along y are on the left axis; only vertical bars use the right one. */
   axis?: "left";
 }
 
-/** A category `y` makes bars horizontal; otherwise they are vertical. */
+/**
+ * A category `y` (its name, or `{ field }`) makes bars horizontal; any other
+ * form of position, a frame's share or pixels included, centers vertical
+ * bars on x.
+ */
 export type BarOptions<S extends Schema> = VerticalBarOptions<S> | HorizontalBarOptions<S>;
 
 /** Gap between grouped bars, as a fraction of each bar's slot. */
@@ -186,13 +205,21 @@ interface Stack {
 /** Options only the feature compiler draws (see model/features.ts). */
 const FEATURES = ["encode", "style"];
 
+/** Bars' options round 2 freezes before its streams draw them. */
+const PENDING: readonly Pending[] = [
+  ...coordinates("x", "y"),
+  ["width", "R", "drop width"],
+  ["strokeSides", "R", "drop strokeSides"],
+  ["labels.content", "C", "give a field or the value"],
+];
+
 /** What value labels are asked for: `labels`' settings, and whether their format is a pattern. */
 type LabelOptions = Frozen<BarLabelsSpec> & { pattern: boolean };
 
-export class BarMark implements Mark<Frozen<BarSpec>> {
+export class BarMark implements Mark<FieldPositions<Frozen<BarSpec>>> {
   declare readonly [MARK]: true;
   readonly headroomDomain = headroomDomain;
-  readonly spec: Frozen<BarSpec>;
+  readonly spec: FieldPositions<Frozen<BarSpec>>;
   readonly table: Table<Schema>;
   readonly zero: "x" | "y";
   readonly tooltip: "x" | "y";
@@ -244,7 +271,20 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     | undefined;
 
   constructor(input: BarSpec, table: Table<Schema>) {
-    this.spec = frozen(input);
+    // Well formed first, as the validator checks a spec before what it draws.
+    const { width, strokeSides } = input;
+    if (width !== undefined)
+      checkOption(isPixels(width?.px), "bar", "width.px", "a number of at least 0", width?.px);
+    if (strokeSides !== undefined)
+      checkOption(
+        isSides(strokeSides),
+        "bar",
+        "strokeSides",
+        'sides, such as ["top"]',
+        strokeSides,
+      );
+    refusePending(input, "bar", PENDING);
+    this.spec = frozen(input) as FieldPositions<Frozen<BarSpec>>;
     checkTooltip(table, this.spec.tooltip, "bar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -1388,8 +1428,8 @@ export function bar<S extends Schema>(
   table: Table<S>,
   options: BarOptions<S>,
 ): ChartMark<Frozen<BarSpec>> {
-  const fields = (value: string | readonly string[]) =>
-    typeof value === "string" ? value : [...value];
+  // Lists of fields are copied; a field or a coordinate is kept as given.
+  const fields = <T>(value: T | readonly string[]) => (Array.isArray(value) ? [...value] : value);
   const spec: BarSpec = {
     type: "bar",
     x: fields(options.x),
@@ -1405,6 +1445,9 @@ export function bar<S extends Schema>(
       "strokeWidth",
       "strokeOpacity",
       "dash",
+      "strokeSides",
+      "width",
+      "zIndex",
       "opacity",
       "label",
       "legend",

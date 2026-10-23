@@ -78,9 +78,9 @@ def track_spec(track: Any, role: str) -> Any:
             else float(track.value)
         )
     if isinstance(track, Pixels):
-        if track.frame is not None or track.offset is not None:
-            raise ValueError(f"{role}: a track's pixels take no frame or offset; drop them")
-        if not _pixels(track.value):
+        if track.field is not None or track.frame is not None or track.offset is not None:
+            raise ValueError(f"{role}: a track's pixels take no field, frame, or offset; drop them")
+        if track.value is None or not _pixels(track.value):
             raise ValueError(
                 f"{role}: expected pixels greater than 0; received {shown(track.value)}"
             )
@@ -204,6 +204,11 @@ def inset_spec(
                     f"{role} place: insets go at fractions or pixels of the plot or the chart, "
                     f"and {axis} is {shown(getattr(place, axis))}; use hg.Fraction or hg.Pixels"
                 )
+            if isinstance(coordinate.get("fraction", coordinate.get("px")), dict):
+                raise ValueError(
+                    f"{role} place: an inset goes at one place, not at a column's values; "
+                    f"give {axis} a number"
+                )
         spec["place"] = {"at": at}
         if anchor is not None:
             spec["place"]["anchor"] = anchor
@@ -228,14 +233,24 @@ def inset_spec(
         if size is None:
             continue
         if isinstance(size, Fraction):
-            if not (0 < size.value <= 1) or size.frame is not None or size.offset is not None:
+            if (
+                size.value is None
+                or not (0 < size.value <= 1)
+                or size.frame is not None
+                or size.offset is not None
+            ):
                 raise ValueError(
                     f"{role} {name}: expected a fraction of the parent's plot above 0, at most 1; "
                     f"received {shown(size)}"
                 )
             spec[name] = {"fraction": float(size.value)}
         elif isinstance(size, Pixels):
-            if not _pixels(size.value) or size.frame is not None or size.offset is not None:
+            if (
+                size.value is None
+                or not _pixels(size.value)
+                or size.frame is not None
+                or size.offset is not None
+            ):
                 raise ValueError(
                     f"{role} {name}: expected pixels greater than 0; received {shown(size)}"
                 )

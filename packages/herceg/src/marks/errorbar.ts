@@ -8,7 +8,7 @@ import type { Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, ErrorBarSpec, Frozen } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
-import type { CssColor } from "./encoding.ts";
+import type { CssColor, FieldCoordinate } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
   type BandContext,
@@ -32,6 +32,7 @@ import {
   SeriesSplitter,
   valueKind,
 } from "./mark.ts";
+import { coordinates, type FieldPositions, refusePending } from "./pending.ts";
 import { lowerPosition, rowOf, type Series, TableCache, visibleRange, xExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -66,6 +67,8 @@ interface ErrorBarStyle<S extends Schema> {
   strokeWidth?: number;
   /** Width of the caps at each end in pixels; 0 for none. Default 8. */
   cap?: number;
+  /** Where the error bars are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   label?: string;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
@@ -76,9 +79,9 @@ interface ErrorBarStyle<S extends Schema> {
 
 /** Vertical error bars at each `x`, from `y1` to `y2`. */
 export interface VerticalErrorBarOptions<S extends Schema> extends ErrorBarStyle<S> {
-  x: PositionField<S>;
-  y1: NumericField<S>;
-  y2: NumericField<S>;
+  x: PositionField<S> | FieldCoordinate<S>;
+  y1: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
+  y2: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
   y?: never;
   yError?: never;
   x1?: never;
@@ -88,7 +91,7 @@ export interface VerticalErrorBarOptions<S extends Schema> extends ErrorBarStyle
 
 /** Vertical error bars at each `x`, from `y - yError` to `y + yError`. */
 export interface VerticalSymmetricErrorBarOptions<S extends Schema> extends ErrorBarStyle<S> {
-  x: PositionField<S>;
+  x: PositionField<S> | FieldCoordinate<S>;
   y: NumericField<S>;
   yError: NumericField<S>;
   y1?: never;
@@ -100,9 +103,9 @@ export interface VerticalSymmetricErrorBarOptions<S extends Schema> extends Erro
 
 /** Horizontal error bars at each `y`, from `x1` to `x2`. */
 export interface HorizontalErrorBarOptions<S extends Schema> extends ErrorBarStyle<S> {
-  y: PositionField<S>;
-  x1: NumericField<S>;
-  x2: NumericField<S>;
+  y: PositionField<S> | FieldCoordinate<S>;
+  x1: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
+  x2: NumericField<S> | FieldCoordinate<S, NumericField<S>>;
   x?: never;
   xError?: never;
   y1?: never;
@@ -114,7 +117,7 @@ export interface HorizontalErrorBarOptions<S extends Schema> extends ErrorBarSty
 
 /** Horizontal error bars at each `y`, from `x - xError` to `x + xError`. */
 export interface HorizontalSymmetricErrorBarOptions<S extends Schema> extends ErrorBarStyle<S> {
-  y: PositionField<S>;
+  y: PositionField<S> | FieldCoordinate<S>;
   x: NumericField<S>;
   xError: NumericField<S>;
   x1?: never;
@@ -170,10 +173,13 @@ type Ends = { low: string; high: string } | { center: string; error: string };
  * both ends; intervals missing an end, or with an end the axis cannot
  * place, are neither drawn nor counted toward the axes.
  */
-export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
+/** Error bars' positions round 2 freezes before stream R places rows by them. */
+const PENDING = coordinates("x", "y", "x1", "x2", "y1", "y2");
+
+export class ErrorBarMark implements Mark<FieldPositions<Frozen<ErrorBarSpec>>> {
   declare readonly [MARK]: true;
   readonly insetDomain = insetDomain;
-  readonly spec: Frozen<ErrorBarSpec>;
+  readonly spec: FieldPositions<Frozen<ErrorBarSpec>>;
   readonly table: Table<Schema>;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
@@ -190,7 +196,8 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   readonly #shares: BandShares | undefined;
 
   constructor(input: ErrorBarSpec, table: Table<Schema>) {
-    this.spec = frozen(colored(input, table, "stroke"));
+    refusePending(input, "errorbar", PENDING);
+    this.spec = frozen(colored(input, table, "stroke")) as FieldPositions<Frozen<ErrorBarSpec>>;
     checkTooltip(table, this.spec.tooltip, "errorbar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -552,6 +559,7 @@ export function errorBar<S extends Schema>(
       "stroke",
       "strokeWidth",
       "cap",
+      "zIndex",
       "label",
       "legend",
       "id",

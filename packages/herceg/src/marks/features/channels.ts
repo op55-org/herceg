@@ -123,7 +123,8 @@ export function compileChannel<V>(
   }
   if ("field" in spec) {
     const field = categoryField(table, spec.field, `${path}.field`);
-    const named = scales(spec.scale ?? scale, `${path}.scale`, field);
+    // Identity scales are refused before channels are read (compile.ts).
+    const named = scales((spec.scale as string | undefined) ?? scale, `${path}.scale`, field);
     checkOutputs(named, check, path);
     named.read(table!, field);
     return { kind: "field", field, scale: named };

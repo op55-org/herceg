@@ -55,15 +55,24 @@ export type Place = SidePlace | InsidePlace;
  * epoch milliseconds, or a category's value); `field` reads each row's
  * value; `fraction` is a share of a frame, 0 at its left or bottom and 1 at
  * its right or top, as in plots; `px` counts pixels from a frame's left or
- * top edge, down for y, as on screens. `scale` names the scale of `data` and
- * `field` ("x", "y", "yRight"; by default the axis' own), and `frame` the
- * box of `fraction` and `px` ("plot" by default). `offset` moves the result
- * by that many pixels, right for x and down for y. Only `data` and `field`
- * count toward a scale's domain.
+ * top edge, down for y, as on screens. A fraction or pixel count may be
+ * each row's value of a number field (`{ fraction: { field } }`), and
+ * shares outside 0 to 1 are places beyond the frame, which clipping
+ * decides about. `scale` names the scale of `data` and `field`: "x", "y",
+ * "yRight", or a position scale of the chart's `scales` with no axis of
+ * its own (by default the axis' own). `frame` is the box of `fraction` and
+ * `px` ("plot" by default). `offset` moves the result by that many pixels,
+ * right for x and down for y. Only `data` and `field` count toward a
+ * scale's domain.
  */
 export type Coordinate =
   | { data: number | string; scale?: string; offset?: number }
   | { field: string; scale?: string; offset?: number }
+  | { fraction: number | { field: string }; frame?: Frame; offset?: number }
+  | { px: number | { field: string }; frame?: Frame; offset?: number };
+
+/** A constant share of a frame or pixels from its edge: where furniture such as an inset is placed. */
+export type FrameCoordinate =
   | { fraction: number; frame?: Frame; offset?: number }
   | { px: number; frame?: Frame; offset?: number };
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import numbers
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Literal
 
 from ._data import listed, shown
@@ -76,6 +76,40 @@ def _checked(
 def _choice(value: Any, choices: Sequence[str], role: str) -> None:
     if value not in choices:
         raise ValueError(f"{role}: expected {listed(choices)}; received {shown(value)}")
+
+
+def vertical_align_problem(value: Any, keys: tuple[str, ...]) -> tuple[str, str] | None:
+    """Where a text style given as a dict, under the option ``value`` (its
+    name and its keys so far in ``keys``), has a ``vertical_align`` that is
+    none, as the engine's validator finds it before it is refused: the place
+    under the option (``.style.vertical_align``) and what it expected. Dicts,
+    lists, and options classes' fields are looked into, a style's own or a
+    role's of one (``style.tick_label``), never a ``map``'s categories."""
+    if isinstance(value, Mapping):
+        if "style" in keys[-2:]:
+            for key in ("vertical_align", "verticalAlign"):
+                if value.get(key) not in (None, "top", "middle", "bottom"):
+                    return f".{key}", (
+                        f'expected "top", "middle", or "bottom"; received {shown(value[key])}'
+                    )
+        items: list[tuple[str, Any]] = [
+            (str(key), item) for key, item in value.items() if key != "map"
+        ]
+    elif is_dataclass(value) and not isinstance(value, type):
+        items = [(f.name, getattr(value, f.name)) for f in fields(value) if f.name != "map"]
+    elif isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            problem = vertical_align_problem(item, keys)
+            if problem:
+                return f"[{i}]{problem[0]}", problem[1]
+        return None
+    else:
+        return None
+    for key, item in items:
+        problem = vertical_align_problem(item, (*keys, key))
+        if problem:
+            return f".{key}{problem[0]}", problem[1]
+    return None
 
 
 def _built(value: Any, kind: type[Any], role: str) -> Any:
@@ -183,7 +217,9 @@ class TextStyle:
     ``font_weight`` is 100 to 900 (400 normal, 600 semibold, 700 bold);
     ``line_height`` is a multiple of ``font_size``; ``align`` puts the text
     at the ``"start"``, ``"center"``, or ``"end"`` of the span it is placed
-    in (the chart's width for its title, the plot's for a panel's title);
+    in (the chart's width for its title, the plot's for a panel's title),
+    and ``vertical_align`` puts the block of its lines' ``"top"``,
+    ``"middle"``, or ``"bottom"`` at its place;
     ``halo`` is ``"auto"``, ``False``, or an ``hg.Halo``; ``background`` an
     ``hg.TextBox`` (or ``False``) with ``padding`` around the text in pixels.
     """
@@ -196,6 +232,7 @@ class TextStyle:
     opacity: float | None = None
     line_height: float | None = None
     align: Align | None = None
+    vertical_align: Literal["top", "middle", "bottom"] | None = None
     halo: HaloOption | None = None
     background: TextBox | Literal[False] | Mapping[str, Any] | None = None
     padding: float | Mapping[str, float] | None = None
@@ -224,6 +261,8 @@ class TextStyle:
             _number(self.line_height, "TextStyle line_height", positive=True)
         if self.align is not None:
             _choice(self.align, ("start", "center", "end"), "TextStyle align")
+        if self.vertical_align is not None:
+            _choice(self.vertical_align, ("top", "middle", "bottom"), "TextStyle vertical_align")
         if self.halo not in (None, "auto", False):
             self.halo = _built(self.halo, Halo, "TextStyle halo")
         if self.background is not None and self.background is not False:

@@ -298,6 +298,7 @@ export function boxen<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
       "id",
     ]),
   };

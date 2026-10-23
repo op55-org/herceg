@@ -127,12 +127,12 @@ export function panelDrawing(
   marks: boolean,
 ): { data: readonly Geometry[]; above: readonly Geometry[] } {
   const cut = (mark: Geometry) => clipOf(mark) === "plot";
-  const drawn = marks ? panel.marks.filter((mark) => !mark.draw.guide) : [];
+  const drawn = marks ? panel.marks.filter((mark) => mark.draw.canvas) : [];
   return {
     data: drawn.filter(cut),
     above: [
       ...drawn.filter((mark) => !cut(mark)),
-      ...panel.marks.filter((mark) => mark.draw.guide),
+      ...panel.marks.filter((mark) => !mark.draw.canvas),
     ],
   };
 }

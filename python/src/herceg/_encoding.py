@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import numbers
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any, Literal
 
@@ -18,7 +18,7 @@ import numpy as np
 from ._data import listed, shown
 from ._derive import Expr
 from ._errors import ChartError
-from ._guides import Format, format_spec
+from ._guides import Format, IdentityScale, format_spec
 from ._style import (
     StrokeStyle,
     TextStyle,
@@ -75,7 +75,9 @@ def _constant(value: Any, role: str) -> Any:
 class Channel:
     """A value per row: a column's value read through a scale (``field``,
     with ``scale`` naming one of the chart's ``scales``; colors read
-    ``"color"`` by default, symbols ``"symbol"``, dashes ``"dash"``), the
+    ``"color"`` by default, symbols ``"symbol"``, dashes ``"dash"``; with
+    ``scale=hg.IdentityScale()``, or the spec's ``{"type": "identity"}``,
+    each value is the output itself, such as a column of colors), the
     series' names through a scale (``series=True`` with ``scale``: marks
     naming one scale share colors, legend entries, and dodged places by
     their series' names, as a line and the band around it do, whatever data
@@ -83,7 +85,7 @@ class Channel:
     ``hg.when(condition, then, otherwise)`` instead."""
 
     field: str | None = None
-    scale: str | None = None
+    scale: str | IdentityScale | Mapping[str, str] | None = None
     value: Any = None
     series: bool | None = None
 
@@ -109,22 +111,68 @@ class Channel:
                     "Channel scale: maps a column's values or the series' names; give field "
                     "or series=True, or drop scale"
                 )
-            if not isinstance(self.scale, str) or not self.scale:
+            if isinstance(self.scale, Mapping):
+                # The spec's form, as the chart's scales take it.
+                if dict(self.scale) != {"type": "identity"}:
+                    raise TypeError(
+                        'Channel scale: an identity scale is {"type": "identity"}; give '
+                        f"hg.IdentityScale(); received {shown(self.scale)}"
+                    )
+                self.scale = IdentityScale()
+            if isinstance(self.scale, IdentityScale):
+                if self.series:
+                    raise ChartError(
+                        "Channel scale: series' names are no outputs; name one of the chart's "
+                        "scales for series=True"
+                    )
+            elif not isinstance(self.scale, str) or not self.scale:
                 raise TypeError(
-                    f"Channel scale: expected the name of one of the chart's scales; "
-                    f"received {shown(self.scale)}"
+                    f"Channel scale: expected the name of one of the chart's scales, or "
+                    f"hg.IdentityScale(); received {shown(self.scale)}"
                 )
 
     def _spec(self) -> dict[str, Any]:
         if self.series:
             return {"series": True, "scale": self.scale}
         if self.field is not None:
-            return {"field": self.field, **({"scale": self.scale} if self.scale else {})}
+            scale = self.scale._spec() if isinstance(self.scale, IdentityScale) else self.scale
+            return {"field": self.field, **({"scale": scale} if scale else {})}
         return {"value": _constant(self.value, "Channel value")}
 
 
 #: A channel option: an ``hg.Channel`` (or a dict of its options), or ``hg.when(...)``.
 ChannelOption = Channel | Expr | Mapping[str, Any]
+
+
+def output_problem(
+    channel: str, value: Any, is_color: Callable[[str], bool] | None = None
+) -> str | None:
+    """Why ``value`` cannot be what ``channel`` (as the spec names it) draws,
+    or None where it can, as the engine's ``outputProblem`` says; ``is_color``
+    tells a CSS color (herceg's parser by default)."""
+    number = isinstance(value, numbers.Real) and not isinstance(value, bool)
+    if channel in ("color", "fill", "stroke"):
+        from ._colors import is_color as parsed
+
+        reads = is_color or parsed
+        return None if isinstance(value, str) and reads(value) else "a CSS color"
+    if channel == "symbol":
+        return None if value in SYMBOLS else f"a shape: {', '.join(SYMBOLS)}"
+    if channel == "dash":
+        lengths = isinstance(value, list) and all(
+            isinstance(n, numbers.Real) and not isinstance(n, bool) and 0 <= float(n) < float("inf")
+            for n in value
+        )
+        return (
+            None
+            if lengths or value in ("-", "--", ":", "-.")
+            else 'a dash: "-", "--", ":", "-.", or pixel lengths'
+        )
+    if channel in ("strokeWidth", "size"):
+        if number and 0 <= float(value) < float("inf"):
+            return None
+        return "an area of 0 or more square pixels" if channel == "size" else "0 or more pixels"
+    return None if number and 0 <= float(value) <= 1 else "a number from 0 to 1"
 
 
 def channel_spec(value: Any, role: str) -> Any:
@@ -402,31 +450,46 @@ Frame = Literal["plot", "chart"]
 def _offset(value: Any, role: str) -> Any:
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
-        raise TypeError(f"{role} offset: expected pixels; received {shown(value)}")
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not np.isfinite(value):
+        raise TypeError(
+            f"{role} offset: expected a finite number of pixels; received {shown(value)}"
+        )
     return float(value)
+
+
+def _share(value: Any, field: Any, role: str, expected: str) -> None:
+    """Checks a coordinate's constant ``value`` or number ``field``, one of them."""
+    if (value is None) == (field is None):
+        raise ValueError(f"{role}: give a value or field, one of them")
+    if field is not None and (not isinstance(field, str) or not field):
+        raise TypeError(f"{role} field: expected a column name; received {shown(field)}")
+    if value is not None and (
+        isinstance(value, bool) or not isinstance(value, numbers.Real) or not np.isfinite(value)
+    ):
+        raise TypeError(f"{role}: expected {expected}; received {shown(value)}")
 
 
 @dataclass(frozen=True)
 class Fraction:
     """A place a share of the plot (or with ``frame="chart"``, the chart)
-    along an axis: 0 at its left or bottom, 1 at its right or top, then
-    moved ``offset`` pixels (right for x, down for y)."""
+    along an axis: 0 at its left or bottom, 1 at its right or top (shares
+    beyond lie outside), then moved ``offset`` pixels (right for x, down for
+    y). With ``field``, each row's share is a number column's value."""
 
-    value: float
+    value: float | None = None
+    field: str | None = None
     frame: Frame | None = None
     offset: float | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, numbers.Real):
-            raise TypeError(
-                f"Fraction: expected a number such as 0.03; received {shown(self.value)}"
-            )
+        _share(self.value, self.field, "Fraction", "a number such as 0.03")
         if self.frame is not None:
             _choice(self.frame, ("plot", "chart"), "Fraction frame")
+        _offset(self.offset, "Fraction")
 
     def _spec(self) -> dict[str, Any]:
-        spec = {"fraction": float(self.value), "frame": self.frame}
+        share = float(self.value) if self.field is None else {"field": self.field}  # type: ignore[arg-type]
+        spec = {"fraction": share, "frame": self.frame}
         spec["offset"] = _offset(self.offset, "Fraction")
         return {key: value for key, value in spec.items() if value is not None}
 
@@ -434,30 +497,55 @@ class Fraction:
 @dataclass(frozen=True)
 class Pixels:
     """A place ``value`` pixels from the plot's (or the chart's) left or top
-    edge, down for y as on screens, then moved ``offset`` pixels."""
+    edge, down for y as on screens, then moved ``offset`` pixels; with
+    ``field``, each row's pixels are a number column's value. Where a length
+    is asked for (a scale's ``padding``, bars' ``width``), ``hg.Pixels(6)``
+    is 6 pixels."""
 
-    value: float
+    value: float | None = None
+    field: str | None = None
     frame: Frame | None = None
     offset: float | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, numbers.Real):
-            raise TypeError(f"Pixels: expected a number of pixels; received {shown(self.value)}")
+        _share(self.value, self.field, "Pixels", "a number of pixels")
         if self.frame is not None:
             _choice(self.frame, ("plot", "chart"), "Pixels frame")
+        _offset(self.offset, "Pixels")
 
     def _spec(self) -> dict[str, Any]:
-        spec = {"px": float(self.value), "frame": self.frame}
+        place = float(self.value) if self.field is None else {"field": self.field}  # type: ignore[arg-type]
+        spec = {"px": place, "frame": self.frame}
         spec["offset"] = _offset(self.offset, "Pixels")
         return {key: value for key, value in spec.items() if value is not None}
+
+
+def length_spec(value: Any, role: str) -> Any:
+    """A length in pixels as the spec takes it, ``{"px": n}``: from
+    ``hg.Pixels(n)`` (a constant, with no frame or offset) or that dict."""
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        if set(value) != {"px"}:
+            raise ValueError(
+                f'{role}: expected hg.Pixels(n) or {{"px": n}}; received {shown(value)}'
+            )
+        value = Pixels(value["px"])
+    if not isinstance(value, Pixels):
+        raise TypeError(f"{role}: expected hg.Pixels(n), a length; received {shown(value)}")
+    if value.field is not None or value.frame is not None or value.offset is not None:
+        raise ValueError(f"{role}: a length is pixels alone; drop field, frame, and offset")
+    _number(value.value, role)
+    return {"px": float(value.value)}  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
 class DataPosition:
     """A value on an axis' scale (a number, a datetime, or a category's
     value), or with ``field`` each row's value of a column, then moved
-    ``offset`` pixels. ``scale`` names the scale (``"x"``, ``"y"``, or
-    ``"y_right"``; the axis' own by default)."""
+    ``offset`` pixels. ``scale`` names the scale (``"x"``, ``"y"``,
+    ``"y_right"``, or a position scale of the chart's own ``scales``; the
+    axis' own by default)."""
 
     value: Any = None
     field: str | None = None
@@ -467,8 +555,22 @@ class DataPosition:
     def __post_init__(self) -> None:
         if (self.value is None) == (self.field is None):
             raise ValueError("DataPosition: give a value or field, one of them")
-        if self.scale is not None:
-            _choice(self.scale, ("x", "y", "y_right"), "DataPosition scale")
+        if self.field is not None and (not isinstance(self.field, str) or not self.field):
+            raise TypeError(
+                f"DataPosition field: expected a column name; received {shown(self.field)}"
+            )
+        # A category's value, or a finite number or a datetime.
+        if self.value is not None and not isinstance(self.value, str):
+            at = instant(self.value, "DataPosition value")
+            if not np.isfinite(at):
+                raise TypeError(
+                    f"DataPosition value: expected a finite number; received {shown(self.value)}"
+                )
+        _offset(self.offset, "DataPosition")
+        if self.scale is not None and (not isinstance(self.scale, str) or not self.scale):
+            raise TypeError(
+                f"DataPosition scale: expected a scale's name; received {shown(self.scale)}"
+            )
 
     def _spec(self) -> dict[str, Any]:
         scale = {"y_right": "yRight"}.get(self.scale or "", self.scale)
@@ -501,6 +603,11 @@ def instant(value: Any, role: str) -> float:
 #: or an ``hg.Fraction``, ``hg.Pixels``, or ``hg.DataPosition``.
 Coordinate = str | float | _dt.date | Fraction | Pixels | DataPosition
 
+#: A mark's place for each row along an axis besides a column's name: a
+#: coordinate (a column on a scale of the chart's own, or a share or
+#: pixels read from a column).
+RowPosition = Fraction | Pixels | DataPosition
+
 
 def coordinate_spec(value: Any, role: str) -> Any:
     """A place as the spec takes it: column names pass through, datetimes
@@ -513,10 +620,10 @@ def coordinate_spec(value: Any, role: str) -> Any:
 
 
 def coordinate_field(value: Any) -> str | None:
-    """The column a place reads, if any."""
+    """The column a place reads, if any: its own, or its share's or pixels'."""
     if isinstance(value, str):
         return value
-    return value.field if isinstance(value, DataPosition) else None
+    return value.field if isinstance(value, (DataPosition, Fraction, Pixels)) else None
 
 
 @dataclass(frozen=True)
@@ -571,21 +678,199 @@ class LabelPlace:
             _offset(self.offset, "LabelPlace")
 
 
+@dataclass(frozen=True)
+class LabelPart:
+    """A part of a label's text, between literal strings: a column's value
+    of the row the label is at (``field``, written with ``format``), the
+    name of the series it labels (``series=True``), or the value it labels
+    there (``value=True``, written with ``format``)::
+
+        content=["Peak ", hg.LabelPart(value=True, format=hg.Format(number=".1f"))]
+    """
+
+    field: str | None = None
+    series: bool | None = None
+    value: bool | None = None
+    format: Format | Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        given = [name for name in ("field", "series", "value") if getattr(self, name) is not None]
+        if len(given) != 1:
+            raise ValueError("LabelPart: give field, series=True, or value=True, one of them")
+        for name in ("series", "value"):
+            # True itself: 1 equals True, but is no flag.
+            if getattr(self, name) is not None and getattr(self, name) is not True:
+                raise TypeError(
+                    f"LabelPart {name}: expected True; received {shown(getattr(self, name))}"
+                )
+        if self.field is not None and (not isinstance(self.field, str) or not self.field):
+            raise TypeError(
+                f"LabelPart field: expected a column name; received {shown(self.field)}"
+            )
+        if self.series and self.format is not None:
+            raise ValueError("LabelPart format: a series' name is written as it is; drop format")
+
+    def _spec(self) -> dict[str, Any]:
+        spec: dict[str, Any] = (
+            {"field": self.field}
+            if self.field is not None
+            else {"series": True}
+            if self.series
+            else {"value": True}
+        )
+        if self.format is not None:
+            spec["format"] = format_spec(self.format, "LabelPart format")
+        return spec
+
+
+def content_spec(value: Any, role: str) -> Any:
+    """A label's ``content`` as the spec takes it: its parts in order, each
+    literal text or an ``hg.LabelPart`` (or a dict of its options)."""
+    if value is None:
+        return None
+    if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence) or not value:
+        raise TypeError(
+            f'{role}: expected a list of parts, such as ["Peak ", hg.LabelPart(value=True)]; '
+            f"received {shown(value)}"
+        )
+    return [
+        part if isinstance(part, str) else _built(part, LabelPart, role)._spec() for part in value
+    ]
+
+
+#: Which point of a series a label follows.
+LabelAt = Literal["first", "last", "visible-start", "visible-end"]
+_LABEL_AT = ("first", "last", "visible-start", "visible-end")
+_EDGES = ("y1", "y2", "x1", "x2")
+
+
+def label_dict_problem(value: Any, keys: Sequence[str]) -> tuple[str, str] | None:
+    """Where a label option given as a dict is malformed in its ``keys``
+    (``"mark"``, ``"at"``, ``"edge"``, ``"content"``), as the engine's
+    validator finds it: the place within it (``"content[1].field"``) and
+    what it expected, or None. Its class checks the rest as it is made."""
+    if not isinstance(value, Mapping):
+        return None
+    for key in keys:
+        given = value.get(key)
+        if key == "mark" and not (isinstance(given, str) and given):
+            return key, f"expected a mark's id; received {shown(given)}"
+        if key == "at" and given not in _LABEL_AT:
+            return key, f"expected {listed(_LABEL_AT)}; received {shown(given)}"
+        if key == "edge" and given is not None and given not in _EDGES:
+            return key, f"expected {listed(_EDGES)}; received {shown(given)}"
+        if key == "content" and given is not None:
+            problem = _content_problem(given)
+            if problem:
+                return f"content{problem[0]}", problem[1]
+    return None
+
+
+def _content_problem(content: Any) -> tuple[str, str] | None:
+    """Where a label's ``content`` is not a list of parts, as ``content_spec``
+    reads it: the place within it (``"[1].field"``) and what it expected."""
+    if isinstance(content, (str, Mapping)) or not isinstance(content, Sequence) or not content:
+        return "", (
+            'expected a list of parts, such as ["Peak ", hg.LabelPart(value=True)]; '
+            f"received {shown(content)}"
+        )
+    for i, part in enumerate(content):
+        if isinstance(part, (str, LabelPart)):
+            continue
+        given = (
+            [name for name in ("field", "series", "value") if part.get(name) is not None]
+            if isinstance(part, Mapping)
+            else []
+        )
+        if len(given) != 1:
+            return f"[{i}]", (
+                "expected text, or hg.LabelPart(field=...), (series=True), or (value=True); "
+                f"received {shown(part)}"
+            )
+        name = given[0]
+        if name == "field" and not (isinstance(part[name], str) and part[name]):
+            return f"[{i}].field", f"expected a column's name; received {shown(part[name])}"
+        if name != "field" and part[name] is not True:
+            return f"[{i}].{name}", f"expected True; received {shown(part[name])}"
+    return None
+
+
+@dataclass
+class SeriesLabels:
+    """Labels following each series of a line or area: at its ``at``
+    (``"first"`` or ``"last"`` observation drawn, or where it enters or
+    leaves the view, ``"visible-start"`` or ``"visible-end"``), saying
+    ``content`` (the series' name by default; see ``hg.LabelPart``), placed
+    by ``place`` (an ``hg.LabelPlace``) and styled by ``style``. A band
+    (``y1`` and ``y2``) follows the edge ``edge`` names."""
+
+    at: LabelAt
+    content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
+    edge: Literal["y1", "y2", "x1", "x2"] | None = None
+    place: LabelPlace | Mapping[str, Any] | None = None
+    style: TextStyle | Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _choice(self.at, _LABEL_AT, "SeriesLabels at")
+        if self.edge is not None:
+            _choice(self.edge, _EDGES, "SeriesLabels edge")
+        content_spec(self.content, "SeriesLabels content")
+        self.place = _built(self.place, LabelPlace, "SeriesLabels place")
+        self.style = _built(self.style, TextStyle, "SeriesLabels style")
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {
+            "at": self.at,
+            "content": content_spec(self.content, "SeriesLabels content"),
+            "edge": self.edge,
+            "place": _spec(self.place) if self.place is not None else None,
+            "style": _spec(self.style) if self.style is not None else None,
+        }
+        return {key: value for key, value in spec.items() if value is not None}
+
+
+@dataclass(frozen=True)
+class MarkAnchor:
+    """A place on another mark's series that text follows: the ``mark``'s
+    id, ``at`` along each series (as ``hg.SeriesLabels`` takes it), and a
+    band's ``edge``; one label per series."""
+
+    mark: str
+    at: LabelAt
+    edge: Literal["y1", "y2", "x1", "x2"] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mark, str) or not self.mark:
+            raise TypeError(f"MarkAnchor mark: expected a mark's id; received {shown(self.mark)}")
+        _choice(self.at, _LABEL_AT, "MarkAnchor at")
+        if self.edge is not None:
+            _choice(self.edge, _EDGES, "MarkAnchor edge")
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {"mark": self.mark, "at": self.at, "edge": self.edge}
+        return {key: value for key, value in spec.items() if value is not None}
+
+
 @dataclass
 class Label:
-    """A label: constant ``text``, or each row's ``field`` (numbers written
-    with ``format``, an ``hg.Format`` or Intl options), styled by ``style``
-    (an ``hg.TextStyle``) and placed by ``place`` (an ``hg.LabelPlace``)."""
+    """A label: constant ``text``, each row's ``field`` (numbers written
+    with ``format``, an ``hg.Format`` or Intl options), or ``content`` made
+    of parts (see ``hg.LabelPart``), styled by ``style`` (an
+    ``hg.TextStyle``) and placed by ``place`` (an ``hg.LabelPlace``)."""
 
     text: str | None = None
     field: str | None = None
+    content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
     format: Format | Mapping[str, Any] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
     place: LabelPlace | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if (self.text is None) == (self.field is None):
-            raise ValueError("Label: give text or field, one of them")
+        if sum(value is not None for value in (self.text, self.field, self.content)) != 1:
+            raise ValueError("Label: give text, field, or content, one of them")
+        if self.content is not None and self.format is not None:
+            raise ValueError("Label format: content's parts have formats of their own; drop format")
+        content_spec(self.content, "Label content")
         self.style = _built(self.style, TextStyle, "Label style")
         self.place = _built(self.place, LabelPlace, "Label place")
 
@@ -593,6 +878,7 @@ class Label:
         spec = {
             "text": self.text,
             "field": self.field,
+            "content": content_spec(self.content, "Label content"),
             "format": format_spec(self.format, "Label format"),
             "style": _spec(self.style) if self.style is not None else None,
             "place": _spec(self.place) if self.place is not None else None,
@@ -613,7 +899,8 @@ def label_spec(value: Any, role: str, *, places: bool = True) -> Any:
 @dataclass
 class BarLabels:
     """Bars' value labels: each bar's value (or with ``field``, a column's),
-    written with ``format`` (an ``hg.Format`` or Intl options), styled by
+    written with ``format`` (an ``hg.Format`` or Intl options), or
+    ``content`` made of parts (see ``hg.LabelPart``), styled by
     ``style`` (black or white by contrast with the bar unless its color is
     set), on bars at least ``min_length`` pixels long, placed by ``place``:
     an ``hg.LabelPlace`` with ``outside=False`` puts them inside the bars at
@@ -622,12 +909,19 @@ class BarLabels:
     bars' segments."""
 
     field: str | None = None
+    content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
     format: Format | Mapping[str, Any] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
     min_length: float | None = None
     place: LabelPlace | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        if self.content is not None and (self.field is not None or self.format is not None):
+            raise ValueError(
+                "BarLabels content: its parts name fields and formats of their own; "
+                "drop field and format"
+            )
+        content_spec(self.content, "BarLabels content")
         self.style = _built(self.style, TextStyle, "BarLabels style")
         if self.min_length is not None:
             _number(self.min_length, "BarLabels min_length")
@@ -642,6 +936,7 @@ class BarLabels:
     def _spec(self) -> dict[str, Any]:
         spec = {
             "field": self.field,
+            "content": content_spec(self.content, "BarLabels content"),
             "format": format_spec(self.format, "BarLabels format"),
             "style": _spec(self.style) if self.style is not None else None,
             "minLength": self.min_length,

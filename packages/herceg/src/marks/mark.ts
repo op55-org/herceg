@@ -273,10 +273,12 @@ export interface MarkIdentity {
   readonly panel?: string | undefined;
   /** What the mark's drawing is cut to; data to the plot, labels and text not at all, when absent. */
   readonly clip?: Clip | undefined;
-  /** `false` leaves the mark out of the chart's legends. */
-  readonly legend?: false | undefined;
+  /** `false` leaves the mark out of the chart's legends; `true` lists an annotation. */
+  readonly legend?: boolean | undefined;
   /** What tooltips show of the rows of marks whose points are rows, besides their values. */
   readonly tooltip?: Frozen<MarkTooltipSpec> | undefined;
+  /** Where the mark is drawn among the others of its panel (see `MarkBase.zIndex`). */
+  readonly zIndex?: number | undefined;
 }
 
 /** A scale of a mark that guides may name (see `Mark.legendScales`). */
@@ -651,6 +653,34 @@ export function usesY(mark: Mark): boolean {
 export function valueKind(table: Table, fields: readonly string[]): "time" | "number" {
   return fields.some((field) => table.kind(field) === "time") ? "time" : "number";
 }
+
+/**
+ * Throws an invalid-option error at `path` of a `type` mark unless `ok`:
+ * a malformed option, refused for good, and before what the mark does not
+ * draw yet (marks/pending.ts).
+ */
+export function checkOption(
+  ok: boolean,
+  type: string,
+  path: string,
+  expected: string,
+  value: unknown,
+): void {
+  if (!ok)
+    throw new ChartError({
+      code: "invalid-option",
+      path,
+      message: `${type} ${path}: expected ${expected}; received ${typeof value === "number" ? value : JSON.stringify(value)}`,
+    });
+}
+
+/** Whether `value` is a length of 0 or more pixels. */
+export const isPixels = (value: unknown): boolean =>
+  typeof value === "number" && value >= 0 && Number.isFinite(value);
+
+/** Whether `value` lists sides of a rectangle, as `strokeSides` does. */
+export const isSides = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((side) => ["top", "right", "bottom", "left"].includes(side));
 
 export function requireField(
   table: Table,

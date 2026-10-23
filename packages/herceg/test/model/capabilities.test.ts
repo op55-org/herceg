@@ -472,7 +472,7 @@ const besideLine = (c: MarkCase, extra: Partial<ChartConfig> = {}): ChartConfig 
 });
 
 function expectGeometry(panel: Panel, kind: Geometry["kind"]) {
-  expect(panel.marks.some((m) => m.kind === kind && (m.draw.guide || m.draw.size(m) > 0))).toBe(
+  expect(panel.marks.some((m) => m.kind === kind && (!m.draw.canvas || m.draw.size(m) > 0))).toBe(
     true,
   );
 }
@@ -2255,11 +2255,11 @@ describe("capabilities: encodings", () => {
     expect(paints.filter((paint) => paint === "#00ab41")).toHaveLength(3);
   });
 
-  it("points and annotations take no encode in specs", () => {
-    for (const mark of [
-      { type: "point", x: "x", y: "y", encode: { color: { value: "#000000" } } },
-      { type: "rule", y: 1, encode: { stroke: { value: "#000000" } } },
-    ])
-      expect(() => validateSpec({ marks: [mark as never] })).toThrow(/encode/);
+  // Points' channels are bound from round 2's stream C on (test/model/contracts.test.ts).
+  it("annotations take no encode in specs; points take one", () => {
+    const rule = { type: "rule", y: 1, encode: { stroke: { value: "#000000" } } };
+    expect(() => validateSpec({ marks: [rule as never] })).toThrow(/encode/);
+    const point = { type: "point", x: "x", y: "y", encode: { color: { value: "#000000" } } };
+    expect(() => validateSpec({ marks: [point as never] })).not.toThrow();
   });
 });

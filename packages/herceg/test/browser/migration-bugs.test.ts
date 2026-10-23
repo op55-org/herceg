@@ -175,7 +175,7 @@ it.each(["svg", "canvas"] as const)(
     const data = table({ x: [0, 1, 0, 1], y: [1, 2, 3, 4], site: ["N", "N", "S", "S"] });
     const chart = createChart(host, {
       renderer,
-      guides: [legend({ scales: [{ mark: "curves", channel: "color" }] })],
+      guides: [legend({ include: [{ mark: "curves", channel: "color" }] })],
       marks: [line(data, { x: "x", y: "y", color: "site", id: "curves", legend: false })],
     });
     try {

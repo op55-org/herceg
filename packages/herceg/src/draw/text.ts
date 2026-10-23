@@ -34,7 +34,8 @@ export function textElement(
 
 /** Text labels, with a halo when asked; labels of several lines are centered on their point. */
 export const textDrawing: Drawing<TextGeometry> = {
-  guide: true,
+  canvas: false,
+  defaultClip: false,
   size: () => 0,
   svg(mark, { theme }) {
     const halo = mark.halo ? haloAttributes(mark.halo) : "";
@@ -86,7 +87,8 @@ function rotation(item: TextItem): string {
 
 /** Labels in styles of their own, as positioned text items (boxes, fonts, sizes). */
 export const labelsDrawing: Drawing<LabelsGeometry> = {
-  guide: true,
+  canvas: false,
+  defaultClip: false,
   size: () => 0,
   svg(mark, { theme }) {
     let out = "";

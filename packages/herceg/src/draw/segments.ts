@@ -49,7 +49,8 @@ export const segmentDrawing: Drawing<SegmentGeometry> = {
 
 /** Segments drawn above the data as guides, such as lines from moved labels to their points. */
 export const guideSegmentDrawing: Drawing<SegmentGeometry> = {
-  guide: true,
+  canvas: false,
+  defaultClip: false,
   size: () => 0,
   elements: segmentElements,
   svg: (mark) => markupOf(segmentElements(mark)),

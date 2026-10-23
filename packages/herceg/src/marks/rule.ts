@@ -17,6 +17,7 @@ import type { TextStyle } from "../spec/style.ts";
 import { dashPattern } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import {
+  ANNOTATION_PENDING,
   AnnotationData,
   type Label,
   labelOf,
@@ -26,15 +27,21 @@ import {
   type TextField,
   valueAt,
 } from "./annotation.ts";
+import type { LabelPartOf } from "./encoding.ts";
 import { labelPaint, labelsGeometry, type PlacedLabel } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame, MARK, Mark, MarkKey, RowParts } from "./mark.ts";
 import { frozen, painted } from "./mark.ts";
+import { refusePending } from "./pending.ts";
 
 /** A rule's label: its text, or each row's `field`; where it goes and how it looks. */
 export type RuleLabel<F extends string = string> =
   | string
-  | (({ text: string; field?: never } | { field: F; text?: never }) & {
+  | ((
+      | { text: string; field?: never; content?: never }
+      | { field: F; text?: never; content?: never }
+      | { content: readonly LabelPartOf<F>[]; text?: never; field?: never; format?: never }
+    ) & {
       format?: LabelSpec["format"];
       style?: TextStyle;
       place?: LabelPlaceSpec;
@@ -59,6 +66,10 @@ interface RuleStyle {
   span?: readonly [Coordinate, Coordinate];
   /** Whether the rule's value counts toward its axis' domain; false by default. */
   contributeDomain?: boolean;
+  /** `true` lists the rules in the chart's legends by their label; they are left out by default. */
+  legend?: boolean;
+  /** Where the rules are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   id?: string;
 }
 
@@ -102,6 +113,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
   readonly #plain: boolean;
 
   constructor(input: RuleSpec, table?: Table) {
+    refusePending(input, "rule", ANNOTATION_PENDING);
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -413,6 +425,8 @@ export function rule<S extends Schema>(
         "span",
         "label",
         "contributeDomain",
+        "legend",
+        "zIndex",
         "axis",
         "facet",
         "panel",

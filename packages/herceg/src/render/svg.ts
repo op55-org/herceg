@@ -37,10 +37,10 @@ export function uncutMarkup(
   let guides = "";
   for (const mark of marks) {
     const clip = clipOf(mark);
-    if (clip === "plot" && !mark.draw.guide) continue;
+    if (clip === "plot" && mark.draw.canvas) continue;
     let markup = mark.draw.svg(mark, context);
     if (clip) markup = `<g clip-path="url(#${clip === "plot" ? plot : chart})">${markup}</g>`;
-    if (mark.draw.guide) guides += markup;
+    if (!mark.draw.canvas) guides += markup;
     else data += markup;
   }
   return data + guides;
@@ -297,7 +297,7 @@ export function renderSvg(scene: Scene, options: SvgOptions = {}): string {
     for (const panel of panels) {
       out += `<g clip-path="url(#${clip(panel)})">`;
       for (const mark of panel.marks)
-        if (!mark.draw.guide && clipOf(mark) === "plot") out += mark.draw.svg(mark, context);
+        if (mark.draw.canvas && clipOf(mark) === "plot") out += mark.draw.svg(mark, context);
       out += "</g>";
     }
     for (const panel of panels) {

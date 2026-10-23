@@ -7,7 +7,15 @@ import type { Geometry, LineGeometry } from "../scene/scene.ts";
 import type { Clip, Curve, Dash, Frozen, LineSpec, SymbolName } from "../spec/spec.ts";
 import { dashPattern } from "../style/style.ts";
 import { BandShares, STILL } from "./dodge.ts";
-import type { Condition, Continuity, CssColor, Encodings, MarkStyle } from "./encoding.ts";
+import type {
+  Condition,
+  Continuity,
+  CssColor,
+  Encodings,
+  FieldCoordinate,
+  MarkStyle,
+  SeriesLabels,
+} from "./encoding.ts";
 import {
   type Bands,
   buildSeries,
@@ -37,6 +45,7 @@ import {
   traceSeries,
   untranspose,
 } from "./orient.ts";
+import { coordinates, type FieldPositions, type Pending, refusePending } from "./pending.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { IndexUse, tracePath, unionExtent } from "./trace.ts";
@@ -94,6 +103,10 @@ interface LineStyle<S extends Schema> {
   curve?: Curve;
   /** Name of a single line in legends and tooltips. Defaults to the value field. */
   label?: string;
+  /** A label following each line: at its first or last point, or where it enters or leaves the view. */
+  labels?: SeriesLabels<S>;
+  /** Where the lines are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
@@ -111,19 +124,19 @@ export type LineOptions<S extends Schema> = LineStyle<S> &
   (
     | {
         orient?: "x";
-        /** Positions: a number or time field, or a category field. */
-        x: PositionField<S>;
-        /** One field, or several fields drawn as separate lines sharing x. */
-        y: NumericField<S> | readonly NumericField<S>[];
+        /** Positions: a number or time field, a category field, or a coordinate. */
+        x: PositionField<S> | FieldCoordinate<S>;
+        /** One field, several fields drawn as separate lines sharing x, or a coordinate. */
+        y: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
         /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
         axis?: "left" | "right";
       }
     | {
         /** Positions along y, values along x: depth profiles, densities of y. */
         orient: "y";
-        y: PositionField<S>;
-        /** One field, or several fields drawn as separate lines sharing y. */
-        x: NumericField<S> | readonly NumericField<S>[];
+        y: PositionField<S> | FieldCoordinate<S>;
+        /** One field, several fields drawn as separate lines sharing y, or a coordinate. */
+        x: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
         /** Lines along y use the left axis, as horizontal bars do. */
         axis?: "left";
       }
@@ -147,9 +160,12 @@ const FEATURES = [
   "where",
 ] as const;
 
-export class LineMark implements Mark<Frozen<LineSpec>> {
+/** Lines' options round 2 freezes before its streams draw them. */
+const PENDING: readonly Pending[] = [...coordinates("x", "y"), ["labels", "C", "drop labels"]];
+
+export class LineMark implements Mark<FieldPositions<Frozen<LineSpec>>> {
   declare readonly [MARK]: true;
-  readonly spec: Frozen<LineSpec>;
+  readonly spec: FieldPositions<Frozen<LineSpec>>;
   readonly table: Table<Schema>;
   readonly tooltip: "x" | "y";
   readonly featured: boolean;
@@ -161,7 +177,8 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
   readonly #shares: BandShares | undefined;
 
   constructor(input: LineSpec, table: Table<Schema>) {
-    this.spec = frozen(input);
+    refusePending(input, "line", PENDING);
+    this.spec = frozen(input) as FieldPositions<Frozen<LineSpec>>;
     checkTooltip(table, this.spec.tooltip, "line");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -361,6 +378,8 @@ export function line<S extends Schema>(
       "panel",
       "clip",
       "color",
+      "zIndex",
+      "labels",
       ...FEATURES,
     ]),
   } as LineSpec;

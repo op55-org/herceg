@@ -147,7 +147,7 @@ def test_ticks_and_formats_refuse_what_they_cannot_say_in_python_names():
         hg.Format(number=",.2q")
     with pytest.raises(ValueError, match='Format time: "%U" at character 4 of "%H %U"'):
         hg.Format(time="%H %U")
-    with pytest.raises(TypeError, match="AxisOptions format: Python functions cannot travel"):
+    with pytest.raises(hg.ChartError, match="AxisOptions format: Python functions cannot travel"):
         hg.Chart(WEEK, y=hg.AxisOptions(format=lambda v: str(v))).line(x="t", y="v").to_spec()
 
 
@@ -171,7 +171,7 @@ def test_scales_and_guides_write_their_specs():
                     ],
                 ),
                 hg.axis("y_right", line=True),
-                hg.legend(scales=[hg.ScaleRef(mark="a", channel="series")], columns=3),
+                hg.legend(include=[hg.ScaleRef(mark="a", channel="series")], columns=3),
                 hg.colorbar(place=hg.Place(side="bottom"), ticks=5),
             ],
         )
@@ -199,7 +199,7 @@ def test_scales_and_guides_write_their_specs():
     assert legend == {
         "type": "legend",
         "columns": 3,
-        "scales": [{"mark": "a", "channel": "series"}],
+        "include": [{"mark": "a", "channel": "series"}],
     }
     assert colorbar == {"type": "colorbar", "place": {"side": "bottom"}, "ticks": 5}
     assert spec["marks"][1]["legend"] is False
@@ -207,17 +207,17 @@ def test_scales_and_guides_write_their_specs():
 
 def test_guides_refuse_what_they_cannot_say_in_python_names():
     with pytest.raises(
-        ValueError, match='axis scale: expected "x", "y", or "y_right"; received "z"'
+        ValueError, match=r'axis place: an axis of the chart\'s own scale "z" has no'
     ):
         hg.axis("z")
     with pytest.raises(ValueError, match='TickLayer id: expected a name other than "" and "major"'):
         hg.TickLayer(id="major")
     with pytest.raises(ValueError, match="legend rows: columns or rows, not both"):
         hg.Chart(WEEK, guides=[hg.legend(columns=2, rows=2)]).line(x="t", y="v").to_spec()
-    with pytest.raises(TypeError, match=r"Chart guides\[0\]: expected hg.axis\(...\)"):
+    with pytest.raises(hg.ChartError, match=r"Chart guides\[0\]: expected hg.axis\(...\)"):
         hg.Chart(WEEK, guides=[{"type": "axis"}]).line(x="t", y="v").to_spec()
     with pytest.raises(
-        ValueError, match="Chart scales temperature: expected an hg.OrdinalScale, a scale of"
+        ValueError, match="Chart scales temperature: a position scale of the chart's own says"
     ):
         hg.Chart(WEEK, scales={"temperature": hg.Scale()}).line(x="t", y="v").to_spec()
     with pytest.raises(ValueError, match="line legend: expected False"):
@@ -312,7 +312,9 @@ def test_guides_naming_a_mark_show_it_whatever_its_legend_setting():
             data,
             width=480,
             height=300,
-            guides=[hg.legend(title="Sites", scales=[hg.ScaleRef(mark="curves", channel=channel)])],
+            guides=[
+                hg.legend(title="Sites", include=[hg.ScaleRef(mark="curves", channel=channel)])
+            ],
         ).line(x="t", y="v", color="site", id="curves")
         svg = chart.to_svg()
         assert ">Sites<" in svg and ">A<" in svg and ">B<" in svg
@@ -320,7 +322,7 @@ def test_guides_naming_a_mark_show_it_whatever_its_legend_setting():
         data,
         width=480,
         height=300,
-        guides=[hg.legend(scales=[hg.ScaleRef(mark="curves", channel="size")])],
+        guides=[hg.legend(include=[hg.ScaleRef(mark="curves", channel="size")])],
     ).line(x="t", y="v", color="site", id="curves")
     with pytest.raises(Exception, match='mark "curves" has no "size" scale; name one it has'):
         lone.to_svg()

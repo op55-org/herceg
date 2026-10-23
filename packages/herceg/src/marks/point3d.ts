@@ -44,6 +44,7 @@ import {
 import {
   type AxisData,
   axesKey,
+  checkDepthOrder,
   type FaceFrame3D,
   type Frame3D,
   findRow,
@@ -147,6 +148,7 @@ export class Point3DMark implements Layer3D {
   /** A category `color` other than the series field, its values in order of appearance. */
 
   constructor(input: Point3DSpec, table: Table) {
+    checkDepthOrder(input, "point3d");
     // A category color names the series, as on points along axes.
     this.spec = frozen(withSeries(input, table)) as Frozen<Point3DSpec & { series?: string }>;
     checkTooltip(table, this.spec.tooltip, "point3d");

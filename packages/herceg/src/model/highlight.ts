@@ -898,7 +898,8 @@ function clipped(
   along: "x" | "y",
 ): Geometry {
   const { plot } = frame;
-  const draw = geometry.draw as Drawing<Geometry> & { canvas: DataCanvas };
+  // Runs of series' data, which canvases draw.
+  const draw = geometry.draw as Drawing<Geometry> & { canvas: CanvasPaint };
   const id = `herceg-runs-${++clips}`;
   // Each span's rectangle: x, y, width, height.
   const rect = (i: number) =>
@@ -932,7 +933,7 @@ function clipped(
   return { ...geometry, key: `${geometry.key}${ON}${id}`, draw: drawing };
 }
 
-type DataCanvas = Extract<Drawing<Geometry>, { canvas: unknown }>["canvas"];
+type CanvasPaint = Exclude<Drawing<Geometry>["canvas"], false>;
 
 /** Where a series draws its runs of one selected row, which no span shows: x, y pixels per row. */
 function loneRows(
@@ -1041,7 +1042,7 @@ function outlineOf(area: AreaGeometry): LineGeometry {
 
 /** A drawing of the same marks at `fraction` of their opacity. */
 function faded(draw: Drawing<Geometry>, fraction: number): Drawing<Geometry> {
-  const elements = draw.elements;
+  const { elements, canvas: paint } = draw;
   const copy = {
     ...draw,
     opacity: (draw.opacity ?? 1) * fraction,
@@ -1056,14 +1057,14 @@ function faded(draw: Drawing<Geometry>, fraction: number): Drawing<Geometry> {
             opacity: String(fraction * Number(attributes.opacity ?? 1)),
           },
         }))),
-    ...(!draw.guide && {
-      canvas(context, geometry, options) {
+    canvas:
+      paint &&
+      ((context, geometry, options) => {
         const alpha = context.globalAlpha;
         context.globalAlpha = alpha * fraction;
-        draw.canvas(context, geometry, options);
+        paint(context, geometry, options);
         context.globalAlpha = alpha;
-      },
-    }),
+      }),
   } as Drawing<Geometry>;
   return copy;
 }

@@ -488,6 +488,7 @@ export function violin<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
       "id",
     ]),
   };

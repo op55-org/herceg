@@ -132,7 +132,7 @@ describe("legends with settings in the browser", () => {
   it("show each legend's entries as buttons of their own", async () => {
     const chart = createChart(host, {
       marks: [line(values, { x: "t", y: "a", id: "a" }), line(values, { x: "t", y: "b", id: "b" })],
-      guides: [legend({ scales: [{ mark: "b", channel: "series" }], place: { side: "right" } })],
+      guides: [legend({ include: [{ mark: "b", channel: "series" }], place: { side: "right" } })],
     });
     await chart.loading;
     expect(buttons().map((b) => b.textContent)).toEqual(["a", "b"]);

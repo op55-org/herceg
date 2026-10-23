@@ -53,6 +53,7 @@ type BoxPlotStyleOptions<S extends Schema> = Pick<
   | "facet"
   | "panel"
   | "clip"
+  | "zIndex"
   | "id"
 >;
 
@@ -480,6 +481,7 @@ export function boxplot<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
       "id",
     ]),
   } as unknown as BoxPlotSpec;

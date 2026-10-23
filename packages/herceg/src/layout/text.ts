@@ -216,6 +216,50 @@ export function centeredLines(text: string, at: TextAt, paint: TextPaint): TextA
   return moved(at, 0, ((1 - lineCount(text)) * paint.lineHeight) / 2);
 }
 
+/**
+ * Where a block of text (its lines, and its box's padding when its paint
+ * has a box) is placed: the point `x`, `y`; which of the block's sides or
+ * its middle goes there along its lines (`align`) and across them
+ * (`verticalAlign`); and its turn about that point, in degrees clockwise.
+ */
+export interface BlockAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly align: "start" | "center" | "end";
+  readonly verticalAlign: "top" | "middle" | "bottom";
+  readonly angle: number;
+}
+
+/**
+ * Where `lines` in `paint` are drawn for their block to be at `anchor`:
+ * the first line's place, and the box behind them (before the turn, as
+ * `TextItem.box` is) when the paint has one. Hand both to `textItem`, which
+ * pads text only when it is given no box.
+ */
+export function anchorBlock(
+  lines: TextLines,
+  anchor: BlockAnchor,
+  paint: TextPaint,
+): { at: TextAt; box: Rect | undefined } {
+  const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
+  const { align, verticalAlign } = anchor;
+  const height = lines.height + top + bottom;
+  const blockTop = verticalAlign === "top" ? 0 : verticalAlign === "middle" ? -height / 2 : -height;
+  const dx = align === "start" ? left : align === "end" ? -right : (left - right) / 2;
+  const at = moved(
+    {
+      x: anchor.x,
+      y: anchor.y,
+      anchor: align === "center" ? "middle" : align,
+      angle: anchor.angle,
+      baseline: "middle",
+    },
+    dx,
+    blockTop + top + paint.lineHeight / 2,
+  );
+  return { at, box: paint.background ? textBox(lines, at, paint) : undefined };
+}
+
 /** `at` moved `dx` along its text and `dy` down it, in the text's own turn. */
 function moved(at: TextAt, dx: number, dy: number): TextAt {
   const turn = (at.angle * Math.PI) / 180;

@@ -245,6 +245,7 @@ describe("reference figures", () => {
       height: 200,
       marks: [line(load, { x: "t", y: "load" })],
       legend: {
+        include: [],
         entries: [
           { key: "a", label: "Accent", swatch: { type: "rect", fill: "var(--accent, #ff0000)" } },
         ],
@@ -258,6 +259,7 @@ describe("reference figures", () => {
         height: 200,
         marks: [line(load, { x: "t", y: "load" })],
         legend: {
+          include: [],
           entries: [
             { key: "a", label: "Accent", swatch: { type: "rect", fill: "var(--accent, #ff0000)" } },
           ],

@@ -666,8 +666,8 @@ chart = hg.Chart(
 | `hg.axis(scale, ...)` | `scale` (`"x"`, `"y"`, `"y_right"`), `place` (`hg.Place(side=...)`: x on the `"bottom"` or `"top"`, y on the `"left"` or `"right"`, y_right on the `"right"`), `id`, `title`, `ticks`, `format`, `grid`, `show`, `style`, `tick` (`hg.Tick(direction="out" \| "in" \| "cross", length=...)` or `False`), `labels` (`hg.TickLabels` or `False`), `line` (draw its line), `layers` (`hg.TickLayer`s). |
 | `hg.TickLayer` | `id` (not `"major"`), `ticks`, `format`, `tick`, `labels`, `style` (its `tick` and `tick_label`): minor ticks, a row of day boundaries. |
 | `hg.TickLabels` | `rotation` (degrees clockwise, or a list tried in turn), `collision` (`"show"`, `"hide"`, and on x axes `"stagger"` and `"wrap"`), `row` (0 by the line, 1 beyond, on x axes), `priority` (the higher stays where labels of a row meet), `duplicates` (`"hide"` leaves out a label repeating the one before it). |
-| `hg.LegendOptions` (`legend=`), `hg.legend(...)` (`guides`) | `place`, `columns` or `rows`, `order` (`"row"` or `"column"`), `title`, `entries` (`hg.LegendEntry`s of your own), `swatches="mark"` (swatches that look like the marks), `style`; `hg.legend` also `scales` (`hg.ScaleRef(mark=..., channel="series" \| "color" \| "size" \| "symbol")`), `id`, `show`. |
-| `hg.LegendEntry` | `key`, `label`, a `swatch` (`hg.Swatch(type="line" \| "rect" \| "circle" \| "composite", ...)`) or `sample` (a mark's id, drawn as it looks), and `targets` (the ids of marks clicking it hides and shows). |
+| `hg.LegendOptions` (`legend=`), `hg.legend(...)` (`guides`) | `place`, `columns` or `rows`, `order` (`"row"` or `"column"`), `title`, `include` (what it lists: `hg.ScaleRef(mark=..., channel="series" \| "color" \| "size" \| "symbol")`s, or `[]` for its entries alone; every scale by default), `entries` (`hg.LegendEntry`s of your own, for now with `include=[]`), `swatches="mark"` (swatches that look like the marks), `style`; `hg.legend` also `id`, `show`. |
+| `hg.LegendEntry` | `key`, `label`, a `swatch` (`hg.Swatch(type="line" \| "rect" \| "symbol" \| "composite", ...)`, a symbol's `symbol` a point's shape) or `sample` (a mark's id, drawn as it looks), and `targets` (the ids of marks clicking it hides and shows). |
 | `hg.colorbar(...)` | `scale` (`hg.ScaleRef(mark=..., channel="color")`; the chart's only color scale by default), `place` (the right by default; beside the plots it stands, above or below it lies), `title`, `ticks`, `format`, `tick`, `labels`, `layers` (as an axis' along the bar), `length`, `thickness`, `style`, `id`, `show`. Ticks are rounded inside the color domain; a diverging scale's middle color sits at its midpoint; a contour's bands are steps. |
 
 An entry stands for a value: the series of every mark and panel showing
@@ -1598,13 +1598,18 @@ isolated iframe.
 What herceg refuses raises `hg.ChartError`, a `ValueError` with the
 engine's fields: `code` (`"unknown-field"`, `"field-type"`,
 `"series-varies"`, `"series-with-values"`, `"unknown-reference"`,
-`"invalid-option"`, ...), `path` (`"marks[1].color"`, options in Python's
+`"invalid-option"`, `"unsupported"` (a well-formed option herceg does
+not draw yet, saying what to give instead), ...), `path` (`"marks[1].color"`, options in Python's
 spelling), `mark`, `panel`, `phase`, and `info()`, all of them as a dict.
 Columns, their kinds, and series are checked as each mark is added
 (`chart.line(x="t", y="p90")` raises at once, listing the columns the data
 has); references, such as a channel's `scale`, as the chart is output; and
 what only the engine can check (the rows `hg.derive` makes) as it draws
-SVG, PNG, or PDF. A chart that cannot draw in HTML, a notebook, a widget,
+SVG, PNG, or PDF. Some options are taken before herceg draws them
+(`z_index=`, bars' `width=hg.Pixels(n)`, lines' `labels=hg.SeriesLabels(...)`,
+`hg.IdentityScale`, and the others the engine's architecture lists under
+"Spec contracts"); a chart refuses each with `"unsupported"` as the mark is
+added or the chart output. A chart that cannot draw in HTML, a notebook, a widget,
 or Streamlit shows a box of its size in its place saying "Chart could not
 be rendered" and why; an update a widget cannot apply leaves its chart
 under a banner saying so until one applies.

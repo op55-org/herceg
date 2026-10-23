@@ -3300,8 +3300,10 @@ marks (see The chart handle).
 Geometry carries its drawing (`Drawing` in `scene/scene.ts`, implementations
 in `src/draw/`): its SVG markup, optionally the same output as a few SVG
 elements with attributes, and its size (for choosing a renderer). Data
-drawings also paint on a canvas; guide drawings (rules, text) draw only in
-SVG, above the data. The mark that emits the geometry attaches the drawing,
+drawings also paint on a canvas (`canvas`); guide drawings (rules, text)
+have `canvas: false` and draw only in SVG, above the data, and are not cut
+to the plot unless their mark says so (`defaultClip: false`). The mark
+that emits the geometry attaches the drawing,
 so the SVG and Canvas renderers know no geometry kinds and a bundle only
 contains drawing code for the marks it imports (a line chart does not carry
 bar, point, raster, or text drawing). Each geometry type is checked against
@@ -4275,9 +4277,9 @@ values that moves their scale is shown at once, since their layers are
 planned with the scene.
 
 **Legends** (`guides/legends.ts`) are the automatic legend (the short form's
-settings) and the legends `guides` lists, each showing the scales it names
-(`ScaleRef`: the `id` of a mark along axes and its channel, "series",
-"color", "size", or "symbol") or all of them; listed legends claim their
+settings) and the legends `guides` lists, each showing the scales its
+`include` names (`ScaleRef`: the `id` of a mark along axes and its channel,
+"series", "color", "size", or "symbol") or all of them; listed legends claim their
 scales, colorbars theirs, and the automatic legend shows the rest. Marks
 with the same scale share one part (a ramp, a key), which any of them
 names. Only the automatic legend leaves out a chart of one series, as the
@@ -4303,8 +4305,8 @@ entry, labelled as the first, toggling them all; labels alone never merge
 entries. `swatches: "mark"` draws each entry's swatch from its mark's settings: a
 line of its width and dash, a box of an area's or bar's fill at its
 opacity, a point's symbol (its legend glyph); several looks under one entry
-draw together. Custom `entries` show a swatch (a line, a box, a circle, or
-several) or a mark's sample, and toggle the marks they target; entries that
+draw together. Custom `entries` show a swatch (a line, a box, a point's
+symbol, or several) or a mark's sample, and toggle the marks they target; entries that
 toggle nothing are drawn (`CaptionGuide`, with the legend's title) rather
 than made buttons, and described. A `LegendItem` that stands for several
 series has `targets`, which the HTML legend toggles together (shown hidden
@@ -5289,7 +5291,10 @@ phase wherever a frame or an export lays them out. The static renderer hands
 the info to Python, which raises `herceg.ChartError`, a `ValueError` with
 the same fields in Python's spelling (option names in snake_case, never
 fields or ids); the Python package raises the same codes and paths as marks
-are added, for what it can check without the engine.
+are added, for what it can check without the engine. The spec loader's
+validator throws `ChartError`s too (`invalid-option`, at the option's
+path), and `unsupported` names a well-formed option a chart cannot draw,
+saying what to give instead (see Spec contracts).
 
 A mounted chart reports through one path (`MountedChart.#fail`): options
 refused as the chart is made or updated, a compiler or other code that
@@ -5300,7 +5305,10 @@ nothing was drawn yet, `onError` is called, `"error"` listeners hear it,
 and with neither, the console. With `errorMode: "inline"` (the default) the
 chart shows it (`dom/errors.ts`): a box of the chart's size in its place,
 the drawing hidden and out of the tab order; or, for an update refused
-after a frame drew, a banner over that frame, which is still right because
+after a frame drew, a banner over that frame (a mounted chart shows the
+alert's text at once and styles it when `dom/failure-style.ts`, which looks
+as `showFailure` draws, loads with the first failure, so a chart's first
+chunk carries no styling for it), which is still right because
 a refused update changes nothing (the model configures transactionally and
 the chart restores its options). The next frame that draws removes them.
 With `"throw"`, making the chart and `update` throw what they refuse, and
@@ -5434,6 +5442,93 @@ A spec carries its format's `version`: 1, the only one so far
 whose properties may mean what it cannot draw. Herceg is unpublished, so the
 format changes in place: its compatibility promise starts with the first
 published release.
+
+## Spec contracts
+
+The spec states some options before every renderer draws them, so that the
+spec's types, the validator, the TypeScript mark functions, and Python's
+builders agree on their shapes while their drawing lands. A chart refuses
+each such option, rather than ignoring it, with a `ChartError` of code
+`unsupported` at its path: "not drawn as given yet", and what to give
+instead. Marks refuse theirs as they are made, through the tables in
+`marks/pending.ts`, and the model refuses `zIndex` and `verticalAlign`
+wherever the chart's options hold them (`refuseZIndex`,
+`refuseVerticalAlign`; `textPaint` refuses, without a path, what the
+options do not hold in plain objects); the guide compiler refuses scales',
+axes', and tick labels' options, the legends their `include`, `entries`,
+and targets (`guides/legends.ts`), and the feature compiler identity and
+scoped scales. Python refuses the same options with the same
+codes and paths (`_pending.py`): marks' as they are added, the chart's in
+`to_spec`. Each refusal goes when its option is drawn. A malformed value
+is refused first, for good, as `invalid-option` at its own path: by the
+validator, which every spec passes through; by Python's builders, which
+write specs; and by the mark functions and compilers for the options
+whose checks stay (point sizes, bar widths, region outlines, scales' and
+3D boxes' settings). Until its option is drawn, a mark function refuses
+it whole, whatever its value, and the change that draws it adds the
+mark function's checks of its values.
+
+Refused so far: `zIndex` other than 0 on marks and other than -1 on grid
+lines (`grid: { zIndex }`); scales' `padding` other than `"auto"`; position
+scales of the chart's own under other names (`scales: { depth: { type:
+"linear" } }`) and the positions and axis guides naming them; `verticalAlign` in text styles;
+tick labels' `inside` and `gap`; positions read from fields as shares or
+pixels (`{ fraction: { field } }`, `{ px: { field } }`); bars' `width: { px
+}` and `strokeSides`; regions' `stroke`, `strokeWidth`, and `strokeSides`;
+identity scales (`{ type: "identity" }`, named or on a channel) and ordinal
+scales' `scope`; lines' and areas' `labels`, label `content` made of parts,
+and text `from`; annotations' `legend: true`; and in legends, entries after
+included scales, `include` of a mark whole or a scale by name, and targets
+of rows by value. 3D boxes refuse for good `zIndex` on their marks and
+grid lines, and `padding`: they draw by depth and fit their data. Bars
+placed by coordinates keep the orientation rule fields have: a category
+`y`, by name or as `{ field }`, makes them horizontal, and any other
+position, a frame's share or pixels included, centers vertical bars on x.
+
+The forms the drawing and exports will read are stated and tested, though
+no renderer reads them yet. `scene/paint.ts` orders a panel's painting:
+its grid batches (`GridBatch`, one per axis) and its geometry by `zIndex`
+(marks 0, grid lines -1), ties as listed with grids first (`paintOrder`),
+local to the panel, apart from clipping and from the logical order the
+keyboard and descriptions keep. `spec/positions.ts` binds a position
+option, in any form, to one `PositionBinding`: on a scale (the axis' own or
+one the chart names) or in a frame (a share or pixels), from a field or a
+constant, with its offset, so placement, domains, inspection, and
+selection read every form alike. `spec/channels.ts` binds a mark's channel
+options, in whatever form they come (a constant, a field's name, `{ field,
+scale }`, the series' names through a scale, a condition, `encode`), to one
+`ChannelBinding` each, keeping the option each came from for messages,
+and states the rules every reader keeps (a string both a field and an
+output, or neither, is refused, as is a channel set both directly and in
+`encode`; constant options are constants; identity bindings make no
+series or legend entries); the validator reads its table of the channels
+each mark takes.
+`marks/attachments.ts` states where text attached to another mark's series
+goes (`Attachment`: the panel, the series, the observation owning the
+point, the value drawn there, and whether the series is shown), and the
+rules for `first`, `last`, and the visible ends of a series.
+`anchorBlock` (`layout/text.ts`) places a block of text lines, and its box,
+by its sides or middle along and across its lines, turned about its anchor.
+`planExport` (`spec/export.ts`; Python's `plan_export`) checks export
+settings (format, size in a unit, dpi, quality, background, tooltips)
+against `EXPORT_LIMITS` and says what an export draws: the layout size in
+CSS pixels and the image's pixels; the exports do not read these settings
+yet.
+
+### Contract tests
+
+A contract is a promise an option, mark, or surface makes, named by an ID
+of lowercase words joined by dots: what it is about, the behavior, and
+where it is proved when several surfaces prove it
+(`mark.z-index.order.spec`, `mark.z-index.order.python`). Tests proving one
+are ordinary tests named with the ID: `contractTest(id, fn, name)` in
+TypeScript (`test/helpers/contracts.ts`, `[contract:id] name`) and
+`@pytest.mark.contract(id)` in Python (`tests/conftest.py`, which records
+the ID as a JUnit property), each ID proved once. The spec's contracts are
+cases both read (`test/fixtures/contracts.json`): a chart's spec and the
+same chart made in Python, either drawn (Python making the same spec) or
+refused with the same code, path, and message in each language's spelling,
+and export settings with the plan they make or the error they raise.
 
 ## Package layout
 
@@ -5741,7 +5836,10 @@ mouse input, through Playwright's mouse.
   stand in the chart's tracks or beside one subplot (a panel's legend);
   colorbars stand in the chart's tracks only; both name marks along axes,
   not layout marks; colorbars show linear scales (no log color scale); custom
-  swatches are lines, boxes, and circles. Tick layers draw tick marks and
+  swatches are lines, boxes, and symbols. Custom entries come alone
+  (`include: []`); entries after the scales a legend includes, legends
+  including a mark whole or a scale by name, and entries targeting rows by
+  value are refused (`unsupported`; see Spec contracts). Tick layers draw tick marks and
   labels, not grid lines of their own. A change of values that moves an
   axis the guides list is shown at once, not animated.
 - Breaks only on time x axes, the same for every panel (a panel's own `x`
