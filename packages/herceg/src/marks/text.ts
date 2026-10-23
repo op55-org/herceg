@@ -4,11 +4,13 @@ import { guideSegmentDrawing } from "../draw/segments.ts";
 import { LabelBoxes, segmentMeetsBox, segmentsMeet } from "../layout/label-boxes.ts";
 import { lineCount } from "../layout/text.ts";
 import type { Geometry, SegmentGeometry } from "../scene/scene.ts";
+import type { MarkAnchorSpec } from "../spec/encoding.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { AnnotationPosition, Clip, Frozen, TextSpec } from "../spec/spec.ts";
 import type { Halo, StrokeStyle, TextStyle as TextStyleSpec } from "../spec/style.ts";
 import { dashPattern } from "../style/style.ts";
 import {
+  ANNOTATION_PENDING,
   AnnotationData,
   labelOf,
   type PlaceOption,
@@ -16,6 +18,7 @@ import {
   readsTable,
   type TextField,
 } from "./annotation.ts";
+import type { LabelPartOf } from "./encoding.ts";
 import { labelPaint, labelsGeometry, type PlacedLabel, plainText, textGeometry } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -30,6 +33,7 @@ import {
   type RowParts,
   seriesKey,
 } from "./mark.ts";
+import { refusePending } from "./pending.ts";
 
 interface TextStyle {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
@@ -53,6 +57,10 @@ interface TextStyle {
   overlap?: "show" | "hide" | "move";
   /** How the lines from moved labels back to their points look. */
   style?: { leader?: StrokeStyle };
+  /** `true` lists the text in the chart's legends by its label; it is left out by default. */
+  legend?: boolean;
+  /** Where the text is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** Whether the text's places count toward the axes' domains; false by default. */
   contributeDomain?: boolean;
   id?: string;
@@ -61,15 +69,32 @@ interface TextStyle {
 /** Text's label: its text, or each row's `field`, styled (`style`: color, font, size, box, `align`). */
 export type TextLabel<F extends string = string> =
   | string
-  | (({ text: string; field?: never } | { field: F; text?: never }) & {
+  | ((
+      | { text: string; field?: never; content?: never }
+      | { field: F; text?: never; content?: never }
+      | { content: readonly LabelPartOf<F>[]; text?: never; field?: never; format?: never }
+    ) & {
       format?: FormatSpec;
       style?: TextStyleSpec;
     });
 
 /** Where text is: `at`, or its short forms `x` and `y`. */
 type TextPlace<F extends string> =
-  | { x: PlaceOption<F>; y: PlaceOption<F>; at?: never }
-  | { at: { x: PlaceOption<F>; y: PlaceOption<F> }; x?: never; y?: never };
+  | { x: PlaceOption<F>; y: PlaceOption<F>; at?: never; from?: never }
+  | { at: { x: PlaceOption<F>; y: PlaceOption<F> }; x?: never; y?: never; from?: never };
+
+/**
+ * Text following another mark's series (`from`), one label per series, of
+ * no table of its own: its label's fields are the source mark's, read at
+ * the observation each label is at.
+ */
+type FollowingText = {
+  from: MarkAnchorSpec;
+  x?: never;
+  y?: never;
+  at?: never;
+  label: TextLabel;
+};
 
 /** Room kept around each label against others, in pixels, at least: a default halo reaches 1.5. */
 const LABEL_GAP = 2;
@@ -93,8 +118,9 @@ const AROUND: readonly (readonly [number, number])[] = [
   [1, 1],
   [-1, 1],
 ];
-/** One label at a constant place. */
-export type TextOptions = TextStyle & TextPlace<never> & { label: TextLabel<never> };
+/** One label at a constant place, or labels following another mark's series. */
+export type TextOptions = TextStyle &
+  ((TextPlace<never> & { label: TextLabel<never> }) | FollowingText);
 
 /** Labels from a table, one per row; places may also be constants. */
 export type TextDataOptions<S extends Schema> = TextStyle &
@@ -117,6 +143,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
   readonly #y: Frozen<AnnotationPosition>;
 
   constructor(input: TextSpec, table?: Table) {
+    refusePending(input, "text", [...ANNOTATION_PENDING, ["from", "C", "give at, or x and y"]]);
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -131,10 +158,16 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     this.#x = x;
     this.#y = y;
     const label = labelOf(spec.label);
-    this.#data = new AnnotationData(table, { x, y }, label, "text", {
-      x: "x",
-      y: spec.axis === "right" ? "yRight" : "y",
-    });
+    this.#data = new AnnotationData(
+      table,
+      spec.at ? { "at.x": x, "at.y": y } : { x, y },
+      label,
+      "text",
+      {
+        x: "x",
+        y: spec.axis === "right" ? "yRight" : "y",
+      },
+    );
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
     this.featured = format?.number !== undefined || format?.time !== undefined;
   }
@@ -426,10 +459,13 @@ export function text<S extends Schema>(
       "x",
       "y",
       "at",
+      "from",
       "label",
       "overlap",
       "style",
       "contributeDomain",
+      "legend",
+      "zIndex",
       "axis",
       "facet",
       "panel",

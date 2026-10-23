@@ -4,6 +4,7 @@
 // Resolving a role's levels gives a paint: plain values renderers read,
 // made once per configuration and shared by every element of the role.
 
+import { ChartError } from "../spec/errors.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { Halo, Insets, PlotStyle, StrokeStyle, TextBox, TextStyle } from "../spec/style.ts";
 
@@ -93,6 +94,14 @@ export function cssFont(font: string, size: number, weight = 400, italic = false
  */
 export function textPaint(levels: Levels<TextStyle>): TextPaint {
   const style = cascade(levels);
+  // Round 2 freezes it before stream R draws it (marks/pending.ts, which
+  // refuses it at its path where the chart's options hold it).
+  if (style.verticalAlign)
+    throw new ChartError({
+      code: "unsupported",
+      message:
+        "verticalAlign: not drawn as given yet (round 2 stream R adds it); drop verticalAlign",
+    });
   const font = style.font ?? "sans-serif";
   const size = style.fontSize ?? 12;
   const weight = style.fontWeight ?? 400;

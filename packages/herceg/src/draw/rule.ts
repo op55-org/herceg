@@ -16,7 +16,8 @@ export function ruleLabel(
 
 /** Reference lines, with their label at the top (vertical) or right end (horizontal). */
 export const ruleDrawing: Drawing<RuleGeometry> = {
-  guide: true,
+  canvas: false,
+  defaultClip: false,
   size: () => 0,
   svg(rule, { theme }) {
     const opacity = rule.opacity === undefined ? "" : ` stroke-opacity="${rule.opacity}"`;

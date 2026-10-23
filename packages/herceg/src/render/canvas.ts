@@ -84,7 +84,7 @@ export function paintCanvas(
       const options = { plot, pixelRatio: ratio, clouds };
       for (const mark of marks) {
         const draw = mark.draw;
-        if (!draw.guide && clipOf(mark) === "plot") draw.canvas(context, mark, options);
+        if (draw.canvas && clipOf(mark) === "plot") draw.canvas(context, mark, options);
       }
       context.restore();
     }
@@ -101,7 +101,7 @@ export function paintCanvas(
       }
       for (const mark of marks) {
         const draw = mark.draw;
-        if (!draw.guide && clipOf(mark) !== "plot")
+        if (draw.canvas && clipOf(mark) !== "plot")
           draw.canvas(context, mark, { plot, pixelRatio: ratio, clouds: cpu });
       }
       context.restore();

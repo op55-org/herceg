@@ -13,6 +13,9 @@
  * - "series-varies": a line's or area's color changes within one of its series.
  * - "series-with-values": several value fields together with a series field.
  * - "unknown-reference": a panel, scale, or mark id the chart does not have.
+ * - "unsupported": a well-formed option or combination the chart cannot
+ *   draw, such as a nonzero `zIndex` on a 3D mark; the message names what
+ *   to do instead.
  * - "layout-failed": the chart cannot fit what it must draw in its size.
  * - "load-failed": code the chart needs could not be loaded.
  * - "render-failed": drawing failed for another reason.
@@ -24,6 +27,7 @@ export type ChartErrorCode =
   | "series-varies"
   | "series-with-values"
   | "unknown-reference"
+  | "unsupported"
   | "layout-failed"
   | "load-failed"
   | "render-failed";
@@ -80,20 +84,20 @@ export class ChartError extends Error implements ChartErrorInfo {
 
 /**
  * `error`, thrown by what the chart's options at `location` built (a mark
- * of `marks`, named `mark`), placed there: its message starting at the
- * location and, for a ChartError, its path within it.
+ * of `marks`, named `mark`), placed there as a chart error: its message
+ * starting at the location and, for a ChartError, its path within it. A
+ * location the chart's own options start with "spec." in messages only.
  */
-export function within(location: string, error: unknown, mark?: string | number): Error {
+export function within(location: string, error: unknown, mark?: string | number): ChartError {
   const message = `${location}: ${(error as Error).message}`;
+  const path = location.replace(/^spec\.?/, "");
   if (error instanceof ChartError) {
     error.message = message;
-    error.path = error.path === undefined ? location : `${location}.${error.path}`;
+    error.path = error.path === undefined ? path : `${path}.${error.path}`;
     error.mark ??= mark;
     return error;
   }
-  if (error instanceof RangeError) return new RangeError(message);
-  if (error instanceof TypeError) return new TypeError(message);
-  return new Error(message);
+  return new ChartError({ code: "invalid-option", path, mark, message }, error);
 }
 
 /** A chart error as JSON-safe data, as other runtimes take it: without its stack and cause. */

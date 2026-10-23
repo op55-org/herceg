@@ -11,7 +11,7 @@ import math
 import numbers
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
 from dataclasses import field as dataclass_field
 from os import PathLike
 from typing import (
@@ -23,45 +23,62 @@ from typing import (
     Protocol,
     TypedDict,
     TypeVar,
+    cast,
 )
 
 import numpy as np
 
-from . import _geo, _render
+from . import _geo, _pending, _render
 from ._colors import is_color
 from ._data import Column, Matrix, Table, listed, shown
 from ._derive import BinSpec, Derived, Expr, _fields_of, bin_spec
 from ._encoding import (
     SYMBOLS,
     BarLabels,
+    Channel,
     Continuity,
     Coordinate,
+    DataPosition,
     Encodings,
     Fraction,
     Label,
+    MarkAnchor,
     MarkStyle,
     Pixels,
     Position,
+    RowPosition,
+    SeriesLabels,
     Stack,
+    channel_spec,
     condition_spec,
     coordinate_field,
     coordinate_spec,
     encodings_spec,
     fraction_option,
+    label_dict_problem,
     label_spec,
+    length_spec,
     mark_style_spec,
+    output_problem,
     tagged_spec,
 )
-from ._errors import ChartError, python_path
+from ._errors import ChartError, key_path, located, python_path
 from ._guides import (
     Format,
+    GridLines,
     Guide,
+    IdentityScale,
     LegendOptions,
+    OrdinalScale,
+    Padding,
     Scale,
     Ticks,
     format_spec,
+    grid_spec,
+    guide_problem,
     guides_spec,
     legend_spec,
+    padding_spec,
     scales_spec,
     scope_spec,
     ticks_spec,
@@ -85,6 +102,7 @@ from ._layout import (
     inset_spec,
     mosaic_cells,
 )
+from ._pending import refuse_chart, refuse_mark
 from ._rows import RowSelection, SelectionBinding
 from ._rows import bindings as bindings_of
 from ._series import series_of
@@ -93,17 +111,20 @@ from ._style import (
     PANEL_ROLES,
     HaloOption,
     Place,
+    Side,
     Style,
     Theme,
     ThemeName,
     Title,
     _built,
+    _camel,
     _spec,
     halo_spec,
     insets,
     style_spec,
     theme_spec,
     title_spec,
+    vertical_align_problem,
 )
 
 # Annotations read at runtime (typing.get_type_hints) need Unpack too.
@@ -351,7 +372,10 @@ class AxisOptions:
     marks of its own panels, so one subplot can show categories along y
     while another shows numbers. ``repeat`` says where panels sharing a
     scale label it: ``"outer"`` (the default) on the outer edge of panels
-    lined up with each other, ``"all"`` on every panel.
+    lined up with each other, ``"all"`` on every panel. ``padding`` is the
+    room the scale keeps around its data (see ``hg.Scale``), and ``grid``
+    draws grid lines, or with ``hg.GridLines(z_index=...)`` places them
+    among the marks.
     """
 
     type: Literal["linear", "log", "time"] | None = None
@@ -359,7 +383,8 @@ class AxisOptions:
     title: str | None = None
     nice: bool | None = None
     zero: bool | None = None
-    grid: bool | None = None
+    padding: Padding | None = None
+    grid: bool | GridLines | dict[str, Any] | None = None
     ticks: int | Ticks | dict[str, Any] | None = None
     format: Format | dict[str, Any] | None = None
     tooltip_format: Format | dict[str, Any] | None = None
@@ -377,6 +402,8 @@ class AxisOptions:
             if isinstance(value, dict) and not set(value) & {"number", "time"}:
                 _check_format(value, f"AxisOptions {name}", _NUMBER_FORMAT | _TIME_FORMAT)
         scope_spec(self.scope, "AxisOptions scope")
+        padding_spec(self.padding, "AxisOptions padding")
+        grid_spec(self.grid, "AxisOptions grid")
         if self.repeat is not None and self.repeat not in ("outer", "all"):
             raise ValueError(
                 f'AxisOptions repeat: expected "outer" or "all"; received {shown(self.repeat)}'
@@ -417,7 +444,8 @@ class AxisOptions:
             "title": self.title,
             "nice": self.nice,
             "zero": self.zero,
-            "grid": self.grid,
+            "padding": padding_spec(self.padding, "AxisOptions padding"),
+            "grid": grid_spec(self.grid, "AxisOptions grid"),
             "ticks": ticks_spec(self.ticks, "AxisOptions ticks"),
             "format": format_spec(self.format, "AxisOptions format"),
             "tooltipFormat": format_spec(self.tooltip_format, "AxisOptions tooltip_format"),
@@ -742,7 +770,7 @@ class _SharedOptions(TypedDict, total=False):
     height: int | None
     y_right: AxisOptions | dict[str, Any] | None
     legend: bool | LegendOptions | dict[str, Any] | None
-    scales: dict[str, Scale | dict[str, Any]] | None
+    scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]] | None
     guides: Sequence[Guide] | None
     padding: float | dict[str, float] | None
     tooltip: bool | TooltipMode | Tooltip | None
@@ -805,6 +833,7 @@ class HelperOptions(_SharedOptions, _LayoutOptions, _BindingOptions, total=False
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_T = TypeVar("_T")
 
 
 def _own_options(function: Callable[..., Any]) -> set[str]:
@@ -824,6 +853,25 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
         for name in kwargs:
             if name not in known:
                 raise TypeError(_unknown_option(function, name, known))
+        # Text styles' vertical_align, which round 2 draws from stream R on,
+        # is checked where it is given, before what refuses it (_pending.py).
+        # Styles are in dicts and options objects (and the guides' list),
+        # never in data, scales, or other lists, which may be long.
+        for name, value in kwargs.items():
+            styled = isinstance(value, Mapping) or is_dataclass(value) or name == "guides"
+            problem = (
+                vertical_align_problem(value, (name,))
+                if styled and name not in ("data", "scales")
+                else None
+            )
+            if problem:
+                chart = cast("Chart", args[0])
+                at = (
+                    name
+                    if function.__name__ == "__init__"
+                    else f"marks[{len(chart._marks)}].{name}"
+                )
+                raise ChartError(f"{at}{problem[0]}: {problem[1]}", path=f"{at}{problem[0]}")
         return function(*args, **kwargs)
 
     return checked
@@ -833,6 +881,16 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
 _LINE_CHANNELS = ("color", "stroke", "dash", "stroke_width", "opacity")
 _AREA_CHANNELS = ("color", "fill", "stroke", "opacity")
 _BAR_CHANNELS = ("color", "fill", "stroke", "stroke_width", "opacity")
+#: What points take for each of their channel options until round 2's
+#: stream C binds channels, as the engine says (marks/point.ts).
+_POINT_FORMS = {
+    "color": "give a column or a color",
+    "size": "give a column",
+    "fill_opacity": "give a column or a number",
+    "symbol": 'give a shape or {"field": ...}',
+    "encode": "drop encode",
+}
+_POINT_CHANNELS = ("color", "fill", "stroke", "stroke_width", "opacity", "symbol", "size")
 
 
 def _markers(value: Any) -> Any:
@@ -923,7 +981,8 @@ class Chart:
         panels: Sequence[Panel | str] | None = None,
         layout: Grid | Mapping[str, Any] | None = None,
         legend: bool | LegendOptions | dict[str, Any] | None = None,
-        scales: dict[str, Scale | dict[str, Any]] | None = None,
+        scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]]
+        | None = None,
         guides: Sequence[Guide] | None = None,
         padding: float | dict[str, float] | None = None,
         tooltip: bool | TooltipMode | Tooltip | None = True,
@@ -954,6 +1013,8 @@ class Chart:
                 "Chart facet: facet, or facet_row and facet_column, not both; drop one"
             )
         panel_list = [Panel(p) if isinstance(p, str) else p for p in panels or ()]
+        for i, panel in enumerate(panel_list):
+            _check_panel(panel, f"panels[{i}]")
         if panels is not None and not panel_list:
             raise ValueError(f"Chart panels: expected at least one panel; received {panels!r}")
         ids = [p.id for p in panel_list]
@@ -1247,7 +1308,8 @@ class Chart:
         elif id in taken:
             raise ValueError(f"Panel id: {shown(id)} names two panels; give each panel its own id")
         made = Panel(id, title=title, x=x, y=y, y_right=y_right, camera=camera, style=style)
-        made._spec()  # Refuses settings the spec cannot take, here rather than at output.
+        # Refuses settings the spec cannot take, here rather than at output.
+        _check_panel(made, f"panels[{len(self._panels)}]")
         if not self._panels:
             settings = self._settings
             _check_subplot_ranges(
@@ -1262,8 +1324,8 @@ class Chart:
     @_check_method_options
     def line(
         self,
-        x: str | Sequence[str],
-        y: str | Sequence[str],
+        x: str | Sequence[str] | RowPosition,
+        y: str | Sequence[str] | RowPosition,
         *,
         orient: Orient | None = None,
         series: str | Literal[False] | None = None,
@@ -1282,12 +1344,14 @@ class Chart:
         where: Expr | None = None,
         curve: Curve | None = None,
         label: str | None = None,
+        labels: SeriesLabels | Mapping[str, Any] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Lines through x and y columns; several value columns or a series column give
@@ -1315,10 +1379,12 @@ class Chart:
         ``where`` leaves rows out as gaps, meeting the line where the
         condition changes.
         """
+        x, y = self._field("line", "x", x), self._field("line", "y", y)
         table = self._mark_table(data)
         along, x_spec, y_spec = self._oriented(table, "line", x, y, orient)
         _left_along_y("line", along, axis)
         channels = encodings_spec(encode, _LINE_CHANNELS, "line")
+        self._refuse_identity(channels, "line")
         self._check_colors(table, color, channels, "line")
         split = self._series_of(table, series, color, channels, stroke, "stroke", "line")
         values = y_spec if along == "x" else x_spec
@@ -1347,12 +1413,14 @@ class Chart:
                 "where": condition_spec(where, "line where"),
                 "curve": curve,
                 "label": label,
+                "labels": self._series_labels(labels, "line"),
                 "legend": _mark_legend(legend, "line"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "line"),
                 "panel": panel,
                 "clip": _clip(clip, "line"),
                 "tooltip": self._mark_tooltip(table, tooltip, "line"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -1361,13 +1429,13 @@ class Chart:
     @_check_method_options
     def area(
         self,
-        x: str | Sequence[str] | None = None,
-        y: str | Sequence[str] | None = None,
+        x: str | Sequence[str] | RowPosition | None = None,
+        y: str | Sequence[str] | RowPosition | None = None,
         *,
-        y1: str | None = None,
-        y2: str | None = None,
-        x1: str | None = None,
-        x2: str | None = None,
+        y1: str | RowPosition | None = None,
+        y2: str | RowPosition | None = None,
+        x1: str | RowPosition | None = None,
+        x2: str | RowPosition | None = None,
         orient: Orient | None = None,
         series: str | Literal[False] | None = None,
         stack: AreaStack = False,
@@ -1387,12 +1455,14 @@ class Chart:
         where: Expr | None = None,
         curve: Curve | None = None,
         label: str | None = None,
+        labels: SeriesLabels | Mapping[str, Any] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Filled areas: down to zero, stacked, or the band between ``y1`` and ``y2``.
@@ -1434,8 +1504,12 @@ class Chart:
             raise ValueError(
                 f"area stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
+        x, y = self._field("area", "x", x), self._field("area", "y", y)
+        y1, y2 = self._field("area", "y1", y1), self._field("area", "y2", y2)
+        x1, x2 = self._field("area", "x1", x1), self._field("area", "x2", x2)
         table = self._mark_table(data)
         channels = encodings_spec(encode, _AREA_CHANNELS, "area")
+        self._refuse_identity(channels, "area")
         self._check_colors(table, color, channels, "area")
         split = self._series_of(table, series, color, channels, fill, "fill", "area")
         along_x = y1 is not None or y2 is not None
@@ -1529,12 +1603,14 @@ class Chart:
                 "where": condition_spec(where, "area where"),
                 "curve": curve,
                 "label": label,
+                "labels": self._series_labels(labels, "area"),
                 "legend": _mark_legend(legend, "area"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "area"),
                 "panel": panel,
                 "clip": _clip(clip, "area"),
                 "tooltip": self._mark_tooltip(table, tooltip, "area"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -1543,8 +1619,8 @@ class Chart:
     @_check_method_options
     def bar(
         self,
-        x: str | Sequence[str],
-        y: str | Sequence[str],
+        x: str | Sequence[str] | RowPosition,
+        y: str | Sequence[str] | RowPosition,
         *,
         series: str | Literal[False] | None = None,
         stack: BarStack = False,
@@ -1569,6 +1645,9 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         halo: HaloOption | None = None,
+        width: Pixels | Mapping[str, float] | None = None,
+        stroke_sides: Sequence[Side] | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Bars: one band per category of x, or bars centered on number or time x.
@@ -1591,9 +1670,25 @@ class Chart:
         _check_stack(stack, "bar")
         if dodge and stack:
             raise ValueError("bar dodge: stacked bars pile up in one slot; drop dodge or stack")
+        # A width's pixels at their own path, as the spec's validator says.
+        px: Any = (
+            width.value
+            if isinstance(width, Pixels)
+            else width.get("px", 0)
+            if isinstance(width, Mapping)
+            else 0
+        )
+        if not (_finite(px) and px >= 0):
+            raise ChartError(
+                f"bar width.px: expected a number of at least 0; received {shown(px)}",
+                path=self._path("bar", "width.px"),
+            )
         value_labels: BarLabels | None = None
         if labels is not False and labels is not True:
-            value_labels = _built(labels, BarLabels, "bar labels")
+            self._check_label_dict(labels, "bar", "labels", ("content",))
+            value_labels = self._option(
+                "bar labels", lambda: _built(labels, BarLabels, "bar labels")
+            )
             pattern = value_labels.format
             if isinstance(pattern, Mapping) and not {"number", "time"} & set(pattern):
                 _check_format(dict(pattern), "bar labels format", _NUMBER_FORMAT)
@@ -1603,8 +1698,10 @@ class Chart:
             raise ValueError(
                 f"bar stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
+        x, y = self._field("bar", "x", x), self._field("bar", "y", y)
         table = self._mark_table(data)
         channels = encodings_spec(encode, _BAR_CHANNELS, "bar")
+        self._refuse_identity(channels, "bar")
         self._check_colors(table, color, channels, "bar")
         split = self._series_of(table, series, color, channels, fill, "fill", "bar")
         if isinstance(y, str) and self._kind(table, y) == "category":
@@ -1656,6 +1753,11 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "bar"),
                 "tooltip": self._mark_tooltip(table, tooltip, "bar"),
+                "width": self._option("bar width", lambda: length_spec(width, "bar width")),
+                "strokeSides": self._option(
+                    "bar stroke_sides", lambda: _sides(stroke_sides, "bar stroke_sides")
+                ),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -1681,6 +1783,7 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """One tick per observation of exactly one number or time column.
@@ -1733,6 +1836,7 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "rug"),
                 "tooltip": self._mark_tooltip(table, tooltip, "rug"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -1742,12 +1846,12 @@ class Chart:
     def error_bar(
         self,
         *,
-        x: str | None = None,
-        y: str | None = None,
-        x1: str | None = None,
-        x2: str | None = None,
-        y1: str | None = None,
-        y2: str | None = None,
+        x: str | RowPosition | None = None,
+        y: str | RowPosition | None = None,
+        x1: str | RowPosition | None = None,
+        x2: str | RowPosition | None = None,
+        y1: str | RowPosition | None = None,
+        y2: str | RowPosition | None = None,
         x_error: str | None = None,
         y_error: str | None = None,
         series: str | None = None,
@@ -1764,6 +1868,7 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Error bars at each ``x``, from ``y1`` to ``y2`` or ``y`` ± ``y_error``; or, at each
@@ -1786,6 +1891,9 @@ class Chart:
             raise ValueError(
                 'error_bar axis: horizontal error bars have no right axis; drop axis="right"'
             )
+        x, y = self._field("error_bar", "x", x), self._field("error_bar", "y", y)
+        x1, x2 = self._field("error_bar", "x1", x1), self._field("error_bar", "x2", x2)
+        y1, y2 = self._field("error_bar", "y1", y1), self._field("error_bar", "y2", y2)
         table = self._mark_table(data)
         along, other = ("y", "x") if horizontal else ("x", "y")
         position = y if horizontal else x
@@ -1853,6 +1961,7 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "error_bar"),
                 "tooltip": self._mark_tooltip(table, tooltip, "error_bar"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -1861,24 +1970,25 @@ class Chart:
     @_check_method_options
     def point(
         self,
-        x: str,
-        y: str,
+        x: str | RowPosition,
+        y: str | RowPosition,
         *,
         series: str | Literal[False] | None = None,
         animation_key: str | None = None,
         data: Any = None,
         radius: float | None = None,
-        size: str | None = None,
+        size: str | Channel | Mapping[str, Any] | Expr | None = None,
         radius_range: tuple[float, float] | None = None,
         fill: str | None = None,
-        fill_opacity: float | str | None = None,
+        fill_opacity: float | str | Channel | Mapping[str, Any] | Expr | None = None,
         stroke: str | None = None,
         stroke_width: float | None = None,
-        color: str | None = None,
+        color: str | Channel | Mapping[str, Any] | Expr | None = None,
         colors: str | Sequence[str] | None = None,
         color_domain: tuple[float, float] | None = None,
         color_midpoint: float | None = None,
-        symbol: str | Mapping[str, str] | None = None,
+        symbol: str | Channel | Mapping[str, Any] | Expr | None = None,
+        encode: Encodings | Mapping[str, Any] | None = None,
         sampling: Literal["none", "pixel"] | None = None,
         dodge: bool = False,
         jitter: float | Jitter | None = None,
@@ -1890,6 +2000,7 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Scatter points.
@@ -1925,6 +2036,53 @@ class Chart:
         values (a beeswarm), laid out again as the chart resizes and zooms,
         with points that do not fit at the band's edges.
         """
+        problem = _point_size_problem(radius, size, radius_range, encode)
+        if problem:
+            raise ChartError(problem[1], path=self._path("point", problem[0]))
+        x, y = self._field("point", "x", x), self._field("point", "y", y)
+        # Round 2 binds points' channels from stream C on (_pending.py), as
+        # the engine does: any channel form of color, size, and fill_opacity;
+        # a symbol's but a column's alone (hg.Channel(field=...) or
+        # {"field": ...}, as points always took). Other dicts are checked as before.
+        forms = {"field", "scale", "value", "series", "condition"}
+        if isinstance(symbol, Channel) and symbol.field is not None and symbol.scale is None:
+            symbol = {"field": symbol.field}
+        for option, value in (
+            ("color", color),
+            ("size", size),
+            ("fill_opacity", fill_opacity),
+            ("symbol", symbol),
+            ("encode", encode),
+        ):
+            given = forms - {"field"} if option == "symbol" else forms
+            if isinstance(value, (Channel, Encodings, Expr)) or (
+                isinstance(value, Mapping) and (option == "encode" or bool(set(value) & given))
+            ):
+                # Well formed first, as the engine checks a spec before what it draws.
+                if isinstance(value, Mapping):
+                    for at, channel in (
+                        [(f"encode.{_camel(name)}", item) for name, item in value.items()]
+                        if option == "encode"
+                        else [(_camel(option), value)]
+                    ):
+                        self._check_channel_dict(channel, "point", at)
+
+                def check(option: str = option, value: Any = value) -> Any:
+                    if option != "encode":
+                        return {_camel(option): channel_spec(value, f"point {option}")}
+                    return encodings_spec(value, _POINT_CHANNELS, "point")
+
+                self._check_outputs(
+                    self._option(f"point {option}", check),
+                    "point",
+                    "encode." if option == "encode" else "",
+                )
+                _pending.refuse(
+                    f"point {option}", "C", _POINT_FORMS[option], self._path("point", option)
+                )
+        color, size = cast("str | None", color), cast("str | None", size)
+        fill_opacity = cast("float | str | None", fill_opacity)
+        symbol = cast("str | Mapping[str, str] | None", symbol)
         table = self._mark_table(data)
         self._require(table, x, (*_NUMERIC, "category"), "point x")
         self._require(table, y, (*_NUMERIC, "category"), "point y")
@@ -1999,6 +2157,7 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "point"),
                 "tooltip": self._mark_tooltip(table, tooltip, "point"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -2032,6 +2191,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Counts of a number or time field in bins: of ``x`` (vertical bars) or
@@ -2113,6 +2273,7 @@ class Chart:
                     "facet": _mark_facet(facet, "histogram"),
                     "panel": panel,
                     "clip": _clip(clip, "histogram"),
+                    "zIndex": z_index,
                     "id": id,
                 },
                 table,
@@ -2198,6 +2359,7 @@ class Chart:
                 "facet": _mark_facet(facet, "histogram"),
                 "panel": panel,
                 "clip": _clip(clip, "histogram"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -2223,6 +2385,7 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Open-high-low-close candles at each ``x``, as for prices.
@@ -2258,6 +2421,7 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "candlestick"),
                 "tooltip": self._mark_tooltip(table, tooltip, "candlestick"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -2431,6 +2595,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Box plots of a number column's values per category.
@@ -2512,6 +2677,7 @@ class Chart:
                 "outliers": outliers,
                 "legend": _mark_legend(legend, "boxplot"),
                 "clip": _clip(clip, "boxplot"),
+                "zIndex": z_index,
             },
             x,
             y,
@@ -2547,6 +2713,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Letter-value ("boxen") plots of a number column's values per category.
@@ -2606,6 +2773,7 @@ class Chart:
                 "outliers": outliers,
                 "legend": _mark_legend(legend, "boxen"),
                 "clip": _clip(clip, "boxen"),
+                "zIndex": z_index,
             },
             x,
             y,
@@ -2639,6 +2807,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Violins of a number column's values per category.
@@ -2682,6 +2851,7 @@ class Chart:
                 "inner": inner,
                 "legend": _mark_legend(legend, "violin"),
                 "clip": _clip(clip, "violin"),
+                "zIndex": z_index,
             },
             x,
             y,
@@ -3647,6 +3817,7 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """A grid of cells colored by the numeric column ``color``: cells at ``x`` and ``y``, or the
@@ -3725,6 +3896,7 @@ class Chart:
             "panel": panel,
             "clip": _clip(clip, "heatmap"),
             "tooltip": self._mark_tooltip(table, tooltip, "heatmap"),
+            "zIndex": z_index,
             "id": id,
         }
         if date is not None:
@@ -3868,6 +4040,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Contours of a field sampled on a grid: lines where it crosses each
@@ -3954,6 +4127,7 @@ class Chart:
                 "facet": _mark_facet(facet, "contour"),
                 "panel": panel,
                 "clip": _clip(clip, "contour"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -3975,6 +4149,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """A SciPy-layout linkage tree with leaves on category bands.
@@ -4059,6 +4234,7 @@ class Chart:
                 "facet": _mark_facet(facet, "dendrogram"),
                 "panel": panel,
                 "clip": _clip(clip, "dendrogram"),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -4082,6 +4258,8 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
+        legend: bool | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Reference lines: horizontal at ``y`` or vertical at ``x``.
@@ -4098,7 +4276,8 @@ class Chart:
         """
         if (x is None) == (y is None):
             raise ValueError("rule: needs exactly one of x and y")
-        label_json = label_spec(label, "rule")
+        self._check_label_dict(label, "rule", "label", ("content",))
+        label_json = self._option("rule label", lambda: label_spec(label, "rule"))
         if span is not None and (not isinstance(span, (tuple, list)) or len(span) != 2):
             raise ValueError(
                 "rule span: expected two places, such as (hg.Fraction(0.25), 10); "
@@ -4126,6 +4305,8 @@ class Chart:
                 "facet": _mark_facet(facet, "rule"),
                 "panel": panel,
                 "clip": _clip(clip, "rule"),
+                "legend": self._option("rule legend", lambda: _flag(legend, "rule legend")),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -4143,12 +4324,17 @@ class Chart:
         data: Any = None,
         fill: str | None = None,
         fill_opacity: float | None = None,
+        stroke: str | None = None,
+        stroke_width: float | None = None,
+        stroke_sides: Sequence[Side] | None = None,
         contribute_domain: bool | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         clip: Clip | None = None,
         halo: HaloOption | None = None,
+        legend: bool | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Shaded regions: from ``x1`` to ``x2``, from ``y1`` to ``y2``, or both.
@@ -4167,7 +4353,20 @@ class Chart:
                 raise ValueError(f"region {missing}: needs both {name}1 and {name}2, or neither")
         if x1 is None and y1 is None:
             raise ValueError("region: needs x1 and x2, y1 and y2, or both")
-        label_json = label_spec(label, "region")
+        # Outlines are well formed before they are refused (_pending.py), as
+        # the engine checks a spec before what it draws.
+        if stroke is not None and not isinstance(stroke, str):
+            raise ChartError(
+                f"region stroke: expected a color; received {shown(stroke)}",
+                path=self._path("region", "stroke"),
+            )
+        if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
+            raise ChartError(
+                f"region stroke_width: expected 0 or more pixels; received {shown(stroke_width)}",
+                path=self._path("region", "stroke_width"),
+            )
+        self._check_label_dict(label, "region", "label", ("content",))
+        label_json = self._option("region label", lambda: label_spec(label, "region"))
         table = self._annotation_table(
             data, {"x1": x1, "x2": x2, "y1": y1, "y2": y2}, label_json, "region"
         )
@@ -4181,12 +4380,19 @@ class Chart:
                 "y2": coordinate_spec(y2, "region y2"),
                 "fill": fill,
                 "fillOpacity": fill_opacity,
+                "stroke": stroke,
+                "strokeWidth": stroke_width,
+                "strokeSides": self._option(
+                    "region stroke_sides", lambda: _sides(stroke_sides, "region stroke_sides")
+                ),
                 "label": label_json,
                 "contributeDomain": _flag(contribute_domain, "region contribute_domain"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "region"),
                 "panel": panel,
                 "clip": _clip(clip, "region"),
+                "legend": self._option("region legend", lambda: _flag(legend, "region legend")),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -4200,6 +4406,7 @@ class Chart:
         x: Coordinate | None = None,
         y: Coordinate | None = None,
         at: Position | None = None,
+        from_: MarkAnchor | Mapping[str, Any] | None = None,
         data: Any = None,
         overlap: Literal["show", "hide", "move"] | None = None,
         style: MarkStyle | Mapping[str, Any] | None = None,
@@ -4209,6 +4416,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         halo: HaloOption | None = None,
+        legend: bool | None = None,
+        z_index: float | None = None,
         id: str | None = None,
     ) -> Chart:
         """Text ``label`` at ``(x, y)``, or at ``at``, an ``hg.Position``.
@@ -4230,22 +4439,42 @@ class Chart:
             raise ValueError(
                 f'text overlap: expected "show", "hide", or "move"; received {shown(overlap)}'
             )
+        anchor: dict[str, Any] | None = None
+        if from_ is not None:
+            if at is not None or x is not None or y is not None:
+                raise ChartError(
+                    "text from_: a place on another mark, or at, or x and y; one of them",
+                    path=f"marks[{len(self._marks)}]",
+                )
+            self._check_label_dict(from_, "text", "from_", ("mark", "at", "edge"))
+            anchor = self._option(
+                "text from_", lambda: _built(from_, MarkAnchor, "text from_")._spec()
+            )
+            _pending.refuse("text from_", "C", "give at, or x and y", self._path("text", "from_"))
         if at is not None and (x is not None or y is not None):
             raise ValueError(
                 "text at: a place, or its short forms x and y, not both; drop at or x and y"
             )
-        if at is None and (x is None or y is None):
+        if from_ is None and at is None and (x is None or y is None):
             raise ValueError("text: needs a place; give x and y, or at=hg.Position(x=..., y=...)")
         if at is not None:
             at = _built(at, Position, "text at")
         if label is None:
             raise ValueError("text label: needs text or an hg.Label; give label")
-        label_json = label_spec(label, "text", places=False)
-        places = {"x": at.x, "y": at.y} if at is not None else {"x": x, "y": y}
+        self._check_label_dict(label, "text", "label", ("content",))
+        label_json = self._option("text label", lambda: label_spec(label, "text", places=False))
+        places = (
+            {"x": at.x, "y": at.y}
+            if at is not None
+            else {}
+            if from_ is not None
+            else {"x": x, "y": y}
+        )
         table = self._annotation_table(data, places, label_json, "text")
         return self._add(
             {
                 "type": "text",
+                "from": anchor,
                 "halo": _halo(halo, "text"),
                 "x": coordinate_spec(x, "text x"),
                 "y": coordinate_spec(y, "text y"),
@@ -4258,6 +4487,8 @@ class Chart:
                 "facet": _mark_facet(facet, "text"),
                 "panel": panel,
                 "clip": _clip(clip, "text"),
+                "legend": self._option("text legend", lambda: _flag(legend, "text legend")),
+                "zIndex": z_index,
                 "id": id,
             },
             table,
@@ -4269,7 +4500,7 @@ class Chart:
         """The portable chart spec and the binary buffers its columns reference."""
         self._check_spec()
         columns = self._used_columns()
-        return assemble_spec(
+        spec, buffers = assemble_spec(
             self._spec_options(),
             self._layout_spec(),
             columns,
@@ -4282,6 +4513,11 @@ class Chart:
                 if table_name(table) in columns and table_name(origin) in columns
             },
         )
+        _check_axes(spec)
+        if any(mark["type"] in _MARKS_3D for mark in spec["marks"]):
+            _refuse_depth(spec)
+        refuse_chart(spec)
+        return spec, buffers
 
     def _layouts(self) -> list[dict[str, Any]]:
         """The specs of the chart's layout marks, in order."""
@@ -4344,7 +4580,11 @@ class Chart:
         for index, (mark, _) in enumerate(self._marks):
             for name, channel in (mark.get("encode") or {}).items():
                 scale = channel.get("scale") if isinstance(channel, dict) else None
-                if scale is None or scale in declared or scale in ("color", "symbol", "dash"):
+                if (
+                    not isinstance(scale, str)
+                    or scale in declared
+                    or scale in ("color", "symbol", "dash")
+                ):
                     continue
                 named = [n for n in declared if n not in ("x", "y", "yRight")]
                 choices = f", or name one of {listed(named)}" if named else ""
@@ -4884,6 +5124,25 @@ class Chart:
         name = option or rest.replace(" ", "_")
         return name if mark == "Chart" else f"marks[{len(self._marks)}].{name}"
 
+    def _option(self, role: str, make: Callable[[], _T]) -> _T:
+        """``make()``, refusing its value as a ChartError at the path of the
+        option ``role`` names (``"bar width"``)."""
+        try:
+            return make()
+        except ChartError as error:
+            if error.path is not None:
+                raise
+            raise ChartError(str(error), code=error.code, path=self._path(role)) from None
+        except (ValueError, TypeError) as error:
+            raise ChartError(str(error), code="invalid-option", path=self._path(role)) from None
+
+    def _field(self, mark: str, name: str, value: _T | RowPosition) -> _T:
+        """A position given as a column (or columns), refusing a coordinate,
+        which round 2's stream R places rows by (see _pending.py)."""
+        if isinstance(value, (Fraction, Pixels, DataPosition)):
+            _pending.refuse(f"{mark} {name}", "R", "give a column", self._path(mark, name))
+        return cast("_T", value)
+
     def _single_or_series(
         self, fields: str | list[str], series: str | None, role: str, inferred: bool = False
     ) -> None:
@@ -4962,6 +5221,128 @@ class Chart:
             )
         return color
 
+    def _check_annotation_scales(self, spec: Mapping[str, Any]) -> None:
+        """Refuses an annotation's place on a scale other than its axis' own,
+        as the engine does: y_right needs axis="right", and position scales
+        of the chart's own wait for round 2's stream R (_pending.py)."""
+        mark = spec["type"]
+        own = {"x": "x", "y": "yRight" if spec.get("axis") == "right" else "y"}
+        # A rule's span lies across it.
+        across = "y" if mark == "rule" and spec.get("x") is not None else "x"
+        places = {name: spec.get(name) for name in ("x", "y", "x1", "x2", "y1", "y2")}
+        places.update({f"span[{i}]": place for i, place in enumerate(spec.get("span") or ())})
+        places.update({f"at.{name}": place for name, place in (spec.get("at") or {}).items()})
+        for name, place in places.items():
+            scale = place.get("scale") if isinstance(place, Mapping) else None
+            letter = name.removeprefix("at.")[0]
+            axis = letter if letter in own else across
+            if scale is None or scale == own[axis]:
+                continue
+            path = self._path(mark, f"{name}.scale")
+            if scale == "yRight":
+                raise ChartError(
+                    f'{mark} {name}.scale: "y_right" is not this {axis} axis\' scale; '
+                    'give axis="right"',
+                    path=path,
+                )
+            _pending.refuse(f"{mark} {name}.scale", "R", "drop scale", path)
+
+    def _series_labels(self, labels: Any, mark: str) -> Any:
+        """A line's or area's ``labels`` as the spec takes them, refused at
+        their own paths: an area's band labels follow one ``edge``; a
+        line's follow the line."""
+        if labels is None:
+            return None
+        edge = labels.get("edge") if isinstance(labels, Mapping) else getattr(labels, "edge", None)
+        if mark == "line" and edge is not None:
+            raise ChartError(
+                "line labels.edge: a line's labels follow the line; drop edge",
+                path=self._path("line", "labels.edge"),
+            )
+        self._check_label_dict(labels, mark, "labels", ("at", "edge", "content"))
+        return self._option(
+            f"{mark} labels", lambda: _built(labels, SeriesLabels, f"{mark} labels")._spec()
+        )
+
+    def _check_label_dict(self, value: Any, mark: str, option: str, keys: tuple[str, ...]) -> None:
+        """Refuses a label option given as a dict (``labels``, ``label``,
+        ``from_``) whose ``keys`` are malformed, at their own paths, as the
+        engine's validator does, before the dict makes its class."""
+        problem = label_dict_problem(value, keys)
+        if problem:
+            path = self._path(mark, f"{option}.{problem[0]}")
+            raise ChartError(f"{mark} {path.partition('.')[2]}: {problem[1]}", path=path)
+
+    def _check_channel_dict(self, channel: Any, mark: str, at: str) -> None:
+        """Refuses a channel given as a dict whose column name or constant is
+        not one, at its own path (``at`` as the spec names it, ``encode.fill``),
+        as the engine's validator does, before the dict makes an ``hg.Channel``."""
+        if not isinstance(channel, Mapping):
+            return
+
+        def refuse(key: str, expected: str) -> None:
+            path = self._path(mark, python_path(f"{at}.{key}"))
+            raise ChartError(
+                f"{mark} {path.partition('.')[2]}: expected {expected}; "
+                f"received {shown(channel[key])}",
+                path=path,
+            )
+
+        if "field" in channel and not (isinstance(channel["field"], str) and channel["field"]):
+            refuse("field", "a column's name")
+        scale = channel.get("scale")
+        if "scale" in channel and not (
+            isinstance(scale, (str, IdentityScale))
+            or (isinstance(scale, Mapping) and dict(scale) == {"type": "identity"})
+        ):
+            refuse("scale", "a scale's name, or hg.IdentityScale()")
+        if "value" in channel:
+            # Text is checked as a color as it is drawn, as in the engine.
+            problem = output_problem(at.rpartition(".")[2], channel["value"], lambda text: True)
+            if problem:
+                refuse("value", problem)
+
+    def _check_outputs(self, channels: Mapping[str, Any], mark: str, prefix: str) -> None:
+        """Refuses channels' constants and conditions' branches that are not
+        what each channel draws, at their paths, as the engine does."""
+        for name, channel in channels.items():
+            if not isinstance(channel, Mapping):
+                continue
+            branches = (
+                [("value", channel["value"])]
+                if "value" in channel
+                else [
+                    ("condition.then", channel["condition"]["then"]),
+                    ("condition.otherwise", channel["condition"]["otherwise"]),
+                ]
+                if "condition" in channel
+                else []
+            )
+            for key, value in branches:
+                # Text is checked as a color as it is drawn, as in the engine,
+                # whose validator takes any: points' channels from stream C on.
+                problem = output_problem(name, value, lambda text: True)
+                if problem:
+                    path = self._path(mark, python_path(f"{prefix}{name}.{key}"))
+                    raise ChartError(
+                        f"{mark} {path.partition('.')[2]}: expected {problem}; "
+                        f"received {shown(value)}",
+                        path=path,
+                    )
+
+    def _refuse_identity(self, channels: Mapping[str, Any] | None, mark: str) -> None:
+        """Refuses identity scales on channels, which round 2 binds from
+        stream C on (_pending.py), before their fields are checked."""
+        for name, channel in (channels or {}).items():
+            if isinstance(channel, Mapping) and isinstance(channel.get("scale"), Mapping):
+                path = self._path(mark, python_path(f"encode.{name}.scale"))
+                _pending.refuse(
+                    f"{mark} {path.partition('.')[2]}",
+                    "C",
+                    "name one of the chart's scales, or drop scale",
+                    path,
+                )
+
     def _check_colors(
         self, table: int, color: str | None, channels: dict[str, Any] | None, mark: str
     ) -> None:
@@ -4992,7 +5373,14 @@ class Chart:
             field = channel.get("field") if isinstance(channel, dict) else None
             if field is not None:
                 option = python_path(f"encode.{name}.field")
-                self._require(table, field, ("category",), f"{mark} {option}")
+                # Through an identity scale (its own, or one of the chart's), a
+                # number field's values are widths and opacities.
+                scale = channel.get("scale")
+                identity = isinstance(scale, Mapping) or (
+                    (self._options.get("scales") or {}).get(scale, {}).get("type") == "identity"
+                )
+                kinds = ("category", "number") if identity else ("category",)
+                self._require(table, field, kinds, f"{mark} {option}")
 
     def _check_series_color(
         self,
@@ -5197,6 +5585,18 @@ class Chart:
         return table
 
     def _add(self, spec: dict[str, Any], table: int | None) -> Chart:
+        z = spec.get("zIndex")
+        if z is not None and (
+            isinstance(z, bool) or not isinstance(z, numbers.Real) or not math.isfinite(z)
+        ):
+            raise ChartError(
+                f"{_method(spec['type'])} z_index: expected a finite number, where the mark is "
+                f"painted among its panel's marks; received {shown(z)}",
+                path=f"marks[{len(self._marks)}].z_index",
+            )
+        refuse_mark(spec, _method(spec["type"]), f"marks[{len(self._marks)}]")
+        if spec["type"] in ("rule", "region", "text"):
+            self._check_annotation_scales(spec)
         kinds = [mark["type"] for mark, _ in self._marks]
         layouts = [kind for kind in kinds if kind in _LAYOUT_MARKS]
         # The layers of a map, and of a 3D chart, share their chart with each other only.
@@ -5968,17 +6368,31 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
     # Dragging moves a network's nodes when asked to.
     if settings.get("drag"):
         interaction["drag"] = True
+    # Axes', scales', and guides' new settings at their own paths, then each as a whole.
+    for name in ("x", "y", "y_right", "z"):
+        _check_axis_dict(settings.get(name), name)
+    _check_scale_dicts(settings.get("scales"))
+    guides = settings.get("guides")
+    placed = [("legend", settings["legend"])] + (
+        [(f"guides[{i}]", guide) for i, guide in enumerate(guides)]
+        if isinstance(guides, Sequence) and not isinstance(guides, (str, bytes))
+        else []
+    )
+    for at, guide in placed:
+        problem = guide_problem(guide)
+        if problem:
+            raise ChartError(f"{at}.{problem[0]}: {problem[1]}", path=f"{at}.{problem[0]}")
     options = {
         "title": title_spec(settings["title"], "Chart title", placed=True),
         "description": settings["description"],
         "width": settings["width"],
         "height": settings["height"],
-        "x": _axis(settings["x"]),
-        "y": _axis(settings["y"], "Chart y"),
-        "yRight": _axis(settings["y_right"], "Chart y_right"),
-        "legend": legend_spec(settings["legend"]),
-        "scales": scales_spec(settings.get("scales")),
-        "guides": guides_spec(settings.get("guides")),
+        "x": located("x", lambda: _axis(settings["x"])),
+        "y": located("y", lambda: _axis(settings["y"], "Chart y")),
+        "yRight": located("y_right", lambda: _axis(settings["y_right"], "Chart y_right")),
+        "legend": located("legend", lambda: legend_spec(settings["legend"])),
+        "scales": located("scales", lambda: scales_spec(settings.get("scales"))),
+        "guides": located("guides", lambda: guides_spec(settings.get("guides"))),
         "padding": insets(settings.get("padding"), "Chart padding"),
         "tooltip": tooltip
         if tooltip is None or isinstance(tooltip, bool)
@@ -5992,7 +6406,7 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
         "locale": settings["locale"],
         "timeZone": settings["time_zone"],
         "projection": _projection(settings.get("projection")),
-        "z": _axis(settings.get("z"), "Chart z"),
+        "z": located("z", lambda: _axis(settings.get("z"), "Chart z")),
         "camera": _camera(settings.get("camera")),
         "boxAspect": _box_aspect(settings.get("box_aspect")),
         "navigator": _navigator(settings.get("navigator")),
@@ -6116,6 +6530,29 @@ def _mark_facet(facet: str | None, mark: str) -> str | None:
     return facet
 
 
+def _point_size_problem(
+    radius: Any, size: Any, radius_range: Any, encode: Any
+) -> tuple[str, str] | None:
+    """Why a point's size is in no single form, and the option to blame, as
+    the engine's validator checks before what it draws: a size channel
+    (``size`` other than a column's name, or ``encode``'s) gives points'
+    areas on its own scale, a radius one size for all."""
+    if isinstance(encode, Encodings):
+        encoded = encode.size is not None
+    else:
+        encoded = isinstance(encode, Mapping) and encode.get("size") is not None
+    if (encoded or not isinstance(size, (str, type(None)))) and radius_range is not None:
+        return "radius_range", (
+            "point radius_range: a size channel's scale gives its areas; drop radius_range"
+        )
+    if encoded and (radius is not None or size is not None):
+        given = "a constant radius" if radius is not None else "size"
+        return "encode.size", f"point encode.size: a size channel, and {given} too; drop one"
+    if radius is not None and size is not None:
+        return "radius", "point radius: a constant radius or a size column, not both; drop one"
+    return None
+
+
 def _check_size(radius: float | None, size: str | None, mark: str) -> None:
     """Refuses a radius that is not a positive number of pixels, or a radius
     with a size column."""
@@ -6219,6 +6656,66 @@ def _column_spec(column: Column, buffers: list[bytes]) -> dict[str, Any]:
         return {"type": "category", "codes": index, "dictionary": list(column.dictionary)}
     dtype = "float32" if column.values.dtype.itemsize == 4 else "float64"
     return {"type": column.kind, "dtype": dtype, "buffer": index}
+
+
+def _check_axis_dict(axis: Any, at: str) -> None:
+    """Refuses an axis' settings given as a dict whose ``padding`` or grid
+    lines' ``z_index`` is malformed, at its own path (``x.padding``), as the
+    engine's validator does, before the dict makes an ``hg.AxisOptions``."""
+    if not isinstance(axis, Mapping):
+        return
+    padding = axis.get("padding")
+    px: Any = padding.get("px") if isinstance(padding, Mapping) else None
+    if isinstance(padding, Mapping) and not (_finite(px) and px >= 0):
+        raise ChartError(
+            f"{at}.padding.px: expected a number of at least 0; received {shown(px)}",
+            path=f"{at}.padding.px",
+        )
+    if padding is not None:
+        located(f"{at}.padding", lambda: padding_spec(padding, f"{at}.padding"))
+    grid = axis.get("grid")
+    z = grid.get("z_index") if isinstance(grid, Mapping) else None
+    if z is not None and not _finite(z):
+        raise ChartError(
+            f"{at}.grid.z_index: expected a finite number; received {shown(z)}",
+            path=f"{at}.grid.z_index",
+        )
+
+
+def _check_panel(panel: Any, at: str) -> None:
+    """Refuses a panel's settings the spec cannot take, at ``at``
+    (``panels[1]``): new ones at their own paths (text styles'
+    ``vertical_align``, axes' ``padding`` and grid lines), then the rest at
+    the panel."""
+    problem = vertical_align_problem(panel, ())
+    if problem:
+        raise ChartError(f"{at}{problem[0]}: {problem[1]}", path=f"{at}{problem[0]}")
+    for name in ("x", "y", "y_right"):
+        _check_axis_dict(getattr(panel, name, None), f"{at}.{name}")
+    if isinstance(panel, Panel):
+        located(at, panel._spec)
+
+
+def _check_scale_dicts(scales: Any) -> None:
+    """Refuses scales given as dicts whose ``padding`` or ``scope`` is
+    malformed, at its own path (``scales["p.99"].padding``), as
+    ``_check_axis_dict`` does."""
+    if not isinstance(scales, Mapping):
+        return
+    for name, scale in scales.items():
+        at = key_path("scales", str(name))
+        _check_axis_dict(scale, at)
+        scope = scale.get("scope") if isinstance(scale, Mapping) else None
+        if scope is None:
+            continue
+        # Positions take layouts' rows and columns too; categories a chart or a panel.
+        if name in ("x", "y", "y_right") or scale.get("type") in ("linear", "log", "time"):
+            located(f"{at}.scope", functools.partial(scope_spec, scope, f"{at}.scope"))
+        elif scope not in ("chart", "panel"):
+            raise ChartError(
+                f'{at}.scope: expected "chart" or "panel"; received {shown(scope)}',
+                path=f"{at}.scope",
+            )
 
 
 def _axis(
@@ -6542,6 +7039,80 @@ def _range(
     return [low, high]
 
 
+_SIDES = ("top", "right", "bottom", "left")
+
+
+def _check_axes(spec: Mapping[str, Any]) -> None:
+    """Refuses an axis guide of a scale that places no values: x, y, and
+    y_right do, and the chart's own linear, log, and time scales."""
+    scales = spec.get("scales") or {}
+    for i, guide in enumerate(spec.get("guides") or ()):
+        scale = guide.get("scale")
+        if guide.get("type") != "axis" or scale in ("x", "y", "yRight"):
+            continue
+        if (scales.get(scale) or {}).get("type") not in ("linear", "log", "time"):
+            raise ChartError(
+                f'guides[{i}].scale: expected "x", "y", "y_right", or a position scale of the '
+                f"chart's scales; received {shown(scale)}",
+                path=f"guides[{i}].scale",
+            )
+
+
+def _refuse_depth(spec: Mapping[str, Any]) -> None:
+    """Refuses for good what a 3D box's axes cannot do: it fits its data, and
+    draws its grid lines by depth, as the engine's 3D charts say. A chart's
+    axes are its box's when it has no panels (z always is); a panel's are
+    when its marks are 3D."""
+    boxes = [mark.get("panel") for mark in spec["marks"] if mark["type"] in _MARKS_3D]
+    panels = spec.get("panels")
+    scales = spec.get("scales") or {}
+    axes = (
+        [("z", spec.get("z"))]
+        if panels
+        else [
+            ("scales.x", scales.get("x")),
+            ("scales.y", scales.get("y")),
+            *((name, spec.get(name)) for name in ("x", "y", "z")),
+        ]
+    )
+    for i, panel in enumerate(panels or ()):
+        if panel.get("id") in boxes:
+            axes += [(f"panels[{i}].{name}", panel.get(name)) for name in ("x", "y", "z")]
+    for at, axis in axes:
+        if not isinstance(axis, Mapping):
+            continue
+        grid = axis.get("grid")
+        if isinstance(grid, Mapping) and "zIndex" in grid:
+            path = f"{at}.grid.z_index"
+            raise ChartError(
+                f"{path}: a 3D box draws its grid lines by depth, not in an order of their own; "
+                "drop z_index",
+                code="unsupported",
+                path=path,
+            )
+        if axis.get("padding") not in (None, "auto"):
+            path = f"{at}.padding"
+            raise ChartError(
+                f"{path}: a 3D box fits its data, padded as it is drawn; drop padding",
+                code="unsupported",
+                path=path,
+            )
+
+
+def _sides(value: Any, role: str) -> list[str] | None:
+    """Sides of a rectangle, each once, such as those its outline draws."""
+    if value is None:
+        return None
+    if isinstance(value, str) or not isinstance(value, Sequence) or len(set(value)) != len(value):
+        raise ValueError(
+            f'{role}: expected sides, each once, such as ["top", "bottom"]; received {shown(value)}'
+        )
+    for side in value:
+        if side not in _SIDES:
+            raise ValueError(f"{role}: expected {listed(_SIDES)}; received {shown(side)}")
+    return list(value)
+
+
 def _mark_legend(legend: Any, mark: str) -> Literal[False] | None:
     """A mark's ``legend``: ``False`` leaves it out of the chart's legends."""
     if legend is not None and legend is not False:
@@ -6760,8 +7331,8 @@ def _chart_of(data: Any, options: HelperOptions) -> Chart:
 @helper
 def line(
     data: Any,
-    x: str | Sequence[str],
-    y: str | Sequence[str],
+    x: str | Sequence[str] | RowPosition,
+    y: str | Sequence[str] | RowPosition,
     *,
     orient: Orient | None = None,
     series: str | Literal[False] | None = None,
@@ -6779,9 +7350,11 @@ def line(
     where: Expr | None = None,
     curve: Curve | None = None,
     label: str | None = None,
+    labels: SeriesLabels | Mapping[str, Any] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -6807,9 +7380,11 @@ def line(
         where=where,
         curve=curve,
         label=label,
+        labels=labels,
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         tooltip=tooltip,
         id=id,
     )
@@ -6818,13 +7393,13 @@ def line(
 @helper
 def area(
     data: Any,
-    x: str | Sequence[str] | None = None,
-    y: str | Sequence[str] | None = None,
+    x: str | Sequence[str] | RowPosition | None = None,
+    y: str | Sequence[str] | RowPosition | None = None,
     *,
-    y1: str | None = None,
-    y2: str | None = None,
-    x1: str | None = None,
-    x2: str | None = None,
+    y1: str | RowPosition | None = None,
+    y2: str | RowPosition | None = None,
+    x1: str | RowPosition | None = None,
+    x2: str | RowPosition | None = None,
     orient: Orient | None = None,
     series: str | Literal[False] | None = None,
     stack: AreaStack = False,
@@ -6843,9 +7418,11 @@ def area(
     where: Expr | None = None,
     curve: Curve | None = None,
     label: str | None = None,
+    labels: SeriesLabels | Mapping[str, Any] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -6883,9 +7460,11 @@ def area(
         where=where,
         curve=curve,
         label=label,
+        labels=labels,
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         tooltip=tooltip,
         id=id,
     )
@@ -6894,8 +7473,8 @@ def area(
 @helper
 def bar(
     data: Any,
-    x: str | Sequence[str],
-    y: str | Sequence[str],
+    x: str | Sequence[str] | RowPosition,
+    y: str | Sequence[str] | RowPosition,
     *,
     series: str | Literal[False] | None = None,
     stack: BarStack = False,
@@ -6916,6 +7495,8 @@ def bar(
     panel: str | None = None,
     clip: Clip | None = None,
     halo: HaloOption | None = None,
+    stroke_sides: Sequence[Side] | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -6945,6 +7526,8 @@ def bar(
         clip=clip,
         tooltip=tooltip,
         halo=halo,
+        stroke_sides=stroke_sides,
+        z_index=z_index,
         id=id,
     )
 
@@ -6952,23 +7535,24 @@ def bar(
 @helper
 def scatter(
     data: Any,
-    x: str,
-    y: str,
+    x: str | RowPosition,
+    y: str | RowPosition,
     *,
     series: str | Literal[False] | None = None,
     animation_key: str | None = None,
     radius: float | None = None,
-    size: str | None = None,
+    size: str | Channel | Mapping[str, Any] | Expr | None = None,
     radius_range: tuple[float, float] | None = None,
     fill: str | None = None,
-    fill_opacity: float | str | None = None,
+    fill_opacity: float | str | Channel | Mapping[str, Any] | Expr | None = None,
     stroke: str | None = None,
     stroke_width: float | None = None,
-    color: str | None = None,
+    color: str | Channel | Mapping[str, Any] | Expr | None = None,
     colors: str | Sequence[str] | None = None,
     color_domain: tuple[float, float] | None = None,
     color_midpoint: float | None = None,
-    symbol: str | Mapping[str, str] | None = None,
+    symbol: str | Channel | Mapping[str, Any] | Expr | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
     sampling: Literal["none", "pixel"] | None = None,
     dodge: bool = False,
     jitter: float | Jitter | None = None,
@@ -6977,6 +7561,7 @@ def scatter(
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7000,6 +7585,7 @@ def scatter(
         color_domain=color_domain,
         color_midpoint=color_midpoint,
         symbol=symbol,
+        encode=encode,
         sampling=sampling,
         dodge=dodge,
         jitter=jitter,
@@ -7008,6 +7594,7 @@ def scatter(
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         tooltip=tooltip,
         id=id,
     )
@@ -7163,6 +7750,7 @@ def heatmap(
     label: str | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7192,6 +7780,7 @@ def heatmap(
         label=label,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         tooltip=tooltip,
         id=id,
     )
@@ -7215,6 +7804,7 @@ def contour(
     label: str | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7235,6 +7825,7 @@ def contour(
         label=label,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         id=id,
     )
 
@@ -7341,6 +7932,7 @@ def histogram(
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7368,6 +7960,7 @@ def histogram(
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         id=id,
     )
 
@@ -7472,6 +8065,7 @@ def boxplot(
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7496,6 +8090,7 @@ def boxplot(
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         id=id,
     )
 
@@ -7560,6 +8155,7 @@ def violin(
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7578,6 +8174,7 @@ def violin(
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         id=id,
     )
 
@@ -7849,6 +8446,7 @@ def candlestick(
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -7868,6 +8466,7 @@ def candlestick(
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         tooltip=tooltip,
         id=id,
     )

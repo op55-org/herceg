@@ -178,6 +178,18 @@ def test_widgets_keep_panels_legends_through_updates():
     assert panels_legends() == ["latency"]
 
 
+def test_insets_go_at_one_place():
+    chart = hg.Chart(DATA)
+    [cell] = chart.columns([1])
+    latency = cell.panel("latency")
+    for place in (
+        hg.Position(x=hg.Fraction(field="p99"), y=hg.Pixels(0)),
+        hg.Position(x=hg.Fraction(0.5), y=hg.Pixels(field="p99")),
+    ):
+        with pytest.raises(ValueError, match="an inset goes at one place, not at a column's"):
+            latency.inset("detail", place=place)
+
+
 def test_insets_go_over_insets():
     chart = hg.Chart(DATA, height=500)
     [cell] = chart.columns([1])
@@ -193,11 +205,13 @@ def test_insets_go_over_insets():
 
 
 def test_panels_axes_take_neither_scope_nor_repeat():
+    # Refused as the chart takes its panels, at the panel.
     for name, value in (("scope", "chart"), ("repeat", "all")):
-        chart = hg.Chart(DATA, panels=[hg.Panel("a", x=hg.AxisOptions(**{name: value}))])
-        chart.line(x="time", y="p99", panel="a")
-        with pytest.raises(ValueError, match=f"Panel x {name}: only the chart's x, y, and y_right"):
-            chart.to_spec()
+        with pytest.raises(
+            hg.ChartError, match=f"Panel x {name}: only the chart's x, y, and y_right"
+        ) as raised:
+            hg.Chart(DATA, panels=[hg.Panel("a", x=hg.AxisOptions(**{name: value}))])
+        assert raised.value.path == "panels[0]"
 
 
 def test_a_refused_layout_leaves_the_chart_to_lay_out_again():

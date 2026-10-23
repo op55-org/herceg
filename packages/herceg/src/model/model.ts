@@ -41,6 +41,7 @@ import {
   type RowParts,
   usesY,
 } from "../marks/mark.ts";
+import { refuseVerticalAlign, refuseZIndex } from "../marks/pending.ts";
 import type { Series } from "../marks/series.ts";
 import type { FieldReaders } from "../marks/tooltip-fields.ts";
 import { domainExtent, unionExtent } from "../marks/trace.ts";
@@ -3061,6 +3062,15 @@ function sideOf(mark: Mark): "left" | "right" {
  * along axes' index among the chart's marks.
  */
 function validate(config: ChartConfig): [Mark[], LayoutMark[], number[]] {
+  refuseZIndex(config.marks);
+  // Marks' specs, subplots' settings, and the chart's plain options but its
+  // scales and fonts (textPaint refuses what lies elsewhere, without a path).
+  for (const [i, { spec }] of config.marks.entries()) refuseVerticalAlign(spec, `marks[${i}]`, []);
+  for (const [i, panel] of (config.panels?.declared ?? []).entries())
+    refuseVerticalAlign(panel, `panels[${i}]`, []);
+  for (const key in config)
+    if (key !== "scales" && key !== "fonts")
+      refuseVerticalAlign(config[key as keyof ChartConfig], key, [key]);
   const marks: Mark[] = [];
   const positions: number[] = [];
   let layouts: LayoutMark[] = [];

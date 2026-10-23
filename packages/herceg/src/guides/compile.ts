@@ -13,6 +13,145 @@ import { compiledLegends, plannedLegends } from "./legends.ts";
 import type { Format } from "./options.ts";
 import { countOf, tickPlanner, writer } from "./ticks.ts";
 
+/**
+ * Refuses what axes and guides ask before round 2's stream R draws it (see
+ * marks/pending.ts): scales' padding, grids among the marks, axes of the
+ * chart's own position scales, and tick labels inside the plot or apart
+ * from their ticks.
+ */
+function refusePending(kit: GuideKit, config: ChartConfig): void {
+  const refuse = (path: string, correction: string) => {
+    throw new kit.ChartError({
+      code: "unsupported",
+      path,
+      message: `chart ${path}: not drawn as given yet (round 2 stream R adds it); ${correction}`,
+    });
+  };
+  // 3D boxes refuse their own axes' settings for good (marks/plot3d.ts): a
+  // chart's when its marks are 3D, a panel's when its marks are.
+  const boxes = config.marks.flatMap((mark) =>
+    (mark as { dimensions?: number }).dimensions === 3 ? [mark.spec.panel] : [],
+  );
+  const gridZ = (grid: unknown) => (grid as { zIndex?: number } | undefined)?.zIndex;
+  // A chart without panels whose marks are 3D: its x and y are its box's.
+  const box = (name: string) =>
+    !config.panels && boxes.length > 0 && (name === "x" || name === "y");
+  // Scales first: the short forms hold their settings too, merged.
+  const axes: [string, object | undefined][] = [
+    ...Object.entries(config.scales ?? {}).flatMap(
+      ([name, scale]): [string, object | undefined][] =>
+        box(name)
+          ? []
+          : [
+              [
+                /^[A-Za-z_$][\w$]*$/.test(name)
+                  ? `scales.${name}`
+                  : `scales[${JSON.stringify(name)}]`,
+                scale,
+              ],
+            ],
+    ),
+    ...SCALES.flatMap((name): [string, object | undefined][] =>
+      box(name) ? [] : [[name, config[name]]],
+    ),
+    ...(config.panels?.declared ?? []).flatMap((panel, i) =>
+      boxes.includes(panel.id)
+        ? []
+        : SCALES.map((name): [string, object | undefined] => [`panels[${i}].${name}`, panel[name]]),
+    ),
+  ];
+  // Well formed first, as the validator checks a spec before what it
+  // draws: what is malformed is refused for good.
+  const malformed = (path: string, expected: string, value: unknown): never => {
+    throw new kit.ChartError({
+      code: "invalid-option",
+      path,
+      message: `chart ${path}: expected ${expected}; received ${typeof value === "number" ? value : JSON.stringify(value)}`,
+    });
+  };
+  const pixels = (value: unknown) =>
+    typeof value === "number" && value >= 0 && Number.isFinite(value);
+  const checkGrid = (grid: unknown, path: string) => {
+    const z = gridZ(grid);
+    if (z !== undefined && !Number.isFinite(z))
+      malformed(`${path}.grid.zIndex`, "a finite number", z);
+  };
+  for (const [path, settings] of axes) {
+    const { grid, padding } = (settings ?? {}) as { grid?: unknown; padding?: unknown };
+    checkGrid(grid, path);
+    if (typeof padding === "number") {
+      if (!(padding >= 0 && padding < 0.5))
+        malformed(`${path}.padding`, "a share of the domain from 0 up to 0.5, not 0.5", padding);
+    } else if (padding && typeof padding === "object") {
+      const { px } = padding as { px?: unknown };
+      if (!pixels(px)) malformed(`${path}.padding.px`, "a number of at least 0", px);
+    } else if (padding !== undefined && padding !== "auto")
+      malformed(
+        `${path}.padding`,
+        '"auto", a share of the domain from 0 up to 0.5, or { px }',
+        padding,
+      );
+  }
+  config.guides?.forEach((guide, i) => {
+    if (guide.type === "legend") return;
+    if (guide.type === "axis") {
+      if (typeof guide.scale !== "string")
+        malformed(`guides[${i}].scale`, "a scale's name", guide.scale);
+      checkGrid(guide.grid, `guides[${i}]`);
+    }
+    for (const [path, labels] of tickLabels(guide, `guides[${i}]`)) {
+      const { gap, inside } = (labels || {}) as { gap?: unknown; inside?: unknown };
+      if (gap !== undefined && !pixels(gap))
+        malformed(`${path}.gap`, "a number of at least 0", gap);
+      if (inside !== undefined && typeof inside !== "boolean")
+        malformed(`${path}.inside`, "true or false", inside);
+    }
+  });
+  for (const [path, settings] of axes) {
+    const axis = settings as { grid?: unknown; padding?: unknown } | undefined;
+    const z = gridZ(axis?.grid);
+    if (z !== undefined && z !== -1) refuse(`${path}.grid.zIndex`, "drop zIndex");
+    if (axis?.padding !== undefined && axis.padding !== "auto")
+      refuse(`${path}.padding`, 'drop padding, or give "auto"');
+  }
+  config.guides?.forEach((guide, i) => {
+    if (guide.type === "legend") return;
+    const at = `guides[${i}]`;
+    if (guide.type === "axis") {
+      if (!SCALES.includes(guide.scale as ScaleName)) {
+        if (["linear", "log", "time"].includes(config.scales?.[guide.scale]?.type as string))
+          refuse(`${at}.scale`, "name x, y, or yRight");
+        throw new kit.ChartError({
+          code: "unknown-reference",
+          path: `${at}.scale`,
+          message: `chart ${at}.scale: the chart has no position scale "${guide.scale}"; name x, y, or yRight`,
+        });
+      }
+      const z = gridZ(guide.grid);
+      if (z !== undefined && z !== -1) refuse(`${at}.grid.zIndex`, "drop zIndex");
+    }
+    for (const [path, spec] of tickLabels(guide, at)) {
+      const { inside, gap } = (spec || {}) as { inside?: boolean; gap?: number };
+      if (inside || gap !== undefined)
+        refuse(`${path}.${inside ? "inside" : "gap"}`, `drop ${inside ? "inside" : "gap"}`);
+    }
+  });
+}
+
+/** A guide's tick labels and its layers', by their paths. */
+function tickLabels(
+  guide: { labels?: unknown; layers?: readonly { labels?: unknown }[] },
+  at: string,
+): [string, unknown][] {
+  return [
+    [`${at}.labels`, guide.labels],
+    ...(guide.layers ?? []).map((layer, k): [string, unknown] => [
+      `${at}.layers[${k}].labels`,
+      layer.labels,
+    ]),
+  ];
+}
+
 /** The compiler, with the chart's code it uses (see `GuideKit`). */
 export function guideCompiler(kit: GuideKit): GuideCompiler {
   return { compile: (config) => compile(kit, config) };
@@ -32,21 +171,23 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
     }
   };
   for (const scale of SCALES) note(config[scale], scale);
-  config.panels?.list.forEach((panel, i) => {
+  config.panels?.declared.forEach((panel, i) => {
     for (const scale of SCALES) note(panel[scale], `panels[${i}].${scale}`);
   });
   // The model merged `scales` into the short forms; their settings are named where they are set.
   const { scales } = config;
-  // Other scales are categories' (the feature compiler's).
+  // Other scales are the feature compiler's, which loads for them and
+  // refuses those round 2 does not draw yet.
   for (const [name, scale] of Object.entries(scales ?? {}))
     if (
       !SCALES.includes(name as ScaleName) &&
-      (scale as { type?: string } | undefined)?.type !== "ordinal"
+      !["ordinal", "identity", "linear", "log", "time"].includes(scale?.type as string)
     )
       throw new Error(
         `chart scales.${name}: marks place values on x, y, and yRight; name one of those, or give type: "ordinal" for a scale of categories`,
       );
   for (const scale of SCALES) note(scales?.[scale], `scales.${scale}`);
+  refusePending(kit, config);
   let read = config;
   // Listed axes: each scale's on its default side read as its short form.
   config.guides?.forEach((guide, i) => {
@@ -62,7 +203,7 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
     const labels = axis?.layers[0]?.labels;
     return labels ? (labels.duplicates ?? (axis.home ? undefined : "hide")) : undefined;
   };
-  const legends = plannedLegends(read);
+  const legends = plannedLegends(kit, read);
   return {
     axes: listed && compiledAxes(kit, listed.axes),
     legends: legends && compiledLegends(kit, legends),

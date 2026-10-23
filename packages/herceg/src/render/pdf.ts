@@ -874,7 +874,7 @@ export function drawPdfPage(scene: Scene, page: PdfPage, locale?: string): PdfPa
     for (const { plot, marks, visible } of panels) {
       cut(visible ?? [plot]);
       for (const mark of marks)
-        if (!mark.draw.guide && clipOf(mark) === "plot")
+        if (mark.draw.canvas && clipOf(mark) === "plot")
           paintGeometry(page, mark, plot, theme, regular);
       page.write("Q\n");
     }
@@ -891,7 +891,7 @@ export function drawPdfPage(scene: Scene, page: PdfPage, locale?: string): PdfPa
       for (const guides of [false, true])
         for (const mark of marks) {
           const clip = clipOf(mark);
-          if (!!mark.draw.guide !== guides || (clip === "plot" && !guides)) continue;
+          if (!mark.draw.canvas !== guides || (clip === "plot" && !guides)) continue;
           if (clip) cut(clip === "plot" ? (visible ?? [plot]) : [chart]);
           paintGeometry(page, mark, plot, theme, regular);
           if (clip) page.write("Q\n");

@@ -4,6 +4,8 @@
 // Each legend claims the scales it shows; the automatic legend shows the
 // rest.
 
+import { symbolReach } from "../draw/symbol-shapes.ts";
+import { markerPath } from "../marks/features/markers.ts";
 import type { LegendScale } from "../marks/mark.ts";
 import type { SeriesSwatch } from "../model/features.ts";
 import type { GuideKit, PlacedLegend } from "../model/guides.ts";
@@ -53,7 +55,7 @@ interface Plan {
   place: Place;
   options: LegendOptionsSpec;
   /** The scales it shows; undefined for what no other legend claims (the automatic one) or for all. */
-  sources: readonly ScaleRef[] | undefined;
+  sources: readonly ChannelRef[] | undefined;
   automatic: boolean;
   /** For the automatic legend: whether the chart sets `legend`, so that it shows even one entry. */
   explicit: boolean;
@@ -70,6 +72,7 @@ interface Plan {
  * automatic legend; undefined where it does not.
  */
 export function plannedLegends(
+  kit: GuideKit,
   config: ChartConfig,
 ): { legends: Plan[]; colorbars: ColorbarPlan[]; layouts: ReadonlySet<string> } | undefined {
   const { legend } = config;
@@ -85,7 +88,7 @@ export function plannedLegends(
     key: guide.id !== undefined ? `legend|id|${guide.id}` : `legend|${i}`,
     place: placeOf(guide),
     options: guide,
-    sources: guide.scales,
+    sources: included(kit, guide, `guides[${i}]`),
     automatic: false,
     explicit: true,
     path: `chart guides[${i}]`,
@@ -96,12 +99,19 @@ export function plannedLegends(
       key: "legend",
       place: options.place ?? { side: "top" },
       options,
-      sources: undefined,
+      sources: included(kit, options, "legend"),
       automatic: true,
       explicit: legend !== undefined,
       forced: legend === true,
       path: "chart legend",
     });
+  for (const plan of colorbars)
+    if (plan.scale?.scale !== undefined)
+      throw pending(
+        kit,
+        `${plan.path.slice(6)}.scale`,
+        'name a mark\'s, as { mark, channel: "color" }',
+      );
   // Layout marks (maps, pies), which legends and colorbars do not name yet.
   const layouts = new Set(
     config.marks.flatMap((mark) =>
@@ -111,6 +121,49 @@ export function plannedLegends(
     ),
   );
   return { legends: plans, colorbars, layouts };
+}
+
+/** Refuses what legend options at `path` ask before round 2's stream C shows it (see marks/pending.ts). */
+function pending(kit: GuideKit, path: string, correction: string): Error {
+  return new kit.ChartError({
+    code: "unsupported",
+    path,
+    message: `chart ${path}: not drawn as given yet (round 2 stream C adds it); ${correction}`,
+  });
+}
+
+/**
+ * The scales legend options at `path` include, all a legend shows by
+ * default (undefined), refusing what round 2's stream C adds: scales by
+ * name, marks whole, entries after included ones (entries come alone,
+ * with `include: []`), and targets by value.
+ */
+function included(
+  kit: GuideKit,
+  { include, entries }: LegendOptionsSpec,
+  path: string,
+): readonly ChannelRef[] | undefined {
+  if (entries && include?.length !== 0)
+    throw pending(kit, `${path}.entries`, "give include: [] for your entries alone");
+  entries?.forEach(({ targets }, k) => {
+    targets?.forEach((target, t) => {
+      if (target.mark === undefined || target.field !== undefined)
+        throw pending(
+          kit,
+          `${path}.entries[${k}].targets[${t}]`,
+          "target a mark whole, as { mark }",
+        );
+    });
+  });
+  return include?.map((ref, k) => {
+    if (ref.channel === undefined)
+      throw pending(
+        kit,
+        `${path}.include[${k}]`,
+        'name a mark\'s scale, as { mark, channel: "color" }',
+      );
+    return ref;
+  });
 }
 
 /**
@@ -126,6 +179,12 @@ function placeOf(guide: LegendGuideSpec): Place {
     ? place
     : { ...place, scope: "panel", panel };
 }
+
+/**
+ * A scale of a mark's that a legend includes: what legends show of
+ * `include` until round 2's stream C adds scales by name and marks whole.
+ */
+type ChannelRef = Extract<ScaleRef, { mark: string }>;
 
 /** What guides may name of a mark with an identity that declares nothing (see `Mark.legendScales`). */
 const SERIES: readonly LegendScale[] = ["series"];
@@ -180,7 +239,7 @@ export function compiledLegends(
       if (!allParts.some((shown) => shown.key === key)) allParts.push(part);
     // Whether a scale a mark owns is one `ref` names: a mark's "color" is
     // its series' where its color splits them.
-    const names = (ref: ScaleRef, mark: string | number, channel: string) =>
+    const names = (ref: ChannelRef, mark: string | number, channel: string) =>
       ref.mark === mark &&
       (ref.channel === channel ||
         (ref.channel === "color" && channel === "series" && split.has(mark)));
@@ -206,7 +265,7 @@ export function compiledLegends(
     // `Mark.legendScales`), whatever its rows hold now: one naming no such
     // scale is a mistake, not an empty legend; one whose scale shows
     // nothing yet shows nothing until it does.
-    const resolve = (ref: ScaleRef, path: string): readonly LegendScale[] => {
+    const resolve = (ref: ChannelRef, path: string): readonly LegendScale[] => {
       if (layouts.has(ref.mark))
         throw new Error(
           `${path}: mark "${ref.mark}" draws its own layout, whose scales the automatic legend shows; drop the reference`,
@@ -263,11 +322,11 @@ export function compiledLegends(
     // What the chart's listed legends show, which the automatic one leaves
     // to them; a panel's legend covers what it lists in its panel only (see
     // the automatic legend's below).
-    const claimed: ScaleRef[] = [];
+    const claimed: ChannelRef[] = [];
     const all = plans.some((plan) => !plan.automatic && !plan.sources && plan.panel === undefined);
     for (const plan of plans)
       plan.sources?.forEach((ref, k) => {
-        resolve(ref, `${plan.path}.scales[${k}]`);
+        resolve(ref, `${plan.path}.include[${k}]`);
         if (plan.panel === undefined) claimed.push(ref);
       });
     // What each legend lists: entries (of what its panel draws, for a
@@ -298,13 +357,14 @@ export function compiledLegends(
             ({ mark }) => marks.find((m) => m.mark.spec.id === mark)?.series ?? [],
           ),
         );
+        // Its own entries (alone, with `include: []`) cover what they target.
         return {
           plan,
           ...inPanels!.listed(
             plan.panel,
             entries,
             parts,
-            shows,
+            targeted ? () => true : shows,
             targeted && new Set(targeted.map(({ key }) => key)),
           ),
         };
@@ -413,13 +473,13 @@ function partOwners(
 ) {
   const owners = new Map<
     string,
-    { owners: { mark: string | number; channel: ScaleRef["channel"] }[]; part: LegendPart }
+    { owners: { mark: string | number; channel: ChannelRef["channel"] }[]; part: LegendPart }
   >();
   const format = (value: number) => kit.formatNumber(value, locale);
   marks.forEach(({ mark, series }, index) => {
     for (const part of mark.legends?.(series, theme, format, paint) ?? []) {
       // Keys of sizes and shapes say so; ramps and color keys show color.
-      const channel: ScaleRef["channel"] =
+      const channel: ChannelRef["channel"] =
         part.channel === "size" ? "size" : part.channel === "shape" ? "symbol" : "color";
       const owner = { mark: mark.spec.id ?? index, channel };
       const shared = owners.get(part.key);
@@ -677,7 +737,7 @@ function derived(
   marks: readonly MarkSeries[],
   theme: Theme,
   paint: PaintReader,
-  sources: readonly ScaleRef[] | undefined,
+  sources: readonly ChannelRef[] | undefined,
 ): Row[] {
   // The marks and series each entry stands for, for their looks: of marks
   // left out of legends too, where the legend names them.
@@ -784,9 +844,10 @@ function custom(
   };
   return specs.map((spec, k) => {
     const at = `${path}.entries[${k}]`;
+    // Targets by value are refused before (`included`): each names a mark.
     const targets = (spec.targets ?? []).flatMap(({ mark }, t) => {
       const where = `${at}.targets[${t}].mark`;
-      const found = find(mark, where);
+      const found = find(mark!, where);
       const drawnIn = found.mark.spec.panel;
       if (panel !== undefined && drawnIn !== panel)
         throw new Error(
@@ -983,23 +1044,19 @@ function swatchItems(kit: GuideKit, swatch: SeriesSwatch): Sample {
         ],
       };
     }
-    case "circle": {
+    case "symbol": {
+      // `size` pixels across, whatever the shape reaches per unit of radius.
+      const symbol = swatch.symbol ?? "circle";
       const size = swatch.size ?? SWATCH;
-      const r = size / 2;
-      return {
-        width: Math.max(SWATCH, size),
-        height: Math.max(SWATCH, size),
-        items: [
-          {
-            type: "shape",
-            d: `M${-r},0a${r},${r} 0 1,0 ${size},0a${r},${r} 0 1,0 ${-size},0`,
-            at: [Math.max(SWATCH, size) / 2, 0],
-            fill: swatch.fill,
-            ...(swatch.stroke && { stroke: swatch.stroke }),
-            ...(swatch.opacity !== undefined && { opacity: swatch.opacity }),
-          },
-        ],
-      };
+      const r = size / 2 / symbolReach(symbol);
+      return swatchItems(kit, {
+        type: "glyph",
+        d: markerPath(kit, symbol, 0, 0, r),
+        size,
+        fill: swatch.fill,
+        ...(swatch.stroke && { stroke: swatch.stroke }),
+        ...(swatch.opacity !== undefined && { opacity: swatch.opacity }),
+      });
     }
     case "glyph": {
       const size = Math.max(SWATCH, swatch.size);

@@ -37,6 +37,7 @@ import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import { TIME_UNIT_MS } from "../scale/time.ts";
 import type { Batch3D, Batches3D, FaceGeometry, Geometry, Rect } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import { type Axis3D, boxGeometry, boxMargin } from "../three/axes.ts";
@@ -166,6 +167,16 @@ export interface Hit3D {
   behind?: number;
 }
 
+/** Refuses a 3D mark's `zIndex` other than 0: a 3D box draws its marks by depth. */
+export function checkDepthOrder(spec: { zIndex?: number }, type: string): void {
+  if (spec.zIndex !== undefined && spec.zIndex !== 0)
+    throw new ChartError({
+      code: "unsupported",
+      path: "zIndex",
+      message: `${type} zIndex: a 3D box draws its marks by depth, not in an order of their own; drop zIndex, and place what must show in front nearer the camera, or in a panel of its own`,
+    });
+}
+
 export function isLayer3D(mark: LayoutMark): mark is Layer3D {
   return (mark as Partial<Layer3D>).dimensions === 3;
 }
@@ -205,6 +216,66 @@ export function joinLayers3D(
     throw new Error("chart yRight: 3D charts have no right y axis; drop it");
   if (!config.panels && config.x?.breaks)
     throw new Error("chart x.breaks: 3D axes have no breaks; drop them");
+  // A 3D box fits its data, and draws its grid by depth (as checkDepthOrder
+  // says of marks): its axes are the chart's when it has no panels (z
+  // always is), else its panel's.
+  type Axis = { grid?: boolean | { zIndex?: number }; padding?: unknown } | undefined;
+  const at = config.panels?.declared.findIndex(({ id }) => id === panel) ?? -1;
+  const own = config.panels?.declared[at] as Record<string, Axis> | undefined;
+  const chart = config as unknown as Record<string, Axis>;
+  const scales = config.scales as Record<string, Axis> | undefined;
+  const axes: [string, Axis][] = config.panels
+    ? [
+        ["z", chart.z],
+        ...AXES.map((name): [string, Axis] => [`panels[${at}].${name}`, own?.[name]]),
+      ]
+    : [
+        ["scales.x", scales?.x],
+        ["scales.y", scales?.y],
+        ...AXES.map((name): [string, Axis] => [name, chart[name]]),
+      ];
+  // Malformed first, for good, as the validator checks a spec before what it draws.
+  for (const [path, axis] of axes) {
+    const z = typeof axis?.grid === "object" ? axis.grid.zIndex : undefined;
+    const padding = axis?.padding;
+    const px = (padding as { px?: unknown } | null | undefined)?.px;
+    const problem: [string, string, unknown] | undefined =
+      z !== undefined && !Number.isFinite(z)
+        ? [".grid.zIndex", "a finite number", z]
+        : typeof padding === "number"
+          ? padding >= 0 && padding < 0.5
+            ? undefined
+            : [".padding", "a share of the domain from 0 up to 0.5, not 0.5", padding]
+          : padding && typeof padding === "object"
+            ? typeof px === "number" && px >= 0 && Number.isFinite(px)
+              ? undefined
+              : [".padding.px", "a number of at least 0", px]
+            : padding !== undefined && padding !== "auto"
+              ? [".padding", '"auto", a share of the domain from 0 up to 0.5, or { px }', padding]
+              : undefined;
+    if (problem) {
+      const [key, expected, value] = problem;
+      throw new ChartError({
+        code: "invalid-option",
+        path: `${path}${key}`,
+        message: `chart ${path}${key}: expected ${expected}; received ${typeof value === "number" ? value : JSON.stringify(value)}`,
+      });
+    }
+  }
+  for (const [path, axis] of axes) {
+    if (typeof axis?.grid === "object" && axis.grid.zIndex !== undefined)
+      throw new ChartError({
+        code: "unsupported",
+        path: `${path}.grid.zIndex`,
+        message: `chart ${path}.grid.zIndex: a 3D box draws its grid lines by depth, not in an order of their own; drop zIndex`,
+      });
+    if (axis?.padding !== undefined && axis.padding !== "auto")
+      throw new ChartError({
+        code: "unsupported",
+        path: `${path}.padding`,
+        message: `chart ${path}.padding: a 3D box fits its data, padded as it is drawn; drop padding`,
+      });
+  }
   return new Plot3D(marks as Layer3D[], config, indices, panel);
 }
 
@@ -659,7 +730,8 @@ function planAxis3D(
   const fields = [...new Set(data.map((d) => d.field))];
   const title = spec?.title ?? fields.join(", ");
   const shown = spec?.show ?? true;
-  const grid = spec?.grid ?? true;
+  // A 3D box's grid is drawn by depth with its walls ({ zIndex } is refused).
+  const grid = spec?.grid !== false;
   if (kind === "category") {
     if (spec?.type !== undefined)
       throw new Error(`chart ${name}.type: the axis shows categories; drop "${spec.type}"`);

@@ -9,6 +9,10 @@ to do about it.
 
 - Python `hg.Place` accepts panel-scoped side placements for legends and colorbars, matching the engine's validation.
 - Chart drag gestures prevent native text selection while preserving static text selection, clicks, and focus.
+- Legends name what they list with `include` (`[{ mark, channel }]`, or `[]` for their own `entries` alone), in the `legend` option and `legend()` alike; it replaces `legend()`'s `scales`. Custom entries come with `include: []` for now. A swatch of a point's shape is `{ type: "symbol", symbol }`, replacing `{ type: "circle" }`. Python: `include=`, `hg.Swatch(type="symbol", symbol=...)`.
+- The spec loader's validator throws `ChartError`s with codes and paths, and the code `"unsupported"` names a well-formed option a chart does not draw, with what to give instead.
+- The spec's types, the TypeScript mark functions, and the Python builders take options charts do not draw yet, and charts refuse each with `"unsupported"`: marks' `zIndex` (Python `z_index`) and grid lines' (`grid: { zIndex }`, `hg.GridLines`), scales' `padding`, position scales of the chart's own, text styles' `verticalAlign` (`vertical_align`), tick labels' `inside` and `gap`, positions read from fields as fractions or pixels, bars' `width: { px }` and `strokeSides`, regions' `stroke`, `strokeWidth`, and `strokeSides`, identity scales (`hg.IdentityScale`) and ordinal scales' `scope`, labels following series (`labels`, `hg.SeriesLabels`), label `content` of parts (`hg.LabelPart`), text `from` (`hg.MarkAnchor`), annotations' `legend: true`, and in legends, `include` of a mark whole (`hg.MarkRef`) or a scale by name and entries' targets of rows by value (`hg.LegendTarget`).
+- A mounted chart's failure alert shows its text at once and is styled once its module loads, so a chart's first chunk carries no styling for it.
 
 The first public release. What it contains:
 

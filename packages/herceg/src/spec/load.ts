@@ -72,7 +72,7 @@ import type {
   RowSelectionSpec,
   SelectionSpec,
 } from "./spec.ts";
-import { describeUnknown, findUnknown, unknownError } from "./validate.ts";
+import { describeUnknown, findUnknown, unknownRefusal } from "./validate.ts";
 
 /** Bytes of a binary column: an ArrayBuffer, or a view such as a Uint8Array or DataView. */
 export type SpecBuffer = ArrayBuffer | ArrayBufferView;
@@ -153,7 +153,7 @@ export function loadSpec(
 ): LoadedSpec {
   const found = findUnknown(spec);
   const handling = options.unknown ?? "error";
-  if (found.length > 0 && handling === "error") throw new TypeError(unknownError(found));
+  if (found.length > 0 && handling === "error") throw unknownRefusal(found);
   if (found.length > 0 && handling === "warn")
     console.warn(
       `herceg spec: ignoring properties the format does not have: ${found.map(describeUnknown).join(", ")}`,
@@ -247,7 +247,7 @@ function loadRowSelection(
             store.set(channel, held);
           } catch (error) {
             // A condition of fields the table lacks, or not true or false.
-            throw new TypeError(`${at}.expression: ${(error as Error).message}`);
+            throw within(`${at}.expression`, error);
           }
         }
       }

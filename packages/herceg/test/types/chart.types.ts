@@ -5,6 +5,7 @@ import { inset } from "../../src/layout.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import type { PlotRect } from "../../src/scene/scene.ts";
+import type { LineSpec } from "../../src/spec/spec.ts";
 
 declare const element: HTMLElement;
 declare const maybeTitle: string | undefined;
@@ -35,7 +36,7 @@ chart.flush();
 // @ts-expect-error synced charts reach each other through their sync group
 chart.syncCursor(1);
 const drawn = line(data, { x: "x", y: "y" });
-drawn.spec.x satisfies string | readonly string[];
+drawn.spec.x satisfies LineSpec["x"];
 // @ts-expect-error drawing is internal
 drawn.geometry;
 // @ts-expect-error only the mark functions make marks

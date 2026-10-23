@@ -504,7 +504,7 @@ describe("colors by category", () => {
     ).toThrow("line (mark 0) color: set as color and as encode.color; give one");
     expect(() =>
       build({
-        scales: { sites: { type: "linear" } as never },
+        scales: { sites: { type: "band" } as never },
         marks: [line(sites, { x: "t", y: "v" })],
       }),
     ).toThrow(/chart scales\.sites: marks place values on x, y, and yRight/);

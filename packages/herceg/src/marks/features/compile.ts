@@ -90,6 +90,32 @@ function compile(
   };
   for (const [name, spec] of Object.entries(config.scales ?? {})) {
     if (POSITIONS.includes(name) || spec === undefined) continue;
+    // Malformed first, for good, as the validator checks a spec before what it draws.
+    const { scope } = spec as { scope?: unknown };
+    if (spec.type === "ordinal" && scope !== undefined && scope !== "chart" && scope !== "panel")
+      throw new kit.ChartError({
+        code: "invalid-option",
+        path: `${scalePath(name)}.scope`,
+        message: `chart ${scalePath(name)}.scope: expected "chart" or "panel"; received ${JSON.stringify(scope)}`,
+      });
+    // Round 2 freezes these before its streams draw them (marks/pending.ts).
+    const pending: [string, string, string] | undefined =
+      spec.type === "identity"
+        ? ["", "C", 'give type: "ordinal"']
+        : spec.type === "ordinal" && spec.scope !== undefined
+          ? [".scope", "C", "drop scope"]
+          : spec.type === "linear" || spec.type === "log" || spec.type === "time"
+            ? ["", "R", "place values on x, y, and yRight"]
+            : undefined;
+    if (pending) {
+      const [key, stream, instead] = pending;
+      const path = scalePath(name) + key;
+      throw new kit.ChartError({
+        code: "unsupported",
+        path,
+        message: `chart ${path}: not drawn as given yet (round 2 stream ${stream} adds it); ${instead}`,
+      });
+    }
     const ordinal = spec as OrdinalScaleSpec;
     if (ordinal.type !== "ordinal")
       throw new Error(
@@ -148,6 +174,18 @@ function compile(
     path: string,
     where: Where,
   ): void {
+    // Round 2 binds identity scales from stream C on (marks/pending.ts):
+    // refused before series and paints are read, whichever paint wins.
+    for (const [name, channel] of Object.entries(
+      (spec as { encode?: Record<string, { scale?: unknown } | undefined> }).encode ?? {},
+    ))
+      if (typeof channel?.scale === "object")
+        throw Object.assign(
+          new Error(
+            `${path} encode.${name}.scale: not drawn as given yet (round 2 stream C adds it); name one of the chart's scales, or drop scale`,
+          ),
+          { code: "unsupported" },
+        );
     // On marks whose `color` is a field or a color, a name both says neither
     // (their series would read it as a field), and one that is neither is a mistake.
     const short = PAINTED.includes(spec.type) ? spec.color : undefined;

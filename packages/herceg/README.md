@@ -3397,13 +3397,18 @@ Options a chart refuses, a field its data lacks, a line whose color changes
 within a series, code that fails to load, and a frame that fails to draw are
 `ChartError`s: an `Error` with `code` (`"invalid-option"`,
 `"unknown-field"`, `"field-type"`, `"series-varies"`,
-`"series-with-values"`, `"unknown-reference"`, `"layout-failed"`,
-`"load-failed"`, or `"render-failed"`), `phase` (`"validate"`,
+`"series-with-values"`, `"unknown-reference"`, `"unsupported"` (a
+well-formed option the chart does not draw, saying what to give instead),
+`"layout-failed"`, `"load-failed"`, or `"render-failed"`), `phase` (`"validate"`,
 `"compile"`, `"load"`, `"layout"`, or `"render"`), and where known `path`
 (`"marks[1].color"`), `mark` (its `id`, else its index), and `panel`.
 Messages read "location: problem; correction". Mark functions throw them
 for their own options (`line(table, { y: "p90" })` with no such field),
-with a path within those options.
+with a path within those options. The types take some options before
+charts draw them (marks' `zIndex`, bars' `width: { px }`, lines' `labels`,
+identity scales, and others listed in docs/architecture.md, "Spec
+contracts"); a chart refuses each with `"unsupported"` rather than
+drawing it otherwise.
 
 By default (`errorMode: "inline"`) neither `createChart` nor `update` throws
 for what the chart refuses. A chart that has drawn nothing shows a box of
@@ -4059,10 +4064,10 @@ The short form `legend` and `legend({ ... })` take:
 | `columns`, `rows` | Entries in a grid of this many columns, or rows; one of them. |
 | `order` | `"row"` fills row by row (the default with `columns`), `"column"` down each column (the default with `rows`). |
 | `title` | A string, or `{ text, style? }`, above the entries. |
-| `entries` | Entries of your own in place of the series': `[{ key, label, swatch? \| sample?: { mark }, targets?: [{ mark }] }]`. A `swatch` is `{ type: "line", stroke, strokeWidth?, dash? }`, `{ type: "rect", fill, stroke? }`, `{ type: "circle", fill, stroke?, size? }` (lines, boxes, and circles take `opacity`), or `{ type: "composite", parts }`, drawn over one another and centered; `sample` draws a mark's look, its symbol for points; entries with `targets` hide and show those marks, others explain. |
+| `entries` | Entries of your own, for now alone, with `include: []`: `[{ key, label, swatch? \| sample?: { mark }, targets?: [{ mark }] }]`. A `swatch` is `{ type: "line", stroke, strokeWidth?, dash? }`, `{ type: "rect", fill, stroke? }`, `{ type: "symbol", symbol?, fill, stroke?, size? }` (a point's shape, `"circle"` by default; lines, boxes, and symbols take `opacity`), or `{ type: "composite", parts }`, drawn over one another and centered; `sample` draws a mark's look, its symbol for points; entries with `targets` hide and show those marks, others explain. |
 | `swatches` | `"mark"`: swatches that look like the marks: a line of a line's width and dash, with its markers, a box of an area's or bar's fill (a bar's outline and opacity too), a point's symbol. |
 | `style` | `legendLabel`, `legendTitle`, `tickLabel`. |
-| `scales` | (`legend()` only) The scales it lists, `[{ mark, channel }]` with a mark's `id` and `"series"`, `"color"`, `"size"`, or `"symbol"`; every one by default, in place of the automatic legend. |
+| `include` | What it lists: `[{ mark, channel }]`, a mark's `id` and `"series"`, `"color"`, `"size"`, or `"symbol"`, or `[]` for its `entries` alone; every scale by default. A `legend()` listing scales takes their place in the automatic legend. |
 | `id`, `show` | (`legend()` only) A name of its own; `false` draws none. |
 
 An entry stands for a value (see Colors and channels): the series of every
@@ -4073,7 +4078,7 @@ through one named scale. With `swatches: "mark"`, an entry that marks draw
 differently shows each one's look, a line over a bar's box. Entries of your
 own (`entries`) group anything else. A mark's `legend: false` leaves its
 series, ramps, and keys out of the legends and colorbars that name no mark;
-those naming it in `scales` or `scale` show it. A mark whose color field
+those naming it in `include` or `scale` show it. A mark whose color field
 splits its series is named by `channel: "color"` or `"series"` alike, and a
 reference to a scale the mark does not have is an error naming those it has.
 What a mark has comes of its options, whatever its rows hold: a point with

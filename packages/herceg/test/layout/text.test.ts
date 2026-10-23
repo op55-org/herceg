@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { textItemMarkup } from "../../src/draw/text.ts";
 import {
+  anchorBlock,
   canvasMeasurer,
   estimateText,
   fontKind,
@@ -69,6 +70,40 @@ describe("text layout", () => {
     expect(textBox(lines, { ...at, anchor: "middle" }, paint).x).toBe(86);
     expect(textBox(lines, { ...at, anchor: "end" }, paint).x).toBe(76);
     expect(textBox(lines, { ...at, baseline: "hanging" }, paint).y).toBe(48);
+  });
+
+  it("places a block of lines by its sides or middle, its box's padding inside it", () => {
+    const lines = textLines("ab\ncdef", paint, measure);
+    const block = (align: "start" | "center" | "end", verticalAlign: "top" | "middle" | "bottom") =>
+      anchorBlock(lines, { x: 100, y: 50, align, verticalAlign, angle: 0 }, paint);
+    // The box's top left, bottom right, and middle at the point; the first
+    // line's middle inside it by the padding and half a line.
+    expect(block("start", "top")).toEqual({
+      at: { x: 104, y: 57, anchor: "start", baseline: "middle", angle: 0 },
+      box: { x: 100, y: 50, width: 26, height: 28 },
+    });
+    expect(block("end", "bottom").box).toEqual({ x: 74, y: 22, width: 26, height: 28 });
+    expect(block("center", "middle").box).toEqual({ x: 87, y: 36, width: 26, height: 28 });
+    // Without a box, the lines alone are placed, unpadded.
+    const plain = textPaint([{ fontSize: 10, lineHeight: 1.2 }]);
+    expect(
+      anchorBlock(lines, { x: 100, y: 50, align: "start", verticalAlign: "top", angle: 0 }, plain),
+    ).toEqual({
+      at: { x: 100, y: 56, anchor: "start", baseline: "middle", angle: 0 },
+      box: undefined,
+    });
+  });
+
+  it("turns a block about its anchor", () => {
+    const lines = textLines("ab\ncdef", paint, measure);
+    const anchor = { x: 100, y: 50, align: "start", verticalAlign: "top", angle: 90 } as const;
+    const { at, box } = anchorBlock(lines, anchor, paint);
+    // The unturned box's top left, turned about the text's point as
+    // renderers turn it, is the anchor.
+    const turned = (x: number, y: number) => [at.x - (y - at.y), at.y + (x - at.x)];
+    const [x, y] = turned(box!.x, box!.y);
+    expect(x).toBeCloseTo(100);
+    expect(y).toBeCloseTo(50);
   });
 
   it("keeps a guide's lines in one item, boxed around them all, drawn a line height apart", () => {

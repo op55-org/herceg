@@ -55,7 +55,6 @@ import type { Camera } from "../three/camera.ts";
 import type { AdoptedChart } from "./adopt.ts";
 import type { Brush } from "./brush.ts";
 import { ascending, DRAG_THRESHOLD, normalize, type Selection } from "./brushed.ts";
-import { showFailure } from "./errors.ts";
 import {
   type ChartEvents,
   type ChartListener,
@@ -1219,7 +1218,20 @@ export class MountedChart implements Chart, ExportsScene {
           visibility: "hidden",
         });
       }
-      this.#failure = showFailure(this.root, failure, kept);
+      // The alert's text shows at once, styled once its module loads (an
+      // error should not wait for code, nor fail with it). Its wording is
+      // dom/errors.ts's `failureText`.
+      const shown = this.root.ownerDocument.createElement("div");
+      shown.setAttribute("role", "alert");
+      // Where it goes and its size at once, so the chart's room does not change.
+      shown.style.cssText = `visibility:visible;position:absolute;inset:0;white-space:pre-line;${kept ? "bottom:auto" : ""}`;
+      shown.textContent = `${kept ? "Chart update failed; showing previous data." : "Chart could not be rendered"}\n${failure.message}`;
+      this.root.append(shown);
+      this.#failure = shown;
+      import("./failure-style.ts").then(
+        ({ styleFailure }) => this.#failure === shown && styleFailure(shown, kept),
+        () => {},
+      );
     }
     if (!reported) this.#report(failure);
   }

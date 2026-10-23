@@ -30,9 +30,12 @@ describe("architecture", () => {
   // module both imported would move out of the chart's first chunk into a
   // chunk of its own (esbuild's splitting), so the compiler is handed what
   // it uses of the chart's code (GUIDE_KIT) and imports only types from it.
+  // Legend swatches draw symbols with the markers' code, which the feature
+  // compiler loads too: a chunk of the two compilers' own.
   it("the guide compiler imports only types from the chart's modules", () => {
+    const shared = ["format/patterns.ts", "marks/features/markers.ts", "draw/symbol-shapes.ts"];
     const own = (path: string) =>
-      path.startsWith(join(SRC, "guides")) || path === join(SRC, "format/patterns.ts");
+      path.startsWith(join(SRC, "guides")) || shared.some((file) => path === join(SRC, file));
     for (const file of [...files(join(SRC, "guides")), join(SRC, "format/patterns.ts")]) {
       const source = readFileSync(file, "utf8");
       for (const [, path] of source.matchAll(/^import (?!type )[^;]*?from "([^"]+)"/gm))

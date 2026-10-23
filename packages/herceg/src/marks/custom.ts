@@ -126,6 +126,8 @@ interface CustomBase {
    * cut to the plot and labels are drawn whole.
    */
   clip?: Clip;
+  /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /**
@@ -186,6 +188,8 @@ export interface CustomSpec {
   zero?: "x" | "y";
   facet?: "repeat";
   clip?: Clip;
+  /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /** The x field of the series. */
@@ -241,7 +245,16 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   constructor(table: Table | undefined, options: CustomDataOptions<Schema>) {
     const spec: CustomSpec = {
       type: "custom",
-      ...definedFields(options, ["id", "axis", "zero", "facet", "panel", "clip", "legend"]),
+      ...definedFields(options, [
+        "id",
+        "axis",
+        "zero",
+        "facet",
+        "panel",
+        "clip",
+        "zIndex",
+        "legend",
+      ]),
     };
     if (options.zero !== undefined && options.zero !== "x" && options.zero !== "y")
       throw new TypeError(

@@ -65,6 +65,8 @@ export interface CandlestickOptions<S extends Schema> {
    * cut to the plot and labels are drawn whole.
    */
   clip?: Clip;
+  /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /** `false` leaves the mark out of the chart's legends. */
@@ -552,6 +554,7 @@ export function candlestick<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
       "id",
     ]),
   };

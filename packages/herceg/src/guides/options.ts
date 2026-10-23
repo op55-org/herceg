@@ -10,6 +10,7 @@ import type {
   ChartAxisSpec,
   ColorbarSpec,
   FormatSpec,
+  IdentityScaleSpec,
   LegendGuideSpec,
   OrdinalScaleSpec,
   PanelSpec,
@@ -108,13 +109,15 @@ export type GuideOptions = AxisGuideOptions | LegendGuideOptions | ColorbarOptio
 
 /**
  * The chart's scales by name: its position scales, over the short forms'
- * settings, and scales of categories (see `OrdinalScaleSpec`).
+ * settings, position scales of their own that marks name, scales of
+ * categories (see `OrdinalScaleSpec`), and identity scales, whose values
+ * are their outputs.
  */
 export interface Scales {
   x?: ScaleOptions;
   y?: ScaleOptions;
   yRight?: ScaleOptions;
-  readonly [name: string]: ScaleOptions | OrdinalScaleSpec | undefined;
+  readonly [name: string]: ScaleOptions | OrdinalScaleSpec | IdentityScaleSpec | undefined;
 }
 
 /**

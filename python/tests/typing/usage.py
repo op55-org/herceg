@@ -77,3 +77,17 @@ hg.graph(links, "a", "b", layout="tree")  # type: ignore[arg-type]
 dash_style: hg.Dash = "-."
 hg.line({"x": [0, 1], "y": [1, 2]}, "x", "y", dash=dash_style)
 hg.Chart({"x": [0, 1], "y": [1, 2]}).line("x", "y", dash=":").rule(y=1, dash="--")
+
+# Identity scales, as an object or as the spec writes them.
+hg.Channel(field="paint", scale=hg.IdentityScale())
+hg.Channel(field="paint", scale={"type": "identity"})
+
+# Scales of the chart's own, of every kind.
+hg.Chart(
+    data,
+    scales={
+        "raw": hg.IdentityScale(),
+        "regions": hg.OrdinalScale(),
+        "depth": hg.Scale(type="linear"),
+    },
+)

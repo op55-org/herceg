@@ -520,6 +520,7 @@ describe("layouts in the browser", () => {
         legend({ panel: "a" }),
         legend({
           panel: "a",
+          include: [],
           entries: [{ key: "all", label: "All", targets: [{ mark: "first" }] }],
         }),
       ],
@@ -554,9 +555,13 @@ describe("layouts in the browser", () => {
       guides: [
         legend({
           panel: "a",
+          include: [],
           entries: [{ key: "a", label: "In a", targets: [{ mark: "quiet" }] }],
         }),
-        legend({ entries: [{ key: "all", label: "Quiet", targets: [{ mark: "quiet" }] }] }),
+        legend({
+          include: [],
+          entries: [{ key: "all", label: "Quiet", targets: [{ mark: "quiet" }] }],
+        }),
       ],
       panels: panels(columns([1, 1], [panel("a"), panel("b")])),
     });

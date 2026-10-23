@@ -59,6 +59,14 @@ export interface TextStyle {
    * title starts at the left, an axis title is centered).
    */
   align?: "start" | "center" | "end";
+  /**
+   * Where a block of text stands across its lines from the point it is
+   * placed at: that point at its top, middle, or bottom (its box's edge,
+   * when it has a background), before any turn. Each text has a natural
+   * placement when this is left out (a rule's label above it, tick labels
+   * away from their axis).
+   */
+  verticalAlign?: "top" | "middle" | "bottom";
   halo?: Halo;
   /** A box behind the text; `false` for none. */
   background?: TextBox | false;

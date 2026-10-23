@@ -414,6 +414,8 @@ describe("what needs the guide compiler", () => {
       { y: { format: { number: ".1f" } } },
       { y: { tooltipFormat: (v: number) => String(v) } },
       { scales: { y: {} } },
+      // Settings the guide compiler checks before the feature compiler refuses the scale.
+      { scales: { depth: { type: "linear", padding: 0.5 } } },
       { guides: [] },
       { legend: { columns: 2 } },
     ])

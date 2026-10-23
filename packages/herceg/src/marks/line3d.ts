@@ -42,6 +42,7 @@ import {
 import {
   type AxisData,
   axesKey,
+  checkDepthOrder,
   type FaceFrame3D,
   type Frame3D,
   findRow,
@@ -140,6 +141,7 @@ export class Line3DMark implements Layer3D {
   #held: { version: number; groups: readonly Group[] } | undefined;
 
   constructor(input: Line3DSpec, table: Table) {
+    checkDepthOrder(input, "line3d");
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "line3d");
     // Read from the copy: the caller may change what it passed.

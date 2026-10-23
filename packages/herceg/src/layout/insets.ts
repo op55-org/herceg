@@ -105,8 +105,10 @@ function coordinate(
   ] as const)
     if (!Number.isFinite(n))
       throw layoutError(`${path}.${name}`, `expected a finite number; received ${n}`);
-  if ("px" in c) return lo + c.px + offset;
-  return (axis === "x" ? lo + c.fraction * (hi - lo) : hi - c.fraction * (hi - lo)) + offset;
+  // Finite, so a number: a field's share has no place among insets.
+  const n = value as number;
+  if ("px" in c) return lo + n + offset;
+  return (axis === "x" ? lo + n * (hi - lo) : hi - n * (hi - lo)) + offset;
 }
 
 /** How far along an inset's box, from its start, its anchor is. */

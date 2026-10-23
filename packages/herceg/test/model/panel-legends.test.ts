@@ -526,7 +526,7 @@ describe("panel legends", () => {
         point(shades, { x: "t", y: "v", color: "heat", panel: "errors" }),
       ],
       panels: layout,
-      guides: [legend({ panel: "latency", scales: [{ mark: "regions", channel: "series" }] })],
+      guides: [legend({ panel: "latency", include: [{ mark: "regions", channel: "series" }] })],
     };
     const scene = model(config).scene(estimateText);
     const own = legends(scene).find((g) => g.panel === "latency")!;
@@ -547,7 +547,7 @@ describe("panel legends", () => {
     const scene = model({
       marks: quiet,
       panels: layout,
-      guides: [legend({ panel: "latency", scales: [{ mark: "p99", channel: "color" }] })],
+      guides: [legend({ panel: "latency", include: [{ mark: "p99", channel: "color" }] })],
     }).scene(estimateText);
     expect(labels(legends(scene).find((g) => g.panel === "latency"))).toEqual(["eu", "us", "ap"]);
     // A panel's legend naming nothing leaves it out.
@@ -567,7 +567,7 @@ describe("panel legends", () => {
     const scene = model({
       marks: named,
       panels: layout,
-      guides: [legend({ panel: "latency", scales: [{ mark: "p99", channel: "series" }] })],
+      guides: [legend({ panel: "latency", include: [{ mark: "p99", channel: "series" }] })],
     }).scene(estimateText);
     // Errors draws the regions too, and no legend there lists them.
     expect(labels(legends(scene).find((g) => g.panel === undefined))).toEqual(["eu", "us", "ap"]);
@@ -578,7 +578,7 @@ describe("panel legends", () => {
       guides: [
         legend({ panel: "errors" }),
         legend({ panel: "latency" }),
-        legend({ panel: "latency", scales: [] }),
+        legend({ panel: "latency", include: [] }),
       ],
     }).scene(estimateText);
     expect(legends(both).find((g) => g.panel === undefined)).toBeUndefined();
@@ -657,14 +657,17 @@ describe("panel legends", () => {
         guides: [
           legend({
             ...(where && { panel: where }),
+            include: [],
             entries: [{ key: "all", label: "Errors", targets: [{ mark: "errors" }] }],
           }),
         ],
       });
+      // Beside the chart's legend, which lists the series it leaves.
       const entry = (scene: Scene) =>
         legends(scene)
-          .find((g) => g.panel === where)!
-          .entries.find((e) => e.key === "all")!;
+          .filter((g) => g.panel === where)
+          .flatMap((g) => g.entries)
+          .find((e) => e.key === "all")!;
       const shown = entry(chart.scene(estimateText));
       expect(shown.hidden).toBe(false);
       // Hidden in errors, the only panel drawing them.
@@ -684,6 +687,7 @@ describe("panel legends", () => {
         legend({ panel: "errors" }),
         legend({
           panel: "errors",
+          include: [],
           entries: [{ key: "all", label: "Errors", targets: [{ mark: "errors" }] }],
         }),
         legend({}),
@@ -718,6 +722,7 @@ describe("panel legends", () => {
         guides: [
           legend({
             panel: "latency",
+            include: [],
             entries: [
               { key: "own", label: "Own", targets: targets.map((mark) => ({ mark })) },
               { key: "note", label: "Note" },
@@ -749,6 +754,7 @@ describe("panel legends", () => {
           guides: [
             legend({
               panel: "latency",
+              include: [],
               entries: [{ key: "m", label: "M", targets: [{ mark: "m" }] }],
             }),
           ],

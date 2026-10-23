@@ -83,7 +83,7 @@ describe("scales and guides", () => {
     ).not.toThrow();
     const other = { marks, scales: { temperature: { domain: [0, 1] } } } as unknown as ChartSpec;
     expect(() => validateSpec(other)).toThrow(
-      'spec.scales.temperature.type: expected "ordinal" (scales other than x, y, and yRight are scales of categories); received undefined',
+      'spec.scales.temperature.type: expected "ordinal", "identity", or a position scale\'s "linear", "log", or "time"; received undefined',
     );
   });
 
@@ -145,6 +145,7 @@ describe("scales and guides", () => {
     expect(
       valid({
         legend: {
+          include: [],
           entries: [
             { key: "band", label: "Maintenance", swatch: { type: "rect", fill: "#eee" } },
             { key: "avg", label: "Average", sample: { mark: "avg" }, targets: [{ mark: "avg" }] },
@@ -155,11 +156,12 @@ describe("scales and guides", () => {
     expect(
       valid({
         legend: {
+          include: [],
           entries: [{ key: "a", label: "A", swatch: { type: "star", fill: "red" } as never }],
         },
       }),
     ).toThrow(
-      /^spec\.legend\.entries\[0\]\.swatch\.type: expected "line", "rect", "circle", or "composite"/,
+      /^spec\.legend\.entries\[0\]\.swatch\.type: expected "line", "rect", "symbol", or "composite"/,
     );
   });
 

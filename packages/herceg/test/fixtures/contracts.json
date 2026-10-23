@@ -1,0 +1,4026 @@
+{
+  "about": "The spec's contracts as the engine and the Python package both keep them. Each case is a chart: its portable spec (spec), which the engine loads and draws, and the same chart made in Python (builder: the Chart's options, then its methods' calls; an object with \"hg\" is that class of herceg's, built with \"args\"). A case with code is refused, when the engine loads the spec or draws it (stage) and in Python by the methods or to_spec, with the code, path (python_path where Python spells it otherwise), and messages given (python, Python's); pending names the stream that draws it, until which its refusal says so, and Python's spec with the refusal set aside is the case's, unless builder_spec is false (the builder refuses it before it can write it). A case without code is drawn, its legends listing legend's labels where given, and Python's spec is the case's. Read by packages/herceg/test/model/contracts.test.ts and python/tests/test_contracts.py.",
+  "data": {
+    "t": [0, 1, 2, 3],
+    "v": [1, 2, 3, 4],
+    "w": [4, 3, 2, 1],
+    "region": ["eu", "eu", "us", "us"],
+    "paint": ["#d62728", "#1f77b4", "#d62728", "#1f77b4"]
+  },
+  "cases": [
+    {
+      "contract": "mark.z-index.order",
+      "name": "a mark painted out of its order",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "zIndex": 2
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z_index": 2
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[0].zIndex",
+      "python_path": "marks[0].z_index",
+      "message": "marks[0].zIndex: not drawn as given yet",
+      "python": "line z_index: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "mark.z-index.default",
+      "name": "a mark in its order",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "zIndex": 0
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z_index": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "mark.z-index.finite",
+      "name": "a mark's order not a number",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "zIndex": "front"
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z_index": "front"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "marks[0].zIndex",
+      "python_path": "marks[0].z_index",
+      "message": "zIndex: expected a finite number",
+      "python": "z_index: expected a finite number",
+      "stage": "load"
+    },
+    {
+      "contract": "mark.z-index.depth",
+      "name": "a 3D mark painted out of its order",
+      "spec": {
+        "marks": [
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w",
+            "zIndex": 1
+          }
+        ]
+      },
+      "code": "unsupported",
+      "path": "marks[0].zIndex",
+      "message": "point3d zIndex: a 3D box draws its marks by depth, not in an order of their own; drop zIndex",
+      "stage": "load"
+    },
+    {
+      "contract": "axis.grid.z-index.depth",
+      "name": "a 3D box's grid lines over its marks",
+      "spec": {
+        "x": {
+          "grid": {
+            "zIndex": 1
+          }
+        },
+        "marks": [
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "x": {
+            "hg": "AxisOptions",
+            "args": {
+              "grid": {
+                "hg": "GridLines",
+                "args": {
+                  "z_index": 1
+                }
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "point_3d",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z": "w"
+            }
+          }
+        ]
+      },
+      "code": "unsupported",
+      "path": "x.grid.zIndex",
+      "python_path": "x.grid.z_index",
+      "message": "x.grid.zIndex: a 3D box draws its grid lines by depth",
+      "python": "x.grid.z_index: a 3D box draws its grid lines by depth",
+      "stage": "draw"
+    },
+    {
+      "contract": "scale.padding.depth",
+      "name": "a 3D box's vertical axis padded",
+      "spec": {
+        "z": {
+          "padding": 0.1
+        },
+        "marks": [
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "z": {
+            "hg": "AxisOptions",
+            "args": {
+              "padding": 0.1
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "point_3d",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z": "w"
+            }
+          }
+        ]
+      },
+      "code": "unsupported",
+      "path": "z.padding",
+      "message": "z.padding: a 3D box fits its data",
+      "python": "z.padding: a 3D box fits its data",
+      "stage": "draw"
+    },
+    {
+      "contract": "scale.padding.beside-depth",
+      "name": "a 2D subplot's scale padded beside a 3D one",
+      "spec": {
+        "panels": [
+          {
+            "id": "a",
+            "y": {
+              "padding": 0.2
+            }
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w",
+            "panel": "b"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "panels": [
+            {
+              "hg": "Panel",
+              "args": {
+                "id": "a",
+                "y": {
+                  "hg": "AxisOptions",
+                  "args": {
+                    "padding": 0.2
+                  }
+                }
+              }
+            },
+            "b"
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "panel": "a"
+            }
+          },
+          {
+            "method": "point_3d",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z": "w",
+              "panel": "b"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "stage": "draw",
+      "path": "panels[0].y.padding",
+      "message": "panels[0].y.padding: not drawn as given yet",
+      "python": "panels[0].y.padding: not drawn as given yet"
+    },
+    {
+      "contract": "scale.padding.beside-box",
+      "name": "a scale of the chart's own padded beside a 3D box",
+      "spec": {
+        "scales": {
+          "depth": {
+            "type": "linear",
+            "padding": 0.1
+          }
+        },
+        "marks": [
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "depth": {
+              "type": "linear",
+              "padding": 0.1
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "point_3d",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z": "w"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "stage": "draw",
+      "path": "scales.depth.padding",
+      "message": "chart scales.depth.padding: not drawn as given yet",
+      "python": "scales.depth.padding: not drawn as given yet",
+      "builder_spec": false
+    },
+    {
+      "contract": "axis.grid.beside-depth",
+      "name": "the chart's grid lines under the marks, beside a 3D subplot",
+      "spec": {
+        "x": {
+          "grid": {
+            "zIndex": -1
+          }
+        },
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w",
+            "panel": "b"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "x": {
+            "hg": "AxisOptions",
+            "args": {
+              "grid": {
+                "hg": "GridLines",
+                "args": {
+                  "z_index": -1
+                }
+              }
+            }
+          },
+          "panels": ["a", "b"]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "panel": "a"
+            }
+          },
+          {
+            "method": "point_3d",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z": "w",
+              "panel": "b"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "scale.padding.depth-scale",
+      "name": "a 3D box's x scale padded",
+      "spec": {
+        "scales": {
+          "x": {
+            "type": "linear",
+            "padding": 0.2
+          }
+        },
+        "marks": [
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "x": {
+              "hg": "Scale",
+              "args": {
+                "type": "linear",
+                "padding": 0.2
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "point_3d",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "z": "w"
+            }
+          }
+        ]
+      },
+      "code": "unsupported",
+      "stage": "draw",
+      "path": "scales.x.padding",
+      "message": "scales.x.padding: a 3D box fits its data",
+      "python": "scales.x.padding: a 3D box fits its data"
+    },
+    {
+      "contract": "axis.grid.z-index",
+      "name": "grid lines over the marks",
+      "spec": {
+        "y": {
+          "grid": {
+            "zIndex": 1
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "y": {
+            "hg": "AxisOptions",
+            "args": {
+              "grid": {
+                "hg": "GridLines",
+                "args": {
+                  "z_index": 1
+                }
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "y.grid.zIndex",
+      "python_path": "y.grid.z_index",
+      "message": "y.grid.zIndex: not drawn as given yet",
+      "python": "y.grid.z_index: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "axis.grid.default",
+      "name": "grid lines under the marks",
+      "spec": {
+        "y": {
+          "grid": {
+            "zIndex": -1
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "y": {
+            "hg": "AxisOptions",
+            "args": {
+              "grid": {
+                "hg": "GridLines",
+                "args": {
+                  "z_index": -1
+                }
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "axis.grid.z-index.malformed",
+      "name": "an axis guide's grid lines in an order that is no number",
+      "spec": {
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "y",
+            "grid": {
+              "zIndex": "bad"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "y",
+                "grid": {
+                  "z_index": "bad"
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "guides[0].grid.zIndex",
+      "python_path": "guides[0].grid.z_index",
+      "message": "guides[0].grid.zIndex: expected",
+      "python": "guides[0].grid.z_index: expected a finite number; received \"bad\""
+    },
+    {
+      "contract": "scale.padding",
+      "name": "a scale's padding",
+      "spec": {
+        "x": {
+          "padding": {
+            "px": 12
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "x": {
+            "hg": "AxisOptions",
+            "args": {
+              "padding": {
+                "hg": "Pixels",
+                "args": {
+                  "value": 12
+                }
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "x.padding",
+      "message": "x.padding: not drawn as given yet",
+      "python": "x.padding: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "scale.padding.share",
+      "name": "a scale padded by half its span",
+      "spec": {
+        "x": {
+          "padding": 0.5
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "x.padding",
+      "message": "x.padding: expected a share of the domain from 0 up to 0.5, not 0.5; received 0.5",
+      "stage": "load",
+      "builder": {
+        "chart": {
+          "x": {
+            "padding": 0.5
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "python": "x.padding: expected a share of the domain from 0 up to 0.5, not 0.5; received 0.5"
+    },
+    {
+      "contract": "scale.padding.share.quoted",
+      "name": "a scale of a name with a dot padded by half its span",
+      "spec": {
+        "scales": {
+          "p.99": {
+            "type": "linear",
+            "padding": 0.5
+          }
+        },
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "scales[\"p.99\"].padding",
+      "message": "scales[\"p.99\"].padding: expected a share of the domain",
+      "builder": {
+        "chart": {
+          "scales": {
+            "p.99": {
+              "type": "linear",
+              "padding": 0.5
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "python": "scales[\"p.99\"].padding: expected a share of the domain from 0 up to 0.5, not 0.5; received 0.5"
+    },
+    {
+      "contract": "scale.padding.pixels",
+      "name": "a scale padded by less than no pixels",
+      "spec": {
+        "x": {
+          "padding": {
+            "px": -1
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "x": {
+            "padding": {
+              "px": -1
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "x.padding.px",
+      "message": "x.padding.px: expected a number of at least 0; received -1",
+      "python": "x.padding.px: expected a number of at least 0; received -1"
+    },
+    {
+      "contract": "scale.ordinal.scope.quoted",
+      "name": "an ordinal scale of a name with a dot scoped to no place",
+      "spec": {
+        "scales": {
+          "p.99": {
+            "type": "ordinal",
+            "scope": "row"
+          }
+        },
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "scales[\"p.99\"].scope",
+      "message": "scales[\"p.99\"].scope: expected \"chart\" or \"panel\"",
+      "builder": {
+        "chart": {
+          "scales": {
+            "p.99": {
+              "scope": "row"
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "python": "scales[\"p.99\"].scope: expected \"chart\" or \"panel\"; received \"row\""
+    },
+    {
+      "contract": "scale.padding.panel-path",
+      "name": "a subplot's scale padded, the layout placing it second",
+      "spec": {
+        "panels": [
+          {
+            "id": "a",
+            "y": {
+              "padding": 0.2
+            }
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "layout": {
+          "type": "grid",
+          "columns": [1, 1],
+          "cells": [
+            {
+              "row": 0,
+              "column": 0,
+              "content": {
+                "type": "panel",
+                "panel": "b"
+              }
+            },
+            {
+              "row": 0,
+              "column": 1,
+              "content": {
+                "type": "panel",
+                "panel": "a"
+              }
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "b"
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "stage": "draw",
+      "path": "panels[0].y.padding",
+      "message": "panels[0].y.padding: not drawn as given yet"
+    },
+    {
+      "contract": "scale.position.named",
+      "name": "a position scale of the chart's own",
+      "spec": {
+        "scales": {
+          "depth": {
+            "type": "linear"
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "depth": {
+              "hg": "Scale",
+              "args": {
+                "type": "linear"
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "scales.depth",
+      "message": "scales.depth: not drawn as given yet",
+      "python": "scales.depth: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "scale.position.named.path",
+      "name": "a position scale of the chart's own of a name with a dot",
+      "spec": {
+        "scales": {
+          "p.99": {
+            "type": "log",
+            "padding": 0.1
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "p.99": {
+              "hg": "Scale",
+              "args": {
+                "type": "log",
+                "padding": 0.1
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "scales[\"p.99\"].padding",
+      "message": "scales[\"p.99\"].padding: not drawn as given yet",
+      "python": "scales[\"p.99\"].padding: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "axis.scale.missing",
+      "name": "an axis of a scale the chart does not have",
+      "spec": {
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "missing",
+            "place": {
+              "side": "left"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "missing",
+                "place": {
+                  "hg": "Place",
+                  "args": {
+                    "side": "left"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "guides[0].scale",
+      "message": "guides[0].scale: expected \"x\", \"y\", \"yRight\", or a position scale of the chart's scales; received \"missing\"",
+      "python": "guides[0].scale: expected \"x\", \"y\", \"y_right\", or a position scale of the chart's scales; received \"missing\""
+    },
+    {
+      "contract": "axis.scale.categories",
+      "name": "an axis of an ordinal scale",
+      "spec": {
+        "scales": {
+          "k": {
+            "type": "ordinal"
+          }
+        },
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "k",
+            "place": {
+              "side": "left"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "k": {
+              "hg": "OrdinalScale",
+              "args": {}
+            }
+          },
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "k",
+                "place": {
+                  "hg": "Place",
+                  "args": {
+                    "side": "left"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "guides[0].scale",
+      "message": "guides[0].scale: expected \"x\", \"y\", \"yRight\", or a position scale of the chart's scales; received \"k\"",
+      "python": "guides[0].scale: expected \"x\", \"y\", \"y_right\", or a position scale of the chart's scales; received \"k\""
+    },
+    {
+      "contract": "axis.scale.name",
+      "name": "an axis of a scale named by a list",
+      "spec": {
+        "scales": {
+          "depth": {
+            "type": "linear"
+          }
+        },
+        "guides": [
+          {
+            "type": "axis",
+            "scale": ["depth"],
+            "place": {
+              "side": "left"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "guides[0].scale",
+      "message": "guides[0].scale: expected"
+    },
+    {
+      "contract": "axis.scale.name-object",
+      "name": "an axis of a scale named by an object",
+      "spec": {
+        "scales": {
+          "depth": {
+            "type": "linear"
+          }
+        },
+        "guides": [
+          {
+            "type": "axis",
+            "scale": {
+              "toString": null
+            },
+            "place": {
+              "side": "left"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "guides[0].scale",
+      "message": "guides[0].scale: expected"
+    },
+    {
+      "contract": "position.scale.named",
+      "name": "a rule on a position scale of the chart's own",
+      "spec": {
+        "scales": {
+          "depth": {
+            "type": "linear"
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "rule",
+            "y": {
+              "data": 3,
+              "scale": "depth"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "depth": {
+              "type": "linear"
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "rule",
+            "args": {
+              "y": {
+                "hg": "DataPosition",
+                "args": {
+                  "value": 3,
+                  "scale": "depth"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[1].y.scale",
+      "message": "rule y.scale: not drawn as given yet",
+      "python": "rule y.scale: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "position.scale.other-axis",
+      "name": "a rule's y on the x scale",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "rule",
+            "y": {
+              "data": 1,
+              "scale": "x"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "rule",
+            "args": {
+              "y": {
+                "hg": "DataPosition",
+                "args": {
+                  "value": 1,
+                  "scale": "x"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "stage": "load",
+      "path": "marks[1].y.scale",
+      "message": "rule y.scale: not drawn as given yet",
+      "python": "rule y.scale: not drawn as given yet"
+    },
+    {
+      "contract": "text.vertical-align",
+      "name": "text aligned vertically",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "text",
+            "x": 1,
+            "y": 2,
+            "label": {
+              "text": "peak",
+              "style": {
+                "verticalAlign": "top"
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "text",
+            "args": {
+              "x": 1,
+              "y": 2,
+              "label": {
+                "hg": "Label",
+                "args": {
+                  "text": "peak",
+                  "style": {
+                    "hg": "TextStyle",
+                    "args": {
+                      "vertical_align": "top"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[1].label.style.verticalAlign",
+      "python_path": "marks[1].label.style.vertical_align",
+      "message": "marks[1].label.style.verticalAlign: not drawn as given yet",
+      "python": "label.style.vertical_align: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "text.vertical-align.malformed",
+      "name": "a title aligned vertically nowhere",
+      "spec": {
+        "title": {
+          "text": "A",
+          "style": {
+            "verticalAlign": "bad"
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "title": {
+            "text": "A",
+            "style": {
+              "vertical_align": "bad"
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "title.style.verticalAlign",
+      "python_path": "title.style.vertical_align",
+      "message": "title.style.verticalAlign: expected",
+      "python": "title.style.vertical_align: expected \"top\", \"middle\", or \"bottom\"; received \"bad\""
+    },
+    {
+      "contract": "text.vertical-align.map-key",
+      "name": "a category named verticalAlign, in a scale named style",
+      "spec": {
+        "scales": {
+          "style": {
+            "type": "ordinal",
+            "map": {
+              "verticalAlign": "#d62728"
+            }
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "style": {
+              "hg": "OrdinalScale",
+              "args": {
+                "map": {
+                  "verticalAlign": "#d62728"
+                }
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "axis.tick-labels.inside",
+      "name": "tick labels inside the plot",
+      "spec": {
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "y",
+            "labels": {
+              "inside": true
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "y",
+                "labels": {
+                  "hg": "TickLabels",
+                  "args": {
+                    "inside": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "guides[0].labels.inside",
+      "message": "guides[0].labels.inside: not drawn as given yet",
+      "python": "guides[0].labels.inside: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "axis.tick-labels.gap",
+      "name": "tick labels' gap not a length",
+      "spec": {
+        "guides": [
+          {
+            "type": "axis",
+            "scale": "y",
+            "labels": {
+              "gap": -2
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "guides[0].labels.gap",
+      "message": "guides[0].labels.gap: expected a number of at least 0",
+      "stage": "load",
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "axis",
+              "args": {
+                "scale": "y",
+                "labels": {
+                  "gap": -2
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "python": "guides[0].labels.gap: expected a number of at least 0; received -2"
+    },
+    {
+      "contract": "position.fraction.field",
+      "name": "a rule at shares a field gives",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "rule",
+            "y": {
+              "fraction": {
+                "field": "w"
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "rule",
+            "args": {
+              "y": {
+                "hg": "Fraction",
+                "args": {
+                  "field": "w"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[1].y.fraction",
+      "message": "y.fraction: not drawn as given yet",
+      "python": "y.fraction: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "position.pixels.field",
+      "name": "a line's x in pixels a field gives",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": {
+              "px": {
+                "field": "w"
+              }
+            },
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": {
+                "hg": "Pixels",
+                "args": {
+                  "field": "w"
+                }
+              },
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[0].x",
+      "message": "line x: not drawn as given yet",
+      "python": "line x: not drawn as given yet",
+      "builder_spec": false,
+      "stage": "load"
+    },
+    {
+      "contract": "errorbar.center.field",
+      "name": "a symmetric error bar's center at a share of the plot",
+      "spec": {
+        "marks": [
+          {
+            "type": "errorbar",
+            "x": "t",
+            "y": {
+              "fraction": 0.3
+            },
+            "yError": "w"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "marks[0]",
+      "message": "errorbar y: a center with yError is a field; give a field's name",
+      "stage": "load"
+    },
+    {
+      "contract": "bar.width.pixels",
+      "name": "bars of a width in pixels",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "width": {
+              "px": 8
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "width": {
+                "hg": "Pixels",
+                "args": {
+                  "value": 8
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[0].width",
+      "message": "bar width: not drawn as given yet",
+      "python": "bar width: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "bar.width.positive",
+      "name": "bars of no width",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "width": {
+              "px": -1
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "width": {
+                "hg": "Pixels",
+                "args": {
+                  "value": -1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "marks[0].width.px",
+      "message": "width.px: expected a number of at least 0",
+      "python": "bar width.px: expected a number of at least 0; received -1",
+      "stage": "load"
+    },
+    {
+      "contract": "bar.stroke-sides",
+      "name": "bars outlined on some sides",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "stroke": "#000",
+            "strokeSides": ["top"]
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "stroke": "#000",
+              "stroke_sides": ["top"]
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[0].strokeSides",
+      "python_path": "marks[0].stroke_sides",
+      "message": "bar strokeSides: not drawn as given yet",
+      "python": "bar stroke_sides: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "region.stroke",
+      "name": "a region outlined",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "region",
+            "x1": 1,
+            "x2": 2,
+            "stroke": "#000"
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "region",
+            "args": {
+              "x1": 1,
+              "x2": 2,
+              "stroke": "#000"
+            }
+          }
+        ]
+      },
+      "pending": "R",
+      "code": "unsupported",
+      "path": "marks[1].stroke",
+      "message": "region stroke: not drawn as given yet",
+      "python": "region stroke: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "region.stroke.width",
+      "name": "a region outlined less than nothing wide",
+      "spec": {
+        "marks": [
+          {
+            "type": "region",
+            "x1": 0,
+            "x2": 1,
+            "strokeWidth": -1
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "region",
+            "args": {
+              "x1": 0,
+              "x2": 1,
+              "stroke_width": -1
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].strokeWidth",
+      "python_path": "marks[0].stroke_width",
+      "message": "strokeWidth: expected a number of at least 0; received -1",
+      "python": "region stroke_width: expected 0 or more pixels; received -1"
+    },
+    {
+      "contract": "region.stroke.color",
+      "name": "a region outlined in a number",
+      "spec": {
+        "marks": [
+          {
+            "type": "region",
+            "x1": 0,
+            "x2": 1,
+            "stroke": 2
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "region",
+            "args": {
+              "x1": 0,
+              "x2": 1,
+              "stroke": 2
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].stroke",
+      "message": "stroke: expected a string; received 2",
+      "python": "region stroke: expected a color; received 2"
+    },
+    {
+      "contract": "channel.scale.identity",
+      "name": "colors a field holds",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": {
+              "field": "paint",
+              "scale": {
+                "type": "identity"
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": {
+                "hg": "Channel",
+                "args": {
+                  "field": "paint",
+                  "scale": {
+                    "hg": "IdentityScale",
+                    "args": {}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[0].color",
+      "message": "point color: not drawn as given yet",
+      "python": "point color: not drawn as given yet",
+      "builder_spec": false,
+      "stage": "load"
+    },
+    {
+      "contract": "channel.scale.identity.dict",
+      "name": "colors a field holds, given as a dict",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": {
+              "field": "paint",
+              "scale": {
+                "type": "identity"
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": {
+                "field": "paint",
+                "scale": {
+                  "hg": "IdentityScale",
+                  "args": {}
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[0].color",
+      "message": "point color: not drawn as given yet",
+      "python": "point color: not drawn as given yet",
+      "builder_spec": false,
+      "stage": "load"
+    },
+    {
+      "contract": "channel.scale.identity.point-encode",
+      "name": "a point's encoded colors a field holds, the scale given as the spec writes it",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "color": {
+                "field": "paint",
+                "scale": {
+                  "type": "identity"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "color": {
+                  "field": "paint",
+                  "scale": {
+                    "type": "identity"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[0].encode",
+      "message": "point encode: not drawn as given yet (round 2 stream C adds it); drop encode",
+      "python": "point encode: not drawn as given yet (round 2 stream C adds it); drop encode",
+      "builder_spec": false,
+      "stage": "load"
+    },
+    {
+      "contract": "channel.output.point",
+      "name": "a point's color that is no color",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": {
+              "value": 3
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": {
+                "value": 3
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].color.value",
+      "message": "color.value: expected",
+      "python": "point color.value: expected a CSS color; received 3"
+    },
+    {
+      "contract": "channel.output.bool",
+      "name": "a point's color that is a boolean",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": {
+              "value": true
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": {
+                "value": true
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].color.value",
+      "message": "color.value: expected a string; received true",
+      "python": "point color.value: expected a CSS color; received True"
+    },
+    {
+      "contract": "channel.output.encode",
+      "name": "a point's encoded fill that is no color",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "fill": {
+                "value": 3
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "fill": {
+                  "value": 3
+                }
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].encode.fill.value",
+      "message": "encode.fill.value: expected a string; received 3",
+      "python": "point encode.fill.value: expected a CSS color; received 3"
+    },
+    {
+      "contract": "channel.output.css",
+      "name": "a point's color text that is no CSS color, refused with its channel",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": {
+              "value": "garbage"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": {
+                "value": "garbage"
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "stage": "load",
+      "path": "marks[0].color",
+      "message": "point color: not drawn as given yet",
+      "python": "point color: not drawn as given yet",
+      "builder_spec": false
+    },
+    {
+      "contract": "channel.field.name",
+      "name": "a point's color of a field that is no name",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "color": {
+              "field": 3
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "color": {
+                "field": 3
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].color.field",
+      "message": "color.field: expected a field name; received 3",
+      "python": "point color.field: expected a column's name; received 3"
+    },
+    {
+      "contract": "point.size.range-with-channel",
+      "name": "a size channel's points, and radii to size them in",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "size": {
+              "field": "w"
+            },
+            "radiusRange": [2, 8]
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "size": {
+                "field": "w"
+              },
+              "radius_range": [2, 8]
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0]",
+      "python_path": "marks[0].radius_range",
+      "message": "point radiusRange: a size channel's scale gives its areas; drop radiusRange",
+      "python": "point radius_range: a size channel's scale gives its areas; drop radius_range"
+    },
+    {
+      "contract": "point.size.range-with-encode",
+      "name": "an encoded size channel's points, and radii to size them in",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "size": {
+                "field": "w"
+              }
+            },
+            "radiusRange": [2, 8]
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "size": {
+                  "field": "w"
+                }
+              },
+              "radius_range": [2, 8]
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0]",
+      "python_path": "marks[0].radius_range",
+      "message": "point radiusRange: a size channel's scale gives its areas; drop radiusRange",
+      "python": "point radius_range: a size channel's scale gives its areas; drop radius_range"
+    },
+    {
+      "contract": "point.size.encode-with-radius",
+      "name": "an encoded size channel's points of a constant radius",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "size": {
+                "field": "w"
+              }
+            },
+            "radius": 3
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "size": {
+                  "field": "w"
+                }
+              },
+              "radius": 3
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0]",
+      "python_path": "marks[0].encode.size",
+      "message": "point encode.size: a size channel, and a constant radius too; drop one",
+      "python": "point encode.size: a size channel, and a constant radius too; drop one"
+    },
+    {
+      "contract": "point.size.encode-with-size",
+      "name": "an encoded size channel's points, sized by a field too",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "size": {
+                "field": "w"
+              }
+            },
+            "size": "w"
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "size": {
+                  "field": "w"
+                }
+              },
+              "size": "w"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0]",
+      "python_path": "marks[0].encode.size",
+      "message": "point encode.size: a size channel, and size too; drop one",
+      "python": "point encode.size: a size channel, and size too; drop one"
+    },
+    {
+      "contract": "point.size.radius-with-channel",
+      "name": "a size channel's points of a constant radius",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "size": {
+              "field": "w"
+            },
+            "radius": 3
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "size": {
+                "field": "w"
+              },
+              "radius": 3
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0]",
+      "python_path": "marks[0].radius",
+      "message": "point radius: a constant radius or a size field, not both; drop one",
+      "python": "point radius: a constant radius or a size column, not both; drop one"
+    },
+    {
+      "contract": "channel.scale.identity.encode",
+      "name": "a line's colors a field holds, under a stroke of its own",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "stroke": "#000",
+            "encode": {
+              "color": {
+                "field": "paint",
+                "scale": {
+                  "type": "identity"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "stroke": "#000",
+              "encode": {
+                "color": {
+                  "hg": "Channel",
+                  "args": {
+                    "field": "paint",
+                    "scale": {
+                      "hg": "IdentityScale",
+                      "args": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[0].encode.color.scale",
+      "message": "encode.color.scale: not drawn as given yet",
+      "python": "encode.color.scale: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "channel.scale.identity.number",
+      "name": "a line's widths a number field holds",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "strokeWidth": {
+                "field": "w",
+                "scale": {
+                  "type": "identity"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "stroke_width": {
+                  "hg": "Channel",
+                  "args": {
+                    "field": "w",
+                    "scale": {
+                      "hg": "IdentityScale",
+                      "args": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "stage": "draw",
+      "path": "marks[0].encode.strokeWidth.scale",
+      "python_path": "marks[0].encode.stroke_width.scale",
+      "message": "encode.strokeWidth.scale: not drawn as given yet",
+      "python": "line encode.stroke_width.scale: not drawn as given yet"
+    },
+    {
+      "contract": "channel.scale.identity.named",
+      "name": "a line's widths a number field holds, through an identity scale of the chart's",
+      "spec": {
+        "scales": {
+          "raw": {
+            "type": "identity"
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "encode": {
+              "strokeWidth": {
+                "field": "w",
+                "scale": "raw"
+              }
+            }
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "raw": {
+              "hg": "IdentityScale",
+              "args": {}
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "encode": {
+                "stroke_width": {
+                  "hg": "Channel",
+                  "args": {
+                    "field": "w",
+                    "scale": "raw"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "stage": "draw",
+      "path": "scales.raw",
+      "message": "scales.raw: not drawn as given yet",
+      "python": "scales.raw: not drawn as given yet"
+    },
+    {
+      "contract": "scale.identity.named",
+      "name": "an identity scale of the chart's",
+      "spec": {
+        "scales": {
+          "paints": {
+            "type": "identity"
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "paints": {
+              "hg": "IdentityScale",
+              "args": {}
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "scales.paints",
+      "message": "scales.paints: not drawn as given yet",
+      "python": "scales.paints: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "scale.ordinal.scope",
+      "name": "an ordinal scale scoped to each panel",
+      "spec": {
+        "scales": {
+          "regions": {
+            "type": "ordinal",
+            "scope": "panel"
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "regions": {
+              "hg": "OrdinalScale",
+              "args": {
+                "scope": "panel"
+              }
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "scales.regions.scope",
+      "message": "scales.regions.scope: not drawn as given yet",
+      "python": "scales.regions.scope: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "line.labels",
+      "name": "labels following a line's series",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "labels": {
+              "at": "last"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "labels": {
+                "hg": "SeriesLabels",
+                "args": {
+                  "at": "last"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[0].labels",
+      "message": "line labels: not drawn as given yet",
+      "python": "line labels: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "line.labels.at",
+      "name": "a line's labels at no place along it",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "labels": {
+              "at": "middle"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "labels": {
+                "at": "middle"
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].labels.at",
+      "message": "labels.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\"",
+      "python": "line labels.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\""
+    },
+    {
+      "contract": "line.labels.edge",
+      "name": "a line's labels along an edge",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "labels": {
+              "at": "last",
+              "edge": "y1"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "labels": {
+                "hg": "SeriesLabels",
+                "args": {
+                  "at": "last",
+                  "edge": "y1"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].labels.edge",
+      "message": "labels.edge: expected no edge: a line's labels follow the line",
+      "python": "line labels.edge: a line's labels follow the line; drop edge"
+    },
+    {
+      "contract": "bar.labels.content",
+      "name": "bars' labels made of parts",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "labels": {
+              "content": [
+                "n = ",
+                {
+                  "value": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "labels": {
+                "hg": "BarLabels",
+                "args": {
+                  "content": [
+                    "n = ",
+                    {
+                      "hg": "LabelPart",
+                      "args": {
+                        "value": true
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[0].labels.content",
+      "message": "bar labels.content: not drawn as given yet",
+      "python": "bar labels.content: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "label.content.empty",
+      "name": "bars' labels of no parts",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "labels": {
+              "content": []
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "labels": {
+                "content": []
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].labels.content",
+      "message": "labels.content: expected a list of parts",
+      "python": "bar labels.content: expected a list of parts"
+    },
+    {
+      "contract": "label.content.part",
+      "name": "a rule's label of a part of no kind",
+      "spec": {
+        "marks": [
+          {
+            "type": "rule",
+            "y": 2,
+            "label": {
+              "content": [
+                {
+                  "series": true
+                },
+                {
+                  "bogus": 1
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "rule",
+            "args": {
+              "y": 2,
+              "label": {
+                "content": [
+                  {
+                    "series": true
+                  },
+                  {
+                    "bogus": 1
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].label.content[1]",
+      "message": "label.content[1]: expected text, { field }, { series: true }, or { value: true }",
+      "python": "rule label.content[1]: expected text, or hg.LabelPart(field=...)"
+    },
+    {
+      "contract": "label.part.flag",
+      "name": "bars labeled by a part whose flag is a number",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "labels": {
+              "content": [
+                {
+                  "value": 1
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "labels": {
+                "content": [
+                  {
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].labels.content[0].value",
+      "message": "labels.content[0].value: expected true; received 1",
+      "python": "bar labels.content[0].value: expected True; received 1"
+    },
+    {
+      "contract": "label.content.alone",
+      "name": "a label of text and parts",
+      "spec": {
+        "marks": [
+          {
+            "type": "rule",
+            "y": 2,
+            "label": {
+              "text": "SLO",
+              "content": ["SLO"]
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "marks[0].label",
+      "message": "marks[0].label: expected a label with one of text, field, and content",
+      "stage": "load"
+    },
+    {
+      "contract": "text.from",
+      "name": "text following a mark's series",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "text",
+            "label": "a",
+            "from": {
+              "mark": "a",
+              "at": "last"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "text",
+            "args": {
+              "label": "a",
+              "from_": {
+                "hg": "MarkAnchor",
+                "args": {
+                  "mark": "a",
+                  "at": "last"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[1].from",
+      "python_path": "marks[1].from_",
+      "message": "text from: not drawn as given yet",
+      "python": "text from_: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "text.from.at",
+      "name": "text following a mark at no place along it",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "id": "a"
+          },
+          {
+            "type": "text",
+            "from": {
+              "mark": "a",
+              "at": "middle"
+            },
+            "label": {
+              "text": "x"
+            }
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "id": "a"
+            }
+          },
+          {
+            "method": "text",
+            "args": {
+              "label": "x",
+              "from_": {
+                "mark": "a",
+                "at": "middle"
+              }
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[1].from.at",
+      "python_path": "marks[1].from_.at",
+      "message": "from.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\"",
+      "python": "text from_.at: expected \"first\", \"last\", \"visible-start\", or \"visible-end\"; received \"middle\""
+    },
+    {
+      "contract": "text.from.exclusive",
+      "name": "text both following a mark and placed",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "text",
+            "label": "a",
+            "x": 1,
+            "y": 2,
+            "from": {
+              "mark": "a",
+              "at": "last"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "marks[1]",
+      "message": "from",
+      "stage": "load",
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "text",
+            "args": {
+              "label": "a",
+              "x": 1,
+              "y": 2,
+              "from_": {
+                "mark": "a",
+                "at": "last"
+              }
+            }
+          }
+        ]
+      },
+      "python": "text from_: a place on another mark, or at, or x and y; one of them"
+    },
+    {
+      "contract": "annotation.legend",
+      "name": "a rule in the legend",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "rule",
+            "y": 2,
+            "label": "SLO",
+            "legend": true
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          },
+          {
+            "method": "rule",
+            "args": {
+              "y": 2,
+              "label": "SLO",
+              "legend": true
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "marks[1].legend",
+      "message": "rule legend: not drawn as given yet",
+      "python": "rule legend: not drawn as given yet",
+      "stage": "load"
+    },
+    {
+      "contract": "annotation.legend.malformed",
+      "name": "a rule in the legend by a number",
+      "spec": {
+        "marks": [
+          {
+            "type": "rule",
+            "y": 2,
+            "label": "SLO",
+            "legend": 1
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "rule",
+            "args": {
+              "y": 2,
+              "label": "SLO",
+              "legend": 1
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "marks[0].legend",
+      "message": "legend: expected",
+      "python": "rule legend: expected True or False; received 1"
+    },
+    {
+      "contract": "legend.entries.append",
+      "name": "a legend's own entries after the chart's",
+      "spec": {
+        "legend": {
+          "entries": [
+            {
+              "key": "slo",
+              "label": "SLO",
+              "swatch": {
+                "type": "line",
+                "stroke": "#000"
+              }
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": {
+            "hg": "LegendOptions",
+            "args": {
+              "entries": [
+                {
+                  "hg": "LegendEntry",
+                  "args": {
+                    "key": "slo",
+                    "label": "SLO",
+                    "swatch": {
+                      "hg": "Swatch",
+                      "args": {
+                        "type": "line",
+                        "stroke": "#000"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "series": "region"
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "legend.entries",
+      "message": "legend.entries: not drawn as given yet",
+      "python": "legend.entries: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "legend.entries.alone",
+      "name": "a legend of its own entries alone",
+      "spec": {
+        "legend": {
+          "include": [],
+          "entries": [
+            {
+              "key": "slo",
+              "label": "SLO",
+              "swatch": {
+                "type": "symbol",
+                "symbol": "diamond",
+                "fill": "#000"
+              },
+              "targets": [
+                {
+                  "mark": "a"
+                }
+              ]
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "series": "region",
+            "id": "a"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": {
+            "hg": "LegendOptions",
+            "args": {
+              "include": [],
+              "entries": [
+                {
+                  "hg": "LegendEntry",
+                  "args": {
+                    "key": "slo",
+                    "label": "SLO",
+                    "swatch": {
+                      "hg": "Swatch",
+                      "args": {
+                        "type": "symbol",
+                        "symbol": "diamond",
+                        "fill": "#000"
+                      }
+                    },
+                    "targets": ["a"]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "series": "region",
+              "id": "a"
+            }
+          }
+        ]
+      },
+      "legend": ["SLO"]
+    },
+    {
+      "contract": "legend.entries.beside-automatic",
+      "name": "a legend of its own entries beside the automatic one",
+      "spec": {
+        "guides": [
+          {
+            "type": "legend",
+            "include": [],
+            "entries": [
+              {
+                "key": "slo",
+                "label": "SLO",
+                "swatch": {
+                  "type": "rect",
+                  "fill": "#000"
+                },
+                "targets": [
+                  {
+                    "mark": "a"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "legend",
+              "args": {
+                "include": [],
+                "entries": [
+                  {
+                    "hg": "LegendEntry",
+                    "args": {
+                      "key": "slo",
+                      "label": "SLO",
+                      "swatch": {
+                        "hg": "Swatch",
+                        "args": {
+                          "type": "rect",
+                          "fill": "#000"
+                        }
+                      },
+                      "targets": ["a"]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v",
+              "series": "region"
+            }
+          }
+        ]
+      },
+      "legend": ["eu", "us", "SLO"]
+    },
+    {
+      "contract": "legend.include.scale",
+      "name": "a legend of a mark's series",
+      "spec": {
+        "legend": false,
+        "guides": [
+          {
+            "type": "legend",
+            "include": [
+              {
+                "mark": "a",
+                "channel": "series"
+              }
+            ]
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": false,
+          "guides": [
+            {
+              "hg": "legend",
+              "args": {
+                "include": [
+                  {
+                    "hg": "ScaleRef",
+                    "args": {
+                      "mark": "a",
+                      "channel": "series"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v",
+              "series": "region"
+            }
+          }
+        ]
+      },
+      "legend": ["eu", "us"]
+    },
+    {
+      "contract": "legend.include.mark",
+      "name": "a legend of a mark whole",
+      "spec": {
+        "legend": {
+          "include": [
+            {
+              "mark": "a"
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": {
+            "hg": "LegendOptions",
+            "args": {
+              "include": [
+                {
+                  "hg": "MarkRef",
+                  "args": {
+                    "mark": "a"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v",
+              "series": "region"
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "legend.include[0]",
+      "message": "legend.include[0]: not drawn as given yet",
+      "python": "legend.include[0]: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "legend.include.malformed",
+      "name": "a legend including a scale by no name",
+      "spec": {
+        "legend": {
+          "include": [
+            {
+              "scale": 3
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": {
+            "include": [
+              {
+                "scale": 3
+              }
+            ]
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "legend.include[0].scale",
+      "message": "legend.include[0].scale: expected a string; received 3",
+      "python": "legend.include[0].scale: expected a name; received 3"
+    },
+    {
+      "contract": "legend.include.hidden",
+      "name": "a legend shown nowhere, of a mark whole",
+      "spec": {
+        "guides": [
+          {
+            "type": "legend",
+            "show": false,
+            "include": [
+              {
+                "mark": "a"
+              }
+            ]
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "id": "a"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "guides": [
+            {
+              "hg": "legend",
+              "args": {
+                "show": false,
+                "include": [
+                  {
+                    "hg": "MarkRef",
+                    "args": {
+                      "mark": "a"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "id": "a"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "legend.scales.renamed",
+      "name": "a legend's scales, now its include",
+      "spec": {
+        "legend": {
+          "scales": [
+            {
+              "mark": "a",
+              "channel": "series"
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "legend.scales",
+      "message": "scales",
+      "stage": "load"
+    },
+    {
+      "contract": "legend.swatch.circle-renamed",
+      "name": "a circle swatch, now a symbol",
+      "spec": {
+        "legend": {
+          "include": [],
+          "entries": [
+            {
+              "key": "a",
+              "label": "A",
+              "swatch": {
+                "type": "circle",
+                "fill": "#000"
+              }
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "path": "legend.entries[0].swatch.type",
+      "message": "symbol",
+      "stage": "load"
+    },
+    {
+      "contract": "legend.targets.rows",
+      "name": "a legend entry hiding some rows",
+      "spec": {
+        "legend": {
+          "include": [],
+          "entries": [
+            {
+              "key": "eu",
+              "label": "EU",
+              "swatch": {
+                "type": "rect",
+                "fill": "#000"
+              },
+              "targets": [
+                {
+                  "mark": "a",
+                  "field": "region",
+                  "values": ["eu"]
+                }
+              ]
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": {
+            "hg": "LegendOptions",
+            "args": {
+              "include": [],
+              "entries": [
+                {
+                  "hg": "LegendEntry",
+                  "args": {
+                    "key": "eu",
+                    "label": "EU",
+                    "swatch": {
+                      "hg": "Swatch",
+                      "args": {
+                        "type": "rect",
+                        "fill": "#000"
+                      }
+                    },
+                    "targets": [
+                      {
+                        "hg": "LegendTarget",
+                        "args": {
+                          "mark": "a",
+                          "field": "region",
+                          "values": ["eu"]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v",
+              "series": "region"
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "legend.entries[0].targets[0]",
+      "message": "legend.entries[0].targets[0]: not drawn as given yet",
+      "python": "legend.entries[0].targets[0]: not drawn as given yet",
+      "stage": "draw"
+    },
+    {
+      "contract": "legend.targets.malformed",
+      "name": "a legend entry hiding rows of a field by no name",
+      "spec": {
+        "legend": {
+          "include": [],
+          "entries": [
+            {
+              "key": "eu",
+              "label": "EU",
+              "swatch": {
+                "type": "rect",
+                "fill": "#000"
+              },
+              "targets": [
+                {
+                  "mark": "a",
+                  "field": 3,
+                  "values": ["eu"]
+                }
+              ]
+            }
+          ]
+        },
+        "marks": [
+          {
+            "type": "line",
+            "id": "a",
+            "x": "t",
+            "y": "v",
+            "series": "region"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "legend": {
+            "include": [],
+            "entries": [
+              {
+                "key": "eu",
+                "label": "EU",
+                "swatch": {
+                  "type": "rect",
+                  "fill": "#000"
+                },
+                "targets": [
+                  {
+                    "mark": "a",
+                    "field": 3,
+                    "values": ["eu"]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "id": "a",
+              "x": "t",
+              "y": "v",
+              "series": "region"
+            }
+          }
+        ]
+      },
+      "code": "invalid-option",
+      "stage": "load",
+      "path": "legend.entries[0].targets[0].field",
+      "message": "legend.entries[0].targets[0].field: expected a field name; received 3",
+      "python": "legend.entries[0].targets[0].field: expected a name; received 3"
+    },
+    {
+      "contract": "colorbar.scale.named",
+      "name": "a colorbar of a scale by name",
+      "spec": {
+        "scales": {
+          "temps": {
+            "type": "ordinal"
+          }
+        },
+        "guides": [
+          {
+            "type": "colorbar",
+            "scale": {
+              "scale": "temps"
+            }
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "builder": {
+        "chart": {
+          "scales": {
+            "temps": {
+              "hg": "OrdinalScale",
+              "args": {}
+            }
+          },
+          "guides": [
+            {
+              "hg": "colorbar",
+              "args": {
+                "scale": {
+                  "hg": "ScaleRef",
+                  "args": {
+                    "scale": "temps"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "calls": [
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v"
+            }
+          }
+        ]
+      },
+      "pending": "C",
+      "code": "unsupported",
+      "path": "guides[0].scale",
+      "message": "guides[0].scale: not drawn as given yet",
+      "python": "guides[0].scale: not drawn as given yet",
+      "stage": "draw"
+    }
+  ],
+  "exports": [
+    {
+      "contract": "export.plan.default",
+      "name": "a PNG of the chart's own size",
+      "chart": [400, 300],
+      "settings": {},
+      "plan": {
+        "format": "png",
+        "width": 400,
+        "height": 300,
+        "pixels": [400, 300],
+        "dpi": 96
+      }
+    },
+    {
+      "contract": "export.plan.inches",
+      "name": "a figure in inches at 150 dpi",
+      "chart": [400, 300],
+      "settings": {
+        "size": [16, 10],
+        "unit": "in",
+        "dpi": 150
+      },
+      "plan": {
+        "format": "png",
+        "width": 1536,
+        "height": 960,
+        "pixels": [2400, 1500],
+        "dpi": 150
+      }
+    },
+    {
+      "contract": "export.plan.quality",
+      "name": "a JPEG at its default quality",
+      "chart": [400, 300],
+      "settings": {
+        "format": "jpeg"
+      },
+      "plan": {
+        "format": "jpeg",
+        "width": 400,
+        "height": 300,
+        "pixels": [400, 300],
+        "dpi": 96,
+        "quality": 90
+      }
+    },
+    {
+      "contract": "export.plan.svg-size",
+      "name": "an SVG in millimeters",
+      "chart": [400, 300],
+      "settings": {
+        "format": "svg",
+        "size": [254, 127],
+        "unit": "mm"
+      },
+      "plan": {
+        "format": "svg",
+        "width": 960,
+        "height": 480,
+        "pixels": [960, 480],
+        "dpi": 96
+      }
+    },
+    {
+      "contract": "export.svg.dpi",
+      "name": "an SVG at a dpi",
+      "chart": [400, 300],
+      "settings": {
+        "format": "svg",
+        "dpi": 300
+      },
+      "code": "unsupported",
+      "path": "dpi",
+      "message": "dpi: sets image pixels, which SVG has none of; drop dpi"
+    },
+    {
+      "contract": "export.png.quality",
+      "name": "a PNG of a quality",
+      "chart": [400, 300],
+      "settings": {
+        "quality": 80
+      },
+      "code": "unsupported",
+      "path": "quality",
+      "message": "quality: compresses JPEG and WebP; PNG keeps every pixel, so drop quality"
+    },
+    {
+      "contract": "export.unit.name",
+      "name": "an export measured in a list",
+      "chart": [400, 300],
+      "settings": {
+        "size": [1, 1],
+        "unit": ["in"]
+      },
+      "code": "invalid-option",
+      "path": "unit",
+      "message": "unit: expected \"px\", \"in\", \"cm\", \"mm\", or \"pt\"; received"
+    },
+    {
+      "contract": "export.limit.pixels",
+      "name": "more pixels than an export draws",
+      "chart": [400, 300],
+      "settings": {
+        "size": [16, 10],
+        "unit": "in",
+        "dpi": 600
+      },
+      "code": "invalid-option",
+      "path": "dpi",
+      "message": "dpi: 9600 by 6000 pixels is more than PNG exports draw"
+    },
+    {
+      "contract": "export.limit.webp-side",
+      "name": "a WebP wider than WebP holds",
+      "chart": [400, 300],
+      "settings": {
+        "format": "webp",
+        "size": [16384, 10]
+      },
+      "code": "invalid-option",
+      "path": "size",
+      "message": "size: 16384 by 10 pixels is more than WEBP exports draw (16383 a side"
+    },
+    {
+      "contract": "export.limit.dpi",
+      "name": "a dpi past the most",
+      "chart": [400, 300],
+      "settings": {
+        "dpi": 2400
+      },
+      "code": "invalid-option",
+      "path": "dpi",
+      "message": "dpi: expected 1 to 1200; received 2400"
+    },
+    {
+      "contract": "export.unit.alone",
+      "name": "a unit without a size",
+      "chart": [400, 300],
+      "settings": {
+        "unit": "in"
+      },
+      "code": "invalid-option",
+      "path": "unit",
+      "message": "unit: says what size is measured in; give size, or drop unit"
+    },
+    {
+      "contract": "export.tooltip.raster",
+      "name": "tooltips in a PNG",
+      "chart": [400, 300],
+      "settings": {
+        "tooltip": "title"
+      },
+      "code": "unsupported",
+      "path": "tooltip",
+      "message": "tooltip: \"title\" writes tooltips into SVG, which a PNG image cannot hold; export SVG, or drop tooltip"
+    }
+  ]
+}

@@ -34,6 +34,7 @@ import {
 import {
   type AxisData,
   axesKey,
+  checkDepthOrder,
   type FaceFrame3D,
   type Frame3D,
   findRow,
@@ -173,6 +174,7 @@ export class SurfaceMark implements Layer3D {
   #shaded: { key: string; bytes: Uint8Array } | undefined;
 
   constructor(input: SurfaceSpec, table: Table) {
+    checkDepthOrder(input, "surface");
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;

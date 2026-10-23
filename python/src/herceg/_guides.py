@@ -17,7 +17,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Literal
 
 from ._data import _time_ms, listed, shown
-from ._errors import ChartError
+from ._errors import ChartError, located
 from ._style import (
     AXIS_ROLES,
     LEGEND_ROLES,
@@ -253,15 +253,26 @@ class TickLabels:
     labels that would overlap do (``collision``: ``"show"``, ``"hide"``,
     ``"stagger"``, ``"wrap"``), their ``row`` (0 by the axis line, 1
     beyond), ``priority`` where they collide, and whether labels repeating
-    the one before them show (``duplicates``)."""
+    the one before them show (``duplicates``). ``inside=True`` draws them
+    inside the plot beside their ticks, aligned by ``style``'s
+    ``tick_label``, and ``gap`` is the pixels between them and their
+    tick's end on their side."""
 
     rotation: float | Sequence[float] | None = None
     collision: Collision | None = None
     row: int | None = None
     priority: float | None = None
     duplicates: Literal["hide", "show"] | None = None
+    inside: bool | None = None
+    gap: float | None = None
 
     def __post_init__(self) -> None:
+        if self.inside is not None and not isinstance(self.inside, bool):
+            raise TypeError(
+                f"TickLabels inside: expected True or False; received {shown(self.inside)}"
+            )
+        if self.gap is not None:
+            _number(self.gap, "TickLabels gap")
         if self.collision is not None:
             _choice(self.collision, ("show", "hide", "stagger", "wrap"), "TickLabels collision")
         if self.duplicates is not None:
@@ -378,22 +389,48 @@ def scope_spec(scope: Any, role: str) -> Any:
     )
 
 
+#: Room a scale keeps around its data: ``"auto"`` (the default), a share of
+#: its domain on each side, or ``hg.Pixels(n)``; 0 for none.
+Padding = Literal["auto"] | float | Any
+
+
+def padding_spec(value: Any, role: str) -> Any:
+    """A scale's ``padding`` as the spec takes it."""
+    if value is None or value == "auto":
+        return value
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+        if not 0 <= float(value) < 0.5:
+            raise ValueError(
+                f"{role}: expected a share of the domain from 0 up to 0.5, not 0.5; "
+                f"received {shown(value)}"
+            )
+        return float(value)
+    from ._encoding import length_spec
+
+    return length_spec(value, role)
+
+
 @dataclass
 class Scale:
     """A position scale's settings in the chart's ``scales``: ``"x"``,
     ``"y"``, and ``"y_right"``, over the short forms ``x=``, ``y=``,
-    ``y_right=``. Scales of categories are ``hg.OrdinalScale``."""
+    ``y_right=``, and position scales of the chart's own under other
+    names (with a ``type``), which marks name in ``hg.DataPosition``.
+    ``padding`` is the room it keeps around its data. Scales of categories
+    are ``hg.OrdinalScale``."""
 
     type: Literal["linear", "log", "time"] | None = None
     domain: Sequence[Any] | None = None
     nice: bool | None = None
     zero: bool | None = None
     scope: Scope | None = None
+    padding: Padding | None = None
     tooltip_format: Format | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.type is not None:
             _choice(self.type, ("linear", "log", "time"), "Scale type")
+        padding_spec(self.padding, "Scale padding")
         scope_spec(self.scope, "Scale scope")
         if self.domain is not None and len(self.domain) != 2:
             raise ValueError(
@@ -409,6 +446,7 @@ class Scale:
             "nice": self.nice,
             "zero": self.zero,
             "scope": scope_spec(self.scope, "Scale scope"),
+            "padding": padding_spec(self.padding, "Scale padding"),
             "tooltipFormat": format_spec(self.tooltip_format, "Scale tooltip_format"),
         }
         return {key: value for key, value in spec.items() if value is not None}
@@ -431,13 +469,16 @@ class OrdinalScale:
     ``map`` fixes outputs by value; others take the theme's palette by
     their place in the ``domain``: the given values in that order (others
     take ``unknown``), or else the columns' values, a categorical's own
-    order first."""
+    order first. With ``scope="panel"``, each panel maps its own values."""
 
     domain: Sequence[str] | None = None
     map: Mapping[str, Any] | None = None
     unknown: Any = None
+    scope: Literal["chart", "panel"] | None = None
 
     def __post_init__(self) -> None:
+        if self.scope is not None:
+            _choice(self.scope, ("chart", "panel"), "OrdinalScale scope")
         if self.domain is not None and (
             isinstance(self.domain, str) or any(not isinstance(v, str) for v in self.domain)
         ):
@@ -453,6 +494,8 @@ class OrdinalScale:
 
     def _spec(self) -> dict[str, Any]:
         out: dict[str, Any] = {"type": "ordinal"}
+        if self.scope is not None:
+            out["scope"] = self.scope
         if self.domain is not None:
             out["domain"] = list(self.domain)
         if self.map is not None:
@@ -460,6 +503,18 @@ class OrdinalScale:
         if self.unknown is not None:
             out["unknown"] = _output(self.unknown)
         return out
+
+
+@dataclass(frozen=True)
+class IdentityScale:
+    """A scale that maps nothing: each row's value is the channel's output
+    (a color for colors, a shape's name, an area in square pixels for
+    sizes, 0 to 1 for opacities), checked as constants are. Its values split
+    no series and make no legend entries. Under a name in the chart's
+    ``scales``, or in place as ``hg.Channel(field=..., scale=hg.IdentityScale())``."""
+
+    def _spec(self) -> dict[str, Any]:
+        return {"type": "identity"}
 
 
 def _output(value: Any) -> Any:
@@ -471,8 +526,9 @@ def _output(value: Any) -> Any:
 
 def scales_spec(value: Any) -> Any:
     """A chart's ``scales`` as the spec takes them: ``hg.Scale`` for the
-    positions ``"x"``, ``"y"``, and ``"y_right"``, ``hg.OrdinalScale`` (or
-    dicts of their options) for scales of categories, by name."""
+    positions ``"x"``, ``"y"``, and ``"y_right"``; under other names
+    ``hg.OrdinalScale`` (or a dict of its options) for scales of
+    categories, ``hg.IdentityScale``, or an ``hg.Scale`` of a ``type``."""
     if value is None:
         return None
     if not isinstance(value, Mapping):
@@ -490,58 +546,172 @@ def scales_spec(value: Any) -> Any:
                     "OrdinalScale otherwise"
                 )
             out[names[name]] = _built(scale, Scale, role)._spec()
-        else:
-            if isinstance(scale, Scale):
-                raise ChartError(
-                    f"{role}: expected an hg.OrdinalScale, a scale of categories; "
-                    f"marks place values on {listed(tuple(names))}"
+        elif isinstance(scale, IdentityScale) or (
+            isinstance(scale, Mapping) and scale.get("type") == "identity"
+        ):
+            if isinstance(scale, Mapping) and set(scale) != {"type"}:
+                raise ValueError(
+                    f"{role}: an identity scale has no settings; give hg.IdentityScale()"
                 )
+            out[name] = IdentityScale()._spec()
+        elif isinstance(scale, Scale) or (
+            isinstance(scale, Mapping) and scale.get("type") in ("linear", "log", "time")
+        ):
+            scale = _built(scale, Scale, role)
+            if scale.type is None:
+                raise ChartError(
+                    f"{role}: a position scale of the chart's own says its type; give "
+                    'type="linear", "log", or "time", or an hg.OrdinalScale for categories'
+                )
+            out[name] = scale._spec()
+        else:
             out[name] = _built(scale, OrdinalScale, role)._spec()
     return out
 
 
 @dataclass
 class ScaleRef:
-    """A scale a mark owns: the mark's ``id`` (``mark``) and the ``channel``
-    (``"series"`` colors, a ``"color"`` field's ramp or colors, which are
-    its series' where ``color=`` splits them, ``"size"``, or ``"symbol"``).
-    Guides naming a mark show it whatever its ``legend`` setting."""
+    """A scale a guide shows: one a mark owns, by the mark's ``id``
+    (``mark``) and the ``channel`` (``"series"`` colors, a ``"color"``
+    field's ramp or colors, which are its series' where ``color=`` splits
+    them, ``"size"``, or ``"symbol"``), or one of the chart's ``scales`` by
+    name (``scale``), with every value any mark reads through it. Guides
+    naming a mark show it whatever its ``legend`` setting."""
 
-    mark: str
-    channel: Channel
+    mark: str | None = None
+    channel: Channel | None = None
+    scale: str | None = None
 
     def __post_init__(self) -> None:
+        if self.scale is not None:
+            if self.mark is not None or self.channel is not None:
+                raise ValueError(
+                    "ScaleRef: a mark's scale (mark, channel) or a scale's name, not both"
+                )
+            if not isinstance(self.scale, str) or not self.scale:
+                raise TypeError(
+                    f"ScaleRef scale: expected a scale's name; received {shown(self.scale)}"
+                )
+            return
         if not isinstance(self.mark, str) or not self.mark:
             raise TypeError(f"ScaleRef mark: expected a mark's id; received {shown(self.mark)}")
         _choice(self.channel, ("series", "color", "size", "symbol"), "ScaleRef channel")
+
+
+@dataclass(frozen=True)
+class MarkRef:
+    """A mark a legend lists whole, by its ``id``: its series, or for an
+    annotation, what its label names."""
+
+    mark: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mark, str) or not self.mark:
+            raise TypeError(f"MarkRef mark: expected a mark's id; received {shown(self.mark)}")
+
+
+def include_spec(value: Any, role: str) -> Any:
+    """A legend's ``include`` as the spec takes it: ``hg.ScaleRef`` and
+    ``hg.MarkRef`` (or dicts of their options), in order; ``[]`` for its
+    own entries alone."""
+    if value is None:
+        return None
+    if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence):
+        raise TypeError(
+            f"{role}: expected a list of hg.ScaleRef and hg.MarkRef; received {shown(value)}"
+        )
+    out = []
+    for ref in value:
+        if isinstance(ref, Mapping) and set(ref) == {"mark"}:
+            ref = MarkRef(**ref)
+        if not isinstance(ref, MarkRef):
+            ref = _built(ref, ScaleRef, role)
+        out.append(_spec(ref))
+    return out
+
+
+@dataclass(frozen=True)
+class LegendTarget:
+    """What a legend entry of your own hides and shows besides whole marks
+    (named by id): the rows of ``mark`` whose ``field`` holds one of
+    ``values``, or with ``scale`` (and no mark), the ``values`` of one of
+    the chart's scales in every mark reading it."""
+
+    values: Sequence[str]
+    mark: str | None = None
+    field: str | None = None
+    scale: str | None = None
+
+    def __post_init__(self) -> None:
+        # A list, not an iterator, which checking would use up.
+        if (
+            isinstance(self.values, (str, bytes))
+            or not isinstance(self.values, Sequence)
+            or any(not isinstance(v, str) for v in self.values)
+        ):
+            raise TypeError(
+                f"LegendTarget values: expected a list of values; received {shown(self.values)}"
+            )
+        for name in ("mark", "field", "scale"):
+            value = getattr(self, name)
+            if value is not None and not (isinstance(value, str) and value):
+                raise TypeError(f"LegendTarget {name}: expected a name; received {shown(value)}")
+        if (self.scale is None) == (self.mark is None) or (self.mark is not None) != (
+            self.field is not None
+        ):
+            raise ValueError("LegendTarget: give mark and field, or scale, with values")
+
+    def _spec(self) -> dict[str, Any]:
+        spec: dict[str, Any] = (
+            {"scale": self.scale}
+            if self.scale is not None
+            else {"mark": self.mark, "field": self.field}
+        )
+        spec["values"] = list(self.values)
+        return spec
 
 
 @dataclass
 class Swatch:
     """A legend entry's swatch: a ``"line"`` (``stroke``, ``stroke_width``,
     ``dash``), a ``"rect"`` (``fill``, and ``stroke`` for an outline), a
-    ``"circle"`` (``fill``, ``stroke``, and ``size``, pixels across), or a
-    ``"composite"`` of ``parts``; ``opacity`` from 0 to 1. An entry shows
-    another symbol by its ``sample``, a mark that draws it."""
+    ``"symbol"`` (a point's ``symbol``, ``"circle"`` by default, with
+    ``fill``, ``stroke``, and ``size``, pixels across), or a ``"composite"``
+    of ``parts``; ``opacity`` from 0 to 1. An entry shows a mark's look by
+    its ``sample``, a mark that draws it."""
 
-    type: Literal["line", "rect", "circle", "composite"]
+    type: Literal["line", "rect", "symbol", "composite"]
     stroke: str | None = None
     fill: str | None = None
     stroke_width: float | None = None
     dash: str | Sequence[float] | None = None
+    symbol: str | None = None
     size: float | None = None
     opacity: float | None = None
     parts: Sequence[Swatch | Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         _choice(self.type, tuple(_SWATCH_FIELDS), "Swatch type")
-        needs = {"line": "stroke", "rect": "fill", "circle": "fill", "composite": "parts"}[
+        if self.symbol is not None:
+            from ._encoding import SYMBOLS
+
+            _choice(self.symbol, SYMBOLS, "Swatch symbol")
+        needs = {"line": "stroke", "rect": "fill", "symbol": "fill", "composite": "parts"}[
             self.type
         ]
         if getattr(self, needs) is None:
             raise ValueError(f"Swatch {needs}: a {self.type} swatch needs {needs}; give it")
         takes = _SWATCH_FIELDS[self.type]
-        for name in ("stroke", "fill", "stroke_width", "dash", "size", "opacity", "parts"):
+        for name in (
+            "stroke",
+            "fill",
+            "stroke_width",
+            "dash",
+            "symbol",
+            "size",
+            "opacity",
+            "parts",
+        ):
             if getattr(self, name) is not None and name not in takes:
                 raise ValueError(
                     f"Swatch {name}: a {self.type} swatch takes {listed(takes)}; drop {name}"
@@ -560,7 +730,7 @@ class Swatch:
 _SWATCH_FIELDS: dict[str, tuple[str, ...]] = {
     "line": ("stroke", "stroke_width", "dash", "opacity"),
     "rect": ("fill", "stroke", "opacity"),
-    "circle": ("fill", "stroke", "size", "opacity"),
+    "symbol": ("symbol", "fill", "stroke", "size", "opacity"),
     "composite": ("parts",),
 }
 
@@ -569,13 +739,14 @@ _SWATCH_FIELDS: dict[str, tuple[str, ...]] = {
 class LegendEntry:
     """A legend entry of your own: its ``key`` and ``label``, a ``swatch``
     (an ``hg.Swatch``) or ``sample``, the id of a mark whose look it shows,
-    and ``targets``, the ids of marks clicking it hides and shows."""
+    and ``targets``, what clicking it hides and shows: marks by id, or
+    ``hg.LegendTarget`` for rows by value."""
 
     key: str
     label: str
     swatch: Swatch | Mapping[str, Any] | None = None
     sample: str | None = None
-    targets: Sequence[str] | None = None
+    targets: Sequence[str | LegendTarget | Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         for name in ("key", "label"):
@@ -594,7 +765,12 @@ class LegendEntry:
         if self.sample is not None:
             spec["sample"] = {"mark": self.sample}
         if self.targets is not None:
-            spec["targets"] = [{"mark": mark} for mark in self.targets]
+            spec["targets"] = [
+                {"mark": target}
+                if isinstance(target, str)
+                else _built(target, LegendTarget, "LegendEntry targets")._spec()
+                for target in self.targets
+            ]
         return spec
 
 
@@ -635,6 +811,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         "rows": builder.rows,
         "order": builder.order,
         "title": _title(builder.title, f"{role} title"),
+        "include": include_spec(builder.include, f"{role} include"),
         "entries": [_built(entry, LegendEntry, f"{role} entries")._spec() for entry in entries]
         if entries is not None
         else None,
@@ -648,7 +825,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
 class AxisGuide:
     """An axis the chart's ``guides`` lists (see ``hg.axis``)."""
 
-    scale: Literal["x", "y", "y_right"]
+    scale: str
     id: str | None = None
     place: Place | Mapping[str, Any] | None = None
     title: str | None = None
@@ -657,14 +834,24 @@ class AxisGuide:
     tick: Tick | Literal[False] | Mapping[str, Any] | None = None
     labels: TickLabels | Literal[False] | Mapping[str, Any] | None = None
     line: bool | None = None
-    grid: bool | None = None
+    grid: bool | GridLines | Mapping[str, Any] | None = None
     layers: Sequence[TickLayer | Mapping[str, Any]] | None = None
     show: bool | None = None
     repeat: Literal["outer", "all"] | None = None
     style: Style | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        _choice(self.scale, ("x", "y", "y_right"), "axis scale")
+        if not isinstance(self.scale, str) or not self.scale:
+            raise TypeError(
+                "axis scale: expected x, y, y_right, or a scale's name; "
+                f"received {shown(self.scale)}"
+            )
+        own = self.scale not in ("x", "y", "y_right")
+        if own and self.place is None:
+            raise ValueError(
+                f"axis place: an axis of the chart's own scale {shown(self.scale)} has no side "
+                "of its own; give place=hg.Place(side=...)"
+            )
         if self.repeat is not None:
             _choice(self.repeat, ("outer", "all"), "axis repeat")
         self.place = _built(self.place, Place, "axis place")
@@ -673,7 +860,7 @@ class AxisGuide:
             side = self.place.side
             if side is None:
                 raise ValueError("axis place: an axis goes on a side; give side")
-            if side not in sides[self.scale]:
+            if not own and side not in sides[self.scale]:
                 raise ValueError(
                     f"axis place: {self.scale} axes go on the {listed(sides[self.scale])} "
                     f"side; received {shown(side)}"
@@ -696,7 +883,7 @@ class AxisGuide:
             "tick": _marks(self.tick, Tick, "axis tick"),
             "labels": _marks(self.labels, TickLabels, "axis labels"),
             "line": self.line,
-            "grid": self.grid,
+            "grid": grid_spec(self.grid, "axis grid"),
             "layers": [_built(layer, TickLayer, "axis layers")._spec() for layer in self.layers]
             if self.layers is not None
             else None,
@@ -707,8 +894,35 @@ class AxisGuide:
         return {key: value for key, value in spec.items() if value is not None}
 
 
-def axis(scale: Literal["x", "y", "y_right"], **options: Any) -> AxisGuide:
-    """An axis of ``scale`` (``"x"``, ``"y"``, ``"y_right"``), for the chart's
+@dataclass(frozen=True)
+class GridLines:
+    """Grid lines across the plot at an axis' major ticks: ``z_index``
+    places them among the marks (-1, under marks of the default 0, by
+    default)."""
+
+    z_index: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.z_index is not None:
+            _finite(self.z_index, "GridLines z_index")
+
+
+def _finite(value: Any, role: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value):
+        raise TypeError(f"{role}: expected a finite number; received {shown(value)}")
+
+
+def grid_spec(value: Any, role: str) -> Any:
+    """An axis' ``grid`` as the spec takes it: a boolean, or ``hg.GridLines``."""
+    if value is None or isinstance(value, bool):
+        return value
+    built = _built(value, GridLines, role)
+    return {} if built.z_index is None else {"zIndex": float(built.z_index)}
+
+
+def axis(scale: str, **options: Any) -> AxisGuide:
+    """An axis of ``scale`` (``"x"``, ``"y"``, ``"y_right"``, or a position
+    scale of the chart's own ``scales``, which then needs ``place``), for the chart's
     ``guides``: on its scale's default side it takes the place of the
     automatic axis, its unset settings taken from ``x=``, ``y=``, or
     ``y_right=``; elsewhere (``place=hg.Place(side="top")``) it is drawn too.
@@ -728,10 +942,11 @@ class LegendOptions:
     """The chart's legend (``legend=``): where it goes (``place``, an
     ``hg.Place``; above the plots by default), its entries in ``columns`` or
     ``rows`` (filled by ``order``, ``"row"`` or ``"column"``) under a
-    ``title``, ``entries`` of your own in place of the series', swatches
-    that look like the marks (``swatches="mark"``: of every mark showing an
-    entry's value), and how it looks (``style``, an
-    ``hg.Style`` of its ``legend_label``, ``legend_title``, and
+    ``title``, what it ``include``s (``hg.ScaleRef`` and ``hg.MarkRef``;
+    everything by default, ``[]`` for nothing), ``entries`` of your own
+    after those, swatches that look like the marks (``swatches="mark"``:
+    of every mark showing an entry's value), and how it looks (``style``,
+    an ``hg.Style`` of its ``legend_label``, ``legend_title``, and
     ``tick_label`` roles). Giving one shows the legend, also for a single
     series."""
 
@@ -740,6 +955,7 @@ class LegendOptions:
     rows: int | None = None
     order: Literal["row", "column"] | None = None
     title: str | Mapping[str, Any] | None = None
+    include: Sequence[ScaleRef | MarkRef | Mapping[str, Any]] | None = None
     entries: Sequence[LegendEntry | Mapping[str, Any]] | None = None
     swatches: Literal["mark"] | None = None
     style: Style | Mapping[str, Any] | None = None
@@ -759,7 +975,7 @@ def legend_spec(legend: Any) -> Any:
 class LegendGuide:
     """A legend the chart's ``guides`` lists (see ``hg.legend``)."""
 
-    scales: Sequence[ScaleRef | Mapping[str, Any]] | None = None
+    include: Sequence[ScaleRef | MarkRef | Mapping[str, Any]] | None = None
     id: str | None = None
     place: Place | Mapping[str, Any] | None = None
     columns: int | None = None
@@ -782,18 +998,17 @@ class LegendGuide:
                     f"legend panel: expected a panel's id; received {shown(self.panel)}"
                 )
             spec["panel"] = self.panel
-        if self.scales is not None:
-            spec["scales"] = [_spec(_built(ref, ScaleRef, "legend scales")) for ref in self.scales]
         if self.show is not None:
             spec["show"] = self.show
         return spec
 
 
 def legend(**options: Any) -> LegendGuide:
-    """A legend for the chart's ``guides``: of the scales ``scales`` names
-    (``hg.ScaleRef(mark=..., channel=...)``), or of all the chart's, in place
-    of the automatic legend; laid out in ``columns`` or ``rows`` under a
-    ``title``, with ``entries`` of your own, and ``swatches="mark"`` for
+    """A legend for the chart's ``guides``: of what ``include`` names
+    (``hg.ScaleRef(mark=..., channel=...)``, ``hg.ScaleRef(scale=...)``,
+    ``hg.MarkRef(mark=...)``; ``[]`` for nothing), or of all the chart's, in
+    place of the automatic legend; laid out in ``columns`` or ``rows`` under
+    a ``title``, with ``entries`` of your own after those, and ``swatches="mark"`` for
     swatches that look like the marks. Legends list one entry per value a
     chart's series stand for, whichever marks and panels show it. With
     ``panel``, it lists what that panel draws (above the panel by default),
@@ -863,6 +1078,59 @@ def colorbar(**options: Any) -> Colorbar:
 Guide = AxisGuide | LegendGuide | Colorbar
 
 
+def guide_problem(guide: Any) -> tuple[str, str] | None:
+    """Where a guide's or legend's settings given as dicts are malformed in
+    what round 2 adds (grid lines' ``z_index``, tick labels' ``gap`` and
+    ``inside``, a legend's ``include`` and its entries' ``targets``), as the engine's validator
+    finds it: the place within it (``labels.gap``) and what it expected, or
+    None. Its classes check the rest as they are made."""
+
+    def get(owner: Any, key: str) -> Any:
+        return owner.get(key) if isinstance(owner, Mapping) else getattr(owner, key, None)
+
+    grid = get(guide, "grid")
+    z = grid.get("z_index") if isinstance(grid, Mapping) else None
+    if z is not None and (
+        isinstance(z, bool) or not isinstance(z, numbers.Real) or not math.isfinite(z)
+    ):
+        return "grid.z_index", f"expected a finite number; received {shown(z)}"
+    labels = [("labels", get(guide, "labels"))]
+    for k, layer in enumerate(get(guide, "layers") or ()):
+        labels.append((f"layers[{k}].labels", get(layer, "labels")))
+    for at, tick_labels in labels:
+        if not isinstance(tick_labels, Mapping):
+            continue
+        gap, inside = tick_labels.get("gap"), tick_labels.get("inside")
+        number = isinstance(gap, numbers.Real) and not isinstance(gap, bool)
+        if gap is not None and not (number and 0 <= gap < math.inf):
+            return f"{at}.gap", f"expected a number of at least 0; received {shown(gap)}"
+        if inside is not None and not isinstance(inside, bool):
+            return f"{at}.inside", f"expected True or False; received {shown(inside)}"
+    for k, entry in enumerate(get(guide, "entries") or ()):
+        for t, target in enumerate(get(entry, "targets") or ()):
+            if not isinstance(target, Mapping):
+                continue
+            at = f"entries[{k}].targets[{t}]"
+            for key in ("mark", "field", "scale"):
+                if key in target and not (isinstance(target[key], str) and target[key]):
+                    return f"{at}.{key}", f"expected a name; received {shown(target[key])}"
+            values = target.get("values", ())
+            if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+                return f"{at}.values", f"expected a list of values; received {shown(values)}"
+            for v, value in enumerate(values):
+                if not isinstance(value, str):
+                    return f"{at}.values[{v}]", f"expected text; received {shown(value)}"
+    include = get(guide, "include")
+    if isinstance(include, Sequence) and not isinstance(include, (str, bytes)):
+        for k, ref in enumerate(include):
+            if not isinstance(ref, Mapping):
+                continue
+            for key in ("mark", "scale", "channel"):
+                if key in ref and not (isinstance(ref[key], str) and ref[key]):
+                    return f"include[{k}].{key}", f"expected a name; received {shown(ref[key])}"
+    return None
+
+
 def guides_spec(value: Any) -> Any:
     """A chart's ``guides`` as the spec takes them."""
     if value is None:
@@ -875,9 +1143,10 @@ def guides_spec(value: Any) -> Any:
     out = []
     for i, guide in enumerate(value):
         if not isinstance(guide, (AxisGuide, LegendGuide, Colorbar)):
-            raise TypeError(
+            raise ChartError(
                 f"Chart guides[{i}]: expected hg.axis(...), hg.legend(...), or hg.colorbar(...); "
-                f"received {type(guide).__name__}"
+                f"received {type(guide).__name__}",
+                path=f"guides[{i}]",
             )
-        out.append(guide._spec())
+        out.append(located(f"guides[{i}]", guide._spec))
     return out

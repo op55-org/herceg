@@ -499,7 +499,7 @@ function translucent(draw: Drawing<Geometry>, opacity: number): Drawing<Geometry
   }
   let made = byOpacity.get(opacity);
   if (made) return made;
-  const elements = draw.elements;
+  const { elements, canvas: paint } = draw;
   made = {
     ...draw,
     opacity: (draw.opacity ?? 1) * opacity,
@@ -511,14 +511,14 @@ function translucent(draw: Drawing<Geometry>, opacity: number): Drawing<Geometry
           tag,
           attributes: { ...attributes, opacity: String(opacity * Number(attributes.opacity ?? 1)) },
         }))),
-    ...(!draw.guide && {
-      canvas(context, geometry, options) {
+    canvas:
+      paint &&
+      ((context, geometry, options) => {
         const alpha = context.globalAlpha;
         context.globalAlpha = alpha * opacity;
-        draw.canvas(context, geometry, options);
+        paint(context, geometry, options);
         context.globalAlpha = alpha;
-      },
-    }),
+      }),
   } as Drawing<Geometry>;
   byOpacity.set(opacity, made);
   return made;

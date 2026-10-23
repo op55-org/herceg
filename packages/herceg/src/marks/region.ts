@@ -5,10 +5,12 @@ import { lineCount } from "../layout/text.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RectGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec } from "../spec/encoding.ts";
+import type { Side } from "../spec/place.ts";
 import type { AnnotationPosition, Clip, Frozen, RegionRange, RegionSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import type { TextPaint } from "../style/style.ts";
 import {
+  ANNOTATION_PENDING,
   AnnotationData,
   labelOf,
   type Place,
@@ -22,8 +24,11 @@ import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
   type ChartMark,
+  checkOption,
   type Frame,
   frozen,
+  isPixels,
+  isSides,
   type MARK,
   type Mark,
   type MarkKey,
@@ -31,6 +36,7 @@ import {
   type RowParts,
   seriesKey,
 } from "./mark.ts";
+import { refusePending } from "./pending.ts";
 import type { RuleLabel } from "./rule.ts";
 
 interface RegionStyle {
@@ -50,8 +56,17 @@ interface RegionStyle {
   panel?: string;
   fill?: string;
   fillOpacity?: number;
+  /** An outline: its color, and width in pixels (1 by default with a stroke). */
+  stroke?: string;
+  strokeWidth?: number;
+  /** The sides `stroke` outlines, such as ["left", "right"]: every side by default. */
+  strokeSides?: readonly Side[];
   /** Whether the regions' values count toward the axes' domains; false by default. */
   contributeDomain?: boolean;
+  /** `true` lists the regions in the chart's legends by their label; they are left out by default. */
+  legend?: boolean;
+  /** Where the regions are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   id?: string;
 }
 
@@ -104,6 +119,32 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
   readonly #plain: boolean;
 
   constructor(input: RegionSpec, table?: Table) {
+    // Outlines well formed first, as the validator checks a spec before what it draws.
+    const { stroke, strokeWidth, strokeSides } = input;
+    if (stroke !== undefined)
+      checkOption(typeof stroke === "string", "region", "stroke", "a string", stroke);
+    if (strokeWidth !== undefined)
+      checkOption(
+        isPixels(strokeWidth),
+        "region",
+        "strokeWidth",
+        "a number of at least 0",
+        strokeWidth,
+      );
+    if (strokeSides !== undefined)
+      checkOption(
+        isSides(strokeSides),
+        "region",
+        "strokeSides",
+        'sides, such as ["top"]',
+        strokeSides,
+      );
+    refusePending(input, "region", [
+      ...ANNOTATION_PENDING,
+      ["stroke", "R", "drop stroke"],
+      ["strokeWidth", "R", "drop strokeWidth"],
+      ["strokeSides", "R", "drop strokeSides"],
+    ]);
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -393,8 +434,13 @@ export function region<S extends Schema>(
         "y2",
         "fill",
         "fillOpacity",
+        "stroke",
+        "strokeWidth",
+        "strokeSides",
         "label",
         "contributeDomain",
+        "legend",
+        "zIndex",
         "axis",
         "facet",
         "panel",

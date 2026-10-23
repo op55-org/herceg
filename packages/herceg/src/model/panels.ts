@@ -103,6 +103,8 @@ export function panels(
 export class Panels implements PanelLayout {
   /** The panels, in the order the layout draws and reads them. */
   readonly list: readonly PanelOptions[];
+  /** The panels in the order the configuration lists them, which paths name (`panels[1]`). */
+  readonly declared: readonly PanelOptions[];
   /** The layout as the spec writes it, with every panel's id. */
   readonly layout: LayoutSpec | undefined;
   readonly #compiled: CompiledLayout;
@@ -113,6 +115,7 @@ export class Panels implements PanelLayout {
   constructor(list: readonly PanelOptions[], layout?: LayoutOptions, from?: Panels) {
     if (from) {
       this.list = from.list;
+      this.declared = from.declared;
       this.layout = from.layout;
       this.#compiled = from.#compiled;
       this.#cells = from.#newCells();
@@ -136,6 +139,7 @@ export class Panels implements PanelLayout {
     );
     const byId = new Map(normal.list.map((panel) => [panel.id, panel]));
     this.list = this.#compiled.order.map((id) => byId.get(id)!);
+    this.declared = normal.list;
     this.layout = normal.layout;
     this.#cells = this.#newCells();
   }

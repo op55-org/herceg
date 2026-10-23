@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Mapping
-from typing import Any, Literal
+from collections.abc import Callable, Mapping
+from typing import Any, Literal, TypeVar
+
+_T = TypeVar("_T")
 
 #: What kind of problem it is (see ``ChartError``).
 ChartErrorCode = Literal[
@@ -14,6 +17,7 @@ ChartErrorCode = Literal[
     "series-varies",
     "series-with-values",
     "unknown-reference",
+    "unsupported",
     "layout-failed",
     "load-failed",
     "render-failed",
@@ -34,7 +38,8 @@ class ChartError(ValueError):
     line's or area's color changing within one of its series),
     ``"series-with-values"`` (several value columns and a series column),
     ``"unknown-reference"`` (a panel or scale the chart does not have),
-    ``"layout-failed"``, ``"load-failed"``, or ``"render-failed"``.
+    ``"unsupported"`` (a well-formed option the chart cannot draw, with what
+    to do instead), ``"layout-failed"``, ``"load-failed"``, or ``"render-failed"``.
     ``path`` is where in the chart's options (``"marks[1].color"``, or for
     a mark's own options ``"color"``), ``mark`` the mark (its ``id``, or its
     index among the chart's marks), ``panel`` the panel, and ``phase`` when
@@ -100,6 +105,29 @@ _NAMED = {"scales", "data", "columns", "map", "panels"}
 
 # A path's parts: names, dots, and indices or quoted keys in brackets.
 _PART = re.compile(r'\[(?:\d+|"(?:[^"\\]|\\.)*")\]|\.|[^.\[]+')
+
+
+#: Keys written after a dot in paths; others go in brackets, quoted (``scales["p.99"]``).
+_NAME = re.compile(r"^[A-Za-z_$][\w$]*$", re.ASCII)
+
+
+def located(path: str, make: Callable[[], _T]) -> _T:
+    """``make()``, refusing what it raises as a ChartError at ``path``
+    (``guides[0]``), unless the error names a place of its own."""
+    try:
+        return make()
+    except ChartError as error:
+        if error.path is not None:
+            raise
+        raise ChartError(str(error), code=error.code, path=path) from None
+    except (ValueError, TypeError) as error:
+        raise ChartError(str(error), path=path) from None
+
+
+def key_path(at: str, key: str) -> str:
+    """The path of ``key`` under ``at``: after a dot, or for a key that is no
+    name, quoted in brackets, so the path keeps it whole (``scales["p.99"]``)."""
+    return f"{at}.{key}" if _NAME.match(key) else f"{at}[{json.dumps(key)}]"
 
 
 def python_path(path: str) -> str:

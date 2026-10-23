@@ -4,7 +4,7 @@
 // `legend` options are their short forms (see docs/architecture.md,
 // "Scales and guides").
 
-import type { OrdinalScaleSpec } from "./encoding.ts";
+import type { IdentityScaleSpec, OrdinalScaleSpec, SymbolName } from "./encoding.ts";
 import type { Place, Side } from "./place.ts";
 import type { ScaleScope } from "./spec.ts";
 import type { AxisStyles, LegendStyles, TextStyle } from "./style.ts";
@@ -87,6 +87,18 @@ export interface TickLabelsSpec {
   priority?: number;
   /** Labels that repeat one before them: left out ("hide", the default) or drawn ("show"). */
   duplicates?: "hide" | "show";
+  /**
+   * Draw the labels inside the plot, beside their ticks, rather than
+   * outside it; rows then advance inward. Their alignment along the axis
+   * and across it is `style.tickLabel`'s `align` and `verticalAlign`.
+   */
+  inside?: boolean;
+  /**
+   * Pixels from the labels to their tick's end on their side (half a
+   * "cross" tick's length; the axis line where the tick does not reach
+   * their side), 0 or more.
+   */
+  gap?: number;
 }
 
 /**
@@ -106,8 +118,23 @@ export interface TickLayerSpec {
 }
 
 /**
+ * Room between the data and a plot's edges, along a position scale:
+ * "auto" (the default) leaves room for what marks draw at their values
+ * (markers whole, bars' widths) on domains fitted to the data, and keeps
+ * explicit domains and views exact; a number widens the domain by that
+ * share of its span at each end (`[a, b]` becomes `[a - p(b - a), b +
+ * p(b - a)]`, in the scale's transformed space: logs on a log scale), from
+ * 0 up to but not including 0.5; `{ px }` keeps that many pixels at each
+ * end. 0 turns automatic room off.
+ */
+export type ScalePadding = "auto" | number | { px: number };
+
+/**
  * A position scale's settings: the short forms `x`, `y`, and `yRight` hold
- * these with their axes' settings.
+ * these with their axes' settings. Under another name in the chart's
+ * `scales`, a position scale of its own, which marks place values on with
+ * `{ field, scale }` and which has no axis unless an axis guide names it;
+ * such a scale gives its `type`.
  */
 export interface ScaleSpec {
   /** Inferred from the data when omitted: time fields get "time". */
@@ -118,6 +145,8 @@ export interface ScaleSpec {
   nice?: boolean;
   /** Include zero in the domain. */
   zero?: boolean;
+  /** Room between the data and the plot's edges along the scale. */
+  padding?: ScalePadding;
   /** Which panels share one instance of the scale. */
   scope?: ScaleScope;
   /** How tooltips, the keyboard, and crosshair labels write one value; the axis' format by default. */
@@ -133,19 +162,33 @@ export interface ScalesSpec {
   x?: ScaleSpec;
   y?: ScaleSpec;
   yRight?: ScaleSpec;
-  readonly [name: string]: ScaleSpec | OrdinalScaleSpec | undefined;
+  readonly [name: string]: ScaleSpec | OrdinalScaleSpec | IdentityScaleSpec | undefined;
 }
 
 /**
- * A scale a mark owns, by the mark's `id` and the channel: its series
- * colors ("series"), a color field's ramp or colors ("color", which are its
- * series' where its color splits them), its sizes ("size"), or its symbols
- * ("symbol"). Guides naming a mark show it whatever its `legend` setting.
+ * A scale a guide shows: one a mark owns, by the mark's `id` and the
+ * channel (its series colors, "series"; a color field's ramp or colors,
+ * "color", which are its series' where its color splits them; its sizes,
+ * "size"; or its symbols, "symbol"), or one of the chart's `scales` by
+ * name (`{ scale }`), with every value any mark reads through it. Guides
+ * naming a mark show it whatever its `legend` setting.
  */
-export interface ScaleRef {
+export type ScaleRef =
+  | { mark: string; channel: "series" | "color" | "size" | "symbol"; scale?: never }
+  | { scale: string; mark?: never; channel?: never };
+
+/**
+ * A mark a legend lists whole: its series, or for an annotation, what its
+ * label names (one entry, or one per value of its label's field).
+ */
+export interface MarkRef {
   mark: string;
-  channel: "series" | "color" | "size" | "symbol";
+  channel?: never;
+  scale?: never;
 }
+
+/** What a legend lists: a scale's values, or a mark's entries. */
+export type LegendInclude = ScaleRef | MarkRef;
 
 /**
  * An axis showing a position scale along a side of the plots: its ticks
@@ -156,7 +199,8 @@ export interface AxisGuideSpec {
   type: "axis";
   /** Unique among the chart's guides. */
   id?: string;
-  scale: "x" | "y" | "yRight";
+  /** "x", "y", "yRight", or a position scale of the chart's `scales`, which then needs `place`. */
+  scale: "x" | "y" | "yRight" | (string & {});
   /** Below the plots (x) or left of them (y) by default; x above, y on the right. */
   place?: { side: Side };
   title?: string;
@@ -167,7 +211,7 @@ export interface AxisGuideSpec {
   /** The axis' line along the plot: x axes draw it, y axes do not, by default. */
   line?: boolean;
   /** Grid lines at its major ticks across the plot; the scale's default axis draws them by default. */
-  grid?: boolean;
+  grid?: boolean | GridLinesSpec;
   layers?: readonly TickLayerSpec[];
   /** Draw the axis; true by default. */
   show?: boolean;
@@ -180,10 +224,18 @@ export interface AxisGuideSpec {
 }
 
 /**
- * A sample drawn for a legend entry: a line, a filled box, or a circle
- * (`size` pixels across), outlined by a 1-pixel `stroke`, or several over
- * each other. An entry shows another symbol by its `sample` of a mark that
- * draws it.
+ * Grid lines across the plot at an axis' major ticks: `zIndex` places them
+ * among the marks (-1, under marks of the default 0, by default).
+ */
+export interface GridLinesSpec {
+  zIndex?: number;
+}
+
+/**
+ * A sample drawn for a legend entry: a line, a filled box, or a point's
+ * symbol ("circle" by default; `size` pixels across, 10 by default),
+ * outlined by a 1-pixel `stroke`, or several over each other. An entry can
+ * also show a mark's look by its `sample` of the mark.
  */
 export type SwatchSpec =
   | {
@@ -194,20 +246,39 @@ export type SwatchSpec =
       opacity?: number;
     }
   | { type: "rect"; fill: string; stroke?: string; opacity?: number }
-  | { type: "circle"; fill: string; stroke?: string; size?: number; opacity?: number }
+  | {
+      type: "symbol";
+      symbol?: SymbolName;
+      fill: string;
+      stroke?: string;
+      size?: number;
+      opacity?: number;
+    }
   | { type: "composite"; parts: readonly SwatchSpec[] };
+
+/**
+ * What a legend entry of your own hides and shows: a mark whole, the rows
+ * of a mark whose `field` holds one of `values`, or the values of one of
+ * the chart's scales (in every mark reading it). The entry is hidden when
+ * everything it targets is.
+ */
+export type LegendTarget =
+  | { mark: string; field?: never; values?: never; scale?: never }
+  | { mark: string; field: string; values: readonly string[]; scale?: never }
+  | { scale: string; values: readonly string[]; mark?: never; field?: never };
 
 /**
  * A legend entry of your own: its label, and either a swatch or a sample
  * drawn as mark `sample.mark` draws its entries; with `targets`, clicking
- * it hides and shows those marks.
+ * it hides and shows what they name. Its `key` is unique among the
+ * legend's own entries.
  */
 export interface LegendEntrySpec {
   key: string;
   label: string;
   swatch?: SwatchSpec;
   sample?: { mark: string };
-  targets?: readonly { mark: string }[];
+  targets?: readonly LegendTarget[];
 }
 
 /** A legend's title: its text, or its text and how it looks. */
@@ -227,19 +298,22 @@ export interface LegendOptionsSpec {
   /** Fill the grid row by row ("row", the default with `columns`) or down each column ("column", the default with `rows`). */
   order?: "row" | "column";
   title?: LegendTitleSpec;
-  /** Entries in place of those the chart's scales give. */
+  /**
+   * What the legend lists of the chart's scales and marks: every one a
+   * legend shows by default; `[]` for its own `entries` alone.
+   */
+  include?: readonly LegendInclude[];
+  /** Entries of your own, after those `include` gives. */
   entries?: readonly LegendEntrySpec[];
   /** Swatches that look like the marks: a dashed line for a dashed line, a symbol for points. */
   swatches?: "mark";
   style?: LegendStyles;
 }
 
-/** A legend: the entries of the scales it names (all the chart's by default), laid out as its options say. */
+/** A legend: the entries of what it includes (all the chart's by default), laid out as its options say. */
 export interface LegendGuideSpec extends LegendOptionsSpec {
   type: "legend";
   id?: string;
-  /** The scales whose entries it lists; every one a legend shows by default. */
-  scales?: readonly ScaleRef[];
   /**
    * The id of the subplot (or inset) whose marks it lists: it goes above
    * that panel by default, and its entries hide and show them there only.

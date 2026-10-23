@@ -24,10 +24,13 @@ import {
   type PointGeometry,
   type PointItems,
 } from "../scene/scene.ts";
+import type { ChannelSpec } from "../spec/encoding.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, PointSpec } from "../spec/spec.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { Appearance, scaleKey } from "./appearance.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
+import type { Channel, Encodings, FieldCoordinate, MappedField } from "./encoding.ts";
 import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -58,14 +61,22 @@ import {
   type SummaryContext,
   seriesOf,
 } from "./mark.ts";
+import {
+  coordinates,
+  type FieldPositions,
+  OBJECT,
+  type Pending,
+  refusePending,
+} from "./pending.ts";
 import { placeAt, rowOf, type Series, valueAt, visibleRange, xExtent, yExtent } from "./series.ts";
 import { offsetOf, Swarms } from "./swarm.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
 /**
- * A point's size: a constant `radius`, or a number field `size` sized by
- * area within `radiusRange` (bubbles); not both.
+ * A point's size, in one form: a constant `radius`, a number field `size`
+ * sized by area within `radiusRange` (bubbles), or a size channel, as
+ * `size` or `encode.size`.
  */
 export type PointSize<S extends Schema> =
   | {
@@ -73,6 +84,7 @@ export type PointSize<S extends Schema> =
       radius?: number;
       size?: never;
       radiusRange?: never;
+      encode?: { size?: never };
     }
   | {
       radius?: never;
@@ -80,7 +92,53 @@ export type PointSize<S extends Schema> =
       size?: NumericField<S>;
       /** Radii of the smallest and largest values of `size`. Default [2, 12]. */
       radiusRange?: readonly [number, number];
+      encode?: { size?: never };
+    }
+  | {
+      radius?: never;
+      /**
+       * A channel giving each point's area in square pixels, or a number
+       * field sized by area as `size` is.
+       */
+      size?: Channel<number, S> | MappedField<S>;
+      radiusRange?: never;
+      encode?: { size?: never };
+    }
+  | { radius?: never; size?: never; radiusRange?: never };
+
+/**
+ * Where a point's `spec` has no single size form (see `PointSize`), and
+ * why, or undefined: a size channel, given as `size` or in `encode`, gives
+ * points' areas on its own scale, and a radius one size for all.
+ */
+export function pointSizeForm(spec: {
+  radius?: unknown;
+  size?: unknown;
+  radiusRange?: unknown;
+  encode?: unknown;
+}): { path: string; message: string } | undefined {
+  const { radius, size, radiusRange, encode } = spec;
+  const encoded =
+    typeof encode === "object" &&
+    encode !== null &&
+    (encode as { size?: unknown }).size !== undefined;
+  if (((typeof size === "object" && size !== null) || encoded) && radiusRange !== undefined)
+    return {
+      path: "radiusRange",
+      message: "point radiusRange: a size channel's scale gives its areas; drop radiusRange",
     };
+  if (encoded && (radius !== undefined || size !== undefined))
+    return {
+      path: "encode.size",
+      message: `point encode.size: a size channel, and ${radius !== undefined ? "a constant radius" : "size"} too; drop one`,
+    };
+  return radius !== undefined && size !== undefined
+    ? {
+        path: "radius",
+        message: "point radius: a constant radius or a size field, not both; drop one",
+      }
+    : undefined;
+}
 
 export type PointOptions<S extends Schema> = PointStyle<S> & PointSize<S>;
 
@@ -97,10 +155,13 @@ interface PointStyle<S extends Schema> {
   clip?: Clip;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
-  /** A number or time field, or a category field placing points in its bands (strip plots). */
-  x: PositionField<S>;
+  /**
+   * A number or time field, a category field placing points in its bands
+   * (strip plots), or a coordinate.
+   */
+  x: PositionField<S> | FieldCoordinate<S>;
   /** Like `x`: categories run top to bottom. */
-  y: PositionField<S>;
+  y: PositionField<S> | FieldCoordinate<S>;
   /**
    * Category field: one colored point series per value; by default the
    * category `color` field, and `false` for none (points colored each by
@@ -110,8 +171,8 @@ interface PointStyle<S extends Schema> {
   /** A number, time, or category field matching points across data resets when the chart animates values. */
   animationKey?: PositionField<S>;
   fill?: string;
-  /** Opacity from 0 to 1, or a number field mapped from 0.15 to 1. */
-  fillOpacity?: number | NumericField<S>;
+  /** Opacity from 0 to 1, a number field mapped from 0.15 to 1, or a channel. */
+  fillOpacity?: number | NumericField<S> | Channel<number, S> | MappedField<S>;
   /** Outline color of every point; the chart's background with only `strokeWidth`. */
   stroke?: string;
   /** Outline width in pixels: 1 with only `stroke`, none by default. */
@@ -120,9 +181,10 @@ interface PointStyle<S extends Schema> {
    * A number or time field colored on a continuous scale, with a color
    * legend; or a category field whose values take the theme's palette in
    * order of appearance, with a key of them (the `series` field, named here,
-   * keeps its series' colors).
+   * keeps its series' colors); or a channel, such as `{ field, scale: {
+   * type: "identity" } }` for a field of colors.
    */
-  color?: PositionField<S>;
+  color?: PositionField<S> | Channel<string, S> | MappedField<S>;
   /**
    * Colors for a number or time `color`, low to high, such as an imported
    * scheme (`viridis`, `rdbu`, ...). Defaults to the theme's sequential
@@ -135,9 +197,19 @@ interface PointStyle<S extends Schema> {
   colorMidpoint?: number;
   /**
    * A shape's name, or a category field with a shape per value: its name,
-   * or `{ field }`, which a field named like a shape needs. Default "circle".
+   * or `{ field }`, which a field named like a shape needs (with `scale`,
+   * a channel). Default "circle".
    */
-  symbol?: SymbolName | CategoryField<S> | { field: CategoryField<S> };
+  symbol?: SymbolName | CategoryField<S> | Channel<SymbolName, S>;
+  /**
+   * Channels of each point: color, fill, stroke, strokeWidth, opacity,
+   * symbol, and size; color and size map number fields as `color` and
+   * `size` do.
+   */
+  encode?: Pick<Encodings<S>, "fill" | "stroke" | "strokeWidth" | "opacity" | "symbol"> & {
+    color?: Channel<string, S> | MappedField<S>;
+    size?: Channel<number, S> | MappedField<S>;
+  };
   /**
    * "pixel": draw opaque points whose centers share a device pixel once.
    * Faster for dense scatters; edges can differ by a fraction of a pixel.
@@ -161,6 +233,8 @@ interface PointStyle<S extends Schema> {
    * is laid out again as the chart resizes and zooms.
    */
   swarm?: boolean;
+  /** Where the points are drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   label?: string;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
@@ -195,10 +269,39 @@ interface Encoding {
 /** Stream identities of clouds by table, x field, and y field, shared by every chart drawing them. */
 const streamKeys = new WeakMap<Table, Map<string, Map<string, object>>>();
 
-export class PointMark implements Mark<Frozen<PointSpec>> {
+/**
+ * A point spec as points draw it: positions and channels fields or
+ * constants, while they refuse coordinates and channel objects (pending.ts).
+ */
+type DrawnPointSpec = FieldChannels<FieldPositions<Frozen<PointSpec>>>;
+type FieldChannels<S> = {
+  readonly [K in keyof S]: K extends "symbol"
+    ? string | { readonly field: string }
+    : K extends "color" | "size" | "fillOpacity" | "encode"
+      ? Exclude<S[K], object>
+      : S[K];
+};
+
+/** Points' options round 2 freezes before its streams draw them. */
+const PENDING: readonly Pending[] = [
+  ...coordinates("x", "y"),
+  ["color", "C", "give a field or a color", OBJECT],
+  ["size", "C", "give a field", OBJECT],
+  ["fillOpacity", "C", "give a field or a number", OBJECT],
+  // `{ field }` alone is a symbol field, as points always took one.
+  [
+    "symbol",
+    "C",
+    "give a shape or { field }",
+    (v) => OBJECT(v) && (!("field" in (v as object)) || "scale" in (v as object)),
+  ],
+  ["encode", "C", "drop encode"],
+];
+
+export class PointMark implements Mark<DrawnPointSpec> {
   declare readonly [MARK]: true;
   readonly insetDomain = insetDomain;
-  readonly spec: Frozen<PointSpec>;
+  readonly spec: DrawnPointSpec;
   readonly table: Table<Schema>;
   readonly identity: MarkSources;
   readonly legendScales: readonly LegendScale[];
@@ -238,7 +341,11 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   readonly #swarms: Swarms | undefined;
 
   constructor(input: PointSpec, table: Table<Schema>, view?: RowView) {
-    this.spec = frozen(input);
+    // Well formed first, as the validator checks a spec before what it draws.
+    const sizeForm = pointSizeForm(input);
+    if (sizeForm) throw new ChartError({ code: "invalid-option", ...sizeForm });
+    refusePending(input, "point", PENDING);
+    this.spec = frozen(input) as DrawnPointSpec;
     checkTooltip(table, this.spec.tooltip, "point");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -283,8 +390,6 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     const xField = this.#banded.x ? undefined : spec.x;
     this.#split = new SeriesSplitter(table, xField, [spec.y], series, spec.label, view);
     this.identity = { field: series, values: [spec.y] };
-    if (spec.radius !== undefined && spec.size !== undefined)
-      throw new Error("point radius: a constant radius or a size field, not both; drop one");
     if (spec.size !== undefined) requireField(table, spec.size, NUMERIC, "point size");
     if (typeof spec.fillOpacity === "string")
       requireField(table, spec.fillOpacity, NUMERIC, "point fillOpacity");
@@ -326,8 +431,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     // `{ field }` names a field; a shape's name draws that shape, and any
     // other name is a field. A name that is both would leave the choice to
     // the table's columns, so it is refused.
-    const symbol = spec.symbol;
-    const named = typeof symbol === "object" ? undefined : symbol;
+    const named = typeof spec.symbol === "object" ? undefined : spec.symbol;
     const shape = named === undefined ? undefined : SYMBOLS.find((s) => s === named);
     if (shape !== undefined && table.has(shape)) {
       throw new Error(
@@ -335,7 +439,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
       );
     }
     const field =
-      typeof symbol === "object" ? symbol.field : shape === undefined ? named : undefined;
+      typeof spec.symbol === "object" ? spec.symbol.field : shape === undefined ? named : undefined;
     if (field === undefined) {
       this.#symbol = shape ?? "circle";
     } else {
@@ -1153,6 +1257,8 @@ export function point<S extends Schema>(
       "sampling",
       "dodge",
       "swarm",
+      "zIndex",
+      "encode",
       "label",
       "legend",
       "id",
@@ -1167,7 +1273,7 @@ export function point<S extends Schema>(
   } as unknown as PointSpec;
   // Specs name symbol fields as { field }, so a reader never mistakes one for a shape.
   const { symbol } = options;
-  if (typeof symbol === "object") spec.symbol = { field: symbol.field };
+  if (typeof symbol === "object") spec.symbol = symbol as ChannelSpec<SymbolName>;
   else if (symbol !== undefined)
     spec.symbol = SYMBOLS.includes(symbol as SymbolName) ? symbol : { field: symbol };
   if (options.colors) spec.colors = [...options.colors];

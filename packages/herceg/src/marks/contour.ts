@@ -87,6 +87,8 @@ export interface ContourOptions<S extends Schema> {
    * cut to the plot and labels are drawn whole.
    */
   clip?: Clip;
+  /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
+  zIndex?: number;
   /** The subplot to draw in, or "*" for every panel. */
   panel?: string;
   id?: string;
@@ -1260,6 +1262,7 @@ export function contour<S extends Schema>(
       "facet",
       "panel",
       "clip",
+      "zIndex",
       "id",
     ]),
   };

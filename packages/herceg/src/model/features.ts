@@ -31,8 +31,7 @@ export type FeatureKit = GuideKit & { isColor(value: string): boolean };
 /**
  * A series' swatch: one a spec could give, a box whose fill has an opacity
  * of its own under the outline's (`opacity` fades both), or a marker's
- * symbol as SVG path data about its center, `size` pixels across (the
- * guide compiler draws symbols without their shapes' code).
+ * symbol as SVG path data about its center, `size` pixels across.
  */
 export type SeriesSwatch =
   | Exclude<SwatchSpec, { type: "composite" | "rect" }>

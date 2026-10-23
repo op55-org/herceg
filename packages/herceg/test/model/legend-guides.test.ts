@@ -144,7 +144,7 @@ describe("swatches as the marks look", () => {
   it("draw a mark left out of legends as it looks where a legend names it", () => {
     const { scene } = build({
       marks: [line(data, { x: "t", y: "a", dash: "--", id: "dashed", legend: false })],
-      guides: [legend({ scales: [{ mark: "dashed", channel: "series" }], swatches: "mark" })],
+      guides: [legend({ include: [{ mark: "dashed", channel: "series" }], swatches: "mark" })],
     });
     const stroke = entriesOf(scene)[0]!.sample!.items[0]!;
     expect(stroke.type === "segments" && stroke.paint.dash.length).toBe(2);
@@ -190,7 +190,7 @@ describe("legends of the scales they name", () => {
     const { scene } = build({
       marks,
       guides: [
-        legend({ scales: [{ mark: "second", channel: "series" }], place: { side: "right" } }),
+        legend({ include: [{ mark: "second", channel: "series" }], place: { side: "right" } }),
       ],
     });
     const [automatic, listed] = guidesOf(scene, "legend");
@@ -234,7 +234,7 @@ describe("legends of the scales they name", () => {
         heatmap(cells, { x: "x", y: "y", color: "v", id: "a" }),
         heatmap(cells, { x: "x", y: "y", color: "v", id: "b" }),
       ],
-      guides: [legend({ scales: [{ mark: "b", channel: "color" }], place: { side: "bottom" } })],
+      guides: [legend({ include: [{ mark: "b", channel: "color" }], place: { side: "bottom" } })],
     });
     const ramps = guidesOf(scene, "ramp");
     expect(ramps).toHaveLength(1);
@@ -264,7 +264,7 @@ describe("legends of the scales they name", () => {
     const { scene } = build({
       marks: [point(sized, { x: "t", y: "v", size: "size|units", id: "p" })],
       legend: false,
-      guides: [legend({ scales: [{ mark: "p", channel: "size" }] })],
+      guides: [legend({ include: [{ mark: "p", channel: "size" }] })],
     });
     expect(guidesOf(scene, "key")).toHaveLength(1);
   });
@@ -296,7 +296,7 @@ describe("legends of the scales they name", () => {
     const { scene } = build({
       marks: hidden,
       guides: [
-        legend({ scales: [{ mark: "curves", channel: "series" }], place: { side: "right" } }),
+        legend({ include: [{ mark: "curves", channel: "series" }], place: { side: "right" } }),
       ],
     });
     // The automatic legend, of one series, draws none.
@@ -315,7 +315,7 @@ describe("legends of the scales they name", () => {
     for (const channel of ["color", "series"] as const) {
       const { scene } = build({
         marks: both,
-        guides: [legend({ scales: [{ mark: "curves", channel }], place: { side: "right" } })],
+        guides: [legend({ include: [{ mark: "curves", channel }], place: { side: "right" } })],
       });
       const [automatic, listed] = guidesOf(scene, "legend");
       expect(
@@ -332,15 +332,15 @@ describe("legends of the scales they name", () => {
 
   it("refuse a scale the mark does not have, naming those it has", () => {
     expect(() =>
-      build({ marks, guides: [legend({ scales: [{ mark: "first", channel: "color" }] })] }),
+      build({ marks, guides: [legend({ include: [{ mark: "first", channel: "color" }] })] }),
     ).toThrow(
-      'chart guides[0].scales[0].channel: mark "first" has no "color" scale; name one it has, as channel: "series"',
+      'chart guides[0].include[0].channel: mark "first" has no "color" scale; name one it has, as channel: "series"',
     );
     const cells = table({ x: [0, 1], y: category(["a", "b"]), v: [1, 2] });
     expect(() =>
       build({
         marks: [heatmap(cells, { x: "x", y: "y", color: "v", id: "h" })],
-        guides: [legend({ scales: [{ mark: "h", channel: "series" }] })],
+        guides: [legend({ include: [{ mark: "h", channel: "series" }] })],
       }),
     ).toThrow('mark "h" has no "series" scale; name one it has, as channel: "color"');
     // A mark coloring series by a field owns them, whichever values its rows hold.
@@ -353,7 +353,7 @@ describe("legends of the scales they name", () => {
       expect(() =>
         build({
           marks: [line(unknown, { x: "t", y: "v", color: "k", id: "l" })],
-          guides: [legend({ scales: [{ mark: "l", channel }] })],
+          guides: [legend({ include: [{ mark: "l", channel }] })],
         }),
       ).not.toThrow();
     // A mark of rows but no series owns no scale either.
@@ -361,7 +361,7 @@ describe("legends of the scales they name", () => {
     expect(() =>
       build({
         marks: [...marks, rule(events, { x: "t", label: "note", id: "events" })],
-        guides: [legend({ scales: [{ mark: "events", channel: "size" }] })],
+        guides: [legend({ include: [{ mark: "events", channel: "size" }] })],
       }),
     ).toThrow(
       'mark "events" has no "size" scale, nor another a legend shows; name a mark that colors',
@@ -371,13 +371,13 @@ describe("legends of the scales they name", () => {
     expect(() =>
       build({
         marks: [point(empty, { x: "t", y: "v", id: "p" })],
-        guides: [legend({ scales: [{ mark: "p", channel: "size" }] })],
+        guides: [legend({ include: [{ mark: "p", channel: "size" }] })],
       }),
     ).toThrow('mark "p" has no "size" scale; name one it has, as channel: "series"');
     expect(() =>
       build({
         marks: [...marks, rule(table({ t: new Float64Array(0) }), { x: "t", id: "none" })],
-        guides: [legend({ scales: [{ mark: "none", channel: "color" }] })],
+        guides: [legend({ include: [{ mark: "none", channel: "color" }] })],
       }),
     ).toThrow('mark "none" has no "color" scale, nor another a legend shows');
   });
@@ -404,7 +404,7 @@ describe("legends of the scales they name", () => {
       legend: false,
       guides: [
         legend({
-          scales: [
+          include: [
             { mark: "p", channel: "size" },
             { mark: "p", channel: "symbol" },
           ],
@@ -428,7 +428,7 @@ describe("legends of the scales they name", () => {
         candlestick(prices, { ...ticker, label: "ACME", id: "c" }),
         candlestick(prices, { ...ticker, label: "Other" }),
       ],
-      guides: [legend({ scales: [{ mark: "c", channel: "series" }] })],
+      guides: [legend({ include: [{ mark: "c", channel: "series" }] })],
     });
     const listed = guidesOf(scene, "legend").map((g) => g.entries.map((entry) => entry.label));
     expect(listed.sort()).toEqual([["ACME"], ["Other"]]);
@@ -436,8 +436,8 @@ describe("legends of the scales they name", () => {
 
   it("refuse a mark id no mark has", () => {
     expect(() =>
-      build({ marks, guides: [legend({ scales: [{ mark: "third", channel: "series" }] })] }),
-    ).toThrow('chart guides[0].scales[0]: no mark has id "third"; give the mark id: "third"');
+      build({ marks, guides: [legend({ include: [{ mark: "third", channel: "series" }] })] }),
+    ).toThrow('chart guides[0].include[0]: no mark has id "third"; give the mark id: "third"');
   });
 });
 
@@ -448,6 +448,7 @@ describe("entries of your own", () => {
     const { scene, model } = build({
       marks: [line(data, { x: "t", y: "v", id: "trend" })],
       legend: {
+        include: [],
         entries: [
           { key: "band", label: "Maintenance", swatch: { type: "rect", fill: "#eeeeee" } },
           { key: "trend", label: "Trend", sample: { mark: "trend" }, targets: [{ mark: "trend" }] },
@@ -462,12 +463,13 @@ describe("entries of your own", () => {
     expect(trend!.targets).toHaveLength(1);
   });
 
-  it("draw circles of their size and outlined boxes", () => {
+  it("draw symbols of their size and outlined boxes", () => {
     const { scene } = build({
       marks: [line(data, { x: "t", y: "v" })],
       legend: {
+        include: [],
         entries: [
-          { key: "big", label: "Big", swatch: { type: "circle", fill: "#ff0000", size: 16 } },
+          { key: "big", label: "Big", swatch: { type: "symbol", fill: "#ff0000", size: 16 } },
           {
             key: "box",
             label: "Box",
@@ -479,7 +481,7 @@ describe("entries of your own", () => {
     const items = guidesOf(scene, "caption").flatMap((g) => g.items);
     const shapes = items.filter((item): item is ShapeItem => item.type === "shape");
     expect(shapes).toHaveLength(2);
-    expect(shapes[0]!.d).toContain("a8,8");
+    expect(shapes[0]!.d).toBe("M-8 0a8 8 0 1 1 16 0a8 8 0 1 1 -16 0");
     expect(shapes[1]).toMatchObject({ fill: "#ffffff", stroke: "#000000" });
     // Labels clear the wider swatch.
     const big = items.find(
@@ -497,6 +499,7 @@ describe("entries of your own", () => {
       ],
       legend: {
         swatches: "mark",
+        include: [],
         entries: [
           { key: "p", label: "Points", sample: { mark: "p" }, targets: [{ mark: "p" }] },
           { key: "a", label: "Area", sample: { mark: "a" }, targets: [{ mark: "a" }] },
@@ -517,7 +520,10 @@ describe("entries of your own", () => {
     const zone = region({ x1: 0, x2: 1, fill: "#ff0000", id: "zone" });
     const { scene, model } = build({
       marks: [line(data, { x: "t", y: "v" }), zone],
-      legend: { entries: [{ key: "z", label: "Maintenance", sample: { mark: "zone" } }] },
+      legend: {
+        include: [],
+        entries: [{ key: "z", label: "Maintenance", sample: { mark: "zone" } }],
+      },
     });
     const box = guidesOf(scene, "caption")
       .flatMap((g) => g.items)
@@ -527,7 +533,10 @@ describe("entries of your own", () => {
     expect(() =>
       build({
         marks: [line(data, { x: "t", y: "v" }), zone],
-        legend: { entries: [{ key: "z", label: "Maintenance", targets: [{ mark: "zone" }] }] },
+        legend: {
+          include: [],
+          entries: [{ key: "z", label: "Maintenance", targets: [{ mark: "zone" }] }],
+        },
       }),
     ).toThrow(
       'chart legend.entries[0].targets[0].mark: mark "zone" is an annotation, which has no series to hide and show; target marks with series, or drop the target',
@@ -539,8 +548,9 @@ describe("entries of your own", () => {
       marks: [line(data, { x: "t", y: "v" })],
       legend: {
         columns: 1,
+        include: [],
         entries: [
-          { key: "big", label: "Big", swatch: { type: "circle", fill: "#ff0000", size: 40 } },
+          { key: "big", label: "Big", swatch: { type: "symbol", fill: "#ff0000", size: 40 } },
           { key: "small", label: "Small", swatch: { type: "rect", fill: "#0000ff" } },
           {
             key: "thick",

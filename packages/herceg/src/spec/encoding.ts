@@ -28,17 +28,29 @@ export type SymbolName =
 
 /**
  * A value per row: a field's value read through a scale (the channel's
- * default scale, "color" for colors, or the one `scale` names), the
- * series' names through a scale (`{ series: true, scale }`: series of
+ * default scale, "color" for colors, the one of the chart's `scales` that
+ * `scale` names, or with `scale: { type: "identity" }` the value itself),
+ * the series' names through a scale (`{ series: true, scale }`: series of
  * marks naming one scale share colors, legend entries, and dodged places by
  * name, as a line and the band around it do), a constant, or a
  * condition's `then` where `when` holds and its `otherwise` elsewhere.
  */
 export type ChannelSpec<V> =
-  | { field: Field; scale?: string }
+  | { field: Field; scale?: string | IdentityScaleSpec }
   | { series: true; scale: string }
   | { value: V }
   | { condition: { when: Expression; then: V; otherwise: V } };
+
+/**
+ * A scale that maps nothing: each row's value is the channel's output (a
+ * color for colors, a symbol's name, an area in square pixels for sizes,
+ * pixels for widths, 0 to 1 for opacities, a dash), checked as the channel
+ * checks its constants. Its values make no legend entries and split no
+ * series.
+ */
+export interface IdentityScaleSpec {
+  type: "identity";
+}
 
 /**
  * A mark's channels. `color` is the primary paint: a line's stroke, a bar's,
@@ -73,6 +85,12 @@ export interface EncodingsSpec {
  */
 export interface OrdinalScaleSpec {
   type: "ordinal";
+  /**
+   * Which panels share the scale's mapping: every panel of the chart (the
+   * default), or each panel its own ("panel"), whose values then take
+   * places in that panel's domain.
+   */
+  scope?: "chart" | "panel";
   domain?: readonly string[];
   map?: Readonly<Record<string, string | number | Dash>>;
   /** For values outside an explicit `domain`: the theme's muted color by default. */
@@ -167,28 +185,87 @@ export interface LabelPlaceSpec {
 }
 
 /**
- * A label: constant `text`, or each row's `field` (numbers written with
- * `format`), styled as `style` says and placed as `place` says.
+ * One part of a label's text: literal text, a field's value of the row
+ * the label is at (written with `format`), the name of the series it
+ * labels (`{ series: true }`), or its value there (`{ value: true }`, the
+ * value the geometry has at the label's place, written with `format`).
  */
-export type LabelSpec = ({ text: string; field?: never } | { field: Field; text?: never }) & {
+export type LabelPart =
+  | string
+  | { field: Field; format?: FormatSpec; series?: never; value?: never }
+  | { series: true; field?: never; value?: never; format?: never }
+  | { value: true; format?: FormatSpec; field?: never; series?: never };
+
+/** A label's text, its parts in order: `["Capacity: ", { value: true, format: { number: ".1f" } }]`. */
+export type LabelContent = readonly LabelPart[];
+
+/**
+ * A label: constant `text`, each row's `field` (numbers written with
+ * `format`), or `content` made of parts, styled as `style` says and placed
+ * as `place` says.
+ */
+export type LabelSpec = (
+  | { text: string; field?: never; content?: never }
+  | { field: Field; text?: never; content?: never }
+  | { content: LabelContent; text?: never; field?: never; format?: never }
+) & {
   format?: FormatSpec;
   style?: TextStyle;
   place?: LabelPlaceSpec;
 };
 
 /**
- * A bar's value label: the value (or with `field`, a field's), written with
- * `format`, styled as `style` says (black or white by contrast with the bar
- * inside it unless `style.color` is set), on bars at least `minLength`
- * pixels long, placed as `place` says.
+ * Which point of a series a label follows: its first or last observation
+ * drawn ("first", "last"), or where its line enters or leaves the view
+ * ("visible-start", "visible-end"), along the series' own order.
  */
-export interface BarLabelsSpec {
-  field?: Field;
-  format?: FormatSpec;
+export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
+
+/**
+ * Labels that follow each series of a line: placed at `at`, saying
+ * `content` (the series' name by default), placed as `place` says (beside
+ * the point, or `outside` the plot at its edge) and styled as `style` says.
+ */
+export interface SeriesLabelsSpec {
+  at: LabelAt;
+  content?: LabelContent;
+  place?: LabelPlaceSpec;
+  style?: TextStyle;
+}
+
+/**
+ * Labels that follow each series of an area (see `SeriesLabelsSpec`): a
+ * band's (`y1` and `y2`, or `x1` and `x2`) follow the edge `edge` names.
+ */
+export interface AreaLabelsSpec extends SeriesLabelsSpec {
+  edge?: "y1" | "y2" | "x1" | "x2";
+}
+
+/**
+ * A place on another mark's geometry that text follows: mark `mark`'s
+ * series at `at` (see `SeriesLabelsSpec`).
+ */
+export interface MarkAnchorSpec {
+  mark: string;
+  at: LabelAt;
+  edge?: "y1" | "y2" | "x1" | "x2";
+}
+
+/**
+ * A bar's value label: the value (or with `field`, a field's), written with
+ * `format`, or `content` made of parts (each written with its own format),
+ * styled as `style` says (black or white by contrast with the bar inside
+ * it unless `style.color` is set), on bars at least `minLength` pixels
+ * long, placed as `place` says.
+ */
+export type BarLabelsSpec = (
+  | { field?: Field; format?: FormatSpec; content?: never }
+  | { content: LabelContent; field?: never; format?: never }
+) & {
   style?: TextStyle;
   minLength?: number;
   place?: BarLabelPlaceSpec;
-}
+};
 
 /**
  * Where bars' labels go: past each bar's end (`outside`, the default for

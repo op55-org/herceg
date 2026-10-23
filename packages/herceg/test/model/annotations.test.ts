@@ -355,7 +355,7 @@ describe("text", () => {
       });
       const [label] = of(scene, "text") as TextGeometry[];
       const [leaders] = of(scene, "segments");
-      expect(leaders!.draw.guide).toBe(true);
+      expect(leaders!.draw.canvas).toBe(false);
       expect(leaders!.stroke).toBe(scene.theme.muted);
       expect(leaders!.count).toBeGreaterThan(0);
       expect(leaders!.count).toBeLessThan(label!.count);

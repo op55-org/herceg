@@ -5,15 +5,25 @@
 
 import type { Expr } from "../data/expr.ts";
 import type { Expression } from "../data/expression.ts";
-import type { CategoryField, Schema } from "../data/table.ts";
+import type {
+  CategoryField,
+  NumberField,
+  NumericField,
+  PositionField,
+  Schema,
+} from "../data/table.ts";
 import type {
   BarLabelPlaceSpec,
   CalendarBreak,
+  IdentityScaleSpec,
+  LabelAt,
+  LabelPlaceSpec,
   MarkerStyle,
   SeriesStyle,
   SymbolName,
 } from "../spec/encoding.ts";
 import type { FormatSpec } from "../spec/guides.ts";
+import type { Frame } from "../spec/place.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { StrokeStyle, TextStyle } from "../spec/style.ts";
 
@@ -32,15 +42,61 @@ export type CssColor =
 
 /**
  * A channel: a category field's values through a scale (`scale` names one of
- * the chart's `scales`; colors take "color" by default), the series' names
+ * the chart's `scales`; colors take "color" by default), a field's values
+ * as they are (`scale: { type: "identity" }`, or the name of an identity
+ * scale of the chart's: colors, shapes, and dashes from category fields,
+ * sizes, widths, and opacities from number fields), the series' names
  * through a scale (`{ series: true, scale }`, which joins marks' series by
  * name: a line and its band), a constant, or a condition on each row.
  */
 export type Channel<V, S extends Schema> =
   | { field: CategoryField<S>; scale?: string }
+  | {
+      field: V extends number ? NumberField<S> : CategoryField<S>;
+      scale: string | IdentityScaleSpec;
+    }
   | { series: true; scale: string }
   | { value: V }
   | { condition: { when: Condition; then: V; otherwise: V } };
+
+/** A number or time field through the channel's own mapping: a color ramp, sizes by area, opacities. */
+export interface MappedField<S extends Schema> {
+  field: NumericField<S>;
+  scale?: never;
+}
+
+/**
+ * A place along an axis for each row (see `Coordinate`): a field `F` (any
+ * position field, or a number or time one for values) on the axis' scale
+ * or on a position scale of the chart's `scales` (`scale`), a share of the
+ * plot read from a number field (`{ fraction: { field } }`), pixels from
+ * its edge (`{ px: { field } }`), or a constant, each moved `offset` pixels.
+ */
+export type FieldCoordinate<S extends Schema, F extends string = PositionField<S>> =
+  | { field: F; scale?: string; offset?: number }
+  | { fraction: number | { field: NumberField<S> }; frame?: Frame; offset?: number }
+  | { px: number | { field: NumberField<S> }; frame?: Frame; offset?: number }
+  | { data: number | string; scale?: string; offset?: number };
+
+/** A part of a label's text, reading fields `F` (see `LabelPart`). */
+export type LabelPartOf<F extends string> =
+  | string
+  | { field: F; format?: FormatSpec; series?: never; value?: never }
+  | { series: true; field?: never; value?: never; format?: never }
+  | { value: true; format?: FormatSpec; field?: never; series?: never };
+
+/** Labels following each series of a line (see `SeriesLabelsSpec`). */
+export interface SeriesLabels<S extends Schema> {
+  at: LabelAt;
+  content?: readonly LabelPartOf<keyof S & string>[];
+  place?: LabelPlaceSpec;
+  style?: TextStyle;
+}
+
+/** Labels following each series of an area: along `edge` for a band's (see `AreaLabelsSpec`). */
+export interface AreaLabels<S extends Schema> extends SeriesLabels<S> {
+  edge?: "y1" | "y2" | "x1" | "x2";
+}
 
 /** A mark's channels (each mark takes those it draws). */
 export interface Encodings<S extends Schema> {
@@ -75,13 +131,14 @@ export interface Continuity<S extends Schema> {
 }
 
 /** A bar's value label (see `BarLabelsSpec`). */
-export interface BarLabels<S extends Schema> {
-  field?: CategoryField<S> | string;
-  format?: FormatSpec;
+export type BarLabels<S extends Schema> = (
+  | { field?: CategoryField<S> | string; format?: FormatSpec; content?: never }
+  | { content: readonly LabelPartOf<keyof S & string>[]; field?: never; format?: never }
+) & {
   style?: TextStyle;
   minLength?: number;
   place?: BarLabelPlaceSpec;
-}
+};
 
 /** CSS's named colors. */
 export type NamedColor =

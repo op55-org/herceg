@@ -33,6 +33,7 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
         {
           type: "legend",
           panel: "a",
+          include: [],
           entries: [
             { key: "quiet", label: "Quiet", targets: [{ mark: "q" }] },
             { key: "other", label: "Other", targets: [{ mark: "r" }] },
