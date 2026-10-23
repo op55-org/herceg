@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import { browsers } from "../../scripts/browser/browsers.ts";
+import { browserServer, browsers } from "../../scripts/browser/browsers.ts";
 
 export default defineConfig({
   // Discovering dependencies mid-test can reload the page and lose module mocks.
@@ -30,6 +30,7 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
+    api: browserServer,
     browser: {
       enabled: true,
       headless: true,

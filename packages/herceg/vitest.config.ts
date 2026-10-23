@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import { browsers } from "../../scripts/browser/browsers.ts";
+import { browserServer, browsers } from "../../scripts/browser/browsers.ts";
 import { commands } from "../../scripts/browser/commands.ts";
 
 export default defineConfig({
@@ -18,6 +18,7 @@ export default defineConfig({
           name: "browser",
           include: ["test/browser/**/*.test.ts"],
           setupFiles: ["../../scripts/browser/setup.ts"],
+          api: browserServer,
           browser: {
             enabled: true,
             headless: true,

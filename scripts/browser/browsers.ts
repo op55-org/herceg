@@ -43,4 +43,13 @@ for (const name of chosen ?? [])
       `HERCEG_BROWSERS: no browser "${name}"; name chromium, firefox, or webkit, comma-separated`,
     );
 
+/**
+ * The test server's address, for every config's browser project (`api`).
+ * Bound to "localhost", Vite takes ::1 alone when another program holds
+ * 127.0.0.1 on its port (Android's adb can take Vitest's default, 63315),
+ * and Firefox, which reaches localhost over IPv4, then connects to that
+ * program and never starts. Bound to IPv4, Vite sees the clash and moves on.
+ */
+export const browserServer = { host: "127.0.0.1" };
+
 export const browsers = engines.filter(({ browser }) => !chosen || chosen.includes(browser));

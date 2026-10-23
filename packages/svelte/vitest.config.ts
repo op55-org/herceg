@@ -2,7 +2,7 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { createServer, type ViteDevServer } from "vite";
 import { defineConfig } from "vitest/config";
 import type { BrowserCommand } from "vitest/node";
-import { browsers } from "../../scripts/browser/browsers.ts";
+import { browserServer, browsers } from "../../scripts/browser/browsers.ts";
 
 // Exact matches, so "herceg" does not also rewrite "herceg/layout".
 const herceg = [
@@ -53,6 +53,7 @@ export default defineConfig({
   test: {
     // Test files use runes, which Svelte compiles only in `.svelte.ts` modules.
     include: ["test/**/*.test.svelte.ts"],
+    api: browserServer,
     browser: {
       enabled: true,
       headless: true,
