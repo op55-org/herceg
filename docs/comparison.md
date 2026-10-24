@@ -254,25 +254,25 @@ initial bundle; the placement providers carry the synchronous copying path.
 | chartjs-line | 4.5.1 | 196.4 | 63.7 | 56.0 | - | - | - |
 | echarts-full | 6.1.0 | 1107.9 | 370.5 | 302.3 | - | - | - |
 | echarts-line | 6.1.0 | 490.7 | 166.8 | 142.7 | - | - | - |
-| herceg-area | 0.0.0 (bd10070c) | 179.3 | 68.8 | 61.4 | - | 11.0 | 81.9 |
-| herceg-bar | 0.0.0 (bd10070c) | 175.7 | 68.3 | 60.8 | - | 11.0 | 81.8 |
-| herceg-contour | 0.0.0 (bd10070c) | 165.8 | 64.7 | 57.8 | - | 11.0 | 79.0 |
-| herceg-grid-pivot | 0.0.0 (bd10070c) | 133.6 | 45.9 | 41.1 | - | - | - |
-| herceg-grid-remote | 0.0.0 (bd10070c) | 89.6 | 31.1 | 27.9 | - | - | - |
-| herceg-grid | 0.0.0 (bd10070c) | 90.6 | 31.9 | 28.7 | - | - | - |
-| herceg-heatmap | 0.0.0 (bd10070c) | 169.6 | 66.1 | 58.9 | - | 11.0 | 79.0 |
-| herceg-image | 0.0.0 (bd10070c) | 238.6 | 95.2 | 85.7 | - | - | 2.9 |
-| herceg-line | 0.0.0 (bd10070c) | 152.0 | 59.1 | 52.8 | - | 11.0 | 81.9 |
-| herceg-pdf-document | 0.0.0 (bd10070c) | 251.9 | 99.4 | 89.3 | - | - | 2.9 |
-| herceg-pdf-fonts | 0.0.0 (bd10070c) | 274.9 | 108.5 | 97.2 | - | - | 2.9 |
-| herceg-pdf | 0.0.0 (bd10070c) | 251.8 | 99.4 | 89.3 | - | - | 2.9 |
-| herceg-pivot | 0.0.0 (bd10070c) | 60.5 | 20.5 | 18.7 | - | - | - |
-| herceg-react-line | 0.0.0 (bd10070c) | 157.7 | 61.3 | 54.8 | - | 11.0 | 81.9 |
-| herceg-scatter | 0.0.0 (bd10070c) | 175.1 | 68.3 | 60.8 | - | 11.0 | 81.3 |
-| herceg-spec-pdf | 0.0.0 (bd10070c) | 914.7 | 346.3 | 289.2 | - | - | 2.9 |
-| herceg-svelte-line | 0.0.0 (bd10070c) | 159.3 | 61.9 | 55.3 | - | 11.0 | 81.9 |
-| herceg-vue-line | 0.0.0 (bd10070c) | 158.0 | 61.4 | 54.9 | - | 11.0 | 81.9 |
-| herceg-web | 0.0.0 (bd10070c) | 844.6 | 319.6 | 263.9 | - | 9.6 | 75.3 |
+| herceg-area | 0.0.0 (daf5cdec) | 179.9 | 69.1 | 61.6 | - | 11.0 | 102.6 |
+| herceg-bar | 0.0.0 (daf5cdec) | 176.7 | 68.9 | 61.3 | - | 11.0 | 102.0 |
+| herceg-contour | 0.0.0 (daf5cdec) | 166.1 | 64.8 | 57.9 | - | 11.0 | 99.7 |
+| herceg-grid-pivot | 0.0.0 (daf5cdec) | 133.6 | 45.9 | 41.1 | - | - | - |
+| herceg-grid-remote | 0.0.0 (daf5cdec) | 89.6 | 31.1 | 27.9 | - | - | - |
+| herceg-grid | 0.0.0 (daf5cdec) | 90.6 | 31.9 | 28.7 | - | - | - |
+| herceg-heatmap | 0.0.0 (daf5cdec) | 169.7 | 66.1 | 59.0 | - | 11.0 | 99.7 |
+| herceg-image | 0.0.0 (daf5cdec) | 290.6 | 115.5 | 103.6 | - | - | 2.9 |
+| herceg-line | 0.0.0 (daf5cdec) | 152.3 | 59.2 | 53.0 | - | 11.0 | 102.6 |
+| herceg-pdf-document | 0.0.0 (daf5cdec) | 305.5 | 120.4 | 107.8 | - | - | 2.9 |
+| herceg-pdf-fonts | 0.0.0 (daf5cdec) | 328.5 | 129.4 | 115.7 | - | - | 2.9 |
+| herceg-pdf | 0.0.0 (daf5cdec) | 305.4 | 120.3 | 107.8 | - | - | 2.9 |
+| herceg-pivot | 0.0.0 (daf5cdec) | 60.5 | 20.5 | 18.7 | - | - | - |
+| herceg-react-line | 0.0.0 (daf5cdec) | 158.0 | 61.4 | 54.9 | - | 11.0 | 102.6 |
+| herceg-scatter | 0.0.0 (daf5cdec) | 175.9 | 68.8 | 61.3 | - | 11.0 | 101.8 |
+| herceg-spec-pdf | 0.0.0 (daf5cdec) | 971.6 | 368.9 | 309.3 | - | - | 2.9 |
+| herceg-svelte-line | 0.0.0 (daf5cdec) | 159.5 | 62.0 | 55.5 | - | 11.0 | 102.6 |
+| herceg-vue-line | 0.0.0 (daf5cdec) | 158.3 | 61.5 | 55.1 | - | 11.0 | 102.6 |
+| herceg-web | 0.0.0 (daf5cdec) | 851.4 | 322.7 | 266.8 | - | 9.6 | 95.2 |
 | plotly-basic | 4.1.2 | 1184.3 | 391.4 | 325.2 | - | - | - |
 | plotly-full | 4.1.2 | 4699.6 | 1432.7 | 1084.5 | - | - | - |
 | tanstack-line | 1.0.0 | 125.5 | 44.4 | 39.4 | - | - | - |
