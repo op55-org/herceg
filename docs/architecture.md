@@ -4561,8 +4561,8 @@ Browsers draw images through a canvas (`image/raster.ts`): the SVG with
 its root set to the image's pixels, painted over the colors under it (a
 JPEG's opaque base: the theme's background, else white or, under light
 text, black; then `background`), encoded by `toBlob`, its MIME type and
-signature checked (WebKit writes PNG when asked for WebP, which is
-refused), and the resolution written into the bytes (`image/metadata.ts`:
+signature checked (WebKit on macOS writes PNG when asked for WebP,
+which is refused), and the resolution written into the bytes (`image/metadata.ts`:
 PNG `pHYs`, a JFIF APP0 replacing the browser's, or a WebP `VP8X` and
 `EXIF` chunk); the canvas is emptied at once. Python draws the same SVG
 with resvg and encodes it with Pillow. The raster module refers to no

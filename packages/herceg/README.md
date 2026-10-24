@@ -4489,8 +4489,8 @@ const shown = await renderToImage(chart, { format: "webp", dpi: 192 }); // a mou
   size, export its options.
 - More than 16,384 pixels a side (16,383 for WebP), more than 16,777,216
   pixels, or a dpi outside 1 to 1,200 is refused before anything is
-  allocated. A browser that does not write WebP (WebKit, Safari's engine,
-  writes PNG in its place) is refused with that reason.
+  allocated. A browser that does not write WebP (Safari and WebKit on macOS
+  write PNG in its place) is refused with that reason.
 - Text is drawn in the fonts it was measured with: `fonts` from
   `prepareFonts` for static options, and a mounted chart's own.
 

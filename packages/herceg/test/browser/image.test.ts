@@ -4,7 +4,6 @@
 // mounted chart left as it was. Files are read by an independent reader
 // (helpers/image.ts) and decoded by the browser.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { server } from "vitest/browser";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import type { Chart } from "../../src/dom/handle.ts";
@@ -104,8 +103,12 @@ describe("renderToImage", () => {
 
   it("writes WebP with its resolution where the browser writes WebP, and otherwise refuses", async () => {
     const settings: ImageSettings = { format: "webp", dpi: 150, quality: 90 };
-    if (server.browser === "webkit") {
-      // WebKit's canvas writes PNG in place of WebP.
+    // Ask the browser as the export does: some builds' canvases (WebKit on macOS) write PNG
+    // in place of WebP, others (WebKit on Linux) write WebP.
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const probe = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp"));
+    if (probe?.type !== "image/webp") {
       const refused = await rejection(renderToImage(options(), settings));
       expect([refused.code, refused.path]).toEqual(["unsupported", "format"]);
       expect(refused.message).toMatch(
