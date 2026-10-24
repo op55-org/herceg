@@ -72,6 +72,11 @@
       "types": "./dist/pivot.d.ts",
       "import": "./dist/pivot.js",
       "default": "./dist/pivot.js"
+    },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "import": "./dist/web.js",
+      "default": "./dist/web.js"
     }
   },
   "files": [

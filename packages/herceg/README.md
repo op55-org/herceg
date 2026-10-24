@@ -1769,6 +1769,10 @@ the notes), — not yet (refused with an error), · not applicable.
   Legends and colorbars can stand beside one panel with
   `place: { side: "right", scope: "panel", panel: "heat" }`; omitting
   `panel` targets the first panel. Python accepts the same placement in `hg.Place`.
+- Web pages: every mark, facet, subplot, and inset travels in a payload and
+  mounts as a page fragment (`herceg/web`, Python's `herceg.web`); its DOM
+  events report what the Zoom and pan, Brushes, and Tooltip columns say each
+  mark does (`herceg:viewport`, `herceg:select`, `herceg:click`).
 - Lines, rules, and custom shapes support all four dash strings on SVG,
   Canvas (for data marks), and static SVG/PDF export.
 - Series from color: a category `color` names the series, as `series`
@@ -4750,6 +4754,62 @@ validateSpec(spec);
 const { config } = loadSpec(spec);
 createChart(element, config);
 ```
+
+### Payloads and page fragments
+
+`herceg/web` moves charts between a server and a page. A payload is a spec
+and its buffers as one binary message: a little-endian uint32 header length,
+the UTF-8 JSON header `{ protocol: 1, kind: "chart", spec, buffers }` (each
+buffer's `[offset, length]` from the first buffer's start), padding to a
+multiple of 8 bytes, then the buffers, each at an offset that is a multiple
+of 8, so typed arrays view them in place. `protocol` is the payload format's
+own version, apart from the spec's. The header may carry other fields of its
+maker's, which readers ignore.
+
+```ts
+import { decodePayload, encodePayload, loadPayload } from "herceg/web";
+
+const bytes = encodePayload(spec, buffers); // on a server
+const options = await loadPayload("/charts/latency.bin", { signal });
+createChart(element, options); // or <Chart {...options} /> in an adapter
+```
+
+`loadPayload(source, { signal })` fetches a URL (or takes bytes) and returns
+the chart's options, rejecting with a `ChartError` (code `"load-failed"`,
+phase `"load"`) for a response that is not a payload, before any typed
+array views it: `payload.buffers[2]: byte range exceeds the payload length;
+...`, `payload.protocol: unsupported version 2; expected 1; ...`, or for a
+page answering instead, `payload: the response is not a Herceg payload (it
+starts with "<!doctype"); ...`. A spec the engine refuses rejects as
+loading it does. `decodePayload(bytes)` returns `{ header, buffers, bytes }`.
+
+Page fragments are elements with `data-herceg` (Python's
+`herceg.web.fragment` writes them) holding a payload as JSON in a
+`<template data-herceg-payload>`, with base64 strings for the buffers, or
+naming one to fetch in `data-herceg-src`. `observe(root = document)` mounts
+every fragment in `root` and every one inserted later (an HTMX swap, say),
+and unmounts those removed, keeping the chart of one only moved (into
+another observer's root too), and mounts afresh one whose content was
+replaced in place; it returns what stops observing. `mount(element, { src })` mounts one, from `src` (a URL
+or bytes) when given, and resolves with its chart once the first frame is
+drawn; it is mounted once until `unmount(element)`, which destroys the chart
+and aborts a fetch under way; `getChart(element)` returns its chart.
+Importing `herceg/web` changes nothing on the page until one of these is
+called. A fragment's chart draws into a `data-herceg-runtime` element of its
+own; what cannot draw shows there, in the chart's place.
+
+A fragment's element tells the page what the user does with DOM events that
+bubble and cross shadow roots, typed for `addEventListener`
+(`HercegEventMap`): `herceg:ready` (`{ id }`), `herceg:error`
+(`{ id, error: ChartErrorInfo }`, cancelable: `preventDefault()` keeps it
+out of the console), `herceg:click` (`{ id, panel?, inspection }`),
+`herceg:select` (`{ id, panels?, selection }`), and `herceg:viewport`
+(`{ id, panels?, viewport }`). The details are JSON, the same that Python
+reads (`selectionPayload`, `viewportPayload`, and `inspectionPayload` make
+them of a chart's events): ranges are numbers, epoch milliseconds on the
+axes `time` lists, and labels on category axes; an inspection's points carry
+their rows' positions in the data the chart drew. Payloads carry charts;
+the grid has no spec (`kind: "grid"` is refused).
 
 ## Large data
 

@@ -70,8 +70,11 @@ import {
   type TextGeometry,
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { loadPayload } from "../../src/web/load.ts";
+import { encodePayload } from "../../src/web/payload.ts";
 import { legendOf, rampsOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
 
@@ -2310,5 +2313,34 @@ describe("capabilities: encodings", () => {
     expect(() => validateSpec({ marks: [rule as never] })).toThrow(/encode/);
     const point = { type: "point", x: "x", y: "y", encode: { color: { value: "#000000" } } };
     expect(() => validateSpec({ marks: [point as never] })).not.toThrow();
+  });
+});
+
+describe("capabilities: web payloads", () => {
+  // Page fragments (herceg/web) carry any spec: a payload is its envelope.
+  it("carry charts of every family, facets and subplots included", async () => {
+    const data = {
+      d: { columns: { x: [0, 1, 2], y: [1, 3, 2], z: [2, 1, 0], g: ["a", "b", "a"] } },
+    };
+    const links = { l: { columns: { s: ["a", "a", "b"], t: ["b", "c", "c"], v: [1, 2, 3] } } };
+    const specs: ChartSpec[] = [
+      { data, facet: { field: "g" }, marks: [{ type: "line", data: "d", x: "x", y: "y" }] },
+      {
+        data,
+        panels: [{ id: "share" }, { id: "trend" }],
+        marks: [
+          { type: "pie", data: "d", category: "g", value: "y", panel: "share" },
+          { type: "bar", data: "d", x: "g", y: "y", panel: "trend" },
+        ],
+      },
+      { data: links, marks: [{ type: "graph", data: "l", source: "s", target: "t" }] },
+      { data, marks: [{ type: "treemap", data: "d", path: ["g"], value: "y" }] },
+      { data: links, marks: [{ type: "sankey", data: "l", source: "s", target: "t", value: "v" }] },
+      { data, marks: [{ type: "point3d", data: "d", x: "x", y: "y", z: "z" }] },
+    ];
+    for (const spec of specs) {
+      const options = await loadPayload(encodePayload(spec));
+      expect(options.marks).toHaveLength(spec.marks.length);
+    }
   });
 });

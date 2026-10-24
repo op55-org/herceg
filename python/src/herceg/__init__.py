@@ -19,7 +19,9 @@ Charts display in notebooks, save as HTML, SVG, PNG, or PDF, and serialize to th
 portable herceg chart spec shared with the TypeScript library.
 ``chart.widget()`` makes a live notebook chart that Python can update and
 observe (the ``notebook`` extra); ``herceg.streamlit.chart(chart)`` shows one
-in a Streamlit app (the ``streamlit`` extra).
+in a Streamlit app (the ``streamlit`` extra); ``herceg.web`` puts charts in
+the pages a web application serves, and ``herceg.flask`` wires it into Flask
+(the ``flask`` extra).
 """
 
 from ._chart import (

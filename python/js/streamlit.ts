@@ -23,7 +23,8 @@ import {
   type ThemeSpec,
   type Viewport,
 } from "herceg";
-import { type ChartSpec, carryNodePositions, loadSpec } from "herceg/spec";
+import { carryNodePositions, loadSpec } from "herceg/spec";
+import { decodePayload, type PayloadHeader } from "herceg/web";
 import {
   CAMERAS,
   DRILLS,
@@ -55,11 +56,8 @@ export interface Component {
 
 type Event = "camera" | "select" | "click" | "rowSelection" | "drill" | "itemMove" | "viewport";
 
-/** The payload's JSON header. */
-export interface Header {
-  spec: ChartSpec;
-  /** Each buffer's byte offset, from the first buffer, and length. */
-  buffers: [number, number][];
+/** The payload's header (see herceg/web's payload codec), with what the component adds. */
+export interface Header extends PayloadHeader {
   /** Events the script reacts to. Others are not sent: each one reruns the script. */
   events: Event[];
   /**
@@ -179,7 +177,10 @@ function cleanupOf(parentElement: Component["parentElement"]): () => void {
 }
 
 function mount(component: Component, data: Uint8Array, previous: Instance | undefined): Instance {
-  const { bytes, header, buffers } = decodePayload(data);
+  const payload = decodePayload(data);
+  const { bytes, buffers } = payload;
+  // What the component adds to the envelope is herceg.streamlit's own.
+  const header = payload.header as Header;
   const { config, stores } = loadSpec(header.spec, buffers);
   // A run that changes how the chart looks, not its data, keeps the rows
   // clicks and lassos selected; a brush's rows come back with the brush.
@@ -631,28 +632,6 @@ function appTheme(element: HTMLElement): ThemeName | undefined {
   );
   probe.remove();
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128 ? "dark" : "light";
-}
-
-/**
- * Splits a payload: a little-endian uint32 header length, the JSON header,
- * and the buffers from the next multiple of 8 bytes, each at an 8-byte
- * aligned offset so typed arrays view them in place.
- */
-export function decodePayload(data: Uint8Array): {
-  bytes: Uint8Array;
-  header: Header;
-  buffers: Uint8Array[];
-} {
-  // Streamlit hands over a view into a larger message, at any offset; one
-  // copy aligns it.
-  const bytes = data.byteOffset % 8 === 0 ? data : data.slice();
-  const length = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
-  const header = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + length))) as Header;
-  const start = Math.ceil((4 + length) / 8) * 8;
-  const buffers = header.buffers.map(([offset, size]) =>
-    bytes.subarray(start + offset, start + offset + size),
-  );
-  return { bytes, header, buffers };
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {

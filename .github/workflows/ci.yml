@@ -64,6 +64,19 @@ jobs:
       - run: npm run build:python
       - run: npm run lint:python
       - run: npm run test:python
+      # Web pages through a running Flask app, in the browsers the check job
+      # uses; Xvfb gives Firefox WebGL for the 3D charts, as there.
+      - run: sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+      - id: playwright
+        run: |
+          echo "version=$(node -p 'require("playwright/package.json").version')" >> "$GITHUB_OUTPUT"
+          echo "os=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.playwright.outputs.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - run: npx playwright install --with-deps firefox webkit
+      - run: xvfb-run --auto-servernum npm run test:python-web
       # The built wheel must carry the JavaScript bundles and work outside the checkout.
       - run: cd python && uv build
       - run: |

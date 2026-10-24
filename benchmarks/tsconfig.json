@@ -17,6 +17,7 @@
       "herceg/grid/remote": ["../packages/herceg/src/grid-remote.ts"],
       "herceg/grid/memory": ["../packages/herceg/src/grid-memory.ts"],
       "herceg/pivot": ["../packages/herceg/src/pivot.ts"],
+      "herceg/web": ["../packages/herceg/src/web.ts"],
       "@herceg/react": ["../packages/react/src/index.ts"],
       "@herceg/react/grid": ["../packages/react/src/grid.tsx"],
       "@herceg/react/layout": ["../packages/react/src/layout.tsx"],

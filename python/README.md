@@ -6,7 +6,7 @@ large-data handling as the TypeScript library.
 
 > Early development. Line, area, bar, scatter, heatmap, dendrogram, error bar,
 > candlestick, histogram, pie, box plot, letter-value (boxen) plot, violin, treemap, sunburst, gauge, funnel, radar, Sankey, network (graph), and map (choropleth and point) marks, rule, region, and text annotations; small multiples;
-> HTML, notebook, SVG, PNG, and PDF output; live notebook charts; Streamlit apps.
+> HTML, notebook, SVG, PNG, and PDF output; live notebook charts; Streamlit apps; web pages (Flask, Django, FastAPI).
 
 ```python
 import herceg as hg
@@ -1589,9 +1589,11 @@ chart.to_snapshot(id_prefix="latency")  # server-rendered markup for a web page 
 chart.widget()  # a live notebook chart (see below)
 ```
 
-HTML output and notebook display embed the herceg bundle (about 142 KiB,
-52 KiB gzipped), so they work offline. Notebooks show each chart in an
-isolated iframe.
+HTML output and notebook display embed the herceg bundle (about 1.0 MiB,
+389 KiB gzipped), so they work offline. Notebooks show each chart in an
+isolated iframe. `chart.to_html(full_page=False)` is a self-contained
+`<div>` and script that repeats the bundle; for a page of several charts,
+use `herceg.web` (see Web pages), which loads it once.
 
 ### Errors
 
@@ -2139,6 +2141,154 @@ JavaScript apps. Charts without a theme follow the app's light or dark
 theme, also when it changes. [examples/streamlit_app.py](https://github.com/op55-org/herceg/blob/main/python/examples/streamlit_app.py)
 is a complete app.
 
+## Web pages
+
+`herceg.web` puts charts in the pages a web application serves (Flask,
+Django, FastAPI, or any other) without repeating the engine in each chart:
+the page loads herceg's script once, and each chart is a fragment holding
+its spec and data, or naming a route that returns them.
+
+```python
+from herceg import web
+
+head = web.assets(base_url="/static/herceg", nonce=nonce)  # once per page
+body = web.fragment(chart, id="latency", nonce=nonce)  # each chart
+```
+
+`web.assets(base_url, nonce=None)` returns the tags that load the script
+from where the application serves the files of `web.manifest()` (in
+`web.manifest().directory`; `web.asset_path(name)` finds one by its name and
+raises `FileNotFoundError` for others). Each file is named by a hash of its
+content, so serve them with `Cache-Control: public, max-age=31536000,
+immutable`: a page fetches the engine once (845 KiB, 320 KiB gzipped, then
+the modules charts load as they need them), and later pages take it from
+the browser's cache. Ten fragments of a 200-point line are 61 KB of HTML;
+ten `to_html(full_page=False)` outputs are 10.7 MB.
+
+`web.fragment(chart, id=None, nonce=None, data_url=None)` returns an element
+that the script mounts: it holds the chart's spec and columns (base64), or
+with `data_url`, only its size and title, and the script fetches the chart
+from that URL, a route of the application's that returns
+`web.payload(chart)`: the spec and its columns as one binary payload
+(`application/octet-stream`, 16 MB for a million-point line, made in about
+3 ms), which the browser reads without parsing or copying the columns.
+Herceg never adds a route on its own: the application decides how chart
+data is cached and who may read it. `id` names the element (letters,
+digits, `-`, and `_`, starting with a letter; generated when omitted).
+Without JavaScript, or on a page without `web.assets()`, the fragment says
+"Chart not loaded yet: TITLE. It needs JavaScript, and herceg.web.assets()
+once in the page."
+
+```python
+@app.get("/charts/requests.bin")
+def requests_data():
+    return Response(web.payload(requests_chart()), mimetype="application/octet-stream")
+
+web.fragment(requests_chart(), id="requests", data_url="/charts/requests.bin")
+```
+
+The script mounts every fragment on the page when it loads (after the
+page's other deferred and module scripts, so their listeners hear of every
+chart) and every fragment inserted later, as HTMX swaps them in; a fragment
+removed is destroyed, its fetch aborted and its `sync` groups left, and one
+only moved keeps its chart. A fragment replaced or restored from history is
+mounted afresh, without the zoom or selection it had. Charts of separate
+fragments sync as charts of one page do (`sync=`). Fragments, payloads, and
+events carry every chart a spec describes: every mark, facets, layouts,
+insets, maps, networks, and 3D charts, with the interactions each has (see
+the engine's "What each mark supports").
+
+Fragments hold no script, so they work under a strict Content Security
+Policy: `script-src 'nonce-...'`, with or without `'strict-dynamic'`, and
+without `'unsafe-inline'` or `'unsafe-eval'`. Give the page's nonce to
+`web.assets` (for its script and preloads) and to `web.fragment` (for the
+style element that reserves the chart's size until the script sizes it);
+a fragment that HTMX inserts later carries the nonce of its own response,
+not the page's, and needs none under a policy that restricts scripts only.
+A policy that restricts styles too (`style-src 'nonce-...'`) blocks a few
+inline style attributes in herceg's markup (the tabular figures of tick
+labels, legend swatches' layout) unless it allows `style-src-attr
+'unsafe-inline'`; charts still draw. Fetching from `data_url` needs the
+page's `connect-src` to allow it.
+
+The fragment's element tells the page what the user does with DOM events
+that bubble (and cross shadow roots), each `detail` holding JSON:
+
+| Event | `event.detail` |
+| --- | --- |
+| `herceg:ready` | `{id}`: the chart drew its first frame |
+| `herceg:error` | `{id, error}`: what keeps it from drawing (`code`, `message`, `phase`, and `path`, `mark`, `panel` where known), also shown in its place; `event.preventDefault()` keeps it out of the console |
+| `herceg:click` | `{id, panel?, inspection}`: the data clicked, or `null` off the data |
+| `herceg:select` | `{id, panels?, selection}`: the brush's or lasso's ranges, `null` once cleared |
+| `herceg:viewport` | `{id, panels?, viewport}`: each axis' range, `null` where not zoomed |
+
+Ranges are numbers, epoch milliseconds on the time axes the payload's `time`
+names, and labels on category axes. `web.selection(value)`,
+`web.inspection(value)`, and `web.viewport(value)` read what a page posts
+back of them (JSON text or a parsed dict) as `hg.Selection`,
+`hg.Inspection`, and `hg.Viewport`, with datetimes for times, and raise
+`ValueError` for anything else. With HTMX, a form posts a chart's selection
+when it changes; a listener in the capture phase fills the form's field
+before HTMX, listening on the form, sends it:
+
+```html
+<form hx-post="/summary" hx-trigger="herceg:select" hx-target="#summary">
+  <input type="hidden" name="selection">
+  {{ herceg_chart(chart, id="latency") }}
+</form>
+<script type="module" nonce="{{ nonce }}">
+  document.addEventListener("herceg:select", (event) => {
+    const field = event.target.closest("form")?.elements.namedItem("selection");
+    if (field) field.value = JSON.stringify(event.detail.selection);
+  }, { capture: true });
+</script>
+```
+
+```python
+@app.post("/summary")
+def summary():
+    selection = web.selection(request.form["selection"])
+    ...
+```
+
+The page's own modules import herceg's script for its JavaScript API
+(`getChart(element)` returns the chart of a fragment; see the engine's
+`herceg/web`), from the URL `web.assets` writes: `base_url` followed by
+`web.manifest().entry`.
+
+### Flask
+
+`herceg.flask.init_app(app, url_prefix="/_herceg")` (the `flask` extra,
+`pip install 'herceg[flask]'`) serves the script's files there, cached for
+good, and gives templates `herceg_assets(nonce=None)` and
+`herceg_chart(chart, id=None, nonce=None, data_url=None)`:
+
+```python
+from herceg.flask import init_app
+
+app = Flask(__name__)
+init_app(app)
+```
+
+```jinja
+<head>{{ herceg_assets(nonce=csp_nonce) }}</head>
+<body>{{ herceg_chart(chart, id="latency", nonce=csp_nonce) }}</body>
+```
+
+Fragments and tags mark themselves safe for Jinja's and Django's templates
+(the `__html__` protocol), so they need no `|safe`.
+[examples/flask_app.py](https://github.com/op55-org/herceg/blob/main/python/examples/flask_app.py)
+is a complete app with a strict policy, a chart fetched from a route, HTMX
+posting a selection, and charts added to the page later;
+[examples/django_app.py](https://github.com/op55-org/herceg/blob/main/python/examples/django_app.py)
+and [examples/fastapi_app.py](https://github.com/op55-org/herceg/blob/main/python/examples/fastapi_app.py)
+do the same with Django's and FastAPI's own responses. With Django's static
+files, list `web.manifest().directory` in `STATICFILES_DIRS` (under a prefix,
+`("herceg", web.manifest().directory)`) and collect the files as they are:
+their names and the imports between them carry their hashes, which a
+storage must not rewrite. Keep a deployment's earlier files until pages
+open before it are gone, as they may still load the modules they need.
+
 ## Development
 
 From the repository root:
@@ -2151,7 +2301,10 @@ npm run test:python    # build, then run pytest in a uv environment
 ## Limits
 
 - Static output (a chart displayed as a cell's value, HTML files) neither
-  updates nor talks back to Python; use `chart.widget()` for that.
+  updates nor talks back to Python; use `chart.widget()` for that. Web
+  pages' fragments report to the page as DOM events, but the server cannot
+  update a chart it sent (no live updates over Server-Sent Events yet):
+  send the page a new fragment instead.
 - A widget has no `to_png()` of what it shows: a notebook cell cannot wait
   for the browser's answer to a message it sends, and Python does not know
   the series hidden through the legend, the browser's size, or its fonts.
@@ -2171,7 +2324,7 @@ npm run test:python    # build, then run pytest in a uv environment
   later can draw it, and `append` copies the table's columns on each call
   (about 0.35 ms for 100 rows into a million-row, three-column window on an
   Apple M6).
-- Each widget sends the engine (about 646 KiB, 240 KiB gzipped) to the browser
+- Each widget sends the engine (about 1.0 MiB, 395 KiB gzipped) to the browser
   once. Live charts were tested in JupyterLab 4; Notebook 7, VS Code, and
   Colab support anywidget but have not been tested here.
 - A point's `row` is its position in the data the browser drew when it
@@ -2189,6 +2342,6 @@ npm run test:python    # build, then run pytest in a uv environment
   computed from is refused, naming the panels.
 - In Streamlit, a chart that changes between script runs is sent whole: its
   data and, since the component's code travels inline with it, the engine
-  (about 641 KiB, 238 KiB gzipped). Streamlit sends unchanged charts as a
+  (about 1.0 MiB, 393 KiB gzipped). Streamlit sends unchanged charts as a
   reference to what the browser already has. Hover and zoom are not
   reported to the script, since each report would rerun it.

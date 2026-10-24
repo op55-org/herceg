@@ -24,6 +24,7 @@ const publicAPIs = {
   "herceg/grid/conformance": ["checkGridSource", "GRID_SOURCE_FIXTURES"],
   "herceg/pivot": ["pivotRows"],
   "herceg/layout": ["columns", "rows", "grid", "cell", "panel", "inset", "mosaic", "panels"],
+  "herceg/web": ["loadPayload", "mount", "unmount", "getChart", "observe", "decodePayload"],
   "@herceg/react": ["Chart", "Line"],
   "@herceg/react/grid": ["Grid"],
   "@herceg/react/layout": ["Columns", "Rows", "Grid", "Cell", "Panel", "Inset"],

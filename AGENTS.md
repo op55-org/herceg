@@ -57,6 +57,7 @@ npm run bench:express    # herceg.express timings in Python (-- --out results/ex
 npm run build:python     # bundle herceg's JavaScript into the Python package
 npm run test:python      # build:python, then pytest (uv environment in python/)
 npm run test:python-package # build, inspect, install, and smoke-test the Python wheel
+npm run test:python-web  # web pages through a Flask app, in Chrome, Firefox, and WebKit
 npm run test:release     # release version, registry recovery, and publish guard tests (offline)
 npm run lint:python      # ruff check, format check, and mypy type check of the Python package
 npm run version:set -- X.Y.Z # set one version on every published package (see Releasing)

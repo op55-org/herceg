@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import struct
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
@@ -43,6 +42,7 @@ from ._events import (
     decode_viewport,
 )
 from ._live import check_live_rows
+from ._payload import encode
 from ._rows import RowSelection, bound_tables
 
 if TYPE_CHECKING:
@@ -224,34 +224,16 @@ def _payload(
     events: list[str],
     epoch: str = "",
 ) -> bytes:
-    """The chart as one binary message: a little-endian uint32 header length,
-    the JSON header (spec, buffer offsets, events), then the buffers. Buffers
-    start at 8-byte aligned offsets, so the browser views them as typed
-    arrays without copying."""
-    offsets = []
-    end = 0
-    for buffer in buffers:
-        offsets.append([end, len(buffer)])
-        end = _aligned(end + len(buffer))
+    """The chart as one binary payload (see ``_payload.encode``), with the
+    events the script reacts to and the epochs of its data and networks."""
     item_epoch = _item_epoch(spec)
-    header = json.dumps(
-        {
-            "spec": spec,
-            "buffers": offsets,
-            "events": events,
-            "epoch": epoch,
-            **({"itemEpoch": item_epoch} if item_epoch is not None else {}),
-        },
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode()
-    start = _aligned(4 + len(header))
-    out = bytearray(start + end)
-    struct.pack_into("<I", out, 0, len(header))
-    out[4 : 4 + len(header)] = header
-    for (offset, length), buffer in zip(offsets, buffers, strict=True):
-        out[start + offset : start + offset + length] = buffer
-    return bytes(out)
+    return encode(
+        spec,
+        buffers,
+        events=events,
+        epoch=epoch,
+        **({"itemEpoch": item_epoch} if item_epoch is not None else {}),
+    )
 
 
 def _state(
@@ -372,10 +354,6 @@ def _rows(payload: Any, chart: Chart | None, epoch: str) -> RowSelection | None:
     if not all(isinstance(row, int) and not isinstance(row, bool) for row in rows):
         return None
     return RowSelection(binding.channel, data, rows=np.asarray(rows, dtype=np.int64))
-
-
-def _aligned(size: int) -> int:
-    return -(-size // 8) * 8
 
 
 def _rerun() -> None:

@@ -4863,7 +4863,8 @@ rejects), releases the presses it captured, drops what it kept, and takes
 no input, while drawing and answering its methods as before; `update`
 checks bindings with an attached controller before changing anything.
 Python's single-file bundles inline the controller (`python/js/build.mjs`
-bundles without splitting), so they fetch nothing.
+bundles them without splitting), so they fetch nothing; its web assets split
+it into a chunk as npm builds do (see Web pages).
 
 The controller's chunk holds the gesture bindings (`model/bindings.ts`) and
 the keyboard's stepping (`model/keyboard.ts`); layout controls get the
@@ -5503,8 +5504,10 @@ template expression under `<svelte:boundary>` in Svelte), whatever phase it
 came from, so error boundaries catch it. Svelte evaluates mark components'
 derived marks in its scheduler, outside the chart's try, so each mark
 component builds its mark through `built()`, which keeps a refusal as a
-value the chart reports. Python's HTML, notebook output, widgets, and the
-Streamlit component show the same box (`python/js`).
+value the chart reports. Python's HTML, notebook output, widgets, the
+Streamlit component, and web pages' fragments show the same box
+(`python/js`, `src/web/`); a fragment's payload that cannot be loaded shows
+there too, as a `load-failed` error of the `load` phase.
 
 ## Server rendering
 
@@ -5552,6 +5555,92 @@ snapshot format, and hydrate.ts: about 1.6 KB gzip) is in the bundles of
 pages that hydrate only, as `timeBreaks` and `rowSelection` bring theirs;
 charts made with `createChart` carry the constructors' seams for adopted
 parts alone (about 290 B gzip).
+
+## Web pages
+
+`herceg/web` (`src/web/`) moves charts between servers and pages, and the
+Python package's `herceg.web` builds on it. It is a subpath, so no chart
+built with `createChart` carries it.
+
+**Payloads** (`web/payload.ts`, Python's `_payload.py`). A chart travels as
+one binary message: a little-endian uint32 header length, a UTF-8 JSON
+header, padding to a multiple of 8 bytes, then the spec's buffers, each at an
+offset from the buffers' start that is a multiple of 8, so typed arrays view
+them where they are (one copy aligns a view that starts elsewhere, as
+Streamlit hands one over). The header is an envelope, `{ protocol: 1, kind:
+"chart", spec, buffers: [offset, length][] }`, versioned apart from the
+spec: a change of the framing is a new protocol, a change of the grammar a
+new spec version. Makers may add fields of their own (the Streamlit
+component's events and epochs) but cannot replace the envelope's. Reading
+checks everything before viewing bytes (the length, the header's bounds,
+fatal UTF-8 and JSON, the protocol, the kind, a spec object, each range's
+integers, alignment, and bounds), and refuses with `ChartError`s of code
+`load-failed`, phase `load`, located in the payload (`payload.buffers[2]`)
+rather than the spec; bytes that fail framing and start like markup or JSON
+are named as a response of another kind (a login page, an error document).
+The spec is then loaded, and checked, as any spec. Page fragments hold the
+same envelope as JSON with base64 strings for the buffers: in a page, text
+is what can be held; large data goes through a route. Herceg never chooses
+a route by size: `data_url` is the application's, which owns its caching
+and authentication.
+
+**Fragments** (`web/mount.ts`, `web/observe.ts`). A fragment is an element
+with `data-herceg`, its size in data attributes, a style element reserving
+that size (nonce'd when the page has one), a fallback that says what the
+chart needs, and its payload in a `<template>` (inert, not executed, and
+kept by HTMX, which drops script elements when told not to run them) or a
+URL in `data-herceg-src`; it holds no executable script, so a page's policy
+needs nothing of it. `mount` takes the host once (a `WeakMap` by element,
+never by id): it removes runtime markup restored from history, moves the
+size to the host's own style (the CSSOM, which `style-src` does not govern)
+and drops the style element, loads the payload under an `AbortController`,
+and draws the chart into a `data-herceg-runtime` element of its own, which
+`unmount` removes after destroying the chart and aborting the load.
+`mount` resolves once the first frame is drawn; a destroyed chart's `ready`
+never settles, so unmounting rejects it with an `AbortError` instead, and an
+aborted mount tells the page nothing. `observe` mounts the hosts in its root
+and those added later, and unmounts those removed: mutation records arrive
+after the change that made them, so a host moved within the observed roots
+is back in one by then and keeps its chart, an `outerHTML` swap's new
+element of the same id is another host, and a host whose content was
+replaced in place (its runtime element gone) is mounted afresh. One
+`MutationObserver` watches every observed root and one registry holds the
+hosts, so the outcome never depends on which root's records came first;
+records of changes inside runtime elements (charts drawing) are skipped. The script Python's pages load mounts at
+`DOMContentLoaded` (or at once when that has passed): the page's other
+deferred and module scripts run first, so their listeners hear every
+chart's events, as with HTMX's own start.
+
+**Events.** A host dispatches `herceg:ready`, `herceg:error`,
+`herceg:click`, `herceg:select`, and `herceg:viewport` as bubbling,
+composed `CustomEvent`s whose details are JSON: the host's `id`, the panels
+the engine's event names, and the JSON forms of inspections, selections,
+and views (`web/events.ts`, which the Python widget and Streamlit
+component use too): times as epoch milliseconds with the axes holding them
+named, categories as labels rather than band indices, rows as positions in
+the data drawn. Errors are dispatched through the chart's `onError` (one per
+failure, constructor-time refusals included) and for loads that fail
+before a chart exists; the event is cancelable, and the console hears of
+it unless a listener cancels it. There is no revision or epoch: a fragment
+sent again is a new chart.
+
+**Assets** (`python/js/build.mjs`). The pages' script is an ES module built
+with code splitting, every file named by a hash of its content, which
+esbuild computes after writing the import paths into it, so the entry's name
+changes with any file it reaches. A manifest lists the entry, the chunks it
+imports statically (preloaded with `modulepreload`), and every file, so
+modules added to the engine's graph join it without changes to the build.
+`herceg.web.assets` writes the preloads and the module script, with the
+page's nonce: a nonce'd module script's static and dynamic imports carry its
+nonce, so `script-src 'nonce-...'` alone admits them, and with
+`'strict-dynamic'` too. The entry's static closure is the spec loader, which
+imports every mark a spec can name (845 KiB minified, 320 KiB gzip); the
+interaction controller and other chunks load as charts need them.
+
+`Chart.to_html` stays self-contained, a page or `<div>` with the single-file
+bundle inlined, which renders anywhere without a server; `herceg.web` is
+for pages a server sends many charts in. Live updates from the server
+(Server-Sent Events over the notebook widget's messages) are not built yet.
 
 ## Spec and API
 
@@ -5699,7 +5788,8 @@ as ES modules with `sideEffects: false`; bundlers drop what a chart does not
 use. Framework adapters live in separate packages because their dependencies
 differ. One package avoids version skew between engine pieces. PDF export
 is a subpath, `herceg/pdf`, so that unbundled imports of `herceg` (from a
-CDN or in Node) do not load it either.
+CDN or in Node) do not load it either; so are page fragments and payloads,
+`herceg/web`.
 
 The engine, adapters, and Python package share a stable `X.Y.Z` release
 version, checked against their metadata, exact engine dependencies, and
