@@ -2,21 +2,68 @@
 // package calls `hercegStatic.svg(specJson, base64Buffers, ...)`, and `pdf`, which
 // returns the document as base64.
 
-import type { SvgSizing } from "herceg";
-import { type FontSource, prepareFonts } from "herceg/fonts";
+import { type FontSource, type Fonts, prepareFonts } from "herceg/fonts";
 import type { PdfExportOptions } from "herceg/pdf";
 import {
   type ChartErrorInfo,
   type ChartSpec,
   chartError,
   errorInfo,
+  loadSpec,
   type PdfSpec,
+  type SvgSettings,
   specToPDF,
   specToSnapshot,
   specToSVG,
 } from "herceg/spec";
+import { sizedRoot } from "../../packages/herceg/src/image/raster.ts";
+import { type RasterSettings, staticRaster } from "../../packages/herceg/src/render/static.ts";
+import { cssColor } from "../../packages/herceg/src/scale/css-color.ts";
 import { decodeBase64, encodeBase64 } from "./buffers.ts";
 import { rasterFont } from "./raster-font.ts";
+
+type Sources = (Omit<FontSource, "data"> & { data: string })[];
+
+/**
+ * `run`, with what fonts refuse said in Python's words: text they do not
+ * cover with its fix, as PDF export refuses it, and other problems with
+ * what to supply instead.
+ */
+function withFonts<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("fonts do not cover"))
+      throw new Error(`fonts: ${message.slice("fonts ".length)}`);
+    const problem = message.replace(
+      "; match the theme's font or add an explicit fallback family",
+      "",
+    );
+    throw new Error(
+      `fonts: ${problem}; supply static OpenType fonts covering the text and matching the theme's font`,
+    );
+  }
+}
+
+/** The font sources Python sends (as base64), and fonts of them refusing in Python's words. */
+function fontsOf(options: string): { sources: FontSource[]; fonts: Fonts | undefined } {
+  const sources = (JSON.parse(options) as Sources).map((font) => ({
+    ...font,
+    data: decodeBase64(font.data),
+  }));
+  const registry = sources.length ? withFonts(() => prepareFonts(sources)) : undefined;
+  return {
+    sources,
+    fonts:
+      registry &&
+      (Object.create(registry, {
+        measure: {
+          value: (text: string, font: string) => withFonts(() => registry.measure(text, font)),
+        },
+      }) as typeof registry),
+  };
+}
 
 /**
  * Runs an export. What herceg refuses (a spec it does not accept, a font it
@@ -39,40 +86,13 @@ function exported(run: () => string): string | { error: string; info: ChartError
     buffers: string[],
     options = "[]",
     raster = false,
-    sizing = "{}",
+    settings = "{}",
   ): string | { error: string; info: ChartErrorInfo } {
     return exported(() => {
-      const sources = (JSON.parse(options) as (Omit<FontSource, "data"> & { data: string })[]).map(
-        (font) => ({ ...font, data: decodeBase64(font.data) }),
-      );
-      const withFonts = <T>(run: () => T): T => {
-        try {
-          return run();
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          // Text they do not cover is refused with its fix, as PDF export refuses it.
-          if (message.startsWith("fonts do not cover"))
-            throw new Error(`fonts: ${message.slice("fonts ".length)}`);
-          const problem = message.replace(
-            "; match the theme's font or add an explicit fallback family",
-            "",
-          );
-          throw new Error(
-            `fonts: ${problem}; supply static OpenType fonts covering the text and matching the theme's font`,
-          );
-        }
-      };
-      const registry = sources.length ? withFonts(() => prepareFonts(sources)) : undefined;
+      const { sources, fonts } = fontsOf(options);
       const svg = specToSVG(JSON.parse(spec) as ChartSpec, buffers.map(decodeBase64), {
-        ...(JSON.parse(sizing) as SvgSizing),
-        // The fonts, with what they refuse reported in Python's words.
-        ...(registry && {
-          fonts: Object.create(registry, {
-            measure: {
-              value: (text: string, font: string) => withFonts(() => registry.measure(text, font)),
-            },
-          }) as typeof registry,
-        }),
+        ...(JSON.parse(settings) as SvgSettings),
+        ...(fonts && { fonts }),
       });
       return raster
         ? JSON.stringify({
@@ -80,6 +100,35 @@ function exported(run: () => string): string | { error: string; info: ChartError
             fonts: withFonts(() => sources.map((source, i) => encodeBase64(rasterFont(source, i)))),
           })
         : svg;
+    });
+  },
+  /**
+   * What an image export draws, as JSON (see Python's `_render.image`): the
+   * SVG at the image's pixels, the colors under it as RGBA (alpha 0 to
+   * 255), and the fonts resvg draws it in, as base64. Refusals name `where`.
+   */
+  image(
+    spec: string,
+    buffers: string[],
+    options = "[]",
+    settings = "{}",
+    where = "to_image",
+  ): string | { error: string; info: ChartErrorInfo } {
+    return exported(() => {
+      const { sources, fonts } = fontsOf(options);
+      const { config } = loadSpec(JSON.parse(spec) as ChartSpec, buffers.map(decodeBase64));
+      const chart = { ...config, width: config.width ?? 640, height: config.height ?? 320 };
+      const source = staticRaster(where, chart, JSON.parse(settings) as RasterSettings, fonts);
+      const [width, height] = source.plan.pixels;
+      return JSON.stringify({
+        svg: sizedRoot(source.svg, String(width), String(height), true),
+        under: (source.under ?? []).map((color) => {
+          // Bytes, as Pillow takes them: hsl() and color-mix() give fractions.
+          const [r, g, b, a] = cssColor(color)!;
+          return [Math.round(r), Math.round(g), Math.round(b), Math.round(a * 255)];
+        }),
+        fonts: withFonts(() => sources.map((source, i) => encodeBase64(rasterFont(source, i)))),
+      });
     });
   },
   /**

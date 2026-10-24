@@ -8,6 +8,7 @@ import sys
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -306,7 +307,7 @@ def test_unicode_pdf_segmentation_with_and_without_intl():
 def test_unicode_pdf_rejects_malformed_fonts_and_html_font_options(tmp_path):
     with pytest.raises(Exception, match="Malformed font"):
         chart().to_pdf(fonts={"Fixture": b"bad"}, fallback=["Fixture"])
-    with pytest.raises(ValueError, match="save fonts: an option of SVG, PNG, or PDF export"):
+    with pytest.raises(ValueError, match="save fonts: an option of SVG, image, and PDF export"):
         chart().save(str(tmp_path / "chart.html"), fonts=unicode_fonts())
 
 
@@ -397,7 +398,8 @@ def test_png_export(tmp_path):
     chart().save(str(path))
     assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     with pytest.raises(
-        ValueError, match='save path: expected a ".html", ".svg", ".png", or ".pdf" file'
+        ValueError,
+        match='save path: expected a ".html", ".svg", ".png", ".jpg", ".jpeg", ".webp", or ".pdf"',
     ):
         chart().save(str(tmp_path / "chart.gif"))
 
@@ -417,7 +419,7 @@ def test_css_variables_export_their_fallbacks_and_refuse_without_one():
     chart = painted("var(--brand, #ff0000)")
     svg = chart.to_svg()
     assert "var(" not in svg and 'stroke="#ff0000"' in svg
-    pixels = np.asarray(image.open(BytesIO(chart.to_png(scale=1))))
+    pixels = np.asarray(image.open(BytesIO(chart.to_png())))
     assert tuple(pixels[50, 100]) == (255, 0, 0, 255)
     with pytest.raises(ValueError) as refused:
         painted("var(--brand)").to_png()
@@ -445,7 +447,7 @@ def test_marks_paint_as_declared_with_z_index_over_that():
         )
 
     def middle(chart):
-        pixels = np.asarray(image.open(BytesIO(chart.to_png(scale=1))))
+        pixels = np.asarray(image.open(BytesIO(chart.to_png())))
         return tuple(int(value) for value in pixels[52, 100])
 
     svg = layered().to_svg()
@@ -478,7 +480,7 @@ def test_labels_break_lines_in_every_format_with_supplied_fonts(tmp_path):
         assert re.search(f">{re.escape(first)}</tspan><tspan[^>]*>{re.escape(second)}<", svg)
     # Only the title and description elements keep the text whole.
     assert "\n" not in re.sub(r"<(title|desc)[^<]*</(title|desc)>", "", svg)
-    pixels = np.asarray(image.open(BytesIO(rendered.to_png(fonts=fonts, scale=1))))
+    pixels = np.asarray(image.open(BytesIO(rendered.to_png(fonts=fonts))))
     assert pixels.shape == (200, 400, 4)
     path = tmp_path / "lines.pdf"
     rendered.save(path, fonts=fonts)
@@ -581,7 +583,7 @@ def test_png_renders_supplied_font_pixels_with_paths_bytes_and_aliases(tmp_path,
         else {family: str(FONT_FIXTURES / "sans.ttf")}
     )
     svg = rendered.to_svg(fonts=fonts)
-    actual = rendered.to_png(fonts=fonts, scale=1)
+    actual = rendered.to_png(fonts=fonts)
     # Independent reference: original files selected by their native family,
     # rather than the mapping's alias. This also checks the bold title face.
     native_svg = svg.replace(f'font-family="{family}"', 'font-family="Noto Sans"')
@@ -597,9 +599,9 @@ def test_png_renders_supplied_font_pixels_with_paths_bytes_and_aliases(tmp_path,
     assert np.array_equal(pixels, np.asarray(image.open(BytesIO(expected))))
     assert np.count_nonzero(pixels != np.asarray(image.open(BytesIO(fallback)))) > 100
     path = tmp_path / "font.PNG"
-    hg.save(rendered, path, fonts=fonts, scale=1)
+    hg.save(rendered, path, fonts=fonts)
     assert path.read_bytes() == actual
-    assert rendered.to_png(fonts=fonts, scale=1) == actual
+    assert rendered.to_png(fonts=fonts) == actual
 
 
 def test_cff_fonts_measure_and_draw_svg_and_png_and_pdf_refuses_them(tmp_path):
@@ -622,7 +624,7 @@ def test_cff_fonts_measure_and_draw_svg_and_png_and_pdf_refuses_them(tmp_path):
         r"herceg-svg-\d+", "id", rendered.to_svg(fonts={"Brand": FONT_FIXTURES / "sans.ttf"})
     )
     assert re.sub(r"herceg-svg-\d+", "id", svg) == same
-    actual = rendered.to_png(fonts=fonts, scale=1)
+    actual = rendered.to_png(fonts=fonts)
     expected = resvg_py.svg_to_bytes(
         svg_string=svg.replace('font-family="Brand"', 'font-family="Noto Sans"'),
         zoom=1,
@@ -652,6 +654,7 @@ def test_png_removes_temporary_font_files_even_when_rasterization_fails(monkeypa
     import resvg_py
 
     paths = []
+    draw = resvg_py.svg_to_bytes
 
     def rasterize(**options):
         paths.extend(Path(path) for path in options["font_files"])
@@ -662,7 +665,7 @@ def test_png_removes_temporary_font_files_even_when_rasterization_fails(monkeypa
             assert sum(word[0] for word in struct.iter_unpack(">I", padded)) % 2**32 == 0xB1B0AFBA
         if fails:
             raise ValueError("rasterization failed")
-        return b"png"
+        return draw(**options)
 
     monkeypatch.setattr(resvg_py, "svg_to_bytes", rasterize)
     options = {"fonts": {"Fixture": (FONT_FIXTURES / "sans.ttf").read_bytes()}}
@@ -670,7 +673,7 @@ def test_png_removes_temporary_font_files_even_when_rasterization_fails(monkeypa
         with pytest.raises(ValueError, match="rasterization failed"):
             unicode_chart("Font").to_png(**options)
     else:
-        assert unicode_chart("Font").to_png(**options) == b"png"
+        assert unicode_chart("Font").to_png(**options)[:8] == b"\x89PNG\r\n\x1a\n"
     assert all(not path.parent.exists() for path in paths)
 
 
@@ -693,9 +696,15 @@ def test_svg_and_png_validate_fonts_in_the_callers_spelling(method, tmp_path):
 def test_module_save_dispatches_single_charts_like_chart_save(tmp_path, extension):
     item = chart()
     path = tmp_path / f"module.{extension}"
-    options = {"page_size": "A4", "title": "Report"} if extension == "PDF" else {}
-    hg.save(item, path, scale=3, **options)
-    item.save(tmp_path / f"method.{extension}", scale=3, **options)
+    options: dict[str, Any] = (
+        {"page_size": "A4", "title": "Report"}
+        if extension == "PDF"
+        else {"dpi": 288}
+        if extension == "png"
+        else {}
+    )
+    hg.save(item, path, **options)
+    item.save(tmp_path / f"method.{extension}", **options)
     actual = path.read_bytes()
     expected = (tmp_path / f"method.{extension}").read_bytes()
     if extension in ("html", "svg"):
@@ -705,7 +714,7 @@ def test_module_save_dispatches_single_charts_like_chart_save(tmp_path, extensio
         expected = re.sub(pattern, b"id", expected)
     assert actual == expected
     if extension == "png":
-        assert path.read_bytes() == item.to_png(scale=3)
+        assert path.read_bytes() == item.to_png(dpi=288)
     assert not hasattr(hg, "save_pdf")
 
 
@@ -718,6 +727,14 @@ def test_module_save_requires_pdf_for_chart_sequences(tmp_path, extension, seque
         match=r"save path:.*; use a .pdf extension or save each chart separately",
     ):
         hg.save(sequence([chart()]), path)
+    assert not path.exists()
+
+
+def test_module_save_names_options_it_does_not_take(tmp_path):
+    path = tmp_path / "report.pdf"
+    with pytest.raises(TypeError) as raised:
+        hg.save([chart()], path, page_sizes="A4")  # type: ignore[call-arg]
+    assert str(raised.value) == "save: no option 'page_sizes'; did you mean 'page_size'?"
     assert not path.exists()
 
 

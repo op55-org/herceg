@@ -759,15 +759,11 @@ describe("facet panels with x scales of their own", () => {
   it("keep scenes of shared x unchanged", () => {
     const plain = build({ marks, facet: grid, x: { title: "Time" } });
     const shared = build({ marks, facet: grid, x: { title: "Time", scope: "chart" } });
-    expect(renderToSVG({ marks, facet: grid, width: 600, height: 400, idPrefix: "a" })).toBe(
-      renderToSVG({
-        marks,
-        facet: grid,
-        width: 600,
-        height: 400,
-        idPrefix: "a",
-        x: { scope: "chart" },
-      }),
+    expect(renderToSVG({ marks, facet: grid, width: 600, height: 400 }, { idPrefix: "a" })).toBe(
+      renderToSVG(
+        { marks, facet: grid, width: 600, height: 400, x: { scope: "chart" } },
+        { idPrefix: "a" },
+      ),
     );
     expect(shared.scene.panels.map((p) => p.plot)).toEqual(plain.scene.panels.map((p) => p.plot));
     expect(titles(plain.scene)).toHaveLength(1);

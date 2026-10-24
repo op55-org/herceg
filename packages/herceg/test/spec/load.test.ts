@@ -144,16 +144,18 @@ describe("loadSpec", () => {
       y: { title: "ms" },
     };
     const metrics = table({ time: time(x), p99: y }, { name: "metrics" });
-    const direct = renderToSVG({
-      width: 400,
-      height: 200,
-      title: "Latency",
-      locale: "en-US",
-      timeZone: "UTC",
-      marks: [line(metrics, { x: "time", y: "p99" }), rule({ y: 2 })],
-      y: { title: "ms" },
-      idPrefix: "chart",
-    });
+    const direct = renderToSVG(
+      {
+        width: 400,
+        height: 200,
+        title: "Latency",
+        locale: "en-US",
+        timeZone: "UTC",
+        marks: [line(metrics, { x: "time", y: "p99" }), rule({ y: 2 })],
+        y: { title: "ms" },
+      },
+      { idPrefix: "chart" },
+    );
     const viaSpec = specToSVG(spec, [x, y]).replace(/herceg-svg-\d+/g, "chart");
     expect(viaSpec).toBe(direct);
   });

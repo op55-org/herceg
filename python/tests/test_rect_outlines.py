@@ -50,7 +50,7 @@ def test_bars_are_capped_by_the_sides_they_list():
     assert spec["marks"][0]["strokeSides"] == ["top"]
 
     def pixels(chart):
-        return np.asarray(image.open(BytesIO(chart.to_png(scale=1))))
+        return np.asarray(image.open(BytesIO(chart.to_png())))
 
     # The bar's fill (blue) and outline (red) pixels.
     capped_png = pixels(capped(stroke_sides=["top"]))

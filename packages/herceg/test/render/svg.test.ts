@@ -24,17 +24,19 @@ const metrics = table({
 
 describe("renderToSVG", () => {
   it("renders a deterministic line chart", () => {
-    const svg = renderToSVG({
-      width: 480,
-      height: 240,
-      title: "Latency",
-      description: "API and database latency.",
-      timeZone: "UTC",
-      locale: "en-US",
-      marks: [line(metrics, { x: "t", y: ["api", "db"] }), rule({ y: 150, label: "SLO" })],
-      y: { title: "ms" },
-      idPrefix: "latency",
-    });
+    const svg = renderToSVG(
+      {
+        width: 480,
+        height: 240,
+        title: "Latency",
+        description: "API and database latency.",
+        timeZone: "UTC",
+        locale: "en-US",
+        marks: [line(metrics, { x: "t", y: ["api", "db"] }), rule({ y: 150, label: "SLO" })],
+        y: { title: "ms" },
+      },
+      { idPrefix: "latency" },
+    );
     expect(svg).toMatchSnapshot();
   });
 
@@ -62,15 +64,17 @@ describe("renderToSVG", () => {
   });
 
   it("renders stacked areas and dark themes", () => {
-    const svg = renderToSVG({
-      width: 480,
-      height: 240,
-      theme: "dark",
-      timeZone: "UTC",
-      locale: "en-US",
-      marks: [area(metrics, { x: "t", y: ["api", "db"], stack: true })],
-      idPrefix: "stacked",
-    });
+    const svg = renderToSVG(
+      {
+        width: 480,
+        height: 240,
+        theme: "dark",
+        timeZone: "UTC",
+        locale: "en-US",
+        marks: [area(metrics, { x: "t", y: ["api", "db"], stack: true })],
+      },
+      { idPrefix: "stacked" },
+    );
     expect(svg).toMatchSnapshot();
   });
 });
@@ -93,17 +97,16 @@ describe("renderToSVG sizing", () => {
   });
 
   it("is fluid without width and height, stretched or fitted as asked", () => {
-    const fluid = root(renderToSVG({ ...sparkline, sizing: "fluid", preserveAspectRatio: "none" }));
+    const fluid = root(renderToSVG(sparkline, { sizing: "fluid", preserveAspectRatio: "none" }));
     expect(fluid).not.toMatch(/ (width|height)=/);
     expect(fluid).toContain('viewBox="0 0 140 48" preserveAspectRatio="none"');
-    expect(root(renderToSVG({ ...sparkline, preserveAspectRatio: "xMinYMid slice" }))).toContain(
+    expect(root(renderToSVG(sparkline, { preserveAspectRatio: "xMinYMid slice" }))).toContain(
       'width="140" height="48" viewBox="0 0 140 48" preserveAspectRatio="xMinYMid slice"',
     );
   });
 
   it("keeps strokes their width in pixels when asked", () => {
-    const svg = renderToSVG({
-      ...sparkline,
+    const svg = renderToSVG(sparkline, {
       sizing: "fluid",
       strokeScaling: "fixed",
       idPrefix: "spark 1",
@@ -112,7 +115,7 @@ describe("renderToSVG sizing", () => {
     expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" id="spark 1"/);
     expect(svg).toContain('<style>[id="spark 1"] *{vector-effect:non-scaling-stroke}</style>');
     // Any prefix selects its document: quotes and backslashes are escaped in the selector.
-    expect(renderToSVG({ ...sparkline, strokeScaling: "fixed", idPrefix: '9"\\' })).toContain(
+    expect(renderToSVG(sparkline, { strokeScaling: "fixed", idPrefix: '9"\\' })).toContain(
       '<style>[id="9\\22 \\5c "] *{',
     );
   });
@@ -124,13 +127,13 @@ describe("renderToSVG sizing", () => {
   });
 
   it("refuses sizes it does not know", () => {
-    expect(() => renderToSVG({ ...sparkline, sizing: "auto" as "fluid" })).toThrow(
+    expect(() => renderToSVG(sparkline, { sizing: "auto" as "fluid" })).toThrow(
       'renderToSVG sizing: expected "fixed" or "fluid"; received "auto"',
     );
     expect(() =>
-      renderToSVG({ ...sparkline, preserveAspectRatio: "xMidYMid stretch" as "none" }),
+      renderToSVG(sparkline, { preserveAspectRatio: "xMidYMid stretch" as "none" }),
     ).toThrow('renderToSVG preserveAspectRatio: expected "none" or an alignment');
-    expect(() => renderToSVG({ ...sparkline, strokeScaling: true as never })).toThrow(
+    expect(() => renderToSVG(sparkline, { strokeScaling: true as never })).toThrow(
       'renderToSVG strokeScaling: expected "scale" or "fixed"; received true',
     );
   });
@@ -139,13 +142,15 @@ describe("renderToSVG sizing", () => {
 describe("renderToSVG for bars and heatmaps", () => {
   it("renders grouped bars as one path per series", () => {
     const sales = table({ region: ["N", "S", "E"], q1: [10, 20, 30], q2: [5, -10, 15] });
-    const svg = renderToSVG({
-      width: 400,
-      height: 200,
-      locale: "en-US",
-      idPrefix: "bars",
-      marks: [bar(sales, { x: "region", y: ["q1", "q2"] })],
-    });
+    const svg = renderToSVG(
+      {
+        width: 400,
+        height: 200,
+        locale: "en-US",
+        marks: [bar(sales, { x: "region", y: ["q1", "q2"] })],
+      },
+      { idPrefix: "bars" },
+    );
     expect(svg).toMatchSnapshot();
   });
 
@@ -169,13 +174,15 @@ describe("renderToSVG for bars and heatmaps", () => {
 
   it("embeds heatmaps as a PNG image with a color legend", () => {
     const cells = table({ x: [0, 1, 0, 1], y: [0, 0, 1, 1], v: [1, 2, 3, 4] });
-    const svg = renderToSVG({
-      width: 300,
-      height: 200,
-      locale: "en-US",
-      idPrefix: "cells",
-      marks: [heatmap(cells, { x: "x", y: "y", color: "v" })],
-    });
+    const svg = renderToSVG(
+      {
+        width: 300,
+        height: 200,
+        locale: "en-US",
+        marks: [heatmap(cells, { x: "x", y: "y", color: "v" })],
+      },
+      { idPrefix: "cells" },
+    );
     expect(svg).toContain("<image");
     expect(svg).toContain("data:image/png;base64,iVBOR");
     expect(svg).toContain('<linearGradient id="cells-ramp-0">');

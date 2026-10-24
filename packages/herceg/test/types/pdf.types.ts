@@ -34,7 +34,9 @@ renderToPDF(chart);
 renderToPDF(chart, { fonts });
 // @ts-expect-error a mounted chart has its own size
 renderToPDF(chart, { width: 320 });
-const png: Promise<Blob> = chart.toPNG({ scale: 2 });
+const png: Promise<Blob> = chart.toPNG({ dpi: 192 });
+// @ts-expect-error dpi replaces a scale of the chart's size
+chart.toPNG({ scale: 2 });
 void png;
 
 renderToPDF([chart, { width: 640, height: 320, marks: [] }], {
@@ -66,7 +68,9 @@ renderToPDF(chart, { pageSize: "A4" });
 specToPDF({ spec, buffers: [new Float64Array(2)] }, { subject: "Chart description" });
 specToPDF(spec, { pageSize: "A4", subject: "Report description" });
 renderToPDF({ width: 320, height: 120, marks: [] }, { pageSize: "A4" });
-declare const targets: Chart | readonly (Chart | import("../../src/pdf.ts").PdfOptions)[];
+declare const targets:
+  | Chart
+  | readonly (Chart | import("../../src/render/static.ts").StaticOptions)[];
 renderToPDF(targets, { subject: "Report description" });
 // @ts-expect-error positional spec sidecars are removed
 specToPDF(spec, [new Float64Array(2)]);

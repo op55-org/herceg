@@ -3412,7 +3412,7 @@ for an x range), `selection` and `selectionPanels` (see Small multiples for
 `getLegend()`, `getHiddenKeys({ panel? })`, `setHiddenKeys(keys)`, and
 `setVisibility(keys, visible, { panel? })` (see Hiding series and Panels'
 legends), `on(event, listener)`,
-`render()`, `toSVG(sizing?)` and `toPNG()` (see Export), `destroy()`, `showCursor(position)` and `hideCursor()` (see Syncing charts), `ready`
+`render()`, `toSVG(sizing?)` and `toPNG({ dpi }?)` (see Export), `destroy()`, `showCursor(position)` and `hideCursor()` (see Syncing charts), `ready`
 (a promise of the first frame, rejected with what keeps it from drawing; see When a chart cannot draw), and `loading`
 (a promise while the interaction controller loads after the first frame, the guide compiler loads for a chart that needs it (see Scales and guides), the chart's `fonts` load, the GPU painter for large point series, the animation
 code, the controls of a 3D chart, a map, a tree, or a network, the brush, a
@@ -4398,17 +4398,17 @@ labels remain part of the figure. This does not claim PDF/UA conformance.
 
 A mounted chart exports what it shows now, at its size, zoomed, with series
 hidden and a row selection highlighted as they are: `chart.toSVG()` a standalone SVG document,
-`chart.toPNG({ scale })` a PNG `Blob` at `scale` times its size in CSS
-pixels (2 by default; drawn from the SVG export, whose transparent
-background stays transparent; its encoder loads the first time), and
-`renderToPDF(chart)` from `herceg/pdf` a PDF, laid out as the page measured
-its text:
+`chart.toPNG({ dpi })` a PNG `Blob` at `dpi` pixels per inch (96 by
+default, a pixel per CSS pixel; drawn from the SVG export, whose
+transparent background stays transparent; its encoder loads the first
+time), and `renderToPDF(chart)` from `herceg/pdf` a PDF, laid out as the
+page measured its text:
 
 ```ts
 import { renderToPDF } from "herceg/pdf";
 
 const svg = chart.toSVG();
-const png = await chart.toPNG({ scale: 2 }); // Blob, image/png
+const png = await chart.toPNG({ dpi: 192 }); // Blob, image/png, 2 pixels per CSS pixel
 const pdf = renderToPDF(chart, { fonts }); // Uint8Array; fonts as below, optional
 ```
 
@@ -4426,25 +4426,88 @@ const svg = renderToSVG(options); // standalone SVG document
 const pdf = renderToPDF(options); // Uint8Array: a one-page vector PDF
 ```
 
+`renderToSVG(chartOrOptions, settings)` and `specToSVG(spec, buffers,
+settings)` take how to write the file as settings, apart from the chart.
 An SVG is the chart's size by default. `sizing: "fluid"` leaves out its
 width and height, so CSS or its container sizes it and its viewBox scales
 the chart (as wide as its container, by default);
 `preserveAspectRatio` (`"none"` stretches it, or an alignment such as
 `"xMidYMid meet"`) says how it fits a box of another shape; and
 `strokeScaling: "fixed"` keeps lines their width in pixels however it
-scales. `renderToSVG` takes them with the chart's options, `specToSVG` in
-its options, and `chart.toSVG(sizing)` as its argument. Stretching an SVG
+scales; `chart.toSVG(sizing)` takes them as its argument. Stretching an SVG
 scales its text and geometry as they were laid out; a live chart lays itself
 out again at a new size.
 
 ```ts
-const sparkline = renderToSVG({
-  width: 140, height: 48, padding: 0, legend: false,
-  x: { show: false, nice: false }, y: { show: false, nice: false },
-  marks: [line(metrics, { x: "time", y: "p99", clip: false })],
-  sizing: "fluid", preserveAspectRatio: "none", strokeScaling: "fixed",
-});
+const sparkline = renderToSVG(
+  {
+    width: 140, height: 48, padding: 0, legend: false,
+    x: { show: false, nice: false }, y: { show: false, nice: false },
+    marks: [line(metrics, { x: "time", y: "p99", clip: false })],
+  },
+  { sizing: "fluid", preserveAspectRatio: "none", strokeScaling: "fixed" },
+);
 ```
+
+No export keeps text and markers at their size in pixels while the rest
+of a chart scales: a file cannot lay itself out again. Pick one of two
+honest paths instead: an SVG of a fixed size (in pixels, or in inches or
+millimeters with `size` and `unit`, below), or a fluid one that scales as a
+picture, text and all; or a snapshot (`renderToSnapshot`) that a page
+hydrates, which the engine lays out again at every size.
+
+### Images for documents
+
+A figure for a report, paper, or slide has a size on the page and a
+resolution, and they are separate settings. `renderToImage` from
+`herceg/image` writes PNG, JPEG, or WebP in the browser: `size` and `unit`
+(`"px"`, `"in"`, `"cm"`, `"mm"`, or `"pt"`) lay the chart out, and `dpi`
+(96 by default) is the pixels drawn per inch of it. 16 by 10 inches at 150
+dpi lays out at 1536 by 960 CSS pixels, as on a page of that size, and
+draws 2400 by 1500 pixels; another dpi changes the pixels only, never
+wrapping, ticks, or the size text has on the page. The file records its
+resolution (PNG's `pHYs`, JPEG's JFIF density, WebP's EXIF), which
+documents read to place it at its size; applications that ignore it show
+its pixels.
+
+```ts
+import { renderToImage } from "herceg/image";
+
+const figure = await renderToImage(options, {
+  format: "jpeg", size: [16, 10], unit: "in", dpi: 150, quality: 90,
+}); // Blob, image/jpeg, 2400 by 1500 pixels
+const shown = await renderToImage(chart, { format: "webp", dpi: 192 }); // a mounted chart, as it is
+```
+
+- `quality`, from 0 to 100, compresses JPEG and WebP; PNG refuses it.
+- JPEG has no transparency: it is drawn on `background` (a CSS color), else
+  on the chart's own background, else on white (black under light text).
+  PNG and WebP stay transparent where the chart is, unless given a
+  `background`.
+- A mounted chart is drawn at its own size, never resized or redrawn;
+  `size` and `unit` lay out static options. For a mounted chart at another
+  size, export its options.
+- More than 16,384 pixels a side (16,383 for WebP), more than 16,777,216
+  pixels, or a dpi outside 1 to 1,200 is refused before anything is
+  allocated. A browser that does not write WebP (WebKit, Safari's engine,
+  writes PNG in its place) is refused with that reason.
+- Text is drawn in the fonts it was measured with: `fonts` from
+  `prepareFonts` for static options, and a mounted chart's own.
+
+`renderToSVG` takes `size` and `unit` too: an SVG laid out at 160 by 100
+millimeters says so in its width and height. With `tooltip: "title"`, each
+bar, point, and observation of a line carries its tooltip's text as a
+`<title>`, which viewers show under the pointer: up to 5,000 of them, and
+charts whose other marks have tooltips are refused. Images and PDF have no
+such titles and refuse the setting.
+
+```ts
+const inspectable = renderToSVG(options, { size: [160, 100], unit: "mm", tooltip: "title" });
+```
+
+Images are drawn by a browser's canvas; Node has no raster backend (see
+the roadmap). On a server, write SVG or PDF, or images from Python
+(`chart.to_image`).
 
 `renderToPDF` accepts one mounted chart, static options, or a nonempty list.
 `specToPDF` accepts one spec, a `{ spec, buffers }` entry, or a nonempty list:

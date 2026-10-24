@@ -27,6 +27,7 @@ import {
   type SvgContext,
 } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
+import type { ThemeEnvironment } from "../theme.ts";
 
 /** Targets written with titles by default, at most. */
 const BUDGET = 5000;
@@ -47,13 +48,14 @@ export type SvgTitles = NonNullable<SvgContext["titles"]>;
 /**
  * The model's scene, drawn for titles, and the titles of its bars,
  * points, and lines as its tooltips read them: at most `budget` targets,
- * past which it refuses with a ChartError. Write the scene with
+ * past which it refuses with a ChartError. Its scene reads `page` (a
+ * mounted chart's) as the chart's do. Write the scene with
  * `renderSvg(scene, { titles })`.
  */
 export function titlesOf(
   model: ChartModel,
   measure: MeasureText,
-  { budget = BUDGET }: { budget?: number } = {},
+  { budget = BUDGET, page }: { budget?: number; page?: ThemeEnvironment } = {},
 ): { scene: Scene; titles: SvgTitles } {
   // Every mark is drawn as the chart draws it (highlighted, if it is),
   // its bars and points saying which position of their series each draws,
@@ -70,7 +72,7 @@ export function titlesOf(
     );
   let scene: Scene;
   try {
-    scene = model.scene(measure);
+    scene = model.scene(measure, false, page);
   } finally {
     model.highlight = highlight;
     model.fields = fields;

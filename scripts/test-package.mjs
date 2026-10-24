@@ -15,6 +15,7 @@ const publicAPIs = {
   herceg: ["createChart", "line", "table", "time"],
   "herceg/spec": ["loadSpec", "specToPDF"],
   "herceg/pdf": ["renderToPDF"],
+  "herceg/image": ["renderToImage"],
   "herceg/fonts": ["prepareFonts"],
   "herceg/grid": ["createGrid"],
   "herceg/grid/model": ["createGridModel"],
@@ -347,7 +348,7 @@ const data = table({ t: time([0, 1]), v: [1, 2] });
   const apps = {
     herceg: `import { table, line, renderToSVG } from "herceg";
 ${dataSource}
-document.body.innerHTML = renderToSVG({ marks: [line(data, { x: "x", y: "y" })] });`,
+document.body.innerHTML = renderToSVG({ width: 640, height: 320, marks: [line(data, { x: "x", y: "y" })] });`,
     react: `import { createRoot } from "react-dom/client";
 import { Chart, Line } from "@herceg/react";
 import { table } from "herceg";

@@ -9,8 +9,9 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
-from .._chart import Chart, Dash
+from .._chart import _BAR_CHANNELS, _LINE_CHANNELS, _POINT_CHANNELS, Chart, Dash
 from .._data import Column
+from .._encoding import BarLabels, Encodings, SeriesLabels
 from . import _numerics as numerics
 from ._common import (
     ErrorBar,
@@ -33,7 +34,6 @@ from ._common import (
     error_method,
     express,
     facets,
-    fresh,
     function_name,
     group,
     keyed_table,
@@ -55,6 +55,7 @@ from ._common import (
     weight_column,
     weights_of,
 )
+from ._forward import MarkOptions, Outputs, carry, keys_of, mark_options
 from ._numerics import ErrorFunction, Estimator
 
 if sys.version_info >= (3, 11):
@@ -84,6 +85,9 @@ def barplot(
     seed: int | None = 0,
     weight: str | None = None,
     units: str | None = None,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
+    labels: bool | BarLabels | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -109,8 +113,21 @@ def barplot(
     ``series_order`` choose and order levels; other keyword arguments are
     chart options, among them ``facet_row`` and ``facet_column``, whose
     panels each compute their own estimates.
+
+    ``z_index``, ``encode``, and ``labels`` go to the bars, as
+    ``Chart.bar`` takes them. They read the data's columns, not the count
+    or the interval's ends; those beside x, y, and the series must have one
+    value per bar.
     """
     check_axes_differ(x, y, "barplot")
+    marks = mark_options(
+        "barplot",
+        z_index=z_index,
+        encode=encode,
+        labels=labels,
+        channels=_BAR_CHANNELS,
+        labels_of=BarLabels,
+    )
     est = _CategoryEstimates(
         "barplot",
         data,
@@ -122,13 +139,14 @@ def barplot(
         orient,
         _Aggregation("barplot", estimator, errorbar, n_boot, seed, weight, units),
         options,
+        marks,
     )
     chart = make_chart(
         est.table, options, sentence=est.sentence("Bars"), palette=palette, x_label=x, y_label=y
     )
     label = None if series else est.value
     xy = (est.value, est.category) if est.horizontal else (est.category, est.value)
-    chart.bar(*xy, series=series, label=label)
+    chart.bar(*xy, series=series, label=label, **marks.primary())
     est.error_bars(chart, dodge=series is not None, stroke=neutral(options.get("theme")))
     return record(chart, est.statistics("barplot"))
 
@@ -154,6 +172,8 @@ def pointplot(
     linestyles: LineStyle | Sequence[LineStyle] | None = None,
     linestyle: LineStyle | None = None,
     join: bool | None = None,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -165,8 +185,15 @@ def pointplot(
     the lines (``"-"``, ``"--"``, ``":"``, or ``"-."``), or a list of them,
     one per series level; ``"none"`` (or ``""``) draws none, and
     ``linestyle`` gives one style for every line.
+
+    ``z_index`` and ``encode`` go to the points, as ``Chart.point`` takes
+    them; the lines take their color binding (a column or the series
+    through a scale), or are gray beside a color of their own. They read
+    the data's columns; those beside x, y, and the series must have one
+    value per point.
     """
     check_axes_differ(x, y, "pointplot")
+    marks = mark_options("pointplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
     if join is not None:
         raise ValueError(
             'pointplot join: Seaborn 0.13 deprecates it; pass linestyle="none" to draw no lines'
@@ -182,6 +209,7 @@ def pointplot(
         orient,
         _Aggregation("pointplot", estimator, errorbar, n_boot, seed, weight, units),
         options,
+        marks,
     )
     styles = _line_styles(linestyles, linestyle, est.series_labels())
     # Each style drawn has a line mark, of the levels it styles.
@@ -200,8 +228,10 @@ def pointplot(
     xy = (est.value, est.category) if est.horizontal else (est.category, est.value)
     # The points come first: their series, in order, give the legend group its
     # colors and slots, which the lines' marks (one per style) then share.
-    chart.point(*xy, series=series, dodge=spread, radius=4, label=label)
-    est.error_bars(chart, dodge=spread)
+    chart.point(*xy, series=series, dodge=spread, radius=4, label=label, **marks.primary())
+    est.error_bars(
+        chart, dodge=spread, stroke=neutral(options.get("theme")) if marks.colored else None
+    )
     if drawn:
         axis = options.get("y_axis" if est.horizontal else "x_axis")
         scope = axis.get("scope") if isinstance(axis, Mapping) else getattr(axis, "scope", None)
@@ -215,6 +245,7 @@ def pointplot(
                 dodge=spread,
                 dash=cast(Dash, style),
                 label=label,
+                **marks.supporting(joined, neutral(options.get("theme"))),
             )
     return record(chart, est.statistics("pointplot"))
 
@@ -261,6 +292,9 @@ def lineplot(
     units: str | None = None,
     error_style: Literal["band", "bars"] = "band",
     sort: bool = True,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
+    labels: SeriesLabels | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -271,9 +305,24 @@ def lineplot(
     ``errorbar=None``), in ``x`` order unless ``sort=False``; with
     ``units``, as Seaborn's, one line per sampling unit in each series'
     color (a spaghetti plot of repeated measures).
+
+    ``z_index``, ``encode``, and ``labels`` go to the lines, as
+    ``Chart.line`` takes them; a band takes their color binding (a column
+    or the series through a scale), or is gray beside a color of their own.
+    They read the data's columns; those beside x, y, and the series must
+    have one value per series and x, unless ``estimator=None`` draws the
+    rows.
     """
     check_choice(error_style, "lineplot error_style", ("band", "bars"))
     estimator = check_estimator(estimator, "lineplot estimator", none=True)
+    marks = mark_options(
+        "lineplot",
+        z_index=z_index,
+        encode=encode,
+        labels=labels,
+        channels=_LINE_CHANNELS,
+        labels_of=SeriesLabels,
+    )
     facet_row, facet_column = facets(options, "lineplot")
     source = Source(data)
     xc = source.column(x, "lineplot x", ("number", "time"))
@@ -283,6 +332,7 @@ def lineplot(
     )
     weight_values = weight_column(source, weight, "lineplot", [x, y, *variables])
     ranked = unit_ranks(source, units, "lineplot", [x, y, weight, *variables])
+    outputs = Outputs(source, marks, {x, y, *variables})
     rows = complete(
         len(xc),
         xc,
@@ -319,6 +369,8 @@ def lineplot(
             dropped,
             options,
             palette,
+            marks,
+            outputs,
         )
     if units is not None:
         raise ValueError(
@@ -330,8 +382,10 @@ def lineplot(
     x_levels = levels(xc)
     grouping = group([*variables.values(), x_levels], rows)
     # The estimates' column: y's name, unless x has it too.
-    (estimated,) = fresh([y], {x, *names})
-    low, high, count = fresh(["low", "high", "n"], {x, estimated, *names})
+    # The estimates under y's name, which the mark options read as y, but
+    # x's when y is x.
+    (estimated,) = [y] if y != x else outputs.named(y)
+    low, high, count = outputs.named("low", "high", "n")
     out: dict[str, list[float]] = {x: [], estimated: [], low: [], high: [], count: []}
     keys: list[tuple[int, ...]] = []
     for key, members in grouping:
@@ -354,6 +408,17 @@ def lineplot(
         table[low] = number_column(out[low])
         table[high] = number_column(out[high])
     table[count] = number_column(out[count])
+    carry(
+        table,
+        outputs.per_group(
+            grouping,
+            [*names, x],
+            grouping.keys,
+            drawn="estimate",
+            instead="split the lines by it with series, precompute one value per series "
+            "and x, or draw the rows with estimator=None and errorbar=None",
+        ),
+    )
     sentence = (
         f"Lines show {aggregation.of(y)} at each {x}{by(series)}"
         + (
@@ -370,10 +435,19 @@ def lineplot(
     if interval and error_style == "band":
         # A band per series, of the line's table: each stands for what its
         # line does, sharing its color, legend entry, and visibility.
-        chart.area(x, y1=low, y2=high, series=series, label=label, fill_opacity=0.2)
+        chart.area(
+            x,
+            y1=low,
+            y2=high,
+            series=series,
+            label=label,
+            fill_opacity=0.2,
+            **marks.supporting(table, neutral(options.get("theme"))),
+        )
     if interval and error_style == "bars":
-        chart.error_bar(x=x, y1=low, y2=high, series=series, label=label)
-    chart.line(x, estimated, series=series, label=label)
+        stroke = neutral(options.get("theme")) if marks.colored else None
+        chart.error_bar(x=x, y1=low, y2=high, series=series, label=label, stroke=stroke)
+    chart.line(x, estimated, series=series, label=label, **marks.primary())
     stats = Statistics(
         "lineplot", sentence, {"estimates": readable(table)}, aggregation.seed, dropped
     )
@@ -393,6 +467,8 @@ def _lines_of_rows(
     dropped: int,
     options: Mapping[str, Any],
     palette: Sequence[str] | None,
+    marks: MarkOptions,
+    outputs: Outputs,
 ) -> Chart:
     """lineplot without an estimator: the complete `rows` joined in x order
     (or as given), with `units` one line per unit of each series."""
@@ -408,6 +484,7 @@ def _lines_of_rows(
     table = rows_table(variables, rows)
     table[x] = number_column(xv[rows], x_kind)
     table[y] = number_column(yv[rows])
+    carry(table, outputs.rows(rows))
     drawn = table
     if ranks is not None and len(rows):
         # A copy of the row before each change of unit, its y missing, breaks
@@ -424,7 +501,7 @@ def _lines_of_rows(
     order = f"in {x} order" if sort else "in the data's order"
     sentence = f"Lines join the rows' {y} {order}{by(series)}{lines}." + left_out
     chart = make_chart(drawn, options, sentence=sentence, palette=palette, x_label=x, y_label=y)
-    chart.line(x, y, series=series, label=None if series else y)
+    chart.line(x, y, series=series, label=None if series else y, **marks.primary())
     stats = Statistics("lineplot", sentence, {"rows": readable(table)}, None, dropped)
     return record(chart, stats)
 
@@ -560,6 +637,7 @@ class _CategoryEstimates:
         orient: Orient | None,
         aggregation: _Aggregation,
         options: Mapping[str, Any],
+        marks: MarkOptions,
     ) -> None:
         check_choice(orient, f"{function} orient", ("v", "h", "x", "y", None))
         facet_row, facet_column = facets(options, function)
@@ -603,7 +681,8 @@ class _CategoryEstimates:
         weights = weights_of(weight_values, rows, aggregation.weight, function)
         self.dropped = len(vc) - len(rows)
         names = [*variables]
-        self.low, self.high, count = fresh(["low", "high", "n"], {category, value, *names})
+        outputs = Outputs(source, marks, {x, y, *variables})
+        self.low, self.high, count = outputs.named("low", "high", "n")
         grouping = group([*variables.values(), cats], rows)
         v = values(vc)
         keys, codes, centers, lows, highs, counts = [], [], [], [], [], []
@@ -628,14 +707,33 @@ class _CategoryEstimates:
             table[self.low] = number_column(lows)
             table[self.high] = number_column(highs)
         table[count] = number_column(counts)
-        self.table = table
         self.variables = variables
         self.categories = cats
+        self._outputs, self._grouping = outputs, grouping
+        carry(table, self._carried(table))
+        self.table = table
         # Whether lines join the estimates (pointplot's), which descriptions say.
         self.joined_lines = False
-        self._estimates = (keys, codes, centers)
+        self._estimates = (keys, codes)
         self._roles = [x, y, aggregation.weight, aggregation.units, *names]
         self._ordered = order is not None or series_order is not None
+
+    def _carried(self, table: Mapping[str, Column]) -> dict[str, Column]:
+        """The columns the mark options read beside the estimates', at the
+        rows of `table` (of categories within groups of facet panel and
+        series)."""
+        names = [*self.variables, self.category]
+        keys = keys_of(
+            {**self.variables, self.category: self.categories}, table, len(table[self.value])
+        )
+        shape = "bar" if self._outputs.options.function == "barplot" else "point"
+        return self._outputs.per_group(
+            self._grouping,
+            names,
+            keys,
+            drawn=shape,
+            instead=f"split the {shape}s by it with series, or precompute one value per {shape}",
+        )
 
     @property
     def interval(self) -> tuple[ErrorMethod, float] | ErrorFunction | None:
@@ -652,7 +750,7 @@ class _CategoryEstimates:
         Seaborn's do. A shared axis holds every category; with the axis'
         ``scope`` "panel", "row", or "column", one holds the categories with an
         estimate in the panels sharing it, so padding adds none to it."""
-        keys, codes, centers = self._estimates
+        keys, codes = self._estimates
         groups = list(dict.fromkeys(tuple(key) for key in keys))
         names = list(self.variables)
         sharing = sharing_fields(scope, self.facet_row, self.facet_column)
@@ -664,10 +762,6 @@ class _CategoryEstimates:
         held: dict[tuple[int, ...], set[int]] = {}
         for key, code in zip(keys, codes, strict=True):
             held.setdefault(axis_of(tuple(key)), set()).add(code)
-        found = {
-            (tuple(key), code): center
-            for key, code, center in zip(keys, codes, centers, strict=True)
-        }
         every = range(len(self.categories))
         padded = [
             (group, code)
@@ -676,7 +770,17 @@ class _CategoryEstimates:
         ]
         table = keyed_table(self.variables, [group for group, _ in padded])
         table[self.category] = category_column([code for _, code in padded], self.categories.labels)
-        table[self.value] = number_column([found.get(row, math.nan) for row in padded])
+        # Every other column of the estimates, reindexed: at each estimate's
+        # row, and missing where a category was padded.
+        index = {
+            (tuple(key), code): i for i, (key, code) in enumerate(zip(keys, codes, strict=True))
+        }
+        rows = np.array([index.get(row, -1) for row in padded], dtype=np.int64)
+        for name, column in self.table.items():
+            if name not in table:
+                missing = np.nan if column.values.dtype.kind == "f" else -1
+                values = np.append(column.values, np.array([missing], column.values.dtype))
+                table[name] = Column(column.kind, values[rows], column.dictionary)
         return table
 
     def of_series(self, table: dict[str, Column], levels: Sequence[int]) -> dict[str, Column]:

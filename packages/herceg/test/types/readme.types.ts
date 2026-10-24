@@ -462,7 +462,7 @@ createChart(element, {
 // Export of a mounted chart
 async function exportChart() {
   chart.toSVG();
-  await chart.toPNG({ scale: 2 });
+  await chart.toPNG({ dpi: 192 });
   renderToPDF(chart);
 }
 void exportChart;

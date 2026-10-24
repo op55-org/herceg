@@ -33,6 +33,11 @@
       "import": "./dist/pdf.js",
       "default": "./dist/pdf.js"
     },
+    "./image": {
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.js",
+      "default": "./dist/image.js"
+    },
     "./fonts": {
       "types": "./dist/fonts.d.ts",
       "import": "./dist/fonts.js",

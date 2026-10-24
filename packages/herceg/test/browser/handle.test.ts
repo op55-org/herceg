@@ -14,6 +14,7 @@ import { rule } from "../../src/marks/rule.ts";
 import { facet } from "../../src/model/facet.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
+import { imageFacts } from "../helpers/image.ts";
 
 let host: HTMLDivElement;
 const charts: Chart[] = [];
@@ -598,16 +599,23 @@ describe("exports", () => {
       b: Float64Array.from({ length: 101 }, (_, i) => 50 + (i % 5)),
     });
 
-  it("give a PNG of the current state at a scale of the chart's size", async () => {
+  it("give a PNG of the current state at a dpi of the chart's size", async () => {
     const chart = mount({ marks: [line(ramp(), { x: "t", y: ["a", "b"] })] });
     const png = await chart.toPNG();
     expect(png.type).toBe("image/png");
     const image = await createImageBitmap(png);
-    expect([image.width, image.height]).toEqual([1200, 600]);
-    const small = await createImageBitmap(await chart.toPNG({ scale: 0.5 }));
-    expect([small.width, small.height]).toEqual([300, 150]);
-    await expect(chart.toPNG({ scale: 0 })).rejects.toThrow(
-      "toPNG scale: expected a positive number; received 0",
+    // 96 dpi by default: a pixel per CSS pixel, which the PNG records.
+    expect([image.width, image.height]).toEqual([600, 300]);
+    expect(imageFacts(new Uint8Array(await png.arrayBuffer())).dpi?.[0]).toBeCloseTo(96, 1);
+    const dense = await chart.toPNG({ dpi: 192 });
+    const large = await createImageBitmap(dense);
+    expect([large.width, large.height]).toEqual([1200, 600]);
+    expect(imageFacts(new Uint8Array(await dense.arrayBuffer())).dpi?.[0]).toBeCloseTo(192, 1);
+    await expect(chart.toPNG({ dpi: 0 })).rejects.toThrow(
+      "toPNG dpi: expected a positive number; received 0",
+    );
+    await expect(chart.toPNG({ scale: 2 } as never)).rejects.toThrow(
+      "toPNG scale: is not a setting of toPNG, which takes dpi",
     );
   });
 
@@ -619,14 +627,14 @@ describe("exports", () => {
       host.style.width = "300px";
       chart.render();
     });
-    const image = await createImageBitmap(await chart.toPNG({ scale: 1 }));
+    const image = await createImageBitmap(await chart.toPNG());
     expect([image.width, image.height]).toEqual([600, 300]);
     expect(chart.getPanels()[0]!.plot.width).toBeLessThan(300);
   });
 
   it("keep the theme's background in PNGs, and none for auto", async () => {
     const corner = async (chart: Chart) => {
-      const image = await createImageBitmap(await chart.toPNG({ scale: 1 }));
+      const image = await createImageBitmap(await chart.toPNG());
       const canvas = new OffscreenCanvas(image.width, image.height);
       const context = canvas.getContext("2d")!;
       context.drawImage(image, 0, 0);

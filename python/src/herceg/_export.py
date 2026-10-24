@@ -61,6 +61,12 @@ def _positive(value: Any, path: str) -> float:
     return float(value)
 
 
+def _css_pixels(length: float, unit: str) -> float:
+    """``length`` in ``unit`` as CSS pixels, to a ten-thousandth (as the
+    engine rounds it), so that 254 mm lays out at 960 pixels."""
+    return math.floor(length * UNITS[unit] * 1e4 + 0.5) / 1e4
+
+
 def _pixels_of(length: float, dpi: float, path: str) -> int:
     """A dimension of ``length`` CSS pixels in image pixels at ``dpi``: rounded half up, never 0."""
     pixels = math.floor(length * dpi / 96 + 0.5)
@@ -97,8 +103,8 @@ def plan_export(
         raise _refuse("size", f"expected a width and a height; received {shown(size)}")
     if size is None and unit != "px":
         raise _refuse("unit", "says what size is measured in; give size, or drop unit")
-    width = _positive(size[0], "size[0]") * UNITS[unit] if size is not None else chart[0]
-    height = _positive(size[1], "size[1]") * UNITS[unit] if size is not None else chart[1]
+    width = _css_pixels(_positive(size[0], "size[0]"), unit) if size is not None else chart[0]
+    height = _css_pixels(_positive(size[1], "size[1]"), unit) if size is not None else chart[1]
     if not max(width, height) <= SIDE:
         raise _refuse(
             "size",

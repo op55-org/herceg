@@ -33,7 +33,13 @@ pdf_bytes: bytes = hg.to_pdf(export_chart, page_size="A4", language="fr-FR")
 pdf_pages: bytes = hg.to_pdf(
     (export_chart, export_chart), orientation="landscape", page_size="Letter"
 )
-hg.save(export_chart, Path("chart.png"), scale=3)
+hg.save(export_chart, Path("chart.png"), dpi=288)
+hg.save(export_chart, "chart.jpg", size=(16, 10), unit="in", dpi=150, quality=90)
+jpeg: bytes = export_chart.to_image(format="jpeg", size=(16, 10), unit="in", dpi=150)
+png: bytes = export_chart.to_png(dpi=192, background="#ffffff")
+titled: str = export_chart.to_svg(tooltip="title", size=(160, 100), unit="mm")
+export_chart.to_image(format="gif")  # type: ignore[arg-type]
+export_chart.to_png(scale=2)  # type: ignore[call-arg]
 hg.save((export_chart, export_chart), "report.pdf", page_size="A4", margin=36)
 export_chart.save(Path("chart.pdf"), subject="Description")
 hg.save([export_chart], "report.pdf", page_size="Legal")  # type: ignore[arg-type]

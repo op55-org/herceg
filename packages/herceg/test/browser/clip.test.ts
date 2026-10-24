@@ -132,13 +132,10 @@ describe("clip", () => {
     );
     // Ids that start with a digit select their document too.
     const { renderer: _, ...rest } = options(false, "svg");
-    inlined.innerHTML = renderToSVG({
-      ...rest,
-      width: 200,
-      height: 100,
-      strokeScaling: "fixed",
-      idPrefix: "123",
-    });
+    inlined.innerHTML = renderToSVG(
+      { ...rest, width: 200, height: 100 },
+      { strokeScaling: "fixed", idPrefix: "123" },
+    );
     expect(getComputedStyle(inlined.querySelector("path")!).getPropertyValue("vector-effect")).toBe(
       "non-scaling-stroke",
     );

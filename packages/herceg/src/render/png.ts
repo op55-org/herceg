@@ -4,7 +4,7 @@
 
 let crcTable: Uint32Array | undefined;
 
-function crc32(bytes: Uint8Array, start: number, end: number): number {
+export function crc32(bytes: Uint8Array, start: number, end: number): number {
   if (!crcTable) {
     crcTable = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {

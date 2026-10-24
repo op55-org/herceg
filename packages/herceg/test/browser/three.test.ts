@@ -523,7 +523,7 @@ describe("3D subplots", () => {
           chart.render();
           return chart.root.querySelector("canvas")!.getContext("2d")!;
         }
-        const image = await createImageBitmap(await chart.toPNG({ scale: 1 }));
+        const image = await createImageBitmap(await chart.toPNG());
         const canvas = document.createElement("canvas");
         canvas.width = image.width;
         canvas.height = image.height;
@@ -604,7 +604,7 @@ describe("3D subplots", () => {
     });
     try {
       const check = async () => {
-        const image = await createImageBitmap(await chart.toPNG({ scale: 1 }));
+        const image = await createImageBitmap(await chart.toPNG());
         const canvas = document.createElement("canvas");
         canvas.width = image.width;
         canvas.height = image.height;

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import atexit
 import base64
+import difflib
 import html as _html
+import io
 import json
 import math
+import numbers
 import re
 import tempfile
 import uuid
@@ -16,10 +19,11 @@ from functools import cache
 from importlib.resources import files
 from os import PathLike
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 from ._data import shown
 from ._errors import ChartError
+from ._export import ExportPlan, plan_export
 
 if TYPE_CHECKING:
     from ._chart import Chart
@@ -31,6 +35,13 @@ Fonts = Mapping[str, FontData | Mapping[FontWeight, FontData]]
 SvgSizing = Literal["fixed", "fluid"]
 #: How SVG strokes scale with the SVG: with it, or keeping their width in pixels.
 StrokeScaling = Literal["scale", "fixed"]
+#: What ``to_image`` writes.
+ImageFormat = Literal["png", "jpeg", "webp"]
+#: What an export's ``size`` is measured in: CSS pixels (96 per inch), inches,
+#: centimeters, millimeters, or points (72 per inch).
+LengthUnit = Literal["px", "in", "cm", "mm", "pt"]
+#: What ``save`` writes.
+SaveFormat = Literal["html", "svg", "png", "jpeg", "webp", "pdf"]
 PdfPageSize = Literal["A4", "Letter"]
 PdfOrientation = Literal["portrait", "landscape"]
 _FONT_LIMIT = 32 * 1024 * 1024
@@ -141,30 +152,55 @@ def _reworded(error: ChartError, message: str) -> ChartError:
 _ASPECT = re.compile(r"none|x(Min|Mid|Max)Y(Min|Mid|Max)( (meet|slice))?")
 
 
+def _chart_size(spec: dict[str, Any]) -> tuple[float, float]:
+    """The size a spec lays out at: its own, or 640 by 320 CSS pixels (as the engine's)."""
+    return (spec.get("width", 640), spec.get("height", 320))
+
+
+def _plan(location: str, spec: dict[str, Any], **settings: Any) -> ExportPlan:
+    """``plan_export`` for the spec's chart, its refusals located at ``location``
+    ("to_image dpi: expected 1 to 1200; ...")."""
+    try:
+        return plan_export(_chart_size(spec), **settings)
+    except ChartError as error:
+        raise _reworded(error, f"{location} {error}") from None
+
+
 def svg(
     spec: dict[str, Any],
     buffers: list[bytes],
     *,
     fonts: Fonts | None = None,
+    size: tuple[float, float] | None = None,
+    unit: LengthUnit = "px",
+    tooltip: Literal["title"] | None = None,
     sizing: SvgSizing | None = None,
     preserve_aspect_ratio: str | None = None,
     stroke_scaling: StrokeScaling | None = None,
+    location: str = "to_svg",
 ) -> str:
     """Standalone SVG, rendered by herceg's DOM-free renderer in an embedded V8."""
+    _plan(location, spec, format="svg", size=size, unit=unit, tooltip=tooltip)
     if sizing not in (None, "fixed", "fluid"):
-        raise ValueError(f'to_svg sizing: expected "fixed" or "fluid"; received {shown(sizing)}')
+        raise ValueError(
+            f'{location} sizing: expected "fixed" or "fluid"; received {shown(sizing)}'
+        )
     if preserve_aspect_ratio is not None and not (
         isinstance(preserve_aspect_ratio, str) and _ASPECT.fullmatch(preserve_aspect_ratio)
     ):
         raise ValueError(
-            'to_svg preserve_aspect_ratio: expected "none" or an alignment such as '
+            f'{location} preserve_aspect_ratio: expected "none" or an alignment such as '
             f'"xMidYMid meet"; received {shown(preserve_aspect_ratio)}'
         )
     if stroke_scaling not in (None, "scale", "fixed"):
         raise ValueError(
-            f'to_svg stroke_scaling: expected "scale" or "fixed"; received {shown(stroke_scaling)}'
+            f'{location} stroke_scaling: expected "scale" or "fixed"; '
+            f"received {shown(stroke_scaling)}"
         )
     options = {
+        "size": _plain(size),
+        "unit": unit if unit != "px" else None,
+        "tooltip": tooltip,
         "sizing": sizing,
         "preserveAspectRatio": preserve_aspect_ratio,
         "strokeScaling": stroke_scaling,
@@ -172,9 +208,9 @@ def svg(
     return _svg(
         spec,
         buffers,
-        _font_faces(fonts, "to_svg"),
-        location="to_svg",
-        sizing={key: value for key, value in options.items() if value is not None},
+        _font_faces(fonts, location),
+        location=location,
+        settings={key: value for key, value in options.items() if value is not None},
     )
 
 
@@ -239,8 +275,7 @@ def _svg(
     faces: list[dict[str, str]],
     *,
     location: str,
-    raster: bool = False,
-    sizing: dict[str, str] | None = None,
+    settings: dict[str, Any] | None = None,
 ) -> str:
     try:
         return _call(
@@ -248,14 +283,18 @@ def _svg(
             json.dumps(spec),
             _encoded(buffers),
             json.dumps(faces),
-            raster,
-            json.dumps(sizing or {}),
+            False,
+            json.dumps(settings or {}),
         )
     except ChartError as error:
-        message = str(error)
-        if message.startswith("fonts:"):
-            message = f"{location} {message}"
-        raise _reworded(error, message) from None
+        raise _reworded(error, _located(str(error), location)) from None
+
+
+def _located(message: str, location: str) -> str:
+    """An engine's message of an export, located at ``location`` in Python's names."""
+    if message.startswith("fonts:"):
+        return f"{location} {message}"
+    return message.replace("specToSVG ", f"{location} ")
 
 
 def _font_faces(fonts: Fonts | None, location: str) -> list[dict[str, str]]:
@@ -376,27 +415,92 @@ def pdf(
     return base64.b64decode(encoded)
 
 
-def png(
-    spec: dict[str, Any], buffers: list[bytes], *, scale: float, fonts: Fonts | None = None
+def image(
+    spec: dict[str, Any],
+    buffers: list[bytes],
+    *,
+    format: ImageFormat = "png",
+    size: tuple[float, float] | None = None,
+    unit: LengthUnit = "px",
+    dpi: float = 96,
+    quality: float | None = None,
+    background: str | None = None,
+    fonts: Fonts | None = None,
+    location: str = "to_image",
 ) -> bytes:
+    """A PNG, JPEG, or WebP of the chart: laid out at ``size`` (or its own),
+    drawn by resvg at ``dpi`` image pixels per inch, and encoded by Pillow
+    with that resolution recorded (requires the ``export`` extra)."""
+    if format == "svg":
+        raise ChartError(
+            f'{location} format: writes "png", "jpeg", or "webp" images; to_svg writes SVG',
+            code="invalid-option",
+            path="format",
+        )
+    plan = _plan(
+        location,
+        spec,
+        format=format,
+        size=size,
+        unit=unit,
+        dpi=dpi,
+        quality=quality,
+        background=background,
+    )
     try:
         import resvg_py
+        from PIL import Image
     except ImportError as error:
         raise ImportError(
-            "PNG export needs the `export` extra: pip install 'herceg[export]'"
+            "Image export needs the `export` extra: pip install 'herceg[export]'"
         ) from error
-    faces = _font_faces(fonts, "to_png")
-    if not faces:
-        return bytes(
-            resvg_py.svg_to_bytes(svg_string=_svg(spec, buffers, [], location="to_png"), zoom=scale)
+    faces = _font_faces(fonts, location)
+    settings = {
+        "format": format,
+        "size": _plain(size),
+        "unit": unit,
+        "dpi": _plain(dpi),
+        "quality": _plain(quality),
+        "background": background,
+    }
+    try:
+        result = _call(
+            "hercegStatic.image",
+            json.dumps(spec),
+            _encoded(buffers),
+            json.dumps(faces),
+            json.dumps({key: value for key, value in settings.items() if value is not None}),
+            location,
         )
-    rendered = json.loads(_svg(spec, buffers, faces, location="to_png", raster=True))
+    except ChartError as error:
+        raise _reworded(error, _located(str(error), location)) from None
+    rendered = json.loads(result)
+    width, height = (int(side) for side in plan.pixels)
+    drawn = Image.open(io.BytesIO(_resvg(resvg_py, rendered, faces))).convert("RGBA")
+    if drawn.size != (width, height):
+        raise ChartError(
+            f"{location}: resvg drew {drawn.size[0]} by {drawn.size[1]} pixels of the "
+            f"{width} by {height} planned; report this as a bug",
+            code="render-failed",
+        )
+    picture = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for color in rendered["under"]:
+        picture.alpha_composite(Image.new("RGBA", (width, height), tuple(color)))
+    picture.alpha_composite(drawn)
+    del drawn
+    return _encode(picture, plan)
+
+
+def _resvg(resvg_py: Any, rendered: dict[str, Any], faces: list[dict[str, str]]) -> bytes:
+    """resvg's PNG of the rendered SVG, its text in the supplied faces alone
+    when there are any (resvg takes them as files, local to this export and
+    removed on success or failure)."""
+    if not faces:
+        return bytes(resvg_py.svg_to_bytes(svg_string=rendered["svg"]))
     families = {}
     for face in faces:
         family = face["family"].strip().strip("\"'").strip()
         families[family.lower()] = family
-    # resvg takes filenames, including for byte inputs. These renamed copies
-    # are local to this export and removed on success or failure.
     with tempfile.TemporaryDirectory(prefix="herceg-fonts-") as directory:
         paths = []
         for index, encoded in enumerate(rendered["fonts"]):
@@ -406,7 +510,6 @@ def png(
         return bytes(
             resvg_py.svg_to_bytes(
                 svg_string=rendered["svg"],
-                zoom=scale,
                 font_files=paths,
                 skip_system_fonts=True,
                 sans_serif_family=families.get("sans-serif"),
@@ -416,6 +519,175 @@ def png(
                 fantasy_family=families.get("fantasy"),
             )
         )
+
+
+def _plain(value: Any) -> Any:
+    """Planned numbers (NumPy's among them) as JSON writes them: floats, and a
+    size as a list of floats."""
+    if value is None:
+        return None
+    if isinstance(value, numbers.Real):
+        return float(value)
+    return [float(item) for item in value]
+
+
+def _half_up(value: float) -> int:
+    """``value`` rounded to a whole number, halves up (as the engine rounds)."""
+    return math.floor(value + 0.5)
+
+
+def _encode(picture: Any, plan: ExportPlan) -> bytes:
+    """``picture`` (RGBA) in the plan's format, with its resolution recorded:
+    PNG's pHYs, JPEG's JFIF density (whole dots per inch), and WebP's EXIF
+    resolution. JPEG, which has no transparency, keeps every channel of
+    color (no subsampling, which blurs a chart's thin colored lines)."""
+    from PIL import Image
+
+    out = io.BytesIO()
+    if plan.format == "png":
+        picture.save(out, "PNG", dpi=(plan.dpi, plan.dpi))
+    elif plan.format == "jpeg":
+        density = _half_up(plan.dpi)
+        picture.convert("RGB").save(
+            out,
+            "JPEG",
+            quality=_half_up(90 if plan.quality is None else plan.quality),
+            dpi=(density, density),
+            subsampling=0,
+        )
+    else:
+        exif = Image.Exif()
+        exif[282] = exif[283] = float(plan.dpi)  # XResolution, YResolution
+        exif[296] = 2  # in inches
+        # A WebP's EXIF chunk holds the TIFF header itself, without "Exif\0\0".
+        picture.save(
+            out,
+            "WEBP",
+            quality=_half_up(90 if plan.quality is None else plan.quality),
+            lossless=False,
+            exif=exif.tobytes()[6:],
+        )
+    return out.getvalue()
+
+
+class SaveOptions(TypedDict, total=False):
+    """``Chart.save``'s options, which ``hg.save`` takes too (see ``Chart.save``)."""
+
+    format: SaveFormat | None
+    size: tuple[float, float] | None
+    unit: LengthUnit | None
+    dpi: float | None
+    quality: float | None
+    background: str | None
+    tooltip: Literal["title"] | None
+    fonts: Fonts | None
+    sizing: SvgSizing | None
+    preserve_aspect_ratio: str | None
+    stroke_scaling: StrokeScaling | None
+    fallback: Sequence[str]
+    missing_glyph: str | None
+    page_size: PdfPageSize | None
+    orientation: PdfOrientation | None
+    margin: float | None
+    title: str | None
+    subject: str | None
+    language: str | None
+
+
+#: The format of each extension ``save`` knows.
+_EXTENSIONS: dict[str, str] = {
+    ".html": "html",
+    ".svg": "svg",
+    ".png": "png",
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".webp": "webp",
+    ".pdf": "pdf",
+}
+
+#: The formats each of ``save``'s options is a setting of, and how to name them.
+_SAVE_OPTIONS: dict[str, tuple[frozenset[str], str]] = {
+    **{
+        name: (frozenset({"svg", "png", "jpeg", "webp"}), "SVG and image")
+        for name in ("size", "unit")
+    },
+    **{name: (frozenset({"png", "jpeg", "webp"}), "image") for name in ("dpi", "background")},
+    "quality": (frozenset({"jpeg", "webp"}), "JPEG and WebP"),
+    "fonts": (frozenset({"svg", "png", "jpeg", "webp", "pdf"}), "SVG, image, and PDF"),
+    **{
+        name: (frozenset({"svg"}), "SVG")
+        for name in ("tooltip", "sizing", "preserve_aspect_ratio", "stroke_scaling")
+    },
+    **{
+        name: (frozenset({"pdf"}), "PDF")
+        for name in (
+            "fallback",
+            "missing_glyph",
+            "page_size",
+            "orientation",
+            "margin",
+            "title",
+            "subject",
+            "language",
+        )
+    },
+}
+
+#: Paths of each format, as messages name them.
+_PATHS = {
+    "html": ".html",
+    "svg": ".svg",
+    "png": ".png",
+    "jpeg": ".jpg",
+    "webp": ".webp",
+    "pdf": ".pdf",
+}
+
+
+def save_format(path: str | PathLike[str], format: str | None) -> str:
+    """The format ``save`` writes to ``path``: its extension's, which an explicit
+    ``format`` must agree with, or ``format`` for a path without one of them."""
+    suffix = Path(path).suffix.lower()
+    by_extension = _EXTENSIONS.get(suffix)
+    if format is not None:
+        if format not in _PATHS:
+            raise ValueError(
+                'save format: expected "html", "svg", "png", "jpeg", "webp", or "pdf"; '
+                f"received {shown(format)}"
+            )
+        if by_extension is not None and by_extension != format:
+            raise ValueError(
+                f'save format: "{format}" contradicts the path\'s {suffix} extension; '
+                f"drop format, or save to a {_PATHS[format]} path"
+            )
+        return format
+    if by_extension is None:
+        raise ValueError(
+            'save path: expected a ".html", ".svg", ".png", ".jpg", ".jpeg", ".webp", or '
+            f'".pdf" file, or give format; received {shown(path)}'
+        )
+    return by_extension
+
+
+def check_save_options(format: str, given: Sequence[str]) -> None:
+    """Refuses options ``save`` was given that ``format`` does not take, and
+    names it does not know."""
+    for name in given:
+        if name not in _SAVE_OPTIONS:
+            close = difflib.get_close_matches(name, sorted(_SAVE_OPTIONS), n=1, cutoff=0.7)
+            hint = (
+                f"did you mean {close[0]!r}?"
+                if close
+                else "see help(herceg.save) for the options it takes"
+            )
+            raise TypeError(f"save: no option {name!r}; {hint}")
+        formats, owners = _SAVE_OPTIONS[name]
+        if format not in formats:
+            paths = sorted({_PATHS[taker] for taker in formats}, key=list(_PATHS.values()).index)
+            listed = paths[0] if len(paths) == 1 else ", ".join(paths[:-1]) + f", or {paths[-1]}"
+            raise ValueError(
+                f"save {name}: an option of {owners} export; save to a {listed} path or drop {name}"
+            )
 
 
 def show(chart: Chart) -> None:

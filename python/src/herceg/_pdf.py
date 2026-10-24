@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from os import PathLike
 from pathlib import Path
 
 from . import _render
 from ._chart import Chart
+
+if sys.version_info >= (3, 11):
+    from typing import Unpack
+else:
+    from typing_extensions import Unpack
 
 
 def to_pdf(
@@ -58,56 +64,25 @@ def to_pdf(
 def save(
     chart_or_charts: Chart | Sequence[Chart],
     path: str | PathLike[str],
-    *,
-    scale: float = 2,
-    page_size: _render.PdfPageSize | None = None,
-    orientation: _render.PdfOrientation | None = None,
-    margin: float | None = None,
-    title: str | None = None,
-    subject: str | None = None,
-    language: str | None = None,
-    fonts: _render.Fonts | None = None,
-    fallback: Sequence[str] = (),
-    missing_glyph: str | None = None,
+    **options: Unpack[_render.SaveOptions],
 ) -> None:
-    """Save a chart by extension, or a nonempty sequence to a .pdf path.
-
-    A single chart delegates to Chart.save; sequences use to_pdf's settings.
-    """
+    """Save a chart by extension, as ``Chart.save`` does with the same options,
+    or a nonempty sequence to a .pdf path with to_pdf's options."""
     if isinstance(chart_or_charts, Chart):
-        chart_or_charts.save(
-            path,
-            scale=scale,
-            page_size=page_size,
-            orientation=orientation,
-            margin=margin,
-            title=title,
-            subject=subject,
-            language=language,
-            fonts=fonts,
-            fallback=fallback,
-            missing_glyph=missing_glyph,
-        )
+        chart_or_charts.save(path, **options)
         return
-    target = Path(path)
-    if target.suffix.lower() != ".pdf":
+    if Path(path).suffix.lower() != ".pdf" or options.get("format") not in (None, "pdf"):
         raise ValueError(
             "save path: a sequence of charts requires PDF export; "
             "use a .pdf extension or save each chart separately"
         )
+    # Options left at None are not given, whichever format they belong to.
+    given = {
+        name: value for name, value in options.items() if name != "format" and value is not None
+    }
+    _render.check_save_options("pdf", [name for name, value in given.items() if value != ()])
     try:
-        content = to_pdf(
-            chart_or_charts,
-            page_size=page_size,
-            orientation=orientation,
-            margin=margin,
-            title=title,
-            subject=subject,
-            language=language,
-            fonts=fonts,
-            fallback=fallback,
-            missing_glyph=missing_glyph,
-        )
+        content = to_pdf(chart_or_charts, **given)  # type: ignore[arg-type]
     except (ValueError, TypeError) as error:
         raise type(error)(str(error).replace("to_pdf", "save")) from None
-    target.write_bytes(content)
+    Path(path).write_bytes(content)

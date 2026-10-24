@@ -12,8 +12,10 @@ from typing import Any, Literal, TypedDict
 import numpy as np
 
 from .. import _data as hg_data
-from .._chart import AxisOptions, Chart, HelperOptions
+from .._chart import _AREA_CHANNELS, _LINE_CHANNELS, AxisOptions, Chart, HelperOptions
 from .._data import Column
+from .._encoding import Encodings, SeriesLabels
+from .._errors import ChartError
 from . import _numerics as numerics
 from ._common import (
     ExpressOptions,
@@ -36,11 +38,13 @@ from ._common import (
     record,
     rows_table,
     shown,
+    subset,
     values,
     variables_of,
     weight_column,
     weights_of,
 )
+from ._forward import Outputs, carry, keys_of, mark_options
 from ._numerics import Normalize
 
 if sys.version_info >= (3, 11):
@@ -98,6 +102,7 @@ def histplot(
     kde: bool = False,
     kde_options: KdeOptions | None = None,
     colors: str | Sequence[str] | None = None,
+    z_index: float | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -128,7 +133,10 @@ def histplot(
     Cells holding nothing are empty. ``normalize`` measures counts per unit
     of bin area for ``"frequency"`` and ``"density"``. It takes no series
     (facet instead), cumulative counts, multiples, elements, or kde.
+
+    ``z_index`` goes to the histogram, as ``Chart.histogram`` takes it.
     """
+    marks = mark_options("histplot", z_index=z_index)
     if x is not None and y is not None:
         unused = {
             "series": series is not None,
@@ -151,7 +159,18 @@ def histplot(
             )
         check_choice(normalize, "histplot normalize", tuple(_MEASURES))
         return _histplot_2d(
-            data, x, y, weight, normalize, bins, binwidth, binrange, discrete, colors, options
+            data,
+            x,
+            y,
+            weight,
+            normalize,
+            bins,
+            binwidth,
+            binrange,
+            discrete,
+            colors,
+            options,
+            marks.z_index,
         )
     if colors is not None:
         raise ValueError(
@@ -332,6 +351,7 @@ def histplot(
         # Densities over one series' bars show through them, as in Seaborn.
         fill_opacity=0.5 if kde and not grouped and element == "bars" else None,
         label=None if series else name,
+        z_index=marks.z_index,
     )
     if kde_table is not None:
         # Along the binned axis: along y over horizontal bins.
@@ -367,6 +387,9 @@ def kdeplot(
     levels: int | Sequence[float] | None = None,
     thresh: float | None = None,
     colors: str | Sequence[str] | None = None,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
+    labels: SeriesLabels | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -395,9 +418,22 @@ def kdeplot(
     of the panel's rows, so all of them together integrate to 1.
     ``cumulative`` integrates them; ``filled`` fills under them. A series
     with fewer than two distinct values has no density.
+
+    ``z_index``, ``encode``, and ``labels`` go to the density curves (lines,
+    or with ``filled``, areas), as ``Chart.line`` and ``Chart.area`` take
+    them. They read the data's columns, not the density; those beside the
+    value and the series must have one value per series. A bivariate
+    density's contours take ``z_index`` alone.
     """
     facet_row, facet_column = facets(options, "kdeplot")
     if x is not None and y is not None:
+        for option, value in (("encode", encode), ("labels", labels)):
+            if value is not None:
+                raise ChartError(
+                    f"kdeplot {option}: a bivariate density's contours take none; drop "
+                    f"{option}, or give x or y alone",
+                    path=option,
+                )
         return _bivariate(
             data,
             x,
@@ -417,7 +453,17 @@ def kdeplot(
             facet_column,
             options,
             weight,
+            mark_options("kdeplot", z_index=z_index).z_index,
         )
+    marks = mark_options(
+        "kdeplot",
+        z_index=z_index,
+        encode=encode,
+        labels=labels,
+        channels=_AREA_CHANNELS if filled else _LINE_CHANNELS,
+        labels_of=SeriesLabels,
+        edges=filled,
+    )
     for name, given in (("levels", levels), ("thresh", thresh)):
         if given is not None:
             raise ValueError(
@@ -436,6 +482,7 @@ def kdeplot(
         axes=[name, *([weight] if weight is not None else [])],
     )
     weight_values = weight_column(source, weight, "kdeplot", [name])
+    outputs = Outputs(source, marks, {name, *variables})
     rows = complete(len(column), column, weight_values, levels_of=list(variables.values()))
     w = weights_of(weight_values, rows, weight, "kdeplot")
     dropped = len(column) - len(rows)
@@ -458,6 +505,17 @@ def kdeplot(
         value_kind=column.kind,
         role="kdeplot",
         weights=w,
+        column=outputs.named("density")[0],
+    )
+    carry(
+        table,
+        outputs.per_group(
+            group(list(variables.values()), rows),
+            list(variables),
+            keys_of(variables, table, len(table[name])),
+            drawn="density",
+            instead="split the densities by it with series, or precompute one value per series",
+        ),
     )
     measured = "Cumulative probability" if cumulative else "Density"
     sentence = (
@@ -488,9 +546,10 @@ def kdeplot(
             series=series,
             fill_opacity=0.25,
             label=label,
+            **marks.primary(),
         )
     else:
-        chart.line(*xy, orient=orient, series=series, label=label)
+        chart.line(*xy, orient=orient, series=series, label=label, **marks.primary())
     return record(
         chart, Statistics("kdeplot", sentence, {"density": readable(table)}, None, dropped)
     )
@@ -512,6 +571,9 @@ def ecdfplot(
     weight: str | None = None,
     normalize: Literal["probability", "percent", "count"] = "probability",
     complementary: bool = False,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
+    labels: SeriesLabels | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -520,8 +582,21 @@ def ecdfplot(
     from 0 to 1, ``"percent"``, or ``"count"``), or above it with
     ``complementary=True``; of ``y`` alone, steps along y, read by y. A
     group of one distinct value has no step and shows as a point, read as
-    points are, x first: along y, its share before its value."""
+    points are, x first: along y, its share before its value.
+
+    ``z_index``, ``encode``, and ``labels`` go to the steps, as
+    ``Chart.line`` takes them (a group's point takes their ``z_index`` and
+    color channel). They read the data's columns; those beside the value
+    and the series must have one value per series."""
     axis, name = _one_axis(x, y, "ecdfplot")
+    marks = mark_options(
+        "ecdfplot",
+        z_index=z_index,
+        encode=encode,
+        labels=labels,
+        channels=_LINE_CHANNELS,
+        labels_of=SeriesLabels,
+    )
     check_choice(normalize, "ecdfplot normalize", tuple(_SHARES))
     facet_row, facet_column = facets(options, "ecdfplot")
     source = Source(data)
@@ -536,15 +611,17 @@ def ecdfplot(
         axes=[name, *([weight] if weight is not None else [])],
     )
     weight_values = weight_column(source, weight, "ecdfplot", [name])
+    outputs = Outputs(source, marks, {name, *variables})
     rows = complete(len(column), column, weight_values, levels_of=list(variables.values()))
     w = weights_of(weight_values, rows, weight, "ecdfplot")
     dropped = len(column) - len(rows)
     v = values(column)
-    (share,) = fresh([normalize.capitalize()], {name, *variables})
+    (share,) = outputs.named(normalize.capitalize())
     keys: list[np.ndarray] = []
     positions: list[np.ndarray] = []
     heights: list[np.ndarray] = []
-    for key, members in group(list(variables.values()), rows):
+    grouping = group(list(variables.values()), rows)
+    for key, members in grouping:
         # A point per distinct value, which tooltips and the keyboard read:
         # no riser from 0 (or the whole) before the first, which would read
         # as an observation.
@@ -554,19 +631,26 @@ def ecdfplot(
         positions.append(distinct)
         heights.append(steps)
         keys.append(np.tile(np.asarray(key, dtype=np.int64), (len(distinct), 1)))
+    stacked = _stack(keys, len(variables))
+    table = keyed_table(variables, stacked)
+    table[name] = number_column(np.concatenate(positions) if positions else [], column.kind)
+    table[share] = number_column(np.concatenate(heights) if heights else [])
+    carry(
+        table,
+        outputs.per_group(
+            grouping,
+            list(variables),
+            stacked,
+            drawn="distribution",
+            instead="split the steps by it with series, or precompute one value per series",
+        ),
+    )
+    sizes = [len(p) for p in positions]
 
     def steps_of(chosen: Sequence[bool]) -> dict[str, Column]:
-        """The chosen groups' steps, as one table."""
-        out = keyed_table(
-            variables, _stack([k for k, c in zip(keys, chosen, strict=True) if c], len(variables))
-        )
-        kept = [p for p, c in zip(positions, chosen, strict=True) if c]
-        out[name] = number_column(np.concatenate(kept) if kept else [], column.kind)
-        shares = [h for h, c in zip(heights, chosen, strict=True) if c]
-        out[share] = number_column(np.concatenate(shares) if shares else [])
-        return out
+        """The chosen groups' steps."""
+        return subset(table, np.repeat(np.asarray(chosen, dtype=bool), sizes))
 
-    table = steps_of([True] * len(keys))
     # A group of one distinct value has no step to draw: it shows as a point.
     single = [len(p) == 1 for p in positions]
     side = "above" if complementary else "at or below"
@@ -597,6 +681,7 @@ def ecdfplot(
             series=series,
             curve="step-after",
             label=label,
+            **marks.primary(),
         )
     else:
         # Steps and points series by series, so that series keep their order
@@ -613,9 +698,10 @@ def ecdfplot(
                     data=steps_of(stepped),
                     curve="step-after",
                     label=label,
+                    **marks.primary(),
                 )
             if any(points):
-                chart.point(*xy, data=steps_of(points), label=label)
+                chart.point(*xy, data=steps_of(points), label=label, **marks.stand_in())
     return record(chart, Statistics("ecdfplot", sentence, {"ecdf": readable(table)}, None, dropped))
 
 
@@ -629,11 +715,14 @@ def rugplot(
     color: str | None = None,
     series_order: Sequence[Any] | None = None,
     length: float = 8,
+    z_index: float | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
     """A tick per value of ``x`` along the bottom of the plot (or of ``y``
-    along its left), ``length`` pixels long, per ``series``."""
+    along its left), ``length`` pixels long, per ``series``. ``z_index``
+    goes to the rug, as ``Chart.rug`` takes it."""
+    marks = mark_options("rugplot", z_index=z_index)
     axis, name = _one_axis(x, y, "rugplot")
     facet_row, facet_column = facets(options, "rugplot")
     source = Source(data)
@@ -666,6 +755,7 @@ def rugplot(
         series=series,
         length=length,
         label=None if series else name,
+        z_index=marks.z_index,
     )
     return record(
         chart, Statistics("rugplot", sentence, {"values": readable(table)}, None, dropped)
@@ -687,6 +777,7 @@ def _histplot_2d(
     discrete: Any,
     colors: str | Sequence[str] | None,
     options: HelperOptions,
+    z_index: float | None,
 ) -> Chart:
     """histplot of two columns: cells counting pairs in each axis' bins."""
     facet_row, facet_column = facets(options, "histplot")
@@ -793,6 +884,7 @@ def _histplot_2d(
         normalize=normalize,
         colors=colors,
         label=measured,
+        z_index=z_index,
     )
     filled = np.argwhere(counts > 0)
     cells = {
@@ -918,10 +1010,13 @@ def densities(
     role: str,
     common_grid: bool = False,
     weights: np.ndarray | None = None,
+    column: str | None = None,
 ) -> tuple[dict[str, Column], str, str]:
     """Each group's density on its own grid (or with ``common_grid`` on its
     panel's, as Seaborn's histograms put theirs), as one table, and how it
-    was computed; rows weigh as `weights` say, when given."""
+    was computed; rows weigh as `weights` say, when given. The density's
+    column is `column`, or "density" where x and the variables have no
+    such name."""
     if not (bw_adjust > 0 and math.isfinite(bw_adjust)):
         raise ValueError(
             f"{role} bw_adjust: expected a positive number; received {shown(bw_adjust)}"
@@ -1009,7 +1104,8 @@ def densities(
         densities.append(density)
     table = keyed_table(variables, _stack(keys, len(variables)))
     table[name] = number_column(np.concatenate(grids) if grids else [], value_kind)
-    (column,) = fresh(["density"], {name, *variables})
+    if column is None:
+        (column,) = fresh(["density"], {name, *variables})
     table[column] = number_column(np.concatenate(densities) if densities else [])
     rule = (
         "Scott's rule"
@@ -1184,6 +1280,7 @@ def _bivariate(
     facet_column: str | None,
     options: HelperOptions,
     weight: str | None,
+    z_index: float | None,
 ) -> Chart:
     """kdeplot of two columns: contours of the density of each facet panel, on one grid."""
     if series is not None:
@@ -1259,6 +1356,7 @@ def _bivariate(
             variant="bands" if filled else None,
             colors=colors,
             label="density",
+            z_index=z_index,
         )
     levels_table = {"proportion": found["proportions"], "density": found["thresholds"]}
     return record(

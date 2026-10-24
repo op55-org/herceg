@@ -5,7 +5,7 @@ import type { Chart } from "./dom/handle.ts";
 import { checkFonts, EMBED_FONTS } from "./fonts/prepared.ts";
 import type { FontOptions, Fonts } from "./fonts/registry.ts";
 import { describeChart } from "./model/describe.ts";
-import { type ChartConfig, ChartModel, STATIC_RASTER_RATIO } from "./model/model.ts";
+import { ChartModel, STATIC_RASTER_RATIO } from "./model/model.ts";
 import { titleText } from "./model/titles.ts";
 import { staticCompilers } from "./render/compilers.ts";
 import { EXPORT_FONTS, EXPORT_SCENE, type ExportsScene } from "./render/export-scene.ts";
@@ -14,6 +14,7 @@ import { drawPdfPage } from "./render/pdf.ts";
 import { type DocumentInfo, PdfWriter } from "./render/pdf-document.ts";
 import { measurePdfText } from "./render/pdf-fonts.ts";
 import { type PdfPageOptions, paperPage } from "./render/pdf-paper.ts";
+import type { StaticOptions } from "./render/static.ts";
 import type { Scene } from "./scene/scene.ts";
 
 export type { PdfPageOptions } from "./render/pdf-paper.ts";
@@ -37,12 +38,6 @@ export interface PdfExportOptions extends PdfPageOptions, FontOptions {
   fonts?: Fonts;
 }
 
-export interface PdfOptions extends ChartConfig {
-  /** CSS pixels; the page measures 0.75 points per pixel. */
-  width: number;
-  height: number;
-}
-
 /**
  * Vector PDF 1.4 of one chart or a nonempty list, one chart per page.
  * Mounted charts retain their size, zoom, hidden series, and highlighted
@@ -51,14 +46,19 @@ export interface PdfOptions extends ChartConfig {
  * heatmaps are images.
  */
 export function renderToPDF(
-  target: Chart | PdfOptions | readonly (Chart | PdfOptions)[],
+  target: Chart | StaticOptions | readonly (Chart | StaticOptions)[],
   settings: PdfExportOptions = {},
 ): Uint8Array {
-  const targets: readonly (Chart | PdfOptions)[] = Array.isArray(target)
+  const targets: readonly (Chart | StaticOptions)[] = Array.isArray(target)
     ? target
-    : [target as Chart | PdfOptions];
+    : [target as Chart | StaticOptions];
   if (!targets.length)
     throw new RangeError("renderToPDF charts: expected at least one chart; supply a nonempty list");
+  // Native tooltips are pointer targets, which a PDF has none of.
+  if ((settings as { tooltip?: unknown }).tooltip !== undefined)
+    throw new TypeError(
+      'renderToPDF tooltip: a PDF shows no tooltips; export SVG with renderToSVG(chart, { tooltip: "title" }) for them',
+    );
   // The fonts charts measure with, a mounted chart's or the options': one set for the document.
   let fonts = settings.fonts;
   let charts: Fonts | undefined;
@@ -66,7 +66,7 @@ export function renderToPDF(
     const supplied =
       EXPORT_SCENE in item
         ? (item as unknown as ExportsScene)[EXPORT_FONTS]
-        : (item as PdfOptions).fonts;
+        : (item as StaticOptions).fonts;
     // Static options are laid out with the document's fonts; a mounted chart
     // was measured with its own, which its page must draw in.
     if (fonts && supplied && fonts !== supplied && EXPORT_SCENE in item)
@@ -115,9 +115,10 @@ export function renderToPDF(
     if (targets.length === 1) singleInfo = info;
   };
   for (const item of targets) {
-    if (EXPORT_SCENE in item) (item as unknown as ExportsScene)[EXPORT_SCENE](add);
+    if (EXPORT_SCENE in item)
+      (item as unknown as ExportsScene)[EXPORT_SCENE]((scene, model) => add(scene, model));
     else {
-      const options = item as PdfOptions;
+      const options = item as StaticOptions;
       // Validate fitting before laying out a chart with invalid dimensions.
       const page = paperPage(options.width, options.height, settings, resolver);
       const model = new ChartModel(options, NO_PAGE, ...staticCompilers());

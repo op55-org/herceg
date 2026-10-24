@@ -312,12 +312,14 @@ export interface Chart {
    */
   toSVG(options?: SvgSizing): string;
   /**
-   * PNG of the current state, as `toSVG` exports it, at `scale` times the
-   * chart's size in CSS pixels (2 by default); a transparent background
-   * stays transparent. Loads its encoder the first time. For a PDF of the
-   * current state, see `renderToPDF` in herceg/pdf.
+   * PNG of the current state, as `toSVG` exports it, at the chart's size
+   * and `dpi` image pixels per inch (96, a pixel per CSS pixel, by
+   * default), which the PNG records; a transparent background stays
+   * transparent. Loads its encoder the first time. `renderToImage` in
+   * herceg/image writes JPEG and WebP and takes a background; `renderToPDF`
+   * in herceg/pdf writes PDF.
    */
-  toPNG(options?: { scale?: number }): Promise<Blob>;
+  toPNG(settings?: { dpi?: number }): Promise<Blob>;
   destroy(): void;
 }
 
