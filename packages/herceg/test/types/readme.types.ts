@@ -122,6 +122,23 @@ rule(deploys, { x: "at", label: { field: "build" } });
 rule(deploys, { x: "version" });
 // @ts-expect-error times cannot be drawn as text
 rule(deploys, { x: "at", label: { field: "at" } });
+
+// Labels made of parts, and labels following series.
+rule({ y: 250, label: { content: ["SLO ", { value: true, format: { number: ".0f" } }] } });
+bar(table({ region: ["N", "S"], q1: [1, 2] }), {
+  x: "region",
+  y: "q1",
+  labels: { content: ["n = ", { value: true }] },
+});
+const services = table({ time: time(timestamps), ms: p50Latency, service: serviceNames });
+line(services, {
+  id: "latency",
+  x: "time",
+  y: "ms",
+  color: "service",
+  labels: { at: "last", content: [{ series: true }, " ", { value: true }] },
+});
+text({ from: { mark: "latency", at: "visible-end" }, label: "now" });
 region({ x1: new Date(0), x2: new Date(), label: "window" });
 region(deploys, { x1: "at", x2: Date.now(), label: { field: "version" } });
 text({ x: 1, y: 2, label: "note" });

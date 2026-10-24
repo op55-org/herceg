@@ -728,6 +728,7 @@ bar(sites, {
 | Channel form | Means |
 | --- | --- |
 | `{ field, scale? }` | A category field's values through the chart's scale `scale` (colors read `"color"`, dashes `"dash"`, shapes `"symbol"` by default). |
+| `{ field, scale: { type: "identity" } }` | A field's values as they are: colors, dashes, and shapes from category fields; widths, sizes, and opacities from number fields. A named scale of `type: "identity"` does the same. |
 | `{ series: true, scale }` | The series' names through the chart's scale `scale` (required), for marks whose series are not a field's values (value fields, labelled bands). |
 | `{ value }` | A constant. |
 | `{ condition: { when, then, otherwise } }` | `then` on rows where the expression `when` holds, `otherwise` elsewhere. |
@@ -740,12 +741,38 @@ whose colors all go through it.
 
 Lines take `color`, `stroke`, `dash`, `strokeWidth`, and `opacity`
 channels; bars `color`, `fill`, `stroke`, `strokeWidth`, and `opacity`;
-areas `color`, `fill`, `stroke`, and `opacity`. A line or area has one look
-per series, so its channels read values constant within each series (a
-series field, or a field that follows it), and refuse others, also when
-streamed rows change them (the check reads only the new rows). Bars read
-each row's. Points take `color` (a category or number field), `symbol`,
-`size`, and `fillOpacity` as options of their own. The flat options
+areas `color`, `fill`, `stroke`, and `opacity`; points `color`, `fill`,
+`size` (an area in square pixels), `opacity` (their fill's), and `symbol`,
+with `stroke` and `strokeWidth` as values. Every output is checked against
+the channel drawing it: a scale's `map` of shapes read as colors is
+refused, naming the option. Identity scales stand for nothing: they split
+no series and make no legend entries.
+
+Bars and points read each row's look. A line or area keeps one series
+while its look changes along it: where a channel reads rows (a field other
+than the series', a condition, an identity scale), a piece of line takes
+the look of the observation it arrives at, and a step's flat run the look
+of the value it holds. So a forecast flagged on its own rows is drawn
+dashed from the last observation on:
+
+```ts
+line(sales, {
+  x: "month",
+  y: "units",
+  encode: {
+    dash: { condition: { when: col("forecast").eq(true), then: "--", otherwise: "-" } },
+  },
+});
+```
+
+The looks share the series' path, so tangents are shared and dashes carry
+on across; where two looks meet, each paints half the join, so translucent
+looks do not darken their seams; level of detail keeps every run; markers
+take their own rows' looks; and the legend lists the series once, in its
+first look. A line colored by a field other than its series' stands for
+that field's value in the legend while every one of its rows has it, and
+for itself where the value changes along it. Series whose positions do not ascend, and the
+layers of a stack, refuse looks that change. The flat options
 (`stroke`, `fill`, `strokeWidth`, `dash`, `opacity`, `fillOpacity`,
 `strokeOpacity`) style the mark's body; `opacity` is the whole mark's, and
 `strokeOpacity` its outline's.
@@ -911,7 +938,7 @@ text(peaks, {
 | `label` | Means |
 | --- | --- |
 | `"text"` | Constant text: short for `{ text }`. |
-| `text` or `field` | Constant text, or each row's value of a category or number field. |
+| `text`, `field`, or `content` | Constant text, each row's value of a category or number field, or parts (see below). |
 | `format` | How numbers are written: Intl options, or `{ number }` / `{ time }` patterns. |
 | `style` | A text style: `fontSize`, `fontWeight`, `color`, `halo`, `background` (a box: `fill`, `stroke`, `radius`), `padding`, for text `align` (`"start"`, `"center"`, `"end"` at its point), and `verticalAlign` (`"top"`, `"middle"`, `"bottom"`: which of the block's edges, box and all, is at its place; a horizontal rule's label goes below, on, or above it, a region's below, on, or above its edge). |
 | `place.attachment` | Where on a rule (`"start"`, `"center"`, `"end"`, left to right or top to bottom; the end by default) or along a region's side. |
@@ -925,6 +952,49 @@ in view say so, or the chart sets a domain. An annotation in a chart with
 nothing else gives the axes its values. On a category axis, a number is a
 band index (0 is the first band's center, -0.5 its edge); `{ data: "Feb" }`
 places at a band by its value.
+
+Labels made of parts say more than a field: `content` lists text and
+parts, `{ field }` (each row's value, times in the chart's zone),
+`{ series: true }`, and `{ value: true }` (the value a rule, a bar, or a
+series' label stands at), each with a `format`. Bars' `labels` take it too.
+
+```ts
+rule({ y: 250, label: { content: ["SLO ", { value: true, format: { number: ".0f" } }] } });
+bar(sales, { x: "region", y: "q1", labels: { content: ["n = ", { value: true }] } });
+```
+
+Lines and areas label each series they draw with `labels`: at its
+`"first"` or `"last"` observation drawn, or where it enters or leaves the
+view (`"visible-start"`, `"visible-end"`), in the series' color, before
+its start or after its end; `place: { outside: true }` puts them beside
+the axis, in room the chart keeps (`reserve: false` keeps none). A band
+names the edge they follow (`edge: "y2"`). Fields are read at the
+observation the label stands at: where the line enters or leaves the view,
+the one it arrives at there as drawn (on a step's hold, the one whose
+value it holds). Where the view cuts a stack split by a `series` field,
+which row stands there is not known: labels at the view's edges write
+series and values, not fields. Text follows another
+mark's series with `from`, drawn where it is listed among the marks:
+
+```ts
+line(services, {
+  id: "latency",
+  x: "time",
+  y: "ms",
+  color: "service",
+  labels: { at: "last", content: [{ series: true }, " ", { value: true }] },
+});
+text({ from: { mark: "latency", at: "visible-end" }, label: "now" });
+```
+
+With `legend: true`, an annotation is listed in the legend by its label (a
+rule as a line, a region as a box), and its entry hides and shows it; one
+whose label is a field's makes an entry per value, hiding its rows of that
+value. A legend's `include: [{ mark }]` lists it too.
+
+```ts
+rule(deploys, { id: "deploys", x: "time", label: { field: "kind" }, legend: true });
+```
 
 Annotations paint in mark order, as every mark does (see [Paint
 order](#paint-order)): list a region first to shade underneath the data,
@@ -1288,16 +1358,17 @@ not both. `fillOpacity` names a field mapped from
 0.15 to opaque. `color` names a number or time field colored on a continuous
 scale, with a color legend, or a category field whose values take the
 chart's `"color"` scale (see [Colors and channels](#colors-and-channels): its
-fixed map, else the theme's palette in the field's order, cycling through at
-most its first 254 colors), keeping their colors as the data streams, with
+fixed map, else the theme's palette in the field's order), keeping their
+colors as the data streams, with
 a key of colors below the legend when the points' series are another
 field's or `series: false` (series then appear in the legend in a neutral
 color); otherwise a category `color` names the series, colored by value. Marks with the same color scale, or the same key of sizes,
 shapes, or colors, share one legend.
 `symbol` is one shape (`"circle"`, `"square"`, `"triangle"`, `"diamond"`,
 `"cross"` (a plus), `"star"`, `"wye"`, `"triangle-down"`, `"x"`) or a category
-field whose values take the first eight shapes in that order, with a key
-unless the field also splits series: `{ field: "origin" }`, or the field's name. A name that is both a
+field whose values take the `"symbol"` scale's shapes (`scales: { symbol: {
+type: "ordinal", map } }`; by default the first eight in that order), with a
+key unless the field also splits series: `{ field: "origin" }`, or the field's name. A name that is both a
 shape and a field is refused rather than guessed at; `{ field }` encodes the
 field, and specs always name fields that way. Every shape covers the area of a circle of the same radius. Points
 missing a value they encode are not drawn, and tooltips name the encoded
@@ -1791,8 +1862,9 @@ the notes), — not yet (refused with an error), · not applicable.
 - Lines, areas, and bars take channels (`color`, `encode`), scales of
   categories, and looks by value (`style.by`); lines and areas take
   `continuity` and `where`, and lines markers, on every renderer and export.
-  Points take category colors through the color scale but no `encode`;
-  annotations take label objects and coordinates but no channels.
+  Points take the same channels (`color`, `size`, `opacity`, `symbol`)
+  through scales and conditions; annotations take label objects and
+  coordinates but no channels.
 - Line and area gaps preserve isolated finite rows as stroke-sized dots on
   every renderer and export. Bars colored by their own category keep full
   bands, labels, and category legends. Text halos take a color or turn off
@@ -1890,7 +1962,7 @@ the notes), — not yet (refused with an error), · not applicable.
   nodes, surface samples) have no one row to show, custom marks take them
   with series, and network nodes do not yet.
 - Value animation moves unstacked, unlabeled bars, points, lines and areas
-  along x whose rows stay, rules, and pie slices (see
+  along x whose rows stay and that no labels follow, rules, and pie slices (see
   [Animation](#animation)), in charts of one panel; lines and areas along
   y show their new values at once.
 - Every mark draws in SVG, Canvas, static SVG, and PDF; large point series
@@ -3462,8 +3534,7 @@ well-formed option the chart does not draw, saying what to give instead),
 Messages read "location: problem; correction". Mark functions throw them
 for their own options (`line(table, { y: "p90" })` with no such field),
 with a path within those options. The types take some options before
-charts draw them (marks' `zIndex`, bars' `width: { px }`, lines' `labels`,
-identity scales, and others listed in docs/architecture.md, "Spec
+charts draw them (lines' `labels` and others listed in docs/architecture.md, "Spec
 contracts"); a chart refuses each with `"unsupported"` rather than
 drawing it otherwise.
 
@@ -3854,8 +3925,9 @@ A change shows at once when the plot moves (labels wider than the margin had
 room for: margins only grow, so the next change moves), categories or series
 appear or go, a legend wraps differently, slices change order (with `sort:
 "value"`, the default, when values pass each other), a line's x positions
-change, or a mark that cannot move (stacked or labeled bars, text, heatmaps,
-custom marks, or a line or point that cannot) shares an axis that moves;
+change, or a mark that cannot move (stacked or labeled bars, lines and areas
+labels follow, text, heatmaps, custom marks, or a line or point that cannot)
+shares an axis that moves;
 with axes that stay, such marks show their new values while the others move.
 So do appended and dropped rows, changes while values move and until the data
 has been still for a change's duration, changes of options and of hidden
@@ -4121,10 +4193,10 @@ The short form `legend` and `legend({ ... })` take:
 | `columns`, `rows` | Entries in a grid of this many columns, or rows; one of them. |
 | `order` | `"row"` fills row by row (the default with `columns`), `"column"` down each column (the default with `rows`). |
 | `title` | A string, or `{ text, style? }`, above the entries. |
-| `entries` | Entries of your own, for now alone, with `include: []`: `[{ key, label, swatch? \| sample?: { mark }, targets?: [{ mark }] }]`. A `swatch` is `{ type: "line", stroke, strokeWidth?, dash? }`, `{ type: "rect", fill, stroke? }`, `{ type: "symbol", symbol?, fill, stroke?, size? }` (a point's shape, `"circle"` by default; lines, boxes, and symbols take `opacity`), or `{ type: "composite", parts }`, drawn over one another and centered; `sample` draws a mark's look, its symbol for points; entries with `targets` hide and show those marks, others explain. |
+| `entries` | Entries of your own, after what `include` lists, each with a `key` of its own: `[{ key, label, swatch? \| sample?: { mark }, targets? }]`. A `swatch` is `{ type: "line", stroke, strokeWidth?, dash? }`, `{ type: "rect", fill, stroke? }`, `{ type: "symbol", symbol?, fill, stroke?, size? }` (a point's shape, `"circle"` by default; lines, boxes, and symbols take `opacity`), or `{ type: "composite", parts }`, drawn over one another and centered; `sample` draws a mark's look, its symbol for points. `targets` are what an entry hides and shows: `{ mark }` whole, `{ mark, field, values }` (a series field's series, or the rows of points, unstacked bars, and annotations holding the values), or `{ scale, values }` in every mark reading that scale; entries without targets explain. |
 | `swatches` | `"mark"`: swatches that look like the marks: a line of a line's width and dash, with its markers, a box of an area's or bar's fill (a bar's outline and opacity too), a point's symbol. |
 | `style` | `legendLabel`, `legendTitle`, `tickLabel`. |
-| `include` | What it lists: `[{ mark, channel }]`, a mark's `id` and `"series"`, `"color"`, `"size"`, or `"symbol"`, or `[]` for its `entries` alone; every scale by default. A `legend()` listing scales takes their place in the automatic legend. |
+| `include` | What it lists: `{ mark, channel }` (a mark's `id` and `"series"`, `"color"`, `"size"`, or `"symbol"`), `{ scale }` (a scale of categories in `scales`, by name), or `{ mark }` (a mark whole: its series, or an annotation's entries); `[]` for its `entries` alone; every scale by default. A `legend()` listing scales takes their place in the automatic legend. |
 | `id`, `show` | (`legend()` only) A name of its own; `false` draws none. |
 
 An entry stands for a value (see Colors and channels): the series of every
@@ -4140,7 +4212,12 @@ splits its series is named by `channel: "color"` or `"series"` alike, and a
 reference to a scale the mark does not have is an error naming those it has.
 What a mark has comes of its options, whatever its rows hold: a point with
 a `size` field has a size scale before its rows give it values, and a
-legend or colorbar naming it shows it once they do.
+legend or colorbar naming it shows it once they do. Rules, regions, and
+text with `legend: true` (or a legend's `include: [{ mark }]`) are listed
+by their labels, one entry or one per value of the label's field, drawn as
+they draw and hiding them; hidden, they still count toward the domains they
+count toward. Legends listed on one side stack in the order `guides` gives
+them, the first nearest the plots.
 
 ```ts
 createChart(element, {
@@ -4160,7 +4237,7 @@ contour's bands are boxes between their levels, ticked at them.
 
 | Option | Description |
 | --- | --- |
-| `scale` | `{ mark, channel: "color" }`; the chart's only color scale by default. |
+| `scale` | `{ mark, channel: "color" }`: a mark's color ramp, a map's included; the chart's only color scale by default. |
 | `place` | A side, `{ side: "right" }` by default: beside the plots it stands, low values at the bottom; above or below them it lies, low values at the left. |
 | `title` | A string, or `{ text, style? }`, above it. |
 | `ticks`, `format`, `tick`, `labels`, `layers` | As an axis' along the bar, its tick marks on the bar's outer edge, out of it or (`direction: "in"`) into it (a contour's ticks are at its levels by default). Lying colorbars take label rows and turns as x axes do. |

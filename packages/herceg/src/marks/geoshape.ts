@@ -11,7 +11,7 @@ import { extendExtent } from "../geo/project.ts";
 import { anchorOf, ShapeIndex, showsIn, visibleAnchor } from "../geo/shape-index.ts";
 import { boxOfCodes, pixelShape, planeAnchor, planeBoxOf } from "../geo/shapes.ts";
 import { ItemViews } from "../model/item-views.ts";
-import type { LegendEntry } from "../model/legend.ts";
+import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PolygonGeometry, ShapeTransform } from "../scene/scene.ts";
@@ -27,6 +27,7 @@ import {
   type LayoutResult,
   memberOf,
 } from "./layout-mark.ts";
+import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type ChartMark,
@@ -34,6 +35,7 @@ import {
   DIM,
   frozen,
   type GlyphKey,
+  type LegendScale,
   type MARK,
   painted,
   requireField,
@@ -200,6 +202,16 @@ export class GeoShapeMark implements GeoLayer {
       const key = categoryKey(id, category);
       return { key, label: category, color: color(key) };
     });
+  }
+
+  /** Its color ramp, of a number `color`, which guides name: a colorbar shows it once it has values. */
+  get legendScales(): readonly LegendScale[] {
+    return this.#colorKind === "number" ? ["ramp"] : [];
+  }
+
+  /** Its color ramp's legend, which guides naming the layer show. */
+  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
+    return legendParts(...this.scales(theme, locale, paint));
   }
 
   scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {

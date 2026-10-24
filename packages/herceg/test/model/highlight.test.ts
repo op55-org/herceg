@@ -53,6 +53,10 @@ function highlighted(source: Table, marks: ChartMark[]) {
 const ofKind = <G extends Geometry>(geometry: Geometry[], kind: string) =>
   geometry.filter((g) => g.kind === kind) as G[];
 
+/** A span a highlight's run clip keeps, as its SVG clip path writes it (`clipped`, model/highlight.ts). */
+const clipSpan = (x: number, y: number, width: number, height?: number) =>
+  `M${x} ${y}h${width}v${height === undefined ? "" : `${height}h`}`;
+
 describe("highlighting marks' features", () => {
   function featured(source: Table, marks: ChartMark[]) {
     const store = selectionStore(source);
@@ -347,7 +351,7 @@ describe("highlighting", () => {
     const svg = renderSvg(model.scene(estimateText), {});
     const [panel] = model.panels();
     const [a, b] = [panel!.x.map(1), panel!.x.map(2)];
-    expect(svg).toContain(`<rect x="${a}" y="${panel!.plot.y}" width="${b - a}"`);
+    expect(svg).toContain(clipSpan(a, panel!.plot.y, b - a));
     const [dots] = ofKind<PointGeometry>(drawn, "point");
     expect(dots!.count).toBe(1);
     // The dimmed line draws at a fraction of its opacity.
@@ -374,9 +378,7 @@ describe("highlighting", () => {
     const cap = scene.theme.style.line.strokeWidth / 2;
     const end = second!.path.coords[2]!;
     expect(first).toBeGreaterThan(panel!.x.map(0));
-    expect(svg).toContain(
-      `<rect x="${first - cap}" y="${panel!.plot.y}" width="${end - first + cap}"`,
-    );
+    expect(svg).toContain(clipSpan(first - cap, panel!.plot.y, end - first + cap));
   });
 
   it("clips a line along y to its runs of selected rows, along y", () => {
@@ -392,9 +394,7 @@ describe("highlighting", () => {
     const { plot } = panel!;
     const [a, b] = [panel!.y.map(10), panel!.y.map(20)];
     const [top, bottom] = [Math.min(a, b), Math.max(a, b)];
-    expect(svg).toContain(
-      `<rect x="${plot.x}" y="${top}" width="${plot.width}" height="${bottom - top}"`,
-    );
+    expect(svg).toContain(clipSpan(plot.x, top, plot.width, bottom - top));
   });
 
   it("clips a stack along y of a series field through its own edges", () => {
@@ -410,7 +410,7 @@ describe("highlighting", () => {
     expect(lit.map(upper)).toEqual(plain.map(upper));
     const [panel] = model.panels();
     const [a, b] = [panel!.y.map(0), panel!.y.map(20)];
-    const whole = `<rect x="${panel!.plot.x}" y="${Math.min(a, b)}" width="${panel!.plot.width}" height="${Math.abs(b - a)}"`;
+    const whole = clipSpan(panel!.plot.x, Math.min(a, b), panel!.plot.width, Math.abs(b - a));
     for (const g of lit)
       expect(g.draw.svg(g, { theme: scene.theme, encodeRaster: undefined })).toContain(whole);
   });
@@ -444,7 +444,7 @@ describe("highlighting", () => {
       (g) => g.fillOpacity === 0.85 && g.key.includes('"A"'),
     )!;
     const [d, f] = [panel.y.map(0), panel.y.map(2)];
-    const whole = `<rect x="${panel.plot.x}" y="${Math.min(d, f)}" width="${panel.plot.width}" height="${Math.abs(f - d)}"`;
+    const whole = clipSpan(panel.plot.x, Math.min(d, f), panel.plot.width, Math.abs(f - d));
     expect(lit.draw.svg(lit, { theme: scene.theme, encodeRaster: undefined })).toContain(whole);
   });
 
@@ -481,7 +481,7 @@ describe("highlighting", () => {
     expect(lit.map(upper)).toEqual(plain.map(upper));
     const [panel] = model.panels();
     const [left, right] = [panel!.x.map(0), panel!.x.map(3)];
-    const whole = `<rect x="${left}" y="${panel!.plot.y}" width="${right - left}"`;
+    const whole = clipSpan(left, panel!.plot.y, right - left);
     for (const g of lit)
       expect(g.draw.svg(g, { theme: scene.theme, encodeRaster: undefined })).toContain(whole);
   });
@@ -491,7 +491,10 @@ describe("highlighting", () => {
     const { store, geometry, model } = highlighted(source, [area(source, { x: "x", y: "y" })]);
     const [plain] = ofKind<AreaGeometry>(geometry(), "area");
     store.set("focus", selectWhere(col("x").ge(1)));
-    const [dimmed, selected] = ofKind<AreaGeometry>(geometry(), "area");
+    // Fills (outlines are areas of no fill, drawn apart).
+    const [dimmed, selected] = ofKind<AreaGeometry>(geometry(), "area").filter(
+      (g) => !g.key.includes("-outline"),
+    );
     expect(dimmed!.fillOpacity).toBeCloseTo(plain!.fillOpacity * DIM);
     expect(dimmed!.stroke).toBeNull();
     expect(selected!.fillOpacity).toBe(plain!.fillOpacity);
@@ -501,8 +504,8 @@ describe("highlighting", () => {
     const { plot } = panel!;
     // Past the outline's round cap at x = 3, where the area ends.
     const [one, three] = [panel!.x.map(1), panel!.x.map(3) + plain!.strokeWidth / 2];
-    expect(svg).toContain(`<rect x="${plot.x - 1}" y="${plot.y}" width="${one - plot.x + 1}"`);
-    expect(svg).toContain(`<rect x="${one}" y="${plot.y}" width="${three - one}"`);
+    expect(svg).toContain(clipSpan(plot.x - 1, plot.y, one - plot.x + 1));
+    expect(svg).toContain(clipSpan(one, plot.y, three - one));
   });
 
   it("finds runs on reversed axes, and runs of rows at one x as values", () => {
@@ -521,7 +524,7 @@ describe("highlighting", () => {
       // The cap reaches away from the run, at its end that ends the line.
       const [lo, hi] = [Math.min(pa, pb), Math.max(pa, pb)];
       const [x0, x1] = pe === lo ? [lo - cap, hi] : [lo, hi + cap];
-      return `<rect x="${x0}" y="${panel!.plot.y}" width="${x1 - x0}"`;
+      return clipSpan(x0, panel!.plot.y, x1 - x0);
     };
     expect(svg).toContain(span(0, 1, 0));
     expect(svg).toContain(span(4, 5, 5));
@@ -543,7 +546,7 @@ describe("highlighting", () => {
       const [panel] = model.panels();
       const cap = scene.theme.style.line.strokeWidth / 2;
       const [a, b] = [panel!.x.map(from) - cap, panel!.x.map(to) + cap];
-      return [renderSvg(scene, {}), `<rect x="${a}" y="${panel!.plot.y}" width="${b - a}"`];
+      return [renderSvg(scene, {}), clipSpan(a, panel!.plot.y, b - a)];
     };
     // Every row selected: the whole line, caps and all, is drawn as it is.
     const [whole, all] = rect(0, 2);
@@ -557,7 +560,7 @@ describe("highlighting", () => {
     const [panel] = log.model.panels();
     const cap = scene.theme.style.line.strokeWidth / 2;
     const [a, b] = [panel!.x.map(1) - cap, panel!.x.map(2) + cap];
-    expect(renderSvg(scene, {})).toContain(`<rect x="${a}" y="${panel!.plot.y}" width="${b - a}"`);
+    expect(renderSvg(scene, {})).toContain(clipSpan(a, panel!.plot.y, b - a));
   });
 
   it("draws selected values where rows at one x are partly selected", () => {
@@ -583,7 +586,7 @@ describe("highlighting", () => {
     const scene = stacked.model.scene(estimateText);
     const [panel] = stacked.model.panels();
     const [a, b] = [panel!.x.map(0), panel!.x.map(3)];
-    expect(renderSvg(scene, {})).toContain(`<rect x="${a}" y="${panel!.plot.y}" width="${b - a}"`);
+    expect(renderSvg(scene, {})).toContain(clipSpan(a, panel!.plot.y, b - a));
     // Row 0 has no place on a log x axis: row 1, selected with it, is a dot.
     const signed = table({ x: [-1, 1, 2], y: [1, 3, 2] });
     const log = highlighted(signed, [line(signed, { x: "x", y: "y" })]);
@@ -604,7 +607,7 @@ describe("highlighting", () => {
     const rect = (model: ChartModel, from: number, to: number, cap = 0) => {
       const [panel] = model.panels();
       const [a, b] = [panel!.x.map(from) - cap, panel!.x.map(to) + cap];
-      return `<rect x="${a}" y="${panel!.plot.y}" width="${b - a}"`;
+      return clipSpan(a, panel!.plot.y, b - a);
     };
     // A layer in x order leaves out its rows without an x, as the stack does.
     const odd = table({ x: [2, 0, Number.NaN, 1], y: [1, 2, 3, 4], g: ["a", "a", "a", "a"] });
@@ -649,7 +652,7 @@ describe("highlighting", () => {
     const [a, b] = [panel!.y.map(0), panel!.y.map(6)];
     const [top, bottom] = [Math.min(a, b) - cap, Math.max(a, b) + cap];
     expect(renderSvg(scene, {})).toContain(
-      `<rect x="${panel!.plot.x}" y="${top}" width="${panel!.plot.width}" height="${bottom - top}"`,
+      clipSpan(panel!.plot.x, top, panel!.plot.width, bottom - top),
     );
   });
 
@@ -670,7 +673,9 @@ describe("highlighting", () => {
       area(unsorted, { x: "x", y: "y", fill: "#0000ff80", fillOpacity: 0.5 }),
     ]);
     areas.store.set("focus", selectWhere(true));
-    const fills = ofKind<AreaGeometry>(areas.geometry(), "area").map((g) => g.fillOpacity);
+    const fills = ofKind<AreaGeometry>(areas.geometry(), "area")
+      .filter((g) => !g.key.includes("-outline"))
+      .map((g) => g.fillOpacity);
     const alpha = 0x80 / 255;
     expect(composite(alpha * Math.max(...fills), alpha * Math.min(...fills))).toBeCloseTo(
       alpha * 0.5,

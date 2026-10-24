@@ -203,7 +203,7 @@ describe("new marks in the browser", () => {
     chart.destroy();
   });
 
-  it("draws encoded points on canvas, with symbol swatches and a size key", () => {
+  it("draws encoded points on canvas, with symbol swatches and a size key", async () => {
     const pts = table({
       x: [1, 2, 3, 4],
       y: [1, 2, 3, 4],
@@ -214,6 +214,8 @@ describe("new marks in the browser", () => {
       renderer: "canvas",
       marks: [point(pts, { x: "x", y: "y", size: "pop", series: "kind", symbol: "kind" })],
     });
+    // A symbol field's shapes come through the feature compiler.
+    await chart.loading;
     const swatches = [...chart.root.querySelectorAll("button svg path")];
     expect(swatches).toHaveLength(2);
     // A circle is arcs; the second series' square is straight lines.
@@ -243,6 +245,7 @@ describe("new marks in the browser", () => {
       });
       const mark = point(pts, { x: "x", y: "y", radius: 20, symbol: "kind", fill: "#000000" });
       const chart = createChart(host, { renderer: "canvas", marks: [mark] });
+      await chart.loading;
       // Inside both shapes, above the grid line at y = 0.
       const x = chart.toPixel(0, { axis: "x" })!;
       const y = chart.toPixel(0, { axis: "y" })! - 8;

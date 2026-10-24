@@ -1,7 +1,7 @@
 import type { Drawing, RuleGeometry } from "../scene/scene.ts";
 import { cssFont } from "../style/style.ts";
 import { dashAttribute, escapeXml, n } from "./markup.ts";
-import { paintLines } from "./text.ts";
+import { paintLines } from "./text-items.ts";
 
 /**
  * Where a rule's label goes, on its alphabetic baseline: inside the top of

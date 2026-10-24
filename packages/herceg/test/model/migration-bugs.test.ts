@@ -250,7 +250,7 @@ describe("isolated line and area rows", () => {
             const path = g.kind === "line" ? g.path : g.upper;
             const x = Math.round(path.coords[0]! * 10) / 10;
             const y = Math.round(path.coords[1]! * 10) / 10;
-            expect(svg).toContain(`M${x} ${y}L${x} ${y}`);
+            expect(svg).toContain(`M${x} ${y}l0.02 0`);
             expect(svg).toContain('stroke-linecap="round"');
             expect(svg).toContain('stroke-width="4"');
             if (dense) expect(path.count).toBeLessThan(n);

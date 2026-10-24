@@ -1,7 +1,7 @@
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
 import { ArcPath, arcDrawing, inSector, sectorShareRadius, traceSector } from "../draw/arc.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { segmentDrawing } from "../draw/segments.ts";
-import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { ELBOW, placePieLabels, RUN } from "../layout/pie-labels.ts";
 import { fitText, oneLineText } from "../layout/text.ts";

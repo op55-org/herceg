@@ -95,8 +95,11 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
   });
   expect(own).toBeDefined();
   [...host.querySelectorAll("button")].find((button) => button.textContent === "Quiet")!.click();
-  const quiet = chart.getHiddenKeys({ panel: "a" }).filter((key) => key.startsWith('["q"'));
-  expect(quiet).toHaveLength(1);
+  // The entry's key hides the mark whole.
+  const quiet = chart
+    .getHiddenKeys({ panel: "a" })
+    .filter((key) => key.startsWith('["q"') || key.startsWith('{"mark":"q"'));
+  expect(quiet).toContain('{"mark":"q"}');
   await frame();
   model.set("_chart", { ...subplots, revision: 2 });
   const again = listener.mock.instances.at(-1) as MountedChart;

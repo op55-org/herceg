@@ -1269,7 +1269,7 @@ describe("<Chart> that cannot draw", () => {
     act(() =>
       root.render(
         <Chart height={200} onError={(error) => errors.push(error.code)}>
-          <Line data={rows} x="t" y="v" series="g" color="kind" />
+          <Line data={rows} x="t" y="v" series="g" style={{ by: { field: "kind", map: {} } }} />
         </Chart>,
       ),
     );
@@ -1299,7 +1299,7 @@ describe("<Chart> that cannot draw", () => {
       root.render(
         <Boundary>
           <Chart height={200} errorMode="throw">
-            <Line data={rows} x="t" y="v" series="g" color="kind" />
+            <Line data={rows} x="t" y="v" series="g" style={{ by: { field: "kind", map: {} } }} />
           </Chart>
         </Boundary>,
       ),

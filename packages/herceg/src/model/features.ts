@@ -8,17 +8,21 @@
 import type { Table } from "../data/table.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
-import type { Polyline } from "../lod/polyline.ts";
+import type { PointSink, Polyline } from "../lod/polyline.ts";
+import type { ContentWriter } from "../marks/features/content.ts";
+import type { TracedEdge } from "../marks/features/provenance.ts";
 import type { Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts";
 import type { RowBindings } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
 import type { TraceFrame } from "../marks/trace.ts";
 import type { Geometry } from "../scene/scene.ts";
+import type { ChannelSpec, SymbolName } from "../spec/encoding.ts";
 import type { FormatSpec, SwatchSpec } from "../spec/guides.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { clearDomain } from "./clearance.ts";
 import type { GuideKit } from "./guides.ts";
+import type { TableName } from "./identity.ts";
 import type { ChartConfig } from "./model.ts";
 
 /**
@@ -55,6 +59,16 @@ export interface FeatureCompiler {
     previous: CompiledFeatures | undefined,
     identities: Identities,
   ): CompiledFeatures;
+  /**
+   * The names of the tables marks' value fields come from, where two would
+   * take one name (model/identity.ts, `simpleNames`); throws for two tables
+   * of one name.
+   */
+  names(
+    tables: readonly (Table | undefined)[],
+    places: readonly (string | number)[],
+    last: ReadonlyMap<Table, TableName> | undefined,
+  ): (TableName | undefined)[];
 }
 
 /** What the model resolved of what series stand for (see model/identity.ts). */
@@ -66,8 +80,12 @@ export interface Identities {
   readonly scopes: readonly (string | undefined)[];
   /** Each of the compiler's `marks`' index in the chart's `marks`, which errors name. */
   readonly positions: readonly number[];
-  /** The prefix of the identity keys of `field`'s values in `table`. */
-  field(table: Table, field: string): string;
+  /**
+   * The prefix of the identity keys of category `field`'s values, which
+   * colors of the values of `table`'s field read by the mark at `index`
+   * (among the chart's marks) follow.
+   */
+  field(table: Table, field: string, index: number): string;
 }
 
 /** A configuration's mark features, compiled. */
@@ -89,12 +107,13 @@ export interface CompiledFeatures {
    */
   readonly scopes: ReadonlySet<string>;
   /**
-   * With `scales.color` declared, what layout marks' items (a pie's slices)
-   * stand for and their colors: its values, through it, as every mark's.
+   * With `scales.color` declared, what a layout mark's items (a pie's
+   * slices) stand for and their colors: its values, through it (its
+   * panel's, for a scale of each panel's own), as every mark's.
    */
-  readonly items?:
-    | { readonly prefix: string; color(value: string): string | undefined }
-    | undefined;
+  items?(
+    mark: Mark,
+  ): { readonly prefix: string; color(value: string): string | undefined } | undefined;
 }
 
 /** One mark's compiled features. */
@@ -109,6 +128,16 @@ export interface MarkFeatures {
   attach(series: Series): void;
   /** How the mark writes values in `format`, a pattern (`{ number }`, `{ time }`) included. */
   format?(format: FormatSpec, locale: string | undefined, path: string): (value: number) => string;
+  /**
+   * Labels following series the mark draws (`labels` on lines and areas,
+   * text `from` a mark), placed in `frame`'s panel after the mark is drawn
+   * there, painted where it paints (marks/features/labels.ts).
+   */
+  labels?(frame: Frame): Geometry[];
+  /** What those labels outside the plot took left and right, as last placed (`Mark.room`). */
+  room?(): [number, number];
+  /** How labels of parts (`content`: a bar's, an annotation's) are written (marks/features/content.ts). */
+  readonly content?: ContentWriter | undefined;
 }
 
 /**
@@ -123,7 +152,9 @@ export interface SeriesFeatures {
   /**
    * Traces positions [start, end) of an edge of the series into `path` as
    * `tracePath` does, a run of connected observations at a time, each
-   * reduced by `reduce`, with the crossings `where` meets between them.
+   * reduced by `reduce` into `path`, or through `sink` where it records
+   * which position each point kept is (marks/features/provenance.ts), with
+   * the crossings `where` meets between them.
    */
   trace?(
     series: Series,
@@ -133,12 +164,14 @@ export interface SeriesFeatures {
     path: Polyline,
     start: number,
     end: number,
-    reduce: (start: number, end: number) => void,
+    reduce: (start: number, end: number, sink?: PointSink) => void,
   ): void;
   /**
    * Traces positions [start, end) of a band's edges `top` and `bottom`
    * into `upper` and `lower`, a run at a time (`reduce` reducing an edge's
-   * positions into a polyline), with `where`'s crossings at their ends.
+   * positions into a polyline, through its min/max index where given),
+   * with `where`'s crossings at their ends; `indexes`, the edges' own,
+   * where the mark keeps them.
    */
   band?(
     series: Series,
@@ -149,7 +182,14 @@ export interface SeriesFeatures {
     lower: Polyline,
     start: number,
     end: number,
-    reduce: (edge: Series["y"], start: number, end: number, out: Polyline) => void,
+    reduce: (
+      edge: Series["y"],
+      start: number,
+      end: number,
+      out: PointSink,
+      index?: RangeIndex,
+    ) => void,
+    indexes?: { top: RangeIndex; bottom: RangeIndex },
   ): void;
   /** The extent of the series' drawn observations within [x0, x1], as `yExtent` gives it. */
   extent?(
@@ -165,13 +205,65 @@ export interface SeriesFeatures {
   /**
    * For a series running along y (x holds its values): the extent of
    * `values` it draws, of the rows `where` and `defined` keep and the
-   * crossings `where` adds.
+   * crossings `where` adds, placed between rows in the time x's `breaks`
+   * leave.
    */
-  across?(series: Series, values: Series["y"], log: boolean): [number, number] | undefined;
+  across?(
+    series: Series,
+    values: Series["y"],
+    log: boolean,
+    breaks?: Breaks,
+  ): [number, number] | undefined;
   /** Whether a row is drawn: false where `where` or `defined` leave it out. */
   drawn?(row: number): boolean;
+  /**
+   * Whether the series' path stops at table row `row` going `way`, as its
+   * last trace in `frame`'s panel drew it: at an observation ending a run
+   * of the path (past a `maxGap` or `breakBy` boundary, rows `defined`
+   * leaves out, or a value its scales cannot place), not at one the path
+   * goes on from to a crossing of `where`. Undefined where it keeps none.
+   */
+  pathEnds?(series: Series, frame: Frame): ((row: number, way: 1 | -1) => boolean) | undefined;
+  /** The table row each of `markers` (the series' markers, as `geometry` made them last) stands at. */
+  markerRows?(markers: Geometry): ArrayLike<number> | undefined;
+  /**
+   * For series labels follow, drawn with the other layers of their band or
+   * stack curved together: their edges as drawn on `frame`, and the
+   * position in the series of each of their points (both edges').
+   */
+  curved?(
+    series: Series,
+    edges: { readonly upper: Polyline; readonly lower: Polyline },
+    positions: readonly number[],
+    frame: TraceFrame,
+  ): void;
+  /**
+   * For series labels follow: takes the edges (a line's or an area's upper,
+   * a band's lower) of the series' last trace, which observation each point
+   * is, so a geometry drawn next without them reads none; none where the
+   * series was not traced so (a stack's layers drawn through its edges).
+   */
+  takeTrace?(): { readonly upper?: TracedEdge; readonly lower?: TracedEdge };
   /** The series' drawn observations, as a series of those rows: what text summaries read. */
   shown?(series: Series): Series;
+  /**
+   * For a band whose looks change along its series (style runs): the
+   * positions of `series` its runs end at, which layers curved together
+   * keep as points, and which positions they kept (`kept`).
+   */
+  runs?:
+    | {
+        ends(series: Series): ArrayLike<number>;
+        kept(series: Series, positions: ArrayLike<number>): void;
+      }
+    | undefined;
+  /**
+   * For a series whose looks change along it (style runs): the color,
+   * opacity, and stroke width each position of `series` (it, or its
+   * trace) is drawn in, as its stretch of line or its area's outline and
+   * dots draw it, which highlights' dots at its selected rows take.
+   */
+  lookAt?(series: Series): (position: number) => DotLook;
   /** The series' swatch as it draws, for legends that show marks' looks (`swatches: "mark"`). */
   swatch?: ((theme: Theme) => SeriesSwatch) | undefined;
   /**
@@ -179,24 +271,67 @@ export interface SeriesFeatures {
    * `style.by` per row, and which each row takes (an index into `paints`).
    */
   rows?: { readonly paints: readonly RowPaint[]; of(row: number): number } | undefined;
-  /** For points colored by a category field: each value's color through the chart's color scale. */
-  categories?: CategoryColors | undefined;
+  /** For points: what their channels give each row (`PointLooks`), which every series of the mark shares. */
+  points?: PointLooks | undefined;
   /** For bars colored by a field other than the series': a key of its values' colors. */
   key?(): GlyphKey | undefined;
 }
 
-/** A category field's values' colors through a color scale, for the table's current version. */
-export interface CategoryColors {
-  readonly field: string;
-  readonly dictionary: readonly string[];
-  /** Per row: the field's code, -1 for rows without a value. */
-  readonly codes: Int32Array;
-  /** Per code: an index into `colors`, or -1 for codes no row holds. */
-  readonly tones: Int32Array;
-  /** At most 255 colors: points index theirs by bytes. */
+/** How an observation of a line or area is drawn: its stroke's (or dot's) color, opacity, and width. */
+export interface DotLook {
+  readonly color: string;
+  readonly opacity: number;
+  readonly width: number;
+}
+
+/**
+ * A point mark's channels the feature compiler reads (marks/features/points.ts),
+ * as the mark found them in its options: each a channel's spec and the
+ * option it came from (`color`, `encode.size`). Number fields whose values
+ * points map themselves (a color ramp, sizes by area, opacities) and
+ * constants are the mark's own.
+ */
+export interface PointChannels {
+  readonly color?: PointChannel<string> | undefined;
+  readonly size?: PointChannel<number> | undefined;
+  readonly opacity?: PointChannel<number> | undefined;
+  readonly symbol?: PointChannel<SymbolName> | undefined;
+  /** What the mark draws itself: its radius (with a size field, the largest), shape, and outline width. */
+  readonly radius: number;
+  readonly shape: SymbolName;
+  readonly outline: number;
+}
+
+export interface PointChannel<V> {
+  readonly spec: ChannelSpec<V>;
+  readonly path: string;
+}
+
+/**
+ * What a point mark's channels (`PointChannels`) give each row, for the
+ * table's current version. Rows read small integers (a field's dictionary
+ * code, a condition's truth) or, through identity scales of numbers, their
+ * value: nothing is made per row.
+ */
+export interface PointLooks {
+  /** A row's color, an index into `colors`; -1 where it has none, which leaves it undrawn. */
+  readonly color?: ((row: number) => number) | undefined;
+  /** The colors `color` indexes, as many as rows take: identity colors stay exact. */
   readonly colors: readonly string[];
-  /** The codes rows hold in the scale's order: the order a key lists them in. */
-  readonly order: readonly number[];
+  /** A row's area in square pixels; NaN where it has none. */
+  readonly area?: ((row: number) => number) | undefined;
+  /** A row's fill opacity, 0 to 1; NaN where it has none. */
+  readonly opacity?: ((row: number) => number) | undefined;
+  /** A row's shape, an index into SYMBOLS; -1 where it has none. */
+  readonly shape?: ((row: number) => number) | undefined;
+  /** The shape of the series of a name, where the series field gives shapes. */
+  readonly seriesShape?: ((name: string) => number) | undefined;
+  /** How far points reach past their centers at most, outlines included. */
+  readonly reach: number;
+  /** Keys of the values field channels map through ordinal scales: colors, shapes, and sizes. */
+  readonly keys: readonly GlyphKey[];
+  /** What a row's channels read, for its text, numbers in `format`: ", kind Threshold". */
+  text(row: number, format: (value: number) => string): string;
 }
 
 /** A row's look, over its mark's paint and its series' color. */

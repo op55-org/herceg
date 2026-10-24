@@ -1,16 +1,16 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { guideSegmentDrawing } from "../draw/segments.ts";
+import type { Formatter } from "../format/format.ts";
 import { LabelBoxes, segmentMeetsBox, segmentsMeet } from "../layout/label-boxes.ts";
 import { lineCount } from "../layout/text.ts";
 import type { Geometry, SegmentGeometry } from "../scene/scene.ts";
-import type { MarkAnchorSpec } from "../spec/encoding.ts";
+import type { LabelPlaceSpec, MarkAnchorSpec } from "../spec/encoding.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { AnnotationPosition, Clip, Frozen, TextSpec } from "../spec/spec.ts";
 import type { Halo, StrokeStyle, TextStyle as TextStyleSpec } from "../spec/style.ts";
 import { dashPattern } from "../style/style.ts";
 import {
-  ANNOTATION_PENDING,
   AnnotationData,
   labelOf,
   type PlaceOption,
@@ -19,6 +19,7 @@ import {
   type TextField,
 } from "./annotation.ts";
 import type { LabelPartOf } from "./encoding.ts";
+import { FollowingTextMark } from "./following.ts";
 import { labelPaint, labelsGeometry, type PlacedLabel, plainText, textGeometry } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -33,7 +34,6 @@ import {
   type RowParts,
   seriesKey,
 } from "./mark.ts";
-import { refusePending } from "./pending.ts";
 
 interface TextStyle {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
@@ -93,8 +93,18 @@ type FollowingText = {
   x?: never;
   y?: never;
   at?: never;
-  label: TextLabel;
+  label: FollowingLabel;
 };
+
+/**
+ * Following text's label: as text's, placed as series' labels are
+ * (`place`: outside the plot, keeping room or not, and its offset).
+ */
+type FollowingLabel =
+  | string
+  | (Exclude<TextLabel, string> & {
+      place?: Pick<LabelPlaceSpec, "outside" | "reserve" | "offset">;
+    });
 
 /** Room kept around each label against others, in pixels, at least: a default halo reaches 1.5. */
 const LABEL_GAP = 2;
@@ -143,7 +153,6 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
   readonly #y: Frozen<AnnotationPosition>;
 
   constructor(input: TextSpec, table?: Table) {
-    refusePending(input, "text", [...ANNOTATION_PENDING, ["from", "C", "give at, or x and y"]]);
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -169,7 +178,8 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       },
     );
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
-    this.featured = format?.number !== undefined || format?.time !== undefined;
+    this.featured =
+      format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
   }
 
   get table(): Table | undefined {
@@ -182,6 +192,16 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
 
   series() {
     return [];
+  }
+
+  labelEntries(
+    key: MarkKey,
+    locale: string | undefined,
+    rows?: RowParts,
+    pattern?: (format: object, locale: string | undefined, path: string) => Formatter,
+  ) {
+    const data = this.#data;
+    return data.entries(key, locale, rows, data.writer(locale, pattern));
   }
 
   describe(format: AxisFormat, locale: string | undefined, rows?: RowParts): string | undefined {
@@ -205,6 +225,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
           .join(", ");
       },
       rows,
+      format.content,
     );
   }
 
@@ -245,7 +266,9 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
    * their order. Scratch is as large as the items drawn: a facet panel's,
    * not the table's.
    */
-  geometry(_series: unknown, frame: Frame, key: MarkKey, rows?: RowParts): Geometry[] {
+  geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
+    // What the legend hides of it goes undrawn.
+    const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { spec } = this;
     const { plot, theme } = frame;
     const data = this.#data;
@@ -262,6 +285,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     const align = label.style?.align;
     const anchor = align === "start" ? "start" : align === "end" ? "end" : "middle";
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
+    const content = frame.features?.of(this)?.content;
     const overlap = spec.overlap ?? "show";
     const placed = overlap === "show" ? undefined : new LabelBoxes();
     const moving = overlap === "move";
@@ -388,7 +412,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       const [px, py] = pointAt(row) as [number, number];
       // Labels are not clipped, so ones whose point is out of view are left out.
       if (!inPlot(px, py, px, py)) continue;
-      const label = data.text(row, frame.locale, write);
+      const label = data.text(row, frame.locale, write, content);
       if (!placed) {
         add(item, label, px + dx, py + dy + lift(label));
         continue;
@@ -490,9 +514,10 @@ export function text<S extends Schema>(
       "clip",
     ]),
   } as unknown as TextSpec;
-  const field = typeof spec.label === "object" ? spec.label.field : undefined;
+  // Text following a mark's series reads that mark's rows.
+  if (spec.from) return new FollowingTextMark(spec);
   const places = spec.at ? [spec.at.x, spec.at.y] : [spec.x, spec.y];
-  if (table?.name !== undefined && readsTable(places as AnnotationPosition[], field))
+  if (table?.name !== undefined && readsTable(places as AnnotationPosition[], spec.label))
     spec.data = table.name;
   return new TextMark(spec, table as unknown as Table | undefined);
 }

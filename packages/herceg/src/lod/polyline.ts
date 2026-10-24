@@ -1,4 +1,14 @@
 /**
+ * What reducers write the points they keep to: a polyline, or one that also
+ * records which position of the series traced each point is (`position`),
+ * for the feature compiler (marks/features/provenance.ts).
+ */
+export interface PointSink {
+  push(x: number, y: number, position: number): void;
+  break(): void;
+}
+
+/**
  * Growable buffer of polyline points in CSS pixels, reused across frames so
  * steady-state rendering does not allocate. A polyline can have gaps: each
  * entry of `starts` is the index of the first point of a run.

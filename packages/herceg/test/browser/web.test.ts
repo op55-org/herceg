@@ -134,13 +134,13 @@ describe("fragments", () => {
     const quiet = (event: Event) => event.preventDefault();
     document.addEventListener("herceg:error", quiet);
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    // Lines whose color changes within a series: the feature compiler refuses them.
+    // A line colored by a name both a field and a color: the feature compiler refuses it.
     const refused: ChartSpec = {
-      data: { d: { columns: { t: [0, 1], v: [1, 2], kind: ["a", "b"], g: ["p", "p"] } } },
-      marks: [{ type: "line", x: "t", y: "v", series: "g", color: "kind", data: "d" }],
+      data: { d: { columns: { t: [0, 1], v: [1, 2], red: ["a", "b"] } } },
+      marks: [{ type: "line", x: "t", y: "v", color: "red", data: "d" }],
     };
     await expect(mount(element, { src: encodePayload(refused) })).rejects.toThrow(
-      /changes within series/,
+      /names both a field and a color/,
     );
     document.removeEventListener("herceg:error", quiet);
     expect(logged).not.toHaveBeenCalled();

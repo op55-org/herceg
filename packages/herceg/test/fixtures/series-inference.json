@@ -1,5 +1,5 @@
 {
-  "about": "Which field splits a line's, area's, or bar's rows into series, given its spec options and its table's fields' kinds: `series`, or without one a category `color` field (short form or encode.color's field), unless series is false or the mark's own paint (a line's stroke, an area's or bar's fill, flat or in encode) overrides the color. Read by packages/herceg/test/model/conformance.test.ts (seriesOf) and python/tests/test_conformance.py (series_of).",
+  "about": "Which field splits a line's, area's, or bar's rows into series, given its spec options and its table's fields' kinds: `series`, or without one a category `color` field (short form or encode.color's field), unless series is false, the color is read through an identity scale of its own, or the mark's own paint (a line's stroke, an area's or bar's fill, flat or in encode) overrides the color. Read by packages/herceg/test/model/conformance.test.ts (seriesOf) and python/tests/test_conformance.py (series_of).",
   "fields": {
     "t": "number",
     "v": "number",
@@ -69,6 +69,12 @@
       "series": "region"
     },
     {
+      "name": "colors a field holds, through an identity scale, split nothing",
+      "mark": "line",
+      "options": { "encode": { "color": { "field": "region", "scale": { "type": "identity" } } } },
+      "series": null
+    },
+    {
       "name": "a condition splits nothing",
       "mark": "line",
       "options": {
@@ -82,6 +88,18 @@
           }
         }
       },
+      "series": null
+    },
+    {
+      "name": "a point's color channel's field splits points",
+      "mark": "point",
+      "options": { "color": { "field": "region" } },
+      "series": "region"
+    },
+    {
+      "name": "a point's colors a field holds split nothing",
+      "mark": "point",
+      "options": { "color": { "field": "region", "scale": { "type": "identity" } } },
       "series": null
     },
     {

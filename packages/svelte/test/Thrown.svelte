@@ -14,7 +14,7 @@
 
 <svelte:boundary {onerror}>
   <Chart errorMode="throw" height={200}>
-    <Line {data} x="t" y="v" series="g" color="kind" />
+    <Line {data} x="t" y="v" series="g" style={{ by: { field: "kind", map: {} } }} />
   </Chart>
   {#snippet failed(error)}
     <p>{String(error)}</p>

@@ -1,7 +1,7 @@
 import type { NumericArray } from "../data/column.ts";
 import type { RangeExtremes, RangeIndex } from "./minmax-index.ts";
 import type { PositionLookup, TraceBuffers, TraceColumns, TraceSource } from "./point-view.ts";
-import type { Polyline } from "./polyline.ts";
+import type { PointSink } from "./polyline.ts";
 
 /**
  * Maps a value to pixels: `offset + (v - origin) * factor`, where `v` is the
@@ -84,7 +84,7 @@ export interface Breaks {
     xMap: Mapping,
     yMap: Mapping,
     pixelRatio: number,
-    out: Polyline,
+    out: PointSink,
     rows?: Uint32Array,
     index?: RangeIndex,
   ): void;
@@ -128,7 +128,7 @@ export function m4(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   rows?: Uint32Array,
   index?: RangeIndex,
 ): void {
@@ -166,7 +166,7 @@ function m4Columns(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
 ): void {
   const xo = xMap.offset * pixelRatio;
   const xf = xMap.factor * pixelRatio;
@@ -237,7 +237,7 @@ function m4Indexed(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   index: RangeIndex,
 ): void {
   const xo = xMap.offset * pixelRatio;
@@ -284,7 +284,7 @@ function m4Points(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   rows?: Uint32Array,
 ): void {
   // Column math runs in device pixels.
@@ -342,7 +342,7 @@ export function emitColumn(
   last: number,
   xMap: Mapping,
   yMap: Mapping,
-  out: Polyline,
+  out: PointSink,
   rows: Uint32Array | undefined,
 ) {
   const a = low < high ? low : high;
@@ -359,11 +359,11 @@ function emitPoint(
   position: number,
   xMap: Mapping,
   yMap: Mapping,
-  out: Polyline,
+  out: PointSink,
   rows: Uint32Array | undefined,
 ): void {
   const row = rows === undefined ? position : rows[position]!;
-  out.push(mapValue(xMap, x[row]!), mapValue(yMap, y[row]!));
+  out.push(mapValue(xMap, x[row]!), mapValue(yMap, y[row]!), position);
 }
 
 /** Writes every point without reduction, for unsorted x. Hidden points are left out. */
@@ -374,7 +374,7 @@ export function polylineAll(
   end: number,
   xMap: Mapping,
   yMap: Mapping,
-  out: Polyline,
+  out: PointSink,
   rows?: Uint32Array,
 ): void {
   const breaks = xMap.breaks;
@@ -387,6 +387,6 @@ export function polylineAll(
       out.break();
       continue;
     }
-    out.push(mapValue(xMap, xv), mapValue(yMap, yv));
+    out.push(mapValue(xMap, xv), mapValue(yMap, yv), k);
   }
 }

@@ -3,8 +3,11 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { category, encodedCategory, time } from "../../src/data/column.ts";
+import { RowSet } from "../../src/data/row-set.ts";
+import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { type Table, type TableChange, table } from "../../src/data/table.ts";
 import {
+  followedOf,
   frameAt,
   MOVING_ITEMS,
   MOVING_POINTS,
@@ -26,10 +29,12 @@ import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { PointMark, point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
+import { text } from "../../src/marks/text.ts";
 import { planAxis } from "../../src/model/axis.ts";
 import { axisGuide } from "../../src/model/axis-guide.ts";
 import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
+import { Highlighter } from "../../src/model/highlight.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderSvg } from "../../src/render/svg.ts";
@@ -81,7 +86,15 @@ function change(model: ChartModel, edit: () => void): { shown: Shown; tween: Twe
   const scene = model.scene(estimateText);
   return {
     shown: shown!,
-    tween: plan(shown!, scene, model.panels()[0], 200, BUILDERS, sidesOf(model.config)),
+    tween: plan(
+      shown!,
+      scene,
+      model.panels()[0],
+      200,
+      BUILDERS,
+      sidesOf(model.config),
+      followedOf(model.config),
+    ),
   };
 }
 
@@ -272,6 +285,125 @@ describe("bars changing values", () => {
     const twice = table({ region: ["N", "N", "S"], a: [10, 12, 20] });
     const model = chart({ marks: [bar(twice, { x: "region", y: "a" })], y: { domain: [0, 40] } });
     expect(change(model, () => twice.setColumn("a", [11, 13, 25])).tween).toBe(undefined);
+  });
+
+  it("move a highlight's dots with their series, or show them at once with it", () => {
+    // The middle row selected alone: a dot over its observation, which
+    // moves as the line or area does, or with labels following, not at
+    // all, beside bars that move.
+    for (const kind of ["line", "area"] as const)
+      for (const followed of [false, true]) {
+        const data = table({ x: [0, 1, 2], y: [2, 5, 2] }) as unknown as Table;
+        const counts = table({ x: [0, 1, 2], v: [1, 2, 3] });
+        const options = {
+          x: "x",
+          y: "y",
+          stroke: "red",
+          ...(followed && { labels: { at: "last" as const } }),
+        };
+        const model = chart({
+          x: { domain: [0, 2], nice: false },
+          y: { domain: [0, 10], nice: false },
+          marks: [
+            bar(counts, { x: "x", y: "v" }),
+            kind === "line" ? line(data, options) : area(data, options),
+          ],
+        });
+        const store = selectionStore(data);
+        store.set("focus", selectRows(new RowSet(data).addAll([1])));
+        const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+        model.highlight = (mark, series, frame, key) =>
+          highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
+        const { tween } = change(model, () => {
+          data.setColumn("y", [2, 8, 2]);
+          counts.setColumn("v", [2, 3, 4]);
+        });
+        const name = `${kind}, followed: ${followed}`;
+        const middle = frameAt(tween!, 100).panels[0]!.marks;
+        const dot = middle.find((mark) => mark.key.endsWith("-dots")) as PointGeometry;
+        expect(dot, name).toBeDefined();
+        const trace = middle.find((mark) => mark.kind === kind) as LineGeometry | AreaGeometry;
+        const path = trace.kind === "line" ? trace.path : trace.upper;
+        expect(dot.coords[1], name).toBeCloseTo(path.coords[3]!, 3);
+        expect(tween!.scene.panels[0]!.marks.includes(dot), name).toBe(followed);
+      }
+  });
+
+  it("change at once where only pieces of series shown at once would move", () => {
+    // Series a has a missing value, so it shows its new values at once,
+    // and its dot with it; nothing else changes.
+    const data = table({ x: [0, 1, 2], a: [2, 5, NaN], b: [3, 6, 3] }) as unknown as Table;
+    const model = chart({
+      x: { domain: [0, 2], nice: false },
+      y: { domain: [0, 10], nice: false },
+      marks: [line(data, { x: "x", y: ["a", "b"] })],
+    });
+    const store = selectionStore(data);
+    store.set("focus", selectRows(new RowSet(data).addAll([1])));
+    const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+    model.highlight = (mark, series, frame, key) =>
+      highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
+    expect(change(model, () => data.setColumn("a", [2, 8, NaN])).tween).toBe(undefined);
+  });
+
+  it("show series labels follow at their new values at once, with their labels", () => {
+    // An outlined area whose end a label stands at, beside bars that move:
+    // followed by its own labels or by text, highlighted in part (drawn in
+    // lit and dimmed pieces, each with its outline) or not.
+    const data = table({ t: [0, 1, 2], hi: [2, 3, 4] }) as unknown as Table;
+    const counts = table({ t: [0, 1, 2], v: [1, 2, 3] });
+    const outlined = { id: "area", x: "t", y: "hi", stroke: "red" } as const;
+    const last = { at: "last" } as const;
+    const inside = { outside: false } as const;
+    for (const follower of [undefined, "labels", "text"] as const)
+      for (const highlighted of [false, true]) {
+        data.setColumn("hi", [2, 3, 4]);
+        counts.setColumn("v", [1, 2, 3]);
+        const model = chart({
+          x: { domain: [0, 2], nice: false },
+          y: { domain: [0, 10], nice: false },
+          marks: [
+            bar(counts, { x: "t", y: "v" }),
+            area(data, {
+              ...outlined,
+              ...(follower === "labels" && { labels: { ...last, place: inside } }),
+            }),
+            ...(follower === "text"
+              ? [text({ from: { mark: "area", ...last }, label: { text: "end", place: inside } })]
+              : []),
+          ],
+        });
+        if (highlighted) {
+          const store = selectionStore(data);
+          store.set("focus", selectRows(new RowSet(data).addAll([0, 1])));
+          const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+          model.highlight = (mark, series, frame, key) =>
+            highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
+        }
+        const { tween } = change(model, () => {
+          data.setColumn("hi", [6, 7, 8]);
+          counts.setColumn("v", [2, 3, 4]);
+        });
+        const name = `${follower}, highlighted: ${highlighted}`;
+        const middle = frameAt(tween!, 100).panels[0]!.marks;
+        const final = tween!.scene.panels[0]!.marks;
+        // Halfway, every piece of a followed area is as the new scene draws it, as its label is.
+        const pieces = middle.flatMap((mark, i) =>
+          mark.kind === "area" ? [[mark, final[i]]] : [],
+        );
+        expect(pieces.length, name).toBeGreaterThan(highlighted ? 2 : 0);
+        expect(
+          pieces.every(([now, then]) => now === then),
+          name,
+        ).toBe(follower !== undefined);
+        const labels = middle.filter((mark) => mark.kind === "labels");
+        expect(
+          labels.every((mark) => final.includes(mark)),
+          name,
+        ).toBe(true);
+        // Bars move beside it.
+        expect(tween!.bars, name).toHaveLength(1);
+      }
   });
 
   it("change at once beside marks placed in a frame or on a scale of the chart's own", () => {
@@ -1055,6 +1187,81 @@ describe("lines and areas changing values", () => {
           );
       }
     }
+  });
+
+  it("curve a highlight's copies of a layer as the layer, and a series field's bands each alone", () => {
+    // A band and a stack highlighted in part draw lit and dimmed copies of
+    // each layer; a series field's bands are each curved alone, those that
+    // touch too (a and b), where curving them together would straighten
+    // one where the other could cross itself.
+    const one = { t: [1, 2, 3], lo: [5, 10, 15], hi: [10, 20, 30] };
+    const two = {
+      t: [1, 2, 3, 1, 2, 3],
+      s: ["a", "a", "a", "b", "b", "b"],
+      lo: [5, 10, 15, 40, 45, 42],
+      hi: [10, 20, 30, 50, 60, 55],
+    };
+    const touching = {
+      t: [1, 2, 3, 1, 2, 3, 1, 3],
+      s: ["a", "a", "a", "b", "b", "b", "c", "c"],
+      lo: [0, 0, 0, 20, 80, 20, 85, 85],
+      hi: [20, 80, 20, 30, 81, 90, 95, 95],
+    };
+    const cases = [
+      ["band", one, { hi: [15, 25, 45] }, { y1: "lo", y2: "hi" }],
+      ["stack", one, { hi: [15, 25, 45] }, { y: ["lo", "hi"], stack: true }],
+      ["bands", two, { hi: [15, 25, 45, 55, 70, 60] }, { y1: "lo", y2: "hi", series: "s" }],
+      [
+        "touching bands",
+        touching,
+        { lo: [0, 0, 0, 30, 90, 30, 85, 85], hi: [30, 90, 30, 40, 91, 100, 95, 95] },
+        { y1: "lo", y2: "hi", series: "s" },
+      ],
+    ] as const;
+    // Edges as drawn, to a thousandth of a pixel: frames curve them again from rounded points.
+    const areas = (scene: Scene) =>
+      marksOf<AreaGeometry>(scene, "area").map(({ upper, lower }) =>
+        [upper, lower!].flatMap((edge) => [
+          ...edge.coords.subarray(0, edge.count * 2),
+          ...edge.controls.subarray(0, edge.count * 4),
+        ]),
+      );
+    const expectAreas = (actual: number[][], expected: number[][], label: string) => {
+      expect(actual.length, label).toBe(expected.length);
+      actual.forEach((edges, i) => {
+        edges.forEach((value, k) => {
+          if (Number.isNaN(expected[i]![k]!)) expect(value, label).toBeNaN();
+          else expect(value, label).toBeCloseTo(expected[i]![k]!, 3);
+        });
+      });
+    };
+    for (const [name, columns, next, options] of cases)
+      for (const highlighted of [false, true]) {
+        const data = table(columns) as unknown as Table;
+        const marks = [area(data, { x: "t", ...options, curve: "monotone" })];
+        const model = chart({ x: { domain: [1, 3] }, y: { domain: [0, 100] }, marks });
+        if (highlighted) {
+          // Each series' first two rows.
+          const store = selectionStore(data);
+          const firsts = [0, 1, 3, 4].filter((row) => row < data.length);
+          store.set("focus", selectRows(new RowSet(data).addAll(firsts)));
+          const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+          model.highlight = (mark, series, frame, key) =>
+            highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
+        }
+        const before = areas(model.scene(estimateText));
+        const { tween } = change(model, () => {
+          for (const [field, values] of Object.entries(next)) data.setColumn(field, values);
+        });
+        const label = `${name}, highlighted: ${highlighted}`;
+        expect(tween!.stacks.length, label).toBeGreaterThan(0);
+        // The frames begin and end as the scenes draw them.
+        expectAreas(areas(frameAt(tween!, 0)), before, label);
+        expectAreas(areas(frameAt(tween!, 200)), areas(tween!.scene), label);
+        // Between, no layer's edges meet: each has its own.
+        for (const { upper, lower } of marksOf<AreaGeometry>(frameAt(tween!, 100), "area"))
+          expect(ys(upper), label).not.toEqual(ys(lower!));
+      }
   });
 });
 

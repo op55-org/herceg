@@ -4,7 +4,7 @@
 // them within a layout.
 import { describe, expect } from "vitest";
 import { table } from "../../src/data/table.ts";
-import { type AttachedLabel, placeAttached } from "../../src/layout/attached.ts";
+import { type AttachedLabel, placeAttached as place } from "../../src/layout/attached.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import type { Attachment } from "../../src/marks/attachments.ts";
@@ -13,6 +13,7 @@ import { line } from "../../src/marks/line.ts";
 import type { Frame, MarkKey } from "../../src/marks/mark.ts";
 import { RuleMark, rule } from "../../src/marks/rule.ts";
 import { facet } from "../../src/model/facet.ts";
+import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import type { Geometry, LabelsGeometry, Rect, TextItem } from "../../src/scene/scene.ts";
@@ -21,6 +22,9 @@ import { resolveTheme } from "../../src/theme.ts";
 import { contractTest } from "../helpers/contracts.ts";
 
 const theme = resolveTheme("light");
+/** Places labels with the chart's code, as the feature compiler does. */
+const placeAttached = (labels: readonly AttachedLabel[], frame: Frame, key: string) =>
+  place(labels, frame, key, GUIDE_KIT);
 const plot: Rect = { x: 40, y: 10, width: 300, height: 200 };
 const frame = {
   plot,

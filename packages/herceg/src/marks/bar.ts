@@ -1,8 +1,8 @@
 import type { NumericArray } from "../data/column.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
+import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { ALL_SIDES, BOTTOM, LEFT, RIGHT, rectDrawing, sideMask, TOP } from "../draw/rect.ts";
-import { labelsDrawing, textDrawing } from "../draw/text.ts";
 import { type Formatter, numberFormatter } from "../format/format.ts";
 import { centeredLines, estimateText, lineCount, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -19,6 +19,7 @@ import {
   type TextGeometry,
 } from "../scene/scene.ts";
 import type { BarLabelPlaceSpec } from "../spec/encoding.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
 import type { BarLabelsSpec, BarSpec, BarStack, Clip, Dash, Frozen } from "../spec/spec.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
@@ -26,6 +27,8 @@ import { dashPattern, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type { BarLabels, CssColor, Encodings, FieldCoordinate, MarkStyle } from "./encoding.ts";
+import type { ContentWriter } from "./features/content.ts";
+import { withoutHidden } from "./hidden.ts";
 import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -57,7 +60,6 @@ import {
   SeriesSplitter,
   seriesOf,
 } from "./mark.ts";
-import { type Pending, refusePending } from "./pending.ts";
 import { PositionStack } from "./position-stack.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { rowOf, type Series, TableCache, visibleRange, xExtent, yExtent } from "./series.ts";
@@ -214,9 +216,6 @@ interface Stack {
 /** Options only the feature compiler draws (see model/features.ts). */
 const FEATURES = ["encode", "style"];
 
-/** Bars' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [["labels.content", "C", "give a field or the value"]];
-
 /** What value labels are asked for: `labels`' settings, and whether their format is a pattern. */
 type LabelOptions = Frozen<BarLabelsSpec> & { pattern: boolean };
 
@@ -292,7 +291,6 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
         'sides, such as ["top"]',
         strokeSides,
       );
-    refusePending(input, "bar", PENDING);
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "bar");
     // Read from the copy: the caller may change what it passed.
@@ -327,6 +325,13 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       );
     if (labels.field !== undefined)
       requireField(table, labels.field, ["category", "number"], "bar labels.field");
+    if (labels.content !== undefined && !(Array.isArray(labels.content) && labels.content.length))
+      throw new ChartError({
+        code: "invalid-option",
+        path: "labels.content",
+        message:
+          'bar labels.content: expected a list of parts, such as ["Peak: ", { value: true }]',
+      });
     if (spec.stack && labels.place?.outside)
       throw new Error(
         "bar labels.place.outside: stacked bars' labels go inside their segments; drop outside",
@@ -338,7 +343,11 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     };
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "bar series");
     const series = seriesOf(spec, table, "fill");
-    this.featured = asksFeatures(spec, FEATURES, table, series) || this.#labelOptions.pattern;
+    // Patterns and labels of parts are written by the feature compiler.
+    this.featured =
+      asksFeatures(spec, FEATURES, table, series) ||
+      this.#labelOptions.pattern ||
+      labels.content !== undefined;
     this.#rowStack = new RowStack(
       "signed",
       spec.stack === "fill" ? { offset: { resolve: fillLayers, fill: true } } : {},
@@ -430,7 +439,9 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       : table.numbers(this.#position as never);
     // A color in CSS syntax the mark draws itself; the feature compiler, others.
     const fill = spec.fill ?? (this.featured ? undefined : ownColor(spec.color, table));
-    const series = buildSeries(table, this.#split.sources(), positions, key, palette, fill);
+    // Rows the legend hides by value go, as hidden series do (stacks hide by series alone).
+    const built = buildSeries(table, this.#split.sources(), positions, key, palette, fill);
+    const series = spec.stack ? built : withoutHidden(built, hidden, key, table);
     // Rows facets split into panels stack within their panel (stackPanels):
     // the whole table's stacks let go of their buffers.
     if (spec.stack && split) {
@@ -630,6 +641,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           spec.halo,
           this.#labelOptions,
           this.table,
+          frame.features?.of(this)?.content,
         )
       : undefined;
     // The closest neighboring bar centers: within a group, a share apart;
@@ -742,7 +754,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           const cap =
             rounding && !square[part] ? Math.min(radius, width / 2, Math.abs(root - tip)) : 0;
           labeled.add(
-            labeled.text(value, row),
+            labeled.text(value, row, s.label),
             middle,
             root,
             tip,
@@ -996,8 +1008,8 @@ class ValueLabels {
   /** Whether the labels draw as plain text (the theme's font and size). */
   readonly #plain: boolean;
   readonly #minLength: number;
-  /** Each row's text of a `field`, instead of its value. */
-  readonly #field: ((row: number) => string) | undefined;
+  /** Each row's text of a `field` or of parts (`content`), instead of its value. */
+  readonly #field: ((row: number, series: string, value: number) => string) | undefined;
   readonly #size: number;
   /** Room a label's box adds beside its text. */
   readonly #padding: number;
@@ -1013,6 +1025,7 @@ class ValueLabels {
     halo: Halo | undefined,
     options: LabelOptions,
     table: Table,
+    content: ContentWriter | undefined,
   ) {
     const { theme } = frame;
     this.#format = format;
@@ -1040,11 +1053,12 @@ class ValueLabels {
     this.#backdrop = surface(theme);
     const field = options.field;
     if (field !== undefined) this.#field = (row) => fieldText(table, field, row, format);
+    if (content) this.#field = content;
   }
 
-  /** A label's text: the value written, or the row's `field`. */
-  text(value: number, row: number): string | (() => string) {
-    return this.#field ? () => this.#field!(row) : () => this.#format(value);
+  /** A label's text: the value written, the row's `field`, or its parts, of the series `series` names. */
+  text(value: number, row: number, series: string): string | (() => string) {
+    return this.#field ? () => this.#field!(row, series, value) : () => this.#format(value);
   }
 
   /**

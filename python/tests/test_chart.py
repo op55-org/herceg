@@ -2205,11 +2205,14 @@ def test_a_category_color_splits_lines_areas_and_bars_into_series():
         assert chart.to_spec()[0]["marks"][0]["color"] == "region"
         svg = chart.to_svg()
         assert svg.count(">eu</text>") == 1 and svg.count(">us</text>") == 1, method
-    # A color that is no column, or series=False, splits nothing; one line
-    # takes one color along it.
+    # A color that is no column, or series=False, splits nothing; one line's
+    # color changes along it where the column does, as its positions ascend.
     hg.Chart(rows).line(x="t", y="v", color="#c00000").to_svg()
-    with pytest.raises(hg.ChartError, match="line color: column 'region' changes within the line"):
-        hg.Chart(rows).line(x="t", y="v", color="region", series=False)
+    along = {**rows, "t": [0.0, 1.0, 2.0, 3.0]}
+    svg = hg.Chart(along).line(x="t", y="v", color="region", series=False).to_svg()
+    assert svg.count('<clipPath id="herceg-cut-') == 2
+    with pytest.raises(hg.ChartError, match="whose positions do not ascend"):
+        hg.Chart(rows).line(x="t", y="v", color="region", series=False).to_svg()
     each = hg.Chart(rows).bar(x="t", y="v", color="region", series=False).to_spec()
     assert each[0]["marks"][0]["series"] is False
 
@@ -2304,11 +2307,10 @@ def test_every_family_takes_a_category_color_as_its_series():
         hg.Chart(rows).geopoint("v", "n", color="region", series=False)
     with pytest.raises(hg.ChartError, match="line color: column 'n' holds number values"):
         hg.Chart(rows).line(x="v", y="n", color="n")
-    # What paints a line is what must hold within a series.
-    with pytest.raises(hg.ChartError, match="line encode stroke: column 'region' changes within"):
-        hg.Chart({**rows, "s": ["p"] * 4}).line(
-            x="v", y="n", series="s", encode=hg.Encodings(stroke=hg.Channel(field="region"))
-        )
+    # A style map gives each series one look.
+    by = hg.MarkStyle(by=hg.StyleMap(field="region", map={"eu": hg.SeriesStyle(dash="--")}))
+    with pytest.raises(hg.ChartError, match="line style.by.field: column 'region' changes within"):
+        hg.Chart({**rows, "s": ["p"] * 4}).line(x="v", y="n", series="s", style=by)
     with pytest.raises(TypeError, match="radar: no option 'color'; it colors by series"):
         hg.Chart(rows).radar(category="day", value="v", color="region")
 
@@ -2348,9 +2350,10 @@ def test_chart_errors_say_what_and_where_as_the_engine_does():
     assert named.path == "scales.myScale.domain"
     # What only the engine can check (rows made in it) is raised as it draws.
     made = hg.derive({"t": [0.0, 1.0], "v": [1.0, 2.0], "kind": ["a", "b"]}).sort("t")
+    by = hg.MarkStyle(by=hg.StyleMap(field="kind", map={"a": hg.SeriesStyle(dash="--")}))
     with pytest.raises(hg.ChartError, match="changes within the line") as drawn:
-        hg.Chart(made).line(x="t", y="v", color="kind", series=False).to_svg()
-    assert (drawn.value.code, drawn.value.path) == ("series-varies", "marks[0].color")
+        hg.Chart(made).line(x="t", y="v", series=False, style=by).to_svg()
+    assert (drawn.value.code, drawn.value.path) == ("series-varies", "marks[0].style.by.field")
 
 
 def test_points_dodge_and_jitter_in_category_bands():
@@ -2700,7 +2703,7 @@ def test_text_surface_halo_and_opt_out_in_static_exports():
 def test_static_isolated_rows_have_round_dots():
     chart = hg.line({"x": [0, 1, 2, 3, 4], "y": [1, np.nan, 3, np.nan, 5]}, x="x", y="y")
     svg = chart.to_svg()
-    assert len(re.findall(r"M([\d.-]+ [\d.-]+)L\1(?=[ML\"])", svg)) == 3
+    assert len(re.findall(r"M[\d.-]+ [\d.-]+l0\.02 0", svg)) == 3
     assert 'stroke-linecap="round"' in svg
 
 

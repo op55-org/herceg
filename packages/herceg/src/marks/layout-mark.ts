@@ -17,7 +17,7 @@ import type { CameraSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import type { MovedNodes, NodeMoves } from "./graph.ts";
-import { type ChartMark, type Mark, seriesOf } from "./mark.ts";
+import { type ChartMark, type LegendScale, type Mark, seriesOf } from "./mark.ts";
 import type { LayoutClock, NodePositions } from "./node-positions.ts";
 import type { Drill } from "./tree-data.ts";
 
@@ -271,6 +271,8 @@ export interface LayoutMark extends ChartMark {
   ): LegendEntry[];
   /** Legends of color scales and size keys, for marks encoding values that way. */
   legends?(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[];
+  /** The scales of its that guides may name, as `Mark.legendScales` (a map's color ramp). */
+  readonly legendScales?: readonly LegendScale[];
   draw(frame: LayoutFrame): LayoutResult;
   /**
    * Marks that can share a chart (maps' layers) give the one mark that draws

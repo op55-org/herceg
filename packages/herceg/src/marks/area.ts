@@ -63,7 +63,6 @@ import {
   untranspose,
   withBands,
 } from "./orient.ts";
-import { type Pending, refusePending } from "./pending.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { type LayerEdges, lowerPosition, rowOf, type Series, xExtent, yExtent } from "./series.ts";
 import { RowStack } from "./stack.ts";
@@ -113,12 +112,15 @@ interface AreaCommon<S extends Schema> {
   opacity?: number;
   /**
    * The areas' fill: a category field (which splits the rows into an area
-   * per value unless `series` says otherwise, and is then constant within
-   * each series), or a color. The short form of `encode.color`; `fill`
-   * wins over it.
+   * per value unless `series` says otherwise), or a color. The short form
+   * of `encode.color`; `fill` wins over it.
    */
   color?: CategoryField<S> | CssColor;
-  /** Channels, each constant within a series: color, fill, stroke, opacity. */
+  /**
+   * Channels: color, fill, stroke, opacity. One reading rows (a field
+   * other than the series', a condition) changes the area's look along its
+   * series, whose positions must then ascend, and not in a stack.
+   */
   encode?: Pick<Encodings<S>, "color" | "fill" | "stroke" | "opacity">;
   /** Looks by series (`by`). */
   style?: Pick<MarkStyle<S>, "by">;
@@ -300,10 +302,15 @@ export function areaFormError(spec: {
 }
 
 /** Options only the feature compiler draws (see model/features.ts). */
-const FEATURES = ["opacity", "strokeOpacity", "encode", "style", "continuity", "where"] as const;
-
-/** Areas' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [["labels", "C", "drop labels"]];
+const FEATURES = [
+  "opacity",
+  "strokeOpacity",
+  "encode",
+  "style",
+  "continuity",
+  "where",
+  "labels",
+] as const;
 
 export class AreaMark implements Mark<Frozen<AreaSpec>> {
   declare readonly [MARK]: true;
@@ -347,7 +354,6 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   readonly #stacking: Stacking;
 
   constructor(input: AreaSpec, table: Table<Schema>) {
-    refusePending(input, "area", PENDING);
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "area");
     // Read from the copy: the caller may change what it passed.
@@ -600,7 +606,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     });
   }
 
-  xExtent(series: readonly Series[], log: boolean) {
+  xExtent(series: readonly Series[], log: boolean, breaks?: Breaks) {
     if (this.#stacking.mode === "fill" && this.#roles.orient === "y" && !log)
       return [0, 1] as [number, number];
     if (this.#roles.orient === "x") return unionExtent(series.map((s) => xExtent(s, log)));
@@ -614,7 +620,9 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
         return ends.map(
           (values) =>
             values &&
-            (across ? across(s, values, log) : valuesExtent(values, s.edges ? undefined : s, log)),
+            (across
+              ? across(s, values, log, breaks)
+              : valuesExtent(values, s.edges ? undefined : s, log)),
         );
       }),
     );
@@ -824,10 +832,26 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       let i = 0;
       return groups.flatMap((group, g) => {
         const layers = group.map((s) => ({ series: s, top: s.y, bottom: s.y0 }));
-        const edges = traceCurvedLayers(layers, view, rows[g]!, stacked);
+        // A band whose looks change along it keeps the points where they do,
+        // and layers labels follow which rows their points are.
+        const runs = stacked ? undefined : group[0]!.features?.runs;
+        const kept = group.map((s, k) =>
+          (k === 0 && runs) || s.features?.curved ? [] : undefined,
+        );
+        const edges = traceCurvedLayers(
+          layers,
+          view,
+          rows[g]!,
+          stacked,
+          runs?.ends(group[0]!),
+          kept,
+        );
+        if (runs) runs.kept(group[0]!, kept[0]!);
         return group.flatMap((s, k) => {
           const whole = visible[i++]!;
-          return dressed({ ...this.#area(s, edges[k]!, style, frame), curve }, whole, frame);
+          s.features?.curved?.(s, edges[k]!, kept[k]!, view);
+          const area = { ...this.#area(s, edges[k]!, style, frame), curve, stacked };
+          return dressed(area, whole, frame);
         });
       });
     }
@@ -850,7 +874,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       const traced = lower
         ? band
           ? traceBandWith(s, at, curve, (upper, bottom, start, end, reduce) =>
-              band(s, top, lower, at, upper, bottom, start, end, reduce),
+              band(s, top, lower, at, upper, bottom, start, end, reduce, both),
             )
           : traceBand(s, top, lower, at, curve, both)
         : {
@@ -895,6 +919,15 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     if (!this.#shares) return STILL;
     const shift = this.#shift(s, frame);
     return this.#roles.orient === "x" ? [shift, 0] : [0, shift];
+  }
+
+  /** Labels following its series (`labels`) are placed as drawn (marks/features/labels.ts). */
+  get roomPlaced(): boolean {
+    return this.spec.labels !== undefined;
+  }
+
+  room(...[, , , features]: Parameters<NonNullable<Mark["room"]>>): [number, number] {
+    return features?.of(this)?.room?.() ?? [0, 0];
   }
 
   /** Dodged series stand within their bands: at most half a band off along x. */
@@ -1066,7 +1099,6 @@ export function area<S extends Schema>(
       "strokeWidth",
       "color",
       ...FEATURES,
-      "labels",
       "curve",
       "label",
       "legend",

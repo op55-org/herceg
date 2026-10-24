@@ -46,8 +46,20 @@ export function traceRun(
   }
 }
 
-/** WebKit omits zero-length Canvas strokes; this stays below output precision. */
-export const DOT_LENGTH = 0.001;
+/**
+ * How long the line a lone point's round caps paint as a dot is, too short
+ * to see: browsers paint no dot of a line of no length (WebKit paints its
+ * caps twice in SVG, Chromium none where dashed), nor WebKit's canvases of
+ * one much shorter (the first of several 0.001 long, say).
+ */
+const DOT_LENGTH = 0.02;
+
+/** Traces a lone point at (x, y), moved to, as a dot its round caps paint. */
+export function dotAt(sink: PathSink, x: number, y: number): void {
+  // SVG paths round positions to a tenth of a pixel (`n`): the step is written as is.
+  if (sink instanceof SvgPath) sink.d += `l${DOT_LENGTH} 0`;
+  else sink.lineTo(x + DOT_LENGTH, y);
+}
 
 /** Adds a polyline's runs to `sink`, one subpath each. */
 export function traceLine(sink: PathSink, path: Polyline): void {
@@ -58,7 +70,7 @@ export function traceLine(sink: PathSink, path: Polyline): void {
     if (end - start < 1) continue;
     sink.moveTo(c[start * 2]!, c[start * 2 + 1]!);
     // Round caps paint a stroke-sized dot; a lone move paints nothing.
-    if (end === start + 1) sink.lineTo(c[start * 2]! + DOT_LENGTH, c[start * 2 + 1]!);
+    if (end === start + 1) dotAt(sink, c[start * 2]!, c[start * 2 + 1]!);
     traceRun(sink, path, start, end, true);
   }
 }
@@ -84,7 +96,10 @@ function lineElements(line: LineGeometry): SvgElement[] {
     "stroke-linejoin": "round",
     "stroke-linecap": "round",
   };
-  if (line.dash?.length) attributes["stroke-dasharray"] = line.dash.join(" ");
+  if (line.dash?.length) {
+    attributes["stroke-dasharray"] = line.dash.join(" ");
+    if (line.dashOffset) attributes["stroke-dashoffset"] = String(line.dashOffset);
+  }
   return [{ tag: "path", attributes }];
 }
 
@@ -93,13 +108,17 @@ export const lineDrawing: Drawing<LineGeometry> = {
   elements: lineElements,
   svg: (line) => markupOf(lineElements(line)),
   canvas(context, line) {
+    // A width of 0 strokes nothing, as in SVG; the canvas would keep its last width.
+    if (!(line.strokeWidth > 0)) return;
     context.beginPath();
     traceLine(context, line.path);
     // Canvas copies its input; the geometry's readonly array can be passed directly.
     context.setLineDash((line.dash ?? []) as number[]);
+    context.lineDashOffset = line.dashOffset ?? 0;
     context.strokeStyle = line.stroke;
     context.lineWidth = line.strokeWidth;
     context.stroke();
     context.setLineDash([]);
+    context.lineDashOffset = 0;
   },
 };

@@ -45,7 +45,6 @@ import {
   traceSeries,
   untranspose,
 } from "./orient.ts";
-import { type Pending, refusePending } from "./pending.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -83,12 +82,15 @@ interface LineStyle<S extends Schema> {
   strokeOpacity?: number;
   /**
    * The lines' color: a category field (which splits the rows into a line
-   * per value unless `series` says otherwise, and is then constant within
-   * each series), or a color. The short form of `encode.color`; `stroke`
-   * wins over it.
+   * per value unless `series` says otherwise), or a color. The short form
+   * of `encode.color`; `stroke` wins over it.
    */
   color?: CategoryField<S> | CssColor;
-  /** Channels, each constant within a series: color, stroke, dash, strokeWidth, opacity. */
+  /**
+   * Channels: color, stroke, dash, strokeWidth, opacity. One reading rows
+   * (a field other than the series', a condition) changes the line's look
+   * along its series, whose positions must then ascend.
+   */
   encode?: Pick<Encodings<S>, "color" | "stroke" | "dash" | "strokeWidth" | "opacity">;
   /** Looks by series (`by`), and the markers' look. */
   style?: Pick<MarkStyle<S>, "by" | "marker">;
@@ -159,10 +161,8 @@ const FEATURES = [
   "markers",
   "continuity",
   "where",
+  "labels",
 ] as const;
-
-/** Lines' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [["labels", "C", "drop labels"]];
 
 export class LineMark implements Mark<Frozen<LineSpec>> {
   declare readonly [MARK]: true;
@@ -179,7 +179,6 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
   readonly #shares: BandShares | undefined;
 
   constructor(input: LineSpec, table: Table<Schema>) {
-    refusePending(input, "line", PENDING);
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "line");
     // Read from the copy: the caller may change what it passed.
@@ -259,14 +258,14 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
     return series;
   }
 
-  xExtent(series: readonly Series[], log: boolean) {
+  xExtent(series: readonly Series[], log: boolean, breaks?: Breaks) {
     // Along y, x holds values: those its features draw (see
     // model/features.ts). Positions span all rows, so that a streaming
     // window's domain does not jump with its last rows' values.
     const along = this.#roles.orient === "y";
     return unionExtent(
       series.map((s) =>
-        along && s.features?.across ? s.features.across(s, s.x, log) : xExtent(s, log),
+        along && s.features?.across ? s.features.across(s, s.x, log, breaks) : xExtent(s, log),
       ),
     );
   }
@@ -342,6 +341,15 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
     return this.#roles.orient === "x" ? [shift, 0] : [0, shift];
   }
 
+  /** Labels following its series (`labels`) are placed as drawn (marks/features/labels.ts). */
+  get roomPlaced(): boolean {
+    return this.spec.labels !== undefined;
+  }
+
+  room(...[, , , features]: Parameters<NonNullable<Mark["room"]>>): [number, number] {
+    return features?.of(this)?.room?.() ?? [0, 0];
+  }
+
   /** Dodged series stand within their bands: at most half a band off along x. */
   maxDisplacement(_s: Series, frame: Frame): number {
     return this.#shares && this.#roles.orient === "x" ? Math.abs(frame.x.bandwidth ?? 0) / 2 : 0;
@@ -384,7 +392,6 @@ export function line<S extends Schema>(
       "clip",
       "color",
       "zIndex",
-      "labels",
       ...FEATURES,
     ]),
   } as LineSpec;

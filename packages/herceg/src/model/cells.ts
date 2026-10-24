@@ -297,11 +297,15 @@ export class Cells {
         const { index, side, align, offset, width, height } = this.#beside[k]!;
         const across = side === "top" || side === "bottom";
         // Each further from the plot than the legends of its side before it,
-        // and where its `align` says along the plot.
-        let nearer = 0;
-        for (const other of this.#beside.slice(0, k))
-          if (other.index === index && other.side === side)
-            nearer += (across ? other.height : other.width) + LEGEND_GAP + other.offset;
+        // and where its `align` says along the plot. Beside the plot, those
+        // after it take the room further out.
+        let [nearer, farther] = [0, 0];
+        this.#beside.forEach((other, j) => {
+          if (other.index !== index || other.side !== side || j === k) return;
+          const size = (across ? other.height : other.width) + LEGEND_GAP + other.offset;
+          if (j < k) nearer += size;
+          else farther += size;
+        });
         const share = align === "start" ? 0 : align === "center" ? 0.5 : 1;
         const x = plot.x + share * (plot.width - width);
         const y = plot.y + share * (plot.height - height);
@@ -309,8 +313,8 @@ export class Cells {
         if (side === "top")
           return { x, y: plot.y - this.#over[index]! - LEGEND_GAP - offset - height - nearer };
         if (side === "bottom") return { x, y: bottom + LEGEND_GAP + offset + nearer };
-        if (side === "left") return { x: plot.x - before[index]! + LEGEND_GAP + nearer, y };
-        return { x: plot.x + plot.width + after[index]! - LEGEND_GAP - width - nearer, y };
+        if (side === "left") return { x: plot.x - before[index]! + LEGEND_GAP + farther, y };
+        return { x: plot.x + plot.width + after[index]! - LEGEND_GAP - width - farther, y };
       },
 
       finish: (panels, views, chart, theme, ratio, paint) => {

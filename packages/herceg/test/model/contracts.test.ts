@@ -27,7 +27,6 @@ interface Case {
   contract: string;
   name: string;
   spec: object;
-  pending?: string;
   code?: string;
   stage?: "load" | "draw";
   path?: string;
@@ -40,7 +39,6 @@ describe("spec contracts", () => {
     contract,
     name,
     spec,
-    pending,
     code,
     stage,
     path,
@@ -62,9 +60,16 @@ describe("spec contracts", () => {
           reached = "draw";
           const model = new ChartModel(config, undefined, ...staticCompilers());
           model.setSize(400, 200, 1);
-          shown = guidesOf(model.scene(estimateText), "legend").flatMap(({ entries }) =>
-            entries.map(({ label }) => label),
-          );
+          const scene = model.scene(estimateText);
+          shown = [
+            ...guidesOf(scene, "legend").flatMap(({ entries }) =>
+              entries.map(({ label }) => label),
+            ),
+            // Entries that explain rather than toggle, written beside the others.
+            ...guidesOf(scene, "caption").flatMap(({ items }) =>
+              items.flatMap((item) => (item.type === "text" ? [item.text] : [])),
+            ),
+          ];
         } catch (error) {
           thrown = error;
         }
@@ -76,7 +81,6 @@ describe("spec contracts", () => {
         const info = errorInfo(chartError(thrown, "validate"));
         expect({ code: info.code, path: info.path, stage: reached }).toEqual({ code, path, stage });
         expect(info.message).toContain(message);
-        if (pending) expect(info.message).toContain(`(round 2 stream ${pending} adds it)`);
       },
       name,
     );
@@ -170,23 +174,39 @@ describe("mark functions", () => {
       [() => region({ x1: 0, x2: 1, stroke: 2 as never }), "stroke"],
       [() => region({ x1: 0, x2: 1, strokeSides: ["up" as never] }), "strokeSides"],
       [() => bar(rows, { x: "region", y: "v", width: { px: -1 } }), "width.px"],
+      [() => point(rows, { x: "t", y: "v", size: { value: -1 } }), "size.value"],
+      [
+        () =>
+          point(rows, {
+            x: "t",
+            y: "v",
+            encode: {
+              opacity: {
+                // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+                condition: { when: ["==", ["field", "region"], "eu"], then: 2, otherwise: 1 },
+              },
+            },
+          }),
+        "encode.opacity.condition.then",
+      ],
+      [() => point(rows, { x: "t", y: "v", symbol: { value: "blob" as never } }), "symbol.value"],
     ];
     for (const [make, path] of cases)
       expect(thrown(make)).toMatchObject({ code: "invalid-option", path });
   });
 
-  contractTest("mark.pending.whole.factory", () => {
-    // Until its stream draws it, a mark function refuses an option whole,
-    // whatever its value; the validator refuses malformed values first
-    // (fixture cases channel.output.*, line.labels.at, label.content.*). A
-    // stream that draws one of these adds its checks to the mark function
-    // and moves its case here to invalid-option at the validator's path.
-    const cases: [() => unknown, string][] = [
-      [() => point(rows, { x: "t", y: "v", size: { value: -1 } }), "size"],
-      [() => line(rows, { x: "t", y: "v", labels: { at: "last", content: [] } }), "labels"],
-    ];
-    for (const [make, path] of cases)
-      expect(thrown(make)).toMatchObject({ code: "unsupported", path });
+  contractTest("label.content.malformed.factory", () => {
+    // Labels of parts are checked where they are drawn: bars' as they are
+    // made, labels following series as the chart compiles, at the
+    // validator's paths (fixture cases label.content.*).
+    expect(
+      thrown(() => bar(rows, { x: "region", y: "v", labels: { content: [] as never } })),
+    ).toMatchObject({ code: "invalid-option", path: "labels.content" });
+    const marks = [line(rows, { x: "t", y: "v", labels: { at: "last", content: [] as never } })];
+    expect(thrown(() => new ChartModel({ marks }, undefined, ...staticCompilers()))).toMatchObject({
+      code: "invalid-option",
+      path: "marks[0].labels.content",
+    });
   });
 
   contractTest("position.coordinate.malformed.factory", () => {

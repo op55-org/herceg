@@ -19,7 +19,7 @@ import type { TextPaint } from "../style/style.ts";
 import type { AxisType } from "./axis.ts";
 import { Cells } from "./cells.ts";
 import type { MarkSeries } from "./inspect.ts";
-import type { HiddenKeys } from "./legend.ts";
+import { HiddenKeys } from "./legend.ts";
 import {
   type AnnotatedPanel,
   across,
@@ -45,7 +45,7 @@ import {
   typedGroups,
   yAxesOf,
 } from "./panel-layout.ts";
-import { PanelLegends } from "./panel-legends.ts";
+import { PanelLegends, panelVisibility } from "./panel-legends.ts";
 import { mixedPanels, type ScaledConfig, type ScaleName, type Scopes, scopesOf } from "./scales.ts";
 import { titleText } from "./titles.ts";
 
@@ -175,11 +175,8 @@ export class Panels implements PanelLayout {
 
   /**
    * What hiding (or showing, `visible`) series and items `keys` makes of
-   * what panels' legends set (`hidden.panels`): in `panel`, its own state
-   * of them (what a key stands for in place of its series' own settings);
-   * in every panel, without one, they let go of what they set of the keys
-   * and of what those stand for. `hidden.panels` itself where nothing
-   * changes.
+   * what panels' legends set (`panelVisibility`), in panel `panel` or in
+   * every panel.
    */
   visibility(
     hidden: HiddenKeys,
@@ -187,32 +184,9 @@ export class Panels implements PanelLayout {
     visible: boolean,
     panel: string | undefined,
   ): Map<string, Map<string, boolean>> {
-    const { groups } = hidden;
-    let changed = false;
-    if (panel !== undefined) {
-      if (!this.list.some(({ id }) => id === panel))
-        throw new RangeError(`setVisibility panel: no panel "${panel}"`);
-      const own = new Map(hidden.panels.get(panel));
-      // Settings of what keys stand for replace their series' own, in one
-      // pass over the series.
-      const given = new Set(keys);
-      for (const [series, identity] of groups)
-        if (given.has(identity) && own.delete(series)) changed = true;
-      for (const key of keys) {
-        if (own.get(key) !== !visible) changed = true;
-        own.set(key, !visible);
-      }
-      return changed ? new Map(hidden.panels).set(panel, own) : hidden.panels;
-    }
-    const identity = (key: string) => groups.get(key) ?? key;
-    const given = new Set(keys.map(identity));
-    const out = new Map<string, Map<string, boolean>>();
-    for (const [name, own] of hidden.panels) {
-      const kept = new Map([...own].filter(([key]) => !given.has(identity(key))));
-      if (kept.size !== own.size) changed = true;
-      if (kept.size > 0) out.set(name, kept);
-    }
-    return changed ? out : hidden.panels;
+    if (panel !== undefined && !this.list.some(({ id }) => id === panel))
+      throw new RangeError(`setVisibility panel: no panel "${panel}"`);
+    return panelVisibility(hidden, keys, visible, panel);
   }
 
   /**
@@ -239,16 +213,7 @@ export class Panels implements PanelLayout {
    * chart; undefined where it did not.
    */
   snapshot(hidden: HiddenKeys, panel: string): ReadonlySet<string> | undefined {
-    const own = hidden.panels.get(panel);
-    if (!own) return undefined;
-    const keys = hidden.snapshot();
-    const set = (key: string, hide: boolean) => (hide ? keys.add(key) : keys.delete(key));
-    for (const [key, entry] of hidden.groups) {
-      const local = own.get(key) ?? own.get(entry);
-      if (local !== undefined) set(key, local);
-    }
-    for (const [key, hide] of own) set(key, hide);
-    return keys;
+    return hidden.panels.has(panel) ? new PanelKeys(hidden, panel) : undefined;
   }
 
   /**
@@ -609,4 +574,31 @@ function typeOf(marks: readonly Mark[], axis: "x" | "y"): AxisType {
 /** The one panel a mark draws in, for errors; undefined for marks drawn in every panel. */
 function panelOf({ spec }: Mark): string | undefined {
   return spec.panel === EVERY_PANEL ? undefined : spec.panel;
+}
+
+/**
+ * What is hidden in a panel whose legend showed or hid things unlike the
+ * chart, as `HiddenKeys.hiddenIn` says (a series' own setting there, then
+ * what it stands for, then its mark's, then the chart's), of a copy taken
+ * when the scene is made, so that what its frames find is what it drew;
+ * as a set, the keys hidden there, row predicates among them.
+ */
+class PanelKeys extends Set<string> {
+  readonly #in: (key: string) => boolean;
+
+  constructor(hidden: HiddenKeys, panel: string) {
+    super();
+    const copy = new HiddenKeys();
+    for (const key of hidden) copy.add(key);
+    for (const [key, identity] of hidden.groups) copy.groups.set(key, identity);
+    const own = new Map(hidden.panels.get(panel));
+    copy.panels = new Map([[panel, own]]);
+    this.#in = (key) => copy.hiddenIn(key, panel);
+    for (const key of [...copy, ...copy.groups.keys(), ...own.keys()])
+      if (this.#in(key)) super.add(key);
+  }
+
+  override has(key: string): boolean {
+    return this.#in(key);
+  }
 }

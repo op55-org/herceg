@@ -6,6 +6,7 @@
 // charts that use none of it carry none of it.
 
 import { markupOf, n } from "../draw/markup.ts";
+import { textItemMarkup } from "../draw/text.ts";
 import {
   type Formatter,
   formatNumber,
@@ -37,8 +38,8 @@ import { type AxisGuide, type Panel, type Rect, tickLabelGap } from "../scene/sc
 import { ChartError } from "../spec/errors.ts";
 import type { Place } from "../spec/place.ts";
 import type { ScaleScope } from "../spec/spec.ts";
-import { cssFont, dashPattern, insets } from "../style/style.ts";
-import type { Theme } from "../theme.ts";
+import { cssFont, dashPattern, insets, textPaint } from "../style/style.ts";
+import { surface, type Theme } from "../theme.ts";
 import {
   type AxisContext,
   type AxisPlan,
@@ -71,6 +72,9 @@ import type { ChartStyles } from "./styles.ts";
  * a chunk of its own (as esbuild splits code), which compresses worse.
  */
 export const GUIDE_KIT = {
+  textItemMarkup,
+  surface,
+  textPaint,
   formatNumber,
   numberFormatter,
   numberTickLabels,
@@ -348,7 +352,12 @@ export function needsGuides(config: ChartConfig): boolean {
     // Marks painted out of their order, and on scales of the chart's own.
     (config.marks as readonly Mark[]).some(
       ({ bound, scaled, spec }) =>
-        scaled || !!spec.zIndex || bound?.x?.kind === "scale" || bound?.y?.kind === "scale",
+        scaled ||
+        !!spec.zIndex ||
+        // Annotations listed by their labels.
+        spec.legend === true ||
+        bound?.x?.kind === "scale" ||
+        bound?.y?.kind === "scale",
     ) ||
     Object.values(scales ?? {}).some(
       (scale) => scale?.type !== "ordinal" && scale?.type !== "identity",

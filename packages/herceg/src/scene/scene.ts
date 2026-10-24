@@ -60,6 +60,12 @@ export interface Drawing<G extends Geometry> {
   readonly opacity?: number | undefined;
   readonly clip?: readonly number[] | undefined;
   /**
+   * For a drawing leaving parts of its geometry out (a style run's line,
+   * cut where another run meets it): polygons (x, y pairs) it draws
+   * nothing within, for renderers that draw geometry from its fields.
+   */
+  readonly holes?: readonly (readonly number[])[] | undefined;
+  /**
    * Paints onto a canvas in CSS pixels; or false for a drawing only SVG
    * writes (another library's), which keeps its chart's scene in SVG, where
    * everything paints in its order.
@@ -174,6 +180,8 @@ export interface LineGeometry extends Geometry {
   stroke: string;
   strokeWidth: number;
   dash: readonly number[] | undefined;
+  /** How far into its pattern the dash begins, in CSS pixels; 0 when absent. */
+  dashOffset?: number | undefined;
   path: Polyline;
 }
 
@@ -198,6 +206,8 @@ export interface AreaGeometry extends Geometry {
    * frames between two scenes do again (marks/trace.ts `curveLayers`).
    */
   curve?: CurveLayers | undefined;
+  /** With `curve`: whether its mark's layers stack, curved together, or are bands, each curved alone. */
+  stacked?: boolean | undefined;
 }
 
 /** Curves layers' edges through x positions and their boundaries' positions (see `curveLayers`). */
@@ -336,7 +346,9 @@ export interface PointGeometry extends Geometry {
    * Per point: an index into `palette`, the colors of a continuous scale, or
    * with `categorical`, the colors of a category field's values.
    */
-  colors?: { index: Uint8ClampedArray; palette: readonly string[]; categorical?: true } | undefined;
+  colors?:
+    | { index: Uint8ClampedArray | Float32Array; palette: readonly string[]; categorical?: true }
+    | undefined;
   /** Per point: fill opacity. */
   opacities?: Float32Array | undefined;
   /** Per point: an index into SYMBOLS. */
@@ -881,6 +893,12 @@ export interface LegendItem {
   stroke?: string | undefined;
   /** The series keys the entry hides and shows, when not its own key. */
   targets?: readonly string[] | undefined;
+  /**
+   * What showing the entry lets go of, where more than its targets: what
+   * else hides what they name (a mark hidden whole, a predicate over rows
+   * of its series), so that it shows all of it.
+   */
+  shows?: readonly string[] | undefined;
   /**
    * A swatch drawn as the marks look (a dashed line, a symbol), in place
    * of the square or glyph: its items, centered vertically on 0 and

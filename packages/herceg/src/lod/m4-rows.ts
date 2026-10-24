@@ -7,7 +7,7 @@
 import type { NumericArray } from "../data/column.ts";
 import type { Mapping } from "./m4.ts";
 import type { RangeExtremes, RangeIndex } from "./minmax-index.ts";
-import type { Polyline } from "./polyline.ts";
+import type { PointSink } from "./polyline.ts";
 
 /**
  * `m4` over positions `[start, end)` of `rows` (x ascending through them),
@@ -25,7 +25,7 @@ export function rowsM4(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   rows: Uint32Array | undefined,
   index?: RangeIndex,
 ): boolean {
@@ -58,7 +58,7 @@ function scan(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   rows: Uint32Array,
 ): void {
   const xo = xMap.offset * pixelRatio;
@@ -124,7 +124,7 @@ function indexed(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   rows: Uint32Array,
   index: RangeIndex,
 ): void {
@@ -170,27 +170,30 @@ function emitColumn(
   last: number,
   xMap: Mapping,
   yMap: Mapping,
-  out: Polyline,
+  out: PointSink,
 ): void {
   const a = low < high ? low : high;
   const b = low < high ? high : low;
-  emitPoint(x, y, rows[first]!, xMap, yMap, out);
-  if (a !== first && a !== last) emitPoint(x, y, rows[a]!, xMap, yMap, out);
-  if (b !== first && b !== last && b !== a) emitPoint(x, y, rows[b]!, xMap, yMap, out);
-  if (last !== first) emitPoint(x, y, rows[last]!, xMap, yMap, out);
+  emitPoint(x, y, rows, first, xMap, yMap, out);
+  if (a !== first && a !== last) emitPoint(x, y, rows, a, xMap, yMap, out);
+  if (b !== first && b !== last && b !== a) emitPoint(x, y, rows, b, xMap, yMap, out);
+  if (last !== first) emitPoint(x, y, rows, last, xMap, yMap, out);
 }
 
-/** A row's point in pixels, mapped linearly as `mapValue` maps it. */
+/** The point in pixels of the row at `position`, mapped linearly as `mapValue` maps it. */
 function emitPoint(
   x: NumericArray,
   y: NumericArray,
-  row: number,
+  rows: Uint32Array,
+  position: number,
   xMap: Mapping,
   yMap: Mapping,
-  out: Polyline,
+  out: PointSink,
 ): void {
+  const row = rows[position]!;
   out.push(
     xMap.offset + (x[row]! - xMap.origin) * xMap.factor,
     yMap.offset + (y[row]! - yMap.origin) * yMap.factor,
+    position,
   );
 }

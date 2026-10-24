@@ -44,12 +44,37 @@ export function entryOf(
 }
 
 /**
+ * Hidden keys, where hiding a mark whole (`{"mark":M}`, marks/hidden.ts)
+ * hides every series and row it has too, those it gains later included: a
+ * series' key (`[M, ...]`, `seriesKey`) and a row predicate's name their
+ * mark.
+ */
+export class Keys extends Set<string> {
+  override has(key: string): boolean {
+    if (super.has(key)) return true;
+    const whole = this.size > 0 ? wholeOf(key) : undefined;
+    return whole !== undefined && super.has(whole);
+  }
+}
+
+/**
+ * The key hiding a series' or row predicate's mark whole, by the series'
+ * key (`[M, ...]`) or the predicate's (`{"mark":M,"field":...}`): `M` as
+ * both write it; undefined for others.
+ */
+export function wholeOf(key: string): string | undefined {
+  const mark = /^(?:\[|\{"mark":)(-?\d+|"(?:[^"\\]|\\.)*")[,\]]/.exec(key)?.[1];
+  return mark && `{"mark":${mark}}`;
+}
+
+/**
  * The keys of series, items, and identities hidden through the legend and
  * the visibility methods. A series or item is also hidden while what it
  * stands for is: `groups` maps the keys of series and items to their
- * identities' keys (see model/identity.ts).
+ * identities' keys (see model/identity.ts); and a series while its mark is
+ * hidden whole.
  */
-export class HiddenKeys extends Set<string> {
+export class HiddenKeys extends Keys {
   readonly groups = new Map<string, string>();
   /**
    * Per panel, series and item keys hidden (true) or shown (false) there
@@ -70,7 +95,12 @@ export class HiddenKeys extends Set<string> {
   hiddenIn(key: string, panel: string | undefined): boolean {
     // No panel's map is under an undefined key.
     const own = this.panels.get(panel!);
-    return own?.get(key) ?? own?.get(this.groups.get(key)!) ?? this.has(key);
+    return (
+      own?.get(key) ??
+      own?.get(this.groups.get(key)!) ??
+      (own?.size ? own.get(wholeOf(key)!) : undefined) ??
+      this.has(key)
+    );
   }
 
   /** Maps a series' or item's key to its identity's. */
@@ -90,8 +120,8 @@ export class HiddenKeys extends Set<string> {
   }
 
   /** Scene-owned membership, including the series hidden by their group entries (see `Panels.snapshot`). */
-  snapshot(): Set<string> {
-    const keys = new Set(this);
+  snapshot(): Keys {
+    const keys = new Keys(this);
     for (const [key, entry] of this.groups) if (super.has(entry)) keys.add(key);
     return keys;
   }
@@ -129,6 +159,8 @@ export interface LegendPart {
   readonly colorbar?: ColorbarScale | undefined;
   /** What a key of glyphs varies in; parts without one show color. */
   readonly channel?: "size" | "shape" | "color" | undefined;
+  /** The chart's scale of categories a key shows, by name, which legends include by it. */
+  readonly scale?: string | undefined;
   /** Starts a row of its own; the model puts such parts after those that do not. */
   readonly breaks?: boolean;
   /**
@@ -149,11 +181,6 @@ export interface LegendContent {
   hidden: ReadonlySet<string> & Partial<Pick<HiddenKeys, "hiddenIn" | "panels" | "groups">>;
   /** Layout marks' entries, by key, whose looks swatches draw beside series' (`swatches: "mark"`). */
   also?: readonly LegendEntry[] | undefined;
-  /**
-   * Whether a series a legend's own entries name is hidden where the legend
-   * toggles it; by default, as `hidden` has it.
-   */
-  hides?: ((key: string) => boolean) | undefined;
   /**
    * In charts of subplots, what each panel draws, its items' colors, and
    * what lists them in panels' legends (loaded with subplots).

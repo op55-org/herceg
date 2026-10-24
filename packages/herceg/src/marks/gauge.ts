@@ -3,8 +3,8 @@
 
 import type { NumberField, Schema, Table } from "../data/table.ts";
 import { ArcPath, arcDrawing, traceSector } from "../draw/arc.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
-import { textDrawing } from "../draw/text.ts";
 import { type Formatter, formatNumber, numberFormatter } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";

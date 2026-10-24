@@ -91,6 +91,17 @@ function stateKey(event: ViewEvent, panel = ""): string {
 }
 
 /**
+ * How much a hidden key (JSON) names: 0 a mark whole (`{"mark":…}`), 1
+ * what series stand for (`{"field":…,"value":…}`), 2 rows or a group of a
+ * mark's items (`{"mark":…,"field":…}`), 3 a series or an item (`[…]`).
+ */
+function breadthOf(key: string): number {
+  if (key[0] === "[") return 3;
+  const { mark, ...rest } = JSON.parse(key) as { mark?: unknown };
+  return mark === undefined ? 1 : Object.keys(rest).length > 0 ? 2 : 0;
+}
+
+/**
  * A channel's selection between Python and the browser: a condition, or
  * rows, whose positions (Python to the browser) or identities (back) travel
  * as a buffer.
@@ -408,22 +419,25 @@ class Widget {
    * Draws the chart in a view. A chart drawn again (`again`, from a whole
    * chart Python sent) keeps what its legends hid, in the chart and in each
    * panel, whose keys name the values series stand for
-   * (`{"table":…,"value":…}`) or series of marks named by an id the chart
-   * still has (`["id",…]`; a mark's place may hold another mark now), and
-   * the keyboard focus.
+   * (`{"field":…,"value":…}`), or series, rows, or the whole of marks named
+   * by an id the chart still has (`["id",…]`, `{"mark":"id",…}`; a mark's
+   * place may hold another mark now), and the keyboard focus.
    */
   #mount(view: View, again = false) {
     const previous = again ? view.chart : undefined;
     const named = new Set(this.#config?.marks.map(({ spec }) => spec.id) ?? []);
     const kept = (keys: readonly string[]) =>
       keys.filter((key) => {
-        if (key.startsWith('{"')) return key.includes(',"value":');
+        let parsed: unknown;
         try {
-          const [owner] = JSON.parse(key) as unknown[];
-          return typeof owner === "string" && named.has(owner);
+          parsed = JSON.parse(key);
         } catch {
           return false;
         }
+        if (typeof parsed !== "object" || parsed === null) return false;
+        const owner = Array.isArray(parsed) ? parsed[0] : (parsed as { mark?: unknown }).mark;
+        if (owner !== undefined) return typeof owner === "string" && named.has(owner);
+        return "value" in parsed;
       });
     // A chart still waiting to restore hands on what it was to restore.
     const pending = previous ? view.pending : undefined;
@@ -470,16 +484,18 @@ class Widget {
     // (what is reported then is what Python has, and goes no further).
     const restore = () => {
       if (hidden.length) chart.setHiddenKeys(hidden);
-      // Each panel's own settings, of what series stand for and then of
-      // series, as settings of the first replace those of the second.
+      // Each panel's own settings, broad before narrow, as setting one
+      // replaces the narrower ones it covers (model/panel-legends.ts): of
+      // marks whole, of what series stand for, of rows (or groups of a
+      // mark's items), then of series.
       for (const [panel, own] of Object.entries(overrides ?? {})) {
         if (!config.panels?.list.some(({ id }) => id === panel)) continue;
-        for (const identities of [true, false])
+        for (const breadth of [0, 1, 2, 3])
           for (const [keys, visible] of [
             [own.hidden, false],
             [own.shown, true],
           ] as const) {
-            const set = kept(keys).filter((key) => key.startsWith('{"') === identities);
+            const set = kept(keys).filter((key) => breadthOf(key) === breadth);
             if (set.length) chart.setVisibility(set, visible, { panel });
           }
       }

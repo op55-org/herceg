@@ -14,7 +14,7 @@ import { type AxisInspection, type ChartConfig, ChartModel } from "../../src/mod
 import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
-import type { LineGeometry } from "../../src/scene/scene.ts";
+import type { AreaGeometry, LineGeometry } from "../../src/scene/scene.ts";
 
 function build(config: ChartConfig, width = 600) {
   const model = new ChartModel(
@@ -193,6 +193,108 @@ describe("where", () => {
     });
     const [first] = runs((scene.panels[0]!.marks[0] as LineGeometry).path);
     expect(model.xScale()!.invert(first!.at(-1)![0])).toBeCloseTo(7 * HOUR, -3);
+  });
+
+  it("meet a condition at a row a break hides at the break's seam", () => {
+    // Row 1 (t = 4, v = 4) meets each condition itself; the break hides it,
+    // so its crossing at the seam is where the line starts (>=) or ends (<=).
+    const data = table({ t: time([0, 4, 8, 10]), v: [0, 4, 8, 10], lo: [-2, 2, 6, 8] });
+    for (const field of ["t", "v"] as const)
+      for (const op of ["ge", "le"] as const) {
+        const where = col(field)[op](4);
+        for (const mark of [
+          line(data, { x: "t", y: "v", where }),
+          area(data, { x: "t", y: "v", where }),
+          area(data, { x: "t", y1: "lo", y2: "v", where }),
+        ]) {
+          const { model, scene } = build({
+            x: { domain: [0, 10], nice: false, breaks: timeBreaks([{ from: 2, to: 6 }]) },
+            y: { domain: [-2, 10], nice: false },
+            marks: [mark],
+          });
+          const g = scene.panels[0]!.marks[0] as LineGeometry | AreaGeometry;
+          const [run] = runs(g.kind === "line" ? g.path : g.upper);
+          expect(run!.length, `${g.kind} ${field} ${op}`).toBe(op === "ge" ? 3 : 2);
+          const [x, y] = op === "ge" ? run![0]! : run!.at(-1)!;
+          expect(x).toBeCloseTo(model.xScale()!.map(6), 3);
+          expect(y).toBeCloseTo(model.yScale()!.map(4), 3);
+        }
+      }
+  });
+
+  it("meet a condition on the segment drawn, where a break of x leaves out values along y", () => {
+    // Collapsed, v runs 0 to 6 drawn: v > 8 meets the segment two thirds
+    // along, and t > 5 half way, past the break, not at its seam.
+    const data = table({ t: [0, 10], v: time([0, 10]), lo: time([-1, 9]) });
+    for (const [where, along] of [
+      [col("v").gt(8), 2 / 3],
+      [col("t").gt(5), 1 / 2],
+    ] as const)
+      for (const mark of [
+        line(data, { y: "t", x: "v", orient: "y", where }),
+        area(data, { y: "t", x: "v", orient: "y", where }),
+        area(data, { y: "t", x1: "lo", x2: "v", orient: "y", where }),
+      ]) {
+        const { model, scene } = build({
+          x: { domain: [0, 10], nice: false, breaks: timeBreaks([{ from: 2, to: 6 }]) },
+          y: { domain: [0, 10], nice: false },
+          marks: [mark],
+        });
+        const g = scene.panels[0]!.marks[0] as LineGeometry | AreaGeometry;
+        const [x, y] = runs(g.kind === "line" ? g.path : g.upper)[0]![0]!;
+        const [x0, x1] = [model.xScale()!.map(0), model.xScale()!.map(10)];
+        const [y0, y1] = [model.yScale()!.map(0), model.yScale()!.map(10)];
+        expect(x).toBeCloseTo(x0 + along * (x1 - x0), 3);
+        expect(y).toBeCloseTo(y0 + along * (y1 - y0), 3);
+      }
+  });
+
+  it("keep crossings in the values' domain as drawn, where a break of x leaves out values along y", () => {
+    // Collapsed, v falls from 6 to 0 drawn: t > 5 meets it at 3 drawn, 7 in time.
+    const data = table({ t: [0, 10], v: time([10, 0]), lo: time([9, -1]) });
+    const where = col("t").gt(5);
+    for (const mark of [
+      line(data, { y: "t", x: "v", orient: "y", where }),
+      area(data, { y: "t", x: "v", orient: "y", where }),
+      area(data, { y: "t", x1: "lo", x2: "v", orient: "y", where }),
+    ]) {
+      const { model } = build({
+        x: { nice: false, breaks: timeBreaks([{ from: 2, to: 6 }]) },
+        y: { domain: [0, 10], nice: false },
+        marks: [mark],
+      });
+      expect(model.dataXExtent()![1]).toBeCloseTo(7, 5);
+    }
+    // A line or area leaves out a row whose value the break hides (t = 4):
+    // it is drawn, and its crossing found, from t = 0 to 10 as above.
+    const hidden = table({ t: [0, 4, 10], v: time([10, 4, 0]) });
+    for (const mark of [
+      line(hidden, { y: "t", x: "v", orient: "y", where }),
+      area(hidden, { y: "t", x: "v", orient: "y", where }),
+    ]) {
+      const { model } = build({
+        x: { nice: false, breaks: timeBreaks([{ from: 2, to: 6 }]) },
+        y: { domain: [0, 10], nice: false },
+        marks: [mark],
+      });
+      expect(model.dataXExtent()![1]).toBeCloseTo(7, 5);
+    }
+  });
+
+  it("leave out each value field's own rows a break hides along y", () => {
+    // Fields a and b share their rows (in band order): a's middle value is
+    // in the break, b's is not, and b reaches 100.
+    const data = table({ t: ["A", "B", "A"], a: time([10, 0, 4]), b: time([20, 0, 100]) });
+    for (const mark of [
+      line(data, { orient: "y", y: "t", x: ["a", "b"], continuity: { maxGap: 100 } }),
+      area(data, { orient: "y", y: "t", x: ["a", "b"], continuity: { maxGap: 100 } }),
+    ]) {
+      const { model } = build({
+        x: { nice: false, zero: false, breaks: timeBreaks([{ from: 2, to: 6 }]) },
+        marks: [mark],
+      });
+      expect(model.dataXExtent()).toEqual([0, 100]);
+    }
   });
 
   it("reads the rows a streaming window holds, testing appended rows only", () => {

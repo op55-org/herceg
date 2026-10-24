@@ -8,47 +8,90 @@
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
 import { numberPattern, timePattern } from "../../format/patterns.ts";
+import type { PointSink, Polyline } from "../../lod/polyline.ts";
 import { clearDomain } from "../../model/clearance.ts";
 import type {
-  CategoryColors,
   CompiledFeatures,
   FeatureCompiler,
   FeatureKit,
   Identities,
   MarkFeatures,
+  PointChannels,
   SeriesFeatures,
   SeriesSwatch,
 } from "../../model/features.ts";
 import type { ChartConfig } from "../../model/model.ts";
 import type { AreaGeometry, Geometry, LineGeometry } from "../../scene/scene.ts";
-import type { ChannelSpec, OrdinalScaleSpec, SymbolName } from "../../spec/encoding.ts";
+import type {
+  AreaLabelsSpec,
+  ChannelSpec,
+  LabelContent,
+  OrdinalScaleSpec,
+  SymbolName,
+} from "../../spec/encoding.ts";
 import type { ChartErrorCode } from "../../spec/errors.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
-import type { AreaSpec, BarSpec, LineSpec, PointSpec } from "../../spec/spec.ts";
+import type { AreaSpec, BarSpec, LineSpec, TextSpec } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
-import type { Mark, Palette } from "../mark.ts";
+import type { Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
 import {
   checkOutputs,
-  colorCheck,
   compileChannel,
   fieldsOf,
+  IDENTITY,
+  outputCheck,
   type ScaleOf,
   scalePath,
 } from "./channels.ts";
-import { Topology } from "./continuity.ts";
-import { type MarkScope, scalePrefix, scopeOfMark } from "./identity.ts";
+import { writeContent } from "./content.ts";
+import { bandRuns, indexedBand, Topology } from "./continuity.ts";
+import { type MarkScope, scalePrefix, scopeOfMark, tableNames } from "./identity.ts";
+import {
+  checkAt,
+  checkContent,
+  checkOwners,
+  checkPlace,
+  Drawings,
+  edgeOf,
+  placing,
+  recording,
+  seriesLabels,
+} from "./labels.ts";
 import { MARKER_RADIUS, markerPath, markers } from "./markers.ts";
+import { PointStyles } from "./points.ts";
 import { boundFrame, checkPositions } from "./positions.ts";
+import {
+  type PathEnds,
+  pathEnds,
+  positionBuffer,
+  Recorder,
+  type TracedEdge,
+  tableRow,
+} from "./provenance.ts";
 import { RowStyles } from "./row-styles.ts";
+import {
+  fillPieces,
+  holed,
+  keptStretches,
+  marksAt,
+  RunMarks,
+  reduceRuns,
+  runAt,
+  stretchesOf,
+  strokeStretches,
+  tracedEnds,
+} from "./run-paths.ts";
+import type { Look } from "./runs.ts";
 import { type CategoryScale, IdentityColors, OrdinalScale } from "./scales.ts";
-import { SeriesStyles } from "./series-styles.ts";
+import { type SeriesPaint, SeriesStyles } from "./series-styles.ts";
 
 /** The compiler, with the chart's code it uses. */
 export function featureCompiler(kit: FeatureKit): FeatureCompiler {
   return {
     compile: (config, marks, previous, identities) =>
       compile(kit, config, marks, previous, identities),
+    names: (tables, places, last) => tableNames(kit, tables, places, last),
   };
 }
 
@@ -83,13 +126,20 @@ function compile(
   // Scales keep their values' places across updates that keep their settings.
   const kept = (previous as Compiled | undefined)?.scales;
   const scales = new Map<string, OrdinalScale>();
-  const scaleOf = (name: string, spec: OrdinalScaleSpec | undefined) => {
-    const old = kept?.get(name);
+  /** A scale named `name` made (or kept) under `key`: its name, or its panel's or field's too. */
+  const scaleOf = (name: string, spec: OrdinalScaleSpec | undefined, key = name) => {
+    const old = kept?.get(key);
     const same = old && JSON.stringify(old.spec) === JSON.stringify(spec);
     const scale = new OrdinalScale(name, spec, same ? old : undefined);
-    scales.set(name, scale);
+    scales.set(key, scale);
     return scale;
   };
+  // What series and rows stand for beyond the core's scopes, whose hidden keys stay.
+  const prefixes = new Set<string>();
+  /** Declared scales of each panel's own (`scope: "panel"`), made per panel as marks read them. */
+  const ofPanels = new Map<string, OrdinalScaleSpec>();
+  /** Declared identity scales, which map nothing. */
+  const unmapped = new Set<string>();
   for (const [name, spec] of Object.entries(config.scales ?? {})) {
     if (POSITIONS.includes(name) || spec === undefined) continue;
     // Malformed first, for good, as the validator checks a spec before what it draws.
@@ -102,40 +152,53 @@ function compile(
       });
     // Position scales of the chart's own are the guide compiler's (guides/positions.ts).
     if (spec.type === "linear" || spec.type === "log" || spec.type === "time") continue;
-    // Round 2 freezes these before its streams draw them (marks/pending.ts).
-    const pending: [string, string, string] | undefined =
-      spec.type === "identity"
-        ? ["", "C", 'give type: "ordinal"']
-        : spec.type === "ordinal" && spec.scope !== undefined
-          ? [".scope", "C", "drop scope"]
-          : undefined;
-    if (pending) {
-      const [key, stream, instead] = pending;
-      const path = scalePath(name) + key;
-      throw new kit.ChartError({
-        code: "unsupported",
-        path,
-        message: `chart ${path}: not drawn as given yet (round 2 stream ${stream} adds it); ${instead}`,
-      });
+    if (spec.type === "identity") {
+      unmapped.add(name);
+      continue;
     }
     const ordinal = spec as OrdinalScaleSpec;
     if (ordinal.type !== "ordinal")
       throw new Error(
         `chart ${scalePath(name)}: expected type: "ordinal", a scale of categories; marks place values on x, y, and yRight`,
       );
-    scaleOf(name, ordinal);
+    if (ordinal.scope === "panel") ofPanels.set(name, ordinal);
+    else scaleOf(name, ordinal);
   }
   // The chart's palette slots of identity keys, which each scene hands over first.
   const chart: { slot: ((key: string) => number) | undefined } = { slot: undefined };
   const colors = new Map<string, IdentityColors>();
+  /**
+   * The scale `name` of a mark drawn in `panel`: the chart's, or for a
+   * scale of each panel's own, its subplot's. Facets and marks of every
+   * panel have no one subplot.
+   */
+  const scaleIn = (name: string, panel: string | undefined, path: string) => {
+    const spec = ofPanels.get(name);
+    if (!spec) return scales.get(name);
+    if (config.facet || panel === "*")
+      throw new kit.ChartError({
+        code: "unsupported",
+        path: `${scalePath(name)}.scope`,
+        message: `chart ${scalePath(name)}.scope: "panel" maps values in each subplot, and ${path} ${config.facet ? "is split into facets" : "is drawn in every panel"}; draw it in one subplot, or drop scope`,
+      });
+    const key = `${name}\0${panel ?? ""}`;
+    return scales.get(key) ?? scaleOf(name, spec, key);
+  };
+  /** The prefix of identity keys of the values of scale `name` in `panel`. */
+  const prefixIn = (name: string, panel: string | undefined) => {
+    const prefix = scalePrefix(name, ofPanels.has(name) ? (panel ?? "") : undefined);
+    prefixes.add(prefix);
+    return prefix;
+  };
   const readIn =
-    (table: Table | undefined, mark: Where): ScaleOf =>
+    (table: Table | undefined, mark: Where, panel: string | undefined): ScaleOf =>
     (name, path, field) => {
-      const scale = scales.get(name);
+      if (unmapped.has(name)) return IDENTITY;
+      const scale = scaleIn(name, panel, path);
       if (scale) return scale;
       // Without a declared "color", a field's values take the colors of what they stand for.
       if (name === "color" && field !== undefined && table) {
-        const prefix = identities.field(table, field);
+        const prefix = identities.field(table, field, mark.index);
         let made = colors.get(prefix);
         if (!made) {
           made = new IdentityColors(prefix, chart);
@@ -143,8 +206,18 @@ function compile(
         }
         return made;
       }
-      if (DEFAULT_SCALES.includes(name)) return scaleOf(name, undefined);
-      const names = [...scales.keys()].map((n) => `"${n}"`).join(", ");
+      // A field's values take the shapes and dashes of its name, apart from other fields'.
+      if (DEFAULT_SCALES.includes(name)) {
+        const key = field === undefined ? name : `${name}\0${field}`;
+        return scales.get(key) ?? scaleOf(name, undefined, key);
+      }
+      const names = [
+        ...new Set([...scales.values()].map((scale) => scale.name)),
+        ...ofPanels.keys(),
+      ]
+        .filter((n) => !DEFAULT_SCALES.includes(n) || config.scales?.[n] !== undefined)
+        .map((n) => `"${n}"`)
+        .join(", ");
       throw new kit.ChartError({
         code: "unknown-reference",
         path: `marks[${mark.index}].${path.slice(mark.path.length + 1)}`,
@@ -155,8 +228,15 @@ function compile(
   const zone = config.timeZone ?? "local";
   const byMark = new Map<Mark, MarkFeatures & { use(theme: Theme, paint: PaintReader): void }>();
   const declared = config.scales?.color !== undefined;
-  // What series and rows stand for beyond the core's scopes, whose hidden keys stay.
-  const prefixes = new Set<string>();
+  // Labels following series: marks' own `labels`, and text `from` a mark
+  // (by its id). Their sources' series record what they draw (labels.ts).
+  const followed = new Set(
+    marks.flatMap((mark) => {
+      const from = (mark.spec as Partial<TextSpec>).from;
+      return mark.spec.type === "text" && from ? [from.mark] : [];
+    }),
+  );
+  const drawings = new Map<Mark, Drawings>();
   marks.forEach((mark, at) => {
     // Named by its place among the chart's marks, layout marks included.
     const index = identities.positions[at]!;
@@ -176,18 +256,10 @@ function compile(
     path: string,
     where: Where,
   ): void {
-    // Round 2 binds identity scales from stream C on (marks/pending.ts):
-    // refused before series and paints are read, whichever paint wins.
-    for (const [name, channel] of Object.entries(
-      (spec as { encode?: Record<string, { scale?: unknown } | undefined> }).encode ?? {},
-    ))
-      if (typeof channel?.scale === "object")
-        throw Object.assign(
-          new Error(
-            `${path} encode.${name}.scale: not drawn as given yet (round 2 stream C adds it); name one of the chart's scales, or drop scale`,
-          ),
-          { code: "unsupported" },
-        );
+    if (spec.type === "text" && (mark.spec as TextSpec).from) {
+      byMark.set(mark, followingText(kit, mark, where, marks, drawings, config, zone));
+      return;
+    }
     if (mark.bound) checkPositions(mark, where);
     // On marks whose `color` is a field or a color, a name both says neither
     // (their series would read it as a field), and one that is neither is a mistake.
@@ -198,11 +270,26 @@ function compile(
           ? `${path} color: "${short}" names both a field and a color; give encode.color: { field: "${short}" } or { value: "${short}" }`
           : `${path} color: "${short}" is neither a field nor a color; ${mark.table ? `the table has ${fieldsOf(mark.table)}` : "the mark has no table"}, and colors are hex, rgb(), hsl(), var(), or CSS names`,
       );
-    const by = (field: string) => identities.field(mark.table!, field);
-    const scope = scopeOfMark(mark, own, by, declared);
+    const by = (field: string) => identities.field(mark.table!, field, where.index);
+    const { panel } = mark.spec;
+    const scope = scopeOfMark(mark, own, by, declared, (name) =>
+      unmapped.has(name) ? undefined : prefixIn(name, panel),
+    );
+    // A series field is inferred from a color field only through a scale that maps its values.
+    const encoded = (spec as { encode?: { color?: object } }).encode?.color;
+    const through = (encoded ?? spec.color) as { field?: string; scale?: unknown } | undefined;
+    if (
+      (mark.spec as { series?: unknown }).series === undefined &&
+      through?.field !== undefined &&
+      through.field === mark.identity?.field &&
+      unmapped.has(through.scale as string)
+    )
+      throw new Error(
+        `${path} ${encoded ? "encode.color" : "color"}.scale: "${through.scale}" is an identity scale, whose colors split no series; give series, or series: false`,
+      );
     for (const prefix of [scope?.color, scope?.rows])
       if (prefix && prefix !== own) prefixes.add(prefix);
-    const read = readIn(mark.table, where);
+    const read = readIn(mark.table, where, panel);
     // A color channel naming series stands for them whatever paints them
     // (scopeOfMark), so it is checked where a paint of the mark's own wins too.
     const color = (spec as { encode?: { color?: ChannelSpec<string> } }).encode?.color;
@@ -212,7 +299,7 @@ function compile(
         mark.table,
         read,
         "color",
-        colorCheck(kit.isColor),
+        outputCheck("color", kit.isColor),
         `${path} encode.color`,
       );
     // The declared scale series' colors follow, its places in their field's dictionary order.
@@ -221,46 +308,106 @@ function compile(
         ? undefined
         : read(scope.scale, `${path} ${scope.option ?? "color"}`);
     if (scale) {
-      checkOutputs(scale, colorCheck(kit.isColor), `${path} color`);
+      checkOutputs(scale, outputCheck("color", kit.isColor), `${path} color`);
       // The scale reads the values that color the mark, not series it colors otherwise.
       if (scope!.field !== undefined) scale.read(mark.table!, scope!.field);
     }
+    // Series of lines and areas labels follow record what they draw.
+    const labels = (mark.spec as { labels?: AreaLabelsSpec }).labels;
+    const drawn =
+      (spec.type === "line" || spec.type === "area") &&
+      (labels !== undefined || (spec.id !== undefined && followed.has(spec.id)))
+        ? new Drawings(mark)
+        : undefined;
     // Series of marks that need nothing else take the declared scale's colors.
-    if (!mark.featured && !asks(mark)) {
+    if (!mark.featured && !asks(mark) && !drawn) {
       if (scale) byMark.set(mark, scaledFeatures(scale, scope!));
       return;
     }
     const log = positionsLog(config, mark);
-    const at = { scope, path, read, scale, where };
+    const at = { scope, path, read, scale, where, labeled: drawn !== undefined };
     if (spec.type === "line") byMark.set(mark, lineFeatures(kit, mark, at, zone, log));
     else if (spec.type === "area") byMark.set(mark, areaFeatures(kit, mark, at, zone, log));
-    else if (spec.type === "bar") byMark.set(mark, barFeatures(kit, mark, at, zone));
-    else if (spec.type === "point" && !asks(mark)) byMark.set(mark, pointFeatures(kit, mark, at));
+    else if (spec.type === "bar") byMark.set(mark, barFeatures(kit, mark, at, zone, config.locale));
+    else if (spec.type === "point") byMark.set(mark, pointFeatures(kit, mark, at));
     else if (spec.type === "rule" || spec.type === "region" || spec.type === "text")
-      byMark.set(mark, labelFeatures(kit, mark, zone, path));
+      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config.locale));
     else
       throw new Error(
         `${path}: encode, style, markers, continuity, and where are not options of ${spec.type} marks`,
+      );
+    if (!drawn) return;
+    const features = byMark.get(mark)!;
+    recording(features, drawn);
+    drawings.set(mark, drawn);
+    if (labels?.content)
+      checkOwners(
+        kit,
+        mark,
+        labels.at,
+        labels.content,
+        (i) => `marks[${where.index}].labels.content[${i}]`,
+      );
+    if (labels)
+      Object.assign(
+        features,
+        placing(
+          kit,
+          {
+            source: mark,
+            index: where.index,
+            drawings: drawn,
+            at: labels.at,
+            ...seriesLabels(mark, labels, path),
+            content: writeContent(
+              kit,
+              labels.content ?? [{ series: true }],
+              mark.table,
+              config.locale,
+              zone,
+              (i) => `marks[${where.index}].labels.content[${i}]`,
+              { series: true, value: true },
+            ),
+            style: labels.style,
+            place: labels.place,
+            path: `${path} labels.style`,
+          },
+          JSON.stringify([where.mark, "labels"]),
+        ),
       );
   }
   // Layout marks' items follow a declared color scale too, reading their fields' values into it.
   let theme: Theme | undefined;
   let paint: PaintReader | undefined;
-  const colorScale = declared ? (scales.get("color") ?? scaleOf("color", undefined)) : undefined;
-  if (colorScale) prefixes.add(scalePrefix("color"));
-  if (colorScale)
+  /** The declared color scale of a mark's items, in its panel. */
+  const colorOf = (mark: Mark) =>
+    declared
+      ? (scaleIn(
+          "color",
+          mark.spec.panel,
+          `${mark.spec.type} (mark ${(config.marks as readonly Mark[]).indexOf(mark)})`,
+        ) ?? scaleOf("color", undefined))
+      : undefined;
+  if (declared)
     for (const mark of config.marks as readonly Mark[]) {
       const identity = mark.identity as { field?: string; table?: Table } | undefined;
-      if (!marks.includes(mark) && identity?.field !== undefined && mark.table)
-        colorScale.read(identity.table ?? mark.table, identity.field);
+      if (!marks.includes(mark) && identity?.field !== undefined && mark.table) {
+        colorOf(mark)!.read(identity.table ?? mark.table, identity.field);
+        prefixIn("color", mark.spec.panel);
+      }
     }
   const compiled: Compiled = {
     scales,
     scopes: prefixes,
-    items: colorScale && {
-      prefix: scalePrefix("color"),
-      color: (value) =>
-        theme && paint!(colorScale.output(value, theme.palette, theme.muted), "chart scales.color"),
+    items: (mark) => {
+      const scale = colorOf(mark);
+      return (
+        scale && {
+          prefix: prefixIn("color", mark.spec.panel),
+          color: (value) =>
+            theme && paint!(scale.output(value, theme.palette, theme.muted), "chart scales.color"),
+        }
+      );
     },
     of: (mark) => byMark.get(mark),
     frame: (frame, bound) => boundFrame(kit, frame, bound),
@@ -273,6 +420,98 @@ function compile(
     },
   };
   return compiled;
+}
+
+/**
+ * The features of text following the series of mark `from.mark` (a line or
+ * area declared before it, in its panel), whose labels it places as it is
+ * drawn: its label's text, a field of the source mark's, or content.
+ */
+function followingText(
+  kit: FeatureKit,
+  mark: Mark,
+  where: Where,
+  marks: readonly Mark[],
+  drawings: ReadonlyMap<Mark, Drawings>,
+  config: ChartConfig,
+  zone: string,
+): MarkFeatures & { use(): void } {
+  const spec = mark.spec as TextSpec;
+  const from = spec.from!;
+  const at = `${where.path} from`;
+  const source = marks.find((m) => m.spec.id === from.mark);
+  if (!source) {
+    const layout = (config.marks as readonly Mark[]).some((m) => m.spec.id === from.mark);
+    throw new kit.ChartError({
+      code: layout ? "invalid-option" : "unknown-reference",
+      path: `marks[${where.index}].from.mark`,
+      mark: where.mark,
+      message: layout
+        ? `${at}.mark: mark "${from.mark}" draws its own layout; text follows the series of lines and areas`
+        : `${at}.mark: no mark has id "${from.mark}"; give the line or area it follows id: "${from.mark}"`,
+    });
+  }
+  const { type, panel } = source.spec;
+  if (type !== "line" && type !== "area")
+    throw new Error(
+      `${at}.mark: mark "${from.mark}" is a ${type}; text follows the series of lines and areas`,
+    );
+  if (marks.indexOf(source) > marks.indexOf(mark))
+    throw new Error(
+      `${at}.mark: mark "${from.mark}" comes after this text; declare the text after the mark it follows`,
+    );
+  if (panel !== spec.panel)
+    throw new Error(
+      `${where.path} panel: the text follows mark "${from.mark}", drawn in ${panel === undefined ? "no panel" : `panel "${panel}"`}; draw it there too`,
+    );
+  checkAt(from.at, `${at}.at`);
+  const edge = edgeOf(source, from.edge, at);
+  const label = typeof spec.label === "string" ? { text: spec.label } : spec.label;
+  checkContent(label.content, `${where.path} label.content`);
+  checkPlace(label.place, `${where.path} label.place`);
+  const own = `marks[${where.index}].label`;
+  const content: LabelContent = label.content ?? [
+    label.field !== undefined
+      ? { field: label.field, ...(label.format && { format: label.format }) }
+      : label.text!,
+  ];
+  checkOwners(kit, source, from.at, content, (i) =>
+    label.content ? `${own}.content[${i}]` : `${own}.field`,
+  );
+  return {
+    use() {},
+    palette: (base) => base,
+    attach() {},
+    ...placing(
+      kit,
+      {
+        source,
+        index: identityIndex(config, source),
+        drawings: drawings.get(source)!,
+        at: from.at,
+        edge,
+        content: writeContent(
+          kit,
+          content,
+          source.table,
+          config.locale,
+          zone,
+          (i) => (label.content ? `${own}.content[${i}]` : own),
+          { series: true, value: true },
+        ),
+        style: label.style,
+        halo: spec.halo,
+        place: label.place,
+        path: `${where.path} label.style`,
+      },
+      JSON.stringify([where.mark, "text"]),
+    ),
+  };
+}
+
+/** A mark's index among the chart's marks, layout marks included. */
+function identityIndex(config: ChartConfig, mark: Mark): number {
+  return (config.marks as readonly Mark[]).indexOf(mark);
 }
 
 /**
@@ -316,6 +555,8 @@ interface At {
   readonly read: ScaleOf;
   readonly scale: CategoryScale | undefined;
   readonly where: Where;
+  /** Whether labels follow the mark's series (`labels`, or text `from` it). */
+  readonly labeled: boolean;
 }
 
 /**
@@ -400,13 +641,15 @@ function sourceOf(key: string): string {
 
 /**
  * The axis a line's or area's positions lie in bands along: its orient's,
- * where its position field is a category.
+ * where its position field (named, or a coordinate's) is a category, as the
+ * mark orders its series' rows by band then.
  */
 function bandAxis(mark: Mark): "x" | "y" | undefined {
   const orient = mark.tooltip === "y" ? "y" : "x";
-  const field = (mark.spec as { x?: unknown; y?: unknown })[orient];
+  const given = (mark.spec as { x?: unknown; y?: unknown })[orient];
+  const field = given === undefined ? undefined : positionField(given);
   const table = mark.table;
-  return typeof field === "string" && table?.has(field) && table.kind(field) === "category"
+  return field !== undefined && table?.has(field) && table.kind(field) === "category"
     ? orient
     : undefined;
 }
@@ -444,7 +687,7 @@ function resolved<T extends { series?: string | false }>(
 function lineFeatures(
   kit: FeatureKit,
   mark: Mark,
-  { scope, path, read, scale, where }: At,
+  { scope, path, read, scale, where, labeled }: At,
   zone: string,
   log: boolean,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
@@ -457,6 +700,7 @@ function lineFeatures(
     "stroke",
     where,
     kit,
+    mark.tooltip as "x" | "y",
     mark.view,
     bandAxis(mark),
   );
@@ -511,9 +755,71 @@ function lineFeatures(
         marker.fill = paintOf(marker.fill, `${path} style.marker.fill`);
       if (marker?.stroke !== undefined)
         marker.stroke = paintOf(marker.stroke, `${path} style.marker.stroke`);
-      // The observations the last trace kept, which markers stand at.
+      // The observations the last trace kept, which markers stand at, the
+      // row of each, and with runs, the run of each.
       let kept: Float32Array = new Float32Array(0);
+      let keptRows: Float64Array = new Float64Array(0);
       let count = 0;
+      const markerRuns: number[] = [];
+      const rowsOf = new WeakMap<Geometry, ArrayLike<number>>();
+      // Which observation each point traced is, where markers, `continuity`,
+      // or labels ask: the rows ending the series' paths, by panel, as last
+      // traced there, and the line as last traced, for labels.
+      const recorder = marker || topology || labeled ? new Recorder() : undefined;
+      const endsIn = new Map<string, PathEnds>();
+      let traced: { upper?: TracedEdge } = {};
+      // With runs: the points tracing reduced (before curves and steps), and the run of each.
+      const marks = paint.runs && new RunMarks(paint.runs.looks);
+      let reduced: Polyline | undefined;
+      // The width the series was last drawn at, which its runs' looks are over.
+      let width = spec.strokeWidth ?? 0;
+      /** Look `index` of the series' runs as it draws, over the mark's `width`: its width, dash, and opacity. */
+      const drawn = new Map<
+        number,
+        { look: Look; strokeWidth: number; dash: readonly number[] | undefined; opacity: number }
+      >();
+      const drawnLook = (index: number, width: number) => {
+        let made = drawn.get(index);
+        if (!made) {
+          const look = styles.look(index, paint);
+          const strokeWidth = look.strokeWidth ?? width;
+          made = {
+            look,
+            strokeWidth,
+            dash: kit.dashPattern(look.dash ?? spec.dash, strokeWidth),
+            opacity: (look.opacity ?? 1) * (paint.strokeOpacity ?? 1),
+          };
+          drawn.set(index, made);
+        }
+        return made;
+      };
+      /** Markers in the looks of their observations' runs, a geometry per look. */
+      const runMarkers = (series: Series, width: number) => {
+        const byLook = new Map<number, { coords: number[]; rows: number[] }>();
+        for (let i = 0; i < count; i++) {
+          const look = paint.runs!.looks[markerRuns[i]!]!;
+          const at = byLook.get(look) ?? byLook.set(look, { coords: [], rows: [] }).get(look)!;
+          at.coords.push(kept[i * 2]!, kept[i * 2 + 1]!);
+          at.rows.push(keptRows[i]!);
+        }
+        return [...byLook].map(([index, { coords, rows }]) => {
+          // As the line's stretch there is drawn.
+          const { look } = drawnLook(index, width);
+          const dots = markers(
+            kit,
+            series.key,
+            Float32Array.from(coords),
+            coords.length / 2,
+            marker!,
+            symbol,
+            look.color ?? series.color,
+            look.opacity ?? 1,
+          );
+          const made = { ...dots, key: `${dots.key}${index}` };
+          rowsOf.set(made, rows);
+          return made;
+        });
+      };
       const features: SeriesFeatures = {
         swatch(theme) {
           const strokeWidth = paint.strokeWidth ?? spec.strokeWidth ?? theme.style.line.strokeWidth;
@@ -540,8 +846,37 @@ function lineFeatures(
           };
           return { type: "composite", parts: [stroke, dot] };
         },
-        geometry(geometry, series) {
+        geometry(geometry, series, frame) {
           const line = geometry as LineGeometry;
+          width = line.strokeWidth;
+          if (paint.runs && marks && reduced) {
+            // Looks along the series: each run's stretch of line, then markers in their runs' looks.
+            const width = line.strokeWidth;
+            const looks = paint.runs.looks;
+            const stretches = stretchesOf(reduced, line.path, marks, spec.curve);
+            const out: Geometry[] = strokeStretches(
+              line.path,
+              stretches,
+              (run) => drawnLook(looks[run]!, width),
+              (i) => frame.polyline(series.key, `run${i}`),
+            ).map(({ run, path, dashOffset, holes }, i) => {
+              const { look, strokeWidth, dash, opacity } = drawnLook(looks[run]!, width);
+              const piece: LineGeometry = {
+                ...line,
+                key: `${line.key}|run${i}`,
+                of: line.key,
+                stroke: look.color ?? series.color,
+                strokeWidth,
+                dash,
+                ...(dash?.length && { dashOffset }),
+                path,
+              };
+              return holed(styles.translucent(piece, opacity), holes);
+            });
+            if (marker && count > 0) out.push(...runMarkers(series, width));
+            count = 0;
+            return out;
+          }
           if (paint.strokeWidth !== undefined || paint.dash !== undefined) {
             line.strokeWidth = paint.strokeWidth ?? line.strokeWidth;
             line.dash = kit.dashPattern(paint.dash ?? spec.dash, line.strokeWidth);
@@ -549,30 +884,67 @@ function lineFeatures(
           const out: Geometry[] = [
             styles.translucent(line, paint.opacity * (paint.strokeOpacity ?? 1)),
           ];
-          if (marker && count > 0)
-            out.push(
-              markers(kit, series.key, kept, count, marker, symbol, series.color, paint.opacity),
+          if (marker && count > 0) {
+            const dots = markers(
+              kit,
+              series.key,
+              kept,
+              count,
+              marker,
+              symbol,
+              series.color,
+              paint.opacity,
             );
+            rowsOf.set(dots, keptRows.subarray(0, count));
+            out.push(dots);
+          }
           count = 0;
           return out;
         },
       };
-      if (marker || topology)
+      if (marker) features.markerRows = (markers) => rowsOf.get(markers);
+      if (paint.runs)
+        features.lookAt = (series) => {
+          const ends = tracedEnds(s, series, paint.runs!.ends);
+          return (k) => {
+            const look = styles.look(paint.runs!.looks[runAt(ends, k)]!, paint);
+            return {
+              color: look.color ?? series.color,
+              opacity: (look.opacity ?? 1) * (paint.strokeOpacity ?? 1),
+              width: look.strokeWidth ?? width,
+            };
+          };
+        };
+      if (marker || topology || marks || labeled)
         features.trace = (series, y, frame, stage, out, start, end, reduce) => {
-          let step = reduce;
+          // Which observation each point is, where markers or path ends read it.
+          const sink = recorder && stage === "line" ? recorder : undefined;
+          sink?.start(out, positionBuffer(frame, series.key, stage));
+          let step = (a: number, b: number, _run?: number) => reduce(a, b, sink);
           if (marker && stage === "line") {
             // Crossings `where` meets are not observations: they get no markers.
             kept = frame.floats(series.key, "markers", 64);
+            keptRows = frame.doubles(series.key, "marker-rows", 32);
             count = 0;
-            step = (a, b) => {
+            markerRuns.length = 0;
+            step = (a, b, run) => {
               const from = out.count;
-              reduce(a, b);
-              const length = (count + out.count - from) * 2;
+              reduce(a, b, sink);
+              const added = out.count - from;
+              if (run !== undefined) for (let i = 0; i < added; i++) markerRuns.push(run);
+              const length = (count + added) * 2;
               if (length > kept.length) {
                 const grown = frame.floats(series.key, "markers", length);
                 grown.set(kept.subarray(0, count * 2));
                 kept = grown;
               }
+              if (count + added > keptRows.length) {
+                const grown = frame.doubles(series.key, "marker-rows", length);
+                grown.set(keptRows.subarray(0, count));
+                keptRows = grown;
+              }
+              for (let i = 0; i < added; i++)
+                keptRows[count + i] = tableRow(series, sink!.positions[from + i]!);
               kept.set(out.coords.subarray(from * 2, out.count * 2), count * 2);
               // Lines along y are traced with x and y swapped, and swapped back after.
               if (along === "y")
@@ -581,18 +953,54 @@ function lineFeatures(
               count = length / 2;
             };
           }
-          if (topology) topology.trace(series, y, frame, out, start, end, step);
-          else step(start, end);
+          let each: (a: number, b: number) => void = step;
+          if (marks) {
+            // Each run reduced apart, so its boundaries are points of the path.
+            reduced = out;
+            marks.reset();
+            drawn.clear();
+            const ends = tracedEnds(s, series, paint.runs!.ends);
+            each = (a, b) => reduceRuns(out, marks, ends, series.length, a, b, step);
+          }
+          if (topology) topology.trace(series, y, frame, sink ?? out, start, end, each);
+          else each(start, end);
+          if (!sink) return;
+          sink.settle();
+          if (topology) endsIn.set(frame.panel ?? "", pathEnds(out, sink, series));
+          if (labeled) {
+            const { positions } = sink;
+            traced = {
+              upper: { series, values: y, other: undefined, frame, path: out, positions },
+            };
+          }
+        };
+      if (labeled)
+        features.takeTrace = () => {
+          const taken = traced;
+          traced = {};
+          return taken;
         };
       if (topology) {
         features.extent = (...args) => topology.extent(...args);
-        features.across = (...args) => topology.across(...args);
+        // Along y, a line leaves out rows whose values a break hides.
+        features.across = (series, values, log, breaks) =>
+          topology.across(series, values, log, breaks, true);
         features.drawn = (row) => topology.drawn(row);
+        features.pathEnds = (_series, frame) => endsOf(endsIn, frame);
         features.shown = (series) => topology.shown(series);
       }
       s.features = features;
     },
   };
+}
+
+/** As `SeriesFeatures.pathEnds`: whether a row ends a path, as the series was last traced in `frame`'s panel. */
+function endsOf(
+  endsIn: ReadonlyMap<string, PathEnds>,
+  frame: Frame,
+): ((row: number, way: 1 | -1) => boolean) | undefined {
+  const ends = endsIn.get(frame.panel ?? "");
+  return ends && ((row, way) => (way === 1 ? ends.last : ends.first).has(row));
 }
 
 /**
@@ -626,8 +1034,9 @@ function formatOf(
 function barFeatures(
   kit: FeatureKit,
   mark: Mark,
-  { scope, path, read, scale }: At,
+  { scope, path, read, scale, where }: At,
   zone: string,
+  locale: string | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as BarSpec;
   const styles = new RowStyles(resolved<BarSpec>(mark), mark.table!, read, path, kit.isColor);
@@ -637,6 +1046,18 @@ function barFeatures(
   const pattern = labels?.format as { number?: string; time?: string } | undefined;
   if (pattern?.number !== undefined || pattern?.time !== undefined)
     format(labels!.format!, undefined, `${path} labels.format`);
+  // Labels of parts: a field at the bar's row, its series, its value.
+  const content =
+    labels?.content &&
+    writeContent(
+      kit,
+      labels.content,
+      mark.table,
+      locale,
+      zone,
+      (i) => `marks[${where.index}].labels.content[${i}]`,
+      { series: true, value: true },
+    );
   let theme: Theme | undefined;
   let paintOf: PaintReader;
   return {
@@ -675,31 +1096,53 @@ function barFeatures(
       };
     },
     format,
+    content,
   };
 }
 
-/** Annotations' labels in pattern formats. */
+/**
+ * Annotations' labels in pattern formats, and of parts (`content`): a
+ * field of their table's, or a rule's value at its place.
+ */
 function labelFeatures(
   kit: FeatureKit,
   mark: Mark,
   zone: string,
   path: string,
+  where: Where,
+  locale: string | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const format = formatOf(kit, zone);
   const label = (mark.spec as { label?: unknown }).label;
-  const pattern = typeof label === "object" ? (label as { format?: FormatSpec }).format : undefined;
+  const own =
+    typeof label === "object"
+      ? (label as { format?: FormatSpec; content?: LabelContent })
+      : undefined;
+  const pattern = own?.format;
   // A pattern refused is refused now, not when the first label is drawn; Intl options are the chart's.
   const { number, time } = (pattern ?? {}) as { number?: string; time?: string };
   if (number !== undefined || time !== undefined)
     format(pattern!, undefined, `${path} label.format`);
-  return { use() {}, palette: (base) => base, attach() {}, format };
+  if (own) checkContent(own.content, `${path} label.content`);
+  const content =
+    own?.content &&
+    writeContent(
+      kit,
+      own.content,
+      mark.table,
+      locale,
+      zone,
+      (i) => `marks[${where.index}].label.content[${i}]`,
+      { series: false, value: mark.spec.type === "rule" },
+    );
+  return { use() {}, palette: (base) => base, attach() {}, format, content };
 }
 
 /** Areas' looks by series, and continuity for areas that do not stack. */
 function areaFeatures(
   kit: FeatureKit,
   mark: Mark,
-  { scope, path, read, scale, where }: At,
+  { scope, path, read, scale, where, labeled }: At,
   zone: string,
   log: boolean,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
@@ -712,6 +1155,7 @@ function areaFeatures(
     "fill",
     where,
     kit,
+    mark.tooltip as "x" | "y",
     mark.view,
     bandAxis(mark),
   );
@@ -728,6 +1172,7 @@ function areaFeatures(
     throw new Error(
       `${path} ${spec.where !== undefined ? "where" : "continuity"}: stacked areas cannot leave rows out yet; drop it or the stack`,
     );
+
   const along = mark.tooltip as "x" | "y";
   const field = positionField(spec[along]);
   const topology = asks ? new Topology(kit, table, spec, { field, log }, zone, path) : undefined;
@@ -748,8 +1193,25 @@ function areaFeatures(
       ),
     attach(s) {
       const paint = styles.paint(s, sourceOf(s.key));
+      // A stack's layers share edges, which looks along a layer would have to follow too.
+      if (paint.runs && spec.stack)
+        throw new kit.ChartError({
+          code: "unsupported",
+          path: `marks[${where.index}].encode`,
+          mark: where.mark,
+          message: `${path} encode: the look of series "${s.label}" changes along it, and stacked areas take one look per layer; keep each layer's look, or drop the stack`,
+        });
       identify(s, scope, paint.value);
       const banded = spec.y1 !== undefined || spec.x1 !== undefined;
+      // With runs: each edge's points as tracing reduced them (before steps), and the run of each.
+      const runs = paint.runs;
+      const marks = runs && { upper: new RunMarks(runs.looks), lower: new RunMarks(runs.looks) };
+      let reduced: { upper: Polyline | undefined; lower: Polyline | undefined } = {
+        upper: undefined,
+        lower: undefined,
+      };
+      // With runs: the area as last drawn, whose outline its runs' looks follow.
+      let drawn: AreaGeometry | undefined;
       const features: SeriesFeatures = {
         // As areas fill by default (see the guide compiler's samples): stacks nearly opaque.
         swatch: () => ({
@@ -759,8 +1221,12 @@ function areaFeatures(
             (paint.fillOpacity ?? spec.fillOpacity ?? (spec.stack ? 0.85 : banded ? 0.2 : 0.25)) *
             paint.opacity,
         }),
-        geometry(geometry) {
+        geometry(geometry, series, frame) {
           const area = geometry as AreaGeometry;
+          if (runs && marks) {
+            drawn = area;
+            return runAreas(styles, area, series, frame, paint, marks, reduced, spec, banded);
+          }
           if (paint.stroke !== undefined) area.stroke = paint.stroke;
           if (paint.strokeWidth !== undefined) area.strokeWidth = paint.strokeWidth;
           if (paint.fillOpacity !== undefined) area.fillOpacity = paint.fillOpacity;
@@ -771,13 +1237,150 @@ function areaFeatures(
           return [area];
         },
       };
+      if (runs)
+        features.lookAt = (series) => {
+          const ends = tracedEnds(s, series, runs.ends);
+          const looks = drawn && areaLooks(styles, drawn, series, paint, spec.stroke);
+          return (k) => {
+            const run = runAt(ends, k);
+            return {
+              color: looks?.strokeOf(run) ?? looks?.fill(run) ?? series.color,
+              opacity: (paint.strokeOpacity ?? 1) * (looks?.opacity(run) ?? 1),
+              width: looks?.width(run) ?? 0,
+            };
+          };
+        };
+      if (topology || marks || labeled) {
+        // Which observation each point traced is, where `continuity` or
+        // labels ask: the rows ending the series' paths, by panel, as last
+        // traced there (its upper edge's: both edges' runs end alike), and
+        // its edges as last traced, for labels.
+        const recorder = topology || labeled ? new Recorder() : undefined;
+        const lowerRecorder = labeled ? new Recorder() : undefined;
+        const endsIn = new Map<string, PathEnds>();
+        let traced: { upper?: TracedEdge; lower?: TracedEdge } = {};
+        features.trace = (series, y, frame, stage, out, start, end, reduce) => {
+          recorder?.start(out, positionBuffer(frame, series.key, stage));
+          const step = (a: number, b: number) => reduce(a, b, recorder);
+          let each = step;
+          if (marks) {
+            reduced = { upper: out, lower: undefined };
+            marks.upper.reset();
+            const ends = tracedEnds(s, series, runs!.ends);
+            each = (a, b) => reduceRuns(out, marks.upper, ends, series.length, a, b, step);
+          }
+          if (topology) topology.trace(series, y, frame, recorder ?? out, start, end, each);
+          else each(start, end);
+          if (!recorder) return;
+          recorder.settle();
+          if (topology) endsIn.set(frame.panel ?? "", pathEnds(out, recorder, series));
+          if (labeled) {
+            const { positions } = recorder;
+            traced = {
+              upper: { series, values: y, other: undefined, frame, path: out, positions },
+            };
+          }
+        };
+        features.band = (series, top, bottom, frame, upper, lower, start, end, reduce, indexes) => {
+          traced = {};
+          recorder?.start(upper, positionBuffer(frame, series.key, "upper"));
+          lowerRecorder?.start(lower, positionBuffer(frame, series.key, "lower"));
+          // Each edge written through its recorder, where it has one.
+          const [up, down]: [PointSink, PointSink] = [recorder ?? upper, lowerRecorder ?? lower];
+          let each: (edge: Series["y"], a: number, b: number, out: PointSink) => void = reduce;
+          if (marks) {
+            reduced = { upper, lower };
+            marks.upper.reset();
+            marks.lower.reset();
+            const ends = tracedEnds(s, series, runs!.ends);
+            each = (edge, a, b, out) =>
+              reduceRuns(
+                out === up ? upper : lower,
+                out === up ? marks.upper : marks.lower,
+                ends,
+                series.length,
+                a,
+                b,
+                (from, to) => reduce(edge, from, to, out),
+              );
+          }
+          if (topology) topology.band(series, top, bottom, frame, up, down, start, end, each);
+          else if (
+            !marks &&
+            indexes &&
+            indexedBand(series, top, bottom, frame, start, end, indexes)
+          ) {
+            reduce(top, start, end, up, indexes.top);
+            reduce(bottom, start, end, down, indexes.bottom);
+          } else bandRuns(series, top, bottom, frame, up, down, start, end, each);
+          // A stack's layer drawn through its edges (no series of the mark's)
+          // runs through the stack's positions, which name none of its rows.
+          if (!recorder || !series.features) return;
+          recorder.settle();
+          if (topology) endsIn.set(frame.panel ?? "", pathEnds(upper, recorder, series));
+          if (labeled) {
+            lowerRecorder!.settle();
+            const at = { series, frame };
+            traced = {
+              upper: {
+                ...at,
+                values: top,
+                other: bottom,
+                path: upper,
+                positions: recorder.positions,
+              },
+              lower: {
+                ...at,
+                values: bottom,
+                other: top,
+                path: lower,
+                positions: lowerRecorder!.positions,
+              },
+            };
+          }
+        };
+        if (topology) features.pathEnds = (_series, frame) => endsOf(endsIn, frame);
+        if (labeled) {
+          features.takeTrace = () => {
+            const taken = traced;
+            traced = {};
+            return taken;
+          };
+          // Layers curved together: both edges' points stand at the same rows.
+          features.curved = (series, { upper, lower }, kept, frame) => {
+            const positions = positionBuffer(frame, series.key, "upper")(kept.length);
+            positions.set(kept);
+            const [top, bottom] = [series.y, series.y0];
+            const at = { series, frame, positions };
+            traced = {
+              upper: { ...at, values: top, other: bottom, path: upper },
+              ...(bottom && { lower: { ...at, values: bottom, other: top, path: lower } }),
+            };
+          };
+        }
+      }
+      if (marks)
+        features.runs = {
+          ends: (series) => tracedEnds(s, series, runs!.ends),
+          kept(series, positions) {
+            // Layers curved together keep the points of both edges at the same positions.
+            const ends = tracedEnds(s, series, runs!.ends);
+            marksAt(marks.upper, positions, ends);
+            marksAt(marks.lower, positions, ends);
+            reduced = { upper: undefined, lower: undefined };
+          },
+        };
       if (topology) {
-        features.trace = (series, y, frame, _stage, out, start, end, reduce) =>
-          topology.trace(series, y, frame, out, start, end, reduce);
-        features.band = (series, top, bottom, frame, upper, lower, start, end, reduce) =>
-          topology.band(series, top, bottom, frame, upper, lower, start, end, reduce);
         features.extent = (...args) => topology.extent(...args);
-        features.across = (...args) => topology.across(...args);
+        // Along y, an area leaves out rows whose values a break hides; a band keeps them at its seam.
+        features.across = (series, values, log, breaks) =>
+          topology.across(
+            series,
+            values,
+            log,
+            breaks,
+            spec.y1 === undefined && spec.x1 === undefined,
+          );
         features.drawn = (row) => topology.drawn(row);
         features.shown = (series) => topology.shown(series);
       }
@@ -786,98 +1389,134 @@ function areaFeatures(
   };
 }
 
-/** Points colored by a category field, through the chart's color scale. */
+/**
+ * An area whose looks change along its series, drawn in its runs'
+ * stretches (run-paths.ts): each run's fill, then each run's outline over
+ * them, as an area draws its outline over its fill.
+ */
+function runAreas(
+  styles: SeriesStyles,
+  area: AreaGeometry,
+  series: Series,
+  frame: Frame,
+  paint: SeriesPaint,
+  marks: { upper: RunMarks; lower: RunMarks },
+  reduced: { upper: Polyline | undefined; lower: Polyline | undefined },
+  { curve, stroke }: AreaSpec,
+  banded: boolean,
+): Geometry[] {
+  const upper = stretchesOf(reduced.upper ?? area.upper, area.upper, marks.upper, curve);
+  // A band's lower edge; an area along y closes at its baseline through one of its own.
+  const lower =
+    banded && area.lower
+      ? stretchesOf(reduced.lower ?? area.lower, area.lower, marks.lower, curve)
+      : undefined;
+  const { fill, opacity, strokeOf, width } = areaLooks(styles, area, series, paint, stroke);
+  const out: Geometry[] = fillPieces(area, upper, lower, (i, edge) =>
+    frame.polyline(series.key, `run${i}-${edge}`),
+  ).map(({ area: piece, run }) => ({
+    ...piece,
+    fill: fill(run),
+    fillOpacity: (paint.fillOpacity ?? area.fillOpacity) * opacity(run),
+  }));
+  // Outlines where the area has one, and dots for observations standing
+  // alone: areas of no fill, so they end as the area's outline does.
+  // Each run's own width decides, which the series' style may give where the area's is 0.
+  const outlined = keptStretches(
+    upper,
+    (st) => width(st.run) > 0 && (st.from === st.to || strokeOf(st.run) !== null),
+  );
+  if (outlined.length > 0) {
+    strokeStretches(
+      area.upper,
+      outlined,
+      (run) => ({ strokeWidth: width(run), dash: undefined }),
+      (i) => frame.polyline(series.key, `run${i}-outline`),
+    ).forEach(({ run, path, holes }, i) => {
+      const piece: AreaGeometry = {
+        ...area,
+        key: `${area.key}|outline${i}`,
+        of: area.key,
+        fill: fill(run),
+        fillOpacity: 0,
+        upper: path,
+        lower: null,
+        stroke: strokeOf(run),
+        strokeWidth: width(run),
+        strokeOpacity: (paint.strokeOpacity ?? 1) * opacity(run),
+        curve: undefined,
+      };
+      out.push(holed(piece, holes));
+    });
+  }
+  return out;
+}
+
+/**
+ * The looks of the runs of an area's series (`area` as the mark draws it,
+ * `stroke` its option): each run's look, fill, opacity, and outline, which
+ * also paints dots of observations standing alone (null for none).
+ */
+function areaLooks(
+  styles: SeriesStyles,
+  area: AreaGeometry,
+  series: Series,
+  paint: SeriesPaint,
+  stroke: string | undefined,
+) {
+  const { runs } = paint;
+  const looks = new Map<number, Look>();
+  const lookOf = (run: number) => {
+    const index = runs!.looks[run]!;
+    const look = looks.get(index) ?? styles.look(index, paint);
+    looks.set(index, look);
+    return look;
+  };
+  const fill = (run: number) => lookOf(run).color ?? series.color;
+  // An outline the option colors whole; else each run's in its own color.
+  // What the series has whatever its rows is in each look already.
+  const whole = stroke === undefined ? undefined : area.stroke;
+  return {
+    lookOf,
+    fill,
+    opacity: (run: number) => lookOf(run).opacity ?? 1,
+    width: (run: number) => lookOf(run).strokeWidth ?? area.strokeWidth,
+    strokeOf: (run: number) =>
+      lookOf(run).stroke ?? (area.stroke === null ? null : (whole ?? fill(run))),
+  };
+}
+
+/** Points' looks by their channels (points.ts), which every series of the mark shares. */
 function pointFeatures(
   kit: FeatureKit,
   mark: Mark,
-  { scope, path, read }: At,
+  { scope, path, read, scale }: At,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
-  const spec = mark.spec as PointSpec;
-  const table = mark.table!;
-  const field = spec.color as string;
-  const scale = read("color", `${path} color`, field);
-  const color = colorCheck(kit.isColor);
-  for (const [value, output] of Object.entries(scale.spec?.map ?? {}))
-    color(output, `chart scales.color.map[${JSON.stringify(value)}] (read by ${path} color)`);
-  if (scale.spec?.unknown !== undefined)
-    color(scale.spec.unknown, `chart scales.color.unknown (read by ${path} color)`);
-  scale.read(table, field);
+  const channels = (mark as Mark & { channels: PointChannels }).channels;
+  const styles = new PointStyles(kit, channels, mark.table!, read, path, mark.identity?.field);
   let theme: Theme | undefined;
-  let paint: PaintReader;
-  let last:
-    | { version: number; theme: Theme; paint: PaintReader; categories: CategoryColors }
-    | undefined;
-  // Each value's color slot, kept while the data streams: values never change colors.
-  let slots: {
-    theme: Theme;
-    paint: PaintReader;
-    colors: string[];
-    tone: Map<string, number>;
-    of: Map<string, number>;
-  };
-  const categories = (): CategoryColors => {
-    if (last?.version === table.version && last.theme === theme && last.paint === paint)
-      return last.categories;
-    if (slots?.theme !== theme || slots.paint !== paint)
-      slots = { theme: theme!, paint, colors: [], tone: new Map(), of: new Map() };
-    const { colors, tone, of } = slots;
-    const { codes, dictionary } = table.categories(field as never);
-    const held = new Uint8Array(dictionary.length);
-    for (let i = 0; i < codes.length; i++) if (codes[i]! >= 0) held[codes[i]!] = 1;
-    const tones = new Int32Array(dictionary.length).fill(-1);
-    const order: number[] = [];
-    // Points index their colors by bytes: the palette's first 254 cycle, and
-    // one stays for the muted color.
-    const palette = theme!.palette.slice(0, 254);
-    const muted = theme!.muted;
-    for (let code = 0; code < dictionary.length; code++) {
-      if (!held[code]) continue;
-      order.push(code);
-      const value = dictionary[code]!;
-      let slot = of.get(value);
-      if (slot === undefined) {
-        // Values outside an explicit domain take `unknown`, or the muted color, as other marks
-        // do; past 254 colors of their own, the muted color too.
-        let color = paint(scale.output(value, palette, muted), `${path} color`);
-        if (!tone.has(color) && colors.length >= 254) color = muted;
-        if (!tone.has(color)) tone.set(color, colors.push(color) - 1);
-        slot = tone.get(color)!;
-        of.set(value, slot);
-      }
-      tones[code] = slot;
-    }
-    const placeOf = (code: number) => scale.place(dictionary[code]!) ?? Infinity;
-    order.sort((a, b) => placeOf(a) - placeOf(b));
-    last = {
-      version: table.version,
-      theme: theme!,
-      paint,
-      categories: { field, dictionary, codes, tones, colors, order },
-    };
-    return last.categories;
-  };
   return {
     use(t, p) {
       theme = t;
-      paint = p;
+      styles.use(t, p);
     },
-    // Colored by their series field, series take its values' colors; colored
-    // by another, their rows do, and the series take none of the palette's.
+    // Sizes and shapes the channels give reach as far as the largest.
+    get inset() {
+      if (!channels.size && !channels.symbol) return undefined;
+      const reach = styles.inset();
+      return { x: reach, y: reach };
+    },
     palette: (base) =>
       scaledPalette(
         base,
         scope,
-        undefined,
+        scale,
         () => theme,
-        (key, _label, given) =>
-          given ??
-          (field === mark.identity?.field
-            ? scale.output(sourceOf(key), theme!.palette, theme!.muted)
-            : theme!.muted),
+        (key, label, given) => given ?? styles.seriesColor(sourceOf(key), label),
       ),
     attach(s) {
       identify(s, scope, undefined);
-      if (field !== mark.identity?.field) s.features = { categories: categories() };
+      s.features = { points: styles.looks() };
     },
   };
 }

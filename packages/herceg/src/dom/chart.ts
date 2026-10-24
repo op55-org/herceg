@@ -1037,8 +1037,9 @@ export class MountedChart implements Chart, ExportsScene {
     const own = this.#options.panels?.visibility(model, list, visible, panel);
     if (panel !== undefined && !own)
       throw new Error("setVisibility panel: the chart has no subplots; drop panel");
-    const hidden = new Set(model);
     const { groups } = model;
+    // Kept as what they stand for, as `#hide` keeps them, before any of them goes.
+    const hidden = new Set([...model].map((key) => groups.get(key) ?? key));
     for (const key of panel === undefined ? list : []) {
       // A series of a legend group shows and hides with its group's entry.
       const stored = groups.get(key) ?? key;
@@ -1068,10 +1069,9 @@ export class MountedChart implements Chart, ExportsScene {
     // Scenes draw with copies of the model's set, made as they are built.
     hidden.clear();
     for (const key of keys) hidden.add(key);
-    if (panels) {
-      hidden.panels = panels;
-      this.#loadCompilers();
-    }
+    if (panels) hidden.panels = panels;
+    // Panels' own visibility, and marks or rows hidden, show on the legend through the guide compiler.
+    this.#loadCompilers();
     this.#settle();
     this.#invalidate();
     this.#events.emit("visibility", {

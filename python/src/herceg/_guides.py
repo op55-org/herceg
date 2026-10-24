@@ -813,6 +813,11 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
     if builder.swatches is not None:
         _choice(builder.swatches, ("mark",), f"{role} swatches")
     entries = builder.entries
+    made = (
+        [_built(entry, LegendEntry, f"{role} entries")._spec() for entry in entries]
+        if entries is not None
+        else None
+    )
     spec = {
         "place": _spec(_built(builder.place, Place, f"{role} place")),
         "columns": builder.columns,
@@ -820,9 +825,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         "order": builder.order,
         "title": _title(builder.title, f"{role} title"),
         "include": include_spec(builder.include, f"{role} include"),
-        "entries": [_built(entry, LegendEntry, f"{role} entries")._spec() for entry in entries]
-        if entries is not None
-        else None,
+        "entries": made,
         "swatches": builder.swatches,
         "style": style_spec(builder.style, f"{role} style", LEGEND_ROLES),
     }

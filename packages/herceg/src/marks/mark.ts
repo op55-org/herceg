@@ -1,6 +1,7 @@
 import type { FieldKind, NumericArray } from "../data/column.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
+import type { Formatter } from "../format/format.ts";
 import { formatNumber, timeTickLabels } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { MeasureText } from "../layout/text.ts";
@@ -18,6 +19,7 @@ import type { Geometry, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import type { ContentWriter } from "./features/content.ts";
 import type { RowBindings } from "./row-bindings.ts";
 import {
   isSortedSubset,
@@ -175,6 +177,8 @@ export interface Frame {
   groupSeries?: readonly [series: readonly MarkSeries[], hidden: ReadonlySet<string>] | undefined;
   /** The chart drawing this frame, for caches that count each chart's redraws. */
   owner: object;
+  /** The panel's key, which labels following series name (marks/attachments.ts). */
+  panel?: string | undefined;
   /** The owner's count of scenes drawn; the panels of one scene share it. */
   scene: number;
   /** Large point series may be left to a GPU painter as clouds. */
@@ -241,6 +245,8 @@ export interface AxisFormat {
   y: (value: number) => string;
   /** Other numbers, such as values of fields a mark encodes as size or color. */
   value: (value: number) => string;
+  /** How the mark's labels of parts (`content`) are written (`MarkFeatures.content`). */
+  content?: ContentWriter | undefined;
 }
 
 /**
@@ -280,6 +286,8 @@ export interface GlyphKey {
   title: string;
   /** What the glyphs vary in, for the chart's text alternative. */
   channel: "size" | "shape" | "color";
+  /** The scale of categories mapping the values, which legends include by name. */
+  scale?: string | undefined;
   /** For shapes, `shape` is the symbol's name. */
   entries: { label: string; glyph: string; r: number; shape?: string; color?: string }[];
 }
@@ -565,7 +573,7 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * whose glyphs differ in size (points sized by a field); NaN when the row
    * is not drawn. Clicks that select rows read it.
    */
-  reach?(row: number): number;
+  reach?(row: number, series: Series): number;
   /**
    * Of two positions of series `s` (one of `series`), whether the first's
    * glyph paints over the second's, for marks whose glyphs do not paint in
@@ -695,6 +703,19 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
     format: (value: number) => string,
     paint: PaintReader,
   ): LegendPart[];
+  /**
+   * An annotation's legend entries by its label, as mark `key`: one for
+   * constant text, hiding the mark whole, or one per value of its label's
+   * field among `rows` (all by default), hiding the rows that hold it
+   * (marks/hidden.ts), written as its labels are (`pattern`, the
+   * formatter of patterns, as `MarkFeatures.format`).
+   */
+  labelEntries?(
+    key: MarkKey,
+    locale: string | undefined,
+    rows?: RowParts,
+    pattern?: (format: object, locale: string | undefined, path: string) => Formatter,
+  ): { key: string; label: string }[];
 }
 
 /**
@@ -715,11 +736,7 @@ export function valueKind(table: Table, fields: readonly string[]): "time" | "nu
   return fields.some((field) => table.kind(field) === "time") ? "time" : "number";
 }
 
-/**
- * Throws an invalid-option error at `path` of a `type` mark unless `ok`:
- * a malformed option, refused for good, and before what the mark does not
- * draw yet (marks/pending.ts).
- */
+/** Throws an invalid-option error at `path` of a `type` mark unless `ok`: a malformed option. */
 export function checkOption(
   ok: boolean,
   type: string,
@@ -798,15 +815,17 @@ export interface SeriesSource {
 
 /**
  * The field splitting a line's, area's, or bar's rows into series: its
- * `series`, or without one the category field its color names (`color`, or
- * `encode.color`'s field), so that `color: "region"` draws a series per
- * region. None with `series: false`, or where the mark's own paint (`paint`:
- * a line's stroke, an area's or bar's fill) overrides the color.
+ * `series`, or without one the category field its color names (`color`, a
+ * point's color channel's field, or `encode.color`'s), so that `color:
+ * "region"` draws a series per region. None with `series: false`, where the
+ * mark's own paint (`paint`: a line's stroke, an area's or bar's fill)
+ * overrides the color, or where an identity scale of the channel's own reads
+ * the field (one of the chart's is refused, in the feature compiler).
  */
 export function seriesOf(
   spec: {
     readonly series?: string | false | undefined;
-    readonly color?: string | undefined;
+    readonly color?: string | object | undefined;
     readonly stroke?: string | undefined;
     readonly fill?: string | undefined;
     readonly encode?: Readonly<Record<string, unknown>> | undefined;
@@ -816,7 +835,14 @@ export function seriesOf(
 ): string | undefined {
   if (spec.series !== undefined) return spec.series === false ? undefined : spec.series;
   if (spec[paint] !== undefined || spec.encode?.[paint] !== undefined) return undefined;
-  const field = (spec.encode?.color as { field?: string } | undefined)?.field ?? spec.color;
+  // A point's color may be a channel itself, as encode's is.
+  const given = (spec.encode?.color ?? spec.color) as
+    | string
+    | { field?: string; scale?: unknown }
+    | undefined;
+  // Colors read as they are (an identity scale) stand for nothing to split by.
+  if (typeof given === "object" && typeof given.scale === "object") return undefined;
+  const field = typeof given === "object" ? given.field : given;
   return field !== undefined && table.has(field) && table.kind(field) === "category"
     ? field
     : undefined;

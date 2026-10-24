@@ -337,7 +337,8 @@ the axes; tooltip fields, below, are marks'), `pan`, `zoom`, `brush`,
 below), `animation` (`True`, milliseconds, or `hg.Animation(duration=250,
 values=True)`: zooming to a brush and double-click reset move the axes
 gradually in HTML output, and with `values`, bars, pie slices, and lines and
-areas whose x values stay move to the data a live chart's `replace` sends,
+areas whose x values stay and that no labels follow move to the data a live
+chart's `replace` sends,
 with axes whose domains change; points match across replacements with
 `animation_key="id"` on `Chart.point()` or `hg.scatter()`), `renderer`,
 `theme` (below), `locale`, `time_zone`, and `projection` (maps, above).
@@ -666,9 +667,9 @@ chart = hg.Chart(
 | `hg.axis(scale, ...)` | `scale` (`"x"`, `"y"`, `"y_right"`), `place` (`hg.Place(side=...)`: x on the `"bottom"` or `"top"`, y on the `"left"` or `"right"`, y_right on the `"right"`), `id`, `title`, `ticks`, `format`, `grid`, `show`, `style`, `tick` (`hg.Tick(direction="out" \| "in" \| "cross", length=...)` or `False`), `labels` (`hg.TickLabels` or `False`), `line` (draw its line), `layers` (`hg.TickLayer`s). |
 | `hg.TickLayer` | `id` (not `"major"`), `ticks`, `format`, `tick`, `labels`, `style` (its `tick` and `tick_label`): minor ticks, a row of day boundaries. |
 | `hg.TickLabels` | `rotation` (degrees clockwise, or a list tried in turn), `collision` (`"show"`, `"hide"`, and on x axes `"stagger"` and `"wrap"`), `row` (0 by the line, 1 beyond, on x axes), `priority` (the higher stays where labels of a row meet), `duplicates` (`"hide"` leaves out a label repeating the one before it), `inside` (in the plot beside their ticks, taking no room outside it), `gap` (pixels past the ticks' ends). Flat labels stand at their ticks as `style`'s `tick_label` aligns them: `align` on x, `vertical_align` on y. |
-| `hg.LegendOptions` (`legend=`), `hg.legend(...)` (`guides`) | `place`, `columns` or `rows`, `order` (`"row"` or `"column"`), `title`, `include` (what it lists: `hg.ScaleRef(mark=..., channel="series" \| "color" \| "size" \| "symbol")`s, or `[]` for its entries alone; every scale by default), `entries` (`hg.LegendEntry`s of your own, for now with `include=[]`), `swatches="mark"` (swatches that look like the marks), `style`; `hg.legend` also `id`, `show`. |
-| `hg.LegendEntry` | `key`, `label`, a `swatch` (`hg.Swatch(type="line" \| "rect" \| "symbol" \| "composite", ...)`, a symbol's `symbol` a point's shape) or `sample` (a mark's id, drawn as it looks), and `targets` (the ids of marks clicking it hides and shows). |
-| `hg.colorbar(...)` | `scale` (`hg.ScaleRef(mark=..., channel="color")`; the chart's only color scale by default), `place` (the right by default; beside the plots it stands, above or below it lies), `title`, `ticks`, `format`, `tick`, `labels`, `layers` (as an axis' along the bar), `length`, `thickness`, `style`, `id`, `show`. Ticks are rounded inside the color domain; a diverging scale's middle color sits at its midpoint; a contour's bands are steps. |
+| `hg.LegendOptions` (`legend=`), `hg.legend(...)` (`guides`) | `place`, `columns` or `rows`, `order` (`"row"` or `"column"`), `title`, `include` (what it lists: `hg.ScaleRef(mark=..., channel="series" \| "color" \| "size" \| "symbol")`, `hg.ScaleRef(scale=...)` (an `hg.OrdinalScale` of `scales`, by name), or `hg.MarkRef(mark=...)` (a mark whole: its series, or an annotation's entries); `[]` for its entries alone; every scale by default), `entries` (`hg.LegendEntry`s of your own, after what `include` lists, each with a `key` of its own), `swatches="mark"` (swatches that look like the marks), `style`; `hg.legend` also `id`, `show`. |
+| `hg.LegendEntry` | `key`, `label`, a `swatch` (`hg.Swatch(type="line" \| "rect" \| "symbol" \| "composite", ...)`, a symbol's `symbol` a point's shape) or `sample` (a mark's id, drawn as it looks), and `targets`, what clicking it hides and shows: marks by id, `hg.LegendTarget(mark=..., field=..., values=[...])` (a series column's series, or the rows of points, unstacked bars, and annotations holding the values), or `hg.LegendTarget(scale=..., values=[...])` in every mark reading that scale. |
+| `hg.colorbar(...)` | `scale` (`hg.ScaleRef(mark=..., channel="color")`, a mark's color ramp, a map's included; the chart's only color scale by default), `place` (the right by default; beside the plots it stands, above or below it lies), `title`, `ticks`, `format`, `tick`, `labels`, `layers` (as an axis' along the bar), `length`, `thickness`, `style`, `id`, `show`. Ticks are rounded inside the color domain; a diverging scale's middle color sits at its midpoint; a contour's bands are steps. |
 
 An entry stands for a value: the series of every mark and panel showing
 the same value of the same column of one data (or data made from it, as
@@ -681,7 +682,9 @@ that name no mark; those naming it (`hg.ScaleRef(mark=...)`) show it. A
 mark whose `color=` splits its series is named by `channel="color"` or
 `"series"` alike, and a reference to a scale the mark does not have is an
 error naming those it has; what a mark has comes of its options, so a
-scale whose rows give it no values yet is shown once they do.
+scale whose rows give it no values yet is shown once they do. Legends
+listed on one side stack in the order `guides` gives them, the first
+nearest the plots.
 
 ```python
 # One legend under a grid of subplots, each site listed once.
@@ -1100,7 +1103,8 @@ hg.Chart(totals, scales={"color": sites}).bar(
 | --- | --- |
 | `hg.OrdinalScale(domain=, map=, unknown=)` | A scale of categories in `scales`: `map` fixes outputs by value; the others take the theme's palette by their place in `domain` (the given values in order, others `unknown`; or the columns' values, a categorical's own order first). Under `"color"`, every mark's colors go through it; named scales other than `"color"` are read by `hg.Channel(scale=...)`, and every mark reading one gives a value one color and one legend entry, whatever data it reads. |
 | `color=` | A column through the color scale, or a CSS color: a line's stroke, a bar's, area's, or point's fill. `stroke` and `fill` win over it. |
-| `encode=hg.Encodings(...)` | Channels: `hg.Channel(field=, scale=)`, `hg.Channel(series=True, scale=)` (the series' names through a scale, for marks whose series are no column's values), `hg.Channel(value=)`, or `hg.when(condition, then, otherwise)`. Lines take color, stroke, dash, stroke_width, and opacity; bars color, fill, stroke, stroke_width, and opacity; areas color, fill, stroke, and opacity. Lines and areas take one value per series. |
+| `encode=hg.Encodings(...)` | Channels: `hg.Channel(field=, scale=)`, `hg.Channel(series=True, scale=)` (the series' names through a scale, for marks whose series are no column's values), `hg.Channel(value=)`, or `hg.when(condition, then, otherwise)`. Lines take color, stroke, dash, stroke_width, and opacity; bars color, fill, stroke, stroke_width, and opacity; areas color, fill, stroke, and opacity; points color, fill, size (an area in square pixels), opacity (their fill's), and symbol, with stroke and stroke_width as values. A line's or area's look changes along a series where a channel reads rows (a column other than the series', a condition, an identity scale): a piece of line takes the look of the row it arrives at, and the series stays one series. |
+| `hg.IdentityScale()` | A column's values as they are, through `hg.Channel(field=, scale=hg.IdentityScale())` or a named scale: colors, dashes, and shapes from category columns; widths, sizes, and opacities from numbers. It splits no series and makes no legend entries. |
 | `style=hg.MarkStyle(by=hg.StyleMap(field=, map=))` | Looks by value: series whose `field` (or, without it, whose series value or wide value column) is a key of `map` take that `hg.SeriesStyle` (stroke, stroke_width, dash, opacity, fill, fill_opacity, stroke_opacity, marker). Bars read each row's value. |
 | `markers=True` / `"x"`, `style=hg.MarkStyle(marker=hg.MarkerStyle(...))` | A point at each observation a line keeps (after reduction), in its color unless styled. |
 | `opacity`, `stroke_opacity` | The whole mark's opacity, and its outline's. |
@@ -1195,6 +1199,44 @@ Stacked areas refuse `where` and `continuity`.
 | `hg.LabelPlace(attachment=, side=, outside=, reserve=, offset=)` | Where on the rule or region: its start, center, or end (a region's along `side`); `outside=True` puts a horizontal rule's label beside the y axis, which makes room for it unless `reserve=False`. |
 | `contribute_domain=True` | The annotation's values widen the axes' domains. By default annotations show where the data is, and count only in charts with nothing else. |
 | `stroke_opacity`, `span` | A rule's outline opacity, and the part of the other axis it runs along. |
+| `legend=True` | Listed in the legend by its label (a rule as a line, a region as a box), its entry hiding and showing it; a label of a column makes an entry per value, hiding its rows of that value. Hidden, it still counts toward the domains it counts toward. `hg.MarkRef(mark=...)` in a legend's `include` lists it too. |
+
+### Labels following series and labels of parts
+
+Lines and areas label each series they draw with `labels=hg.SeriesLabels(at=...)`:
+at its `"first"` or `"last"` observation drawn, or where it enters or
+leaves the view (`"visible-start"`, `"visible-end"`), in the series'
+color, before its start or after its end, inside the plot or outside it
+(`place=hg.LabelPlace(outside=True)`, with room kept beside the axis). A
+band (`y1` and `y2`) names the edge they follow (`edge="y2"`). Columns are
+read at the observation the label stands at: where the line enters or
+leaves the view, the one it arrives at there as drawn (on a step's hold,
+the one whose value it holds). Where the view cuts a stack split by a
+`series` column, which row stands there is not known: labels at the
+view's edges write series and values, not columns.
+Text follows another mark's series with `from_=hg.MarkAnchor(mark=..., at=...)`,
+drawn where it is listed among the marks. Labels are written as `content`
+of parts: text, and `hg.LabelPart(field=)`, `(series=True)`, or
+`(value=True)`, each with a `format`, which bars' `hg.BarLabels` and
+annotations' `hg.Label` take too.
+
+```python
+(
+    hg.Chart(df, legend=False)
+    .line(
+        x="time",
+        y="ms",
+        color="service",
+        id="latency",
+        labels=hg.SeriesLabels(
+            at="last",
+            content=[hg.LabelPart(series=True), " ", hg.LabelPart(value=True, format=hg.Format(number=".0f"))],
+        ),
+    )
+    .text(label="now", from_=hg.MarkAnchor(mark="latency", at="visible-end"))
+    .rule(y=250, label=hg.Label(content=["SLO ", hg.LabelPart(value=True)]))
+)
+```
 
 ## Normalized stacks and streamgraphs
 
@@ -1634,16 +1676,13 @@ What herceg refuses raises `hg.ChartError`, a `ValueError` with the
 engine's fields: `code` (`"unknown-field"`, `"field-type"`,
 `"series-varies"`, `"series-with-values"`, `"unknown-reference"`,
 `"invalid-option"`, `"unsupported"` (a well-formed option herceg does
-not draw yet, saying what to give instead), ...), `path` (`"marks[1].color"`, options in Python's
+not draw in that combination, saying what to give instead), ...), `path` (`"marks[1].color"`, options in Python's
 spelling), `mark`, `panel`, `phase`, and `info()`, all of them as a dict.
 Columns, their kinds, and series are checked as each mark is added
 (`chart.line(x="t", y="p90")` raises at once, listing the columns the data
 has); references, such as a channel's `scale`, as the chart is output; and
 what only the engine can check (the rows `hg.derive` makes) as it draws
-SVG, PNG, or PDF. Some options are taken before herceg draws them (lines'
-`labels=hg.SeriesLabels(...)`, `hg.IdentityScale`, and the others the
-engine's architecture lists under "Spec contracts"); a chart refuses each
-with `"unsupported"` as the mark is added or the chart output. A chart that cannot draw in HTML, a notebook, a widget,
+SVG, PNG, or PDF. A chart that cannot draw in HTML, a notebook, a widget,
 or Streamlit shows a box of its size in its place saying "Chart could not
 be rendered" and why; an update a widget cannot apply leaves its chart
 under a banner saying so until one applies.

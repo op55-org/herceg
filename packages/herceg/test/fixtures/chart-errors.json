@@ -47,30 +47,30 @@
       "python": "series by 'region' from color"
     },
     {
-      "name": "a color changing within a series of another field",
+      "name": "a style map's field changing within a series of another field",
       "mark": {
         "type": "line",
         "x": "t",
         "y": "v",
         "series": "service",
-        "color": "region"
+        "style": { "by": { "field": "region", "map": { "eu": { "dash": "--" } } } }
       },
       "code": "series-varies",
-      "path": "marks[0].color",
-      "message": "field \"region\" changes within series \"checkout\" (by \"service\")",
-      "python": "column 'region' changes within series 'checkout' (by 'service')"
+      "path": "marks[0].style.by.field",
+      "message": "field \"region\" changes within series \"checkout\" (by \"service\"); a style map gives each series one look",
+      "python": "column 'region' changes within series 'checkout' (by 'service'); a style map gives each series one look"
     },
     {
-      "name": "a color changing within the one line",
+      "name": "a style map's field changing within the one line",
       "mark": {
         "type": "line",
         "x": "t",
         "y": "v",
         "series": false,
-        "color": "region"
+        "style": { "by": { "field": "region", "map": { "eu": { "dash": "--" } } } }
       },
       "code": "series-varies",
-      "path": "marks[0].color",
+      "path": "marks[0].style.by.field",
       "message": "field \"region\" changes within the line",
       "python": "column 'region' changes within the line"
     },

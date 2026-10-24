@@ -230,11 +230,14 @@ export function positionsExtent(s: Series, log: boolean): [number, number] | und
 /** Swaps a polyline traced on a transposed frame (`traceFrame`) back into the chart's coordinates. */
 export function untranspose(path: Polyline): void {
   swapPairs(path.coords, path.count * 2);
-  if (path.curved) swapPairs(path.controls, path.count * 4);
+  if (!path.curved) return;
+  // A straight segment's controls are NaN first (lod/polyline.ts), and stay so.
+  const k = path.controls;
+  for (let i = 0; i < path.count * 4; i += 4) if (!Number.isNaN(k[i]!)) swapPairs(k, 4, i);
 }
 
-function swapPairs(values: Float32Array, length: number): void {
-  for (let i = 0; i < length; i += 2) {
+function swapPairs(values: Float32Array, length: number, start = 0): void {
+  for (let i = start; i < start + length; i += 2) {
     const x = values[i]!;
     values[i] = values[i + 1]!;
     values[i + 1] = x;

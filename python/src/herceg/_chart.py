@@ -28,7 +28,7 @@ from typing import (
 
 import numpy as np
 
-from . import _geo, _pending, _render
+from . import _geo, _render
 from ._colors import is_color
 from ._data import Column, Matrix, Table, listed, shown
 from ._derive import BinSpec, Derived, Expr, _fields_of, bin_spec
@@ -102,7 +102,6 @@ from ._layout import (
     inset_spec,
     mosaic_cells,
 )
-from ._pending import refuse_chart, refuse_mark
 from ._rows import RowSelection, SelectionBinding
 from ._rows import bindings as bindings_of
 from ._series import series_of
@@ -158,6 +157,8 @@ class HeatmapSampling(TypedDict, total=False):
 
 
 _NUMERIC = ("number", "time")
+# Columns a label part writes: numbers, times, and categories.
+_ANY = ("category", "number", "time")
 
 
 @dataclass(frozen=True)
@@ -900,15 +901,6 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
 _LINE_CHANNELS = ("color", "stroke", "dash", "stroke_width", "opacity")
 _AREA_CHANNELS = ("color", "fill", "stroke", "opacity")
 _BAR_CHANNELS = ("color", "fill", "stroke", "stroke_width", "opacity")
-#: What points take for each of their channel options until round 2's
-#: stream C binds channels, as the engine says (marks/point.ts).
-_POINT_FORMS = {
-    "color": "give a column or a color",
-    "size": "give a column",
-    "fill_opacity": "give a column or a number",
-    "symbol": 'give a shape or {"field": ...}',
-    "encode": "drop encode",
-}
 _POINT_CHANNELS = ("color", "fill", "stroke", "stroke_width", "opacity", "symbol", "size")
 
 
@@ -1405,14 +1397,14 @@ class Chart:
         along, x_spec, y_spec = self._oriented(table, "line", x, y, orient)
         _left_along_y("line", along, axis)
         channels = encodings_spec(encode, _LINE_CHANNELS, "line")
-        self._refuse_identity(channels, "line")
         self._check_colors(table, color, channels, "line")
         split = self._series_of(table, series, color, channels, stroke, "stroke", "line")
         values = y_spec if along == "x" else x_spec
         self._single_or_series(values, split, "line", inferred=series is None)
         self._check_dodge(table, "line", dodge, along, x_spec if along == "x" else y_spec, split)
         positions = x_spec if along == "x" else y_spec
-        self._check_series_color(table, split, color, channels, stroke, "line", positions)
+        style_spec = mark_style_spec(style, ("marker",), "line")
+        self._check_series_style(table, split, style_spec, "line", positions)
         return self._add(
             {
                 "type": "line",
@@ -1428,7 +1420,7 @@ class Chart:
                 "opacity": fraction_option(opacity, "line opacity"),
                 "strokeOpacity": fraction_option(stroke_opacity, "line stroke_opacity"),
                 "encode": channels,
-                "style": mark_style_spec(style, ("marker",), "line"),
+                "style": style_spec,
                 "markers": _markers(markers),
                 "continuity": _continuity(continuity, "line"),
                 "where": condition_spec(where, "line where"),
@@ -1534,7 +1526,6 @@ class Chart:
         table = self._mark_table(data)
         self._check_places(table, "area", places)
         channels = encodings_spec(encode, _AREA_CHANNELS, "area")
-        self._refuse_identity(channels, "area")
         self._check_colors(table, color, channels, "area")
         split = self._series_of(table, series, color, channels, fill, "fill", "area")
         along_x = y1 is not None or y2 is not None
@@ -1591,7 +1582,8 @@ class Chart:
                 )
             self._check_dodge(table, "area", dodge, runs, x_spec if runs == "x" else y_spec, split)
         positions = x_spec if runs == "x" else y_spec
-        self._check_series_color(table, split, color, channels, fill, "area", positions)
+        style_spec = mark_style_spec(style, (), "area")
+        self._check_series_style(table, split, style_spec, "area", positions)
         if gaps is not None and split is None:
             raise ValueError(
                 "area stack gaps: for stacks by a series column; give series, or drop gaps"
@@ -1623,7 +1615,7 @@ class Chart:
                 "opacity": fraction_option(opacity, "area opacity"),
                 "strokeOpacity": fraction_option(stroke_opacity, "area stroke_opacity"),
                 "encode": channels,
-                "style": mark_style_spec(style, (), "area"),
+                "style": style_spec,
                 "continuity": _continuity(continuity, "area"),
                 "where": condition_spec(where, "area where"),
                 "curve": curve,
@@ -1732,7 +1724,6 @@ class Chart:
         table = self._mark_table(data)
         self._check_places(table, "bar", places)
         channels = encodings_spec(encode, _BAR_CHANNELS, "bar")
-        self._refuse_identity(channels, "bar")
         self._check_colors(table, color, channels, "bar")
         split = self._series_of(table, series, color, channels, fill, "fill", "bar")
         if isinstance(y, str) and self._kind(table, y) == "category":
@@ -2085,61 +2076,60 @@ class Chart:
             raise ChartError(problem[1], path=self._path("point", problem[0]))
         places = self._places("point", {"x": x, "y": y}, axis == "right")
         x, y = cast("str", places.columns["x"]), cast("str", places.columns["y"])
-        # Round 2 binds points' channels from stream C on (_pending.py), as
-        # the engine does: any channel form of color, size, and fill_opacity;
-        # a symbol's but a column's alone (hg.Channel(field=...) or
-        # {"field": ...}, as points always took). Other dicts are checked as before.
+        # Channels: a column's name or a constant, or a channel (an
+        # hg.Channel, its dict, or hg.when) as the spec writes it; a symbol's
+        # but a column's alone (hg.Channel(field=...) or {"field": ...}, as
+        # points always took). Well formed first, as the engine checks a spec
+        # before what it draws.
         forms = {"field", "scale", "value", "series", "condition"}
         if isinstance(symbol, Channel) and symbol.field is not None and symbol.scale is None:
             symbol = {"field": symbol.field}
+        channels: dict[str, Any] = {}
         for option, value in (
             ("color", color),
             ("size", size),
             ("fill_opacity", fill_opacity),
             ("symbol", symbol),
-            ("encode", encode),
         ):
             given = forms - {"field"} if option == "symbol" else forms
-            if isinstance(value, (Channel, Encodings, Expr)) or (
-                isinstance(value, Mapping) and (option == "encode" or bool(set(value) & given))
+            if isinstance(value, (Channel, Expr)) or (
+                isinstance(value, Mapping) and bool(set(value) & given)
             ):
-                # Well formed first, as the engine checks a spec before what it draws.
-                if isinstance(value, Mapping):
-                    for at, channel in (
-                        [(f"encode.{_camel(name)}", item) for name, item in value.items()]
-                        if option == "encode"
-                        else [(_camel(option), value)]
-                    ):
-                        self._check_channel_dict(channel, "point", at)
-
-                def check(option: str = option, value: Any = value) -> Any:
-                    if option != "encode":
-                        return {_camel(option): channel_spec(value, f"point {option}")}
-                    return encodings_spec(value, _POINT_CHANNELS, "point")
-
-                self._check_outputs(
-                    self._option(f"point {option}", check),
-                    "point",
-                    "encode." if option == "encode" else "",
+                self._check_channel_dict(value, "point", _camel(option))
+                role = f"point {option}"
+                channels[_camel(option)] = self._option(
+                    role, functools.partial(channel_spec, value, role)
                 )
-                _pending.refuse(
-                    f"point {option}", "C", _POINT_FORMS[option], self._path("point", option)
-                )
-        color, size = cast("str | None", color), cast("str | None", size)
-        fill_opacity = cast("float | str | None", fill_opacity)
-        symbol = cast("str | Mapping[str, str] | None", symbol)
+        if isinstance(encode, Mapping):
+            for name, item in encode.items():
+                self._check_channel_dict(item, "point", f"encode.{_camel(name)}")
+        encoded = self._option(
+            "point encode", lambda: encodings_spec(encode, _POINT_CHANNELS, "point")
+        )
+        self._check_outputs(channels, "point", "")
+        self._check_outputs(encoded or {}, "point", "encode.")
         table = self._mark_table(data)
+        self._check_point_channels(
+            table,
+            {"color": color, "fill": fill, "opacity": fill_opacity, "symbol": symbol},
+            {"stroke": stroke, "strokeWidth": stroke_width},
+            channels,
+            encoded or {},
+            (colors, color_domain, color_midpoint),
+        )
+        color = channels.get("color", color)
         self._check_places(table, "point", places)
         self._require(table, x, (*_NUMERIC, "category"), "point x")
         self._require(table, y, (*_NUMERIC, "category"), "point y")
         # A category color names the series, as on lines and bars; series=False keeps one.
-        split = self._series_of(table, series, color, None, fill, "fill", "point")
+        split = self._series_of(table, series, color, encoded, fill, "fill", "point")
         self._require(table, animation_key, (*_NUMERIC, "category"), "point animation_key")
-        _check_size(radius, size, "point")
-        self._require(table, size, _NUMERIC, "point size")
+        _check_size(radius, size if isinstance(size, str) else None, "point")
+        if isinstance(size, str):
+            self._require(table, size, _NUMERIC, "point size")
         if isinstance(fill_opacity, str):
             self._require(table, fill_opacity, _NUMERIC, "point fill_opacity")
-        elif fill_opacity is not None and not 0 <= fill_opacity <= 1:
+        elif isinstance(fill_opacity, numbers.Real) and not 0 <= fill_opacity <= 1:
             raise ValueError(
                 "point fill_opacity: expected a number from 0 to 1 or a column; "
                 f"received {shown(fill_opacity)}"
@@ -2148,9 +2138,12 @@ class Chart:
             raise ValueError(
                 f"point stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
-        self._require(table, color, (*_NUMERIC, "category"), "point color")
-        self._check_category_color(table, color, colors, color_domain, color_midpoint, "point")
-        symbol_spec = self._symbol(table, symbol)
+        if isinstance(color, str):
+            self._require(table, color, (*_NUMERIC, "category"), "point color")
+            self._check_category_color(table, color, colors, color_domain, color_midpoint, "point")
+        symbol_spec = channels.get("symbol") or self._symbol(
+            table, cast("str | Mapping[str, str] | None", symbol)
+        )
         spread = (
             Jitter(width=jitter)
             if isinstance(jitter, numbers.Real) and not isinstance(jitter, bool)
@@ -2181,10 +2174,10 @@ class Chart:
                 "series": series,
                 "animationKey": animation_key,
                 "radius": radius,
-                "size": size,
+                "size": channels.get("size", size),
                 "radiusRange": _range(radius_range, "point radius_range", minimum=0),
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": channels.get("fillOpacity", fill_opacity),
                 "stroke": stroke,
                 "strokeWidth": stroke_width,
                 "color": color,
@@ -2192,6 +2185,7 @@ class Chart:
                 "colorDomain": _range(color_domain, "point color_domain"),
                 "colorMidpoint": _midpoint(color_midpoint, color_domain, "point"),
                 "symbol": symbol_spec,
+                "encode": encoded,
                 "sampling": sampling,
                 "dodge": dodge or None,
                 "jitter": spread._spec() if spread is not None else None,
@@ -4499,7 +4493,6 @@ class Chart:
             anchor = self._option(
                 "text from_", lambda: _built(from_, MarkAnchor, "text from_")._spec()
             )
-            _pending.refuse("text from_", "C", "give at, or x and y", self._path("text", "from_"))
         if at is not None and (x is not None or y is not None):
             raise ValueError(
                 "text at: a place, or its short forms x and y, not both; drop at or x and y"
@@ -4511,15 +4504,26 @@ class Chart:
         if label is None:
             raise ValueError("text label: needs text or an hg.Label; give label")
         self._check_label_dict(label, "text", "label", ("content",))
-        label_json = self._option("text label", lambda: label_spec(label, "text", places=False))
-        places = (
-            {"x": at.x, "y": at.y}
-            if at is not None
-            else {}
-            if from_ is not None
-            else {"x": x, "y": y}
-        )
-        table = self._annotation_table(data, places, label_json, "text")
+        following = from_ is not None
+        label_json = self._option("text label", lambda: label_spec(label, "text", places=following))
+        if following:
+            # Its labels go where they follow their series, and read the source mark's columns.
+            place = label_json.get("place") if isinstance(label_json, dict) else None
+            for option in ("attachment", "side"):
+                if (place or {}).get(option) is not None:
+                    raise ValueError(
+                        f"text label place: labels go at from_.at on their series; drop {option}"
+                    )
+            if data is not None:
+                raise ValueError(
+                    "text data: text following another mark reads that mark's columns; drop data"
+                )
+            assert anchor is not None
+            self._check_following_fields(anchor["mark"], label_json)
+            table = None
+        else:
+            places = {"x": at.x, "y": at.y} if at is not None else {"x": x, "y": y}
+            table = self._annotation_table(data, places, label_json, "text")
         return self._add(
             {
                 "type": "text",
@@ -4563,9 +4567,10 @@ class Chart:
             },
         )
         _check_axes(spec)
+        _check_legend_keys(spec)
+        _check_colorbars(spec)
         if any(mark["type"] in _MARKS_3D for mark in spec["marks"]):
             _refuse_depth(spec)
-        refuse_chart(spec)
         return spec, buffers
 
     def _layouts(self) -> list[dict[str, Any]]:
@@ -4648,7 +4653,16 @@ class Chart:
                     path=f"marks[{index}].{at}.scale",
                     mark=index if mark.get("id") is None else mark["id"],
                 )
-            for name, channel in (mark.get("encode") or {}).items():
+            # Channels in encode, and a point's color, size, opacity, and symbol of their own.
+            channels = [
+                (f"encode.{name}", channel) for name, channel in (mark.get("encode") or {}).items()
+            ]
+            channels += [
+                (name, mark[name])
+                for name in ("color", "size", "fillOpacity", "symbol")
+                if isinstance(mark.get(name), dict)
+            ]
+            for name, channel in channels:
                 scale = channel.get("scale") if isinstance(channel, dict) else None
                 if (
                     not isinstance(scale, str)
@@ -4661,10 +4675,10 @@ class Chart:
                 method = _method(mark["type"])
                 option = python_path(name)
                 raise ChartError(
-                    f"{method} encode {option} scale: the chart has no scale {scale!r}; add it to "
-                    f"scales{choices}",
+                    f"{method} {option.replace('.', ' ')} scale: the chart has no scale "
+                    f"{scale!r}; add it to scales{choices}",
                     code="unknown-reference",
-                    path=f"marks[{index}].encode.{option}.scale",
+                    path=f"marks[{index}].{option}.scale",
                     mark=index if mark.get("id") is None else mark["id"],
                 )
 
@@ -5105,6 +5119,12 @@ class Chart:
                 used.setdefault(node_table, set()).update(
                     spec[key] for key in _NODE_FIELDS if spec.get(key) is not None
                 )
+            # Text following another mark reads that mark's columns.
+            following = spec.get("from")
+            if spec.get("type") == "text" and isinstance(following, dict):
+                source = self._source_table(str(following["mark"]))
+                if source is not None:
+                    used.setdefault(source, set()).update(_label_fields(spec))
         # Columns row selections' conditions set from Python test, and those
         # of the conditions bindings start with.
         for binding in self._row_selection:
@@ -5539,8 +5559,7 @@ class Chart:
         ):
             refuse("scale", "a scale's name, or hg.IdentityScale()")
         if "value" in channel:
-            # Text is checked as a color as it is drawn, as in the engine.
-            problem = output_problem(at.rpartition(".")[2], channel["value"], lambda text: True)
+            problem = output_problem(at.rpartition(".")[2], channel["value"], is_color)
             if problem:
                 refuse("value", problem)
 
@@ -5561,9 +5580,7 @@ class Chart:
                 else []
             )
             for key, value in branches:
-                # Text is checked as a color as it is drawn, as in the engine,
-                # whose validator takes any: points' channels from stream C on.
-                problem = output_problem(name, value, lambda text: True)
+                problem = output_problem(name, value, is_color)
                 if problem:
                     path = self._path(mark, python_path(f"{prefix}{name}.{key}"))
                     raise ChartError(
@@ -5571,19 +5588,6 @@ class Chart:
                         f"received {shown(value)}",
                         path=path,
                     )
-
-    def _refuse_identity(self, channels: Mapping[str, Any] | None, mark: str) -> None:
-        """Refuses identity scales on channels, which round 2 binds from
-        stream C on (_pending.py), before their fields are checked."""
-        for name, channel in (channels or {}).items():
-            if isinstance(channel, Mapping) and isinstance(channel.get("scale"), Mapping):
-                path = self._path(mark, python_path(f"encode.{name}.scale"))
-                _pending.refuse(
-                    f"{mark} {path.partition('.')[2]}",
-                    "C",
-                    "name one of the chart's scales, or drop scale",
-                    path,
-                )
 
     def _check_colors(
         self, table: int, color: str | None, channels: dict[str, Any] | None, mark: str
@@ -5624,72 +5628,52 @@ class Chart:
                 kinds = ("category", "number") if identity else ("category",)
                 self._require(table, field, kinds, f"{mark} {option}")
 
-    def _check_series_color(
+    def _check_series_style(
         self,
         table: int,
         series: str | None,
-        color: str | None,
-        encode: dict[str, Any] | None,
-        paint: str | None,
+        style: Mapping[str, Any] | None,
         mark: str,
         position: Any = None,
     ) -> None:
-        """Refuses a line or area whose color column changes within one of its
-        series, where the data is here to check: lines and areas take one color
-        per series (the engine checks again as the data changes). What paints
-        it is checked: a paint of the mark's own (``paint``, a line's stroke or
-        an area's fill) wins, then its channel, then the color. Rows without a
-        category ``position`` are drawn in no series, as the engine leaves
-        them out."""
-        primary = "stroke" if mark == "line" else "fill"
-        if paint is not None:
-            return
-        own = (encode or {}).get(primary)
-        channel = own if own is not None else (encode or {}).get("color")
-        field = (
-            channel.get("field")
-            if isinstance(channel, dict)
-            else color
-            if own is None and channel is None
-            else None
-        )
+        """Refuses a line or area whose style map's column changes within one
+        of its series, where the data is here to check: a style map gives
+        each series one look (the engine checks again as the data changes;
+        looks that change along a series are channels in ``encode``). Rows
+        without a category ``position`` are drawn in no series, as the engine
+        leaves them out."""
+        field = ((style or {}).get("by") or {}).get("field")
         if field is None or field == series or self._kind(table, field) != "category":
             return
         source = self._tables[table][1]
         try:
-            colors = source.column(field).values
+            values = source.column(field).values
             groups = (
                 source.column(series).values
                 if series is not None
-                else np.zeros(len(colors), np.int32)
+                else np.zeros(len(values), np.int32)
             )
         except (KeyError, TypeError, ValueError, AttributeError):
             # A derived table's rows are made in the browser, which checks them.
             return
-        known = (colors >= 0) & (groups >= 0)
+        known = (values >= 0) & (groups >= 0)
         if isinstance(position, str) and self._kind(table, position) == "category":
             known &= source.column(position).values >= 0
-        pairs = np.unique(np.stack([groups[known], colors[known]]), axis=1)
+        pairs = np.unique(np.stack([groups[known], values[known]]), axis=1)
         repeated = np.flatnonzero(pairs[0][1:] == pairs[0][:-1])
         if repeated.size == 0:
             return
-        option = (
-            ("encode stroke" if primary == "stroke" else "encode fill")
-            if own is not None
-            else "encode color"
-            if isinstance(channel, dict)
-            else "color"
-        )
         if series is None:
-            within, fix = "the line" if mark == "line" else "the area", "a series column"
+            within, fix = f"the {mark}", "a series column"
         else:
             name = source.column(series).dictionary[int(pairs[0][repeated[0]])]
             within, fix = f"series {name!r} (by {series!r})", "another column"
         raise ChartError(
-            f"{mark} {option}: column {field!r} changes within {within}; {mark}s take one color "
-            f"per series, so split them by {fix} or give a constant color",
+            f"{mark} style.by.field: column {field!r} changes within {within}; a style map "
+            f"gives each series one look, so split them by {fix}, or give the looks in "
+            "encode, where they change along a series",
             code="series-varies",
-            path=self._path(mark, option.replace(" ", ".")),
+            path=self._path(mark, "style.by.field"),
         )
 
     def _oriented(
@@ -5789,6 +5773,71 @@ class Chart:
         self._require(table, symbol, ("category",), "point symbol")
         return {"field": symbol}
 
+    def _check_point_channels(
+        self,
+        table: int,
+        flat: Mapping[str, Any],
+        outline: Mapping[str, Any],
+        channels: Mapping[str, Any],
+        encoded: Mapping[str, Any],
+        ramp: tuple[Any, Any, Any],
+    ) -> None:
+        """Refuses a point's channels as the engine does (marks/point.ts, and
+        its feature compiler's points.ts): one set as an option and in
+        ``encode``; an outline varying point by point; columns that are not
+        there, or categories sized or made translucent without a scale
+        mapping them; and a ramp's options without a number column to color."""
+        options = {"opacity": "fill_opacity", "strokeWidth": "stroke_width"}
+        for name, value in {**flat, **outline}.items():
+            if value is not None and name in encoded:
+                at = python_path(f"encode.{name}")
+                raise ChartError(
+                    f"point {at}: set as {options.get(name, name)} and as {at}; give one",
+                    path=self._path("point", at),
+                )
+        for name in outline:
+            if name in encoded and "value" not in encoded[name]:
+                at = python_path(f"encode.{name}")
+                raise ChartError(
+                    f"point {at}: points of a mark draw one outline; give "
+                    f"hg.Channel(value=...), or {python_path(name)}",
+                    code="unsupported",
+                    path=self._path("point", at),
+                )
+        given = [(f"encode.{name}", name, channel) for name, channel in encoded.items()] + [
+            (name, "opacity" if name == "fillOpacity" else name, channel)
+            for name, channel in channels.items()
+        ]
+        for at, name, channel in given:
+            field = channel.get("field") if isinstance(channel, Mapping) else None
+            if field is None:
+                continue
+            self._require(table, field, (*_NUMERIC, "category"), f"point {python_path(at)}.field")
+            if (
+                name in ("size", "opacity")
+                and channel.get("scale") is None
+                and self._kind(table, field) == "category"
+            ):
+                what = "sizes" if name == "size" else "opacities"
+                raise ChartError(
+                    f"point {python_path(at)}.field: column {field!r} holds categories, which "
+                    f"{what} read through a scale mapping them; give scale, the name of one "
+                    "of the chart's scales",
+                    path=self._path("point", python_path(f"{at}.field")),
+                )
+        color = encoded.get("fill") or encoded.get("color") or channels.get("color")
+        if color is not None and any(option is not None for option in ramp):
+            field = color.get("field")
+            if not (
+                field is not None
+                and color.get("scale") is None
+                and self._kind(table, field) in _NUMERIC
+            ):
+                raise ValueError(
+                    "point colors: a ramp colors a number column; drop colors, "
+                    "color_domain, and color_midpoint"
+                )
+
     def _check_category_color(
         self,
         table: int,
@@ -5808,6 +5857,27 @@ class Chart:
                 "palette; drop colors, color_domain, and color_midpoint"
             )
 
+    def _source_table(self, mark: str) -> int | None:
+        """The table of the mark of id ``mark`` declared so far, if it has one."""
+        for spec, table in self._marks:
+            if spec.get("id") == mark:
+                return table
+        return None
+
+    def _check_following_fields(self, mark: str, label: Any) -> None:
+        """Checks the columns a label of text following mark ``mark`` reads,
+        which are that mark's, where it is declared already (the chart
+        refuses text following a mark declared after it)."""
+        table = self._source_table(mark)
+        if table is None:
+            return
+        spec = {"label": label}
+        text = label.get("field") if isinstance(label, dict) else None
+        # Written as content parts are: times too, in the chart's zone.
+        self._require(table, text, _ANY, "text label field")
+        for field in sorted(_label_fields(spec) - {text}):
+            self._require(table, field, _ANY, "text label.content field")
+
     def _annotation_table(
         self, data: Any, positions: dict[str, Any], label: Any, role: str
     ) -> int | None:
@@ -5818,7 +5888,13 @@ class Chart:
             if (field := coordinate_field(value)) is not None
         }
         text = label.get("field") if isinstance(label, dict) else None
-        if not fields and text is None:
+        # A label of parts reads the columns its parts name.
+        parts = [
+            part["field"]
+            for part in (label.get("content") or [] if isinstance(label, dict) else [])
+            if isinstance(part, dict) and part.get("field") is not None
+        ]
+        if not fields and text is None and not parts:
             return None
         table = self._mark_table(data)
         for name, field in fields.items():
@@ -5830,6 +5906,8 @@ class Chart:
             else:
                 self._require(table, field, _NUMERIC, f"{role} {name}")
         self._require(table, text, ("category", "number"), f"{role} label field")
+        for i, part in enumerate(parts):
+            self._require(table, part, _ANY, f"{role} label.content[{i}].field")
         return table
 
     def _add(self, spec: dict[str, Any], table: int | None) -> Chart:
@@ -5842,9 +5920,20 @@ class Chart:
                 f"painted among its panel's marks; received {shown(z)}",
                 path=f"marks[{len(self._marks)}].z_index",
             )
-        refuse_mark(spec, _method(spec["type"]), f"marks[{len(self._marks)}]")
         if spec["type"] in ("rule", "region", "text"):
             self._check_annotation_scales(spec)
+            label = spec.get("label")
+            parts = isinstance(label, dict) and label.get("content") is not None
+            if spec.get("legend") is True and (label is None or parts):
+                role = _method(spec["type"])
+                raise ChartError(
+                    f"{role} legend: True lists the {role} by its label's text or column, and a "
+                    "label of parts has neither; give text or a column, or drop legend"
+                    if parts
+                    else f"{role} legend: True lists the {role} by its label; give it a label, "
+                    "or drop legend",
+                    path=f"marks[{len(self._marks)}].legend",
+                )
         kinds = [mark["type"] for mark, _ in self._marks]
         layouts = [kind for kind in kinds if kind in _LAYOUT_MARKS]
         # The layers of a map, and of a 3D chart, share their chart with each other only.
@@ -6873,7 +6962,14 @@ def _feature_fields(spec: dict[str, Any]) -> set[str]:
     """The columns a mark's encodings, conditions, styles by value, labels,
     and places read."""
     fields: set[str] = set()
-    for channel in (spec.get("encode") or {}).values():
+    channels = list((spec.get("encode") or {}).values())
+    # A point's color, size, opacity, and symbol may be channels themselves.
+    channels += [
+        spec[key]
+        for key in ("color", "size", "fillOpacity", "symbol")
+        if isinstance(spec.get(key), dict)
+    ]
+    for channel in channels:
         if "field" in channel:
             fields.add(channel["field"])
         elif "condition" in channel:
@@ -6886,14 +6982,27 @@ def _feature_fields(spec: dict[str, Any]) -> set[str]:
     by = (spec.get("style") or {}).get("by") or {}
     if isinstance(by.get("field"), str):
         fields.add(by["field"])
-    for key in ("label", "labels"):
-        if isinstance(spec.get(key), dict) and isinstance(spec[key].get("field"), str):
-            fields.add(spec[key]["field"])
+    fields |= _label_fields(spec)
     for place in [*(spec.get("at") or {}).values(), *(spec.get("span") or ())]:
         if isinstance(place, str):
             fields.add(place)
         elif isinstance(place, dict) and isinstance(place.get("field"), str):
             fields.add(place["field"])
+    return fields
+
+
+def _label_fields(spec: dict[str, Any]) -> set[str]:
+    """The columns a mark's labels read: their field, and their parts'."""
+    fields: set[str] = set()
+    for key in ("label", "labels"):
+        label = spec.get(key)
+        if not isinstance(label, dict):
+            continue
+        if isinstance(label.get("field"), str):
+            fields.add(label["field"])
+        for part in label.get("content") or ():
+            if isinstance(part, dict) and isinstance(part.get("field"), str):
+                fields.add(part["field"])
     return fields
 
 
@@ -7305,6 +7414,53 @@ def _range(
 
 
 _SIDES = ("top", "right", "bottom", "left")
+
+
+def _check_legend_keys(spec: Mapping[str, Any]) -> None:
+    """Each legend's entries of its own have keys of their own, as the
+    engine checks them: equal labels never merge, and keys never do."""
+    legend = spec.get("legend")
+    legends = [("legend", legend)] if isinstance(legend, Mapping) else []
+    legends += [
+        (f"guides[{i}]", guide)
+        for i, guide in enumerate(spec.get("guides") or ())
+        if guide.get("type") == "legend"
+    ]
+    for at, options in legends:
+        keys: set[str] = set()
+        for k, entry in enumerate(options.get("entries") or ()):
+            if entry["key"] in keys:
+                raise ChartError(
+                    f'{at}.entries[{k}].key: "{entry["key"]}" is the key of another of the '
+                    "legend's entries; give each a key of its own",
+                    path=f"{at}.entries[{k}].key",
+                )
+            keys.add(entry["key"])
+
+
+def _check_colorbars(spec: Mapping[str, Any]) -> None:
+    """What colorbars name, as the engine checks it when it draws them: a
+    mark's color ramp, never a scale by its name."""
+    scales = spec.get("scales") or {}
+    for i, guide in enumerate(spec.get("guides") or ()):
+        if guide.get("type") != "colorbar" or guide.get("show") is False:
+            continue
+        scale = guide.get("scale")
+        name = scale.get("scale") if isinstance(scale, Mapping) else None
+        if name is None:
+            continue
+        categories = (scales.get(name) or {}).get("type") == "ordinal"
+        what = (
+            "is a scale of categories, whose values a legend lists, as "
+            "include=[hg.ScaleRef(scale=...)]"
+            if categories
+            else "is no color ramp"
+        )
+        raise ChartError(
+            f'guides[{i}].scale: a colorbar shows a mark\'s color ramp, and "{name}" {what}; '
+            'name the mark, as hg.ScaleRef(mark=..., channel="color")',
+            path=f"guides[{i}].scale",
+        )
 
 
 def _check_axes(spec: Mapping[str, Any]) -> None:

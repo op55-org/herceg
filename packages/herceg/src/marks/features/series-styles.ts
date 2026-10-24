@@ -1,8 +1,9 @@
 // Looks of series of connected marks (lines, areas): their color and paint
-// from channels and `style.by`, each one value per series. A channel or
-// map by a field reads the field's value over each series' rows, which
-// must be one: lines and areas have no styles per row. Each series' value
-// is checked once, then as rows are appended only the new rows.
+// from channels and `style.by`. A channel reading rows (a field other than
+// the series', a condition, an identity scale) gives a series runs of looks
+// along it (runs.ts), drawn in stretches (run-paths.ts); a style map by a
+// field reads the field's value over each series' rows, which must be one,
+// checked once, then as rows are appended only the new rows.
 
 import type { Table } from "../../data/table.ts";
 import type { FeatureKit } from "../../model/features.ts";
@@ -13,13 +14,16 @@ import type { PaintReader, Theme } from "../../theme.ts";
 import type { Series } from "../series.ts";
 import {
   type Channel,
+  type Check,
   categoryField,
-  colorCheck,
   colorShortForm,
   compileChannel,
+  outputCheck,
+  rowReader,
   type ScaleOf,
 } from "./channels.ts";
 import type { Where } from "./compile.ts";
+import { firstAfter, type Look, type RunPart, type Runs, StyleRuns } from "./runs.ts";
 
 /** The paint a series takes from the features, over its mark's flat paint. */
 export interface SeriesPaint {
@@ -33,8 +37,15 @@ export interface SeriesPaint {
   strokeOpacity?: number | undefined;
   fillOpacity?: number | undefined;
   style?: SeriesStyle | undefined;
-  /** The value of the field coloring the series, where it is not the series field. */
+  /** The value of the field coloring the series at every observation, where it is not the series field. */
   value?: string | undefined;
+  /** Where its looks change along it, where they do. */
+  runs?: Runs | undefined;
+  /**
+   * With runs: what the series' style map, channels not reading rows, and
+   * mark give it, which its runs' looks fall back to (see `look`).
+   */
+  own?: Omit<Look, "color"> | undefined;
 }
 
 /** The options of a line's or area's spec its looks come from. */
@@ -51,23 +62,6 @@ export interface SeriesStyleSpec {
   encode?: EncodingsSpec;
   style?: { by?: StyleMapSpec };
 }
-
-const width = (value: unknown, path: string) => {
-  if (typeof value !== "number" || !(value >= 0) || !Number.isFinite(value))
-    throw new RangeError(`${path}: expected 0 or more pixels; received ${JSON.stringify(value)}`);
-};
-const fraction = (value: unknown, path: string) => {
-  if (typeof value !== "number" || !(value >= 0 && value <= 1))
-    throw new RangeError(
-      `${path}: expected a number from 0 to 1; received ${JSON.stringify(value)}`,
-    );
-};
-const dash = (value: unknown, path: string) => {
-  if (typeof value === "string" ? !["-", "--", ":", "-."].includes(value) : !Array.isArray(value))
-    throw new TypeError(
-      `${path}: expected a pixel dash array or "-", "--", ":", "-."; received ${JSON.stringify(value)}`,
-    );
-};
 
 /** A series' value of a channel: by its rows, its source, or its name. */
 type Reader<V> = (s: Series | undefined, id: string, label?: string) => V | undefined;
@@ -90,6 +84,21 @@ interface Checked {
 }
 
 /**
+ * Where a series' color field has the one value its rows read so far end
+ * with: since row `since` (by identity, `rowOffset + row`), with code
+ * `code`, up to row `last`; in which generation, before which change of
+ * existing values, and of the mark's row view, which rows count.
+ */
+interface Uniform {
+  generation: number;
+  modified: number;
+  view: number | undefined;
+  last: number;
+  code: number;
+  since: number;
+}
+
+/**
  * The looks of a connected mark's series, compiled: `primary` is the paint
  * `color` sets (a line's stroke, an area's fill).
  */
@@ -109,16 +118,20 @@ export class SeriesStyles {
   readonly #by: Reader<SeriesStyle> | undefined;
   /** Whether a series' color needs its rows (a field other than the series field, or a condition). */
   readonly #byRows: boolean;
-  /**
-   * The field the series' color is read from, where it is not the series
-   * field, and the option naming it.
-   */
+  /** The runs of channels reading rows, where some do. */
+  readonly #runs: StyleRuns | undefined;
+  /** The axis the series' positions run along. */
+  readonly #along: "x" | "y";
+  /** The field the series' color is read from, where it is not the series field. */
   readonly #colorField: string | undefined;
-  readonly #colorPath: string;
   /** The axis whose positions are bands, where rows without a band are no series' (see `#constant`). */
   readonly #bands: "x" | "y" | undefined;
   /** Each series' checked values, by series key and what they are of. */
   readonly #checked = new Map<string, Checked>();
+  /** Each series' color field values (see `#colorValue`), by series key, at the table's version and the one before. */
+  #uniform = new Map<string, Uniform>();
+  #uniformBefore = new Map<string, Uniform>();
+  #uniformAt = -1;
   /** The series field's codes by value, for one table version (see `#codeOf`). */
   #codes: { version: number; dictionary: readonly string[]; of: Map<string, number> } | undefined;
   #theme: Theme | undefined;
@@ -137,6 +150,7 @@ export class SeriesStyles {
     primary: "stroke" | "fill",
     where: Where,
     kit: FeatureKit,
+    along: "x" | "y",
     view?: { readonly revision: number },
     bands?: "x" | "y",
   ) {
@@ -149,6 +163,7 @@ export class SeriesStyles {
     this.#view = view;
     this.#bands = bands;
     this.#primary = primary;
+    this.#along = along;
     const encode = spec.encode ?? {};
     const both = (flat: keyof SeriesStyleSpec, channel: keyof EncodingsSpec) => {
       if (spec[flat] !== undefined && encode[channel] !== undefined)
@@ -169,11 +184,11 @@ export class SeriesStyles {
           : colorShortForm(spec.color, table, `${path} color`, isColor)));
     let rows = false;
     let colorField: string | undefined;
-    let colorPath = `${path} color`;
+    const parts: RunPart[] = [];
     const reader = <V>(
       channel: ChannelSpec<V> | undefined,
-      check: (value: unknown, at: string) => void,
-      name: string,
+      check: Check,
+      name: "color" | "stroke" | "fill" | "dash" | "strokeWidth" | "opacity",
       defaults: () => readonly V[],
       fallback: () => V,
     ): Reader<V> | undefined => {
@@ -186,24 +201,32 @@ export class SeriesStyles {
         name === "color" || name === "fill" || name === "stroke" ? "color" : name,
         check,
         at,
+        name,
       );
       // Only the series' own color waits for its rows (see `color`).
       const paint = name === "color" || name === primary;
       if (
-        paint &&
-        (compiled.kind === "condition" ||
-          (compiled.kind === "field" && compiled.field !== spec.series))
-      )
-        rows = true;
-      if (paint && compiled.kind === "field" && compiled.field !== spec.series) {
-        colorField = compiled.field;
-        colorPath = at;
+        compiled.kind === "condition" ||
+        compiled.kind === "identity" ||
+        (compiled.kind === "field" && compiled.field !== spec.series)
+      ) {
+        // Rows' looks: runs along the series.
+        parts.push({
+          name: paint ? "color" : (name as keyof Look),
+          read: (rows) => rowReader(compiled, rows, defaults(), fallback(), check, at, false),
+        });
+        if (paint) rows = true;
+        if (paint && compiled.kind === "field") colorField = compiled.field;
+        return undefined;
       }
-      return this.#reader(compiled, at, defaults, fallback);
+      return this.#reader(compiled, defaults, fallback);
     };
     const palette = () => this.#theme?.palette ?? [];
     const muted = () => this.#theme?.muted ?? "#999999";
-    const colorValue = colorCheck(isColor);
+    const colorValue = outputCheck("color", isColor);
+    const dash = outputCheck("dash", isColor);
+    const width = outputCheck("strokeWidth", isColor);
+    const fraction = outputCheck("opacity", isColor);
     this.#color = reader(color, colorValue, "color", palette, muted);
     this.#stroke = reader(encode.stroke, colorValue, "stroke", palette, muted);
     this.#fill = reader(encode.fill, colorValue, "fill", palette, muted);
@@ -244,7 +267,8 @@ export class SeriesStyles {
     }
     this.#byRows = rows;
     this.#colorField = colorField;
-    this.#colorPath = colorPath;
+    // Rows in band order are read whole each version; others as they are appended.
+    this.#runs = parts.length ? new StyleRuns(table, parts, view, bands === undefined) : undefined;
   }
 
   /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
@@ -253,31 +277,15 @@ export class SeriesStyles {
     this.#paint = paint;
   }
 
-  /** A series' value of a compiled channel, one per series. */
-  #reader<V>(
-    channel: Channel<V>,
-    path: string,
-    defaults: () => readonly V[],
-    fallback: () => V,
-  ): Reader<V> {
+  /** A series' value of a compiled channel that does not read rows: one per series. */
+  #reader<V>(channel: Channel<V>, defaults: () => readonly V[], fallback: () => V): Reader<V> {
     if (channel.kind === "value") return () => channel.value;
     if (channel.kind === "series")
       return (s, id, label) =>
         channel.scale.output(label ?? s?.label ?? id, defaults(), fallback());
-    if (channel.kind === "condition") {
-      // Each row's outcome, as text: dashes are arrays, alike by their steps.
-      const outcome = (row: number) =>
-        JSON.stringify(channel.when(row) ? channel.then : channel.otherwise);
-      return (s) => {
-        const value = s && this.#constant(s, `${path}|condition`, outcome, path);
-        return value === undefined ? undefined : (JSON.parse(value) as V);
-      };
-    }
-    return (s, id) => {
-      const value =
-        channel.field === this.#spec.series ? id : s && this.#field(s, channel.field, path);
-      return value === undefined ? undefined : channel.scale.output(value, defaults(), fallback());
-    };
+    // The series field's: the series' own value.
+    const { scale } = channel as Extract<Channel<V>, { kind: "field" }>;
+    return (_s, id) => scale.output(id, defaults(), fallback());
   }
 
   /** The value of category `field` over a series' rows, which must be one; undefined for none. */
@@ -291,27 +299,25 @@ export class SeriesStyles {
         return code < 0 ? undefined : dictionary[code];
       },
       path,
-      field,
     );
   }
 
   /**
-   * The one value `read` gives the rows of a series (cached as `of`):
-   * found once, then as the table appends rows checked over its new rows
-   * alone, while the rows checked before are unchanged and the last of them
+   * The one value `read` gives the rows of a series from `field`: found
+   * once, then as the table appends rows checked over its new rows alone,
+   * while the rows checked before are unchanged and the last of them
    * holding the value is still there. Throws where a series has two.
    */
   #constant(
     s: Series,
-    of: string,
+    field: string,
     read: (row: number) => string | undefined,
     path: string,
-    field?: string,
   ): string | undefined {
     const table = this.#table;
     const offset = table.rowOffset;
     const view = this.#view?.revision;
-    const key = `${s.key}|${of}`;
+    const key = `${s.key}|${field}`;
     let checked = this.#checked.get(key);
     if (
       checked &&
@@ -370,27 +376,72 @@ export class SeriesStyles {
     return this.#codes.of.get(value) ?? -1;
   }
 
-  #varies(path: string, s: Series, field: string | undefined): Error {
+  #varies(path: string, s: Series, field: string): Error {
     const series = this.#spec.series;
-    const what = field === undefined ? "its value" : `field "${field}"`;
-    const area = this.#spec.type === "area";
     const within =
       series === undefined
-        ? `the ${area ? "area" : "line"}`
+        ? `the ${this.#spec.type === "area" ? "area" : "line"}`
         : `series "${s.label}" (by "${series}")`;
     const { index, mark } = this.#where;
     return new this.#kit.ChartError({
       code: "series-varies",
       path: `marks[${index}].${path.slice(this.#where.path.length + 1)}`,
       mark,
-      message: `${path}: ${what} changes within ${within}; ${area ? "areas" : "lines"} take one color per series, so split them by ${series === undefined ? "a series field" : "another field"} or give a constant color`,
+      message: `${path}: field "${field}" changes within ${within}; a style map gives each series one look, so split them by ${series === undefined ? "a series field" : "another field"}, or give the looks in encode, where they change along a series`,
     });
   }
 
-  /** The value of the field coloring a series, where it is not the series field. */
+  /**
+   * The value of the field coloring a series, where it is not the series
+   * field, when every observation of the series has it: the value it
+   * stands for (see identity.ts). Undefined where it has two, a missing
+   * value counting as one, or none. Read once, then as the table appends
+   * rows over the new rows alone: the last change of value along the
+   * series says it has two while a row before it is still there.
+   */
   #colorValue(s: Series): string | undefined {
     const field = this.#colorField;
-    return field === undefined ? undefined : this.#field(s, field, this.#colorPath);
+    if (field === undefined || s.length === 0) return undefined;
+    const table = this.#table;
+    const offset = table.rowOffset;
+    const view = this.#view?.revision;
+    // Series no longer asked for, as a rolling window drops them, go.
+    if (this.#uniformAt !== table.version)
+      [this.#uniformBefore, this.#uniform, this.#uniformAt] = [
+        this.#uniform,
+        new Map(),
+        table.version,
+      ];
+    // Rows in band order are read whole each version.
+    const ascending = this.#bands === undefined;
+    let kept = this.#uniform.get(s.key) ?? this.#uniformBefore.get(s.key);
+    if (
+      !kept ||
+      !ascending ||
+      kept.generation !== table.generation ||
+      kept.modified !== table.modifiedVersion ||
+      kept.view !== view
+    )
+      kept = {
+        generation: table.generation,
+        modified: table.modifiedVersion,
+        view,
+        last: -1,
+        code: -2,
+        since: -1,
+      };
+    this.#uniform.set(s.key, kept);
+    const { codes, dictionary } = table.categories(field as never);
+    const rowAt = (k: number) => (s.rows ? s.rows[k]! : k);
+    for (let k = ascending ? firstAfter(s, kept.last - offset) : 0; k < s.length; k++) {
+      const row = rowAt(k);
+      if (codes[row] !== kept.code) [kept.code, kept.since] = [codes[row]!, offset + row];
+      kept.last = offset + row;
+    }
+    // Every observation the series has now holds the last value read.
+    const first = offset + rowAt(0);
+    const one = ascending ? kept.since <= first : kept.since === first;
+    return one && kept.code >= 0 ? dictionary[kept.code] : undefined;
   }
 
   /**
@@ -450,26 +501,74 @@ export class SeriesStyles {
     const { path } = this.#where;
     const read = (color: string | undefined, option: string) =>
       color === undefined ? undefined : this.#paint(color, `${path} ${option}`);
+    // Channels reading rows give the series the look of its first run.
+    const runs = this.#runs?.of(s, this.#theme);
+    const first = runs?.count ? this.#runs!.look(runs.looks[0]!) : undefined;
+    if (runs && runs.count > 1 && !(this.#along === "x" ? s.sorted : s.ySorted)) {
+      const { index, mark } = this.#where;
+      throw new this.#kit.ChartError({
+        code: "unsupported",
+        path: `marks[${index}].encode`,
+        mark,
+        message: `${path} encode: looks change within ${this.#spec.series === undefined ? "the series" : `series "${s.label}"`}, whose positions do not ascend; looks change along ascending ${this.#along}; sort the rows, or keep each series' look`,
+      });
+    }
     // A color channel by rows gives every series its color; a style map by
     // another field, the series it maps (the others keep the palette's).
     const primary = this.#primary;
     if (this.#byRows)
       s.color =
-        read(style?.[primary] ?? this.#spec[primary] ?? this.#paintOf(s, id), primary) ?? s.color;
+        read(style?.[primary] ?? this.#spec[primary] ?? first?.color, primary) ??
+        this.#theme?.muted ??
+        s.color;
     else if (style?.[primary] !== undefined) s.color = read(style[primary], primary)!;
     const spec = this.#spec;
-    return {
+    // What the series has whatever its rows: its style map's, channels not reading rows, the mark's.
+    const own = {
       stroke: read(
         style?.stroke ?? (primary === "stroke" ? undefined : this.#stroke?.(s, id)),
         "stroke",
       ),
       strokeWidth: style?.strokeWidth ?? this.#width?.(s, id),
       dash: style?.dash ?? this.#dash?.(s, id),
-      opacity: style?.opacity ?? this.#opacity?.(s, id) ?? spec.opacity ?? 1,
+      opacity: style?.opacity ?? this.#opacity?.(s, id) ?? spec.opacity,
+    };
+    return {
+      stroke: own.stroke ?? read(first?.stroke, "stroke"),
+      strokeWidth: own.strokeWidth ?? first?.strokeWidth,
+      dash: own.dash ?? first?.dash,
+      opacity: own.opacity ?? first?.opacity ?? 1,
       strokeOpacity: style?.strokeOpacity ?? spec.strokeOpacity,
       fillOpacity: style?.fillOpacity,
       style,
       value: this.#colorValue(s),
+      ...(runs && runs.count > 1 && { runs, own }),
+    };
+  }
+
+  /**
+   * Look `index` of a series' runs as it draws with `paint`: its style
+   * map's settings and the mark's own paint over its channels', colors
+   * read. What a row gives none of is the series' own (`paint.own`), else
+   * undefined: the mark's, and for a color its rows decide, the muted
+   * color channels give rows without one.
+   */
+  look(index: number, paint: SeriesPaint): Look {
+    const look = this.#runs!.look(index);
+    const { style, own } = paint;
+    const { path } = this.#where;
+    const color =
+      style?.[this.#primary] ??
+      this.#spec[this.#primary] ??
+      look.color ??
+      (this.#byRows ? (this.#theme?.muted ?? "#999999") : undefined);
+    const stroke = style?.stroke ?? look.stroke;
+    return {
+      color: color === undefined ? undefined : this.#paint(color, `${path} color`),
+      stroke: stroke === undefined ? own?.stroke : this.#paint(stroke, `${path} encode.stroke`),
+      dash: style?.dash ?? look.dash ?? own?.dash,
+      strokeWidth: style?.strokeWidth ?? look.strokeWidth ?? own?.strokeWidth,
+      opacity: style?.opacity ?? look.opacity ?? own?.opacity,
     };
   }
 
@@ -489,9 +588,14 @@ function held(checked: Checked, rowOffset: number): boolean {
 }
 
 const translucents = new WeakMap<Drawing<Geometry>, Map<number, Drawing<Geometry>>>();
+/**
+ * How many opacities of one drawing are kept: drawings such as lines' live
+ * as long as the page, and opacities streaming in would otherwise stay.
+ */
+const KEPT_OPACITIES = 256;
 
-/** A drawing of the same geometry at `opacity`. */
-function translucent(draw: Drawing<Geometry>, opacity: number): Drawing<Geometry> {
+/** A drawing of the same geometry at `opacity`, the same while it is among the last opacities asked for. */
+export function translucent(draw: Drawing<Geometry>, opacity: number): Drawing<Geometry> {
   let byOpacity = translucents.get(draw);
   if (!byOpacity) {
     byOpacity = new Map();
@@ -499,6 +603,8 @@ function translucent(draw: Drawing<Geometry>, opacity: number): Drawing<Geometry
   }
   let made = byOpacity.get(opacity);
   if (made) return made;
+  // The opacity asked for longest ago goes first.
+  if (byOpacity.size >= KEPT_OPACITIES) byOpacity.delete(byOpacity.keys().next().value!);
   const { elements, canvas: paint } = draw;
   made = {
     ...draw,

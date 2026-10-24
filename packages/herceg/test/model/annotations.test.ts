@@ -590,7 +590,7 @@ describe("text", () => {
     );
     expect(() =>
       text(metrics, { x: "time", y: "value", label: { text: "a", field: "value" } } as never),
-    ).toThrow("text label: needs one of text and field");
+    ).toThrow("text label: needs one of text, field, and content");
     expect(() =>
       text(metrics, { x: "time", y: "value", label: { field: "time" } as never }),
     ).toThrow(/text label\.field: field "time" holds time values; expected category or number/);

@@ -32,11 +32,13 @@ describe("charts of Python's HTML", () => {
       element,
       {
         data: { d: { columns: { t: [0, 1], v: [1, 2], kind: ["a", "b"], g: ["p", "p"] } } },
-        marks: [{ type: "line", x: "t", y: "v", series: "g", color: "kind" }],
+        marks: [
+          { type: "line", x: "t", y: "v", series: "g", style: { by: { field: "kind", map: {} } } },
+        ],
       },
       [],
     );
-    // Lines colored by a field other than the series': the compiler loads, then refuses.
+    // A style map by a field changing within a series: the compiler loads, then refuses.
     await expect(chart!.ready).rejects.toThrow(/changes within series/);
     error.mockRestore();
     expect(alert()!.textContent).toMatch(

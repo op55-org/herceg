@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 
 import herceg as hg
-from herceg import _pending
 from herceg._export import plan_export
 
 FIXTURE = Path(__file__).parents[2] / "packages" / "herceg" / "test" / "fixtures" / "contracts.json"
@@ -55,18 +54,14 @@ def made(case: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("case", cases("cases"))
-def test_spec_contracts(case, monkeypatch):
+def test_spec_contracts(case):
     if "code" in case:
         with pytest.raises(hg.ChartError) as raised:
             made(case)
         error = raised.value
         assert (error.code, error.path) == (case["code"], case.get("python_path", case["path"]))
         assert case["python"] in str(error)
-        if "pending" not in case or case.get("builder_spec") is False:
-            return
-        assert f"(round 2 stream {case['pending']} adds it)" in str(error)
-        # What it refuses for now, the builders already write as the engine reads it.
-        monkeypatch.setattr(_pending, "refuse", lambda *_: None)
+        return
     spec = made(case)
     for key, value in case["spec"].items():
         assert spec[key] == value, key

@@ -3,9 +3,16 @@
 // look where panels show or hide series of their own. Loaded with subplots
 // (model/panels.ts), which hand it to the guide compiler's legends.
 
+import type { Mark, RowParts } from "../marks/mark.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { PaintReader, Theme } from "../theme.ts";
-import type { LegendContent, LegendEntry, LegendPart } from "./legend.ts";
+import {
+  HiddenKeys,
+  type LegendContent,
+  type LegendEntry,
+  type LegendPart,
+  wholeOf,
+} from "./legend.ts";
 
 /** A mark, by its id or index, and the channel of a scale it owns. */
 type Owned = readonly { mark: string | number; channel: string }[];
@@ -13,19 +20,10 @@ type Owned = readonly { mark: string | number; channel: string }[];
 /** The marks owning each legend part (see `partOwners` in guides/legends.ts). */
 export type PartOwners = ReadonlyMap<string, { owners: Owned }>;
 
-/** How an entry is as panels' own visibility leaves it, where it is drawn. */
-export type EntryState = "hidden" | "shown" | "mixed";
-
 /** What a panel of subplots draws, as its legends list it. */
 interface PanelTargets {
   /** The keys of its series (or a layout mark's items), by their entries' keys. */
   members: Map<string, string[]>;
-  /**
-   * The keys of every series it draws, of marks its legends leave out
-   * (`legend: false`) too, which custom entries may name; not of marks of
-   * every panel, which follow the chart's visibility.
-   */
-  series: Set<string>;
   /**
    * What each entry toggles there, by its key: what its series stand for,
    * or a series' own key where it stands for nothing (the entry's key).
@@ -39,11 +37,75 @@ interface PanelTargets {
   parts: Set<string>;
   /** The entries of the layout mark drawn there, under their identities' keys, for swatches. */
   also: LegendEntry[];
+  /** Whether a layout mark's items are what it draws. */
+  items: boolean;
+}
+
+/**
+ * What hiding (or showing, `visible`) series and items `keys` makes of
+ * what panels' legends set (`hidden.panels`): in `panel`, its own state
+ * of them (what a key stands for in place of its series' own settings);
+ * in every panel, without one, they let go of what they set of the keys
+ * and of what those stand for. `hidden.panels` itself where nothing
+ * changes.
+ */
+export function panelVisibility(
+  hidden: HiddenKeys,
+  keys: readonly string[],
+  visible: boolean,
+  panel: string | undefined,
+): Map<string, Map<string, boolean>> {
+  const { groups } = hidden;
+  let changed = false;
+  // Marks given whole, whose series' settings follow (read through every series only then).
+  const wholes = keys.some((key) => key.startsWith('{"mark":') && wholeOf(key) === undefined);
+  if (panel !== undefined) {
+    const own = new Map(hidden.panels.get(panel));
+    // Settings of what keys stand for, or of a mark whole, replace their
+    // series' and rows' own.
+    const given = new Set(keys);
+    for (const key of own.keys())
+      if (given.has(groups.get(key)!) || given.has(wholeOf(key)!)) {
+        own.delete(key);
+        changed = true;
+      }
+    for (const key of keys) {
+      if (own.get(key) !== !visible) changed = true;
+      own.set(key, !visible);
+    }
+    // A mark's series the panel shows or hides through what they stand
+    // for take the state the mark is given whole.
+    if (wholes)
+      for (const [series, group] of groups)
+        if (own.has(group) && given.has(wholeOf(series)!) && own.get(series) !== !visible) {
+          own.set(series, !visible);
+          changed = true;
+        }
+    return changed ? new Map(hidden.panels).set(panel, own) : hidden.panels;
+  }
+  const identity = (key: string) => groups.get(key) ?? key;
+  const given = new Set(keys.map(identity));
+  const out = new Map<string, Map<string, boolean>>();
+  for (const [name, own] of hidden.panels) {
+    // Panels let go of what they set of the keys, what those stand for,
+    // and a mark's series and rows where the mark is given whole; series
+    // of the mark a panel shows or hides through what they stand for
+    // take its state.
+    const kept = new Map(
+      [...own].filter(([key]) => !given.has(identity(key)) && !given.has(wholeOf(key)!)),
+    );
+    if (wholes)
+      for (const [series, group] of groups)
+        if (own.has(group) && given.has(wholeOf(series)!)) kept.set(series, !visible);
+    if (kept.size !== own.size || [...kept].some(([key, hide]) => own.get(key) !== hide))
+      changed = true;
+    if (kept.size > 0) out.set(name, kept);
+  }
+  return changed ? out : hidden.panels;
 }
 
 /** The legends of one scene of a chart of subplots. */
 export class PanelLegends {
-  readonly #content: LegendContent;
   readonly #panels = new Map<string, PanelTargets>();
   /** The marks drawing each entry's series, and those owning each part, in any panel. */
   readonly #owners: ReadonlyMap<string, readonly (string | number)[]>;
@@ -61,8 +123,9 @@ export class PanelLegends {
     locale: string | undefined,
     paint: PaintReader,
     named: ReadonlySet<string | number>,
+    /** An annotation's entries by its label, of its rows in a panel. */
+    labelEntries: (mark: Mark, rows: RowParts | undefined) => { key: string }[],
   ) {
-    this.#content = content;
     this.#owners = owners;
     this.#partsOf = partsOf;
     const { split, color } = content;
@@ -70,7 +133,6 @@ export class PanelLegends {
     const everywhere = new Set<string | number>();
     split?.keys.forEach((key, p) => {
       const members = new Map<string, string[]>();
-      const keys = new Set<string>();
       const targets = new Map<string, readonly string[]>();
       const marks = new Map<string, (string | number)[]>();
       const drawn = new Set<string | number>();
@@ -83,7 +145,6 @@ export class PanelLegends {
         const list = members.get(entry);
         if (list) list.push(key);
         else members.set(entry, [key]);
-        keys.add(key);
         targets.set(entry, [entry]);
         const owners = marks.get(entry) ?? [];
         if (!owners.includes(mark)) marks.set(entry, [...owners, mark]);
@@ -104,20 +165,53 @@ export class PanelLegends {
         }
         for (const part of item.mark.legends?.(theme, locale, paint) ?? []) parts.add(part.key);
       } else
-        split.panels[p]!.forEach(({ mark, series }, m) => {
+        split.panels[p]!.forEach(({ mark, series, rows }, m) => {
           const id = mark.spec.id ?? m;
           // Marks of every panel are the chart's legend's alone.
           if (mark.spec.panel === "*") everywhere.add(id);
           if (split.members?.[p]?.[m] === false || mark.spec.panel === "*") return;
-          for (const s of series) keys.add(s.key);
+          if (mark.labelEntries) {
+            // Annotations listed by their labels: what their rows drawn here name.
+            if (mark.spec.legend !== true && !named.has(id)) return;
+            drawn.add(id);
+            for (const { key } of labelEntries(mark, rows)) add(key, key, id);
+            return;
+          }
           // Marks left out of legends are listed where a legend names them.
           if (mark.spec.legend === false && !named.has(id)) return;
           drawn.add(id);
           for (const s of series) add(s.entry ?? s.key, s.key, id);
         });
-      this.#panels.set(key, { members, series: keys, targets, marks, drawn, parts, also });
+      this.#panels.set(key, {
+        members,
+        targets,
+        marks,
+        drawn,
+        parts,
+        also,
+        items: !!(item && color),
+      });
     });
     this.#everywhere = everywhere;
+  }
+
+  /**
+   * What is hidden once a legend shows `keys`, in panel `panel` or in the
+   * chart, as `setVisibility` leaves it.
+   */
+  static showing(
+    hidden: HiddenKeys,
+    keys: readonly string[],
+    panel: string | undefined,
+  ): HiddenKeys {
+    // What series stand for, shared: showing changes none of it.
+    const { groups } = hidden;
+    const next = Object.assign(new HiddenKeys(), { groups });
+    const identity = (key: string) => groups.get(key) ?? key;
+    const gone = new Set(panel === undefined ? keys.map(identity) : []);
+    for (const key of hidden) if (!gone.has(identity(key))) next.add(identity(key));
+    next.panels = panelVisibility(hidden, keys, true, panel);
+    return next;
   }
 
   /** Throws unless the chart has panel `panel`, which the legend at `path` names. */
@@ -134,14 +228,15 @@ export class PanelLegends {
    * What the legend of panel `panel` lists: the entries of what the panel
    * draws, and of `parts` those of the marks drawn there, that `shows`
    * keeps of the scales their marks own; which the chart's legend then
-   * leaves to it there. A legend of entries of its own (`custom`, the
-   * series they target) covers those whose every series there it targets.
+   * leaves to it there. A legend of entries of its own (`custom`, the keys
+   * they target) covers those whose every series there it targets: by
+   * their key, what they stand for, or their mark whole.
    */
   listed(
     panel: string,
     entries: readonly LegendEntry[],
     parts: readonly LegendPart[],
-    shows: (owned: Owned) => boolean,
+    shows: (owned: Owned, key: string) => boolean,
     custom?: ReadonlySet<string>,
   ): { entries: LegendEntry[]; parts: LegendPart[] } {
     const own = this.#panels.get(panel)!;
@@ -149,8 +244,15 @@ export class PanelLegends {
       entries: entries.filter(
         ({ key }) =>
           own.targets.has(key) &&
-          shows(own.marks.get(key)!.map((mark) => ({ mark, channel: "series" }))) &&
-          (!custom || own.members.get(key)!.every((series) => custom.has(series))),
+          shows(
+            own.marks.get(key)!.map((mark) => ({ mark, channel: "series" })),
+            key,
+          ) &&
+          (!custom ||
+            custom.has(key) ||
+            own.members
+              .get(key)!
+              .every((series) => custom.has(series) || custom.has(wholeOf(series) ?? series))),
       ),
       parts: parts.filter(
         ({ key }) =>
@@ -198,101 +300,21 @@ export class PanelLegends {
   }
 
   /**
-   * How a legend shows `entries`: for panel `panel`'s, hidden where every
-   * one of their series is there, toggling their series there; for the
-   * chart's, as panels' own visibility leaves them (hidden, or shown in
-   * some panels and hidden in others), and undefined where no panel shows
-   * or hides series of its own. With `custom` entries, whether a series
-   * they name is hidden: in the panel, or in every panel drawing it.
+   * How panel `panel`'s legend toggles its entries: what each names there
+   * (`targets`), and the marks drawn there, whose looks its swatches draw.
    */
-  shown(
-    panel: string | undefined,
-    entries: readonly LegendEntry[],
-    custom: boolean,
-  ):
-    | {
-        entries: LegendEntry[];
-        hidden: ReadonlySet<string>;
-        hides: ((key: string) => boolean) | undefined;
-        targets: ReadonlyMap<string, readonly string[]> | undefined;
-        /** For a panel's legend, the marks drawn there, whose looks its swatches draw. */
-        drawn?: ReadonlySet<string | number>;
-        also?: readonly LegendEntry[];
-      }
-    | undefined {
-    const hides = custom ? this.#hides(panel) : undefined;
-    if (panel !== undefined) {
-      const own = this.#panels.get(panel)!;
-      return {
-        entries: [...entries],
-        hidden: this.#hiddenIn(panel, entries),
-        hides,
-        targets: own.targets,
-        drawn: own.drawn,
-        also: own.also,
-      };
-    }
-    if (!this.#content.hidden.panels?.size) return undefined;
-    const states = this.#states(entries);
-    return {
-      entries: entries.map((entry) => ({ ...entry, mixed: states.get(entry.key) === "mixed" })),
-      hidden: new Set(entries.flatMap(({ key }) => (states.get(key) === "hidden" ? [key] : []))),
-      hides,
-      targets: undefined,
-    };
-  }
-
-  /** Each of the chart's entries as panels' own visibility leaves it, by key. */
-  #states(entries: readonly LegendEntry[]): Map<string, EntryState> {
-    const { hidden } = this.#content;
-    return new Map(
-      entries.map(({ key }) => {
-        let shown = false;
-        let hiddenSome = false;
-        for (const [panel, { members }] of this.#panels)
-          for (const target of members.get(key) ?? [])
-            if (hidden.hiddenIn!(target, panel)) hiddenSome = true;
-            else shown = true;
-        // Drawn by a mark of every panel, or by none of the panels: as in the chart.
-        if (
-          (!shown && !hiddenSome) ||
-          this.#owners.get(key)?.some((mark) => this.#everywhere.has(mark))
-        )
-          if (hidden.has(key)) hiddenSome = true;
-          else shown = true;
-        return [key, shown && hiddenSome ? "mixed" : hiddenSome ? "hidden" : "shown"];
-      }),
-    );
-  }
-
-  /** The keys of panel `panel`'s legend's entries hidden there: those whose every series is. */
-  #hiddenIn(panel: string, entries: readonly LegendEntry[]): Set<string> {
+  shown(panel: string): {
+    targets: ReadonlyMap<string, readonly string[]>;
+    drawn: ReadonlySet<string | number>;
+    also: readonly LegendEntry[];
+  } {
     const own = this.#panels.get(panel)!;
-    const { hidden } = this.#content;
-    return new Set(
-      entries.flatMap(({ key }) =>
-        (own.members.get(key) ?? []).every((target) => hidden.hiddenIn!(target, panel))
-          ? [key]
-          : [],
-      ),
-    );
+    return { targets: own.targets, drawn: own.drawn, also: own.also };
   }
 
-  /**
-   * Whether a series a legend's own entries name is hidden: in its panel
-   * `panel`, or for the chart's legend in every panel drawing it.
-   */
-  #hides(panel: string | undefined): (key: string) => boolean {
-    const { hidden } = this.#content;
-    if (panel !== undefined) return (key) => hidden.hiddenIn!(key, panel);
-    return (key) => {
-      let drawn = false;
-      for (const [panel, { series }] of this.#panels)
-        if (series.has(key)) {
-          if (!hidden.hiddenIn!(key, panel)) return false;
-          drawn = true;
-        }
-      return drawn || hidden.has(key);
-    };
+  /** Each layout mark's items drawn in a panel: the panel, their identity's key, and their own keys. */
+  *items(): Generator<[panel: string, identity: string, keys: readonly string[]]> {
+    for (const [panel, { members, items }] of this.#panels)
+      if (items) for (const [identity, keys] of members) yield [panel, identity, keys];
   }
 }

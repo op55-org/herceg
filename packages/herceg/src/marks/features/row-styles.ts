@@ -12,10 +12,12 @@ import type { GlyphKey } from "../mark.ts";
 import type { Series } from "../series.ts";
 import {
   type Channel,
+  type Check,
   categoryField,
-  colorCheck,
   colorShortForm,
   compileChannel,
+  outputCheck,
+  rowReader,
   type ScaleOf,
 } from "./channels.ts";
 
@@ -38,17 +40,6 @@ interface Part {
   at(row: number): number;
 }
 
-const width = (value: unknown, path: string) => {
-  if (typeof value !== "number" || !(value >= 0) || !Number.isFinite(value))
-    throw new RangeError(`${path}: expected 0 or more pixels; received ${JSON.stringify(value)}`);
-};
-const fraction = (value: unknown, path: string) => {
-  if (typeof value !== "number" || !(value >= 0 && value <= 1))
-    throw new RangeError(
-      `${path}: expected a number from 0 to 1; received ${JSON.stringify(value)}`,
-    );
-};
-
 /** The looks of a mark's rows, compiled. */
 export class RowStyles {
   readonly #table: Table;
@@ -57,6 +48,8 @@ export class RowStyles {
   readonly #stroke: Channel<string> | undefined;
   readonly #width: Channel<number> | undefined;
   readonly #opacity: Channel<number> | undefined;
+  /** Each channel's check and option, for the values identity scales read. */
+  readonly #checks: { check: Check; path: string }[];
   readonly #by: { field: string; map: StyleMapSpec["map"] } | undefined;
   readonly #path: string;
   /** Whether rows have looks of their own; otherwise looks are by series, through the palette. */
@@ -104,27 +97,44 @@ export class RowStyles {
         : colorShortForm(spec.color, table, `${path} color`, isColor));
     const at = (name: string) =>
       `${path} ${name === "color" && !encode.color ? "color" : `encode.${name}`}`;
-    const colorValue = colorCheck(isColor);
+    const colorValue = outputCheck("color", isColor);
+    const width = outputCheck("strokeWidth", isColor);
+    const fraction = outputCheck("opacity", isColor);
     // A fill set flat wins over the color channel.
     const fill = spec.fill === undefined ? (encode.fill ?? color) : undefined;
-    this.#fill =
-      fill &&
-      compileChannel(fill, table, scales, "color", colorValue, at(encode.fill ? "fill" : "color"));
+    const fillPath = at(encode.fill ? "fill" : "color");
+    this.#fill = fill && compileChannel(fill, table, scales, "color", colorValue, fillPath);
     this.#stroke =
       encode.stroke &&
       compileChannel(encode.stroke, table, scales, "color", colorValue, at("stroke"));
     this.#width =
       encode.strokeWidth &&
-      compileChannel(encode.strokeWidth, table, scales, "strokeWidth", width, at("strokeWidth"));
+      compileChannel(
+        encode.strokeWidth,
+        table,
+        scales,
+        "strokeWidth",
+        width,
+        at("strokeWidth"),
+        "strokeWidth",
+      );
     this.#opacity =
       encode.opacity &&
-      compileChannel(encode.opacity, table, scales, "opacity", fraction, at("opacity"));
+      compileChannel(encode.opacity, table, scales, "opacity", fraction, at("opacity"), "opacity");
+    this.#checks = [
+      { check: colorValue, path: fillPath },
+      { check: colorValue, path: at("stroke") },
+      { check: width, path: at("strokeWidth") },
+      { check: fraction, path: at("opacity") },
+    ];
     const by = spec.style?.by;
     if (by?.field !== undefined && by.field !== spec.series)
       this.#by = { field: categoryField(table, by.field, `${path} style.by.field`), map: by.map };
     const rowWise = (c: Channel<unknown> | undefined) =>
       c !== undefined &&
-      (c.kind === "condition" || (c.kind === "field" && c.field !== spec.series));
+      (c.kind === "condition" ||
+        c.kind === "identity" ||
+        (c.kind === "field" && c.field !== spec.series));
     this.byRow =
       [this.#fill, this.#stroke, this.#width, this.#opacity].some(rowWise) ||
       this.#by !== undefined;
@@ -183,6 +193,7 @@ export class RowStyles {
    */
   key(): GlyphKey | undefined {
     const fill = this.#fill;
+    // Colors a field holds name no values a key would list.
     if (fill?.kind !== "field" || fill.field === this.#spec.series) return undefined;
     const table = this.#table;
     const theme = this.#theme;
@@ -199,6 +210,7 @@ export class RowStyles {
       ? {
           title: fill.field,
           channel: "color",
+          scale: fill.scale.name,
           entries: values.map((label) => ({
             label,
             glyph: "M-4.5 -4.5h9v9h-9Z",
@@ -299,15 +311,16 @@ export class RowStyles {
     if (this.#looks?.version === table.version) return this.#looks;
     const palette = theme?.palette ?? [];
     const muted = theme?.muted ?? "#999999";
+    const [fill, stroke, width, opacity] = this.#checks;
     const channels = [
-      this.#part(this.#fill, palette, muted),
-      this.#part(this.#stroke, palette, muted),
-      this.#part(this.#width, [], 1),
-      this.#part(this.#opacity, [], 1),
+      rowReader(this.#fill, table, palette, muted, fill!.check, fill!.path),
+      rowReader(this.#stroke, table, palette, muted, stroke!.check, stroke!.path),
+      rowReader(this.#width, table, [], 1, width!.check, width!.path),
+      rowReader(this.#opacity, table, [], 1, opacity!.check, opacity!.path),
     ];
     const by = this.#by;
     const byPart = by && this.#codes(by.field);
-    const parts: Part[] = [...channels.map((c) => c.part), ...(byPart ? [byPart] : [])];
+    const parts: Part[] = [...channels, ...(byPart ? [byPart] : [])];
     // Rows' looks numbered by their parts' values, in the order rows take them;
     // values that give the same paint share one look.
     const of = new Int32Array(table.length);
@@ -358,30 +371,6 @@ export class RowStyles {
   #codes(field: string): Part {
     const { codes, dictionary } = this.#table.categories(field as never);
     return { count: dictionary.length + 1, at: (row) => codes[row]! + 1 };
-  }
-
-  /** A channel as a part of rows' looks, and a row's output. */
-  #part<V>(
-    channel: Channel<V> | undefined,
-    defaults: readonly V[],
-    fallback: V,
-  ): { part: Part; output(row: number): V | undefined } {
-    // The series' names are the series': rows of one series look alike (`#seriesPaint`).
-    if (!channel || channel.kind === "series")
-      return { part: { count: 1, at: () => 0 }, output: () => undefined };
-    if (channel.kind === "value")
-      return { part: { count: 1, at: () => 0 }, output: () => channel.value };
-    if (channel.kind === "condition")
-      return {
-        part: { count: 2, at: (row) => (channel.when(row) ? 1 : 0) },
-        output: (row) => (channel.when(row) ? channel.then : channel.otherwise),
-      };
-    const { codes, dictionary } = this.#table.categories(channel.field as never);
-    const outputs = dictionary.map((value) => channel.scale.output(value, defaults, fallback));
-    return {
-      part: { count: dictionary.length + 1, at: (row) => codes[row]! + 1 },
-      output: (row) => (codes[row]! < 0 ? undefined : outputs[codes[row]!]),
-    };
   }
 }
 

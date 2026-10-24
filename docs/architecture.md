@@ -3752,11 +3752,16 @@ the moving scale, inside the plot), and both edges of bands and stack layers.
 Monotone curves are curved again each frame through the points between, so
 they never pass a point's value between two points: a line's or an area's
 alone with `monotonePolyline` (which the chart passes in too), and a band's
-or stack's layers together with the joint curve their mark attaches to its
-keyed geometry (`AreaGeometry.curve`, trace.ts `curveLayers`), so edges two
-layers share stay one edge and layers never cross. A mark's areas move
+or stack's layers with the joint curve their mark attaches to its keyed
+geometry (`AreaGeometry.curve`, trace.ts `curveLayers`): a stack's layers
+together, so edges two layers share stay one edge and layers never cross,
+and a series field's bands each alone (`AreaGeometry.stacked` says which), as
+the mark curves them; a highlight's copies of a layer take its edges
+(dom/value-traces.ts `moveStacks`). A mark's areas move
 together or not at all: a layer that cannot move (a missing value, say)
-keeps its neighbors at their new values too. Items that appear or go are
+keeps its neighbors at their new values too. So do a series' pieces (its
+outlines, markers, and a highlight's dots, which move by their rows): one
+that cannot move shows the series' new values at once, all of it. Items that appear or go are
 drawn as geometry only: the model, tooltips, the keyboard, events, and
 summaries have the new data from the start.
 
@@ -3764,11 +3769,13 @@ A change moves only when both scenes have one panel with the same key, plot,
 and theme, scales that can move between them, the same series of bars,
 points, lines, areas, and rules, and retained slices in the same order. When
 any scale moves, every geometry in the panel must move with it (marks that
-cannot, such as stacked or labeled bars, text, heatmaps, custom marks, or a
-line whose x positions changed, would stand apart from the axes), and lines
+cannot, such as stacked or labeled bars, lines and areas labels follow,
+text, heatmaps, custom marks, or a line whose x positions changed, would
+stand apart from the axes), and lines
 and areas need x to stay; otherwise the change shows at once. With scales
 that stay, marks that cannot move show their new values while the others
-move. Margins grow at once but shrink only on resizes and option changes, so
+move: a series labels follow (`followedOf`) shows them with its labels,
+which stand where it is drawn. Margins grow at once but shrink only on resizes and option changes, so
 a change whose labels need more room shows at once and the next moves.
 Appended and dropped rows, row views' changes, changes under options or
 hidden keys other than those the scene on screen was drawn with, changes
@@ -3834,23 +3841,42 @@ Series keys identify what is drawn: geometry buffers, caches, inspection,
 and the keyboard, so two marks never write into each other's buffers.
 
 What a series stands for is its **identity** (`model/identity.ts`), a value
-in a scope, with a JSON key of its own: `{"table":"data","field":"region",
-"value":"eu"}` for a category field's value, `{"table":"data","value":"p99"}`
-for a value field or a band's label, `{"scale":"regions","value":"eu"}` for
-a value through a named scale. A table is named by the table its fields come
-from (`rootOf`, `data/origin.ts`: derived tables, row views' tables, and spec
-tables with `origin` lead back to their source while the fields pass through
-unchanged), by its `name` (two tables of one name in a chart are refused)
-or else a name the chart gives it (`ChartModel.#names`): the place of the
-first mark reading it (`{"mark":0}`, `{"mark":"latency"}`, objects so no
-table's own name is one), which a new table read in that place takes once
-no table there keeps it (the table that had it, read again, is named
-anew), so a server snapshot and the browser name tables alike, a table
-rebuilt in its place (a framework rendering again) keeps its values'
-colors, and removing or bringing back a mark renames no other table.
-Colors, legend entries, and visibility follow identities, so a value has one
-color and one entry in every mark, panel, and facet, and unrelated tables
-sharing a field's name stay apart unless a named scale joins them. Layout
+in a scope, with a JSON key of its own: `{"field":"region","value":"eu"}`
+for a category field's value, `{"table":"data","value":"p99"}` for a value
+field or a band's label, `{"scale":"regions","value":"eu"}` for a value
+through a named scale (`{"scale":"regions","panel":"a","value":"eu"}` for
+a scale of each panel's own). A category field is named by its name alone:
+within a chart, one name is one meaning, so the values of `site` take one
+color and one legend entry in every mark, table, panel, facet, and inset,
+even where panels have position axes of their own, and a pie's slices,
+bars colored row by row, and lines split by `site` agree. Fields of
+different names keep apart; one named scale read by both joins them, and
+scales of different names keep apart fields that share a name but not a
+meaning. Value fields stay within their table: a line of `v` and a band
+labelled `v` from one table list one thing, while lines of `v` from
+unrelated tables list two. A table of value fields is named by the table
+its fields come from (`rootOf`, `data/origin.ts`: derived tables, row
+views' tables, and spec tables with `origin` lead back to their source
+while the fields pass through unchanged), by its `name` (two tables of one
+name in a chart are refused) or else a name the chart gives it: the place
+of the first mark reading it (`{"mark":0}`, `{"mark":"latency"}`, objects
+so no table's own name is one), kept from one configuration to the next,
+with `n` where a table kept that place's name. So a server snapshot and
+the browser name tables alike, a table rebuilt in its place (a framework
+rendering again) takes its place's name and its series' colors, and
+removing or adding a mark renames no other table; a table left out of a
+configuration is named anew when it comes back. Naming needs no history
+beyond the configuration before. Charts name their tables themselves
+where no two would take one name (`simpleNames` in `model/identity.ts`);
+where two would (a new table in a place another kept the name of, or two
+tables of one name, refused), the chart loads the feature compiler, which
+names them all alike (`tableNames` in `marks/features/identity.ts`), so
+the first chunk carries only the common case. Source provenance (`rootOf`) is
+still what transforms, selections, and row identity follow; it is no longer
+what category colors follow. Identities of value fields are tagged apart
+from category values, so a measure named `eu` never meets a site called
+`eu`. Colors, legend entries, and visibility follow identities, so a value
+has one color and one entry in every mark, panel, and facet. Layout
 marks give their items' sources (`LayoutMark.identity`, `ItemSources`: the
 field, its table when it is another, as a network's nodes, and how an item
 key names its value), so pie slices, top-level tree branches, radar series,
@@ -3858,7 +3884,8 @@ map regions and points, network node groups, and 3D groups take their
 values' colors and entries; the model reads an item's mark from its key
 (`#itemColor`), so the layers of a map or a 3D plot drawn as one find
 theirs. With `scales.color` declared, items follow it as series do
-(`CompiledFeatures.items`).
+(`CompiledFeatures.items`, the mark's panel's for a scale of each panel's
+own).
 
 The core gives each mark its default scope as the configuration changes
 (`ChartModel.#configure`, from `Mark.identity`: the series field, or the
@@ -3866,20 +3893,26 @@ value fields); the feature compiler, which a chart loads when it colors by
 field or declares scales, refines it (`marks/features/identity.ts`): a
 declared `scales.color` or a channel's `scale` makes series stand for values
 through that scale, and a line or area colored by a field other than its
-series field stands for that field's values. The palette callback each mark
+series field stands for that field's value while every observation of the
+series has it (a missing value counting as another); a series whose value
+changes along it stands for itself, its looks drawn in runs (see
+Encodings). What a series stands for follows its rows as they are now, read
+once and then over appended rows alone, so a chart built again from the
+same rows, or streamed to them, reads the same. The palette callback each mark
 calls as its series resolve maps the series key to its identity in the
 model's hidden set (`HiddenKeys.groups`), and takes the identity's palette
 slot: one allocator per chart, assigning slots to identity keys the first
 time they appear and keeping them for the chart's lifetime, so a value keeps
 its color while others appear, disappear, or are hidden, and while the data
 streams. The first time a value of a category field asks for a slot (the
-configuration notes each series, items', and color field's identity scope
-and root table, `SlotField`), every value of the field's dictionary takes
-one in dictionary order, used or not, so a value's slot is its place in
-the dictionary whether its color splits series, colors rows, or colors a
+configuration notes each table reading the field, by the first mark
+reading it, `SlotField`), every value of the field's dictionaries takes
+one, each table's dictionary in its order and the tables in the order
+marks read them, used or not, so a value's slot is its place in the
+dictionaries whether its color splits series, colors rows, or colors a
 layout mark's items, and whatever a view or a facet shows; what the
-dictionary gains as data streams takes slots after, from where the last
-asking left off, or once a rolling window compacted the dictionary (its
+dictionaries gain as data streams takes slots after, from where the last
+asking left off, or once a rolling window compacted a dictionary (its
 `revision` in `Table.categories`), what in it has no slot yet, in its
 order. Slots once taken stay: a table given again with its values in
 another order keeps their colors, and values that came and went between
@@ -3895,16 +3928,18 @@ even when one mark lacks some of them. Scenes keep copies of the hidden set.
 
 Lines, areas, bars, and points split series by a category `color` field
 when they have no `series` (`seriesOf`, `marks/mark.ts`; `series: false`
-turns it off, and a mark's own stroke or fill keeps it from happening); map
+turns it off, and a mark's own stroke or fill keeps it from happening; a
+field through an identity scale gives colors as they are, stands for
+nothing, and splits no series); map
 and 3D points do too (`withSeries`, `marks/layout-mark.ts`), and the marks
 of summaries and observations (histograms, box plots, boxen plots, violins,
 error bars, rugs) read `color` as their series field or their paint
-(`colored`, `marks/colored.ts`). A line or area
-takes one color per series, so the feature compiler checks that the color
-field is constant within each series (`SeriesStyles`): once per table
-change, and as rows are appended, over the new rows alone, against each
-series' value. A field that changes within a series is a `series-varies`
-`ChartError`. The fixtures in `packages/herceg/test/fixtures`
+(`colored`, `marks/colored.ts`). Once `series` decides what a line or
+area's series are, a color field that changes within one draws style runs
+along it (see Encodings), never new series; a `style.by` field must stay
+constant within each series, which the feature compiler checks once per
+table change, and as rows are appended over the new rows alone, a
+`series-varies` `ChartError` otherwise. The fixtures in `packages/herceg/test/fixtures`
 (`series-inference.json`, `color-identity.json`, `chart-errors.json`) pin
 inference, identities, and errors for the engine and the Python package
 alike.
@@ -3947,9 +3982,12 @@ it, as it loads the guide compiler, and static output brings both
 - `SeriesFeatures` are hooks the core calls where they exist: `geometry`
   (restyle a series' geometry, add its markers), `trace` and `band` (trace
   runs into polylines), `extent` and `across` (values' extents
-  along x, and of marks along y), `drawn` (inspection), `shown` (text
-  summaries), `rows` (bars' looks per row), `categories` (points' colors),
-  `key` (bars' color keys), and `swatch` (legends' `swatches: "mark"`; a
+  along x, and of marks along y), `drawn` (inspection), `markerRows` and
+  `pathEnds` (highlights: markers' rows, and rows ending paths), `curved`
+  and `takeTrace` (labels following series: layers curved together's
+  rows, and the edges last traced), `shown` (text
+  summaries), `rows` (bars' looks per row), `points` (points' looks per
+  row, `PointLooks`), `key` (bars' color keys), and `swatch` (legends' `swatches: "mark"`; a
   marker comes as its symbol's path data, `SeriesSwatch`'s "glyph", since
   the guide compiler has no symbols' shapes).
 - The compiler imports types from the chart's modules, and code only from
@@ -3961,10 +3999,22 @@ it, as it loads the guide compiler, and static output brings both
   chunk of its own (as esbuild splits code), which
   `test/architecture.test.ts` prevents.
 
-**Channels and scales** (`channels.ts`, `scales.ts`). A field channel reads
-a category field through an `OrdinalScale`, its outputs computed per
-dictionary code, so a row's value is an array lookup; a condition is the
-expression compiled once (`data/expression.ts`) and read per row. A scale's
+**Channels and scales** (`channels.ts`, `scales.ts`). Every mark's channels
+compile through one compiler (`compileChannel`): a constant; a category
+field through an `OrdinalScale`, its outputs computed per dictionary code,
+so a row's value is an array lookup; a field's values as they are, through
+an identity scale (`{ type: "identity" }`, or one of the chart's `scales`
+of that type): colors, shapes, and dashes from category fields, sizes,
+widths, and opacities from number fields; the series' names through a
+scale; or a condition, the expression compiled once
+(`data/expression.ts`) and read per row. Every output is checked against
+the channel that draws it (`outputProblem` in `spec/channels.ts`): a
+constant and a condition's branches, a named scale's `map` and `unknown`
+(used or not) for each channel reading it, and an identity scale's values
+as rows give them; a value the channel cannot draw is refused, naming the
+option. Identity scales stand for nothing: they infer no series (a line
+whose series would be inferred through a named one is refused) and make
+no legend entries. A scale's
 domain is its explicit `domain` (closed: other values take `unknown`), or
 the values of the fields marks read, each field's dictionary in its order
 (a `category()` column's, a pandas Categorical's, an Arrow dictionary's)
@@ -3974,17 +4024,95 @@ and whatever the legend hides, and streaming never recolors. The default
 scales ("color", "symbol", "dash") are made when first read; `scales`
 names others.
 
-**Looks.** Lines and areas have one look per series (`series-styles.ts`):
-their channels must be constant within a series, checked once per table
-version, so no row arrays are kept; `style.by` maps a field's value or a
-series' source (its series value, or for wide data its value field) to a
-look. Bars' rows each take a look (`row-styles.ts`), numbered from small
+**Looks.** Lines and areas take a look per series (`series-styles.ts`)
+from channels that do not read rows (constants, the series field, the
+series' names); `style.by` maps a field's value or a series' source (its
+series value, or for wide data its value field) to a look, and a field it
+maps must be constant within a series (`series-varies` otherwise), checked
+once per table version, then over appended rows alone. Channels that read
+rows (a field other than the series', a condition, an identity scale)
+give a series **style runs** (`runs.ts`): where its look changes along its
+positions, and each run's look. A piece of line takes the look of the
+observation it arrives at, and a step's flat run the look of the
+observation whose value it holds (its vertical jump the next one's), so a
+forecast flagged on its own rows is drawn from the last observation on,
+and an estimate in the middle of a line is flagged on its row and the one
+after it (or on the row alone, for the piece into it). Runs are kept as
+the row each ends at and its look, interned by content: no row arrays;
+appended rows are read alone (rows in band order are read whole). Looks
+no run takes any more go as a stream brings new ones.
+
+Runs are drawn along the path (`run-paths.ts`). Tracing reduces each run's
+observations apart (`reduceRuns`, inside the `trace` and `band` hooks;
+layers curved together keep the rows either side of a boundary), so level
+of detail keeps every run however short, and the observations either side
+of each boundary are points of the path; curves and steps are built over
+the whole path, so tangents are shared. Each run then draws its own
+stretch of the traced path, in path order: from the boundary before it to
+the one after, at the last point of the run before (for steps, at the
+corner past it the hold reaches). Observations sharing a position are
+joined by edges like any other, each in its arriving look. Where two runs
+meet, each run's stroke goes half a stroke past the boundary, so its half
+of the join is the path's own, and leaves out a square past the line
+cutting the corner in two (across the tangent where the path is smooth):
+holes its drawing carries (`Drawing.holes`; SVG `clipPath`s named by a
+hash of what they cut, canvas and PDF clips by the even-odd rule). The
+join is painted once, half by each run, which is what keeps translucent
+looks from darkening their seams; widths change at the cut. A cut leaves
+out everything of a stretch within its reach, so it is made only where the
+path near the boundary is the two straight segments meeting there, longer
+than the cut reaches, turning by at most 120 degrees, with nothing else of
+either stretch as near (`cuttable`). Elsewhere (dense or curved paths,
+sharp turns, a path coming back by its boundary) the run after starts at
+the boundary and paints over the run before, which goes on past it and
+draws the join: translucent looks overlap there. A stretch keeps the
+path's own end where no drawn stretch meets it (a first observation alone
+in its look draws nothing). A dash goes on across a boundary while its
+pattern stays (`LineGeometry.dashOffset`, from the path's length, curves
+measured by quadrature) and starts again where it changes or the path
+breaks. An area's fill is cut across the band at its boundaries, so the
+pieces share their edges; its outline is cut as a line is, drawn as an
+area of no fill so it ends as an outline does. Markers take their own
+observation's look. A panel's rows of a series run as its own
+(`tracedEnds`), and runs of one look in a row are reduced and drawn as one
+stretch. A selection highlighting a series in pieces keeps their cuts,
+clipping each piece by the selected spans its extent reaches, at its own
+width (the series' runs' ends found once, each piece's spans by bisection
+over them); values no span tells apart are drawn
+once over all of the pieces. Selected rows standing alone are dots in
+their own observations' looks (color, opacity, half the stroke width),
+one point geometry per series in observation order, after the series'
+pieces, so they composite as translucent points do: a translucent dot
+tints the dimmed stroke of another run under it and darkens its own run's,
+and a later dot paints over an earlier one. Markers are lit where the rows
+they stand at are selected, and dimmed elsewhere. A series stays one
+series: one legend entry, its swatch its first run's look. A row giving a
+channel nothing takes the series' own value, else the mark's (the muted
+color, for colors its rows decide). Positions that do not ascend, and
+layers of a stack, refuse looks that change. Overlaps of separate runs (a
+path coming back over itself within a stroke) paint in path order; a run
+is only guaranteed its geometry, not a visible pixel of its own, where
+many share one pixel. Alternating looks make a stretch per observation:
+the geometry grows with the runs in view, not with looks times points.
+
+Bars' rows each take a look (`row-styles.ts`), numbered from small
 integers (a field's code, a condition's truth) in mixed radix, an
 `Int32Array` of a look per row and a paint per distinct look; a series
 draws one rectangle geometry per look its rows take, so the geometries
-grow with the looks, never the rows. Points' category colors are a tone
-per dictionary code into at most 254 colors and the muted one
-(`CategoryColors`).
+grow with the looks, never the rows.
+
+Points (`points.ts`) draw number fields' ramps, sizes by area, and
+opacities, and constants, themselves; the mark hands the compiler the
+rest (`PointChannels`): category fields (a symbol field's shapes through
+the default "symbol" scale of its name), named and identity scales, and
+conditions, for color (or `fill`), `size` (an area in square pixels),
+`fillOpacity` (or `encode.opacity`), and `symbol`. `PointLooks` gives each
+row's color as an index into as many colors as rows take (identity colors
+stay exact: past 256 colors, points index them by floats), its area,
+opacity, and shape, with keys of what ordinal scales map. A row missing a
+value is not drawn; a value a scale leaves unmapped takes the muted color,
+no shape, the mark's own size, or opaque. Points draw one outline per
+mark: `encode.stroke` and `encode.strokeWidth` take values.
 
 **Runs** (`continuity.ts`). A flag per row says whether it is drawn
 (accepted by `defined` and `where`); after appends and drops only the
@@ -4002,11 +4130,14 @@ skip rows not drawn; extents, tooltips, selections, and summaries read drawn
 rows only. A crossing of `where` is placed where its comparison changes
 sign: interpolated on linear curves, and on step curves at the end of the
 interval the last row owns, so bands and lines meet. Both are found in
-drawn coordinates: positions in the time breaks leave, logs of positions
-and values on log scales, and a comparison's sides placed as the positions
+drawn coordinates: positions, and values along y, in the time breaks
+leave, logs of positions and values on log scales, and a comparison's sides placed as the positions
 are where it reads only the positions' field, else as the values; so a
-crossing lies on the segment drawn. A band's edges share their runs, split where either edge
-has no place, as bands drawn whole are. Extents read the drawn observations
+crossing lies on the segment drawn. A comparison met at a drawn row itself
+(`>=` its value) adds no crossing: the run ends at the row; where a break
+hides the row, the crossing at the break's seam ends it. A band's edges
+share their runs, split where either edge has no place (not by rows a
+break hides), as bands drawn whole are. Extents read the drawn observations
 and crossings in view (by the series' min/max index a run at a time, where
 it has one) and where runs pass the view's edges, with positions on a log
 scale where the chart's settings put them on one (its panel's axis, the
@@ -4018,14 +4149,27 @@ row, so a streaming window's axis does not move with its last rows.
 
 **Markers** stand at the observations the reduced line keeps (recorded as
 it is traced, in a buffer per series) and draw as point geometry with the
-compiler's own drawing, which PDF draws as points.
+compiler's own drawing, which PDF draws as points. Which observation each
+is comes from the reducers: they name the position in the series of each
+point they keep (`PointSink.push`'s third argument, lod/polyline.ts), and
+where markers, `continuity` and `where`, or labels following the series
+ask, the feature compiler traces through a recorder
+(`marks/features/provenance.ts`) that writes the points on to the path
+and keeps their positions (4 bytes a point, in buffers the frame keeps
+from scene to scene), so markers know their rows
+(`SeriesFeatures.markerRows`), a series knows which rows end its paths in
+each panel as it was last traced there (`pathEnds`: an observation ending
+a run of the path, not one it goes on from to a crossing of `where`), and
+labels which observation owns each point of an edge (`takeTrace`; see
+Labels following series).
 
 **Costs.** The hooks in the core grew `herceg-line` by about 870 bytes
 gzip; the compiler chunk (about 13 KB gzip, with expression compilation
 and symbols' shapes) is loaded only by charts that use it. Constant and per-series looks keep no row arrays, and a
 series' paint is read once per data version and theme; looks per row keep
 4 bytes a row for bars, values that paint alike share a look, and each
-look's rectangles are as many as its rows in view. Runs keep a byte per row
+look's rectangles are as many as its rows in view. Style runs keep 16
+bytes a run and nothing per row. Runs keep a byte per row
 and 12 bytes a run. Streaming 100 rows a tick into a 100,000-row window, a
 line with calendar breaks takes about 0.5 ms a tick and one with `where`
 about 0.4 ms, against 0.17 ms without (Node, Apple M6).
@@ -4069,10 +4213,12 @@ across DST or other nonadjacent positions. A coarser interval with no boundary
 in view leaves the preceding useful plan for deduplication. `tooltipFormat`
 remains independent of the tick plan.
 
-The shared line tracer emits a 0.001-pixel segment for a one-vertex run
-(WebKit Canvas omits exactly zero-length strokes);
-round stroke caps paint a dot of the stroke's diameter in SVG, Canvas, and
-PDF. LOD and step tracing preserve these runs. Area outlines use the same
+The shared line tracer emits a 0.02-pixel segment for a one-vertex run
+(`dotAt`; SVG paths write it as a relative step, `l0.02 0`, which their
+0.1-pixel rounding keeps): browsers paint no dot of a zero-length stroke
+alike (WebKit paints SVG caps twice and drops canvas caps of much shorter
+lines, Chromium paints none where dashed), and round stroke caps paint one
+dot of the stroke's diameter in SVG, Canvas, and PDF. LOD and step tracing preserve these runs. Area outlines use the same
 tracer; areas without outlines draw just the isolated upper-edge dots in
 their fill color. Bars whose series field is their category position field
 record a whole-band share, which geometry, inspection, selection, and the
@@ -4363,43 +4509,104 @@ the compiler for. Colorbars refuse `inside` and `gap`. Axes the compiler
 draws carry `AxisGuide.layers`; a change of values that moves their scale
 is shown at once, since their layers are planned with the scene.
 
-**Legends** (`guides/legends.ts`) are the automatic legend (the short form's
-settings) and the legends `guides` lists, each showing the scales its
-`include` names (`ScaleRef`: the `id` of a mark along axes and its channel,
-"series", "color", "size", or "symbol") or all of them; listed legends claim their
-scales, colorbars theirs, and the automatic legend shows the rest. Marks
+**Legends** (`guides/legends.ts`) are the automatic legend (the short
+form's settings) and the legends `guides` lists, each showing what its
+`include` names (`LegendInclude`) or all of it: a scale of categories by
+name (`{ scale }`, its values and the marks reading it), a mark's scale
+(`{ mark, channel }`: its "series", "color", "size", or "symbol"), or a
+mark whole (`{ mark }`: its series, or an annotation's entries); `include:
+[]` lists none, for a legend of its own `entries` alone, which come after
+the included ones. Listed legends claim what they include, colorbars their
+ramps, and the automatic legend shows the rest; listed legends on one side
+stack in the order `guides` lists them, the first nearest the plots. Marks
 with the same scale share one part (a ramp, a key), which any of them
 names. Only the automatic legend leaves out a chart of one series, as the
 default one does; `legend: false` turns it off, not the legends listed. A
 mark's `legend: false` leaves it out of what legends and colorbars naming
-no mark show (`unlisted`), not of those naming it, whose entries come after
-the listed marks' so that those keep their looks; a mark whose color field
-splits its series (`split`) owns its series' colors as "color" too. What
-a mark owns comes of its options, not of what its rows give it now: each
-mark declares the scales guides may name (`Mark.legendScales`: its series'
-colors, a color ramp, which colorbars show, or key of colors, keys of sizes
-and symbols; a mark with an identity that declares none owns its series'
-colors), so a reference to a scale its mark does not declare is an error
-naming the channels it has, rows or none, and one whose scale has no values
-yet shows nothing until it has some (a colorbar is left out until then).
-The emitted parts give what legends show and which marks share them. An
-automatic legend without layout settings is measured as the default one
-(`measureLegends`); others lay out a title, then their entries in a grid
-(`columns` or `rows`, filled by row or by column) or in rows flowing as the
-default's, then their parts. Entries are identities (see Identity and
-color): the series of every mark and panel standing for one value are one
-entry, labelled as the first, toggling them all; labels alone never merge
-entries. `swatches: "mark"` draws each entry's swatch from its mark's settings: a
-line of its width and dash, a box of an area's or bar's fill at its
-opacity, a point's symbol (its legend glyph); several looks under one entry
-draw together. Custom `entries` show a swatch (a line, a box, a point's
-symbol, or several) or a mark's sample, and toggle the marks they target; entries that
-toggle nothing are drawn (`CaptionGuide`, with the legend's title) rather
-than made buttons, and described. A `LegendItem` that stands for several
-series has `targets`, which the HTML legend toggles together (shown hidden
-when all are hidden), and a `sample`, items about its left middle, which it
+no mark show (`unlisted`), not of those naming it, whose entries come
+after the listed marks' so that those keep their looks; a mark whose color
+field splits its series (`split`) owns its series' colors as "color" too.
+An annotation (a rule, region, or text) with `legend: true`, or named
+whole, is listed by its label: one entry, or one per value of its label's
+field, drawn in its look (a rule's line, a region's box) and hiding the
+annotation, or its rows of that value (`marks/hidden.ts`); hidden, it
+still counts toward the domains it counts toward (`contributeDomain`).
+What a mark owns comes of its options, not of what its rows give it now:
+each mark declares the scales guides may name (`Mark.legendScales`: its
+series' colors, a color ramp, which colorbars show, or key of colors, keys
+of sizes and symbols; a mark with an identity that declares none owns its
+series' colors), so a reference to a scale its mark does not declare is an
+error naming the channels it has, rows or none, and one whose scale has no
+values yet shows nothing until it has some (a colorbar is left out until
+then, also over a map of no values). Of layout marks, maps alone own a
+scale guides name: their color ramp. The emitted parts give what legends
+show and which marks share them. An automatic legend without layout
+settings is measured as the default one (`measureLegends`); others lay out
+a title, then their entries in a grid (`columns` or `rows`, filled by row
+or by column) or in rows flowing as the default's, then their parts.
+Entries are identities (see Identity and color): the series of every mark
+and panel standing for one value are one entry, labelled as the first,
+toggling them all; labels alone never merge entries. `swatches: "mark"`
+draws each entry's swatch from its mark's settings: a line of its width
+and dash, a box of an area's or bar's fill at its opacity, a point's
+symbol (its legend glyph); several looks under one entry draw together.
+Custom `entries` (each `key` unique among the legend's entries) show a
+swatch (a line, a box, a point's symbol, or several) or a mark's sample,
+and toggle what they target (`LegendTarget`): a mark whole (a series' key
+names its mark, so the series it gains later hide too: `Keys`), a series
+field's values (its series) or another field's (the rows of points,
+unstacked bars, and annotations holding them, by keys of their own), or a
+scale's values in every mark reading it (the series standing for them, and
+the rows of points and bars reading it through another field; in each
+panel, for a scale of each panel's own). Keys name values, not what marks
+hold now. Entries that toggle nothing are drawn (`CaptionGuide`, with the
+legend's title) rather than made buttons, and described. A `LegendItem`
+that stands for several series has `targets`, which the HTML legend
+toggles together, and a `sample`, items about its left middle, which it
 draws in a small SVG, redrawn when the sample changes; each legend guide is
 a set of buttons of its own label style.
+
+Keys overlap: a series is hidden where any key naming it is (its own, its
+identity's, its mark's whole key, and for rows a predicate holding them).
+Within a panel, its legend's settings take precedence by how much a key
+names: a series' or row predicate's own, then its identity's, then its
+mark's whole, then the chart's (`HiddenKeys.hiddenIn`, which the panel's
+snapshot draws with); setting a mark whole there or chart-wide pins the
+series that panels show or hide through their identity to the mark's new
+state. Entries report what they name as drawn (`guides/visibility.ts`):
+the series, rows, and layout items their keys name in each scope (the
+chart, or each panel of subplots; a panel's legend its panel alone) are
+hidden whole, in part (rows by value), or not, and an entry is hidden
+where all of it is, whatever hides it, mixed where some is, and has no say
+where nothing drawn has it. Showing an entry shows all of it: its
+`LegendItem.shows` lists, beside its targets, what would still hide any of
+it once they are shown, which the HTML legend lets go of too. The chart's
+entries let go of every key the chart sets hiding it (a mark hidden whole,
+what its series stand for, a predicate over its rows), and with them what
+else those hid; a panel's entries let go of the panel's own setting that
+decides it there, which comes before the chart's, so showing one series of
+a mark the panel hid whole leaves the others hidden. In charts of
+subplots, letting go of keys also changes what panels set (a chart-wide
+show clears panels' settings of the keys), so where panels' own settings
+name what an entry names, what hides it is read again as showing would
+leave it (`PanelLegends.showing`) until nothing does. So too where the
+chart hides a series by its own key that has since come to stand for an
+identity: a press keeps every key as what it stands for, which hides that
+identity in every mark, so what hides an entry is read as the press leaves
+it. `setVisibility` lets go of the keys it is given only. A legend's
+entries are read together (`Visibility.states`), their own entries
+included: a mark's rows are counted in one pass per field for all the
+values its entries name (by a category's codes, or numbers; only "null"
+names a missing number), and read for what hides the rows of those values
+only where a hidden entry is shown, again in one pass. Where showing is
+read again as it would leave the keys, the rows holding each value named
+are found once, in one pass, as many as the scene counted, and each
+reading counts only its value's rows; a value more than an eighth of the
+rows hold keeps none, and is read in a pass (at most eight are). The chart's series count the rows they lost as they were drawn. Layout marks' items outside panels
+(a pie's slices) are named by their own keys and what they stand for, so
+a pie hidden whole shows on its entries. Marks hidden whole or
+rows by value load the guide compiler, which reports the default legend's
+entries too.
 
 **Colorbars** (`guides/colorbars.ts`) draw the part of a color scale its
 mark gives legends (`LegendPart.colorbar`: a ramp with its stops' offsets,
@@ -4419,12 +4626,9 @@ Where these extend:
   Encodings); legends list series in the colors they resolve to, bars'
   colors by another field as a key, and with `swatches: "mark"` a series'
   look from the feature compiler (`SeriesFeatures.swatch`) before the
-  compiler's derivation from mark types (`sampleOf`). `ScaleRef` does not
-  name scales of categories yet, so a legend guide cannot show one on its
-  own; points' symbols still cycle by first appearance (`Appearance`)
-  rather than through a "symbol" scale, and points take no `encode`.
-  Layout marks' scales are not named by legends and colorbars (they refuse
-  a reference to one). A log color
+  compiler's derivation from mark types (`sampleOf`). Layout marks other
+  than maps own no scale legends and colorbars name; a stacked bar's rows
+  are not targeted by value, since its series stack as one. A log color
   scale needs its transform in `SequentialScale` and the colorbar's tick
   scale.
 - **Runtime and SSR.** Snapshots render synchronously and so import the
@@ -4620,6 +4824,49 @@ right), reserving room there unless `reserve` is false; labels of one
 column spread apart along y within the plot, in the order of their points,
 as painted (halos included). A column taller than the plot keeps the
 labels that fit from its top and leaves the rest out.
+
+**Labels following series.** Lines and areas take `labels` (`{ at,
+content, edge, place, style }`), and a text mark takes `from: { mark, at,
+edge }`, naming a line or area declared before it in its panel: a label
+per series drawn, at its first or last drawn observation (over the whole
+series, before level of detail reduces it, as the tracer draws rows:
+those `where` and `continuity` keep, whose position and value, and a
+band's other edge, its scales place, a stack's zeros at a log axis' low
+end, a layer's rows a break hides along y at the break's seam; none where
+that is outside the plot), or where its edge as drawn enters or leaves the
+plot (`visible-start`, `visible-end`: steps held, curves followed, in the
+series' own order), read from the observation owning that point
+(`marks/features/attach.ts`). Lines' and areas' traces record which
+observation each point of an edge is (`TracedEdge`, see Markers), so the
+owner is as drawn: an observation owns its point; a segment or curve, the
+observation it arrives at; a step's hold, the one whose value it holds,
+and its jump, the one it arrives at; a crossing of `where`, the row it
+arrives at (recorded with the crossing, past rows a break hides). Where
+level of detail joins rows, a visible end's fields are those of the rows
+it kept. Layers curved together (monotone bands and stacks) record the
+rows of their points as `traceCurvedLayers` draws them (`curved`). Each
+series finds its labels' anchors as it draws (`Drawings.record`, taking
+its trace's record, so a geometry drawn without one reads none); labeled
+stacks still trace through their edges' min/max indexes, and first and
+last skip rows a break hides a break at a time. Layers drawn through a
+stack's edges (a series field's stack) are not traced so: their first and
+last are found as the tracer draws them, but which row stands where they
+enter or leave the view is not known, so labels there that write a field
+are refused (`checkOwners`) and write series and values.
+The feature compiler draws them (`marks/features/labels.ts`): the source
+mark's series record their edges as drawn each scene, the labels are
+placed once the mark has drawn in each panel, and their room outside the
+plot is kept as other `roomPlaced` marks' is. A band follows the edge its
+`edge` names (`"y1"` or `"y2"`); other marks refuse `edge`. Labels take
+their series' color unless their style gives one, go before a series'
+start and after its end, take a halo against what they are drawn on, and
+hidden series draw none. Content is a list of parts (`writeContent`,
+`marks/features/content.ts`): text, `{ field }` read at the owning row
+(times in the chart's zone), `{ series: true }`, and `{ value: true }`,
+each with a format; bars' value labels and rules', regions', and texts'
+labels take the same parts. Text `from` has no table and no domain, draws
+in its own place in the marks' order, and refuses what would place it
+elsewhere (`at`, `x`, `y`, `overlap`, `axis`, `facet`, `contributeDomain`).
 
 A font registry (`fonts/registry.ts`, `prepareFonts` in `herceg/fonts`)
 holds OpenType faces parsed once (`fonts/sfnt.ts`, `fonts/binary.ts`)
@@ -5237,7 +5484,8 @@ candles merged on the same columns (parts merge when their `whole` does).
 Lines and areas draw whole and dimmed (a line
 through a wrapper of its drawing that multiplies the canvas' global alpha
 and adds an SVG `opacity`, an area's fill at a fraction of its opacity and
-its outline as a dimmed line, since areas paint the outline opaque), clipped
+its outline apart, an area of no fill at a fraction of its `strokeOpacity`,
+since areas paint the outline opaque), clipped
 to the plot outside the pixel spans of each series' runs of selected rows,
 and the same geometry as drawn clipped to the spans (from a run's first row
 to its last in x order, ascending, merged where they touch, at least a pixel
@@ -5249,8 +5497,11 @@ a layer drawn through its stack's edges x alone, since the edges draw what
 is there; a run goes on across rows a break hides, as the line joins the
 rows either side, and keeps rows inside it the line breaks at, since the
 caps either side are within its span, so only runs' ends are placed; a run
-that ends a path reaches half the stroke width further, over its round
-cap), so each pixel is painted once and the highlighted part is the very
+that ends a path reaches half the stroke width further, over its round cap:
+as the series' trace ended its paths in that panel where it records them
+(`continuity`, `where`: breaks, positions as a panel places them and rows a
+break leaves out, not a crossing the path goes on to), else where no row
+is drawn before or after it), so each pixel is painted once and the highlighted part is the very
 curve, level-of-detail reduction, and stack the mark drew; a layer of a
 series field's stack, drawn through the union's edges, reaches the union's
 ends past its own first and last rows. Series draw in turn, each its
@@ -5748,54 +5999,30 @@ published release.
 
 ## Spec contracts
 
-The spec states some options before every renderer draws them, so that the
-spec's types, the validator, the TypeScript mark functions, and Python's
-builders agree on their shapes while their drawing lands. A chart refuses
-each such option, rather than ignoring it, with a `ChartError` of code
-`unsupported` at its path: "not drawn as given yet", and what to give
-instead. Marks refuse theirs as they are made, through the tables in
-`marks/pending.ts`; the guide compiler refuses colorbars' scales by name,
-the legends their `include`, `entries`, and targets
-(`guides/legends.ts`), and the feature compiler identity and scoped
-scales. Python refuses the same options with the same
-codes and paths (`_pending.py`): marks' as they are added, the chart's in
-`to_spec`. Each refusal goes when its option is drawn. A malformed value
-is refused first, for good, as `invalid-option` at its own path: by the
-validator, which every spec passes through; by Python's builders, which
-write specs; and by the mark functions and compilers for the options
-whose checks stay (point sizes, bar widths, region outlines, scales' and
-3D boxes' settings). Until its option is drawn, a mark function refuses
-it whole, whatever its value, and the change that draws it adds the
-mark function's checks of its values.
+The spec's types, the validator, the TypeScript mark functions, and
+Python's builders agree on every option's shape. A malformed value is
+refused as `invalid-option` at its own path: by the validator, which every
+spec passes through; by Python's builders, which write specs; and by the
+mark functions and compilers for the options whose checks are theirs
+(point sizes, bar widths, region outlines, labels' content and places,
+scales' and 3D boxes' settings).
 
-Refused so far: identity scales (`{ type: "identity" }`, named or on a
-channel) and ordinal scales' `scope`; lines' and areas' `labels`, label
-`content` made of parts, and text `from`; annotations' `legend: true`;
-colorbars' scales by name; and in legends, entries after included scales,
-`include` of a mark whole or a scale by name, and targets of rows by
-value. Refused for good: on 3D boxes, `zIndex` on their marks and grid
-lines, and `padding` (they draw by depth and fit their data); grid lines
-of an axis on a scale of the chart's own; and tick labels' `inside` and
-`gap` on colorbars. Bars placed by coordinates keep the orientation rule
-fields have: a category `y`, by name or as `{ field }`, makes them
-horizontal, and any other position, a frame's share or pixels included,
-centers vertical bars on x.
+Options are refused where they cannot apply: on 3D boxes, `zIndex` on their marks
+and grid lines, and `padding` (they draw by depth and fit their data);
+grid lines of an axis on a scale of the chart's own; tick labels' `inside`
+and `gap` on colorbars; and colorbars naming a scale by name
+(`invalid-option`: a colorbar shows a mark's color ramp, and named scales
+are of categories, which legends list). Bars placed by coordinates keep
+the orientation rule fields have: a category `y`, by name or as
+`{ field }`, makes them horizontal, and any other position, a frame's share or
+pixels included, centers vertical bars on x.
 
-Some forms are stated and tested before every reader reads them.
-`spec/channels.ts` binds a mark's channel
-options, in whatever form they come (a constant, a field's name, `{ field,
-scale }`, the series' names through a scale, a condition, `encode`), to one
-`ChannelBinding` each, keeping the option each came from for messages,
-and states the rules every reader keeps (a string both a field and an
-output, or neither, is refused, as is a channel set both directly and in
-`encode`; constant options are constants; identity bindings make no
-series or legend entries); the validator reads its table of the channels
-each mark takes.
 `marks/attachments.ts` states where text attached to another mark's series
 goes (`Attachment`: the panel, the series, the observation owning the
 point, the value drawn there, and whether the series is shown), and the
-rules for `first`, `last`, and the visible ends of a series;
-`placeAttached` places such labels (see Text and fonts).
+rules for `first`, `last`, and the visible ends of a series, which labels
+following lines and areas keep (see Labels following series);
+`placeAttached` places them (see Text and fonts).
 `planExport` (`spec/export.ts`; Python's `plan_export`) checks export
 settings (format, size in a unit, dpi, quality, background, tooltips)
 against `EXPORT_LIMITS` and says what an export draws: the layout size in
@@ -6097,12 +6324,11 @@ mouse input, through Playwright's mouse.
   decide what fits. A rule's label outside the plot takes room beside the
   first and last columns of panels only; elsewhere it goes beyond the
   panel's y labels without room kept.
-- Encodings: lines and areas take one look per series (a channel reading a
-  field that changes within a series is refused; no colors per segment);
-  points take `color`, `size`, `symbol`, and `fillOpacity` as fields of
-  their own but no `encode`, and their symbols take shapes by first
-  appearance, not through a "symbol" scale; rules, regions, and text take
-  no channels. `where` refuses monotone curves, and stacked areas refuse
+- Encodings: looks change along a line or area only where its positions
+  ascend, and not along a stack's layers; a line or area colored by a field
+  other than its series' stands for the value it starts with; points draw
+  one outline per mark (`encode.stroke` and `encode.strokeWidth` take
+  values); rules, regions, and text take no channels. `where` refuses monotone curves, and stacked areas refuse
   `where` and `continuity`; there is no `connect` condition between
   neighbors. Bars of looks per row draw a geometry per distinct look, so
   rows of one series at the same position overlap in the order of their
@@ -6121,12 +6347,11 @@ mouse input, through Playwright's mouse.
   labels, staggers, and wraps on x axes only; category axes label the
   categories that fit, with no tick steps, values, or formats. Legends
   stand in the chart's tracks or beside one subplot (a panel's legend);
-  colorbars stand in the chart's tracks only; both name marks along axes,
-  not layout marks; colorbars show linear scales (no log color scale); custom
-  swatches are lines, boxes, and symbols. Custom entries come alone
-  (`include: []`); entries after the scales a legend includes, legends
-  including a mark whole or a scale by name, and entries targeting rows by
-  value are refused (`unsupported`; see Spec contracts). Tick layers draw tick marks and
+  colorbars stand in the chart's tracks only; both name marks along axes
+  and maps' color ramps, not other layout marks; colorbars show a mark's
+  linear ramp (no log color scale), not a scale by name; custom swatches
+  are lines, boxes, and symbols; entries target rows by value in points,
+  unstacked bars, and annotations only. Tick layers draw tick marks and
   labels, not grid lines of their own. A change of values that moves an
   axis the guides list is shown at once, not animated.
 - Breaks only on time x axes, the same for every panel (a panel's own `x`
@@ -6240,8 +6465,8 @@ mouse input, through Playwright's mouse.
   `values`, bars, pie slices, points, and lines and areas traced whole to
   changed values, with the axes their domains move, when the plot and
   categories stay put. Points with `animationKey` match across resets by
-  finite numeric values or category labels. Stacked or labeled bars, unkeyed
-  points across a reset, points crossing the edge of a fixed domain (they
+  finite numeric values or category labels. Stacked or labeled bars, lines
+  and areas labels follow, unkeyed points across a reset, points crossing the edge of a fixed domain (they
   shrink instead), lines whose x positions or level of detail change,
   panels, categories that come or go, and the first appearance of a chart
   show at once.

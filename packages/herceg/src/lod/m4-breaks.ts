@@ -5,7 +5,7 @@
 import type { NumericArray } from "../data/column.ts";
 import { type Breaks, emitColumn, type Mapping, unmappable } from "./m4.ts";
 import type { RangeExtremes, RangeIndex } from "./minmax-index.ts";
-import type { Polyline } from "./polyline.ts";
+import type { PointSink } from "./polyline.ts";
 
 const extremes: RangeExtremes = { low: -1, high: -1, gap: false };
 
@@ -33,7 +33,7 @@ export function brokenM4(
   xMap: Mapping,
   yMap: Mapping,
   pixelRatio: number,
-  out: Polyline,
+  out: PointSink,
   rows?: Uint32Array,
   index?: RangeIndex,
 ): void {

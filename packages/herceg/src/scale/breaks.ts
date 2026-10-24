@@ -17,7 +17,7 @@ import {
   type TraceColumns,
   type TraceSource,
 } from "../lod/point-view.ts";
-import type { Polyline } from "../lod/polyline.ts";
+import type { PointSink } from "../lod/polyline.ts";
 import type { Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { TimeBreakSpec, Weekday, XAxisSpec } from "../spec/spec.ts";
 import { BrokenTimeScale } from "./broken-time.ts";
@@ -697,7 +697,7 @@ export class Calendar implements Breaks {
     xMap: Mapping,
     yMap: Mapping,
     pixelRatio: number,
-    out: Polyline,
+    out: PointSink,
     rows?: Uint32Array,
     index?: RangeIndex,
   ): void {

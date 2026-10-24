@@ -19,12 +19,14 @@ import { describeChart } from "../../src/model/describe.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
+import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import {
   type CaptionGuide,
   guidesOf,
   type LegendItem,
   type RampItem,
+  type RectGeometry,
   type RectItem,
   type Scene,
   type SegmentsItem,
@@ -33,9 +35,11 @@ import {
 } from "../../src/scene/scene.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
+const [, features] = staticCompilers();
 
 function build(config: ChartConfig, width = 640, height = 360) {
-  const model = new ChartModel({ locale: "en-US", ...config }, undefined, guides);
+  // Symbol fields' shapes are the feature compiler's.
+  const model = new ChartModel({ locale: "en-US", ...config }, undefined, guides, features);
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }
@@ -173,9 +177,9 @@ describe("one entry for the same value across marks", () => {
     const hidden = merged.model.scene(estimateText);
     expect(entriesOf(hidden)[0]!.hidden).toBe(true);
     expect(hidden.panels.map((panel) => panel.marks.length)).toEqual([1, 1]);
-    // Tables that only share a field's name stay apart.
+    // A field's name is one meaning in a chart: unrelated tables share it too.
     const other = table({ t: [0, 1], site: ["North", "South"], v: [3, 4] });
-    expect(entriesOf(build(subplots(other)).scene)).toHaveLength(4);
+    expect(entriesOf(build(subplots(other)).scene)).toHaveLength(2);
   });
 });
 
@@ -437,7 +441,7 @@ describe("legends of the scales they name", () => {
   it("refuse a mark id no mark has", () => {
     expect(() =>
       build({ marks, guides: [legend({ include: [{ mark: "third", channel: "series" }] })] }),
-    ).toThrow('chart guides[0].include[0]: no mark has id "third"; give the mark id: "third"');
+    ).toThrow('chart guides[0].include[0].mark: no mark has id "third"; give the mark id: "third"');
   });
 });
 
@@ -516,7 +520,7 @@ describe("entries of your own", () => {
     expect(hidden.opacity).toBeCloseTo(0.25 * 0.4, 5);
   });
 
-  it("draw annotations' samples as they look, and refuse to toggle them", () => {
+  it("draw annotations' samples as they look, and toggle them whole", () => {
     const zone = region({ x1: 0, x2: 1, fill: "#ff0000", id: "zone" });
     const { scene, model } = build({
       marks: [line(data, { x: "t", y: "v" }), zone],
@@ -530,17 +534,23 @@ describe("entries of your own", () => {
       .find((item): item is RectItem => item.type === "rect")!;
     expect(box).toMatchObject({ fill: "#ff0000", opacity: 0.15 });
     expect(describeChart(model)).toContain("The legend: Maintenance.");
-    expect(() =>
-      build({
-        marks: [line(data, { x: "t", y: "v" }), zone],
-        legend: {
-          include: [],
-          entries: [{ key: "z", label: "Maintenance", targets: [{ mark: "zone" }] }],
-        },
-      }),
-    ).toThrow(
-      'chart legend.entries[0].targets[0].mark: mark "zone" is an annotation, which has no series to hide and show; target marks with series, or drop the target',
-    );
+    // Targeted, the entry is a button hiding and showing the region whole.
+    const toggled = build({
+      marks: [line(data, { x: "t", y: "v" }), zone],
+      legend: {
+        include: [],
+        entries: [{ key: "z", label: "Maintenance", targets: [{ mark: "zone" }] }],
+      },
+    });
+    const [entry] = entriesOf(toggled.scene);
+    expect(entry!.targets).toEqual(['{"mark":"zone"}']);
+    const regions = () =>
+      toggled.model
+        .scene(estimateText)
+        .panels[0]!.marks.flatMap((m) => (m.kind === "rect" ? [(m as RectGeometry).count] : []));
+    expect(regions()).toEqual([1]);
+    toggled.model.hidden.add(entry!.targets![0]!);
+    expect(regions()).toEqual([0]);
   });
 
   it("give rows the height of their tallest swatch", () => {

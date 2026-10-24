@@ -8,7 +8,7 @@ import {
   sectorShareRadius,
   traceSector,
 } from "../draw/arc.ts";
-import { textDrawing } from "../draw/text.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { layoutPartition } from "../layout/partition.ts";
 import { labelFor, oneLineText } from "../layout/text.ts";

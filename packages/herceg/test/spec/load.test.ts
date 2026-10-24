@@ -487,6 +487,9 @@ describe("loadSpec", () => {
           y: { field: "v", offset: -8 },
           label: { field: "v" },
         },
+        // At constant places, by their labels' fields, whole or a part.
+        { type: "text", data: "deploys", x: 0, y: 0, label: { field: "version" } },
+        { type: "rule", data: "deploys", y: 1, label: { content: ["v", { field: "version" }] } },
       ],
     });
     // Constant annotations read no table, even when the spec has several.
@@ -496,6 +499,8 @@ describe("loadSpec", () => {
       undefined,
       undefined,
       "metrics",
+      "deploys",
+      "deploys",
     ]);
     const svg = specToSVG({
       data: { d: { columns: { x: [0, 10], y: [0, 10] } } },

@@ -12,7 +12,6 @@ import pytest
 
 import herceg as hg
 import herceg.express as hx
-from herceg import _pending
 
 DATA = {
     "t": [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2],
@@ -167,7 +166,7 @@ def test_a_data_column_named_as_a_computed_one_moves_the_computed_one_aside():
     assert marks(ecdf)[0]["y"] == "Probability_"
 
 
-def test_fits_take_the_options_and_their_points_and_bands_share_the_color(monkeypatch):
+def test_fits_take_the_options_and_their_points_and_bands_share_the_color():
     chart = hx.regplot(
         DATA, x="t", y="v", series="s", scatter=False, encode=BY_SITE, scales=SITES, z_index=4
     )
@@ -175,8 +174,6 @@ def test_fits_take_the_options_and_their_points_and_bands_share_the_color(monkey
     assert line["encode"] == band["encode"] == BY_SITE._spec()
     assert line["zIndex"] == 4 and "zIndex" not in band
     assert set(hx.statistics(chart).tables["fit"]["site"]) == {"n", "s"}
-    # Lines' labels arrive with stream C; their specs are written now.
-    monkeypatch.setattr(_pending, "refuse", lambda *_: None)
     labelled = hg.SeriesLabels(at="last", content=[hg.LabelPart(field="flag")])
     chart = hx.regplot(
         {**DATA, "flag": [0] * 12},
@@ -257,15 +254,14 @@ def test_a_fit_of_a_column_against_itself_keeps_its_values_apart_from_carried_on
     assert set(fit["x_"]) == {"a"} and len(fit["x__"]) == 100
 
 
-def test_a_color_of_the_primary_marks_own_leaves_the_marks_beside_it_neutral(monkeypatch):
-    # Points' channels arrive with stream C; their specs are written now.
-    monkeypatch.setattr(_pending, "refuse", lambda *_: None)
+def test_a_color_of_the_primary_marks_own_leaves_the_marks_beside_it_neutral():
     north = hg.Encodings(color=hg.when(hg.col("site") == "n", "#ff0000", "#0000ff"))
     band, line = marks(hx.lineplot(DATA, x="t", y="v", series="s", encode=north))
     assert line["encode"] == north._spec()
     assert "encode" not in band and band["color"] == "#424242"
     chart = hx.pointplot(DATA, x="t", y="v", series="s", errorbar=None, encode=north)
-    _, lines = marks(chart)
+    points, lines = marks(chart)
+    assert points["encode"] == north._spec()
     assert "encode" not in lines and lines["color"] == "#424242"
     # Through the series' scale, the lines take the points' binding.
     by_series = hg.Encodings(color=hg.Channel(series=True, scale="sites"))
@@ -290,6 +286,7 @@ def test_a_color_of_the_primary_marks_own_leaves_the_marks_beside_it_neutral(mon
     ecdf = hx.ecdfplot(single, x="v", series="s", encode=north, z_index=2)
     point, *steps = marks(ecdf)
     assert point["type"] == "point" and point["zIndex"] == 2
+    assert point["encode"] == north._spec()
     assert all(step["encode"] == north._spec() for step in steps)
 
 
