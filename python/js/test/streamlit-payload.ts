@@ -1,6 +1,7 @@
 // Payloads as herceg.streamlit builds them, and Streamlit's side of a run,
 // for the Streamlit component's tests.
 
+import { encodePayload } from "herceg/web";
 import herceg, { type Component, type Header } from "../streamlit.ts";
 
 /**
@@ -15,29 +16,13 @@ export function payload(
   epoch?: string,
   itemEpoch?: string,
 ): Uint8Array {
-  const offsets: [number, number][] = [];
-  let end = 0;
-  for (const buffer of buffers) {
-    offsets.push([end, buffer.byteLength]);
-    end = Math.ceil((end + buffer.byteLength) / 8) * 8;
-  }
-  const header = new TextEncoder().encode(
-    JSON.stringify({
-      spec,
-      buffers: offsets,
-      events,
-      ...(epoch && { epoch }),
-      ...(itemEpoch && { itemEpoch }),
-    }),
-  );
-  const start = Math.ceil((4 + header.length) / 8) * 8;
-  const out = new Uint8Array(offset + start + end).subarray(offset);
-  new DataView(out.buffer, out.byteOffset).setUint32(0, header.length, true);
-  out.set(header, 4);
-  buffers.forEach((buffer, i) => {
-    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-    out.set(bytes, start + offsets[i]![0]);
+  const bytes = encodePayload(spec, buffers, {
+    events,
+    ...(epoch && { epoch }),
+    ...(itemEpoch && { itemEpoch }),
   });
+  const out = new Uint8Array(offset + bytes.length).subarray(offset);
+  out.set(bytes);
   return out;
 }
 

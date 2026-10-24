@@ -7,7 +7,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24", "typing_extensions>=4.7; python_version < '3.11'"]
-keywords = ["charts", "plotting", "visualization", "dataframe", "notebook", "streamlit"]
+keywords = ["charts", "plotting", "visualization", "dataframe", "notebook", "streamlit", "flask"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Framework :: Jupyter",
@@ -29,6 +29,7 @@ arrow = ["pyarrow>=14"]
 export = ["mini-racer>=0.12", "resvg-py>=0.1"]
 notebook = ["anywidget>=0.9"]
 streamlit = ["streamlit>=1.51"]
+flask = ["flask>=3.0"]
 # herceg.express uses SciPy's hierarchical clustering when it is installed.
 stats = ["scipy>=1.11"]
 dev = [
@@ -42,6 +43,7 @@ dev = [
   "resvg-py>=0.1",
   "anywidget>=0.9",
   "streamlit>=1.51",
+  "flask>=3.0",
   "scipy>=1.11",
   # References herceg.express is checked against.
   "seaborn>=0.13",
@@ -56,10 +58,10 @@ build-backend = "hatchling.build"
 packages = ["src/herceg"]
 # The JavaScript bundles are build outputs (npm run build:python), so they
 # are not tracked by git but must ship in every distribution.
-artifacts = ["src/herceg/static/*.js"]
+artifacts = ["src/herceg/static/*.js", "src/herceg/static/web/*"]
 
 [tool.hatch.build.targets.sdist]
-artifacts = ["src/herceg/static/*.js"]
+artifacts = ["src/herceg/static/*.js", "src/herceg/static/web/*"]
 
 # hatch_build.py: fails the build when the bundles are missing.
 [tool.hatch.build.hooks.custom]

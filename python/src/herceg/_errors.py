@@ -39,7 +39,9 @@ class ChartError(ValueError):
     ``"series-with-values"`` (several value columns and a series column),
     ``"unknown-reference"`` (a panel or scale the chart does not have),
     ``"unsupported"`` (a well-formed option the chart cannot draw, with what
-    to do instead), ``"layout-failed"``, ``"load-failed"``, or ``"render-failed"``.
+    to do instead), ``"layout-failed"``, ``"load-failed"`` (code or data the
+    chart needs could not be loaded, such as a web page's payload), or
+    ``"render-failed"``.
     ``path`` is where in the chart's options (``"marks[1].color"``, or for
     a mark's own options ``"color"``), ``mark`` the mark (its ``id``, or its
     index among the chart's marks), ``panel`` the panel, and ``phase`` when

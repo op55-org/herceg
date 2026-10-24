@@ -11,6 +11,7 @@ export default defineConfig({
     alias: [
       { find: /^herceg$/, replacement: engine("index.ts") },
       { find: /^herceg\/spec$/, replacement: engine("from-spec.ts") },
+      { find: /^herceg\/web$/, replacement: engine("web.ts") },
     ],
   },
   test: {

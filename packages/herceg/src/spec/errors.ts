@@ -17,7 +17,8 @@
  *   draw, such as a nonzero `zIndex` on a 3D mark; the message names what
  *   to do instead.
  * - "layout-failed": the chart cannot fit what it must draw in its size.
- * - "load-failed": code the chart needs could not be loaded.
+ * - "load-failed": code or data the chart needs could not be loaded, such
+ *   as a page fragment's payload that could not be fetched or read.
  * - "render-failed": drawing failed for another reason.
  */
 export type ChartErrorCode =

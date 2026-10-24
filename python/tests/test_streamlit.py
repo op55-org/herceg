@@ -42,6 +42,8 @@ def test_the_payload_is_the_spec_then_aligned_buffers():
     data = hst._payload(spec, buffers, ["select"], "a1b2")
     header, decoded, start = read(data)
     assert header == {
+        "protocol": 1,
+        "kind": "chart",
         "spec": spec,
         "buffers": header["buffers"],
         "events": ["select"],

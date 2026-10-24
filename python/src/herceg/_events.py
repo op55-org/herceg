@@ -315,6 +315,8 @@ def checked(event: str, payload: Any) -> dict[str, Any] | None:
         return {"path": list(path)} if path else None
     if event == "itemMove":
         return encode_item_positions(payload)
+    if event == "click":
+        return _checked_inspection(payload)
     axes = _AXES[event]
     out: dict[str, Any] = {axis: _checked_range(payload.get(axis)) for axis in axes}
     time = payload.get("time", [])
@@ -334,6 +336,63 @@ def checked(event: str, payload: Any) -> dict[str, Any] | None:
             out["panels"] = panels
     out["time"] = time
     return out
+
+
+def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:
+    """An inspection as the browser writes it (python/js's ``inspectionPayload``)."""
+
+    def text(value: Any) -> bool:
+        return isinstance(value, str)
+
+    def number(value: Any) -> bool:
+        return value is None or _finite(value)
+
+    def index(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    if payload.get("axis") not in ("x", "y", "item"):
+        raise ValueError(f'axis is "x", "y", or "item", not {payload.get("axis")!r}')
+    if not text(payload.get("label")) or not isinstance(payload.get("time", False), bool):
+        raise ValueError("expected a label and whether the value is a time")
+    if not (number(payload.get("value")) or text(payload.get("value"))):
+        raise ValueError(f"value is a number or a label, not {payload.get('value')!r}")
+    if payload.get("panel") is not None and not text(payload["panel"]):
+        raise ValueError(f"panel is a panel key, not {payload['panel']!r}")
+    points = payload.get("points")
+    if not isinstance(points, list):
+        raise ValueError("expected a list of points")
+    for i, point in enumerate(points):
+        if not (
+            isinstance(point, dict)
+            and index(point.get("mark"))
+            and all(text(point.get(name)) for name in ("key", "label", "text"))
+            and (point.get("markId") is None or text(point["markId"]))
+            and (point.get("row") is None or index(point["row"]))
+            and number(point.get("value"))
+            and isinstance(point.get("fields", []), list)
+        ):
+            raise ValueError(
+                f"points[{i}]: expected mark, key, label, text, and value as the browser "
+                f"writes them, not {point!r}"
+            )
+        for j, field in enumerate(point.get("fields", [])):
+            if not (
+                isinstance(field, dict)
+                and all(text(field.get(name)) for name in ("field", "label", "kind", "text"))
+                and "value" in field
+                and (number(field["value"]) or text(field["value"]))
+            ):
+                raise ValueError(
+                    f"points[{i}].fields[{j}]: expected field, label, kind, text, and value, "
+                    f"not {field!r}"
+                )
+    values = payload.get("values")
+    if values is not None and not (
+        isinstance(values, dict)
+        and all(text(key) and (number(v) or text(v)) for key, v in values.items())
+    ):
+        raise ValueError(f"values map columns to numbers or labels, not {values!r}")
+    return payload
 
 
 def _checked_range(ends: Any) -> list[Any] | None:
@@ -358,7 +417,13 @@ def _checked_lasso(points: Any) -> list[Any] | None:
 
 
 def _finite(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # An integer too large for a float, as JSON may give one.
+        return False
 
 
 def same_values(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:

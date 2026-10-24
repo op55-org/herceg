@@ -20,8 +20,9 @@ applications. Today it provides:
 - React, Vue, and Svelte components (`@herceg/react`, `@herceg/vue`,
   `@herceg/svelte`) whose data updates bypass the framework;
 - a Python package (`python/`) for pandas, Polars, PyArrow, and NumPy data,
-  with notebook, HTML, SVG, PNG, and PDF output, live notebook charts, and a
-  Streamlit component.
+  with notebook, HTML, SVG, PNG, and PDF output, live notebook charts, a
+  Streamlit component, and charts in web pages (`herceg.web`, with a Flask
+  helper) that load the engine once and report to the page as DOM events.
 
 ## Status
 

@@ -4683,7 +4683,10 @@ class Chart:
         return ChartWidget(self)
 
     def to_html(self, *, full_page: bool = True) -> str:
-        """Self-contained HTML that renders the chart, with herceg and the data embedded."""
+        """Self-contained HTML that renders the chart, with herceg and the data
+        embedded: a page, or with ``full_page=False`` a ``<div>`` and script
+        that repeat the engine in every chart. For pages of several charts,
+        ``herceg.web`` loads the engine once (``web.assets`` and ``web.fragment``)."""
         return _render.html(*self.to_spec(), full_page=full_page)
 
     def to_svg(

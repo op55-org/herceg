@@ -8,7 +8,8 @@
       "herceg": ["../../packages/herceg/src/index.ts"],
       "herceg/pdf": ["../../packages/herceg/src/pdf.ts"],
       "herceg/fonts": ["../../packages/herceg/src/fonts.ts"],
-      "herceg/spec": ["../../packages/herceg/src/from-spec.ts"]
+      "herceg/spec": ["../../packages/herceg/src/from-spec.ts"],
+      "herceg/web": ["../../packages/herceg/src/web.ts"]
     }
   },
   "include": ["*.ts", "test"]

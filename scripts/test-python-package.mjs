@@ -59,10 +59,18 @@ import sys, tarfile, zipfile
 from email.parser import BytesParser
 from pathlib import Path
 license_text = Path(sys.argv[3]).read_bytes()
+import json
 with zipfile.ZipFile(sys.argv[1]) as wheel:
     for name in ("herceg.js", "herceg-static.js", "herceg-widget.js", "herceg-streamlit.js"):
         path = "herceg/static/" + name
         assert wheel.getinfo(path).file_size > 0, "Empty bundle: " + path
+    # The web assets: every file the manifest lists, and nothing else beside it.
+    manifest = json.loads(wheel.read("herceg/static/web/manifest.json"))
+    shipped = {name.removeprefix("herceg/static/web/") for name in wheel.namelist() if name.startswith("herceg/static/web/")}
+    assert shipped == {"manifest.json", *manifest["files"]}, "Web assets differ from their manifest"
+    assert manifest["entry"] in manifest["files"] and set(manifest["preload"]) <= set(manifest["files"])
+    for name in manifest["files"]:
+        assert wheel.getinfo("herceg/static/web/" + name).file_size > 0, "Empty web asset: " + name
     licenses = [name for name in wheel.namelist() if name.endswith(".dist-info/licenses/LICENSE")]
     assert len(licenses) == 1, "Wheel must contain one LICENSE"
     assert wheel.read(licenses[0]) == license_text, "Wheel LICENSE differs from root LICENSE"
@@ -101,6 +109,14 @@ assert html.startswith("<!doctype html>"), "Missing HTML document"
 assert "hercegPython.render" in html, "Missing bundled runtime"
 assert "Package smoke test" in html, "Missing chart title"
 print("Installed wheel rendered", len(html), "HTML characters")
+from herceg import web
+found = web.manifest()
+assert found.directory.is_relative_to(Path(sys.prefix)), "Web assets of the checkout"
+assert web.asset_path(found.entry).stat().st_size > 0, "Missing web entry"
+assert found.entry in web.assets("/static/herceg"), "Missing web entry tag"
+assert web.payload(chart)[4:5] == b"{", "Payload without its header"
+assert "data-herceg" in web.fragment(chart), "Missing fragment host"
+print("Installed wheel has", len(found.files), "web assets")
 `,
       ],
       { cwd: consumer, env },
