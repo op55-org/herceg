@@ -11,8 +11,9 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .._chart import Chart, Jitter
+from .._chart import _POINT_CHANNELS, Chart, Jitter
 from .._data import Column
+from .._encoding import Encodings
 from . import _numerics as numerics
 from . import _swarm
 from ._common import (
@@ -41,6 +42,7 @@ from ._common import (
     values,
     variables_of,
 )
+from ._forward import MarkOptions, Outputs, carry, mark_options
 
 if sys.version_info >= (3, 11):
     from typing import Unpack
@@ -66,6 +68,8 @@ def stripplot(
     dodge: bool = False,
     seed: int | None = 0,
     radius: float | None = None,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -77,10 +81,14 @@ def stripplot(
     all. Points keep their places as the chart redraws: each is moved by a
     hash of its row and the seed (``seed``, 0 as the point mark's; None
     draws one and records it), not by a random draw. ``radius`` is the
-    points' radius in pixels.
+    points' radius in pixels. ``z_index`` and ``encode`` go to the points,
+    as ``Chart.point`` takes them, reading any column of the data.
     """
     spread = _jitter(jitter, seed)
-    layout = _Categories(data, x, y, series, order, series_order, orient, options, "stripplot")
+    marks = mark_options("stripplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
+    layout = _Categories(
+        data, x, y, series, order, series_order, orient, options, "stripplot", marks
+    )
     sentence = f"Points show each {layout.value} for each {layout.category}{by(series)}"
     if spread is not None:
         sentence += (
@@ -99,6 +107,7 @@ def stripplot(
         jitter=spread,
         radius=radius,
         label=None if series else layout.value,
+        **marks.primary(),
     )
     used_seed = spread.seed if spread is not None else None
     return record(
@@ -123,6 +132,8 @@ def swarmplot(
     dodge: bool = False,
     radius: float = 2.5,
     warn_thresh: float = 0.05,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -134,7 +145,8 @@ def swarmplot(
     out at the chart's ``width`` and ``height`` (or 640 by 320 pixels) and,
     as Seaborn does, warns when more than ``warn_thresh`` of a category's
     points (0.05) cannot be placed. ``radius`` is the points' radius in
-    pixels.
+    pixels. ``z_index`` and ``encode`` go to the points, as ``Chart.point``
+    takes them, reading any column of the data.
     """
     if not (isinstance(radius, numbers.Real) and math.isfinite(radius) and radius > 0):
         raise ValueError(
@@ -146,7 +158,10 @@ def swarmplot(
         raise ValueError(
             f"swarmplot warn_thresh: expected a share from 0 to 1; received {shown(warn_thresh)}"
         )
-    layout = _Categories(data, x, y, series, order, series_order, orient, options, "swarmplot")
+    marks = mark_options("swarmplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
+    layout = _Categories(
+        data, x, y, series, order, series_order, orient, options, "swarmplot", marks
+    )
     spread = dodge and series is not None
     sentence = (
         f"Points show each {layout.value} for each {layout.category}{by(series)}, "
@@ -165,6 +180,7 @@ def swarmplot(
         swarm=True,
         radius=float(radius),
         label=None if series else layout.value,
+        **marks.primary(),
     )
     _warn_unplaced(layout, options, series, spread, float(radius), float(warn_thresh))
     return record(
@@ -331,6 +347,7 @@ def boxplot(
     whiskers: Whiskers = "tukey",
     notch: bool = False,
     outliers: bool = True,
+    z_index: float | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -341,7 +358,9 @@ def boxplot(
     another multiple of it (``whiskers=2``), or over the whole range
     (``"range"``), as the box plot mark draws them. Values beyond the
     whiskers are points unless ``outliers=False``. ``notch`` draws
-    1.57 IQR / sqrt(n) notches."""
+    1.57 IQR / sqrt(n) notches. ``z_index`` goes to the boxes, as
+    ``Chart.boxplot`` takes it."""
+    marks = mark_options("boxplot", z_index=z_index)
     reach = _whisker_reach(whiskers)
     if not isinstance(outliers, bool):
         raise TypeError(f"boxplot outliers: expected True or False; received {shown(outliers)}")
@@ -367,6 +386,7 @@ def boxplot(
         notch=notch or None,
         outliers=None if outliers else False,
         label=None if series else layout.value,
+        z_index=marks.z_index,
     )
     return record(
         chart, Statistics("boxplot", sentence, {"boxes": readable(boxes)}, None, layout.dropped)
@@ -389,6 +409,7 @@ def boxenplot(
     trust_alpha: float = 0.05,
     width_method: Literal["exponential", "linear", "area"] = "exponential",
     outliers: bool = True,
+    z_index: float | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -403,7 +424,9 @@ def boxenplot(
     value's confidence interval at ``trust_alpha`` would overlap the next,
     "full" reaches every value, or a number of levels. ``width_method``
     narrows levels by half ("exponential"), by equal steps ("linear"), or
-    to their share of values over their height ("area")."""
+    to their share of values over their height ("area"). ``z_index`` goes
+    to the boxes, as ``Chart.boxen`` takes it."""
+    marks = mark_options("boxenplot", z_index=z_index)
     check_choice(width_method, "boxenplot width_method", ("exponential", "linear", "area"))
     if depth not in ("tukey", "proportion", "trustworthy", "full") and not (
         isinstance(depth, numbers.Integral) and not isinstance(depth, bool) and depth >= 1
@@ -452,6 +475,7 @@ def boxenplot(
         width_method=None if width_method == "exponential" else width_method,
         outliers=None if outliers else False,
         label=None if series else layout.value,
+        z_index=marks.z_index,
     )
     return record(chart, Statistics("boxenplot", sentence, letters, None, layout.dropped))
 
@@ -536,6 +560,7 @@ def violinplot(
     bandwidth: float | None = None,
     split: bool = False,
     inner: Literal["box", "quartiles", "none"] = "box",
+    z_index: float | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -546,7 +571,9 @@ def violinplot(
     by Silverman's rule of thumb, R's). ``inner`` draws a box of the
     quartiles inside (``"box"``), dashed quartile lines and the median
     (``"quartiles"``), or nothing (``"none"``); ``split=True`` draws a
-    ``series`` of two levels as the two halves of one violin."""
+    ``series`` of two levels as the two halves of one violin. ``z_index``
+    goes to the violins, as ``Chart.violin`` takes it."""
+    marks = mark_options("violinplot", z_index=z_index)
     if not isinstance(split, bool):
         raise TypeError(f"violinplot split: expected True or False; received {shown(split)}")
     check_choice(inner, "violinplot inner", ("box", "quartiles", "none"))
@@ -587,6 +614,7 @@ def violinplot(
         split=split or None,
         inner=None if inner == "box" else inner,
         label=None if series else layout.value,
+        z_index=marks.z_index,
     )
     boxes, _ = _box_statistics(layout, 1.5)
     return record(
@@ -614,6 +642,7 @@ class _Categories:
         orient: Orient | None,
         options: Mapping[str, Any],
         function: str,
+        marks: MarkOptions | None = None,
     ) -> None:
         check_choice(orient, f"{function} orient", ("v", "h", "x", "y", None))
         check_axes_differ(x, y, function)
@@ -652,6 +681,8 @@ class _Categories:
         table = rows_table(variables, rows)
         table[self.category] = category_column(categories.codes[rows], categories.labels)
         table[self.value] = number_column(self.values[rows])
+        if marks is not None:
+            carry(table, Outputs(source, marks, {x, y, *variables}).rows(rows))
         self.table = table
         self.xy = (self.value, self.category) if horizontal else (self.category, self.value)
         self.roles = [x, y, *variables]

@@ -12,7 +12,7 @@ export async function render(container: HTMLElement) {
     y: { title: "ms" },
   });
   const svg = chart.toSVG();
-  const png = await chart.toPNG({ scale: 2 });
+  const png = await chart.toPNG({ dpi: 192 });
   // The chart as it is now: zoomed, with series hidden.
   const pdf = renderToPDF(chart);
   return { chart, svg, png, pdf };

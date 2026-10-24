@@ -3576,8 +3576,8 @@ fallback/replacement options; this adds temporary byte/base64 copies.
 Parsing and subsetting add
 no runtime dependency and are bundled only when `prepareFonts` is used, never
 through the core chart entry or a plain `specToPDF` export.
-Python's `to_svg(fonts=...)` and `to_png(fonts=...)`, and `save` for those
-extensions, use this resolver's measurer too. Supplied-font layouts therefore
+Python's `to_svg(fonts=...)`, `to_image(fonts=...)`, and `to_png(fonts=...)`,
+and `save` for those extensions, use this resolver's measurer too. Supplied-font layouts therefore
 match PDF's horizontal advances; without fonts, static SVG retains its estimates.
 SVG references the theme's families without embedding fonts or URLs. PNG
 loads export-local font files into resvg, preserving all glyphs and changing
@@ -4530,13 +4530,46 @@ CPU, as the GPU painter draws within the plot), and PDF clips each to its
 box. Turning the plot's clip off does not grow the chart: outputs still end
 at its size.
 
+## Static SVG and images
+
 Static SVG sizes itself as `SvgSizing` says: `sizing: "fluid"` leaves out
 width and height so CSS or the container sizes the document and its
 viewBox scales the chart; `preserveAspectRatio` is written as given; and
 `strokeScaling: "fixed"` adds a style giving every element
 `vector-effect: non-scaling-stroke`. Stretching an SVG scales its text and
 geometry as they were laid out; live charts lay themselves out again when
-resized.
+resized. No export keeps text and markers at a pixel size while the rest
+scales: that needs a layout at each size, which a snapshot hydrated by the
+engine has and a file does not.
+
+Exports take the chart (a mounted one, or static options) first and how to
+write the file second: `renderToSVG(target, settings)`, `specToSVG(spec,
+buffers, settings)`, `renderToImage(target, settings)` (`herceg/image`),
+and Python's `to_svg`, `to_image`, `to_png`, and `save`, whose keywords
+are the settings. One planner checks them for every output
+(`spec/export-plan.ts`, `planWith`, wrapped as `planExport` with
+`ChartError`s; Python's `plan_export` makes the same plans): a layout size
+in a unit, rounded to 1e-4 CSS pixels, and image pixels at `dpi`
+(`floor(length * dpi / 96 + 0.5)`), refused past `EXPORT_LIMITS` before
+anything is allocated, and the settings each format refuses (quality for
+PNG, dpi for SVG, titles for images and PDF), each refusal located at the
+export's name. Layout happens once, at the layout size; the dpi decides
+only how many pixels draw it, so it never changes wrapping or ticks. A
+mounted chart is exported at its own size: other sizes and fonts are
+refused rather than laid out by resizing it or by a model of its state.
+Browsers draw images through a canvas (`image/raster.ts`): the SVG with
+its root set to the image's pixels, painted over the colors under it (a
+JPEG's opaque base: the theme's background, else white or, under light
+text, black; then `background`), encoded by `toBlob`, its MIME type and
+signature checked (WebKit writes PNG when asked for WebP, which is
+refused), and the resolution written into the bytes (`image/metadata.ts`:
+PNG `pHYs`, a JFIF APP0 replacing the browser's, or a WebP `VP8X` and
+`EXIF` chunk); the canvas is emptied at once. Python draws the same SVG
+with resvg and encodes it with Pillow. The raster module refers to no
+`ChartError` (it is handed a `Fail`, and the planner a `Refuse`), so the
+chunk `toPNG` loads shares nothing with the core bundle; static titles
+reuse `titlesOf` (`render/titles.ts`) over the export's scene, refusing
+charts whose other tooltip marks would be left without.
 
 ## Text and fonts
 
@@ -5418,7 +5451,8 @@ scene, so mapping many values allocates nothing. Every export of a mounted
 chart goes through one method keyed by a symbol (`render/export-scene.ts`),
 which draws what is pending and hands a scene of the current state (size,
 viewports, hidden series) and the model to a writer: `toSVG` writes SVG,
-`toPNG` draws that SVG on a canvas in a module it loads the first time, and
+`toPNG` draws that SVG on a canvas in a module it loads the first time
+(`image/raster.ts`, which `herceg/image` shares), and
 `renderToPDF(chart)` in `herceg/pdf` writes a PDF from the same scene, laid
 out with the page's text measures, so the chart's code carries no PDF code
 and the handle no PDF method.
@@ -5765,8 +5799,7 @@ rules for `first`, `last`, and the visible ends of a series;
 `planExport` (`spec/export.ts`; Python's `plan_export`) checks export
 settings (format, size in a unit, dpi, quality, background, tooltips)
 against `EXPORT_LIMITS` and says what an export draws: the layout size in
-CSS pixels and the image's pixels; the exports do not read these settings
-yet.
+CSS pixels and the image's pixels (see Static SVG and images).
 
 ### Contract tests
 

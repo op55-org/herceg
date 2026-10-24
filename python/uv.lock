@@ -909,6 +909,7 @@ dev = [
     { name = "mypy" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow" },
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pytest" },
@@ -923,6 +924,7 @@ dev = [
 ]
 export = [
     { name = "mini-racer" },
+    { name = "pillow" },
     { name = "resvg-py" },
 ]
 flask = [
@@ -959,6 +961,8 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24" },
     { name = "pandas", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.0" },
+    { name = "pillow", marker = "extra == 'dev'", specifier = ">=10" },
+    { name = "pillow", marker = "extra == 'export'", specifier = ">=10" },
     { name = "polars", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.0" },
     { name = "pyarrow", marker = "extra == 'arrow'", specifier = ">=14" },

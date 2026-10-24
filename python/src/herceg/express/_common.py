@@ -1014,8 +1014,9 @@ def make_chart(
             theme, tokens=dataclasses.replace(tokens, palette=list(palette))
         )
     for axis, label in (("x_axis", x_label), ("y_axis", y_label)):
-        if label is not None and settings.get(axis) is None:
-            settings[axis] = AxisOptions(title=label)
+        # Titled by the column unless the caller's axis titles itself.
+        if label is not None:
+            axis_defaults(settings, axis, title=label)
     given = settings.get("description")
     settings["description"] = f"{given} {sentence}".strip() if given else sentence.strip()
     chart = _chart_of(data, settings)  # type: ignore[arg-type]

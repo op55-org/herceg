@@ -2,18 +2,16 @@
 // written by other languages (the Python package) or stored as JSON.
 
 import { type Chart, createChart, MountedChart } from "./dom/chart.ts";
-import type { Fonts } from "./fonts/registry.ts";
-import type { MeasureText } from "./layout/text.ts";
-import { type PdfExportOptions, type PdfOptions, renderToPDF } from "./pdf.ts";
+import { type PdfExportOptions, renderToPDF } from "./pdf.ts";
 import { type ChartSnapshot, renderToSnapshot, type SnapshotOptions } from "./render/snapshot.ts";
-import { renderToSVG } from "./render/static.ts";
-import type { SvgSizing } from "./render/svg.ts";
+import { type StaticOptions, type SvgSettings, svgFor } from "./render/static.ts";
 import { type LoadedSpec, type LoadOptions, loadSpec, type SpecBuffer } from "./spec/load.ts";
 import type { ChartSpec } from "./spec/spec.ts";
 
 export type { Fonts } from "./fonts/registry.ts";
 export type { PdfExportOptions, PdfPageOptions } from "./pdf.ts";
 export type { ChartSnapshot, SnapshotOptions } from "./render/snapshot.ts";
+export type { SvgSettings } from "./render/static.ts";
 export { ChartError, type ChartErrorInfo, chartError, errorInfo } from "./spec/errors.ts";
 export type * from "./spec/spec.ts";
 export { SPEC_VERSION } from "./spec/spec.ts";
@@ -52,23 +50,21 @@ export function carryNodePositions(from: Chart, to: Chart): void {
 }
 
 /**
- * Standalone SVG for a spec, without a DOM. Sizes default to 640 x 320 CSS
- * pixels when the spec has none; `options` say how the SVG sizes and
- * scales, and what text is measured with: supplied `fonts`, whose families
- * the SVG names, or a `measureText` of its own.
+ * Standalone SVG for a spec, without a DOM, as `renderToSVG` writes static
+ * options. Sizes default to 640 x 320 CSS pixels when the spec has none;
+ * `settings` say its size, scaling, fonts, and native tooltips.
  */
 export function specToSVG(
   spec: ChartSpec,
   buffers: readonly SpecBuffer[] = [],
-  options: SvgSizing & { fonts?: Fonts; measureText?: MeasureText } = {},
+  settings: SvgSettings = {},
 ): string {
   const { config } = loadSpec(spec, buffers);
-  return renderToSVG({
-    ...config,
-    ...options,
-    width: config.width ?? 640,
-    height: config.height ?? 320,
-  });
+  return svgFor(
+    "specToSVG",
+    { ...config, width: config.width ?? 640, height: config.height ?? 320 },
+    settings,
+  );
 }
 
 /**
@@ -104,7 +100,7 @@ export function specToPDF(
     throw new TypeError(
       "specToPDF settings: expected an options object; use { spec, buffers } for sidecars",
     );
-  const chart = (item: ChartSpec | PdfSpec): PdfOptions => {
+  const chart = (item: ChartSpec | PdfSpec): StaticOptions => {
     const { config } = "spec" in item ? loadSpec(item.spec, item.buffers) : loadSpec(item);
     return { ...config, width: config.width ?? 640, height: config.height ?? 320 };
   };

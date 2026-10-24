@@ -40,7 +40,7 @@ def test_subplot_export_pixels_follow_each_configured_camera(tmp_path, format):
     def pixels(azimuth):
         item = chart(azimuth)
         if format == "png":
-            image = Image.open(BytesIO(item.to_png(scale=1)))
+            image = Image.open(BytesIO(item.to_png()))
         else:
             pdf = tmp_path / f"camera-{azimuth}.pdf"
             pdf.write_bytes(item.to_pdf())

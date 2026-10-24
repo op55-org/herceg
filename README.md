@@ -20,9 +20,10 @@ applications. Today it provides:
 - React, Vue, and Svelte components (`@herceg/react`, `@herceg/vue`,
   `@herceg/svelte`) whose data updates bypass the framework;
 - a Python package (`python/`) for pandas, Polars, PyArrow, and NumPy data,
-  with notebook, HTML, SVG, PNG, and PDF output, live notebook charts, a
-  Streamlit component, and charts in web pages (`herceg.web`, with a Flask
-  helper) that load the engine once and report to the page as DOM events.
+  with notebook, HTML, SVG, PNG, JPEG, WebP, and PDF output, live notebook
+  charts, a Streamlit component, and charts in web pages (`herceg.web`, with
+  a Flask helper) that load the engine once and report to the page as DOM
+  events.
 
 ## Status
 
@@ -138,7 +139,10 @@ all the panels of facets and subplots, over the whole x axis whose window
 pans and zooms by pointer and keyboard), time
 axes that leave out breaks (nights, weekends, holidays) in any time zone,
 SVG, PNG, and PDF export of a mounted chart as it is, static SVG (fluid or
-fixed size) and PDF export without a DOM, one set of supplied TrueType fonts
+fixed size, in pixels, inches, or millimeters, and with native tooltips)
+and PDF export without a DOM, PNG, JPEG, and WebP images for documents laid
+out at a size and drawn at a dpi they record (`herceg/image` in browsers,
+`to_image` in Python), one set of supplied TrueType fonts
 (`herceg/fonts`) that live charts, SVG, PNG, and PDF all measure with
 (Unicode PDF text; `renderToPDF` and `specToPDF` accept one chart/spec or a list
 for multiple pages, A4/Letter paper, and shared font subsets), React, Vue,
@@ -146,8 +150,8 @@ and Svelte adapters, min/max indexes for zooming
 and streaming large line
 series (whole columns or split by a series field), WebGL drawing of large
 point series, chart specs with binary columns, a Python package with a shared
-`fonts=` mapping for SVG/PNG/PDF export (TrueType label measurement and PNG
-font rendering; SVG references font families), a second
+`fonts=` mapping for SVG, image, and PDF export (TrueType label measurement
+and image font rendering; SVG references font families), a second
 y axis (in facets and subplots too, shared or per panel), small multiples
 (wrapped or by row and column, with shared or per-panel x and y scales,
 histograms, box plots, boxen plots, and violins summarizing each panel's rows,
@@ -195,9 +199,11 @@ Next, in order:
    generator for them, remote grids from Python, and editing.
 6. PDF: optional shipped Unicode fonts, tagged output for assistive technology,
    and later bidirectional ordering/shaping and CFF fonts.
-7. Screen-reader verification, benchmarks in Firefox and on other machines
+7. Images in Node: a raster backend, so `renderToImage` runs on servers as
+   Python's `to_image` does (browsers draw images through their canvas).
+8. Screen-reader verification, benchmarks in Firefox and on other machines
    (WebKit and Chrome are measured), and an API review before a first release.
-8. Heatmaps, contours, and 2D histograms on log axes; hexagonal bins;
+9. Heatmaps, contours, and 2D histograms on log axes; hexagonal bins;
    labels along contour lines; and calendar month labels aligned to week
    columns.
 

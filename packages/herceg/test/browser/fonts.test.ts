@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { hydrateChart } from "../../src/dom/hydrate.ts";
-import { svgToPng } from "../../src/dom/png-export.ts";
 import { prepareFonts } from "../../src/fonts.ts";
+import { rasterize } from "../../src/image/raster.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { renderToSnapshot } from "../../src/render/snapshot.ts";
+import { planExport } from "../../src/spec/export.ts";
 import { modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -127,7 +128,12 @@ describe("fonts", () => {
     const data = await fixture("sans");
     const svg =
       '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><text x="2" y="15" font-family="Fixture">Wi</text></svg>';
-    const png = await svgToPng(svg, 40, 20, document, { scale: 1 }, [{ family: "Fixture", data }]);
+    const plan = planExport({}, { width: 40, height: 20 });
+    const faces = [{ family: "Fixture", weight: "normal" as const, data }];
+    const fail = ({ message }: { message: string }): never => {
+      throw new Error(message);
+    };
+    const png = await rasterize({ where: "toPNG", fail, svg, plan, faces }, document);
     expect(png.type).toBe("image/png");
     expect(png.size).toBeGreaterThan(100);
   });

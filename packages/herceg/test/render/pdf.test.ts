@@ -42,13 +42,14 @@ import { facet } from "../../src/model/facet.ts";
 import { ChartModel, STATIC_RASTER_RATIO } from "../../src/model/model.ts";
 import { rangeNavigator } from "../../src/model/navigator.ts";
 import { panels } from "../../src/model/panels.ts";
-import { type PdfOptions, renderToPDF } from "../../src/pdf.ts";
+import { renderToPDF } from "../../src/pdf.ts";
 import { NO_PAGE } from "../../src/render/fallbacks.ts";
 import { cellRepeat, renderPdf } from "../../src/render/pdf.ts";
 import { num } from "../../src/render/pdf-document.ts";
 import type { PdfFontResolver } from "../../src/render/pdf-font-embed.ts";
 import { subsetTrueType, writeSfnt } from "../../src/render/pdf-font-subset.ts";
 import { encodeText, measurePdfText, standardFont, textWidth } from "../../src/render/pdf-fonts.ts";
+import type { StaticOptions } from "../../src/render/static.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import { cssColor } from "../../src/scale/css-color.ts";
@@ -429,7 +430,7 @@ const metrics = table({
   db: [80, 82, null, 90, 95, 92, 99, 101, 98, 105, 110, 108],
 });
 
-const latency: PdfOptions = {
+const latency: StaticOptions = {
   width: 480,
   height: 240,
   title: "Latency é",
@@ -680,7 +681,7 @@ describe("renderToPDF", () => {
   it.each([false, true])(
     "tags the full chart with its DOM description (embedded fonts: %s)",
     (embedded) => {
-      const options: PdfOptions = {
+      const options: StaticOptions = {
         ...latency,
         title: "Latency é (EMC)",
         // Metadata must retain Unicode even when standard fonts replace visible glyphs.
@@ -816,7 +817,7 @@ describe("renderToPDF", () => {
         y: [1, 2, 3, 4],
         region: category(["North", "North", "South", "South"]),
       });
-      const options: PdfOptions = {
+      const options: StaticOptions = {
         width: 400,
         height: 300,
         title: "Sales (EMC)",
@@ -849,7 +850,7 @@ describe("renderToPDF", () => {
   });
 
   it("paints transparent themes with light text dark, as pages are white", () => {
-    const background = (theme: NonNullable<PdfOptions["theme"]>) =>
+    const background = (theme: NonNullable<StaticOptions["theme"]>) =>
       /\/Artifact BMC\n(q [\d. ]+ rg)\n0 0 100 50 re\nf\n/.exec(
         readPdf(renderToPDF({ width: 100, height: 50, marks: [], theme })).content,
       )?.[1];
@@ -1482,7 +1483,7 @@ describe("PDF embedded Unicode fonts", () => {
     new DataView(decoy.buffer).setUint16(fontTableOffset(decoy, "head") + 18, 2048);
     const fonts = prepareFonts([...embeddedFonts, { family: "Decoy", data: decoy }]);
     const settings = { fonts, fallback: fallback ? ["Decoy"] : [] };
-    const config: PdfOptions = {
+    const config: StaticOptions = {
       width: 320,
       height: 240,
       locale: "en-US",
@@ -2133,12 +2134,10 @@ describe("PDF embedded Unicode fonts", () => {
     expect(fonts.measure("Latency p99", "12px Fixture")).toBe(
       truetype.measure("Latency p99", "12px Fixture"),
     );
-    const options = {
-      ...latency,
-      idPrefix: "chart",
-      theme: { style: { text: { font: "Fixture" } } },
-    };
-    expect(renderToSVG({ ...options, fonts })).toBe(renderToSVG({ ...options, fonts: truetype }));
+    const options = { ...latency, theme: { style: { text: { font: "Fixture" } } } };
+    expect(renderToSVG(options, { fonts, idPrefix: "chart" })).toBe(
+      renderToSVG(options, { fonts: truetype, idPrefix: "chart" }),
+    );
     expect(() => renderToPDF({ ...options, fonts })).toThrow(
       'renderToPDF fonts: the "Fixture" normal face has CFF outlines; PDF embedding needs TrueType (glyf) outlines; SVG and PNG accept this font',
     );
@@ -2525,7 +2524,7 @@ describe("PDF documents", () => {
   ])(
     "uses catalog $language for English alternatives with chart $locale (embedded fonts: $embedded)",
     ({ locale, language, embedded }) => {
-      const chart: PdfOptions = {
+      const chart: StaticOptions = {
         width: 320,
         height: 160,
         locale,

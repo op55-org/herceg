@@ -6,14 +6,15 @@ import functools
 import math
 import numbers
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 
-from .._chart import Chart
+from .._chart import _LINE_CHANNELS, _POINT_CHANNELS, Chart
 from .._data import Column
+from .._encoding import Encodings, SeriesLabels
 from . import _numerics as numerics
 from . import _regression as regression
 from ._common import (
@@ -30,7 +31,6 @@ from ._common import (
     dropped_sentence,
     express,
     facets,
-    fresh,
     function_name,
     group,
     keyed_table,
@@ -51,6 +51,7 @@ from ._common import (
     weight_column,
     weights_of,
 )
+from ._forward import Outputs, carry, keys_of, mark_options
 from ._numerics import Estimator
 
 if sys.version_info >= (3, 11):
@@ -95,6 +96,9 @@ def regplot(
     fit_reg: bool = True,
     truncate: bool = True,
     grid_size: int = 100,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
+    labels: SeriesLabels | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
@@ -123,8 +127,29 @@ def regplot(
     name columns whose linear effect is removed from ``x`` and ``y``
     first. ``scatter=False`` leaves out the points, ``fit_reg=False`` the
     fit.
+
+    ``z_index``, ``encode``, and ``labels`` go to the fit lines, as
+    ``Chart.line`` takes them; the points, estimates, and band take their
+    color binding (a column or the series through a scale), or are gray
+    beside a color of their own. They read the data's columns; those
+    beside x, y, and the series must have one value per series.
     """
     model = _model(order, logistic, robust, lowess, logx, "regplot")
+    marks = mark_options(
+        "regplot",
+        z_index=z_index,
+        encode=encode,
+        labels=labels,
+        channels=_LINE_CHANNELS,
+        labels_of=SeriesLabels,
+    )
+    if fit_reg is False:
+        for option in ("z_index", "encode", "labels"):
+            marks.refuse(
+                option,
+                "goes to the fit lines, and fit_reg=False draws none; drop "
+                f"{option}, or draw the points with Chart.point",
+            )
     if x_jitter is not None or y_jitter is not None:
         name = "x_jitter" if x_jitter is not None else "y_jitter"
         raise ValueError(
@@ -160,6 +185,7 @@ def regplot(
         source, "regplot", facet_row, facet_column, series, series_order, axes=[x, y]
     )
     taken = [x, y, *variables]
+    outputs = Outputs(source, marks, taken)
     weight_values = weight_column(source, weight, "regplot", taken)
     ranked = unit_ranks(source, units, "regplot", [*taken, weight])
     partials = [
@@ -203,9 +229,10 @@ def regplot(
     banded = fit_reg and ci is not None and model.kind != "lowess"
     used_seed = seed_of(seed, "regplot") if banded or (estimating and x_ci is not None) else None
     names = [*variables]
-    # The fitted values' column: y's name, unless x has it too.
-    (fitted,) = fresh([y], {x, *names})
-    low, high = fresh(["low", "high"], {x, fitted, *names})
+    # The fitted values under y's name, which the mark options read as y,
+    # but x's when y is x.
+    (fitted,) = [y] if y != x else outputs.named(y)
+    low, high = outputs.named("low", "high")
     fits: dict[str, list[np.ndarray]] = {x: [], fitted: [], low: [], high: []}
     keys: list[np.ndarray] = []
     coefficients: list[np.ndarray] = []
@@ -218,7 +245,8 @@ def regplot(
     place = np.empty(len(xv), dtype=np.intp)
     place[rows] = np.arange(len(rows))
     point_x, point_y = xv[rows].copy(), yv[rows].copy()
-    for key, members in group(list(variables.values()), rows):
+    grouping = group(list(variables.values()), rows)
+    for key, members in grouping:
         weighed = None if weights is None else weights[members] > 0
         gx, gy = xv[members], yv[members]
         if partials[0] is not None:
@@ -292,6 +320,19 @@ def regplot(
     fit_table = keyed_table(variables, key_rows)
     for name in (x, fitted, low, high):
         fit_table[name] = number_column(np.concatenate(fits[name]) if fits[name] else [])
+
+    carry(
+        fit_table,
+        outputs.per_group(
+            grouping,
+            names,
+            key_rows,
+            drawn="fit",
+            instead="split the fits by it with series, or precompute one value per series",
+        ),
+    )
+    # The points and estimates beside the fits read only what colors them alike.
+    bound = () if marks.bound is None else (marks.bound,)
     sentence = _sentence(
         x,
         y,
@@ -323,14 +364,34 @@ def regplot(
     point_table = rows_table(variables, rows)
     point_table[x] = number_column(point_x)
     point_table[fitted] = number_column(point_y)
+    carry(point_table, outputs.rows(rows, only=bound))
     chart = make_chart(
         point_table, options, sentence=sentence, palette=palette, x_label=x, y_label=y
     )
     label = None if series else y
     # Estimates beside x under the fitted values' name, apart from x's when y is x.
     estimate_table = _estimate_table(estimates, variables, x, fitted, (low, high))
+    paint = neutral(options.get("theme"))
     if scatter and estimating:
-        chart.point(x, fitted, data=estimate_table, series=series, label=label)
+        carry(
+            estimate_table,
+            outputs.per_group(
+                grouping,
+                names,
+                keys_of(variables, estimate_table, len(estimate_table[x])),
+                drawn="series",
+                instead="split the series by it, or precompute one value per series",
+                only=bound,
+            ),
+        )
+        chart.point(
+            x,
+            fitted,
+            data=estimate_table,
+            series=series,
+            label=label,
+            **marks.supporting(estimate_table, paint, "fill"),
+        )
         if x_ci is not None and not (x_ci == "ci" and ci is None):
             chart.error_bar(
                 x=x,
@@ -339,15 +400,27 @@ def regplot(
                 data=estimate_table,
                 series=series,
                 label=label,
+                stroke=paint if marks.colored else None,
             )
     elif scatter:
-        chart.point(x, fitted, series=series, label=label)
+        chart.point(
+            x, fitted, series=series, label=label, **marks.supporting(point_table, paint, "fill")
+        )
     if banded:
         # A band per series, of the fit line's table: each stands for what its
         # line does, sharing its color, legend entry, and visibility.
-        chart.area(x, y1=low, y2=high, data=fit_table, series=series, label=label, fill_opacity=0.2)
+        chart.area(
+            x,
+            y1=low,
+            y2=high,
+            data=fit_table,
+            series=series,
+            label=label,
+            fill_opacity=0.2,
+            **marks.supporting(fit_table, paint),
+        )
     if fit_reg:
-        chart.line(x, fitted, data=fit_table, series=series, label=label)
+        chart.line(x, fitted, data=fit_table, series=series, label=label, **marks.primary())
     terms = model.order + 1
     coefficient_table = {
         "group": np.arange(len(coefficients)),
@@ -693,6 +766,8 @@ def residplot(
     delta: float = 0.0,
     x_partial: str | None = None,
     y_partial: str | None = None,
+    z_index: float | None = None,
+    encode: Encodings | Mapping[str, Any] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
     """The residuals of ``y`` from a least-squares polynomial fit of
@@ -700,9 +775,11 @@ def residplot(
     ``x``, around a rule at zero. ``lowess=True`` adds a lowess line
     through the residuals, showing structure the fit missed.
     ``x_partial`` and ``y_partial`` remove the linear effect of other
-    columns first, as in ``regplot``.
+    columns first, as in ``regplot``. ``z_index`` and ``encode`` go to the
+    points, as ``Chart.point`` takes them, reading any column of the data.
     """
     model = _model(order, False, robust, False, False, "residplot")
+    marks = mark_options("residplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
     if not isinstance(lowess, bool):
         raise TypeError(f"residplot lowess: expected True or False; received {shown(lowess)}")
     _check_lowess(frac, it, delta, "residplot")
@@ -714,6 +791,7 @@ def residplot(
         None if name is None else source.column(name, f"residplot {role}", ("number",))
         for name, role in ((x_partial, "x_partial"), (y_partial, "y_partial"))
     ]
+    outputs = Outputs(source, marks, {x})
     rows = complete(len(xc), xc, yc, *partials)
     dropped = len(xc) - len(rows)
     xv, yv = values(xc)[rows], values(yc)[rows]
@@ -726,8 +804,9 @@ def residplot(
             f"an order-{model.order} fit needs more than {model.order} distinct {x} values"
         )
     residual = yv - regression.fit(xv, yv, model.kind, model.order)(xv)  # type: ignore[arg-type]
-    (name,) = fresh(["residual"], {x})
+    (name,) = outputs.named("residual")
     table = {x: number_column(xv), name: number_column(residual)}
+    carry(table, outputs.rows(rows))
     fit = (
         "robust linear (Huber's T)"
         if robust
@@ -746,7 +825,7 @@ def residplot(
     sentence += "." + dropped_sentence(dropped, [x, y, x_partial, y_partial])
     chart = make_chart(table, options, sentence=sentence, x_label=x, y_label=f"{y} residual")
     chart.rule(y=0, stroke=neutral(options.get("theme")), dash=[3, 3])
-    chart.point(x, name, label=f"{y} residual")
+    chart.point(x, name, label=f"{y} residual", **marks.primary())
     tables: dict[str, Any] = {"residuals": readable(table)}
     if lowess:
         grid, smooth = regression.lowess(xv, residual, frac, it, delta)

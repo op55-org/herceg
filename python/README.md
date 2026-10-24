@@ -6,7 +6,7 @@ large-data handling as the TypeScript library.
 
 > Early development. Line, area, bar, scatter, heatmap, dendrogram, error bar,
 > candlestick, histogram, pie, box plot, letter-value (boxen) plot, violin, treemap, sunburst, gauge, funnel, radar, Sankey, network (graph), and map (choropleth and point) marks, rule, region, and text annotations; small multiples;
-> HTML, notebook, SVG, PNG, and PDF output; live notebook charts; Streamlit apps; web pages (Flask, Django, FastAPI).
+> HTML, notebook, SVG, PNG, JPEG, WebP, and PDF output; live notebook charts; Streamlit apps; web pages (Flask, Django, FastAPI).
 
 ```python
 import herceg as hg
@@ -1329,6 +1329,38 @@ names (`estimator`, `errorbar`, `n_boot`, `bw_method`, `bw_adjust`, `ci`,
 `multiple`, `linestyles`, `warn_thresh`, ...). Densities and ECDFs of `y`
 alone run along y, as do the KDE overlays of horizontal histograms.
 
+`z_index`, `encode`, and `labels` go to the mark drawing each plot's
+result, as that mark takes them: barplot's bars, the points of pointplot,
+stripplot, swarmplot, and residplot, the lines of lineplot, kdeplot (areas
+with `filled=True`), and ecdfplot, and regplot's fit lines; histplot,
+rugplot, boxplot, boxenplot, violinplot, and a kdeplot of x and y take
+`z_index` alone. They read the data's columns, and the plot's x, y, and
+series as it draws them (y's estimate, say), never another column it
+computes (a count, an interval's ends, a density), which it names apart
+from the data's columns. A column they read beside x, y, and the series
+goes into the table the plot computes: row for row where it draws rows,
+and where it summarizes groups of rows (an estimate, a density, a fit)
+only if it has one value in each group. Otherwise it is refused, saying
+what to do instead: split by it with `series`, precompute one value per
+group, or (lineplot) draw the rows with `estimator=None`. The plot's other
+marks for the same series (a band, a fit's points, joining lines) take
+that mark's color binding, a column or the series through a scale, so a
+series' colors come from one scale; beside a color of the mark's own (a
+condition, a constant) they are gray, as error bars, which take no
+channels, are while the color is a channel. An ecdfplot group of one value
+is a point taking the steps' color channel and `z_index`. Chart options,
+such as an axis' `padding`, a theme's `vertical_align`, named `scales`, and
+`legend`, reach the chart as `hg.Chart` takes them.
+
+```python
+groups = {"groups": hg.OrdinalScale(map={"control": "#7f7f7f", "treated": "#d62728"})}
+hx.lineplot(
+    fmri, x="timepoint", y="signal", series="subject", scales=groups,
+    encode=hg.Encodings(color=hg.Channel(field="group", scale="groups")),
+)
+hx.barplot(tips, x="day", y="tip", labels=True, z_index=1)
+```
+
 A `kdeplot` of `x` and `y` draws the density's contours (bands with
 `filled=True`) at Seaborn's levels: `levels` is how many (10) or the
 probability masses below each, from `thresh` (0.05) up, each contour
@@ -1581,9 +1613,10 @@ chart  # displays in Jupyter, JupyterLab, and VS Code notebooks
 chart.show()  # notebook display, or a browser tab outside notebooks
 chart.save("chart.html")  # self-contained page: herceg and the data embedded
 chart.save("chart.svg")  # static SVG
-chart.save("chart.png")  # PNG at twice the chart size (scale=...)
+chart.save("chart.png")  # PNG at the chart's size, 96 dpi (see Images for documents)
+chart.save("figure.jpg", size=(6, 4), unit="in", dpi=300)  # JPEG for a document
 chart.save("chart.pdf")  # one-page vector PDF (chart.to_pdf() returns the bytes)
-hg.save(chart, "chart.png", scale=3)  # the same format dispatch as chart.save
+hg.save(chart, "chart.webp", dpi=192)  # the same format dispatch as chart.save
 chart.to_spec()  # (spec dict, list of binary buffers)
 chart.to_snapshot(id_prefix="latency")  # server-rendered markup for a web page to hydrate
 chart.widget()  # a live notebook chart (see below)
@@ -1635,13 +1668,19 @@ it again.
 (which the browser's chart must get too) are those it is laid out with. Like
 SVG export, it needs the `export` extra.
 
+### Export
+
 An SVG is the chart's size by default. `to_svg(sizing="fluid")` (and
 `save(path, sizing="fluid")` for `.svg` paths) leaves out its width and
 height, so CSS or its container sizes it and its viewBox scales the chart;
 `preserve_aspect_ratio="none"` stretches it to any box, and
 `stroke_scaling="fixed"` keeps lines their width in pixels however it
 scales. The layout is the one at the chart's size: stretching scales text
-too.
+too. No export keeps text and markers at their size in pixels while the
+rest of a chart scales, since a file cannot lay itself out again; pick an
+SVG of a fixed size (`size` and `unit`, below), or a fluid one that scales
+as a picture, or a snapshot (`to_snapshot`) that a page hydrates, which
+the engine lays out again at every size.
 
 ```python
 spark = hg.Chart(
@@ -1701,12 +1740,51 @@ multiple charts, the default language is `"en"`, with no default title or
 subject. Each chart's visible content uses a nested language scope for its
 locale, while English summaries keep their English alternative scope.
 
+### Images for documents
+
+A figure for a report, paper, or slide has a size on the page and a
+resolution, and they are separate arguments. `chart.to_image(format=,
+size=, unit=, dpi=, quality=, background=, fonts=)` returns PNG, JPEG, or
+WebP bytes: `size` and `unit` (`"px"`, `"in"`, `"cm"`, `"mm"`, or `"pt"`)
+lay the chart out, in place of its `width` and `height`, and `dpi` (96 by
+default) is the pixels drawn per inch of it. 16 by 10 inches at 150 dpi
+lays out at 1536 by 960 CSS pixels, as on a page of that size, and draws
+2400 by 1500 pixels; another dpi changes the pixels only, never wrapping,
+ticks, or the size text has on the page. The file records its resolution
+(PNG's `pHYs`, JPEG's JFIF density, WebP's EXIF), which documents read to
+place it at its size; applications that ignore it show its pixels.
+
+```python
+jpeg = chart.to_image(format="jpeg", size=(16, 10), unit="in", dpi=150, quality=90)
+png = chart.to_png(dpi=192)  # the chart's size, 2 pixels per CSS pixel
+chart.save("figure.webp", size=(160, 100), unit="mm", dpi=300)  # the format from the extension
+svg = chart.to_svg(size=(160, 100), unit="mm", tooltip="title")  # 160mm by 100mm, native tooltips
+```
+
+- `quality`, from 0 to 100, compresses JPEG and WebP; PNG refuses it.
+- JPEG has no transparency: it is drawn on `background` (a CSS color), else
+  on the chart's own background, else on white (black under light text).
+  PNG and WebP stay transparent where the chart is, unless given a
+  `background`.
+- `save` chooses the format by the path's extension (`.png`, `.jpg` or
+  `.jpeg`, `.webp`, `.svg`, `.pdf`, `.html`); a `format` contradicting it
+  is refused, as are options of another format (`dpi` for an SVG).
+- More than 16,384 pixels a side (16,383 for WebP), more than 16,777,216
+  pixels, or a dpi outside 1 to 1,200 is refused before anything is drawn.
+- `to_svg(size=, unit=)` lays an SVG out at that size and says it in its
+  width and height. `to_svg(tooltip="title")` gives each bar, point, and
+  observation of a line its tooltip's text as a `<title>`, which viewers
+  show under the pointer: up to 5,000 of them, and charts whose other marks
+  have tooltips are refused. Images and PDF have no such titles.
+
+### Export dependencies and fonts
+
 SVG, PNG, and PDF export need the `export` extra (`pip install
 'herceg[export]'`): SVG is rendered by the same DOM-free renderer as herceg's
 `renderToSVG`, run in an embedded V8 engine (`mini-racer`), so it matches the
 browser's chart except for text measurement. Without supplied fonts, SVG
-uses fixed Helvetica estimates. PNG is rasterized from that SVG by `resvg`,
-using system fonts by default. PDF comes from herceg's
+uses fixed Helvetica estimates. Images are rasterized from that SVG by
+`resvg`, using system fonts by default, and encoded by Pillow. PDF comes from herceg's
 `renderToPDF` in the same engine: vector marks, axes,
 and legends, heatmaps as images, and selectable text. What the renderer
 refuses, such as an option the spec does not accept (`theme="drak"`) or a
@@ -1725,7 +1803,7 @@ fonts = {
     "Symbols": Path("Symbols.ttf").read_bytes(),
 }
 pdf_bytes = chart.to_pdf(fonts=fonts, fallback=["Symbols"])
-png_bytes = chart.to_png(fonts=fonts, scale=2)
+png_bytes = chart.to_png(fonts=fonts, dpi=192)
 svg_text = chart.to_svg(fonts=fonts)
 chart.save("chart.png", fonts=fonts)
 hg.save(chart, "chart.svg", fonts=fonts)

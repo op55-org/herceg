@@ -223,13 +223,13 @@ const figures: Record<string, StaticOptions> = {
 describe("reference figures", () => {
   for (const [name, options] of Object.entries(figures))
     it(`draws ${name}`, async () => {
-      const svg = renderToSVG({ ...options, idPrefix: name });
+      const svg = renderToSVG(options, { idPrefix: name });
       await expect(svg).toMatchFileSnapshot(`__snapshots__/guides/${name}.svg`);
     });
 
   it("labels days at midnight in each figure's zone", () => {
-    const utc = renderToSVG({ ...hourly("UTC"), idPrefix: "a" });
-    const belgrade = renderToSVG({ ...hourly("Europe/Belgrade"), idPrefix: "b" });
+    const utc = renderToSVG(hourly("UTC"), { idPrefix: "a" });
+    const belgrade = renderToSVG(hourly("Europe/Belgrade"), { idPrefix: "b" });
     expect(utc).toContain(">Mon Sep 28<");
     // The data starts at 02:00 in Belgrade, whose first midnight is Tuesday's.
     expect(belgrade).not.toContain(">Mon Sep 28<");

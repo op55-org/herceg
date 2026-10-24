@@ -61,10 +61,13 @@ import { rowSelection } from "../../src/model/row-selection.ts";
 import { brushedRows } from "../../src/model/selected-rows.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
+import { pngDataUrl } from "../../src/render/png.ts";
+import { drawStatic, renderToSVG } from "../../src/render/static.ts";
 import {
   type Geometry,
   guidesOf,
   type Panel,
+  type RasterGeometry,
   type RectGeometry,
   type SegmentGeometry,
   type TextGeometry,
@@ -1965,14 +1968,60 @@ describe("capabilities: dendrogram", () => {
   });
 });
 
+/** Every built-in mark, as exports take them: the cases above, and a dendrogram. */
+const exported: Pick<MarkCase, "name" | "make">[] = [
+  ...cartesian,
+  ...layouts,
+  {
+    name: "dendrogram",
+    make: () =>
+      dendrogram(table({ first: [0, 2], second: [1, 3], height: [1, 2] }), {
+        first: "first",
+        second: "second",
+        height: "height",
+        leaves: ["a", "b", "c"],
+      }),
+  },
+];
+
 it("capabilities: every built-in mark exports as a PDF document page", () => {
-  const cases = [...cartesian, ...layouts];
   const bytes = renderToPDF(
-    cases.map(({ make }) => ({ width: 600, height: 400, marks: [make()] })),
+    exported.map(({ make }) => ({ width: 600, height: 400, marks: [make()] })),
   );
   const pdf = new TextDecoder("latin1").decode(bytes);
-  expect(pdf).toContain(`/Count ${cases.length}`);
-  expect(pdf.match(/\/S \/Figure\b/g)).toHaveLength(cases.length);
+  expect(pdf).toContain(`/Count ${exported.length}`);
+  expect(pdf.match(/\/S \/Figure\b/g)).toHaveLength(exported.length);
+});
+
+it("capabilities: every built-in mark exports as static SVG at a document's size", () => {
+  for (const { name, make } of exported) {
+    const options = { width: 600, height: 400, marks: [make()] };
+    // Laid out at 576 by 384 CSS pixels, placed at 6 by 4 inches.
+    const svg = renderToSVG(options, { size: [6, 4], unit: "in" });
+    expect(svg, name).toMatch(/^<svg [^>]*width="6in" height="4in" viewBox="0 0 576 384"/);
+    // What the mark's geometry draws at that layout is in it.
+    const { scene } = drawStatic(options, 576, 384, undefined);
+    const context = {
+      theme: scene.theme,
+      encodeRaster: (r: RasterGeometry) => pngDataUrl(r.columns, r.rows, r.pixels),
+    };
+    const drawn = (scene.painted ?? scene.panels)
+      .flatMap((panel) => panel.marks.map((m) => m.draw.svg(m, context)))
+      .filter((markup) => markup !== "");
+    expect(drawn.length, name).toBeGreaterThan(0);
+    for (const markup of drawn) expect(svg.includes(markup), name).toBe(true);
+    // Native titles go on the marks that hold rows a tooltip reads; the
+    // annotations need none; other marks are refused.
+    const titled = () => renderToSVG(options, { tooltip: "title" });
+    const { type } = make().spec;
+    if (type === "bar" || type === "point" || type === "line") {
+      expect(titled(), name).toContain("<title>");
+    } else if (type === "rule" || type === "region" || type === "text") {
+      expect(titled(), name).not.toContain("<title>");
+    } else {
+      expect(titled, name).toThrow('"title" goes on bars, points, and lines');
+    }
+  }
 });
 
 describe("capabilities: color identity", () => {

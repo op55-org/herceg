@@ -1093,13 +1093,14 @@ export class MountedChart implements Chart, ExportsScene {
     return this[EXPORT_SCENE]((scene, model) => this.#svgOf(scene, model, options));
   }
 
-  toPNG(options?: { scale?: number }): Promise<Blob> {
-    // The state now, whatever changes while the encoder loads.
-    const [svg, width, height] = this[EXPORT_SCENE](
-      (scene, model) => [this.#svgOf(scene, model), scene.width, scene.height] as const,
+  toPNG(settings?: { dpi?: number }): Promise<Blob> {
+    // The state now, and the fonts it is drawn in, whatever changes while the encoder loads.
+    const [svg, width, height, faces] = this[EXPORT_SCENE](
+      (scene, model) =>
+        [this.#svgOf(scene, model), scene.width, scene.height, this.#fonts?.faces] as const,
     );
-    return import("./png-export.ts").then((png) =>
-      png.svgToPng(svg, width, height, this.root.ownerDocument, options, this.#fonts?.faces),
+    return import("../image/raster.ts").then((raster) =>
+      raster.pngOf(svg, width, height, this.root.ownerDocument, settings, faces),
     );
   }
 
@@ -1121,7 +1122,7 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#options.fonts;
   }
 
-  [EXPORT_SCENE]<T>(use: (scene: Scene, model: ChartModel) => T): T {
+  [EXPORT_SCENE]<T>(use: (scene: Scene, model: ChartModel, measure: MeasureText) => T): T {
     // An export shows the latest state at the container's current size: what
     // is pending is drawn first, and no frame is drawn when nothing is, so
     // render listeners may export.
@@ -1144,7 +1145,7 @@ export class MountedChart implements Chart, ExportsScene {
     if (drawn) this.#succeed();
     try {
       const measure = this.#measure();
-      return use(this.#sceneOf(measure, false), this.#model);
+      return use(this.#sceneOf(measure, false), this.#model, measure);
     } finally {
       // Listeners hear of the frame once the export is made (or failed):
       // what they change then is drawn on the next frame, as after any other.

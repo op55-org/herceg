@@ -47,7 +47,7 @@ with herceg's functions can also be passed as a `marks` prop.
 The chart fills its container's width and is 320 px tall unless `width`,
 `height`, or `style` says otherwise. A `ref` gives the underlying chart, herceg's
 `Chart`, for imperative calls (`setViewport`, `select`, `toPixel`, `setVisibility`,
-`toSVG`, `toPNG`, and `renderToPDF(chart)` from `herceg/pdf`, which export the chart as
+`toSVG`, `toPNG`, `renderToPDF(chart)` from `herceg/pdf`, and `renderToImage(chart)` from `herceg/image`, which export the chart as
 it shows, a highlighted row selection included). Chart events are props: `onViewport`, `onEdge` (the view came near an end of
 `interaction.limits`, as to load more data), `onSelect`, `onHover`, `onClick`,
 `onRowSelection` (a channel of the chart's `rowSelection` changed),

@@ -4693,6 +4693,9 @@ class Chart:
         self,
         *,
         fonts: _render.Fonts | None = None,
+        size: tuple[float, float] | None = None,
+        unit: _render.LengthUnit = "px",
+        tooltip: Literal["title"] | None = None,
         sizing: _render.SvgSizing | None = None,
         preserve_aspect_ratio: str | None = None,
         stroke_scaling: _render.StrokeScaling | None = None,
@@ -4700,6 +4703,14 @@ class Chart:
         """Standalone SVG, measured with supplied fonts and referencing their families.
 
         Requires the ``export`` extra. Font files are not embedded in the SVG.
+        ``size`` lays the chart out at another size, a ``(width, height)`` in
+        ``unit``: ``"px"`` (CSS pixels, the default), ``"in"``, ``"cm"``,
+        ``"mm"``, or ``"pt"``, which the SVG's width and height then say, so
+        documents place it at that size. ``tooltip="title"`` gives each bar,
+        point, and observation of a line its tooltip's text as a ``<title>``,
+        which viewers show under the pointer (charts with other marks the
+        tooltip reads, and more than 5,000 of them, are refused); the
+        chart's title and description stay what assistive technology reads.
         ``sizing="fluid"`` leaves out the width and height, so CSS or the
         container sizes the SVG and its viewBox scales the chart;
         ``preserve_aspect_ratio`` says how it fits a box of another shape
@@ -4710,6 +4721,9 @@ class Chart:
         return _render.svg(
             *self.to_spec(),
             fonts=fonts,
+            size=size,
+            unit=unit,
+            tooltip=tooltip,
             sizing=sizing,
             preserve_aspect_ratio=preserve_aspect_ratio,
             stroke_scaling=stroke_scaling,
@@ -4745,9 +4759,67 @@ class Chart:
             time_zone=time_zone,
         )
 
-    def to_png(self, *, scale: float = 2, fonts: _render.Fonts | None = None) -> bytes:
-        """PNG at ``scale`` times the chart size (requires the ``export`` extra)."""
-        return _render.png(*self.to_spec(), scale=scale, fonts=fonts)
+    def to_image(
+        self,
+        *,
+        format: _render.ImageFormat = "png",
+        size: tuple[float, float] | None = None,
+        unit: _render.LengthUnit = "px",
+        dpi: float = 96,
+        quality: float | None = None,
+        background: str | None = None,
+        fonts: _render.Fonts | None = None,
+    ) -> bytes:
+        """A PNG, JPEG, or WebP image of the chart, for documents (requires the
+        ``export`` extra).
+
+        ``size`` lays the chart out at a ``(width, height)`` in ``unit``:
+        ``"px"`` (CSS pixels, the default), ``"in"``, ``"cm"``, ``"mm"``, or
+        ``"pt"``; the chart's own size by default. ``dpi`` (96 by default, a
+        pixel per CSS pixel) sets the image's pixels and is recorded in the
+        file (PNG's pHYs, JPEG's JFIF density, WebP's EXIF resolution); it
+        never changes the layout, so ``size=(16, 10), unit="in", dpi=150``
+        lays out at 1536 by 960 CSS pixels and draws 2400 by 1500 pixels.
+        ``quality`` (0 to 100, 90 by default) compresses JPEG and WebP; PNG
+        refuses it. ``background`` is a CSS color under the chart, which a
+        transparent theme shows; JPEG, which has no transparency, is
+        otherwise drawn on the chart's background, or under a transparent one
+        on black (light text) or white. ``fonts`` measure and draw the text,
+        as ``to_svg`` takes them. Images are at most 16,384 pixels a side and
+        16.7 million pixels in all.
+        """
+        return _render.image(
+            *self.to_spec(),
+            format=format,
+            size=size,
+            unit=unit,
+            dpi=dpi,
+            quality=quality,
+            background=background,
+            fonts=fonts,
+        )
+
+    def to_png(
+        self,
+        *,
+        size: tuple[float, float] | None = None,
+        unit: _render.LengthUnit = "px",
+        dpi: float = 96,
+        background: str | None = None,
+        fonts: _render.Fonts | None = None,
+    ) -> bytes:
+        """A PNG of the chart: ``to_image(format="png", ...)`` (requires the
+        ``export`` extra)."""
+        return _render.image(
+            *self.to_spec(),
+            format="png",
+            size=size,
+            unit=unit,
+            dpi=dpi,
+            background=background,
+            fonts=fonts,
+            location="to_png",
+        )
 
     def to_pdf(
         self,
@@ -4780,7 +4852,13 @@ class Chart:
         self,
         path: str | PathLike[str],
         *,
-        scale: float = 2,
+        format: _render.SaveFormat | None = None,
+        size: tuple[float, float] | None = None,
+        unit: _render.LengthUnit | None = None,
+        dpi: float | None = None,
+        quality: float | None = None,
+        background: str | None = None,
+        tooltip: Literal["title"] | None = None,
         fonts: _render.Fonts | None = None,
         sizing: _render.SvgSizing | None = None,
         preserve_aspect_ratio: str | None = None,
@@ -4794,9 +4872,26 @@ class Chart:
         subject: str | None = None,
         language: str | None = None,
     ) -> None:
-        """Writes ``.html``, ``.svg``, ``.png``, or ``.pdf``, chosen by the file extension."""
-        lower = str(path).lower()
-        pdf_options = {
+        """Writes ``.html``, ``.svg``, ``.png``, ``.jpg`` (or ``.jpeg``), ``.webp``,
+        or ``.pdf``, chosen by the file extension.
+
+        ``format`` names the format of a path without one of those
+        extensions; given with one, it must agree. The other options are
+        those of ``to_svg``, ``to_image``, and ``to_pdf``, each refused for
+        a format that does not take it.
+        """
+        chosen = _render.save_format(path, format)
+        given = {
+            "size": size,
+            "unit": unit,
+            "dpi": dpi,
+            "quality": quality,
+            "background": background,
+            "tooltip": tooltip,
+            "fonts": fonts,
+            "sizing": sizing,
+            "preserve_aspect_ratio": preserve_aspect_ratio,
+            "stroke_scaling": stroke_scaling,
             "fallback": fallback or None,
             "missing_glyph": missing_glyph,
             "page_size": page_size,
@@ -4806,44 +4901,25 @@ class Chart:
             "subject": subject,
             "language": language,
         }
-        option = next((key for key, value in pdf_options.items() if value is not None), None)
-        if not lower.endswith(".pdf") and option is not None:
-            raise ValueError(
-                f"save {option}: an option of PDF export; save to a .pdf path or drop {option}"
+        _render.check_save_options(
+            chosen, [name for name, value in given.items() if value is not None]
+        )
+        content: str | bytes
+        if chosen == "html":
+            content = self.to_html()
+        elif chosen == "svg":
+            content = _render.svg(
+                *self.to_spec(),
+                fonts=fonts,
+                size=size,
+                unit="px" if unit is None else unit,
+                tooltip=tooltip,
+                sizing=sizing,
+                preserve_aspect_ratio=preserve_aspect_ratio,
+                stroke_scaling=stroke_scaling,
+                location="save",
             )
-        svg_options = {
-            "sizing": sizing,
-            "preserve_aspect_ratio": preserve_aspect_ratio,
-            "stroke_scaling": stroke_scaling,
-        }
-        option = next((key for key, value in svg_options.items() if value is not None), None)
-        if not lower.endswith(".svg") and option is not None:
-            raise ValueError(
-                f"save {option}: an option of SVG export; save to a .svg path or drop {option}"
-            )
-        if fonts is not None and lower.endswith(".html"):
-            raise ValueError(
-                "save fonts: an option of SVG, PNG, or PDF export; "
-                "save to a .svg, .png, or .pdf path or drop fonts"
-            )
-        if lower.endswith(".html"):
-            content: str | bytes = self.to_html()
-        elif lower.endswith(".svg"):
-            try:
-                content = self.to_svg(
-                    fonts=fonts,
-                    sizing=sizing,
-                    preserve_aspect_ratio=preserve_aspect_ratio,
-                    stroke_scaling=stroke_scaling,
-                )
-            except (ValueError, TypeError) as error:
-                raise type(error)(str(error).replace("to_svg", "save")) from None
-        elif lower.endswith(".png"):
-            try:
-                content = self.to_png(scale=scale, fonts=fonts)
-            except (ValueError, TypeError) as error:
-                raise type(error)(str(error).replace("to_png", "save")) from None
-        elif lower.endswith(".pdf"):
+        elif chosen == "pdf":
             try:
                 content = self.to_pdf(
                     fonts=fonts,
@@ -4859,9 +4935,16 @@ class Chart:
             except (ValueError, TypeError) as error:
                 raise type(error)(str(error).replace("to_pdf", "save")) from None
         else:
-            raise ValueError(
-                'save path: expected a ".html", ".svg", ".png", or ".pdf" file; '
-                f"received {shown(path)}"
+            content = _render.image(
+                *self.to_spec(),
+                format=cast("_render.ImageFormat", chosen),
+                size=size,
+                unit="px" if unit is None else unit,
+                dpi=dpi if dpi is not None else 96,
+                quality=quality,
+                background=background,
+                fonts=fonts,
+                location="save",
             )
         if isinstance(content, bytes):
             with open(path, "wb") as binary:

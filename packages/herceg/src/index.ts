@@ -208,7 +208,7 @@ export {
   renderToSnapshot,
   type SnapshotOptions,
 } from "./render/snapshot.ts";
-export { renderToSVG, type StaticOptions } from "./render/static.ts";
+export { renderToSVG, type StaticOptions, type SvgSettings } from "./render/static.ts";
 export type { SvgAlign, SvgSizing } from "./render/svg.ts";
 export { type TimeBreaks, timeBreaks } from "./scale/breaks.ts";
 export * from "./scale/schemes.ts";
@@ -221,6 +221,7 @@ export {
   chartError,
   errorInfo,
 } from "./spec/errors.ts";
+export type { ExportFormat, ExportSettings, LengthUnit } from "./spec/export.ts";
 export type * from "./spec/spec.ts";
 export { SPEC_VERSION } from "./spec/spec.ts";
 export type { Theme } from "./theme.ts";
