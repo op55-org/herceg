@@ -220,7 +220,8 @@ describe("Streamlit component", () => {
     await frame();
     expect(figure(parent).getAttribute("aria-label")).toBe("After");
     expect(parent.querySelectorAll('[role="figure"]')).toHaveLength(1);
-    expect(band(parent)!.getAttribute("visibility")).toBe("visible");
+    // The brush is restored once the redrawn panels exist, which can take more than a frame.
+    await expect.poll(() => band(parent)?.getAttribute("visibility")).toBe("visible");
     // Restoring the brush does not rerun the script.
     expect(next.state).toEqual([]);
   });
@@ -479,9 +480,10 @@ describe("Streamlit component", () => {
     press(parent, "pointerdown", 0.3, 0.3);
     press(parent, "pointermove", 0.5, 0.5);
     press(parent, "pointerup", 0.7, 0.7);
-    await frame();
+    // The controller and the brush load lazily; a slow machine needs more than a frame.
+    await expect.poll(() => band(parent)?.getAttribute("d")).toBeTruthy();
     const drawn = () => ({
-      outline: band(parent)!.getAttribute("d"),
+      outline: band(parent)?.getAttribute("d"),
       yLabels: [...parent.querySelectorAll('svg text[text-anchor="end"]')].map(
         (t) => t.textContent,
       ),
@@ -490,7 +492,7 @@ describe("Streamlit component", () => {
     const next = run(parent, lineChart("After", ["select"], options));
     await frame();
     expect(figure(parent).getAttribute("aria-label")).toBe("After");
-    expect(drawn()).toEqual(before);
+    await expect.poll(drawn).toEqual(before);
     expect(next.state).toEqual([]);
     // The script has the rectangle whole.
     press(parent, "pointerdown", 0.2, 0.2);
@@ -554,16 +556,14 @@ describe("Streamlit component", () => {
     ] as const)
       press(parent, "pointermove", x, y);
     press(parent, "pointerup", 0.2, 0.8);
-    await frame();
-    expect(band(parent)!.getAttribute("visibility")).toBe("visible");
+    await expect.poll(() => band(parent)?.getAttribute("visibility")).toBe("visible");
     // The script has the outline, in band positions, and its extent's categories.
     const lasso = first.state[0]![1] as { x: string[]; lasso: number[][] };
     expect(lasso.x).toEqual(["a", "b"]);
     expect(lasso.lasso.length).toBeGreaterThanOrEqual(4);
     // A new chart with the same categories, which redraws.
     run(parent, bars(["a", "b", "c"], "lasso", "Again"));
-    await frame();
-    expect(band(parent)!.getAttribute("visibility")).toBe("visible");
+    await expect.poll(() => band(parent)?.getAttribute("visibility")).toBe("visible");
     // Reordered: the outline would cover other bars, so it goes.
     const reordered = run(parent, bars(["c", "a", "b"], "lasso"));
     await frame();
