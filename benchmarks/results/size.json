@@ -1,8 +1,8 @@
 {
  "schema": 1,
- "date": "2026-10-24T12:16:34.976Z",
+ "date": "2026-10-24T13:33:25.449Z",
  "commit": {
-  "sha": "7c9b7128",
+  "sha": "bd10070c",
   "dirty": false
  },
  "method": "esbuild bundle, ESM, es2022, minified, NODE_ENV=production, code splitting; measured is what loads before the chart renders, the entry chunk and the chunks it imports statically, each compressed on its own as browsers fetch them; chunks reached only by dynamic imports and required CSS are reported separately; gzip level 9; brotli quality 11",
@@ -70,11 +70,11 @@
   {
    "entry": "herceg-area",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 415591,
-   "minified": 183563,
-   "gzip": 70505,
-   "brotli": 62798,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 415615,
+   "minified": 183562,
+   "gzip": 70496,
+   "brotli": 62826,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -82,18 +82,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 195168,
-    "gzip": 80965
+    "minified": 201824,
+    "gzip": 83850
    }
   },
   {
    "entry": "herceg-bar",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 410933,
-   "minified": 179899,
-   "gzip": 69965,
-   "brotli": 62219,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 410957,
+   "minified": 179898,
+   "gzip": 69962,
+   "brotli": 62233,
    "chunks": 3,
    "css": null,
    "deferred": {
@@ -101,18 +101,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 194974,
-    "gzip": 80860
+    "minified": 201630,
+    "gzip": 83745
    }
   },
   {
    "entry": "herceg-contour",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 381446,
-   "minified": 169742,
-   "gzip": 66269,
-   "brotli": 59150,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 381470,
+   "minified": 169741,
+   "gzip": 66262,
+   "brotli": 59177,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -120,14 +120,14 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 188068,
-    "gzip": 77975
+    "minified": 194724,
+    "gzip": 80860
    }
   },
   {
    "entry": "herceg-grid-pivot",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
+   "version": "0.0.0 (bd10070c)",
    "raw": 308591,
    "minified": 136843,
    "gzip": 47005,
@@ -140,7 +140,7 @@
   {
    "entry": "herceg-grid-remote",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
+   "version": "0.0.0 (bd10070c)",
    "raw": 185538,
    "minified": 91765,
    "gzip": 31826,
@@ -153,7 +153,7 @@
   {
    "entry": "herceg-grid",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
+   "version": "0.0.0 (bd10070c)",
    "raw": 199402,
    "minified": 92774,
    "gzip": 32684,
@@ -166,11 +166,11 @@
   {
    "entry": "herceg-heatmap",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 395631,
-   "minified": 173661,
-   "gzip": 67660,
-   "brotli": 60340,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 395655,
+   "minified": 173660,
+   "gzip": 67654,
+   "brotli": 60364,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -178,18 +178,34 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 188068,
-    "gzip": 77975
+    "minified": 194724,
+    "gzip": 80860
+   }
+  },
+  {
+   "entry": "herceg-image",
+   "package": "herceg",
+   "version": "0.0.0 (bd10070c)",
+   "raw": 514298,
+   "minified": 244337,
+   "gzip": 97464,
+   "brotli": 87774,
+   "chunks": 5,
+   "css": null,
+   "deferred": null,
+   "lazy": {
+    "minified": 7100,
+    "gzip": 2990
    }
   },
   {
    "entry": "herceg-line",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 351793,
-   "minified": 155644,
-   "gzip": 60543,
-   "brotli": 54076,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 351817,
+   "minified": 155643,
+   "gzip": 60536,
+   "brotli": 54112,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -197,18 +213,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 195168,
-    "gzip": 80965
+    "minified": 201824,
+    "gzip": 83850
    }
   },
   {
    "entry": "herceg-pdf-document",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 547333,
-   "minified": 257793,
-   "gzip": 101760,
-   "brotli": 91469,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 547558,
+   "minified": 257962,
+   "gzip": 101824,
+   "brotli": 91435,
    "chunks": 4,
    "css": null,
    "deferred": null,
@@ -220,11 +236,11 @@
   {
    "entry": "herceg-pdf-fonts",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 590925,
-   "minified": 281357,
-   "gzip": 111057,
-   "brotli": 99550,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 591150,
+   "minified": 281526,
+   "gzip": 111114,
+   "brotli": 99528,
    "chunks": 4,
    "css": null,
    "deferred": null,
@@ -236,11 +252,11 @@
   {
    "entry": "herceg-pdf",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 547229,
-   "minified": 257724,
-   "gzip": 101727,
-   "brotli": 91387,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 547454,
+   "minified": 257893,
+   "gzip": 101791,
+   "brotli": 91484,
    "chunks": 4,
    "css": null,
    "deferred": null,
@@ -252,7 +268,7 @@
   {
    "entry": "herceg-pivot",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
+   "version": "0.0.0 (bd10070c)",
    "raw": 150023,
    "minified": 61917,
    "gzip": 21008,
@@ -265,11 +281,11 @@
   {
    "entry": "herceg-react-line",
    "package": "@herceg/react",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 362825,
-   "minified": 161508,
-   "gzip": 62813,
-   "brotli": 56210,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 362849,
+   "minified": 161507,
+   "gzip": 62808,
+   "brotli": 56078,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -277,18 +293,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 195168,
-    "gzip": 80965
+    "minified": 201824,
+    "gzip": 83850
    }
   },
   {
    "entry": "herceg-scatter",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 404639,
-   "minified": 179312,
-   "gzip": 69978,
-   "brotli": 62305,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 404663,
+   "minified": 179311,
+   "gzip": 69969,
+   "brotli": 62310,
    "chunks": 4,
    "css": null,
    "deferred": {
@@ -296,18 +312,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 193902,
-    "gzip": 80327
+    "minified": 200558,
+    "gzip": 83212
    }
   },
   {
    "entry": "herceg-spec-pdf",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 2033985,
-   "minified": 936444,
-   "gzip": 354540,
-   "brotli": 296293,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 2034210,
+   "minified": 936613,
+   "gzip": 354602,
+   "brotli": 296160,
    "chunks": 6,
    "css": null,
    "deferred": null,
@@ -319,11 +335,11 @@
   {
    "entry": "herceg-svelte-line",
    "package": "@herceg/svelte",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 365391,
-   "minified": 163076,
-   "gzip": 63398,
-   "brotli": 56636,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 365415,
+   "minified": 163075,
+   "gzip": 63391,
+   "brotli": 56624,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -331,18 +347,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 195168,
-    "gzip": 80965
+    "minified": 201824,
+    "gzip": 83850
    }
   },
   {
    "entry": "herceg-vue-line",
    "package": "@herceg/vue",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 365243,
-   "minified": 161841,
-   "gzip": 62917,
-   "brotli": 56193,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 365267,
+   "minified": 161840,
+   "gzip": 62911,
+   "brotli": 56233,
    "chunks": 2,
    "css": null,
    "deferred": {
@@ -350,18 +366,18 @@
     "gzip": 11288
    },
    "lazy": {
-    "minified": 195168,
-    "gzip": 80965
+    "minified": 201824,
+    "gzip": 83850
    }
   },
   {
    "entry": "herceg-web",
    "package": "herceg",
-   "version": "0.0.0 (7c9b7128)",
-   "raw": 1896777,
-   "minified": 864882,
-   "gzip": 327297,
-   "brotli": 270291,
+   "version": "0.0.0 (bd10070c)",
+   "raw": 1896802,
+   "minified": 864881,
+   "gzip": 327292,
+   "brotli": 270208,
    "chunks": 7,
    "css": null,
    "deferred": {
@@ -369,8 +385,8 @@
     "gzip": 9880
    },
    "lazy": {
-    "minified": 178139,
-    "gzip": 74228
+    "minified": 184795,
+    "gzip": 77113
    }
   },
   {
