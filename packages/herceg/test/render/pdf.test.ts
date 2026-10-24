@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { inflateSync } from "node:zlib";
 import { afterAll, describe, expect, it } from "vitest";
 import { category, time } from "../../src/data/column.ts";
+import { col } from "../../src/data/expr.ts";
 import { fromGeoJSON } from "../../src/data/geojson.ts";
 import { table } from "../../src/data/table.ts";
+import { textDrawing } from "../../src/draw/labels.ts";
 import { lineDrawing } from "../../src/draw/line.ts";
 import { rectDrawing } from "../../src/draw/rect.ts";
-import { textDrawing } from "../../src/draw/text.ts";
 import { fontChecksum } from "../../src/fonts/binary.ts";
 import { EMBED_FONTS } from "../../src/fonts/prepared.ts";
 import { parseSfnt } from "../../src/fonts/sfnt.ts";
@@ -553,7 +554,7 @@ describe("renderPdf", () => {
         "50 10 l",
         "90 30 l",
         "60 60 m",
-        "60 60 l",
+        "60.02 60 l",
         "S",
         "Q",
         "q /GS1 gs 0 0 1 rg",
@@ -985,6 +986,33 @@ describe("renderToPDF", () => {
     );
     // Three segments, each one curve (nothing else in the chart is curved).
     expect(content.match(/ c\n/g)).toHaveLength(3);
+  });
+
+  it("cuts style runs where they meet, and carries a dash on across them", () => {
+    const rows = table({ x: [0, 1, 2, 3], y: [0, 2, 1, 3], late: ["n", "n", "y", "y"] });
+    const late = col("late").eq("y");
+    const { content } = readPdf(
+      renderToPDF({
+        width: 300,
+        height: 150,
+        marks: [
+          line(rows, {
+            x: "x",
+            y: "y",
+            dash: ":",
+            // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+            encode: { color: { condition: { when: late, then: "#d62728", otherwise: "#1f77b4" } } },
+          }),
+        ],
+      }),
+    );
+    // Each run leaves out a square past where the other meets it, by the even-odd rule.
+    expect(content.match(/ h W\* n\n/g)).toHaveLength(2);
+    // The second run's dash begins as far into its pattern as the first left off.
+    const phases = [...content.matchAll(/\] ([\d.]+) d/g)].map((m) => Number(m[1]));
+    expect(phases).toHaveLength(2);
+    expect(phases[0]).toBe(0);
+    expect(phases[1]).toBeGreaterThan(0);
   });
 
   it("draws pie slices as cubic curves of at most a quarter turn, on the circle", () => {
@@ -2873,7 +2901,11 @@ it("paints isolated line and area rows with stroke-sized round caps in PDF", () 
     const { content } = readPdf(renderToPDF({ marks: [mark], width: 300, height: 150 }));
     expect(content).toMatch(/4 w/);
     expect(content).toMatch(/1 J/);
-    expect(content.match(/([\d.-]+ [\d.-]+) m\n\1 l/g)).toHaveLength(3);
+    // Each a line too short to see, its caps painting the dot.
+    const dots = [...content.matchAll(/([\d.-]+) ([\d.-]+) m\n([\d.-]+) \2 l/g)].filter(
+      ([, from, , to]) => Math.abs(Number(to) - Number(from)) < 0.05,
+    );
+    expect(dots).toHaveLength(3);
   }
 });
 

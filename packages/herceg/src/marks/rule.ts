@@ -1,5 +1,6 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
 import { ruleDrawing } from "../draw/rule.ts";
+import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
@@ -18,8 +19,8 @@ import type { TextStyle } from "../spec/style.ts";
 import { dashPattern, type TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import {
-  ANNOTATION_PENDING,
   AnnotationData,
+  checkLegend,
   type Label,
   labelOf,
   type PlaceOption,
@@ -33,7 +34,6 @@ import { labelPaint, labelsGeometry, type PlacedLabel } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame, MARK, Mark, MarkKey, RowParts } from "./mark.ts";
 import { frozen, painted } from "./mark.ts";
-import { refusePending } from "./pending.ts";
 
 /** A rule's label: its text, or each row's `field`; where it goes and how it looks. */
 export type RuleLabel<F extends string = string> =
@@ -114,7 +114,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
   readonly #plain: boolean;
 
   constructor(input: RuleSpec, table?: Table) {
-    refusePending(input, "rule", ANNOTATION_PENDING);
+    checkLegend(input, "rule");
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -135,7 +135,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
       typeof spec.label === "string" ||
       (label !== undefined && !label.style && !label.place && !label.format);
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
-    this.featured = format?.number !== undefined || format?.time !== undefined;
+    this.featured =
+      format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
     const vertical = spec.x !== undefined;
     const place = label?.place;
     if (place?.outside && place.attachment === "center")
@@ -168,6 +169,16 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     return [];
   }
 
+  labelEntries(
+    key: MarkKey,
+    locale: string | undefined,
+    rows?: RowParts,
+    pattern?: (format: object, locale: string | undefined, path: string) => Formatter,
+  ) {
+    const data = this.#data;
+    return data.entries(key, locale, rows, data.writer(locale, pattern));
+  }
+
   describe(format: AxisFormat, locale: string | undefined, rows?: RowParts): string | undefined {
     const vertical = this.spec.x !== undefined;
     const place = this.#data.place(vertical ? this.spec.x! : this.spec.y!);
@@ -183,6 +194,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         return Number.isFinite(value) ? `${vertical ? "x" : "y"} ${f(value)}` : undefined;
       },
       rows,
+      format.content,
+      (i) => this.#data.value(place, i),
     );
   }
 
@@ -245,16 +258,21 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     // As the labels are drawn: written by their format, in their boxes, moved by their offset.
     const paint = this.#paint({ theme });
     const write = this.#data.writer(locale, features?.of(this)?.format);
+    const content = features?.of(this)?.content;
+    const at = this.#data.place(this.spec.y);
     let widest = 0;
     this.#data.each(undefined, (i) => {
-      widest = Math.max(widest, measure(this.#data.text(i, locale, write), paint.css));
+      const text = this.#data.text(i, locale, write, content, this.#data.value(at, i));
+      widest = Math.max(widest, measure(text, paint.css));
     });
     const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
     const room = Math.ceil(widest + left + right + (place.offset ?? 0));
     return (place.attachment ?? "end") === "end" ? [0, room] : [room, 0];
   }
 
-  geometry(_series: unknown, frame: Frame, key: MarkKey, rows?: RowParts): Geometry[] {
+  geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
+    // What the legend hides of it goes undrawn.
+    const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { spec } = this;
     const { plot } = frame;
     const data = this.#data;
@@ -267,6 +285,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     const dash = dashPattern(spec.dash, strokeWidth) ?? [4, 4];
     const label = data.label;
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
+    const content = frame.features?.of(this)?.content;
     const out: Geometry[] = [];
     const placed: PlacedLabel[] = [];
     const paint = this.#paint(frame);
@@ -289,7 +308,9 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         if (p === undefined || q === undefined) return;
         [a, b] = [Math.min(p, q), Math.max(p, q)];
       }
-      const text = label ? data.text(i, frame.locale, write) : undefined;
+      const text = label
+        ? data.text(i, frame.locale, write, content, data.value(place, i))
+        : undefined;
       const rule: RuleGeometry = {
         kind: "rule",
         draw: ruleDrawing,
@@ -462,8 +483,7 @@ export function rule<S extends Schema>(
       ],
     ),
   } as unknown as RuleSpec;
-  const field = typeof spec.label === "object" ? spec.label.field : undefined;
-  if (table?.name !== undefined && readsTable([spec.x, spec.y, ...(spec.span ?? [])], field))
+  if (table?.name !== undefined && readsTable([spec.x, spec.y, ...(spec.span ?? [])], spec.label))
     spec.data = table.name;
   return new RuleMark(spec, table as unknown as Table | undefined);
 }

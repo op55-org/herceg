@@ -1165,7 +1165,7 @@ describe("<Chart> that cannot draw", () => {
       defineComponent({
         components,
         setup: () => ({ rows }),
-        template: `<Chart error-mode="throw" :height="200"><Line :data="rows" x="t" y="v" series="g" color="kind" /></Chart>`,
+        template: `<Chart error-mode="throw" :height="200"><Line :data="rows" x="t" y="v" series="g" :style="{ by: { field: 'kind', map: {} } }" /></Chart>`,
       }),
     );
     app.config.errorHandler = (error) => errors.push(error);

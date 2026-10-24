@@ -1,8 +1,8 @@
 import { type Hierarchy, pathOf } from "../data/hierarchy.ts";
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { n } from "../draw/markup.ts";
 import { rectDrawing } from "../draw/rect.ts";
-import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { labelFor } from "../layout/text.ts";
 import { layoutTreemap } from "../layout/treemap.ts";

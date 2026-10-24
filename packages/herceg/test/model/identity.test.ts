@@ -1,7 +1,7 @@
 // What series stand for (model/identity.ts): series and slices standing for
-// one value of one field of one table, or for one value field, share a
-// color, a legend entry, visibility, and dodged places, in every mark and
-// panel; unrelated tables keep apart unless a named scale joins them.
+// one value of a field of one name, or for one value field of one table,
+// share a color, a legend entry, visibility, and dodged places, in every
+// mark and panel; named scales join or keep apart on purpose.
 import { describe, expect, it } from "vitest";
 import { derive } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
@@ -15,7 +15,7 @@ import { geopoint } from "../../src/marks/geopoint.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
-import { identityKey, keyPrefix } from "../../src/model/identity.ts";
+import { identityKey, keyPrefix, type TableName } from "../../src/model/identity.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -56,7 +56,7 @@ const summary = table(
 );
 const bars = () => bar(summary, { x: "day", y: "mean", series: "sex" });
 const intervals = () => errorBar(summary, { x: "day", y1: "low", y2: "high", series: "sex" });
-const sex = (value: string) => identityKey({ table: "summary", field: "sex" }, value);
+const sex = (value: string) => identityKey({ field: "sex" }, value);
 
 describe("identity", () => {
   it("gives series of one field's value one color and one legend entry across marks", () => {
@@ -70,7 +70,7 @@ describe("identity", () => {
     const entries = model.legendEntries();
     expect(entries.map(({ label }) => label)).toEqual(["f", "m"]);
     expect(entries.map(({ key }) => key)).toEqual([sex("f"), sex("m")]);
-    expect(entries[0]!.key).toBe('{"table":"summary","field":"sex","value":"f"}');
+    expect(entries[0]!.key).toBe('{"field":"sex","value":"f"}');
     expect(legendOf(scene).map(({ label }) => label)).toEqual(["f", "m"]);
     // Inspection still reads each mark's own series.
     const panel = scene.panels[0]!;
@@ -78,38 +78,48 @@ describe("identity", () => {
     expect(inspection.points.map(({ label }) => label)).toEqual(["f", "m", "f", "m"]);
   });
 
-  it("keeps unrelated tables that share a field's name apart, unless a named scale joins them", () => {
+  it("gives a field's name one mapping across tables, unless named scales keep them apart", () => {
     const other = table({
       day: ["thu", "thu", "fri", "fri"],
-      sex: ["f", "m", "f", "m"],
+      sex: ["m", "f", "m", "f"],
+      mean: [1, 2, 3, 4],
       low: [1, 2, 3, 4],
       high: [3, 4, 5, 6],
     });
-    const apart = build({
+    const joined = build({
       marks: [bars(), errorBar(other, { x: "day", y1: "low", y2: "high", series: "sex" })],
     });
-    apart.scene(estimateText);
-    expect(apart.legendEntries().map(({ label }) => label)).toEqual(["f", "m", "f", "m"]);
-    expect(new Set(apart.legendEntries().map(({ color }) => color)).size).toBe(4);
-    const joined = build({
-      scales: { sex: { type: "ordinal" } },
+    const scene = joined.scene(estimateText);
+    expect(joined.legendEntries().map(({ key }) => key)).toEqual([sex("f"), sex("m")]);
+    // The first table's dictionary gives the values their places.
+    const fills = kinds<RectGeometry>(scene, "rect").map(({ fill }) => fill);
+    expect(kinds<SegmentGeometry>(scene, "segments").map(({ stroke }) => stroke)).toEqual([
+      fills[1],
+      fills[0],
+    ]);
+    const apart = build({
+      scales: { measured: { type: "ordinal" }, modeled: { type: "ordinal" } },
       marks: [
         bar(summary, {
           x: "day",
           y: "mean",
           series: "sex",
-          encode: { color: { series: true, scale: "sex" } },
+          encode: { color: { series: true, scale: "measured" } },
         }),
-        errorBar(other, { x: "day", y1: "low", y2: "high", series: "sex" }),
+        bar(other, {
+          x: "day",
+          y: "mean",
+          series: "sex",
+          encode: { color: { series: true, scale: "modeled" } },
+        }),
       ],
     });
-    joined.scene(estimateText);
-    // Only the marks naming the scale join it.
-    expect(joined.legendEntries().map(({ key }) => key)).toEqual([
-      identityKey({ scale: "sex" }, "f"),
-      identityKey({ scale: "sex" }, "m"),
-      expect.stringContaining('"field":"sex","value":"f"'),
-      expect.stringContaining('"field":"sex","value":"m"'),
+    apart.scene(estimateText);
+    expect(apart.legendEntries().map(({ key }) => key)).toEqual([
+      identityKey({ scale: "measured" }, "f"),
+      identityKey({ scale: "measured" }, "m"),
+      identityKey({ scale: "modeled" }, "m"),
+      identityKey({ scale: "modeled" }, "f"),
     ]);
   });
 
@@ -320,7 +330,7 @@ describe("identity", () => {
     });
     model.scene(estimateText);
     const eu = model.legendEntries().find(({ label }) => label === "eu")!;
-    expect(eu.key).toBe(identityKey({ table: { mark: 0 }, field: "region" }, "eu"));
+    expect(eu.key).toBe(identityKey({ field: "region" }, "eu"));
     model.hidden.add(eu.key);
     model.scene(estimateText);
     // Service b stands on the zero line, not on the hidden a's values.
@@ -517,49 +527,39 @@ describe("identity", () => {
     ).toEqual(["b", "b"]);
   });
 
-  it("names tables by their marks' places, alike in every chart, and keeps the names", () => {
-    const rows = () => table({ t: [0, 1], v: [1, 2], region: ["eu", "us"] });
-    const lineOf = (data: ReturnType<typeof rows>) =>
-      line(data, { x: "t", y: "v", series: "region" });
+  it("names tables of value fields by their marks' places, alike in every chart, and keeps the names", () => {
+    const rows = () => table({ t: [0, 1], v: [1, 2] });
+    const lineOf = (data: ReturnType<typeof rows>) => line(data, { x: "t", y: "v" });
+    const v = (name: TableName) => identityKey({ table: name }, "v");
     // A chart made before takes nothing from this one's names.
     build({ marks: [lineOf(rows())] }).scene(estimateText);
     const [a, b] = [rows(), rows()];
     const model = build({ marks: [lineOf(a), lineOf(b)] });
     model.scene(estimateText);
     const keys = () => model.legendEntries().map(({ key }) => key);
-    expect(keys()).toEqual(
-      [{ mark: 0 }, { mark: 1 }].flatMap((name) =>
-        ["eu", "us"].map((value) => identityKey({ table: name, field: "region" }, value)),
-      ),
-    );
+    expect(keys()).toEqual([v({ mark: 0 }), v({ mark: 1 })]);
     const colorOf = (key: string) => model.legendEntries().find((e) => e.key === key)!.color;
-    const bEu = keys()[2]!;
-    const color = colorOf(bEu);
-    model.hidden.add(keys()[0]!);
-    // Without the first mark, the second's table keeps its name: its colors,
-    // and nothing of the first's hidden values.
-    model.update({ marks: [lineOf(b)] });
+    const color = colorOf(v({ mark: 1 }));
+    model.hidden.add(v({ mark: 0 }));
+    // Without the first mark, the second's table keeps its name: its color,
+    // and nothing of the first's hidden series.
+    model.update({ marks: [lineOf(b), lineOf(rows())] });
     model.scene(estimateText);
-    expect(keys()[0]).toBe(bEu);
-    expect(colorOf(bEu)).toBe(color);
-    expect(model.hidden.has(bEu)).toBe(false);
+    expect(keys()[0]).toBe(v({ mark: 1 }));
+    expect(colorOf(v({ mark: 1 }))).toBe(color);
+    expect(model.hidden.has(v({ mark: 1 }))).toBe(false);
     // A new table read in that place, as a framework rendering again gives: the same names.
-    const kept = rows();
-    model.update({ marks: [lineOf(kept)] });
+    model.update({ marks: [lineOf(rows()), lineOf(rows())] });
     model.scene(estimateText);
-    const keptEu = identityKey({ table: { mark: 0 }, field: "region" }, "eu");
-    expect(keys()[0]).toBe(keptEu);
+    expect(keys()).toEqual([v({ mark: 0 }), v({ mark: 1 })]);
     // A table's own name is never one the chart gives, whatever it reads.
-    const own = table({ t: [0], v: [1], region: ["eu"] }, { name: "#0" });
+    const kept = rows();
+    const own = table({ t: [0], v: [1] }, { name: "#0" });
     model.update({ marks: [lineOf(own as never), lineOf(kept)] });
     model.scene(estimateText);
-    expect(keys()).toEqual([
-      identityKey({ table: "#0", field: "region" }, "eu"),
-      keptEu,
-      identityKey({ table: { mark: 0 }, field: "region" }, "us"),
-    ]);
+    expect(keys()).toEqual([v("#0"), v({ mark: 1 })]);
     // Two tables of one name are refused, and the refused configuration names no table.
-    const named = (v: number) => table({ t: [0], v: [v], region: ["eu"] }, { name: "same" });
+    const named = (value: number) => table({ t: [0], v: [value] }, { name: "same" });
     expect(() => build({ marks: [lineOf(named(1) as never), lineOf(named(2) as never)] })).toThrow(
       'marks[1]: its table is named "same", as another of the chart\'s tables is; give each table a name of its own',
     );
@@ -571,16 +571,13 @@ describe("identity", () => {
     ).toThrow(/named "same"/);
     model.update({ marks: [lineOf(later), lineOf(fresh)] });
     model.scene(estimateText);
-    expect(keys().filter((_, i) => i % 2 === 0)).toEqual([
-      keptEu,
-      identityKey({ table: { mark: 1 }, field: "region" }, "eu"),
-    ]);
+    expect(keys()).toEqual([v({ mark: 0 }), v({ mark: 1 })]);
   });
 
   it("names a table read again anew once another took its place's name", () => {
-    const rows = () => table({ t: [0, 1], v: [1, 2], region: ["a", "b"] });
+    const rows = () => table({ t: [0, 1], v: [1, 2] });
     const lineOf = (data: ReturnType<typeof rows>, id: string) =>
-      line(data, { x: "t", y: "v", series: "region", id });
+      line(data, { x: "t", y: "v", id });
     const [first, then] = [rows(), rows()];
     const model = build({ marks: [lineOf(first, "live")] });
     model.scene(estimateText);
@@ -589,17 +586,15 @@ describe("identity", () => {
     const [a] = model.legendEntries();
     model.hidden.add(a!.key);
     // The first table, read again before the one that took its place, keeps
-    // none of what that one stands for: its key, color, and hidden values.
+    // none of what that one stands for: its key, color, and hidden series.
     model.update({ marks: [lineOf(first, "old"), lineOf(then, "live")] });
     model.scene(estimateText);
     const entries = model.legendEntries();
     expect(entries.map(({ key }) => key)).toEqual([
-      identityKey({ table: { mark: "old" }, field: "region" }, "a"),
-      identityKey({ table: { mark: "old" }, field: "region" }, "b"),
+      identityKey({ table: { mark: "old" } }, "v"),
       a!.key,
-      identityKey({ table: { mark: "live" }, field: "region" }, "b"),
     ]);
-    expect(entries[2]!.color).toBe(a!.color);
+    expect(entries[1]!.color).toBe(a!.color);
     expect(model.hidden.has(a!.key)).toBe(true);
     expect(model.hidden.has(entries[0]!.key)).toBe(false);
   });
@@ -688,7 +683,7 @@ describe("identity", () => {
     });
     model.scene(estimateText);
     const scopes = [...model.scopes()];
-    expect(scopes).toContain(keyPrefix(identityKey({ table: { mark: 0 }, field: "region" }, "eu")));
+    expect(scopes).toContain(keyPrefix(identityKey({ field: "region" }, "eu")));
     expect(scopes).toContain(keyPrefix(identityKey({ scale: "groups" }, "a")));
   });
 
@@ -809,10 +804,13 @@ describe("identity", () => {
   });
 
   it("keys are JSON, scope first, which their prefix names", () => {
-    const key = identityKey({ table: "data", field: "region" }, 'e"u');
-    expect(key).toBe('{"table":"data","field":"region","value":"e\\"u"}');
-    expect(JSON.parse(key)).toEqual({ table: "data", field: "region", value: 'e"u' });
-    expect(keyPrefix(key)).toBe('{"table":"data","field":"region","value":');
+    const key = identityKey({ field: "region" }, 'e"u');
+    expect(key).toBe('{"field":"region","value":"e\\"u"}');
+    expect(JSON.parse(key)).toEqual({ field: "region", value: 'e"u' });
+    expect(keyPrefix(key)).toBe('{"field":"region","value":');
+    expect(keyPrefix(identityKey({ table: { mark: 0 } }, "v"))).toBe(
+      '{"table":{"mark":0},"value":',
+    );
     expect(keyPrefix(JSON.stringify([0, "f"]))).toBeUndefined();
     expect(keyPrefix('{"mark":0,"group":"a"}')).toBeUndefined();
   });
@@ -826,10 +824,15 @@ describe("identity in specs", () => {
         columns: { day: ["thu", "fri"], sex: ["f", "m"], low: [1, 3], high: [3, 5] },
         ...(origin !== undefined && { origin }),
       },
+      fits: {
+        columns: { day: ["thu", "fri"], mean: [2, 4] },
+        ...(origin !== undefined && { origin }),
+      },
     },
     marks: [
       { type: "bar", data: "summary", x: "day", y: "mean", series: "sex" },
       { type: "errorbar", data: "intervals", x: "day", y1: "low", y2: "high", series: "sex" },
+      { type: "line", data: "fits", x: "day", y: "mean" },
     ],
   });
   const entries = (data: object) => {
@@ -838,10 +841,18 @@ describe("identity in specs", () => {
     return model.legendEntries().map(({ key }) => key);
   };
 
-  it("joins a table made from another (statistics computed elsewhere) by its origin", () => {
-    expect(entries(spec())).toHaveLength(4);
-    const sexOf = (value: string) => identityKey({ table: "summary", field: "sex" }, value);
-    expect(entries(spec("summary"))).toEqual([sexOf("f"), sexOf("m")]);
+  it("joins value fields of a table made from another (statistics computed elsewhere) by its origin", () => {
+    const sexOf = (value: string) => identityKey({ field: "sex" }, value);
+    expect(entries(spec())).toEqual([
+      sexOf("f"),
+      sexOf("m"),
+      identityKey({ table: "fits" }, "mean"),
+    ]);
+    expect(entries(spec("summary"))).toEqual([
+      sexOf("f"),
+      sexOf("m"),
+      identityKey({ table: "summary" }, "mean"),
+    ]);
   });
 
   it("refuses an origin of no table, of itself, or of a cycle", () => {

@@ -549,6 +549,27 @@ describe("level of detail", () => {
     }
   });
 
+  it("keep straight segments straight in curves drawn along y", () => {
+    // Rows 0 and 1 stand at one position: the segment between them is straight, the next curved.
+    const data = table({ t: [0, 0, 1], lo: [1, 1, 1], hi: [2, 3, 4] });
+    for (const mark of [
+      line(data, { orient: "y", y: "t", x: "hi", curve: "monotone" }),
+      area(data, { orient: "y", y: "t", x1: "lo", x2: "hi", curve: "monotone" }),
+    ]) {
+      const config: ChartConfig = {
+        x: { domain: [0, 5], nice: false },
+        y: { domain: [0, 1], nice: false },
+        marks: [mark],
+      };
+      const g = sceneOf(config).scene.panels[0]!.marks[0] as LineGeometry | AreaGeometry;
+      const path = g.kind === "line" ? g.path : g.upper;
+      expect(path.curved).toBe(true);
+      expect(path.controls[4]).toBeNaN();
+      expect(path.controls[8]).not.toBeNaN();
+      expect(renderToSVG({ ...config, width: 600, height: 300 })).not.toContain("NaN");
+    }
+  });
+
   it("shares each curved stack boundary between the layers on either side", () => {
     const data = table({ x: [0, 1, 2, 3], a: [0, 1, 0, 1], b: [1, 1, Number.NaN, 1] });
     const { scene } = sceneOf({

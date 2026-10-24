@@ -15,7 +15,7 @@ import {
   underNode,
 } from "../data/hierarchy.ts";
 import type { Table } from "../data/table.ts";
-import { textDrawing } from "../draw/text.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { formatNumber } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import type { LegendEntry } from "../model/legend.ts";

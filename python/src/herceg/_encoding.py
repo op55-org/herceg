@@ -204,7 +204,9 @@ class Encodings:
     fill; ``fill`` and ``stroke`` set those paints themselves and win over
     it. Lines take color, stroke, dash, stroke_width, and opacity; bars
     color, fill, stroke, stroke_width, and opacity; areas color, fill,
-    stroke, and opacity."""
+    stroke, and opacity; points color, fill, symbol, size (an area in
+    square pixels), opacity (their fill's), and a constant stroke and
+    stroke_width."""
 
     color: ChannelOption | None = None
     fill: ChannelOption | None = None
@@ -816,6 +818,12 @@ class SeriesLabels:
             _choice(self.edge, _EDGES, "SeriesLabels edge")
         content_spec(self.content, "SeriesLabels content")
         self.place = _built(self.place, LabelPlace, "SeriesLabels place")
+        for name in ("attachment", "side"):
+            if getattr(self.place, name, None) is not None:
+                raise ValueError(
+                    f"SeriesLabels place.{name}: labels go where they follow their series; "
+                    f"drop {name}"
+                )
         self.style = _built(self.style, TextStyle, "SeriesLabels style")
 
     def _spec(self) -> dict[str, Any]:

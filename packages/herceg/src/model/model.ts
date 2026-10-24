@@ -60,7 +60,6 @@ import {
   type Scene,
   tickLabelGap,
 } from "../scene/scene.ts";
-import { ChartError } from "../spec/errors.ts";
 import type { InsidePlace, Place, Side, SidePlace } from "../spec/place.ts";
 import type { AnimationSpec, CameraSpec, ChartSpec, ScaleScope } from "../spec/spec.ts";
 import { insets, type TextPaint } from "../style/style.ts";
@@ -98,7 +97,7 @@ import {
   needsGuides,
   type OwnScales,
 } from "./guides.ts";
-import { identityOf, keyPrefix, prefixOf, type TableName } from "./identity.ts";
+import { identityOf, keyPrefix, prefixOf, simpleNames, type TableName } from "./identity.ts";
 import type { ItemPanel, ItemViews } from "./item-views.ts";
 import {
   EDGE,
@@ -395,22 +394,19 @@ export class ChartModel {
   #slots = new Map<string, number>();
   /**
    * The category fields palette slots go by, by their identity keys'
-   * prefix: their root table's dictionary, and how much of it has slots.
+   * prefix: each contributing table's dictionary, in the order marks read
+   * them, and how much of it has slots.
    */
-  #dictionaries = new Map<string, SlotField>();
+  #dictionaries = new Map<string, SlotField[]>();
   /**
    * What each of the configuration's marks' series stand for (see
    * model/identity.ts): the prefix of their identity keys, by index.
    */
   #scopes: (string | undefined)[] = [];
-  /**
-   * What identity keys name unnamed tables by (see `#configure`), with the
-   * count of the name's giving: a table keeps its name until another is given it.
-   */
-  readonly #names = new WeakMap<Table, { readonly name: TableName; readonly given: number }>();
-  /** The last giving of each name in `#names`, by its JSON. */
-  readonly #given = new Map<string, number>();
-  #gives = 0;
+  /** The names the configuration gave tables without names of their own (see model/identity.ts). */
+  #unnamed: ReadonlyMap<Table, TableName> | undefined;
+  /** Whether two of its tables would take one name, which the feature compiler settles. */
+  #clash = false;
 
   /**
    * `page` resolves themes that follow the page: "auto" and CSS variables.
@@ -430,14 +426,6 @@ export class ChartModel {
     this.#configure(config, page);
   }
 
-  /** The name `table` keeps from an earlier configuration, unless another table was given it since. */
-  #kept(table: Table): TableName | undefined {
-    const kept = this.#names.get(table);
-    return kept && this.#given.get(JSON.stringify(kept.name)) === kept.given
-      ? kept.name
-      : undefined;
-  }
-
   /**
    * Takes `config`, read as the model reads it (`scales` merged into the
    * short forms, and as the guide compiler plans it, when the chart has
@@ -454,89 +442,67 @@ export class ChartModel {
     const compiled = this.#guides?.compile(config);
     const read = compiled?.config ?? config;
     const [marks, layouts, positions] = validate(read);
-    // Tables' names in identity keys (see model/identity.ts): their own, or
-    // one the chart gives an unnamed table, the place of the first mark
-    // reading it (`{ mark: 2 }`), which it keeps until a new table read in
-    // that place, once no table there has it, is given it. The tables every
-    // mark reads its series' and colors' fields from keep theirs before new
-    // ones are named.
-    const taken = new Set<string>();
-    const named = new Map<Table, TableName>();
-    const sources = read.marks.map((mark) => {
+    // What series stand for (see model/identity.ts): a category field's
+    // values, by its name, whose slots follow every table reading it, in the
+    // order marks read them; value fields, by their tables' names.
+    const dictionaries = new Map<string, SlotField[]>();
+    const fieldScope = (table: Table, field: string, at: number) => {
+      const prefix = prefixOf({ field });
+      if (table.has(field) && table.kind(field) === "category") {
+        const fields = dictionaries.get(prefix) ?? [];
+        const found = fields.find((f) => f.table === table);
+        // What had slots keeps them: a table's dictionary is followed on.
+        if (!found)
+          fields.push({
+            ...(this.#dictionaries.get(prefix)?.find((f) => f.table === table) ?? {
+              table,
+              field,
+              count: 0,
+            }),
+            at,
+          });
+        else found.at = Math.min(found.at, at);
+        dictionaries.set(prefix, fields);
+      }
+      return prefix;
+    };
+    const tables = read.marks.map((mark) => {
       const { identity } = mark as Mark;
       // A layout mark's items may stand for values of another of its tables (a network's nodes).
       const table = (identity as { table?: Table } | undefined)?.table ?? (mark as Mark).table;
-      if (!identity || !table) return undefined;
-      return rootOf(table, identity.field === undefined ? identity.values : [identity.field]);
+      return identity && identity.field === undefined && table
+        ? rootOf(table, identity.values)
+        : undefined;
     });
-    const names = (root: Table, place: MarkKey = taken.size, index?: number): TableName => {
-      let name = named.get(root);
-      if (name !== undefined) return name;
-      name = root.name ?? this.#kept(root);
-      if (name === undefined || taken.has(JSON.stringify(name))) {
-        if (root.name !== undefined)
-          throw new ChartError({
-            code: "invalid-option",
-            path: `marks[${index}]`,
-            message: `marks[${index}]: its table is named "${root.name}", as another of the chart's tables is; give each table a name of its own`,
-          });
-        let n = 0;
-        name = { mark: place };
-        while (taken.has(JSON.stringify(name))) name = { mark: place, n: ++n };
-      }
-      taken.add(JSON.stringify(name));
-      named.set(root, name);
-      return name;
-    };
-    read.marks.forEach((mark, index) => {
-      const { table, spec } = mark as Mark & {
-        spec: { color?: unknown; encode?: Record<string, { field?: unknown } | undefined> };
-      };
-      const root = sources[index];
-      if (root && (root.name ?? this.#kept(root))) names(root, undefined, index);
-      for (const field of [
-        spec.color,
-        spec.encode?.color?.field,
-        spec.encode?.stroke?.field,
-        spec.encode?.fill?.field,
-      ])
-        if (table && typeof field === "string" && table.has(field)) {
-          const from = rootOf(table, [field]);
-          if (from.name ?? this.#kept(from)) names(from, undefined, index);
-        }
-    });
-    const dictionaries = new Map<string, SlotField>();
-    // A category field's identity keys, whose slots go by its dictionary.
-    const fieldScope = (root: Table, field: string, place?: MarkKey, index?: number) => {
-      const prefix = prefixOf({ table: names(root, place, index), field });
-      // What had slots keeps them: a table's dictionary is followed on.
-      const kept = this.#dictionaries.get(prefix);
-      if (root.has(field) && root.kind(field) === "category")
-        dictionaries.set(prefix, kept?.table === root ? kept : { table: root, field, count: 0 });
-      return prefix;
-    };
+    const places = read.marks.map((mark, index) => mark.spec.id ?? index);
+    // Where two would take one name, the feature compiler names them.
+    const named =
+      simpleNames(tables, places, this.#unnamed) ??
+      this.#features?.names(tables, places, this.#unnamed);
     const scopes = read.marks.map((mark, index) => {
-      const root = sources[index];
-      const { identity } = mark as Mark;
-      if (!root || !identity) return undefined;
-      const place = mark.spec.id ?? index;
+      const { identity, table } = mark as Mark & { identity?: { table?: Table } };
+      if (!identity) return undefined;
+      const name = named?.[index];
       return identity.field === undefined
-        ? prefixOf({ table: names(root, place, index) })
-        : fieldScope(root, identity.field, place, index);
+        ? name && prefixOf({ table: name })
+        : fieldScope(identity.table ?? table!, identity.field, index);
     });
     const featured = this.#features?.compile(read, marks, this.#featured, {
       scopes: positions.map((i) => scopes[i]),
       positions,
-      field: (table, field) => fieldScope(rootOf(table, [field]), field),
+      field: fieldScope,
     });
+    // Tables give their values slots in the order marks read them.
+    for (const fields of dictionaries.values()) fields.sort((a, b) => a.at - b.at);
     const theme = resolveTheme(read.theme, page);
     // Nothing is kept of a configuration refused, so the last scene stays valid.
-    for (const [table, name] of named)
-      if (typeof name === "object" && name !== this.#kept(table)) {
-        const given = ++this.#gives;
-        this.#given.set(JSON.stringify(name), given);
-        this.#names.set(table, { name, given });
-      }
+    if (named) {
+      const unnamed = new Map<Table, TableName>();
+      for (const [i, table] of tables.entries())
+        if (table && table.name === undefined) unnamed.set(table, named[i]!);
+      this.#unnamed = unnamed;
+    }
+    this.#clash = !named;
     this.#source = source;
     this.#compiled = compiled;
     [this.#marks, this.#layouts, this.#positions, this.#featured, this.#scopes] = [
@@ -560,10 +526,14 @@ export class ChartModel {
   /** Which of the guide compiler and the feature compiler the configuration needs and the model lacks. */
   lacks(): [boolean, boolean] {
     const config = this.#source;
-    // Panels' own visibility shows on the chart's legend, which the guide compiler lists.
+    // Panels' own visibility, and marks hidden whole or rows by value, show
+    // on legends as the guide compiler lists them.
     return [
-      !this.#guides && (needsGuides(config) || this.hidden.panels.size > 0),
-      !this.#features && needsFeatures(config),
+      !this.#guides &&
+        (needsGuides(config) ||
+          this.hidden.panels.size > 0 ||
+          [...this.hidden].some((key) => key.startsWith('{"mark":'))),
+      !this.#features && (needsFeatures(config) || this.#clash),
     ];
   }
 
@@ -831,14 +801,14 @@ export class ChartModel {
   /** The palette slot of an identity (or series) key, given the first time it is asked for. */
   #slot = (key: string): number => {
     if (!this.#slots.has(key)) {
-      // A category field's values take their slots in its dictionary's
-      // order, shown or not, the first time one asks, so each has one
-      // color whatever the data, a view, or a facet shows of them, and
-      // whether its color splits series or not; values added later come
-      // after. Fields asking for none (marks of their own colors) take none.
+      // A category field's values take their slots in its dictionaries'
+      // order (each table's reading it, as marks read them), shown or not,
+      // the first time one asks, so each has one color whatever the data, a
+      // view, or a facet shows of them, and whether its color splits series
+      // or not; values added later come after. Fields asking for none (marks
+      // of their own colors) take none.
       const prefix = keyPrefix(key) ?? "";
-      const field = this.#dictionaries.get(prefix);
-      if (field) {
+      for (const field of this.#dictionaries.get(prefix) ?? []) {
         const { dictionary, revision } = field.table.categories(field.field as never);
         // A dictionary grows at its end, so only what it gained since
         // needs slots, unless a rolling window compacted it.
@@ -989,7 +959,7 @@ export class ChartModel {
     const value = scope && (this.#config.marks[index] as LayoutMark).identity?.read(key);
     if (value === undefined) return this.#palette(key);
     // A declared color scale colors items too, as it does every mark's series.
-    const declared = this.#featured?.items;
+    const declared = this.#featured?.items?.(this.#config.marks[index] as Mark);
     const identity = identityOf(declared?.prefix ?? scope!, value);
     this.hidden.join(key, identity);
     return declared?.color(value) ?? this.#palette(identity);
@@ -2392,6 +2362,7 @@ export class ChartModel {
         hidden: panelHidden,
         groupSeries: groupsIn(panelHidden),
         owner: this,
+        panel: key,
         scene,
         clouds,
         measure,
@@ -2430,7 +2401,11 @@ export class ChartModel {
       const geometry = panelMarks.flatMap(({ mark, series, rows }, index) => {
         if (members && !members[index]) return [];
         const id = mark.spec.id ?? this.#positions[index]!;
-        const drawn = paintedAs(mark, draw(mark, series, frameOf(mark), id, rows));
+        const own = frameOf(mark);
+        const made = draw(mark, series, own, id, rows);
+        // Labels following series, placed once their series are drawn here.
+        const labels = this.#featured?.of(mark)?.labels?.(own);
+        const drawn = paintedAs(mark, labels ? [...made, ...labels] : made);
         // What labels placed as they are drawn took here, asked before the next panel draws them.
         if (rooms && mark.roomPlaced)
           rooms.set(`${key}\n${id}`, mark.room!(measure, theme, config.locale, this.#featured));
@@ -2737,8 +2712,11 @@ export class ChartModel {
     const requests: TrackRequest[] = [];
     if (title) requests.push({ key: "title", side: titleSide, size: titleHeight, gap: 8 });
     // Legends beside one subplot take room beside it (see `PanelPlacement`);
-    // a facet's or one panel's sides are the chart's.
+    // a facet's or one panel's sides are the chart's. Those `guides` lists
+    // stack nearest the plots in its order, the automatic legend (first)
+    // outside them.
     const beside: Furniture["beside"] = [];
+    const listed: TrackRequest[] = [];
     for (const { key, place, measured } of legends)
       if (measured && "side" in place) {
         if (place.scope === "panel") {
@@ -2750,13 +2728,14 @@ export class ChartModel {
           continue;
         }
         const along = across(place.side);
-        requests.push({
+        (key === "legend" ? requests : listed).push({
           key,
           side: place.side,
           size: along ? measured.height : measured.width,
           gap: (along || auto ? 8 : 16) + (place.offset ?? 0),
         });
       }
+    requests.push(...listed.reverse());
     // Marks' labels outside the plots (rules' names, labels following
     // series) stand innermost, beside the y axes, in tracks that only grow
     // while the chart's size and settings stay, as margins do, so labels
@@ -3074,6 +3053,7 @@ export class ChartModel {
       x: last?.formatX ?? fallback,
       y: last?.axisOf(mark).formatY ?? fallback,
       value: last?.formatValue ?? fallback,
+      content: mark && this.#featured?.of(mark)?.content,
     };
   }
 
@@ -3354,10 +3334,12 @@ function oriented(
   return domain && domain[0] > domain[1] ? [hi, lo] : [lo, hi];
 }
 
-/** A category field whose values take palette slots in its dictionary's order (see `ChartModel#slot`). */
+/** A table's category field whose values take palette slots in its dictionary's order (see `ChartModel#slot`). */
 interface SlotField {
   table: Table;
   field: string;
+  /** The index of the first mark reading it. */
+  at: number;
   /** The dictionary slots were last taken from, how much of it, and its revision then. */
   of?: readonly string[];
   count: number;

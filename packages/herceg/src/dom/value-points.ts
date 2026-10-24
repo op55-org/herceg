@@ -19,7 +19,8 @@ export interface ShownPoints {
   generation: number;
   radius: number;
   radii: Float32Array | undefined;
-  tones: Uint8ClampedArray | undefined;
+  /** Indexes into `palette`: bytes, or floats for more colors than bytes hold. */
+  tones: Uint8ClampedArray | Float32Array | undefined;
   palette: readonly string[] | undefined;
   /** Tones are a category field's colors, which change at once, not along a ramp. */
   categorical: boolean;
@@ -79,7 +80,7 @@ export interface MovingPoints {
   to: Float32Array;
   /** Before and after per point, side by side. */
   radii: Float32Array | undefined;
-  tones: Uint8ClampedArray | undefined;
+  tones: Float32Array | undefined;
   opacities: Float32Array | undefined;
   /** What a frame draws: centers, and radii, colors, opacities, and shapes where they vary. */
   out: Pick<PointGeometry, "coords" | "radii" | "colors" | "opacities" | "symbols">;
@@ -136,7 +137,7 @@ export function movePoints(
   const to = new Float32Array(count * 2);
   // Points that come or go change size, whether or not their sizes are encoded.
   const radii = next.radii || enters > 0 || exits > 0 ? new Float32Array(count * 2) : undefined;
-  const tones = next.tones && new Uint8ClampedArray(count * 2);
+  const tones = next.tones && new Float32Array(count * 2);
   const opacities = next.opacities && new Float32Array(count * 2);
   const symbols = next.symbols && new Uint8ClampedArray(count);
   const radiusOf = (points: ShownPoints, i: number) => points.radii?.[i] ?? points.radius;
@@ -201,7 +202,7 @@ export function movePoints(
     coords: new Float32Array(count * 2),
     radii: radii && new Float32Array(count),
     colors: tones && {
-      index: new Uint8ClampedArray(count),
+      index: new Float32Array(count),
       palette: next.palette!,
       ...(next.categorical && { categorical: true as const }),
     },

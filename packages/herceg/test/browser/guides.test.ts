@@ -104,7 +104,7 @@ describe("legends with settings in the browser", () => {
     await chart.loading;
     expect(buttons().map((b) => b.textContent)).toEqual(["North", "South"]);
     buttons()[0]!.click();
-    expect(chart.getHiddenKeys()).toEqual(['{"table":"sites","field":"site","value":"North"}']);
+    expect(chart.getHiddenKeys()).toEqual(['{"field":"site","value":"North"}']);
     expect(host.querySelectorAll("svg path[stroke]").length).toBeGreaterThan(0);
     buttons()[0]!.click();
     expect(chart.getHiddenKeys()).toHaveLength(0);

@@ -26,7 +26,6 @@
 import { compileExpression, type Expression } from "../data/expression.ts";
 import type { DataSelection, SelectionStore } from "../data/selection.ts";
 import type { Table } from "../data/table.ts";
-import { lineDrawing } from "../draw/line.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { unmappable } from "../lod/m4.ts";
 import { shareSquares } from "../marks/cell-selection.ts";
@@ -50,6 +49,7 @@ import {
   type PointGeometry,
   type RectGeometry,
 } from "../scene/scene.ts";
+import type { DotLook } from "./features.ts";
 
 export { DIM };
 
@@ -102,9 +102,6 @@ function within<V>(cache: WeakMap<Uint8Array, WeakMap<object, V>>, selected: Uin
 }
 /** Dimmed copies of drawings, made once per drawing. */
 const dimmedDrawings = new WeakMap<Drawing<Geometry>, Drawing<Geometry>>();
-/** Names clip paths of highlighted runs in SVG, unique in a page. */
-let clips = 0;
-
 const ON = "\u0001on";
 const OFF = "\u0001off";
 
@@ -398,145 +395,166 @@ export class Highlighter {
     const found = new Map<Series, Runs>();
     const runs = (s: Series) =>
       found.get(s) ?? found.set(s, runsOf(s, selected, frame, low, along)).get(s)!;
-    const spansFor = new Map<Geometry, number[] | undefined>();
+    // A series' runs' ends, which its pieces (style runs', markers) share.
+    const endsOf = new Map<Series, number[] | undefined>();
+    const seriesEnds = (s: Series) => {
+      if (!endsOf.has(s)) {
+        // Dodged series are drawn off their bands' centers.
+        const shift = shiftOf(mark, s, frame)[along === "x" ? 0 : 1];
+        endsOf.set(s, runEnds(s, runs(s), frame, shift, along));
+      }
+      return endsOf.get(s);
+    };
     // Series spans cannot say: their selected rows' values draw over them instead.
-    const others: Series[] = [];
+    const others = new Set<Series>();
     for (const g of drawn) {
       const s = byKey.get(g.of ?? g.key);
-      // Line ends are round caps, half a stroke past the last vertex.
-      const stroke =
-        g.kind === "line"
-          ? (g as LineGeometry).strokeWidth
-          : (g as AreaGeometry).stroke
-            ? (g as AreaGeometry).strokeWidth
-            : 0;
-      // Dodged series are drawn off their bands' centers.
-      const shift = s && shiftOf(mark, s, frame)[along === "x" ? 0 : 1];
-      const spans = s && spansOf(s, runs(s), frame, stroke / 2, shift!, along);
-      spansFor.set(g, spans);
-      if (!spans && s && !frame.hidden.has(s.key) && !others.includes(s)) others.push(s);
+      if (s && !seriesEnds(s) && !frame.hidden.has(s.key)) others.add(s);
     }
     const lit = new Map<string, Geometry[]>();
-    // Geometry of a series with a key of its own (markers) by its series and kind.
+    // Geometry of a series with a key of its own (markers, style runs'
+    // pieces) by its series and layer: an area's outlines apart from its fills.
     const litKey = (g: Geometry, on = "") =>
-      g.of === undefined ? g.key + on : `${g.of}${on}|${g.kind}`;
-    if (others.length > 0)
+      g.of === undefined ? g.key + on : `${g.of}${on}|${outlined(g) ? "outline" : g.kind}`;
+    if (others.size > 0)
       for (const g of mark.geometry(
-        others.map((s) => masked(s, selected, along === "y")),
+        [...others].map((s) => masked(s, selected, along === "y")),
         own(ON),
         key,
-      ))
-        lit.set(litKey(g), [...(lit.get(litKey(g)) ?? []), ...over(g)]);
+      )) {
+        const parts = lit.get(litKey(g)) ?? lit.set(litKey(g), []).get(litKey(g))!;
+        parts.push(...over(g));
+      }
+    // A series drawn in pieces (sharing `of`: markers, style runs'): each
+    // layer's selected values go once, over the last of its dimmed pieces.
+    const lastPiece = new Map<string, Geometry>();
+    for (const g of drawn) if (g.of !== undefined) lastPiece.set(litKey(g, ON), g);
     // In the mark's order, each part as it paints it: an area's fill, then
     // its outline; a series' selected rows over its own dimmed ones, so that
     // translucent colors selected whole show as they are.
     const out: Geometry[] = [];
     const shift = (s: Series) => shiftOf(mark, s, frame);
     for (const g of drawn) {
-      const spans = spansFor.get(g);
-      // Markers are lit whole, where their observations are in the selected
-      // runs or are lone selected rows, which they mark in place of dots.
-      if (spans && g.of !== undefined && g.kind === "point") {
-        const lone = loneRows(byKey.get(g.of)!, runs, frame, shift);
-        const [inside, outside] = pointsIn(g as PointGeometry, spans, lone, along);
+      const s = byKey.get(g.of ?? g.key);
+      const ends = s && seriesEnds(s);
+      // Markers are lit whole where their observations are selected rows,
+      // which they mark in place of dots.
+      const rows = ends && g.kind === "point" && s.features?.markerRows?.(g);
+      if (rows) {
+        const [inside, outside] = pointsIn(g as PointGeometry, rows, selected);
         out.push(...dimLayer(outside), inside);
         continue;
       }
-      if (spans) {
-        // Each pixel is painted once: dimmed outside the selected runs, as drawn inside them.
-        for (const dimmed of dimLayer(g))
-          out.push(clipped(dimmed, complement(spans, frame, along), frame, along, OFF));
-        if (spans.length > 0) out.push(clipped(g, spans, frame, along, ON));
+      if (ends) {
+        // Each pixel is painted once: dimmed outside the selected runs, as
+        // drawn inside them; each piece of a series (a style run's) by the
+        // spans its own extent reaches, for its own width. Line ends are
+        // round caps, half a stroke past the last vertex.
+        const width =
+          g.kind === "line"
+            ? (g as LineGeometry).strokeWidth
+            : (g as AreaGeometry).stroke
+              ? (g as AreaGeometry).strokeWidth
+              : 0;
+        const box = strokeBounds(g);
+        const [lo, hi] = along === "x" ? [box[0], box[2]] : [box[1], box[3]];
+        const spans =
+          lo <= hi
+            ? spansAt(ends, width / 2, lo, hi)
+            : spansAt(ends, width / 2, -Infinity, Infinity);
+        const off = complement(spans, frame, along);
+        const [outside, inside] =
+          lo <= hi ? [reaching(off, lo, hi), reaching(spans, lo, hi)] : [off, spans];
+        if (outside.length > 0)
+          for (const dimmed of dimLayer(g)) out.push(clipped(dimmed, outside, frame, along, OFF));
+        if (inside.length > 0) out.push(clipped(g, inside, frame, along, ON));
         continue;
       }
       // Dimmed, then its selected rows' values over it, part by part.
       const [under, values] = [dimLayer(g), lit.get(litKey(g, ON)) ?? []];
+      const last = lastPiece.get(litKey(g, ON));
+      if (last) {
+        out.push(...under);
+        if (last === g) out.push(...values);
+        continue;
+      }
       for (let i = 0; i < Math.max(under.length, values.length); i++) {
         if (under[i]) out.push(under[i]!);
         if (values[i]) out.push(values[i]!);
       }
     }
-    if (type !== "line") return out;
-    // Dots at the opacity each series' line is drawn at, for series without
-    // markers: over the series' own runs, under later series, as its
-    // selected parts are (picking reads them so: `litOverSeries`).
-    const opacity = new Map(
-      drawn.filter((g) => g.kind === "line").map((g) => [g.key, g.draw.opacity ?? 1] as const),
-    );
+    // Dots at selected rows no span shows, for series without markers, in
+    // the look each observation is drawn in: a line's color, opacity, and
+    // width, an area's outline's (or its dots'), or as its style runs give
+    // it. Over the series' own runs, under later series, as its selected
+    // parts are (picking reads them so: `litOverSeries`).
+    const whole = new Map<string, DotLook>();
+    for (const g of drawn)
+      if (g.kind === "line") {
+        const line = g as LineGeometry;
+        whole.set(g.key, {
+          color: line.stroke,
+          opacity: g.draw.opacity ?? 1,
+          width: line.strokeWidth,
+        });
+      } else if (g.kind === "area" && g.of === undefined) {
+        const area = g as AreaGeometry;
+        whole.set(g.key, {
+          color: area.stroke ?? area.fill,
+          opacity: area.strokeOpacity ?? 1,
+          width: area.strokeWidth,
+        });
+      }
     const marked = new Set(drawn.map((g) => (g.kind === "point" ? g.of : undefined)));
-    const dotsOf = new Map(
-      dots(
-        series.filter((s) => !marked.has(s.key)),
-        runs,
-        frame,
-        shift,
-        (s) => opacity.get(s.key) ?? 1,
-      ).map((d) => [d.key.slice(0, d.key.indexOf(ON)), d] as const),
-    );
+    const dotsOf = new Map<string, PointGeometry[]>();
+    for (const d of dots(
+      series.filter((s) => !marked.has(s.key)),
+      table,
+      runs,
+      frame,
+      shift,
+      (s) => {
+        const at = s.features?.lookAt?.(s);
+        const look = whole.get(s.key) ?? { color: s.color, opacity: 1, width: 0 };
+        return at ?? (() => look);
+      },
+    )) {
+      const owner = d.key.slice(0, d.key.indexOf(ON));
+      (dotsOf.get(owner) ?? dotsOf.set(owner, []).get(owner)!).push(d);
+    }
     if (dotsOf.size === 0) return out;
-    const ownerOf = (g: Geometry) => g.of ?? g.key.split("\u0001")[0]!;
+    const ownerOf = (g: Geometry) => (g.of ?? g.key).split("\u0001")[0]!;
     const last = new Map<string, Geometry>();
     for (const g of out) last.set(ownerOf(g), g);
+    // Dots of a series none of whose pieces reach the plot go where it
+    // would be drawn: before the first part of a later series.
+    const order = new Map(series.map((s, i) => [s.key, i]));
+    const rank = (owner: string) => order.get(owner) ?? -1;
+    const waiting = [...dotsOf.keys()].filter((owner) => !last.has(owner));
+    waiting.sort((a, b) => rank(a) - rank(b));
     const placed: Geometry[] = [];
     for (const g of out) {
-      placed.push(g);
       const owner = ownerOf(g);
-      if (last.get(owner) === g && dotsOf.has(owner)) {
-        placed.push(dotsOf.get(owner)!);
-        dotsOf.delete(owner);
-      }
+      while (waiting.length > 0 && rank(waiting[0]!) < rank(owner))
+        placed.push(...dotsOf.get(waiting.shift()!)!);
+      placed.push(g);
+      if (last.get(owner) === g && dotsOf.has(owner)) placed.push(...dotsOf.get(owner)!);
     }
-    placed.push(...dotsOf.values());
+    for (const owner of waiting) placed.push(...dotsOf.get(owner)!);
     return placed;
   }
 }
 
-/**
- * Points split by whether they stand at selected rows: their centers along
- * `along` in `spans` (ascending pixel pairs), or within half a pixel of a
- * lone selected row's place (`lone`, x, y pairs). Those in, and the others.
- */
+/** Points split by whether the rows they stand at (`rows`, one a point) are selected: those in, and the others. */
 function pointsIn(
   g: PointGeometry,
-  spans: readonly number[],
-  lone: readonly number[],
-  along: "x" | "y",
+  rows: ArrayLike<number>,
+  selected: Uint8Array,
 ): [PointGeometry, PointGeometry] {
-  const a = along === "x" ? 0 : 1;
-  // Lone rows in order along, each found by a search.
-  const order = Array.from({ length: lone.length / 2 }, (_, i) => i).sort(
-    (i, j) => lone[i * 2 + a]! - lone[j * 2 + a]!,
-  );
-  const places = order.map((i) => lone[i * 2 + a]!);
-  const across = order.map((i) => lone[i * 2 + 1 - a]!);
-  const ends = spans.filter((_, j) => j % 2 === 1);
-  /** The first of ascending `values` at or past `v`. */
-  const search = (values: readonly number[], v: number) => {
-    let [lo, hi] = [0, values.length];
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (values[mid]! < v) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  };
   const parts = [new Float32Array(g.count * 2), new Float32Array(g.count * 2)];
   const counts = [0, 0];
-  // Points' centers are 32-bit floats, spans' ends 64-bit: their roundings apart.
-  const near = 1e-3;
   for (let i = 0; i < g.count; i++) {
-    const p = g.coords[i * 2 + a]!;
-    const q = g.coords[i * 2 + 1 - a]!;
-    // The span ending at or after p, which holds p if it starts by then.
-    const k = search(ends, p - near);
-    let inside = k < ends.length && spans[k * 2]! <= p + near;
-    for (
-      let j = search(places, p - 0.5);
-      !inside && j < places.length && places[j]! <= p + 0.5;
-      j++
-    )
-      inside = Math.abs(across[j]! - q) <= 0.5;
-    const part = inside ? 0 : 1;
+    const part = selected[rows[i]!] === 1 ? 0 : 1;
     parts[part]!.set(g.coords.subarray(i * 2, i * 2 + 2), counts[part]! * 2);
     counts[part]!++;
   }
@@ -766,7 +784,7 @@ function runsOf(
   const { rows, edges } = s;
   const across = along === "x" ? "y" : "x";
   const bases = along === "x" ? s.y0 : s.x0;
-  const sorted = along === "x" ? s.sorted : (s.ySorted ?? false);
+  const sorted = runsAlong(s, frame, along);
   const positionOf = (k: number) => placeAt(s, along, rowOf(s, k));
   let order: Uint32Array | undefined;
   if (!sorted && edges) {
@@ -836,36 +854,44 @@ function runsOf(
 }
 
 /**
- * The pixel spans along the axis a series runs along (`along`: x, or y for
- * lines and areas along y) of its runs of selected rows, in order of
- * position, as pairs: from a run's first row to its last, ascending and
- * merged where they touch, at least a pixel wide, moved `shift` pixels
- * where a dodged series is drawn. Where a run ends a path, its span
- * reaches `cap` pixels further, over the line's round cap. A layer of a
- * stack drawn through its edges (a series field's) fills positions other
- * layers have too: its runs reach the stack's ends past its own first and
- * last rows. Undefined where spans cannot say what is selected: a line
- * whose positions do not ascend, or rows at one position drawn as a run
- * across, all selected or some at a run's end.
+ * Whether a series' positions ascend along `along` as it is traced: as it
+ * says, or over categories, whose rows lines and areas draw in band order.
  */
-function spansOf(
+function runsAlong(s: Series, frame: Frame, along: "x" | "y"): boolean {
+  return (along === "x" ? s.sorted : (s.ySorted ?? false)) || frame[along].type === "band";
+}
+
+/**
+ * The pixel ends along the axis a series runs along (`along`: x, or y for
+ * lines and areas along y) of its runs of selected rows, in pixel order:
+ * per run, its low and high ends, from its first row to its last, moved
+ * `shift` pixels where a dodged series is drawn, and whether each ends a
+ * path (1, else 0), where a stroke's round cap reaches further (`spansAt`).
+ * A layer of a stack drawn through its edges (a series field's) fills
+ * positions other layers have too: its runs reach the stack's ends past
+ * its own first and last rows. Undefined where spans cannot say what is
+ * selected: a line whose positions do not ascend, or rows at one position
+ * drawn as a run across, all selected or some at a run's end.
+ */
+function runEnds(
   s: Series,
   found: Runs,
   frame: Frame,
-  cap: number,
   shift: number,
   along: "x" | "y",
 ): number[] | undefined {
   const edges = s.edges;
-  const sorted = along === "x" ? s.sorted : (s.ySorted ?? false);
+  const sorted = runsAlong(s, frame, along);
   if (!sorted && !edges) return undefined;
   const { at, drawn, shown, count: n } = found;
+  // Where the series was traced, as its trace ended its paths (`continuity`, `where`).
+  const stops = s.features?.pathEnds?.(s, frame);
   const xAt = (i: number) => placeAt(s, along, rowOf(s, at(i)));
   // Edges hold positions as the series does: bands read through a panel's places.
   const places = s.places?.[along];
   const placed = (value: number) => (places && value >= 0 ? places.at(value) : value);
-  // Pixel pairs, in x order, which is pixel order or (reversed axes) its reverse.
-  const runs: number[] = [];
+  // In x order, which is pixel order or (reversed axes) its reverse.
+  const ends: number[] = [];
   for (let r = 0; r < found.runs.length; r += 2) {
     const [start, end] = [found.runs[r]!, found.runs[r + 1]!];
     let [from, to] = [xAt(start), xAt(end)];
@@ -879,23 +905,50 @@ function spansOf(
     // A row alone is a dot.
     if (start === end && from === to) continue;
     if (from === to) return undefined;
-    let [a, b] = [frame[along].map(from) + shift, frame[along].map(to) + shift];
-    // Ends of paths: rows with no row drawn before or after them, past rows breaks hide.
+    const [a, b] = [frame[along].map(from) + shift, frame[along].map(to) + shift];
+    // Ends of paths: as its trace ended them, or rows with no row drawn
+    // before or after them, past rows breaks hide.
     const [before, after] = [shown(start - 1, -1), shown(end + 1, 1)];
-    const sign = a <= b ? 1 : -1;
-    if (before < 0 || !drawn(before)) a -= sign * cap;
-    if (after >= n || !drawn(after)) b += sign * cap;
-    runs.push(Math.min(a, b), Math.max(a, b));
+    const endsPath = (i: number, j: number, way: 1 | -1) =>
+      stops ? stops(rowOf(s, at(i)), way) : j < 0 || j >= n || !drawn(j);
+    const first = endsPath(start, before, -1) ? 1 : 0;
+    const last = endsPath(end, after, 1) ? 1 : 0;
+    if (a <= b) ends.push(a, b, first, last);
+    else ends.push(b, a, last, first);
   }
-  const reversed = runs.length > 2 && runs[0]! > runs[runs.length - 2]!;
+  if (ends.length > 4 && ends[0]! > ends[ends.length - 4]!) {
+    const reversed: number[] = [];
+    for (let i = ends.length - 4; i >= 0; i -= 4) reversed.push(...ends.slice(i, i + 4));
+    return reversed;
+  }
+  return ends;
+}
+
+/**
+ * The spans of the runs of `ends` (`runEnds`) reaching from `lo` to `hi`,
+ * for a stroke whose round caps reach `cap` pixels past a path's ends:
+ * ascending pixel pairs, merged where they touch, at least a pixel wide.
+ * Found by bisection, so a piece of a series reads only the runs it meets.
+ */
+function spansAt(ends: readonly number[], cap: number, lo: number, hi: number): number[] {
+  // Runs' high ends ascend; a run reaches at most a cap and half a pixel past its ends.
+  const reach = cap + 0.5;
+  let [a, b] = [0, ends.length / 4];
+  while (a < b) {
+    const mid = (a + b) >> 1;
+    if (ends[mid * 4 + 1]! + reach < lo) a = mid + 1;
+    else b = mid;
+  }
   const spans: number[] = [];
-  for (let r = 0; r < runs.length; r += 2) {
-    const i = reversed ? runs.length - 2 - r : r;
-    let [lo, hi] = [runs[i]!, runs[i + 1]!];
-    if (hi - lo < 1) [lo, hi] = [(lo + hi) / 2 - 0.5, (lo + hi) / 2 + 0.5];
-    const last = spans.length - 1;
-    if (last > 0 && lo <= spans[last]!) spans[last] = Math.max(spans[last]!, hi);
-    else spans.push(lo, hi);
+  for (let i = a * 4; i < ends.length && ends[i]! - reach <= hi; i += 4) {
+    let [from, to] = [ends[i]! - ends[i + 2]! * cap, ends[i + 1]! + ends[i + 3]! * cap];
+    if (to - from < 1) [from, to] = [(from + to) / 2 - 0.5, (from + to) / 2 + 0.5];
+    // A cap may reach over spans before it: they merge.
+    while (spans.length > 0 && from <= spans[spans.length - 1]!) {
+      to = Math.max(to, spans.pop()!);
+      from = Math.min(from, spans.pop()!);
+    }
+    spans.push(from, to);
   }
   return spans;
 }
@@ -915,6 +968,20 @@ function complement(spans: readonly number[], frame: Frame, along: "x" | "y"): n
   return out;
 }
 
+/** Of `spans` (ascending pairs that do not overlap), those reaching from `lo` to `hi`. */
+function reaching(spans: readonly number[], lo: number, hi: number): number[] {
+  let [a, b] = [0, spans.length / 2];
+  while (a < b) {
+    const mid = (a + b) >> 1;
+    if (spans[mid * 2 + 1]! < lo) a = mid + 1;
+    else b = mid;
+  }
+  const out: number[] = [];
+  for (let i = a * 2; i < spans.length && spans[i]! <= hi; i += 2)
+    out.push(spans[i]!, spans[i + 1]!);
+  return out;
+}
+
 /**
  * A geometry drawn only over spans (pairs of pixels) along x, across the
  * plot's height, or with `along` "y" along y, across its width.
@@ -929,23 +996,28 @@ function clipped(
   const { plot } = frame;
   // Runs of series' data, which canvases draw.
   const draw = geometry.draw as Drawing<Geometry> & { canvas: CanvasPaint };
-  const id = `herceg-runs-${++clips}`;
   // Each span's rectangle: x, y, width, height.
   const rect = (i: number) =>
     along === "x"
       ? [spans[i]!, plot.y, spans[i + 1]! - spans[i]!, plot.height]
       : [plot.x, spans[i]!, plot.width, spans[i + 1]! - spans[i]!];
+  // Named by what it cuts, so that scenes name it alike, and SVG documents
+  // drawn apart and shown on one page do not mix them up.
+  const id = `herceg-runs-${hash(`${geometry.key}${part}${along} ${spans.join(" ")} ${plot.x} ${plot.y} ${plot.width} ${plot.height}`)}`;
   const drawing: Drawing<Geometry> = {
     size: draw.size,
     opacity: draw.opacity,
     clip: Array.from({ length: spans.length / 2 }, (_, i) => rect(i * 2)).flat(),
+    // What it leaves out where style runs meet, which PDF cuts as the drawing's own clips do.
+    ...(draw.holes && { holes: draw.holes }),
     svg(g, context) {
-      let rects = "";
+      // One shape of every span: WebKit clips away all of a flat line under several.
+      let d = "";
       for (let i = 0; i < spans.length; i += 2) {
         const [x, y, width, height] = rect(i);
-        rects += `<rect x="${x}" y="${y}" width="${width}" height="${height}"/>`;
+        d += `M${x} ${y}h${width}v${height}h${-width!}Z`;
       }
-      return `<clipPath id="${id}">${rects}</clipPath><g clip-path="url(#${id})">${draw.svg(g, context)}</g>`;
+      return `<clipPath id="${id}"><path d="${d}"/></clipPath><g clip-path="url(#${id})">${draw.svg(g, context)}</g>`;
     },
     canvas(context, g, options) {
       context.save();
@@ -964,48 +1036,136 @@ function clipped(
 
 type CanvasPaint = Exclude<Drawing<Geometry>["canvas"], false>;
 
-/** Where a series draws its runs of one selected row, which no span shows: x, y pixels per row. */
+/** What a stroke may paint: its points' bounds (curves' controls too), out by half its width. */
+function strokeBounds(geometry: Geometry): [number, number, number, number] {
+  const box: [number, number, number, number] = [
+    Number.POSITIVE_INFINITY,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+  ];
+  const take = (values: ArrayLike<number>, count: number) => {
+    for (let i = 0; i + 1 < count; i += 2) {
+      const [x, y] = [values[i]!, values[i + 1]!];
+      if (Number.isNaN(x) || Number.isNaN(y)) continue;
+      if (x < box[0]) box[0] = x;
+      if (y < box[1]) box[1] = y;
+      if (x > box[2]) box[2] = x;
+      if (y > box[3]) box[3] = y;
+    }
+  };
+  const paths =
+    geometry.kind === "line"
+      ? [(geometry as LineGeometry).path]
+      : [(geometry as AreaGeometry).upper, (geometry as AreaGeometry).lower];
+  for (const path of paths) {
+    if (!path) continue;
+    take(path.coords, path.count * 2);
+    if (path.curved) take(path.controls, path.count * 4);
+  }
+  // Round joins and caps reach half a width from the path, and a pixel more antialiased.
+  const half = (geometry as LineGeometry | AreaGeometry).strokeWidth / 2 + 1;
+  return [box[0] - half, box[1] - half, box[2] + half, box[3] + half];
+}
+
+/** A 32-bit FNV-1a hash of `text`, in base 36 (as run-paths.ts names its cuts). */
+function hash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Where a series draws its runs of one selected row, which no span shows:
+ * x, y pixels per row; with `positions`, the position of each in it too.
+ */
 function loneRows(
   s: Series,
   runs: (s: Series) => Runs,
   frame: Frame,
   shift: (s: Series) => readonly [number, number],
+  positions?: number[],
 ): number[] {
   const coords: number[] = [];
   const found = runs(s);
   const [dx, dy] = shift(s);
   for (let r = 0; r < found.runs.length; r += 2) {
     if (found.runs[r] !== found.runs[r + 1]) continue;
-    const row = rowOf(s, found.at(found.runs[r]!));
+    const k = found.at(found.runs[r]!);
+    const row = rowOf(s, k);
     coords.push(frame.x.map(placeAt(s, "x", row)) + dx, frame.y.map(placeAt(s, "y", row)) + dy);
+    positions?.push(k);
   }
   return coords;
 }
 
-/** Dots at runs of one row drawn, which no span shows, where `shift` says each series is drawn. */
+/**
+ * Dots at runs of one row drawn, which no span shows, where `shift` says
+ * each series is drawn, in the look `looks` gives each position: a
+ * geometry per series, a piece of it (`of`), which value animation moves
+ * with it by the rows of `table` the dots are. Each covers its
+ * observation's stroke, or its dot where it stands alone, and composites
+ * over what is drawn under it as translucent points do.
+ */
 function dots(
   series: readonly Series[],
+  table: Table,
   runs: (s: Series) => Runs,
   frame: Frame,
   shift: (s: Series) => readonly [number, number],
-  opacity: (s: Series) => number,
+  looks: (s: Series) => (position: number) => DotLook,
 ): PointGeometry[] {
   const out: PointGeometry[] = [];
   for (const s of series) {
     if (frame.hidden.has(s.key)) continue;
-    const coords = loneRows(s, runs, frame, shift);
+    const positions: number[] = [];
+    const coords = loneRows(s, runs, frame, shift, positions);
     if (coords.length === 0) continue;
+    const lookAt = looks(s);
+    // In observation order, each in its own look: later dots over earlier
+    // ones, as translucent points draw (never grouped by color).
+    const count = positions.length;
+    const palette: string[] = [];
+    const indexOf = new Map<string, number>();
+    const [index, opacities, radii] = [
+      new Float32Array(count),
+      new Float32Array(count),
+      new Float32Array(count),
+    ];
+    const least = Math.max(2.5, frame.theme.style.line.strokeWidth * 1.5);
+    positions.forEach((k, i) => {
+      const { color, opacity, width } = lookAt(k);
+      let at = indexOf.get(color);
+      if (at === undefined) {
+        at = palette.length;
+        palette.push(color);
+        indexOf.set(color, at);
+      }
+      [index[i], opacities[i], radii[i]] = [at, opacity, Math.max(least, width / 2)];
+    });
+    const alike = (values: Float32Array) => values.every((value) => value === values[0]);
+    const one = palette.length === 1 && alike(opacities) && alike(radii);
+    const items = frame.keyed
+      ? {
+          table,
+          generation: table.generation,
+          ids: Float64Array.from(positions, (k) => table.rowOffset + rowOf(s, k)),
+        }
+      : undefined;
     out.push({
       kind: "point",
       draw: pointDrawing,
       key: `${s.key}${ON}-dots`,
-      fill: s.color,
-      fillOpacity: opacity(s),
+      of: s.key,
+      ...(items && { items }),
+      fill: palette[0]!,
+      fillOpacity: opacities[0]!,
       opaque: false,
-      radius: Math.max(2.5, frame.theme.style.line.strokeWidth * 1.5),
+      radius: radii.reduce((most, r) => Math.max(most, r), 0),
       symbol: "circle",
       coords: Float32Array.from(coords),
-      count: coords.length / 2,
+      count,
+      ...(!one && { colors: { index, palette, categorical: true as const }, opacities, radii }),
     });
   }
   return out;
@@ -1043,30 +1203,47 @@ function dim(geometry: Geometry): Geometry {
 }
 
 /**
+ * Whether `geometry` is an area of no fill (a style run's outline, or dots
+ * of observations standing alone, painted at its stroke's opacity), which
+ * paints after an area's fills.
+ */
+function outlined(geometry: Geometry): boolean {
+  return geometry.kind === "area" && (geometry as AreaGeometry).fillOpacity === 0;
+}
+
+/**
  * A geometry dimmed, for any kind: an area's fill at a fraction of its
- * opacity and its outline drawn apart as a dimmed line, since areas paint
- * their outline at full opacity (and set the canvas' alpha, which a faded
- * drawing would multiply).
+ * opacity and its outline drawn apart, an area of no fill (`outlineOf`)
+ * at a fraction of its stroke's opacity, since areas paint their outline
+ * at full opacity (and set the canvas' alpha, which a faded drawing would
+ * multiply).
  */
 function dimLayer(geometry: Geometry): Geometry[] {
   if (geometry.kind !== "area") return [dim(geometry)];
   const area = geometry as AreaGeometry;
-  const fill: AreaGeometry = { ...area, fillOpacity: area.fillOpacity * DIM, stroke: null };
-  return area.stroke ? [fill, dim(outlineOf(area))] : [fill];
+  // An outline of no fill (a style run's) dims as drawn, keeping where it is cut.
+  if (outlined(area))
+    return [{ ...area, strokeOpacity: (area.strokeOpacity ?? 1) * DIM } as AreaGeometry];
+  // Areas draw isolated observations as dots of their outline, or of their
+  // fill's color without one: with the outline, dimmed, or dimmed here.
+  const fill: AreaGeometry = area.stroke
+    ? { ...area, fillOpacity: area.fillOpacity * DIM, stroke: null, strokeWidth: 0 }
+    : {
+        ...area,
+        fillOpacity: area.fillOpacity * DIM,
+        strokeOpacity: (area.strokeOpacity ?? 1) * DIM,
+      };
+  return area.stroke ? [fill, ...dimLayer(outlineOf(area))] : [fill];
 }
 
-/** An area's outline as a line of its own, which areas otherwise paint opaque, at its own opacity. */
-function outlineOf(area: AreaGeometry): LineGeometry {
-  const opacity = area.strokeOpacity ?? 1;
-  return {
-    kind: "line",
-    key: `${area.key}-outline`,
-    draw: opacity === 1 ? lineDrawing : (faded(lineDrawing as Drawing<Geometry>, opacity) as never),
-    stroke: area.stroke!,
-    strokeWidth: area.strokeWidth,
-    dash: undefined,
-    path: area.upper,
-  };
+/**
+ * An area's outline apart from its fill, as an area of no fill: drawn as
+ * the area draws it (its ends, its isolated observations' dots), at its
+ * own opacity.
+ */
+function outlineOf(area: AreaGeometry): AreaGeometry {
+  // Its series', whose selected dots are drawn after it.
+  return { ...area, key: `${area.key}-outline`, of: area.of ?? area.key, fillOpacity: 0 };
 }
 
 /** A drawing of the same marks at `fraction` of their opacity. */
@@ -1104,7 +1281,8 @@ function faded(draw: Drawing<Geometry>, fraction: number): Drawing<Geometry> {
  * the same color, shows the mark's own: a color of alpha `a` (its own
  * alpha times the mark's opacity) over itself at `a * DIM` composites to
  * `a` when drawn at `(1 - DIM) a / (1 - DIM a)`. An area's outline is
- * drawn as a line of its own, so each is drawn at its own alpha.
+ * drawn apart, an area of no fill (`outlineOf`), so each is drawn at its
+ * own alpha.
  */
 function over(geometry: Geometry): Geometry[] {
   const at = (a: number) => (a >= 1 ? 1 : ((1 - DIM) * a) / (1 - DIM * a));
@@ -1138,11 +1316,20 @@ function over(geometry: Geometry): Geometry[] {
   }
   if (geometry.kind !== "area") return [geometry];
   const area = geometry as AreaGeometry;
+  if (outlined(area)) {
+    // An outline of no fill (a style run's), at its own alpha, keeping where it is cut.
+    // Dots of observations standing alone paint in the fill where there is no outline.
+    const a = alphaOf(area.stroke ?? area.fill) * (area.strokeOpacity ?? 1);
+    if (a >= 1 || a <= 0) return [area];
+    return [{ ...area, strokeOpacity: ((area.strokeOpacity ?? 1) * at(a)) / a } as AreaGeometry];
+  }
   const c = alphaOf(area.fill);
+  // The outline, its isolated observations' dots too, drawn apart.
   const fill: AreaGeometry = {
     ...area,
     fillOpacity: c > 0 ? at(area.fillOpacity * c) / c : area.fillOpacity,
     stroke: null,
+    ...(area.stroke && { strokeWidth: 0 }),
   };
   return area.stroke ? [fill, ...over(outlineOf(area))] : [fill];
 }

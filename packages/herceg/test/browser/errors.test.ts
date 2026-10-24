@@ -78,7 +78,9 @@ describe("charts that cannot draw", () => {
     const rows = table({ t: [0, 1], v: [1, 2], kind: ["a", "a"], g: ["p", "p"] });
     const errors: string[] = [];
     const chart = createChart(host, {
-      marks: [line(rows, { x: "t", y: "v", series: "g", color: "kind" })],
+      marks: [
+        line(rows, { x: "t", y: "v", series: "g", style: { by: { field: "kind", map: {} } } }),
+      ],
       onError: (error) => errors.push(error.code),
     });
     await chart.ready;
@@ -121,11 +123,13 @@ describe("charts that cannot draw", () => {
     const rows = table({ t: [0, 1], v: [1, 2], kind: ["a", "a"], g: ["p", "p"] });
     const errors: ChartError[] = [];
     const chart = createChart(host, {
-      marks: [line(rows, { x: "t", y: "v", series: "g", color: "kind" })],
+      marks: [
+        line(rows, { x: "t", y: "v", series: "g", style: { by: { field: "kind", map: {} } } }),
+      ],
       onError: (error) => errors.push(error),
     });
     await chart.ready;
-    // A row of another kind in series "p": a line takes one color per series.
+    // A row of another kind in series "p": a style map gives each series one look.
     rows.append({ t: [2], v: [3], kind: ["b"], g: ["p"] });
     chart.render();
     expect(errors.map((e) => [e.code, e.phase])).toEqual([["series-varies", "render"]]);
@@ -235,7 +239,9 @@ describe("charts that cannot draw", () => {
     const rows = table({ t: [0, 1], v: [1, 2], kind: ["a", "a"], g: ["p", "p"] });
     const errors: string[] = [];
     const chart = createChart(host, {
-      marks: [line(rows, { x: "t", y: "v", series: "g", color: "kind" })],
+      marks: [
+        line(rows, { x: "t", y: "v", series: "g", style: { by: { field: "kind", map: {} } } }),
+      ],
       errorMode: "throw",
       onError: (error) => errors.push(error.code),
     });

@@ -1804,14 +1804,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[0].color",
-      "message": "point color: not drawn as given yet",
-      "python": "point color: not drawn as given yet",
-      "builder_spec": false,
-      "stage": "load"
+      }
     },
     {
       "contract": "channel.scale.identity.dict",
@@ -1848,14 +1841,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[0].color",
-      "message": "point color: not drawn as given yet",
-      "python": "point color: not drawn as given yet",
-      "builder_spec": false,
-      "stage": "load"
+      }
     },
     {
       "contract": "channel.scale.identity.point-encode",
@@ -1895,14 +1881,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[0].encode",
-      "message": "point encode: not drawn as given yet (round 2 stream C adds it); drop encode",
-      "python": "point encode: not drawn as given yet (round 2 stream C adds it); drop encode",
-      "builder_spec": false,
-      "stage": "load"
+      }
     },
     {
       "contract": "channel.output.point",
@@ -2042,12 +2021,11 @@
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
-      "stage": "load",
-      "path": "marks[0].color",
-      "message": "point color: not drawn as given yet",
-      "python": "point color: not drawn as given yet",
+      "code": "invalid-option",
+      "stage": "draw",
+      "path": "marks[0].color.value",
+      "message": "color.value: expected a CSS color; received \"garbage\"",
+      "python": "point color.value: expected a CSS color; received \"garbage\"",
       "builder_spec": false
     },
     {
@@ -2331,13 +2309,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[0].encode.color.scale",
-      "message": "encode.color.scale: not drawn as given yet",
-      "python": "encode.color.scale: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "channel.scale.identity.number",
@@ -2381,14 +2353,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "stage": "draw",
-      "path": "marks[0].encode.strokeWidth.scale",
-      "python_path": "marks[0].encode.stroke_width.scale",
-      "message": "encode.strokeWidth.scale: not drawn as given yet",
-      "python": "line encode.stroke_width.scale: not drawn as given yet"
+      }
     },
     {
       "contract": "channel.scale.identity.named",
@@ -2440,13 +2405,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "stage": "draw",
-      "path": "scales.raw",
-      "message": "scales.raw: not drawn as given yet",
-      "python": "scales.raw: not drawn as given yet"
+      }
     },
     {
       "contract": "scale.identity.named",
@@ -2483,13 +2442,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "scales.paints",
-      "message": "scales.paints: not drawn as given yet",
-      "python": "scales.paints: not drawn as given yet",
-      "stage": "draw"
+      }
     },
     {
       "contract": "scale.ordinal.scope",
@@ -2501,11 +2454,40 @@
             "scope": "panel"
           }
         },
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ],
         "marks": [
           {
             "type": "line",
             "x": "t",
-            "y": "v"
+            "y": "v",
+            "series": "region",
+            "encode": {
+              "color": {
+                "field": "region",
+                "scale": "regions"
+              }
+            },
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "series": "region",
+            "encode": {
+              "color": {
+                "field": "region",
+                "scale": "regions"
+              }
+            },
+            "panel": "b"
           }
         ]
       },
@@ -2518,24 +2500,49 @@
                 "scope": "panel"
               }
             }
-          }
+          },
+          "panels": ["a", "b"]
         },
         "calls": [
           {
             "method": "line",
             "args": {
               "x": "t",
-              "y": "v"
+              "y": "v",
+              "series": "region",
+              "encode": {
+                "color": {
+                  "hg": "Channel",
+                  "args": {
+                    "field": "region",
+                    "scale": "regions"
+                  }
+                }
+              },
+              "panel": "a"
+            }
+          },
+          {
+            "method": "line",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "series": "region",
+              "encode": {
+                "color": {
+                  "hg": "Channel",
+                  "args": {
+                    "field": "region",
+                    "scale": "regions"
+                  }
+                }
+              },
+              "panel": "b"
             }
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "scales.regions.scope",
-      "message": "scales.regions.scope: not drawn as given yet",
-      "python": "scales.regions.scope: not drawn as given yet",
-      "stage": "draw"
+      "legend": ["eu", "us", "eu", "us"]
     },
     {
       "contract": "line.labels",
@@ -2568,13 +2575,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[0].labels",
-      "message": "line labels: not drawn as given yet",
-      "python": "line labels: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "line.labels.at",
@@ -2695,13 +2696,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[0].labels.content",
-      "message": "bar labels.content: not drawn as given yet",
-      "python": "bar labels.content: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "label.content.empty",
@@ -2893,14 +2888,7 @@
             }
           }
         ]
-      },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[1].from",
-      "python_path": "marks[1].from_",
-      "message": "text from: not drawn as given yet",
-      "python": "text from_: not drawn as given yet",
-      "stage": "load"
+      }
     },
     {
       "contract": "text.from.at",
@@ -3044,12 +3032,7 @@
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "marks[1].legend",
-      "message": "rule legend: not drawn as given yet",
-      "python": "rule legend: not drawn as given yet",
-      "stage": "load"
+      "legend": ["v", "SLO"]
     },
     {
       "contract": "annotation.legend.malformed",
@@ -3142,12 +3125,7 @@
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "legend.entries",
-      "message": "legend.entries: not drawn as given yet",
-      "python": "legend.entries: not drawn as given yet",
-      "stage": "draw"
+      "legend": ["eu", "us", "SLO"]
     },
     {
       "contract": "legend.entries.alone",
@@ -3409,12 +3387,7 @@
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "legend.include[0]",
-      "message": "legend.include[0]: not drawn as given yet",
-      "python": "legend.include[0]: not drawn as given yet",
-      "stage": "draw"
+      "legend": ["eu", "us"]
     },
     {
       "contract": "legend.include.malformed",
@@ -3654,12 +3627,7 @@
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
-      "path": "legend.entries[0].targets[0]",
-      "message": "legend.entries[0].targets[0]: not drawn as given yet",
-      "python": "legend.entries[0].targets[0]: not drawn as given yet",
-      "stage": "draw"
+      "legend": ["EU"]
     },
     {
       "contract": "legend.targets.malformed",
@@ -3793,11 +3761,10 @@
           }
         ]
       },
-      "pending": "C",
-      "code": "unsupported",
+      "code": "invalid-option",
       "path": "guides[0].scale",
-      "message": "guides[0].scale: not drawn as given yet",
-      "python": "guides[0].scale: not drawn as given yet",
+      "message": "guides[0].scale: a colorbar shows a mark's color ramp, and \"temps\" is a scale of categories",
+      "python": "guides[0].scale: a colorbar shows a mark's color ramp, and \"temps\" is a scale of categories",
       "stage": "draw"
     }
   ],

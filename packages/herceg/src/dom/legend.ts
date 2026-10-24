@@ -14,6 +14,8 @@ export interface Entry {
   shown: string;
   /** The keys it hides and shows, in its legend's panel only for a panel's legend. */
   targets: string | readonly string[];
+  /** What showing it lets go of, where more than `targets` (`LegendItem.shows`). */
+  shows?: readonly string[] | undefined;
   panel?: string | undefined;
   /** Its click shows what it names: hidden, or hidden in some panels only (`LegendItem.mixed`). */
   show?: boolean | undefined;
@@ -47,7 +49,11 @@ export class Legend {
       // A second click before the legend is drawn again undoes the first.
       for (const entry of this.#entries.values())
         if (entry.button.contains(target as Node))
-          entry.show = !toggle(entry.targets, entry.panel, entry.show);
+          entry.show = !toggle(
+            (entry.show && entry.shows) || entry.targets,
+            entry.panel,
+            entry.show,
+          );
     });
   }
 
@@ -75,6 +81,7 @@ export class Legend {
           this.#entries.set(id, entry);
         }
         entry.targets = item.targets ?? item.key;
+        entry.shows = item.shows;
         entry.panel = legend.panel;
         entry.show = item.hidden || !!item.mixed;
         // Rewriting styles every frame would make the browser recompute them.

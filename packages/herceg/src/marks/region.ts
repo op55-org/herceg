@@ -11,8 +11,8 @@ import type { AnnotationPosition, Clip, Frozen, RegionRange, RegionSpec } from "
 import type { Halo } from "../spec/style.ts";
 import type { TextPaint } from "../style/style.ts";
 import {
-  ANNOTATION_PENDING,
   AnnotationData,
+  checkLegend,
   labelOf,
   type Place,
   type PlaceOption,
@@ -37,7 +37,6 @@ import {
   type RowParts,
   seriesKey,
 } from "./mark.ts";
-import { refusePending } from "./pending.ts";
 import type { RuleLabel } from "./rule.ts";
 
 interface RegionStyle {
@@ -140,7 +139,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
         'sides, such as ["top"]',
         strokeSides,
       );
-    refusePending(input, "region", ANNOTATION_PENDING);
+    checkLegend(input, "region");
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -157,7 +156,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     );
     this.#plain = label !== undefined && !label.style && !label.place && !label.format;
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
-    this.featured = format?.number !== undefined || format?.time !== undefined;
+    this.featured =
+      format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
   }
 
   get table(): Table | undefined {
@@ -190,11 +190,22 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
         return [across && `x ${across}`, down && `y ${down}`].filter(Boolean).join(", ");
       },
       rows,
+      format.content,
     );
   }
 
   series() {
     return [];
+  }
+
+  labelEntries(
+    key: MarkKey,
+    locale: string | undefined,
+    rows?: RowParts,
+    pattern?: (format: object, locale: string | undefined, path: string) => Formatter,
+  ) {
+    const data = this.#data;
+    return data.entries(key, locale, rows, data.writer(locale, pattern));
   }
 
   xExtent(_series: unknown, log: boolean, _breaks?: unknown, rows?: RowParts) {
@@ -234,7 +245,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     return this.#data.extent(this.#pair("y"), log, overlaps, rows);
   }
 
-  geometry(_series: unknown, frame: Frame, key: MarkKey, rows?: RowParts): Geometry[] {
+  geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
+    // What the legend hides of it goes undrawn.
+    const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { plot, theme } = frame;
     const data = this.#data;
     const id = seriesKey(key, "region");
@@ -269,7 +282,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
         sides[count] =
           given & (((across[2] & 1) << 3) | (across[2] & 2) | (down[2] & 1) | ((down[2] & 2) << 1));
       if (paint) {
-        const text = data.text(i, frame.locale, write);
+        const text = data.text(i, frame.locale, write, frame.features?.of(this)?.content);
         placed.push(
           this.#plain && paint.verticalAlign === undefined
             ? {
@@ -518,8 +531,7 @@ export function region<S extends Schema>(
       ],
     ),
   } as unknown as RegionSpec;
-  const field = typeof spec.label === "object" ? spec.label.field : undefined;
-  if (table?.name !== undefined && readsTable([spec.x1, spec.x2, spec.y1, spec.y2], field))
+  if (table?.name !== undefined && readsTable([spec.x1, spec.x2, spec.y1, spec.y2], spec.label))
     spec.data = table.name;
   return new RegionMark(spec, table as unknown as Table | undefined);
 }

@@ -326,3 +326,59 @@ def test_guides_naming_a_mark_show_it_whatever_its_legend_setting():
     ).line(x="t", y="v", color="site", id="curves")
     with pytest.raises(Exception, match='mark "curves" has no "size" scale; name one it has'):
         lone.to_svg()
+
+
+@pytest.mark.contract("annotation.legend.entries.python")
+def test_annotations_listed_by_their_labels_are_legend_entries():
+    data = {"t": [0, 1, 0, 1], "site": ["A", "A", "B", "B"], "v": [1, 2, 3, 4]}
+    chart = (
+        hg.Chart(data, width=480, height=300)
+        .line(x="t", y="v", series="site")
+        .rule(y=2.5, label="SLO", legend=True)
+        .region(x1=0.2, x2=0.4, label="Maintenance", legend=True)
+    )
+    spec = spec_of(chart)
+    assert [mark.get("legend") for mark in spec["marks"]] == [None, True, True]
+    svg = chart.to_svg()
+    assert ">SLO<" in svg and ">Maintenance<" in svg
+    # Listed by its label, an annotation needs one.
+    with pytest.raises(hg.ChartError) as raised:
+        hg.Chart(data).line(x="t", y="v").rule(y=2, legend=True)
+    assert raised.value.path == "marks[1].legend"
+    assert "rule legend: True lists the rule by its label; give it a label" in str(raised.value)
+
+
+@pytest.mark.contract("legend.composition.python")
+def test_legends_include_scales_and_marks_and_append_entries_of_your_own():
+    data = {"t": [0, 1, 0, 1], "site": ["A", "A", "B", "B"], "v": [1, 2, 3, 4]}
+    goal = hg.LegendEntry(key="goal", label="Goal", swatch=hg.Swatch(type="line", stroke="#000"))
+    only_a = hg.LegendEntry(
+        key="only-a",
+        label="Site A",
+        targets=[hg.LegendTarget(mark="curves", field="site", values=["A"])],
+    )
+    chart = hg.Chart(
+        data,
+        width=480,
+        height=300,
+        scales={"sites": hg.OrdinalScale()},
+        legend=hg.LegendOptions(entries=[goal, only_a]),
+        guides=[hg.legend(include=[hg.ScaleRef(scale="sites"), hg.MarkRef(mark="floor")])],
+    )
+    sites = hg.Encodings(color=hg.Channel(field="site", scale="sites"))
+    chart.line(x="t", y="v", id="curves", encode=sites).rule(y=2, label="Floor", id="floor")
+    spec = spec_of(chart)
+    assert spec["legend"]["entries"][1]["targets"] == [
+        {"mark": "curves", "field": "site", "values": ["A"]}
+    ]
+    assert spec["guides"][0]["include"] == [{"scale": "sites"}, {"mark": "floor"}]
+    svg = chart.to_svg()
+    assert ">Goal<" in svg and ">Site A<" in svg and ">Floor<" in svg
+    # Keys are each entry's own.
+    twice = hg.LegendOptions(
+        entries=[hg.LegendEntry(key="a", label="A"), hg.LegendEntry(key="a", label="B")]
+    )
+    with pytest.raises(hg.ChartError) as raised:
+        hg.Chart(data, legend=twice).line(x="t", y="v").to_spec()
+    assert raised.value.path == "legend.entries[1].key"
+    assert 'legend.entries[1].key: "a" is the key of another' in str(raised.value)

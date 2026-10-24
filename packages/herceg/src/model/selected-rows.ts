@@ -778,7 +778,7 @@ function nearest(
         const point = anchorOf(entry, d, row);
         if (!point) continue;
         const away = Math.hypot(point[0] - px, point[1] - py);
-        const within = glyph ? Math.min(reach, glyph.call(mark, row) + CLICK_SLOP) : reach;
+        const within = glyph ? Math.min(reach, glyph.call(mark, row, s) + CLICK_SLOP) : reach;
         if (away <= within)
           found.take({ series: s, position: k, distance: away }, mark, lit?.[row] ?? 0, over);
       }

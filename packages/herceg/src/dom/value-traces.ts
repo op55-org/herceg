@@ -188,10 +188,14 @@ function pathAt(path: MovingPath, y: Blend): Polyline {
 /**
  * The layers of a monotone band or stack moving together, bottom to top:
  * their boundaries' positions each frame (the first layer's base, then each
- * layer's top), and what the mark curves them with, into `edges`.
+ * layer's top), and what the mark curves them with, into `edges`; and the
+ * geometries drawn with them (a highlight's copies of a layer, its outline),
+ * each with the edges of its layer, `of`.
  */
 export interface MovingStack {
   layers: readonly MovingTrace[];
+  pieces: readonly MovingTrace[];
+  of: readonly number[];
   curve: CurveLayers;
   xs: Float64Array;
   positions: Float64Array[];
@@ -201,34 +205,76 @@ export interface MovingStack {
 }
 
 /**
- * The layers one mark curves together, as they move; undefined unless they
- * share their x positions, as the mark curves them.
+ * How the areas of one monotone mark move, as stacks, as the mark curves
+ * them (`stacked`): a stack's layers together, bands each alone; copies of
+ * a layer (a highlight's, its outline) drawn with its edges. Undefined
+ * unless each stack's layers share their x positions, each standing on
+ * the top of the one below.
  */
-export function moveStack(
-  layers: readonly MovingTrace[],
+export function moveStacks(
+  pieces: readonly MovingTrace[],
   { Polyline }: Lines,
-): MovingStack | undefined {
-  const first = layers[0]!.upper;
-  const n = first.count;
-  const alike = (path: MovingPath | null) =>
-    path !== null && path.count === n && path.x.every((x, i) => x === first.x[i]);
-  if (!layers.every(({ upper, lower }) => alike(upper) && alike(lower))) return undefined;
-  const floats = () => new Float64Array(n);
-  const boundaries = layers.length + 1;
-  return {
-    layers,
-    curve: (layers[0]!.mark as AreaGeometry).curve!,
-    xs: Float64Array.from(first.x),
-    positions: Array.from({ length: boundaries }, floats),
-    tangents: Array.from({ length: boundaries }, floats),
-    curves: floats(),
-    edges: layers.map(() => ({ upper: new Polyline(), lower: new Polyline() })),
-  };
+): MovingStack[] | undefined {
+  const stacked = (pieces[0]!.mark as AreaGeometry).stacked;
+  const stacks: { layers: MovingTrace[]; pieces: MovingTrace[]; of: number[] }[] = [];
+  for (const piece of pieces) {
+    const copied = (layer: MovingTrace) => sameEdges(layer, piece);
+    let stack = stacks.find(({ layers }) => layers.some(copied));
+    if (!stack) {
+      const below = stacked ? stacks[0]?.layers.at(-1) : undefined;
+      if (below && !(piece.lower && samePath(below.upper, piece.lower))) return undefined;
+      stack = below ? stacks[0]! : { layers: [], pieces: [], of: [] };
+      if (!below) stacks.push(stack);
+      stack.layers.push(piece);
+    }
+    stack.pieces.push(piece);
+    stack.of.push(stack.layers.findIndex(copied));
+  }
+  const moving: MovingStack[] = [];
+  for (const { layers, pieces, of } of stacks) {
+    const first = layers[0]!.upper;
+    const n = first.count;
+    const alike = (path: MovingPath | null) =>
+      path !== null && path.count === n && path.x.every((x, i) => x === first.x[i]);
+    if (!layers.every(({ upper, lower }) => alike(upper) && alike(lower))) return undefined;
+    const floats = () => new Float64Array(n);
+    const boundaries = layers.length + 1;
+    moving.push({
+      layers,
+      pieces,
+      of,
+      curve: (layers[0]!.mark as AreaGeometry).curve!,
+      xs: Float64Array.from(first.x),
+      positions: Array.from({ length: boundaries }, floats),
+      tangents: Array.from({ length: boundaries }, floats),
+      curves: floats(),
+      edges: layers.map(() => ({ upper: new Polyline(), lower: new Polyline() })),
+    });
+  }
+  return moving;
 }
 
-/** A stack's layers at the frame's y scale, curved together: the edges two layers share stay one. */
+function sameEdges(a: MovingTrace, b: MovingTrace): boolean {
+  return (
+    samePath(a.upper, b.upper) &&
+    (a.lower === b.lower || (!!a.lower && !!b.lower && samePath(a.lower, b.lower)))
+  );
+}
+
+/** Whether two moving polylines are the same points in both scenes. */
+function samePath(a: MovingPath, b: MovingPath): boolean {
+  if (a.count !== b.count) return false;
+  for (let i = 0; i < a.count; i++)
+    if (a.x[i] !== b.x[i] || a.from[i] !== b.from[i] || a.to[i] !== b.to[i]) return false;
+  return true;
+}
+
+/**
+ * A stack's geometries at the frame's y scale, its layers curved together:
+ * the edges two layers share stay one, and copies of a layer have its edges.
+ */
 export function stackAt(stack: MovingStack, y: Blend): AreaGeometry[] {
-  const { layers, positions, edges } = stack;
+  const { layers, pieces, of, positions, edges } = stack;
   const place = (into: Float64Array, path: MovingPath) => {
     for (let i = 0; i < path.count; i++) into[i] = blend(y, path.from[i]!, path.to[i]!);
   };
@@ -237,7 +283,7 @@ export function stackAt(stack: MovingStack, y: Blend): AreaGeometry[] {
     place(positions[j + 1]!, upper);
   });
   stack.curve(stack.xs, positions, stack.tangents, stack.curves, edges, () => true);
-  return layers.map(({ mark }, j) => ({ ...(mark as AreaGeometry), ...edges[j]! }));
+  return pieces.map(({ mark }, j) => ({ ...(mark as AreaGeometry), ...edges[of[j]!]! }));
 }
 
 /** A rule as drawn: its ends. */

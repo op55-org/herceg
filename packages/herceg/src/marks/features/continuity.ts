@@ -13,13 +13,14 @@ import { compileExpression } from "../../data/expression.ts";
 import type { Table } from "../../data/table.ts";
 import type { Breaks } from "../../lod/m4.ts";
 import type { RangeExtremes, RangeIndex } from "../../lod/minmax-index.ts";
-import type { Polyline } from "../../lod/polyline.ts";
+import type { PointSink } from "../../lod/polyline.ts";
 import type { GuideKit } from "../../model/guides.ts";
 import type { CalendarBreak, ContinuitySpec } from "../../spec/encoding.ts";
 import type { Curve } from "../../spec/spec.ts";
 import type { Series } from "../series.ts";
 import type { TraceFrame } from "../trace.ts";
 import { categoryField, predicate } from "./channels.ts";
+import { crossingOwner } from "./provenance.ts";
 
 /** A row left out, drawn, or left out by `where` alone (its values place a crossing). */
 const HIDDEN = 0;
@@ -61,6 +62,82 @@ function positions(s: Series): { at: (k: number) => number; row: (k: number) => 
   return { at, row: sources ? (k) => sources[k]! : at };
 }
 
+/**
+ * Whether a band's positions [start, end) trace whole through its edges'
+ * min/max `indexes`, as `traceBand` traces them: sorted, of every row,
+ * on linear scales, and no edge missing a value there.
+ */
+export function indexedBand(
+  s: Series,
+  top: Series["y"],
+  bottom: Series["y"],
+  frame: TraceFrame,
+  start: number,
+  end: number,
+  indexes: { top: RangeIndex; bottom: RangeIndex },
+): boolean {
+  const gap = (index: RangeIndex, values: Series["y"]) =>
+    index.length !== values.length || index.query(values, start, end, extremes).gap;
+  return (
+    s.sorted &&
+    s.rows === undefined &&
+    !frame.x.mapping().log &&
+    !frame.y.mapping().log &&
+    start < end &&
+    !gap(indexes.top, top) &&
+    !gap(indexes.bottom, bottom)
+  );
+}
+
+/**
+ * Reduces the runs of positions [from, to) of a band where both its edges
+ * have places into `upper` and `lower` with `reduce`, as `traceBand`
+ * does: rows inside an axis break are left out without ending a run.
+ */
+export function bandRuns(
+  s: Series,
+  top: Series["y"],
+  bottom: Series["y"],
+  frame: TraceFrame,
+  upper: PointSink,
+  lower: PointSink,
+  from: number,
+  to: number,
+  reduce: (edge: Series["y"], start: number, end: number, out: PointSink) => void,
+): void {
+  const xMap = frame.x.mapping();
+  const yMap = frame.y.mapping();
+  const breaks = xMap.breaks;
+  const { at } = positions(s);
+  const placeable = (log: boolean, v: number) => Number.isFinite(v) && (!log || v > 0);
+  let runStart = -1;
+  let drawn = false;
+  for (let k = from; k <= to; k++) {
+    let valid = false;
+    if (k < to) {
+      const i = at(k);
+      // Rows inside an axis break are left out without ending a run.
+      if (breaks?.hides(s.x[i]!)) continue;
+      valid =
+        placeable(xMap.log, s.x[i]!) &&
+        placeable(yMap.log, top[i]!) &&
+        placeable(yMap.log, bottom[i]!);
+    }
+    if (valid && runStart < 0) runStart = k;
+    else if (!valid && runStart >= 0) {
+      // The first run goes on from what the path holds: a crossing at its start.
+      if (drawn) {
+        upper.break();
+        lower.break();
+      }
+      reduce(top, runStart, k, upper);
+      reduce(bottom, runStart, k, lower);
+      runStart = -1;
+      drawn = true;
+    }
+  }
+}
+
 /** A mark's connectivity rules, compiled against its table. */
 export class Topology {
   readonly #table: Table;
@@ -84,6 +161,11 @@ export class Topology {
   #flags: Flags | undefined;
   readonly #runs = new WeakMap<object, Runs>();
   readonly #shown = new WeakMap<object, { version: number; length: number; rows: Uint32Array }>();
+  /** Rows along y whose values a break shows, by values and rows (see `across`). */
+  readonly #shownValues = new WeakMap<
+    object,
+    WeakMap<object, { version: number; length: number; breaks: Breaks; rows: Uint32Array }>
+  >();
 
   constructor(
     kit: GuideKit,
@@ -297,7 +379,7 @@ export class Topology {
     s: Series,
     y: Series["y"],
     frame: TraceFrame,
-    path: Polyline,
+    path: PointSink,
     start: number,
     end: number,
     reduce: (start: number, end: number) => void,
@@ -316,17 +398,12 @@ export class Topology {
     top: Series["y"],
     bottom: Series["y"],
     frame: TraceFrame,
-    upper: Polyline,
-    lower: Polyline,
+    upper: PointSink,
+    lower: PointSink,
     start: number,
     end: number,
-    reduce: (edge: Series["y"], start: number, end: number, out: Polyline) => void,
+    reduce: (edge: Series["y"], start: number, end: number, out: PointSink) => void,
   ): void {
-    const xMap = frame.x.mapping();
-    const yMap = frame.y.mapping();
-    const breaks = xMap.breaks;
-    const { at } = positions(s);
-    const placeable = (log: boolean, v: number) => Number.isFinite(v) && (!log || v > 0);
     this.#runsIn(
       s,
       frame,
@@ -336,31 +413,7 @@ export class Topology {
         { y: top, path: upper },
         { y: bottom, path: lower },
       ],
-      (from, to) => {
-        let runStart = -1;
-        for (let k = from; k <= to; k++) {
-          let valid = false;
-          if (k < to) {
-            const i = at(k);
-            // Rows inside an axis break are left out without ending a run.
-            if (breaks?.hides(s.x[i]!)) continue;
-            valid =
-              placeable(xMap.log, s.x[i]!) &&
-              placeable(yMap.log, top[i]!) &&
-              placeable(yMap.log, bottom[i]!);
-          }
-          if (valid && runStart < 0) runStart = k;
-          else if (!valid && runStart >= 0) {
-            if (runStart > from) {
-              upper.break();
-              lower.break();
-            }
-            reduce(top, runStart, k, upper);
-            reduce(bottom, runStart, k, lower);
-            runStart = -1;
-          }
-        }
-      },
+      (from, to) => bandRuns(s, top, bottom, frame, upper, lower, from, to, reduce),
     );
   }
 
@@ -370,7 +423,7 @@ export class Topology {
     frame: TraceFrame,
     start: number,
     end: number,
-    edges: readonly { y: Series["y"]; path: Polyline }[],
+    edges: readonly { y: Series["y"]; path: PointSink }[],
     reduce: (start: number, end: number) => void,
   ): void {
     const { runs, count } = this.runs(s);
@@ -380,20 +433,25 @@ export class Topology {
     const { at } = positions(s);
     const placeable = (log: boolean, v: number) => Number.isFinite(v) && (!log || v > 0);
     // A crossing meets every edge or none: where the kept row and the crossing have places on all.
+    const steps = this.#curve?.startsWith("step");
     const cross = (kept: number, left: number) => {
-      const crossing = this.#crossing(s, kept, left, xMap, yMap.log);
+      const crossing = this.#crossing(s, kept, left, xMap, yMap);
       const k = at(kept);
       if (!crossing || !placeable(xMap.log, crossing.x) || !placeable(xMap.log, s.x[k]!)) return;
+      // A condition met at the kept row itself (`>=` its value), drawn: the run ends there.
+      if (crossing.t === 0 && !steps && !xMap.breaks?.hides(s.x[k]!)) return;
       const l = at(left);
-      const values = edges.map(({ y }) => between(y[k]!, y[l]!, crossing.t, yMap.log));
+      const values = edges.map(({ y }) => between(y[k]!, y[l]!, crossing.t, yMap));
       if (
         !values.every((v) => placeable(yMap.log, v)) ||
         !edges.every(({ y }) => placeable(yMap.log, y[k]!))
       )
         return;
       const x = mapValue(xMap, crossing.x);
+      // Owned by the row the series arrives at through it (see provenance.ts).
+      const owner = crossingOwner(Math.max(kept, left));
       edges.forEach(({ path }, i) => {
-        path.push(x, mapValue(yMap, values[i]!));
+        path.push(x, mapValue(yMap, values[i]!), owner);
       });
     };
     for (let r = first(runs, count, start); r < count; r++) {
@@ -415,8 +473,8 @@ export class Topology {
    * Where a run ends at a row `where` leaves out, between the drawn
    * position `kept` and the left-out one `left`: its position, and how far
    * from the kept row toward the left-out one it is in drawn coordinates
-   * (`t`): of positions in the time `x.breaks` leave or on a log scale, of
-   * values on a log scale with `yLog`. Steps end where the interval their
+   * (`t`): of positions and values as `x` and `y` place them, in the time
+   * their breaks leave (values along y) or as logs. Steps end where the interval their
    * row owns does, at the kept row's value; linear curves where the
    * condition's comparison changes sign along the segment drawn, its sides
    * placed as positions are where it reads only the positions' field, else
@@ -426,8 +484,8 @@ export class Topology {
     s: Series,
     kept: number,
     left: number,
-    x: { readonly log: boolean; readonly breaks?: Breaks | undefined },
-    yLog: boolean,
+    x: Placement,
+    y: Placement,
   ): { x: number; t: number } | undefined {
     const { at, row } = positions(s);
     const xk = s.x[at(kept)]!;
@@ -436,7 +494,7 @@ export class Topology {
     const after = left > kept;
     // Between the two rows as they are drawn.
     const { breaks } = x;
-    const place = (v: number) => (breaks ? breaks.collapse(v) : x.log ? Math.log(v) : v);
+    const place = placer(x);
     const unplace = (v: number) => (breaks ? breaks.expand(v) : x.log ? Math.exp(v) : v);
     const along = (t: number) => unplace(place(xk) + t * (place(xl) - place(xk)));
     switch (this.#curve) {
@@ -449,7 +507,7 @@ export class Topology {
     }
     const side = this.#side;
     if (!side) return undefined;
-    const sides = this.#onPositions ? place : yLog ? Math.log : (v: number) => v;
+    const sides = this.#onPositions ? place : placer(y);
     const dk = side(row(kept), sides);
     const dl = side(row(left), sides);
     const t = dk / (dk - dl);
@@ -459,11 +517,47 @@ export class Topology {
   /**
    * The extent of the values `values` a series running along y draws (its
    * x holds them, its y the positions): of its drawn observations and its
-   * crossings, as `extent` finds them along x.
+   * crossings, as `extent` finds them along x, between rows in the time x's
+   * `breaks` leave. With `hides` (lines and areas, not bands), the rows
+   * whose values a break hides are left out, as `traceSeries` copies them.
    */
-  across(s: Series, values: Series["y"], log: boolean): [number, number] | undefined {
-    const along: Series = { ...s, x: s.y, sorted: s.ySorted ?? false };
-    return this.extent(along, -Infinity, Infinity, values, log, undefined, false, undefined);
+  across(
+    s: Series,
+    values: Series["y"],
+    log: boolean,
+    breaks?: Breaks,
+    hides = false,
+  ): [number, number] | undefined {
+    let along: Series = { ...s, x: s.y, sorted: s.ySorted ?? false };
+    if (hides && breaks && !s.sources) along = this.#unhidden(along, s.x, breaks);
+    return this.extent(along, -Infinity, Infinity, values, log, undefined, false, undefined, {
+      log,
+      breaks,
+    });
+  }
+
+  /** `s` without the rows whose `values` `breaks` hide, found once per data version. */
+  #unhidden(s: Series, values: Series["y"], breaks: Breaks): Series {
+    // Series of several value fields share their rows: kept by both.
+    let byRows = this.#shownValues.get(values);
+    if (!byRows) {
+      byRows = new WeakMap();
+      this.#shownValues.set(values, byRows);
+    }
+    const key = s.rows ?? values;
+    const version = this.#table.version;
+    let kept = byRows.get(key);
+    if (!kept || kept.version !== version || kept.length !== s.length || kept.breaks !== breaks) {
+      const found: number[] = [];
+      for (let k = 0; k < s.length; k++) {
+        const row = s.rows ? s.rows[k]! : k;
+        if (!breaks.hides(values[row]!)) found.push(row);
+      }
+      kept = { version, length: s.length, breaks, rows: Uint32Array.from(found) };
+      byRows.set(key, kept);
+    }
+    const { rows } = kept;
+    return rows.length === s.length ? s : { ...s, rows, length: rows.length };
   }
 
   /**
@@ -471,7 +565,9 @@ export class Topology {
    * `yExtent` finds the extent of a series drawn whole: its drawn
    * observations in view (by `index` a run at a time, where it has one),
    * and where its runs, crossings included, pass the view's edges, by its
-   * own curve (so `curved`, the chart's guess, is not read).
+   * own curve (so `curved`, the chart's guess, is not read). Values between
+   * rows are placed as `values` draws them (along y, in the time x's breaks
+   * leave), else as logs with `log`.
    */
   extent(
     s: Series,
@@ -482,6 +578,7 @@ export class Topology {
     index: RangeIndex | undefined,
     _curved: boolean,
     breaks: Breaks | undefined,
+    values: Placement = { log },
   ): [number, number] | undefined {
     const lo = Math.min(x0, x1);
     const hi = Math.max(x0, x1);
@@ -497,9 +594,9 @@ export class Topology {
     const { runs, count } = this.runs(s);
     // A run's vertex: a position's observation, or a crossing at a run's end.
     const vertex = (kept: number, left: number): [number, number] | undefined => {
-      const crossing = this.#crossing(s, kept, left, { log: this.#log, breaks }, log);
+      const crossing = this.#crossing(s, kept, left, { log: this.#log, breaks }, values);
       if (!crossing) return undefined;
-      return [crossing.x, between(y[at(kept)]!, y[at(left)]!, crossing.t, log)];
+      return [crossing.x, between(y[at(kept)]!, y[at(left)]!, crossing.t, values)];
     };
     // Crossings in view count where they are.
     const crossings = (a: number, b: number, crossing: number) => {
@@ -563,7 +660,7 @@ export class Topology {
           return add(after[1]);
       }
       const [xa, xb] = [place(before[0]), place(after[0])];
-      add(between(before[1], after[1], (place(edge) - xa) / (xb - xa), log));
+      add(between(before[1], after[1], (place(edge) - xa) / (xb - xa), values));
     };
     for (let r = Math.max(0, first(runs, count, start) - 1); r < count; r++) {
       const a = runs[r * 3]!;
@@ -642,7 +739,16 @@ function fieldsOf(e: Expression): string[] {
 }
 
 /** The value `t` of the way from `a` to `b`, in drawn coordinates: of their logs with `log`. */
-function between(a: number, b: number, t: number, log: boolean): number {
+function between(a: number, b: number, t: number, { log, breaks }: Placement): number {
   if (t === 0) return a;
+  if (breaks) return breaks.expand(between(breaks.collapse(a), breaks.collapse(b), t, { log }));
   return log ? Math.exp(Math.log(a) + t * (Math.log(b) - Math.log(a))) : a + t * (b - a);
+}
+
+/** How a scale draws values: in the time its breaks leave, or as logs. */
+type Placement = { readonly log: boolean; readonly breaks?: Breaks | undefined };
+
+/** A value as `placement` draws it, in a space where segments drawn are straight. */
+function placer({ log, breaks }: Placement): (v: number) => number {
+  return breaks ? (v) => breaks.collapse(v) : log ? Math.log : (v) => v;
 }

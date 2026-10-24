@@ -23,11 +23,34 @@ it.each(["svg", "canvas"] as const)(
   "paints isolated rows as round dots in %s and static SVG",
   async (renderer) => {
     const data = table({ x: [0, 1, 2, 3, 4], y: [1, NaN, 3, NaN, 5] });
-    for (const mark of [
-      line(data, { x: "x", y: "y", strokeWidth: 6, stroke: "#ff0000" }),
-      line(data, { y: "x", x: "y", orient: "y", curve: "step", strokeWidth: 6, stroke: "#ff0000" }),
-      area(data, { x: "x", y: "y", strokeWidth: 6, fill: "#ff0000", line: false }),
-    ]) {
+    const red = [255, 0, 0, 255];
+    for (const [mark, color] of [
+      [line(data, { x: "x", y: "y", strokeWidth: 6, stroke: "#ff0000" }), red],
+      [
+        line(data, {
+          y: "x",
+          x: "y",
+          orient: "y",
+          curve: "step",
+          strokeWidth: 6,
+          stroke: "#ff0000",
+        }),
+        red,
+      ],
+      [area(data, { x: "x", y: "y", strokeWidth: 6, fill: "#ff0000", line: false }), red],
+      // Dashed, and translucent: painted once.
+      [
+        line(data, {
+          x: "x",
+          y: "y",
+          strokeWidth: 6,
+          stroke: "#ff0000",
+          dash: [3, 3],
+          opacity: 0.5,
+        }),
+        [255, 0, 0, 128],
+      ],
+    ] as const) {
       const chart = createChart(host, {
         marks: [mark],
         renderer,
@@ -35,6 +58,7 @@ it.each(["svg", "canvas"] as const)(
         y: { show: false, domain: [0, 6], grid: false },
         theme: { tokens: { background: "transparent" } },
       });
+      await chart.loading;
       const model = modelOf(chart);
       const x = model.xScale()!.map(mark.spec.orient === "y" ? 3 : 2);
       const y = model.yScale()!.map(mark.spec.orient === "y" ? 2 : 3);
@@ -56,7 +80,9 @@ it.each(["svg", "canvas"] as const)(
               .getContext("2d")!
               .getImageData(Math.floor((x + dx) * ratio), Math.floor((y + dy) * ratio), 1, 1).data,
           ];
-          expect(pixel(0, 0)).toEqual([255, 0, 0, 255]);
+          const [r, g, b, a] = pixel(0, 0);
+          expect([r, g, b]).toEqual(color.slice(0, 3));
+          expect(Math.abs(a! - color[3]!)).toBeLessThanOrEqual(1);
           expect(pixel(4, 0)).toEqual(pixel(8, 8));
           expect(pixel(0, 4)).toEqual(pixel(8, 8));
         }

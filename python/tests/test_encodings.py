@@ -106,7 +106,9 @@ def test_channels_are_checked_in_python_names():
 
 
 def test_styles_by_series_markers_and_conditions_send_the_columns_they_read():
-    chart = hg.Chart(SITES).line(
+    # A style map gives each series one look: its column is one value per series.
+    sites = {**SITES, "region": ["n", "n", "n", "s", "s", "s"]}
+    chart = hg.Chart(sites).line(
         x="t",
         y="gain",
         series="site",
@@ -297,3 +299,120 @@ def test_stack_objects_say_offset_order_and_gaps():
     }
     with pytest.raises(ValueError, match="Stack offset: expected"):
         hg.Stack(offset="silhouette")  # type: ignore[arg-type]
+
+
+EVENTS = {
+    "t": [0.0, 1.0, 2.0, 3.0],
+    "v": [1.0, 2.0, 3.0, 4.0],
+    "kind": ["Optimal", "Threshold", "Optimal", "Other"],
+    "badge": ["#d62728", "#1f77b4", "teal", "#d62728"],
+    "area": [16.0, 64.0, 36.0, 100.0],
+}
+
+
+def test_points_take_channels_through_named_and_identity_scales():
+    chart = hg.Chart(
+        EVENTS,
+        scales={
+            "badges": hg.IdentityScale(),
+            "shapes": hg.OrdinalScale(map={"Optimal": "circle", "Threshold": "triangle-down"}),
+            "sizes": hg.OrdinalScale(map={"Optimal": 36, "Threshold": 64}, unknown=16),
+        },
+    ).point(
+        x="t",
+        y="v",
+        series=False,
+        color=hg.Channel(field="badge", scale="badges"),
+        symbol=hg.Channel(field="kind", scale="shapes"),
+        size=hg.Channel(field="kind", scale="sizes"),
+    )
+    mark = marks(chart)[0]
+    assert mark["color"] == {"field": "badge", "scale": "badges"}
+    assert mark["symbol"] == {"field": "kind", "scale": "shapes"}
+    assert mark["size"] == {"field": "kind", "scale": "sizes"}
+    # Colors a column holds are drawn as they are, read as static output reads CSS.
+    assert 'fill="#008080"' in chart.to_svg()
+    # Areas a column holds, colors by a condition, and opacities in encode.
+    chart = hg.Chart(EVENTS).point(
+        x="t",
+        y="v",
+        size=hg.Channel(field="area", scale=hg.IdentityScale()),
+        color=hg.when(hg.col("v") > 2, "#d62728", "#999999"),
+        encode=hg.Encodings(opacity=hg.Channel(value=0.5), stroke=hg.Channel(value="#000")),
+    )
+    mark = marks(chart)[0]
+    assert mark["size"] == {"field": "area", "scale": {"type": "identity"}}
+    assert mark["encode"] == {"stroke": {"value": "#000"}, "opacity": {"value": 0.5}}
+    assert "<path" in chart.to_svg()
+
+
+def test_points_refuse_what_their_channels_cannot_read():
+    points = hg.Chart(EVENTS)
+    with pytest.raises(hg.ChartError, match="point color.value: expected a CSS color"):
+        points.point(x="t", y="v", color=hg.Channel(value="garbage"))
+    with pytest.raises(hg.ChartError, match="point size.value: expected an area of 0 or more"):
+        points.point(x="t", y="v", size=hg.Channel(value=-1))
+    with pytest.raises(
+        hg.ChartError, match="point size.field: column 'kind' holds categories, which sizes"
+    ):
+        points.point(x="t", y="v", size=hg.Channel(field="kind"))
+    with pytest.raises(
+        hg.ChartError, match="point encode.opacity: set as fill_opacity and as encode.opacity"
+    ):
+        points.point(
+            x="t", y="v", fill_opacity=0.5, encode=hg.Encodings(opacity=hg.Channel(value=1))
+        )
+    with pytest.raises(hg.ChartError, match="point encode.stroke: points of a mark draw one"):
+        points.point(x="t", y="v", encode=hg.Encodings(stroke=hg.Channel(field="badge")))
+    with pytest.raises(ValueError, match="point colors: a ramp colors a number column"):
+        points.point(x="t", y="v", color=hg.Channel(field="kind"), colors="viridis")
+
+
+def test_point_conditions_carry_the_columns_they_read():
+    data = {"t": [0.0, 1.0], "v": [1.0, 2.0], "flag": [0.0, 1.0], "other": [5.0, 6.0]}
+    chart = hg.Chart(data).point(
+        x="t", y="v", color=hg.when(hg.col("flag") > 0, "#d62728", "#1f77b4")
+    )
+    spec, _ = chart.to_spec()
+    columns = next(iter(spec["data"].values()))["columns"]
+    assert "flag" in columns
+    assert "other" not in columns
+    assert 'fill="#d62728"' in chart.to_svg()
+
+
+def test_point_channels_name_scales_the_chart_has():
+    chart = hg.Chart(EVENTS).point(x="t", y="v", color=hg.Channel(field="kind", scale="missing"))
+    with pytest.raises(hg.ChartError, match="point color scale: the chart has no scale 'missing'"):
+        chart.to_spec()
+
+
+def test_point_colors_a_column_holds_split_no_series():
+    chart = hg.Chart(EVENTS).point(
+        x="t", y="v", color=hg.Channel(field="badge", scale=hg.IdentityScale())
+    )
+    spec, _ = chart.to_spec()
+    assert "series" not in spec["marks"][0]
+    # A category channel's column names the series, as the column's name does.
+    chart = hg.Chart(EVENTS).point(x="t", y="v", color=hg.Channel(field="kind"))
+    assert len(chart.to_svg().split(">Optimal<")) == 2
+
+
+def test_line_looks_change_along_a_series_where_channels_read_rows():
+    forecast = {
+        "t": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        "v": [1.0, 3.0, 2.0, 4.0, 5.0, 6.0],
+        "estimated": [0, 0, 0, 0, 1, 1],
+    }
+    chart = hg.Chart(forecast).line(
+        x="t",
+        y="v",
+        encode=hg.Encodings(
+            dash=hg.when(hg.col("estimated") > 0, ":", "-"),
+            opacity=hg.when(hg.col("estimated") > 0, 0.5, 1),
+        ),
+    )
+    # One series, drawn in two looks: the observed and the estimated.
+    svg = chart.to_svg()
+    assert svg.count('<clipPath id="herceg-cut-') == 2
+    spec, _ = chart.to_spec()
+    assert "series" not in spec["marks"][0]

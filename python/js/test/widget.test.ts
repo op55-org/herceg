@@ -367,6 +367,50 @@ describe("notebook widget", () => {
     expect(document.activeElement).toBe(host!.querySelector("[tabindex]"));
   });
 
+  it("keeps what a panel set of a mark, what its series stand for, its rows, and its series when the chart is sent again", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const base = snapshot();
+    const shot: Snapshot = {
+      ...base,
+      spec: {
+        ...base.spec,
+        panels: [{ id: "a" }, { id: "b" }],
+        layout: { type: "grid", columns: [1, 1] },
+        data: {
+          data: {
+            columns: {
+              t: number(0),
+              v: number(1),
+              host: { type: "category", codes: 2, dictionary: ["a", "b"] },
+            },
+          },
+        },
+        marks: [
+          { type: "point", data: "data", id: "p", x: "t", y: "v", series: "host", panel: "a" },
+        ],
+      } as Snapshot["spec"],
+      buffers: [...base.buffers.slice(0, 2), new DataView(new Int32Array([0, 0, 1]).buffer)],
+    };
+    const model = new MockModel({ _chart: shot, _listening: [] });
+    mount(model);
+    const chart = listener.mock.instances[0] as MountedChart;
+    await chart.loading;
+    // Each setting narrower than the one before, which setting that again would undo.
+    const whole = '{"mark":"p"}';
+    chart.setVisibility(whole, false);
+    chart.setVisibility(whole, true, { panel: "a" });
+    chart.setVisibility('{"field":"host","value":"b"}', false, { panel: "a" });
+    chart.setVisibility('{"mark":"p","field":"t","equals":"1"}', false, { panel: "a" });
+    chart.setVisibility('["p","b"]', true, { panel: "a" });
+    const hidden = [...chart.getHiddenKeys({ panel: "a" })].sort();
+    model.set("_chart", { ...shot, revision: 1 });
+    const again = listener.mock.instances.at(-1) as MountedChart;
+    expect(again).not.toBe(chart);
+    await again.loading;
+    expect(again.getHiddenKeys()).toEqual([whole]);
+    expect([...again.getHiddenKeys({ panel: "a" })].sort()).toEqual(hidden);
+  });
+
   it("draws a chart sent again with other marks, keeping zoom not yet reported to Python", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     onTestFinished(() => {
@@ -646,13 +690,20 @@ describe("notebook widget", () => {
 
   it("shows a chart that cannot draw in its place, as charts do", async () => {
     const varies = snapshot();
-    // Two hosts in one line: a line takes one color per series.
+    // Two hosts in one line: a style map gives each series one look.
     varies.buffers[2] = new DataView(new Int32Array([0, 1, 0]).buffer);
     const columns = (varies.spec.data as Record<string, { columns: Record<string, unknown> }>).data!
       .columns;
     columns.host = { type: "category", codes: 2, dictionary: ["a", "b"] };
     varies.spec.marks = [
-      { type: "line", x: "t", y: "v", data: "data", color: "host", series: false },
+      {
+        type: "line",
+        x: "t",
+        y: "v",
+        data: "data",
+        series: false,
+        style: { by: { field: "host", map: {} } },
+      },
     ];
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const model = new MockModel({ _chart: varies, _listening: [] });

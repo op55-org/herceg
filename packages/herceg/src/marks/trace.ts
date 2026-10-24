@@ -5,7 +5,7 @@ import type { NumericArray } from "../data/column.ts";
 import type { Table } from "../data/table.ts";
 import { type Mapping, m4, mapValue, polylineAll } from "../lod/m4.ts";
 import type { RangeExtremes, RangeIndex } from "../lod/minmax-index.ts";
-import type { Polyline } from "../lod/polyline.ts";
+import type { PointSink, Polyline } from "../lod/polyline.ts";
 import type { Curve } from "../spec/spec.ts";
 import {
   MIN_CURVE_WIDTH,
@@ -92,7 +92,8 @@ export class IndexUse {
 /**
  * Traces a band's edges as `traceBand` does, positions [start, end) in view
  * written into them by `fill`, which reduces runs of them with `reduce`
- * (for the feature compiler, which decides the runs).
+ * (for the feature compiler, which decides the runs), through an edge's
+ * min/max index where it gives one.
  */
 export function traceBandWith(
   series: Series,
@@ -103,7 +104,13 @@ export function traceBandWith(
     lower: Polyline,
     start: number,
     end: number,
-    reduce: (y: NumericArray, start: number, end: number, out: Polyline) => void,
+    reduce: (
+      y: NumericArray,
+      start: number,
+      end: number,
+      out: PointSink,
+      index?: RangeIndex,
+    ) => void,
   ) => void,
 ): { upper: Polyline; lower: Polyline } {
   const upper = frame.polyline(series.key, "upper");
@@ -111,7 +118,9 @@ export function traceBandWith(
   upper.reset();
   lower.reset();
   const [start, end] = drawnRange(series, frame);
-  fill(upper, lower, start, end, (y, a, b, out) => reduce(series, y, a, b, frame, out));
+  fill(upper, lower, start, end, (y, a, b, out, index) =>
+    reduce(series, y, a, b, frame, out, index),
+  );
   const edges = {
     upper: stepped(upper, frame, series.key, "upper", curve),
     lower: stepped(lower, frame, series.key, "lower", curve),
@@ -126,7 +135,7 @@ function reduce(
   start: number,
   end: number,
   frame: TraceFrame,
-  out: Polyline,
+  out: PointSink,
   index?: RangeIndex,
 ) {
   const xMap = frame.x.mapping();
@@ -209,7 +218,8 @@ export function tracePath(
   const path = frame.polyline(series.key, stage);
   path.reset();
   const [start, end] = curve === "monotone" ? curveRows(series, frame) : drawnRange(series, frame);
-  const step = (a: number, b: number) => reduce(series, y, a, b, frame, path, index);
+  const step = (a: number, b: number, sink: PointSink = path) =>
+    reduce(series, y, a, b, frame, sink, index);
   const trace = series.features?.trace;
   trace ? trace(series, y, frame, stage, path, start, end, step) : step(start, end);
   const traced =
@@ -327,17 +337,22 @@ const RETAINED = 1 << 16;
  * are reduced jointly: each device-pixel column keeps its first and last
  * rows and every boundary's lowest and highest, so all boundaries share x
  * positions and each covers its full extent in the column. Edges are drawn
- * where a layer has its values.
+ * where a layer has its values. Columns end after positions `cuts`
+ * (ascending; a single band's style runs' ends), so the rows either side
+ * of each are kept; `kept`, where given a list for a layer, gets the
+ * positions of its points (both edges'), in order.
  */
 export function traceCurvedLayers(
   layers: readonly Layer[],
   frame: TraceFrame,
   [start, end]: [number, number],
   stacked: boolean,
+  cuts?: ArrayLike<number>,
+  kept?: readonly (number[] | undefined)[],
 ): { upper: Polyline; lower: Polyline }[] {
   if (layers.length === 0) return [];
   const count = layers.length + 1;
-  const rows = keptRows(layers, frame, start, end, stacked);
+  const rows = keptRows(layers, frame, start, end, stacked, cuts);
   const n = rows.length;
   // x, then each boundary's positions, then each boundary's tangents, then steps.
   const size = n * (2 + 2 * count);
@@ -379,7 +394,12 @@ export function traceCurvedLayers(
     const { series, top } = layers[j]!;
     return !stacked || Number.isFinite(top[rowOf(series, rows[i]!)]!);
   };
-  curveLayers(xs, positions, tangents, curves, edges, drawn);
+  curveLayers(xs, positions, tangents, curves, edges, drawn, kept);
+  // From the steps the points stand at to the rows they are.
+  for (const points of kept ?? []) {
+    if (!points) continue;
+    for (let m = 0; m < points.length; m++) points[m] = rows[points[m]!]!;
+  }
   for (const { upper, lower } of edges)
     upper.whole = lower.whole = n === end - start && upper.count === n;
   if (layerFloats.length > RETAINED) layerFloats = new Float64Array(0);
@@ -393,7 +413,8 @@ export function traceCurvedLayers(
  * boundary, written to `tangents`; each segment curved for every boundary,
  * or (too narrow, or where two boundaries could cross) straight for all of
  * them, as `curves` records (1 or 0); and each layer's edges drawn over the
- * runs where it has both boundaries and `drawn(layer, i)` holds. Value
+ * runs where it has both boundaries and `drawn(layer, i)` holds, the steps
+ * of its points written to its list in `kept`, where it has one. Value
  * transitions curve the layers between two scenes with it too.
  */
 export function curveLayers(
@@ -403,6 +424,7 @@ export function curveLayers(
   curves: Float64Array,
   edges: readonly { upper: Polyline; lower: Polyline }[],
   drawn: (layer: number, i: number) => boolean,
+  kept?: readonly (number[] | undefined)[],
 ): void {
   const n = xs.length;
   const count = positions.length;
@@ -445,6 +467,8 @@ export function curveLayers(
   edges.forEach(({ upper, lower }, j) => {
     upper.reset();
     lower.reset();
+    const points = kept?.[j];
+    if (points) points.length = 0;
     const above = positions[j + 1]!;
     const below = positions[j]!;
     const shown = (i: number) => !Number.isNaN(xs[i]! + above[i]! + below[i]!) && drawn(j, i);
@@ -453,6 +477,7 @@ export function curveLayers(
       lower.break();
       edge(upper, above, tangents[j + 1]!, a, z);
       edge(lower, below, tangents[j]!, a, z);
+      if (points) for (let i = a; i < z; i++) points.push(i);
     });
   });
   releaseScratch();
@@ -470,6 +495,7 @@ function keptRows(
   start: number,
   end: number,
   stacked: boolean,
+  cuts?: ArrayLike<number>,
 ): Int32Array {
   const series = layers[0]!.series;
   // Grown as rows are kept: dense data keeps few of its rows.
@@ -509,6 +535,7 @@ function keptRows(
   let column = Number.NaN;
   let firstK = -1;
   let lastK = -1;
+  let cut = 0;
   const flush = () => {
     if (firstK < 0) return;
     candidates[0] = firstK;
@@ -552,6 +579,12 @@ function keptRows(
       }
     }
     lastK = k;
+    // A run ends here: its last row and the next one's first are both kept.
+    while (cuts && cut < cuts.length && cuts[cut]! < k) cut++;
+    if (cuts?.[cut] === k) {
+      flush();
+      column = Number.NaN;
+    }
   }
   flush();
   if (kept.length <= RETAINED) keptScratch = kept;

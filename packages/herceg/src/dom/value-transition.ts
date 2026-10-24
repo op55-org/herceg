@@ -59,7 +59,7 @@ import {
   type MovingStack,
   type MovingTrace,
   moveRule,
-  moveStack,
+  moveStacks,
   moveTrace,
   ruleAt,
   type ShownRule,
@@ -307,7 +307,15 @@ export class ValueAnimation {
     const { config } = this.#model;
     const duration = durationOf(config.animation);
     const panel = this.#model.panels()[0];
-    this.#tween = plan(shown, scene, panel, duration, this.#builders, sidesOf(config));
+    this.#tween = plan(
+      shown,
+      scene,
+      panel,
+      duration,
+      this.#builders,
+      sidesOf(config),
+      followedOf(config),
+    );
     return this.step(frameTime) ?? scene;
   }
 
@@ -397,17 +405,43 @@ export function sidesOf(config: Pick<ChartConfig, "marks">): Sides {
 }
 
 /**
+ * Whether a geometry, by its key, is of a mark labels follow (its own
+ * `labels`, or text `from` it): such marks show their new values at once,
+ * with the labels, which stand where a series is drawn, not where it moves.
+ */
+export function followedOf(config: Pick<ChartConfig, "marks">): (key: string) => boolean {
+  const followed = new Set<unknown>();
+  config.marks.forEach((mark, i) => {
+    const spec = (mark as Mark).spec as Mark["spec"] & {
+      labels?: unknown;
+      from?: { mark: string };
+    };
+    if ((spec.type === "line" || spec.type === "area") && spec.labels !== undefined)
+      followed.add(spec.id ?? i);
+    if (spec.from) followed.add(spec.from.mark);
+  });
+  return (key) => followed.size > 0 && followed.has(ownerOf(key));
+}
+
+/**
  * The identity of the mark a geometry key belongs to: series keys are JSON
  * arrays starting with it (marks/mark.ts), and rules' keys its JSON before a
- * colon and the rule's row.
+ * colon and the rule's row; a highlight's pieces add "\u0001" and the piece
+ * (model/highlight.ts).
  */
-function ownerOf(key: string): unknown {
+function ownerOf(geometryKey: string): unknown {
+  const key = seriesOf(geometryKey);
   const json = key.startsWith("[") ? key : `[${key.slice(0, key.lastIndexOf(":"))}]`;
   try {
     return (JSON.parse(json) as unknown[])[0];
   } catch {
     return undefined;
   }
+}
+
+/** The series a geometry's key (or `of`) names, without a highlight's suffix (model/highlight.ts). */
+function seriesOf(geometryKey: string): string {
+  return geometryKey.split("\u0001")[0]!;
 }
 
 /** Whether a change that brings or takes away this geometry shows at once. */
@@ -537,9 +571,10 @@ function motionsOf(
 /**
  * How what was shown moves to `scene`, whose panel `panel` placed its
  * marks, over `duration` ms, with `sides` saying which y scale places each
- * geometry; undefined when it cannot (the plot or the bands changed, a
- * series came or went, a scale moved that something drawn cannot move
- * with, or retained slices changed order) or nothing moves.
+ * geometry, and `followed` which show their new values at once; undefined
+ * when it cannot (the plot or the bands changed, a series came or went, a
+ * scale moved that something drawn cannot move with, or retained slices
+ * changed order) or nothing moves.
  */
 export function plan(
   shown: Shown,
@@ -548,6 +583,7 @@ export function plan(
   duration: number,
   builders: Builders,
   sides: Sides = () => "y",
+  followed: (key: string) => boolean = () => false,
 ): Tween | undefined {
   const [drawn, ...others] = scene.panels;
   if (!drawn || others.length > 0 || duration === 0 || !movable(drawn)) return undefined;
@@ -590,6 +626,10 @@ export function plan(
   // A mark's areas move together or not at all: a stack's layers share edges.
   const areas = new Map<unknown, { moving: MovingTrace; moves: boolean }[]>();
   const still = new Set<unknown>();
+  // Series a geometry of which shows its new values, which all of theirs do.
+  const atOnce = new Set<string>();
+  // Whether points and lines move, read once those shown at once are left out.
+  const pieceMoves = new Map<MovingPoints | MovingTrace, boolean>();
   // Moving scales move the axes and grid lines, whatever marks do.
   let moves = scales;
   // Include still points and exits in the per-frame budget across the chart.
@@ -604,8 +644,10 @@ export function plan(
       if (motions.x.moves) return undefined;
       continue;
     }
-    const item = shown.items.get(mark.key);
-    const side = sides(mark.key);
+    // Pieces of a series (outlines, markers, a highlight's) are its mark's.
+    const of = mark.of ?? mark.key;
+    const item = followed(of) ? undefined : shown.items.get(mark.key);
+    const side = sides(of);
     // Marks placed otherwise change at once, and what moves beside them with them.
     if (!side) return undefined;
     let moved: { moves: boolean } | undefined;
@@ -624,21 +666,27 @@ export function plan(
         motions[side],
         MOVING_POINTS - pointsDrawn + target.count,
       );
-      if (points) pointsDrawn += points.moving.count - target.count;
-      if (points) tween.points.push(points.moving);
-      moved = points;
+      if (points) {
+        pointsDrawn += points.moving.count - target.count;
+        tween.points.push(points.moving);
+        pieceMoves.set(points.moving, points.moves);
+        continue;
+      }
     } else if (item?.kind === "trace" && (mark.kind === "line" || mark.kind === "area")) {
       // Lines move along y only: points along x would need other rows.
       const trace = mark as LineGeometry | AreaGeometry;
       const scale = { side, motion: motions[side], zero: zero(side) };
       const moving = !motions.x.moves && moveTrace(index, item, trace, scale, builders);
       if (moving && mark.kind === "area") {
-        const owner = ownerOf(mark.key);
+        const owner = ownerOf(of);
         areas.set(owner, [...(areas.get(owner) ?? []), moving]);
         continue;
       }
-      if (moving) tween.traces.push(moving.moving);
-      moved = moving || undefined;
+      if (moving) {
+        tween.traces.push(moving.moving);
+        pieceMoves.set(moving.moving, moving.moves);
+        continue;
+      }
     } else if (item?.kind === "rule" && mark.kind === "rule") {
       const rule = moveRule(index, item, mark as RuleGeometry, side);
       if (rule) tween.rules.push(rule.moving);
@@ -651,7 +699,8 @@ export function plan(
     // What cannot move shows its new values, unless the axes move: it
     // would stand apart from them. Series that came have nothing to move from.
     if (scales || (tracked(mark) && !shown.keys.has(mark.key))) return undefined;
-    if (mark.kind === "area") still.add(ownerOf(mark.key));
+    atOnce.add(seriesOf(of));
+    if (mark.kind === "area") still.add(ownerOf(of));
     const slices = mark.kind === "arc" ? (mark as ArcGeometry).slices : undefined;
     if (slices && shown.pie) {
       const moving = movePie(shown.pie, slices);
@@ -660,20 +709,32 @@ export function plan(
       tween.pie = moving.pie;
     }
   }
+  const pieceOf = ({ of, key }: Geometry) => seriesOf(of ?? key);
   for (const [owner, layers] of areas) {
     // Areas beside one that shows its new values do too.
-    if (still.has(owner)) continue;
     const traces = layers.map(({ moving }) => moving);
-    const curved = (traces[0]!.mark as AreaGeometry).curve !== undefined;
-    const stack = curved ? moveStack(traces, builders) : undefined;
-    if (curved && !stack) {
-      if (scales) return undefined;
+    if (still.has(owner) || traces.some(({ mark }) => atOnce.has(pieceOf(mark)))) {
+      still.add(owner);
       continue;
     }
-    if (stack) tween.stacks.push(stack);
+    const curved = (traces[0]!.mark as AreaGeometry).curve !== undefined;
+    const stacks = curved ? moveStacks(traces, builders) : undefined;
+    if (curved && !stacks) {
+      if (scales) return undefined;
+      still.add(owner);
+      continue;
+    }
+    if (stacks) tween.stacks.push(...stacks);
     else tween.traces.push(...traces);
     moves ||= layers.some((layer) => layer.moves);
   }
+  // Pieces of a series (a highlight's dots, markers) move with it, or show
+  // its new values with it.
+  const shownAtOnce = ({ mark }: { mark: Geometry }) =>
+    atOnce.has(pieceOf(mark)) || still.has(ownerOf(pieceOf(mark)));
+  tween.points = tween.points.filter((points) => !shownAtOnce(points));
+  tween.traces = tween.traces.filter((trace) => !shownAtOnce(trace));
+  for (const piece of [...tween.points, ...tween.traces]) moves ||= pieceMoves.get(piece) ?? false;
   // Series that went have nothing to move to.
   const keys = new Set(drawn.marks.map(({ key }) => key));
   for (const key of shown.keys) if (!keys.has(key)) return undefined;
@@ -820,9 +881,9 @@ export function frameAt(tween: Tween, elapsed: number): Scene {
   for (const trace of tween.traces)
     marks[trace.index] = traceAt(trace, blends[trace.scale.side], panel.plot);
   for (const stack of tween.stacks) {
-    const { layers } = stack;
-    stackAt(stack, blends[layers[0]!.scale.side]).forEach((layer, j) => {
-      marks[layers[j]!.index] = layer;
+    const { pieces } = stack;
+    stackAt(stack, blends[pieces[0]!.scale.side]).forEach((piece, j) => {
+      marks[pieces[j]!.index] = piece;
     });
   }
   for (const rule of tween.rules) marks[rule.index] = ruleAt(rule, blends[rule.along]);

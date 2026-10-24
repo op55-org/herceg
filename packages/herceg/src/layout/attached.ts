@@ -10,17 +10,30 @@
 // side's track, or one x and alignment inside) are spread apart along y
 // within the plot, in the order of their points, as painted, halos too; a
 // column taller than the plot keeps the labels that fit from its top and
-// leaves the others out. The marks that make attachments load this
-// module; the line chart's first chunk does not.
+// leaves the others out. The feature compiler places labels with it, and
+// hands it the chart's code it uses (`AttachedKit`), so the line chart's
+// first chunk does not load it.
 
-import { labelsDrawing } from "../draw/text.ts";
+import type { textItemMarkup } from "../draw/text.ts";
+import { labelsDrawingOf } from "../draw/text-items.ts";
 import type { Attachment } from "../marks/attachments.ts";
 import type { Frame } from "../marks/mark.ts";
-import type { LabelsGeometry, Rect, TextItem } from "../scene/scene.ts";
+import type { Drawing, LabelsGeometry, Rect, TextItem } from "../scene/scene.ts";
 import type { ResolvedHalo, TextPaint } from "../style/style.ts";
-import { surface } from "../theme.ts";
+import type { surface } from "../theme.ts";
 import { anchorBlock } from "./block.ts";
-import { type TextLines, textItem, textLines } from "./text.ts";
+import type { TextLines, textItem, textLines } from "./text.ts";
+
+/** The chart's code labels are placed and drawn with (see model/guides.ts `GUIDE_KIT`). */
+export interface AttachedKit {
+  readonly textLines: typeof textLines;
+  readonly textItem: typeof textItem;
+  readonly textItemMarkup: typeof textItemMarkup;
+  readonly surface: typeof surface;
+}
+
+/** How placed labels draw, with the chart's markup of text items (made once). */
+let drawing: Drawing<LabelsGeometry> | undefined;
 
 /** Pixels between a label inside the plot and its point. */
 const GAP = 4;
@@ -51,6 +64,7 @@ export function placeAttached(
   labels: readonly AttachedLabel[],
   frame: Frame,
   key: string,
+  { textLines, textItem, textItemMarkup, surface }: AttachedKit,
 ): { geometry: LabelsGeometry[]; room: readonly [left: number, right: number] } {
   const { plot, measure } = frame;
   // Each label's block, unturned, by column.
@@ -114,9 +128,9 @@ export function placeAttached(
       items.push(halo ? { ...item, halo } : item);
     }
   }
-  const geometry: LabelsGeometry[] =
-    items.length > 0 ? [{ kind: "labels", draw: labelsDrawing, key, items }] : [];
-  return { geometry, room };
+  if (items.length === 0) return { geometry: [], room };
+  drawing ??= labelsDrawingOf(textItemMarkup);
+  return { geometry: [{ kind: "labels", draw: drawing, key, items }], room };
 }
 
 /**

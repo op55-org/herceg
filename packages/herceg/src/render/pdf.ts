@@ -154,6 +154,9 @@ class PathBuilder {
  */
 let fade = 1;
 
+/** Past the page as far as anything is drawn, for cutting holes out of everything else. */
+const HOLE = 1e5;
+
 /** Channels from 0 to 1 and alpha times `opacity`; undefined when nothing would show. */
 function color(css: string, opacity = 1): [number, number, number, number] | undefined {
   if (css === "none") return undefined;
@@ -180,6 +183,8 @@ interface PaintStyle {
   strokeWidth?: number | undefined;
   strokeOpacity?: number | undefined;
   dash?: readonly number[] | undefined;
+  /** How far into the dash pattern the path begins. */
+  dashOffset?: number | undefined;
   /** Default "butt", as in SVG. */
   cap?: "butt" | "round";
   /** Default "miter", as in SVG. */
@@ -215,8 +220,12 @@ function begin(page: PdfPage, style: PaintStyle): ("f" | "f*" | "S")[] | undefin
     // Patterns SVG cannot draw (all zeros, negative lengths) draw solid
     // lines; PDF rejects a pattern of zeros.
     const dash = style.dash?.every(Number.isFinite) ? style.dash.map((d) => num(d, 3)) : [];
-    if (dash.some((d) => Number(d) > 0) && dash.every((d) => Number(d) >= 0))
-      state += ` [${dash.join(" ")}] 0 d`;
+    if (dash.some((d) => Number(d) > 0) && dash.every((d) => Number(d) >= 0)) {
+      // PDF's phase is a distance into the pattern, never negative.
+      const period = dash.reduce((sum, d) => sum + Number(d), 0) * (dash.length % 2 ? 2 : 1);
+      const phase = (((style.dashOffset ?? 0) % period) + period) % period;
+      state += ` [${dash.join(" ")}] ${num(phase, 3)} d`;
+    }
   }
   page.write(`${state}\n`);
   // Filled and stroked paths are painted twice rather than with "B", which
@@ -469,12 +478,20 @@ function paintGeometry(
   font: TextStyle["font"],
 ): void {
   // Highlights draw some geometry faded, or within rectangles, through drawings of their own.
-  const { opacity = 1, clip } = geometry.draw;
+  const { opacity = 1, clip, holes } = geometry.draw;
+  const cut = clip !== undefined || holes !== undefined;
+  if (cut) page.write("q\n");
   if (clip) {
     let rects = "";
     for (let i = 0; i + 3 < clip.length; i += 4)
       rects += `${num(clip[i]!)} ${num(clip[i + 1]!)} ${num(clip[i + 2]!)} ${num(clip[i + 3]!)} re `;
-    page.write(`q ${rects}W n\n`);
+    page.write(`${rects}W n\n`);
+  }
+  // Each hole is cut away in turn: everything but it, by the even-odd rule.
+  for (const hole of holes ?? []) {
+    let path = `${-HOLE} ${-HOLE} ${2 * HOLE} ${2 * HOLE} re ${num(hole[0]!)} ${num(hole[1]!)} m `;
+    for (let i = 2; i + 1 < hole.length; i += 2) path += `${num(hole[i]!)} ${num(hole[i + 1]!)} l `;
+    page.write(`${path}h W* n\n`);
   }
   const before = fade;
   fade *= opacity;
@@ -482,7 +499,7 @@ function paintGeometry(
     paintMark(page, geometry as MarkGeometry, plot, theme, font);
   } finally {
     fade = before;
-    if (clip) page.write("Q\n");
+    if (cut) page.write("Q\n");
   }
 }
 
@@ -501,6 +518,7 @@ function paintMark(
         stroke: mark.stroke,
         strokeWidth: mark.strokeWidth,
         dash: mark.dash,
+        dashOffset: mark.dashOffset,
         cap: "round",
         join: "round",
       });

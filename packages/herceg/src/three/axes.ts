@@ -6,8 +6,8 @@
 // leftmost, each pushed outward along the edge's normal on screen, and
 // labels that would overlap are thinned.
 
+import { textDrawing } from "../draw/labels.ts";
 import { lineDrawing } from "../draw/line.ts";
-import { textDrawing } from "../draw/text.ts";
 import { type MeasureText, oneLineText } from "../layout/text.ts";
 import { Polyline } from "../lod/polyline.ts";
 import type { LineGeometry, Rect, TextGeometry } from "../scene/scene.ts";

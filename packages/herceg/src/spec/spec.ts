@@ -1128,11 +1128,15 @@ export interface LineSpec extends SeriesBase, RowTooltip {
   label?: string;
   /**
    * The lines' color: a category field (a line per value, unless `series`
-   * says otherwise; constant within each series), or a color. The short
-   * form of `encode.color`; `stroke` wins over it.
+   * says otherwise), or a color. The short form of `encode.color`;
+   * `stroke` wins over it.
    */
   color?: string;
-  /** Channels: color, stroke, dash, strokeWidth, and opacity, each constant within a series. */
+  /**
+   * Channels: color, stroke, dash, strokeWidth, and opacity. One reading
+   * rows (a field other than the series', a condition) changes the line's
+   * look along its series (style runs).
+   */
   encode?: Pick<EncodingsSpec, "color" | "stroke" | "dash" | "strokeWidth" | "opacity">;
   /** Looks by series (`by`) and the markers' look. */
   style?: Pick<MarkStyleSpec, "by" | "marker">;
@@ -1165,10 +1169,14 @@ interface AreaStyle extends SeriesBase, RowTooltip {
   opacity?: number;
   /**
    * The areas' fill: a category field (an area per value, unless `series`
-   * says otherwise; constant within each series), or a color.
+   * says otherwise), or a color.
    */
   color?: string;
-  /** Channels, each constant within a series: color, fill, stroke, and opacity. */
+  /**
+   * Channels: color, fill, stroke, and opacity. One reading rows (a field
+   * other than the series', a condition) changes the area's look along its
+   * series (style runs), outside stacks.
+   */
   encode?: Pick<EncodingsSpec, "color" | "fill" | "stroke" | "opacity">;
   /** Looks by series (`by`). */
   style?: Pick<MarkStyleSpec, "by">;

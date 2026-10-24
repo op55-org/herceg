@@ -3,7 +3,7 @@ import { scanExtent, type Table } from "../data/table.ts";
 import type { Breaks, Mapping } from "../lod/m4.ts";
 import type { RangeExtremes, RangeIndex } from "../lod/minmax-index.ts";
 import type { TraceBuffers, TraceColumns, TraceSource } from "../lod/point-view.ts";
-import type { Polyline } from "../lod/polyline.ts";
+import type { PointSink } from "../lod/polyline.ts";
 import type { SeriesFeatures } from "../model/features.ts";
 
 /**
@@ -81,6 +81,8 @@ export interface Series {
   whole?: Series | undefined;
   /** What the feature compiler resolved for the series: its paint, tracing, and markers. */
   features?: SeriesFeatures | undefined;
+  /** For a series some of whose rows legends hide by value (marks/hidden.ts), the series with them. */
+  unhidden?: Series | undefined;
   /**
    * For a series of another's points copied in order (`traceSeries`), each
    * position's row of the table, which `rows` no longer says.
@@ -149,7 +151,7 @@ export interface SeriesStream {
     xMap: Mapping,
     yMap: Mapping,
     pixelRatio: number,
-    out: Polyline,
+    out: PointSink,
     rows: Uint32Array | undefined,
     index?: RangeIndex,
   ): boolean;

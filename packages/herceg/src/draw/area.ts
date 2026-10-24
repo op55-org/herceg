@@ -1,5 +1,5 @@
 import type { AreaGeometry, Drawing, SvgElement } from "../scene/scene.ts";
-import { DOT_LENGTH, hasIsolated, traceLine, traceRun } from "./line.ts";
+import { dotAt, hasIsolated, traceLine, traceRun } from "./line.ts";
 import { markupOf, type PathSink, SvgPath } from "./markup.ts";
 
 /** Adds an area's outline to `sink`: per run, the top edge, then the bottom edge back. */
@@ -46,7 +46,7 @@ export function traceAreaOutline(sink: PathSink, area: AreaGeometry): void {
     const x = upper.coords[start * 2]!;
     const y = upper.coords[start * 2 + 1]!;
     sink.moveTo(x, y);
-    sink.lineTo(x + DOT_LENGTH, y);
+    dotAt(sink, x, y);
   }
 }
 
@@ -94,12 +94,16 @@ export const areaDrawing: Drawing<AreaGeometry> = {
     context.fillStyle = area.fill;
     context.fill();
     context.globalAlpha = 1;
-    // As in SVG: an outline when the area has one, else only dots for isolated points.
-    if (area.strokeWidth === 0 || (!area.stroke && !hasIsolated(area.upper))) return;
+    // As in SVG: an outline when the area has one, else only dots for isolated
+    // points; round joins, and round ends only with isolated points.
+    const isolated = hasIsolated(area.upper);
+    if (area.strokeWidth === 0 || (!area.stroke && !isolated)) return;
     context.beginPath();
     traceAreaOutline(context, area);
     context.strokeStyle = area.stroke ?? area.fill;
     context.lineWidth = area.strokeWidth;
+    context.lineJoin = "round";
+    context.lineCap = isolated ? "round" : "butt";
     context.globalAlpha = area.strokeOpacity ?? 1;
     context.stroke();
     context.globalAlpha = 1;

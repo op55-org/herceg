@@ -4,7 +4,7 @@
 // others draw as positioned text items (fonts, sizes, boxes), as guides do.
 
 import { labelHalo } from "../draw/label-halo.ts";
-import { labelsDrawing, textDrawing } from "../draw/text.ts";
+import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { type TextAt, textItem } from "../layout/text.ts";
 import type { LabelsGeometry, Rect, TextGeometry } from "../scene/scene.ts";
 import type { Frozen } from "../spec/spec.ts";

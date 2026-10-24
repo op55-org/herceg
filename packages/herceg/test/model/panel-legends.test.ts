@@ -10,6 +10,7 @@ import { geopoint } from "../../src/marks/geopoint.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { facet } from "../../src/model/facet.ts";
 import type { AxisInspection } from "../../src/model/inspect.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -17,6 +18,7 @@ import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { NO_PAGE } from "../../src/render/fallbacks.ts";
 import {
+  type ArcGeometry,
   guidesOf,
   type LegendGuide,
   type LegendItem,
@@ -53,6 +55,27 @@ const legends = (scene: Scene) => guidesOf(scene, "legend") as LegendGuide[];
 const labels = (guide: LegendGuide | undefined) => guide?.entries.map(({ label }) => label);
 /** The series an entry hides and shows, as the legend's buttons do. */
 const targets = (entry: LegendItem) => [entry.targets ?? entry.key].flat();
+/**
+ * Presses an entry's button as legends do (dom/legend.ts, `setVisibility`):
+ * shows what it lets go of where it is hidden or mixed, else hides its targets.
+ */
+function press(chart: ChartModel, entry: LegendItem, panel?: string, of = layout) {
+  const show = !!(entry.hidden || entry.mixed);
+  const keys = (show && entry.shows) || targets(entry);
+  const { hidden } = chart;
+  hidden.panels = of.visibility(hidden, keys, show, panel);
+  for (const key of panel === undefined ? keys : []) {
+    const stored = hidden.groups.get(key) ?? key;
+    if (show) hidden.delete(stored);
+    else hidden.add(stored);
+  }
+}
+/** How many of what `kind` draws (points, or sectors) a panel of `scene` draws. */
+const drawnIn = (scene: Scene, key: string, kind: "point" | "arc" = "point") =>
+  scene.panels
+    .find((p) => p.key === key)!
+    .marks.filter((g): g is PointGeometry | ArcGeometry => g.kind === kind)
+    .reduce((sum, g) => sum + g.count, 0);
 const strokes = (scene: Scene, key: string) =>
   scene.panels
     .find((p) => p.key === key)!
@@ -851,6 +874,364 @@ describe("panel legends", () => {
       const { '[0,"eu"]': hidden, ...kept } = was[i]!;
       expect(hidden).toBeDefined();
       expect(colors).toEqual(kept);
+    }
+  });
+});
+
+describe("panel legends of what legends compose", () => {
+  it("list a panel's annotations by their labels", () => {
+    const chart = model({
+      marks: [...marks, rule({ y: 100, label: "SLO", panel: "latency", id: "slo" })],
+      panels: layout,
+      guides: [legend({ panel: "latency", include: [{ mark: "slo" }] })],
+    });
+    const own = legends(chart.scene(estimateText)).find((g) => g.panel === "latency");
+    expect(labels(own)).toEqual(["SLO"]);
+  });
+
+  it("leave to the chart's legend the series their own entries do not target", () => {
+    const chart = model({
+      marks: [line(data, { x: "t", y: "p99", series: "region", panel: "latency", id: "p99" })],
+      panels: layout,
+      guides: [
+        legend({
+          panel: "latency",
+          include: [],
+          entries: [
+            {
+              key: "eu",
+              label: "EU",
+              targets: [{ mark: "p99", field: "region", values: ["eu"] }],
+            },
+          ],
+        }),
+      ],
+    });
+    const scene = chart.scene(estimateText);
+    expect(labels(legends(scene).find((g) => g.panel === undefined))).toEqual(["us", "ap"]);
+  });
+
+  it("show the chart's own entries hidden where panels hide the rows they target", () => {
+    const rows = table({ t: [0, 1, 2], v: [1, 2, 3], kind: ["a", "b", "a"] });
+    const chart = model({
+      marks: [point(rows, { x: "t", y: "v", panel: "errors", id: "p" })],
+      panels: layout,
+      legend: {
+        include: [],
+        entries: [{ key: "a", label: "A", targets: [{ mark: "p", field: "kind", values: ["a"] }] }],
+      },
+    });
+    const entry = () =>
+      legends(chart.scene(estimateText))
+        .flatMap((g) => g.entries)
+        .find(({ key }) => key === "a")!;
+    expect(entry().hidden).toBe(false);
+    chart.hidden.panels.set("errors", new Map(targets(entry()).map((key) => [key, true])));
+    expect(entry().hidden).toBe(true);
+  });
+
+  it("show in a panel what its legend shows there, over a mark the chart hides whole", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    const chart = model({
+      marks: [point(rows, { x: "t", y: "v", series: "kind", panel: "errors", id: "p" })],
+      panels: layout,
+      guides: [legend({ panel: "errors" })],
+    });
+    const drawn = () =>
+      chart
+        .scene(estimateText)
+        .panels.find((p) => p.key === "errors")!
+        .marks.filter((g): g is PointGeometry => g.kind === "point")
+        .reduce((sum, g) => sum + g.count, 0);
+    const a = chart.series().find((s) => s.label === "a")!;
+    chart.hidden.add('{"mark":"p"}');
+    chart.hidden.panels = layout.visibility(chart.hidden, [a.entry ?? a.key], true, "errors");
+    // As its entry says: shown, drawn there.
+    const entry = legends(chart.scene(estimateText))
+      .find((g) => g.panel === "errors")!
+      .entries.find(({ label }) => label === "a")!;
+    expect(entry.hidden).toBe(false);
+    expect(drawn()).toBe(2);
+    // The mark hidden whole in the panel again hides all of it there.
+    chart.hidden.panels = layout.visibility(chart.hidden, ['{"mark":"p"}'], false, "errors");
+    expect(drawn()).toBe(0);
+  });
+
+  it("draw in a panel what it shows of a mark whole, over series the chart hides", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    const chart = model({
+      marks: [point(rows, { x: "t", y: "v", series: "kind", panel: "errors", id: "p" })],
+      panels: layout,
+      guides: [legend({ panel: "errors" })],
+    });
+    chart.scene(estimateText);
+    for (const s of chart.series()) chart.hidden.add(s.entry ?? s.key);
+    chart.hidden.panels = layout.visibility(chart.hidden, ['{"mark":"p"}'], true, "errors");
+    const scene = chart.scene(estimateText);
+    const drawn = scene.panels
+      .find((p) => p.key === "errors")!
+      .marks.filter((g): g is PointGeometry => g.kind === "point")
+      .reduce((sum, g) => sum + g.count, 0);
+    // As its entries and its hidden keys say.
+    expect(drawn).toBe(4);
+    expect(layout.hiddenKeys(chart.hidden, "errors")).toEqual([]);
+    const own = legends(scene).find((g) => g.panel === "errors")!;
+    expect(own.entries.map(({ hidden }) => hidden)).toEqual([false, false]);
+  });
+
+  it("show rows a panel hides by value in its entries and the chart's, and the chart's show them", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    // The chart's legend too, which lists what the panel's does.
+    const chart = model({
+      marks: [point(rows, { x: "t", y: "v", series: "kind", panel: "errors", id: "p" })],
+      panels: layout,
+      legend: true,
+      guides: [legend({ panel: "errors" })],
+    });
+    const zero = JSON.stringify({ mark: "p", field: "t", equals: "0" });
+    chart.hidden.panels = layout.visibility(chart.hidden, [zero], false, "errors");
+    const a = (panel?: string) =>
+      legends(chart.scene(estimateText))
+        .find((g) => g.panel === panel)!
+        .entries.find(({ label }) => label === "a")!;
+    expect([a().mixed, a("errors").mixed]).toEqual([true, true]);
+    expect(a().shows).toContain(zero);
+    chart.hidden.panels = layout.visibility(chart.hidden, a().shows!, true, undefined);
+    const drawn = chart
+      .scene(estimateText)
+      .panels.find((p) => p.key === "errors")!
+      .marks.filter((g): g is PointGeometry => g.kind === "point")
+      .reduce((sum, g) => sum + g.count, 0);
+    expect(drawn).toBe(4);
+  });
+
+  it("show a chart's own entry mixed where panels hide some of what it names", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    const chart = model({
+      scales: { cats: { type: "ordinal" } },
+      marks: ["latency", "errors"].map((id) =>
+        point(rows, {
+          x: "t",
+          y: "v",
+          series: "kind",
+          id,
+          panel: id,
+          encode: { color: { field: "kind", scale: "cats" } },
+        }),
+      ),
+      panels: layout,
+      legend: { entries: [{ key: "A", label: "A", targets: [{ scale: "cats", values: ["a"] }] }] },
+      guides: [legend({ panel: "latency" })],
+    });
+    const chartEntry = (key: string) =>
+      legends(chart.scene(estimateText))
+        .find((g) => g.panel === undefined)!
+        .entries.find((e) => e.key === key)!;
+    const a = legends(chart.scene(estimateText))
+      .find((g) => g.panel === "latency")!
+      .entries.find(({ label }) => label === "a")!;
+    chart.hidden.panels = layout.visibility(chart.hidden, [a.key], false, "latency");
+    expect([chartEntry("A").hidden, chartEntry("A").mixed]).toEqual([false, true]);
+  });
+
+  it("show a chart's entry in every panel, past what hides it once panels let go of theirs", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    const chart = model({
+      marks: ["latency", "errors"].map((id) =>
+        point(rows, { x: "t", y: "v", series: "kind", panel: id, id }),
+      ),
+      panels: layout,
+      legend: true,
+      guides: [legend({ panel: "latency" }), legend({ panel: "errors" })],
+    });
+    const a = (panel?: string) =>
+      legends(chart.scene(estimateText))
+        .find((g) => g.panel === panel)!
+        .entries.find(({ label }) => label === "a")!;
+    // The chart hides one mark whole, whose panel shows a; the other panel hides a.
+    chart.hidden.add('{"mark":"latency"}');
+    press(chart, a("latency"), "latency");
+    press(chart, a("errors"), "errors");
+    const scene = () => chart.scene(estimateText);
+    expect(["latency", "errors"].map((key) => drawnIn(scene(), key))).toEqual([2, 2]);
+    // Pressed, the chart's lets go of what panels set, and of what hid a under it.
+    expect(a().mixed).toBe(true);
+    press(chart, a());
+    expect([a().hidden, a().mixed]).toEqual([false, undefined]);
+    expect(["latency", "errors"].map((key) => drawnIn(scene(), key))).toEqual([4, 4]);
+  });
+
+  it("show in a panel what an entry names alone, over a mark its own entry hid there whole", () => {
+    const chart = model({
+      marks: [
+        line(data, { x: "t", y: "p99", color: "region", panel: "latency", id: "first" }),
+        line(data, { x: "t", y: "errors", color: "region", panel: "errors" }),
+      ],
+      panels: layout,
+      guides: [
+        legend({ panel: "latency" }),
+        legend({
+          panel: "latency",
+          include: [],
+          entries: [{ key: "all", label: "All", targets: [{ mark: "first" }] }],
+        }),
+      ],
+    });
+    const entry = (label: string) =>
+      legends(chart.scene(estimateText))
+        .filter((g) => g.panel === "latency")
+        .flatMap((g) => g.entries)
+        .find((e) => e.label === label)!;
+    press(chart, entry("All"), "latency");
+    expect(entry("eu").hidden).toBe(true);
+    // Shown there by its own setting, which comes before the mark's: the others stay hidden.
+    expect(entry("eu").shows).toBeUndefined();
+    press(chart, entry("eu"), "latency");
+    expect(["eu", "us", "ap"].map((label) => entry(label).hidden)).toEqual([false, true, true]);
+    expect(strokes(chart.scene(estimateText), "latency")).toHaveLength(1);
+  });
+
+  it("aggregate layout marks' items in the chart's entries without panels' legends", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    const of = panels(columns([1, 1], [panel("points"), panel("share")]));
+    const chart = model({
+      marks: [
+        point(rows, { x: "t", y: "v", series: "kind", panel: "points", id: "p" }),
+        pie(rows, { category: "kind", value: "v", panel: "share", id: "pie" }),
+      ],
+      panels: of,
+      legend: { columns: 1 },
+    });
+    chart.hidden.add('{"mark":"p"}');
+    const scene = chart.scene(estimateText);
+    // Slices of both values are drawn: neither entry is hidden.
+    expect(drawnIn(scene, "share", "arc")).toBe(2);
+    const entries = legends(scene).find((g) => g.panel === undefined)!.entries;
+    expect(entries.map(({ hidden, mixed }) => [hidden, mixed])).toEqual([
+      [false, true],
+      [false, true],
+    ]);
+  });
+
+  it("let go of a layout mark hidden whole where the chart's entry shows its items", () => {
+    const rows = table({ kind: ["a", "b"], v: [1, 2] });
+    const of = panels(columns([1, 1], [panel("share"), panel("other")]));
+    const chart = model({
+      marks: [pie(rows, { category: "kind", value: "v", panel: "share", id: "pie" })],
+      panels: of,
+      legend: true,
+      guides: [legend({ panel: "share" })],
+    });
+    chart.hidden.add('{"mark":"pie"}');
+    const a = (panel?: string) =>
+      legends(chart.scene(estimateText))
+        .find((g) => g.panel === panel)!
+        .entries.find(({ label }) => label === "a")!;
+    expect([a().hidden, a("share").hidden]).toEqual([true, true]);
+    press(chart, a(), undefined, of);
+    expect(drawnIn(chart.scene(estimateText), "share", "arc")).toBe(2);
+    // Shown in its panel alone, the rest of the pie stays hidden there.
+    chart.hidden.add('{"mark":"pie"}');
+    press(chart, a("share"), "share", of);
+    expect(drawnIn(chart.scene(estimateText), "share", "arc")).toBe(1);
+  });
+
+  it("read what showing an entry leaves without copying what series stand for", () => {
+    const chart = model({ marks, panels: layout, legend: true });
+    chart.scene(estimateText);
+    const { hidden } = chart;
+    const [first] = chart.legendEntries();
+    hidden.add(first!.key);
+    const after = layout.panelLegends.showing(hidden, [first!.key], undefined);
+    expect(after.groups).toBe(hidden.groups);
+    expect(after.has(first!.key)).toBe(false);
+  });
+
+  it("aggregate the chart's entries over the panels whose marks read what they target", () => {
+    const rows = table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4], kind: ["a", "b", "a", "b"] });
+    const chartEntry = (chart: ChartModel) =>
+      legends(chart.scene(estimateText))
+        .find((g) => g.panel === undefined)!
+        .entries.find(({ key }) => key === "A")!;
+    const own = [{ key: "local", label: "Local", targets: [{ scale: "cats", values: ["a"] }] }];
+    const entries = [{ key: "A", label: "A", targets: [{ scale: "cats", values: ["a"] }] }];
+    const scales: [{ type: "ordinal"; scope?: "panel" }, ChartConfig["marks"][number]][] = [
+      [
+        { type: "ordinal", scope: "panel" },
+        line(rows, {
+          x: "t",
+          y: "v",
+          panel: "errors",
+          encode: { color: { field: "kind", scale: "cats" } },
+        }),
+      ],
+      [
+        { type: "ordinal" },
+        point(rows, {
+          x: "t",
+          y: "v",
+          series: false,
+          panel: "errors",
+          encode: { symbol: { field: "kind", scale: "cats" } },
+        }),
+      ],
+    ];
+    for (const [scale, mark] of scales) {
+      const chart = model({
+        marks: [mark],
+        panels: layout,
+        scales: { cats: scale },
+        legend: { include: [], entries },
+        guides: [legend({ panel: "errors", include: [], entries: own })],
+      });
+      // No mark of the other panel reads the scale: its key is none of the entry's.
+      expect(targets(chartEntry(chart)).some((key) => key.includes("latency"))).toBe(false);
+      const local = legends(chart.scene(estimateText))
+        .find((g) => g.panel === "errors")!
+        .entries.find(({ key }) => key === "local")!;
+      chart.hidden.panels = layout.visibility(chart.hidden, targets(local), false, "errors");
+      expect(chartEntry(chart).hidden, scale.scope ?? "chart").toBe(true);
+    }
+  });
+
+  it("leave to a panel's legend the labels of an annotation it toggles whole", () => {
+    const rows = table({ t: [0, 1], v: [100, 150], kind: ["low", "high"] });
+    const chart = model({
+      marks: [
+        ...marks,
+        rule(rows, { y: "v", label: { field: "kind" }, legend: true, panel: "latency", id: "r" }),
+      ],
+      panels: layout,
+      guides: [
+        legend({
+          panel: "latency",
+          include: [],
+          entries: [{ key: "all", label: "All labels", targets: [{ mark: "r" }] }],
+        }),
+      ],
+    });
+    const chartLabels = labels(legends(chart.scene(estimateText)).find((g) => !g.panel));
+    expect(chartLabels).not.toContain("low");
+    expect(chartLabels).not.toContain("high");
+  });
+
+  it("stack beside a panel nearest it in the order guides list them", () => {
+    for (const side of ["left", "right"] as const) {
+      const chart = model({
+        marks: [...marks, rule({ y: 100, label: "SLO", panel: "latency", id: "slo" })],
+        panels: layout,
+        legend: false,
+        guides: [
+          legend({ panel: "latency", include: [{ mark: "slo" }], place: { side, scope: "panel" } }),
+          legend({ panel: "latency", place: { side, scope: "panel" } }),
+        ],
+      });
+      const scene = chart.scene(estimateText);
+      const [first, second] = legends(scene).filter((g) => g.panel === "latency");
+      const plot = scene.panels.find((p) => p.key === "latency")!.plot;
+      const edge = side === "left" ? plot.x : plot.x + plot.width;
+      const distance = (g: LegendGuide) => Math.abs(g.entries[0]!.x - edge);
+      expect(distance(first!), side).toBeLessThan(distance(second!));
     }
   });
 });

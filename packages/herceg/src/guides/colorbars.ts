@@ -40,6 +40,8 @@ export interface ColorbarPlan {
   options: ColorbarOptions;
   scale: ScaleRef | undefined;
   path: string;
+  /** Where `guides` lists it. */
+  index: number;
 }
 
 /** The colorbars `guides` lists. */
@@ -55,6 +57,7 @@ export function plannedColorbars(guides: readonly { type: string }[] | undefined
         options,
         scale: options.scale,
         path: `chart guides[${i}]`,
+        index: i,
       },
     ];
   });

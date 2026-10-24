@@ -21,6 +21,7 @@ import { radar } from "../../src/marks/radar.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { sankey } from "../../src/marks/sankey.ts";
 import { treemap } from "../../src/marks/treemap.ts";
+import { panels } from "../../src/model/panels.ts";
 import type { ArcGeometry, ShapesGeometry, TextShape } from "../../src/scene/scene.ts";
 import { resolveTheme } from "../../src/theme.ts";
 import { bandBox, labelsOf, MOUSE, modelOf } from "./helpers.ts";
@@ -231,6 +232,147 @@ describe("interaction", () => {
     expect(chart.root.querySelectorAll("button")[1]!.getAttribute("aria-pressed")).toBe("false");
     chart.destroy();
   });
+
+  it("shows a series from the legend where its mark is hidden whole", async () => {
+    const data = table({ x: [1, 2, 3, 4], y: [3, 1, 4, 2], kind: ["a", "b", "a", "b"] });
+    const chart = createChart(host, {
+      marks: [point(data, { x: "x", y: "y", series: "kind", id: "p" })],
+      legend: { entries: [{ key: "all", label: "All", targets: [{ mark: "p" }] }] },
+    });
+    await chart.loading;
+    chart.render();
+    const button = (label: string) =>
+      [...chart.root.querySelectorAll("button")].find((b) => b.textContent === label)!;
+    button("All").click();
+    chart.render();
+    // The mark hidden whole hides its series, as their entries say.
+    expect(["a", "b", "All"].map((label) => button(label).getAttribute("aria-pressed"))).toEqual([
+      "false",
+      "false",
+      "false",
+    ]);
+    button("a").click();
+    chart.render();
+    expect(button("a").getAttribute("aria-pressed")).toBe("true");
+    expect(chart.getHiddenKeys()).not.toContain('{"mark":"p"}');
+    chart.destroy();
+  });
+
+  it("shows a mark hidden whole on the default legend, loading what reports it", async () => {
+    const data = table({ x: [1, 2, 3, 4], y: [3, 1, 4, 2], kind: ["a", "b", "a", "b"] });
+    const chart = createChart(host, {
+      marks: [point(data, { x: "x", y: "y", series: "kind", id: "p" })],
+    });
+    await chart.loading;
+    const button = (label: string) =>
+      [...chart.root.querySelectorAll("button")].find((b) => b.textContent === label)!;
+    chart.setVisibility('{"mark":"p"}', false);
+    await chart.loading;
+    chart.render();
+    expect(["a", "b"].map((label) => button(label).getAttribute("aria-pressed"))).toEqual([
+      "false",
+      "false",
+    ]);
+    // Showing a series shows it, whatever hid it.
+    button("a").click();
+    chart.render();
+    expect(button("a").getAttribute("aria-pressed")).toBe("true");
+    expect(chart.getHiddenKeys()).not.toContain('{"mark":"p"}');
+    chart.destroy();
+  });
+
+  it("shows a pie's slices from the legend where the pie is hidden whole", async () => {
+    const data = table({ kind: ["a", "b"], y: [1, 2] });
+    const chart = createChart(host, {
+      marks: [pie(data, { category: "kind", value: "y", id: "pie" })],
+      legend: { columns: 1 },
+    });
+    await chart.loading;
+    const button = (label: string) =>
+      [...chart.root.querySelectorAll("button")].find((b) => b.textContent === label)!;
+    chart.setVisibility('{"mark":"pie"}', false);
+    await chart.loading;
+    chart.render();
+    // Its entries say so, and showing one shows it, whatever hid it.
+    expect(["a", "b"].map((label) => button(label).getAttribute("aria-pressed"))).toEqual([
+      "false",
+      "false",
+    ]);
+    button("a").click();
+    chart.render();
+    expect(button("a").getAttribute("aria-pressed")).toBe("true");
+    expect(chart.getHiddenKeys()).not.toContain('{"mark":"pie"}');
+    chart.destroy();
+  });
+
+  it("shows in one press a series that came after its entry hid it", async () => {
+    const rows = table({ x: [0, 1], y: [1, 2], kind: ["a", "a"] }, { maxRows: 10 });
+    const chart = createChart(host, {
+      marks: [point(rows, { x: "x", y: "y", series: "kind", id: "p" })],
+      legend: {
+        include: [],
+        entries: [
+          {
+            key: "ab",
+            label: "A and B",
+            targets: [{ mark: "p", field: "kind", values: ["a", "b"] }],
+          },
+        ],
+      },
+    });
+    await chart.loading;
+    chart.render();
+    const button = () =>
+      [...chart.root.querySelectorAll("button")].find((b) => b.textContent === "A and B")!;
+    button().click();
+    chart.render();
+    rows.append({ x: [2], y: [3], kind: ["b"] });
+    chart.render();
+    expect(button().getAttribute("aria-pressed")).toBe("false");
+    button().click();
+    chart.render();
+    expect(button().getAttribute("aria-pressed")).toBe("true");
+    expect(chart.getHiddenKeys()).toEqual([]);
+    chart.destroy();
+  });
+
+  for (const split of [false, true])
+    it(`shows in one press rows a series that came since would hide${split ? ", in subplots" : ""}`, async () => {
+      const p = table({ x: [0, 1], y: [1, 2], kind: ["a", "b"] });
+      const q = table({ x: [0], y: [1], kind: ["b"] }, { maxRows: 10 });
+      const chart = createChart(host, {
+        marks: [
+          point(p, { x: "x", y: "y", series: "kind", id: "p", ...(split && { panel: "p" }) }),
+          point(q, { x: "x", y: "y", series: "kind", id: "q", ...(split && { panel: "q" }) }),
+        ],
+        ...(split && { panels: panels([{ id: "p" }, { id: "q" }]) }),
+        legend: {
+          include: [],
+          entries: [
+            {
+              key: "zero",
+              label: "P at zero",
+              targets: [{ mark: "p", field: "x", values: ["0"] }],
+            },
+          ],
+        },
+      });
+      await chart.loading;
+      chart.render();
+      // q's "a" hidden before q has any, and p's row at zero, an "a" too.
+      chart.setVisibility('["q","a"]', false);
+      chart.setVisibility('{"mark":"p","field":"x","equals":"0"}', false);
+      q.append({ x: [1], y: [2], kind: ["a"] });
+      chart.render();
+      const button = () =>
+        [...chart.root.querySelectorAll("button")].find((b) => b.textContent === "P at zero")!;
+      expect(button().getAttribute("aria-pressed")).toBe("false");
+      // A press keeps q's "a" as what it stands for, every mark's "a", which it lets go of too.
+      button().click();
+      chart.render();
+      expect(button().getAttribute("aria-pressed")).toBe("true");
+      chart.destroy();
+    });
 
   it("outlines hollow points' legend swatches", () => {
     const data = table({ x: [1, 2, 3, 4], y: [3, 1, 4, 2], kind: ["a", "b", "a", "b"] });

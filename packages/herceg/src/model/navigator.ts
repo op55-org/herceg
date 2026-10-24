@@ -10,9 +10,9 @@
 
 import type { NumericArray } from "../data/column.ts";
 import { labelHalo } from "../draw/label-halo.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { escapeXml, n } from "../draw/markup.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
-import { textDrawing } from "../draw/text.ts";
 import { mapValue } from "../lod/m4.ts";
 import { Polyline } from "../lod/polyline.ts";
 import type { BarMark } from "../marks/bar.ts";

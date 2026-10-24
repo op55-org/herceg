@@ -124,11 +124,13 @@ export function rampLegend(ramp: ColorRamp): LegendPart {
  * value text's color, translucent.
  */
 export function keyLegend(key: GlyphKey): LegendPart {
-  const { title, channel, entries } = key;
-  const id = `key|${title}|${channel}|${entries.map((e) => `${e.label} ${e.glyph} ${e.color}`).join("|")}`;
+  const { title, channel, entries, scale } = key;
+  // Keys alike are one, unless they show scales of different names.
+  const id = `key|${scale ?? ""}|${title}|${channel}|${entries.map((e) => `${e.label} ${e.glyph} ${e.color}`).join("|")}`;
   return {
     key: id,
     channel,
+    scale,
     breaks: true,
     items(text: LegendText, out: LegendOut): LegendFlowItem[] {
       const { measure, lineHeight } = text;

@@ -25,6 +25,7 @@ import { CandlestickMark } from "../marks/candlestick.ts";
 import { ContourMark } from "../marks/contour.ts";
 import { DendrogramMark } from "../marks/dendrogram.ts";
 import { ErrorBarMark } from "../marks/errorbar.ts";
+import { FollowingTextMark } from "../marks/following.ts";
 import { FunnelMark } from "../marks/funnel.ts";
 import { GaugeMark } from "../marks/gauge.ts";
 import { GeoPointMark } from "../marks/geopoint.ts";
@@ -547,6 +548,7 @@ function loadMark(spec: MarkSpec, index: number, tables: Map<string, Table>): Ma
           annotationTable(spec, [spec.x1, spec.x2, spec.y1, spec.y2], tables),
         );
       case "text":
+        if (spec.from) return new FollowingTextMark(spec);
         return new TextMark(
           spec,
           annotationTable(spec, spec.at ? [spec.at.x, spec.at.y] : [spec.x, spec.y], tables),
@@ -640,8 +642,7 @@ function annotationTable(
   positions: readonly (AnnotationPosition | undefined)[],
   tables: Map<string, Table>,
 ): Table | undefined {
-  const field = typeof spec.label === "object" ? spec.label.field : undefined;
-  return readsTable(positions, field) ? tableFor(spec.data, tables) : undefined;
+  return readsTable(positions, spec.label) ? tableFor(spec.data, tables) : undefined;
 }
 
 function tableFor(name: string | undefined, tables: Map<string, Table>): Table {

@@ -5,10 +5,10 @@
 
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
+import { textDrawing } from "../draw/labels.ts";
 import { n } from "../draw/markup.ts";
 import { rectDrawing } from "../draw/rect.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
-import { textDrawing } from "../draw/text.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";

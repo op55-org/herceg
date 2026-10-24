@@ -540,7 +540,7 @@ describe("point color by category", () => {
     ]);
   });
 
-  it("cycles through at most 254 colors and the muted one, as the points and the key read them", () => {
+  it("colors more than 254 values each its own, as the points and the key read them", () => {
     const palette = Array.from({ length: 300 }, (_, i) => `#${i.toString(16).padStart(6, "0")}`);
     const many = table({
       x: Array.from({ length: 260 }, (_, i) => i),
@@ -552,11 +552,12 @@ describe("point color by category", () => {
       marks: [point(many, { x: "x", y: "y", series: false, color: "kind" })],
     });
     const [g] = scene.panels[0]!.marks as PointGeometry[];
-    expect(g!.colors!.palette).toHaveLength(254);
+    expect(g!.colors!.palette).toEqual(palette.slice(0, 260));
+    expect(g!.colors!.index).toBeInstanceOf(Float32Array);
     const fills = keysOf(scene)[0]!.entries.map((e) => e.fill);
-    expect(fills[254]).toBe(palette[0]);
-    const at = model.inspect(model.xScale()!.map(254), model.yScale()!.map(254))!;
-    expect(at.points[0]!.color).toBe(palette[0]);
+    expect(fills[258]).toBe(palette[258]);
+    const at = model.inspect(model.xScale()!.map(258), model.yScale()!.map(258))!;
+    expect(at.points[0]!.color).toBe(palette[258]);
   });
 
   it("refuse a color scale whose unknown output is not a color", () => {
@@ -565,7 +566,7 @@ describe("point color by category", () => {
         scales: { color: { type: "ordinal", domain: ["n"], unknown: 3 } },
         marks: [point(cities, { x: "x", y: "y", series: false, color: "region" })],
       }),
-    ).toThrow("chart scales.color.unknown (read by point (mark 0) color): expected a color");
+    ).toThrow("chart scales.color.unknown (read by point (mark 0) color): expected a CSS color");
   });
 
   it("keep each value's color slot as values come and go", () => {
@@ -582,10 +583,9 @@ describe("point color by category", () => {
     });
     const colorOf = (label: string) =>
       keysOf(model.scene(estimateText))[0]!.entries.find((e) => e.label.text === label)!.fill;
-    // Past 254 mapped colors, the rest take the muted color, and keep it.
-    expect(colorOf("k255")).toBe(LIGHT.muted);
+    expect(colorOf("k255")).toBe(palette[255]);
     stream.dropFirst(10);
-    expect(colorOf("k255")).toBe(LIGHT.muted);
+    expect(colorOf("k255")).toBe(palette[255]);
     expect(colorOf("k20")).toBe(palette[20]);
   });
 
@@ -688,15 +688,24 @@ describe("point symbols", () => {
 
   it("leaves room for how far pointed shapes reach", () => {
     const star = point(cities, { x: "x", y: "y", radius: 10, symbol: "star" }) as PointMark;
-    expect(star.inset.y).toBeCloseTo(10 * symbolReach("star"));
+    expect(star.inset!.y).toBeCloseTo(10 * symbolReach("star"));
     expect(symbolReach("star")).toBeGreaterThan(1.5);
-    const shapes = point(cities, { x: "x", y: "y", radius: 10, symbol: "region" }) as PointMark;
-    expect(shapes.inset.y).toBeCloseTo(10 * Math.max(...SYMBOLS.map(symbolReach)));
     // The topmost star's tip stays inside the plot.
     const { scene } = build({ marks: [star] });
     const g = scene.panels[0]!.marks[0] as PointGeometry;
     const top = Math.min(...Array.from({ length: g.count }, (_, i) => g.coords[i * 2 + 1]!));
     expect(top - 10 * symbolReach("star")).toBeGreaterThanOrEqual(scene.panels[0]!.plot.y - 0.01);
+    // A field's shapes are the feature compiler's, which leaves room for the farthest reaching.
+    const shapes = point(cities, { x: "x", y: "y", radius: 10, symbol: "region" }) as PointMark;
+    expect(shapes.inset).toBeUndefined();
+    const drawn = build({ marks: [shapes] }).scene.panels[0]!;
+    const tips = (drawn.marks as PointGeometry[]).flatMap((m) =>
+      Array.from(
+        { length: m.count },
+        (_, i) => m.coords[i * 2 + 1]! - 10 * symbolReach(SYMBOLS[m.symbols![i]!]!),
+      ),
+    );
+    expect(Math.min(...tips)).toBeGreaterThanOrEqual(drawn.plot.y - 0.01);
   });
 
   it("winds every shape clockwise, so overlapping shapes in one path do not cancel", () => {
@@ -722,10 +731,11 @@ describe("point symbols", () => {
 
   it("keys only values the table holds, each keeping its shape as the table streams", () => {
     const stream = table({ x: [0], y: [0], kind: ["k0"] }, { maxRows: 2 });
-    const model = new ChartModel({
-      locale: "en-US",
-      marks: [point(stream, { x: "x", y: "y", symbol: "kind" })],
-    });
+    const model = new ChartModel(
+      { locale: "en-US", marks: [point(stream, { x: "x", y: "y", symbol: "kind" })] },
+      undefined,
+      ...staticCompilers(),
+    );
     model.setSize(600, 300, 1);
     const shapes = new Map<string, string>();
     // Enough values for the table to compact its dictionary several times.

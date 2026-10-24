@@ -1,12 +1,12 @@
 import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { pointDrawing } from "../draw/point.ts";
-import { CYCLE, SYMBOLS, type SymbolName, symbolPath, symbolReach } from "../draw/symbols.ts";
+import { SYMBOLS, type SymbolName, symbolPath, symbolReach } from "../draw/symbols.ts";
 import { formatNumber } from "../format/format.ts";
 import { GridIndex } from "../lod/grid-index.ts";
 import type { Breaks } from "../lod/m4.ts";
 import { clearDomain } from "../model/clearance.ts";
-import type { CategoryColors } from "../model/features.ts";
+import type { PointChannel, PointChannels, PointLooks } from "../model/features.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { type Nearest, settle } from "../model/nearest.ts";
 import {
@@ -26,13 +26,14 @@ import {
   type PointItems,
   type Rect,
 } from "../scene/scene.ts";
+import { type ChannelName, outputProblem } from "../spec/channels.ts";
 import type { ChannelSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, PointSpec } from "../spec/spec.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
-import { Appearance, scaleKey } from "./appearance.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
 import type { Channel, Encodings, FieldCoordinate, MappedField } from "./encoding.ts";
+import { withoutHidden } from "./hidden.ts";
 import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -63,7 +64,6 @@ import {
   type SummaryContext,
   seriesOf,
 } from "./mark.ts";
-import { OBJECT, type Pending, refusePending } from "./pending.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { placeAt, rowOf, type Series, valueAt, visibleRange, xExtent, yExtent } from "./series.ts";
 import { offsetOf, Swarms } from "./swarm.ts";
@@ -246,8 +246,6 @@ const RADIUS_RANGE: readonly [number, number] = [2, 12];
 const MIN_OPACITY = 0.15;
 const NO_COORDS = new Float32Array(0);
 const POSITION: readonly ["number", "time", "category"] = ["number", "time", "category"];
-/** The shape or color of rows without a category value (see Appearance). */
-const NONE = -1;
 /** Legend shapes: circles of this radius, other shapes reaching at most LEGEND_REACH. */
 const LEGEND_RADIUS = 4.5;
 const LEGEND_REACH = 6;
@@ -257,8 +255,8 @@ interface Encoding {
   radius?: (value: number) => number;
   /** A number or time `color`'s scale. */
   color?: SequentialScale;
-  /** A category `color`'s codes, and each code's index into `palette` (NONE without rows). */
-  categories?: { codes: Int32Array; tones: Int32Array };
+  /** The colors of a color channel the feature compiler reads (see `PointLooks`). */
+  looks?: PointLooks;
   palette?: readonly string[];
   opacity?: (value: number) => number;
 }
@@ -266,46 +264,21 @@ interface Encoding {
 /** Stream identities of clouds by table, x field, and y field, shared by every chart drawing them. */
 const streamKeys = new WeakMap<Table, Map<string, Map<string, object>>>();
 
-/**
- * A point spec as points draw it: channels fields or constants, while
- * they refuse channel objects (pending.ts).
- */
-type DrawnPointSpec = FieldChannels<Frozen<PointSpec>>;
-type FieldChannels<S> = {
-  readonly [K in keyof S]: K extends "symbol"
-    ? string | { readonly field: string }
-    : K extends "color" | "size" | "fillOpacity" | "encode"
-      ? Exclude<S[K], object>
-      : S[K];
-};
-
-/** Points' options round 2 freezes before its streams draw them. */
-const PENDING: readonly Pending[] = [
-  ["color", "C", "give a field or a color", OBJECT],
-  ["size", "C", "give a field", OBJECT],
-  ["fillOpacity", "C", "give a field or a number", OBJECT],
-  // `{ field }` alone is a symbol field, as points always took one.
-  [
-    "symbol",
-    "C",
-    "give a shape or { field }",
-    (v) => OBJECT(v) && (!("field" in (v as object)) || "scale" in (v as object)),
-  ],
-  ["encode", "C", "drop encode"],
-];
-
-export class PointMark implements Mark<DrawnPointSpec> {
+export class PointMark implements Mark<Frozen<PointSpec>> {
   declare readonly [MARK]: true;
   readonly clearDomain = clearDomain;
-  readonly spec: DrawnPointSpec;
+  readonly spec: Frozen<PointSpec>;
   readonly table: Table<Schema>;
   readonly identity: MarkSources;
   readonly legendScales: readonly LegendScale[];
   readonly view: RowView | undefined;
   readonly tooltip = "point";
-  /** A category `color` colors points through the chart's color scale (see model/features.ts). */
+  /** Channels the feature compiler reads per row colors, sizes, and shapes points through (see model/features.ts). */
   readonly featured: boolean = false;
-  readonly inset: { x: number; y: number };
+  /** What of the channels the feature compiler reads, and what the mark draws itself. */
+  readonly channels: PointChannels;
+  /** Room automatic padding keeps for points; the feature compiler's where its channels size or shape them. */
+  readonly inset: { x: number; y: number } | undefined;
   readonly bound: RowBindings | undefined;
   /** The fields placing points along x and y: their own, or their coordinates'. */
   readonly #fields: { readonly x: string; readonly y: string };
@@ -314,21 +287,18 @@ export class PointMark implements Mark<DrawnPointSpec> {
   readonly #banded: { readonly x: boolean; readonly y: boolean };
   /** Pick indexes per frame (charts sharing this mark have separate frames), per series key. */
   readonly #indexes = new WeakMap<Frame, Map<string, GridIndex>>();
-  /** Fields encoding size, opacity, color, and shape, when the options name fields. */
+  /** Number fields points map themselves: sizes by area, opacities, a color ramp. */
   readonly #sizeField: string | undefined;
   readonly #opacityField: string | undefined;
-  readonly #symbolField: string | undefined;
-  /** A number or time `color`, colored on a continuous scale. */
   readonly #toneField: string | undefined;
-  /** A category `color` other than the series field, its values' colors through the chart's color scale. */
-  readonly #colorField: string | undefined;
-  /** A category symbol field's values in order of appearance, which take the shapes in turn. */
-  readonly #shapes: Appearance | undefined;
-  /** The shape of every point when no field gives one. */
+  /** The shape of every point when no channel gives one. */
   readonly #symbol: SymbolName;
   /** The radius of every point, or with a `size` field the largest. */
   readonly #radius: number;
-  /** Outline width in pixels; 0 for none. */
+  /** Fill opacity of every point when no channel gives one. */
+  readonly #opacity: number;
+  /** Outline color and width in pixels; 0 for none. */
+  readonly #stroke: string | undefined;
   readonly #ringWidth: number;
   /** How far each of SYMBOLS reaches per unit of radius. */
   readonly #reaches = SYMBOLS.map(symbolReach);
@@ -343,8 +313,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
     // Well formed first, as the validator checks a spec before what it draws.
     const sizeForm = pointSizeForm(input);
     if (sizeForm) throw new ChartError({ code: "invalid-option", ...sizeForm });
-    refusePending(input, "point", PENDING);
-    this.spec = frozen(input) as DrawnPointSpec;
+    this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "point");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -360,7 +329,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
     requireField(table, position.y, POSITION, "point y");
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "point series");
     // A category color names the series, as on lines and bars.
-    const series = seriesOf(spec, table, "fill");
+    const series = seriesOf(spec as PointSpec as never, table, "fill");
     this.#series = series;
     if (spec.animationKey !== undefined)
       requireField(table, spec.animationKey, POSITION, "point animationKey");
@@ -393,96 +362,79 @@ export class PointMark implements Mark<DrawnPointSpec> {
     const xField = this.#banded.x ? undefined : position.x;
     this.#split = new SeriesSplitter(table, xField, [position.y], series, spec.label, view);
     this.identity = { field: series, values: [position.y] };
-    if (spec.size !== undefined) requireField(table, spec.size, NUMERIC, "point size");
-    if (typeof spec.fillOpacity === "string")
-      requireField(table, spec.fillOpacity, NUMERIC, "point fillOpacity");
-    if (spec.color !== undefined) {
-      requireField(table, spec.color, POSITION, "point color");
-      if (table.kind(spec.color) !== "category") this.#toneField = spec.color;
-      else if (
-        spec.colors !== undefined ||
+    const channels = pointChannels(spec, table);
+    const { color, size, opacity, symbol } = channels;
+    this.#toneField = color.own;
+    this.#sizeField = size.own;
+    this.#opacityField = opacity.own;
+    if (
+      color.given !== undefined &&
+      color.own === undefined &&
+      (spec.colors !== undefined ||
         spec.colorDomain !== undefined ||
-        spec.colorMidpoint !== undefined
-      )
-        throw new Error(
-          `point colors: "${spec.color}" is a category field, colored by the theme's palette; drop colors, colorDomain, and colorMidpoint`,
-        );
-      // Colored by the series field, points keep their series' colors, which
-      // the chart's color scale gives them; other fields color each point.
-      else {
-        this.featured = true;
-        if (spec.color !== series) this.#colorField = spec.color;
-      }
-    }
+        spec.colorMidpoint !== undefined)
+    )
+      throw new Error(
+        `point colors: ${typeof color.given === "string" ? `"${color.given}" is a category field, colored by the theme's palette` : "a ramp colors a number field"}; drop colors, colorDomain, and colorMidpoint`,
+      );
     if (Array.isArray(spec.colors)) checkRamp(spec.colors, "point colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "point");
     if (spec.radius !== undefined && !(spec.radius > 0 && Number.isFinite(spec.radius)))
       throw new RangeError(
         `point radius: expected a positive number of pixels; received ${spec.radius}`,
       );
-    if (typeof spec.fillOpacity === "number" && !(spec.fillOpacity >= 0 && spec.fillOpacity <= 1))
+    this.#opacity = typeof opacity.given === "number" ? opacity.given : 1;
+    if (!(this.#opacity >= 0 && this.#opacity <= 1))
       throw new RangeError(
-        `point fillOpacity: expected a number from 0 to 1 or a field; received ${spec.fillOpacity}`,
+        `point fillOpacity: expected a number from 0 to 1 or a field; received ${this.#opacity}`,
       );
     const range = spec.radiusRange ?? RADIUS_RANGE;
     if (!(range[0] >= 0 && range[1] > range[0] && Number.isFinite(range[1])))
       throw new RangeError(
         `point radiusRange: expected two finite radii, ascending; received [${range}]`,
       );
-    this.#sizeField = spec.size;
-    this.#opacityField = typeof spec.fillOpacity === "string" ? spec.fillOpacity : undefined;
-    // `{ field }` names a field; a shape's name draws that shape, and any
-    // other name is a field. A name that is both would leave the choice to
-    // the table's columns, so it is refused.
-    const named = typeof spec.symbol === "object" ? undefined : spec.symbol;
-    const shape = named === undefined ? undefined : SYMBOLS.find((s) => s === named);
-    if (shape !== undefined && table.has(shape)) {
-      throw new Error(
-        `point symbol: "${shape}" names both a shape and a field; give { field: "${shape}" } to encode the field`,
-      );
-    }
-    const field =
-      typeof spec.symbol === "object" ? spec.symbol.field : shape === undefined ? named : undefined;
-    if (field === undefined) {
-      this.#symbol = shape ?? "circle";
-    } else {
-      if (!table.has(field)) {
-        throw new RangeError(
-          `point symbol: no shape or field "${field}"; name a category field or one of ${SYMBOLS.map((s) => `"${s}"`).join(", ")}`,
-        );
-      }
-      requireField(table, field, CATEGORY, "point symbol");
-      this.#symbolField = field;
-      this.#shapes = new Appearance(field);
-      this.#symbol = "circle";
-    }
+    this.#symbol = typeof symbol.given === "string" ? (symbol.given as SymbolName) : "circle";
     // What guides may name: the series, and the fields that color, size,
     // and shape points (a symbol field splitting series shows in its entries).
     const scales: LegendScale[] = ["series"];
+    const field = (c: PointChannel<unknown> | undefined) =>
+      c && "field" in c.spec && c.spec.field !== series;
     if (this.#toneField !== undefined) scales.push("ramp");
-    if (this.#colorField !== undefined) scales.push("key");
-    if (this.#sizeField !== undefined) scales.push("size");
-    if (this.#symbolField !== undefined && this.#symbolField !== series) scales.push("symbol");
+    if (field(color.compiled)) scales.push("key");
+    if (this.#sizeField !== undefined || field(size.compiled)) scales.push("size");
+    if (field(symbol.compiled)) scales.push("symbol");
     this.legendScales = scales;
     const radius = this.#sizeField !== undefined ? range[1] : (spec.radius ?? DEFAULT_RADIUS);
-    // Pointed shapes reach past the radius of a circle of the same area.
-    const reach =
-      this.#symbolField !== undefined
-        ? Math.max(...this.#reaches)
-        : this.#reaches[SYMBOLS.indexOf(this.#symbol)]!;
     this.#radius = radius;
-    if (
-      spec.strokeWidth !== undefined &&
-      !(spec.strokeWidth >= 0 && Number.isFinite(spec.strokeWidth))
-    )
-      throw new RangeError(
-        `point strokeWidth: expected 0 or more pixels; received ${spec.strokeWidth}`,
-      );
-    this.#ringWidth = spec.strokeWidth ?? (spec.stroke !== undefined ? 1 : 0);
+    const encode = spec.encode ?? {};
+    for (const name of ["stroke", "strokeWidth"] as const) {
+      if (encode[name] === undefined) continue;
+      refuseBoth(spec, name, name);
+      if (!("value" in encode[name]))
+        throw new ChartError({
+          code: "unsupported",
+          path: `encode.${name}`,
+          message: `point encode.${name}: points of a mark draw one outline; give { value }, or ${name}`,
+        });
+    }
+    this.#stroke = spec.stroke ?? (encode.stroke as { value?: string } | undefined)?.value;
+    const width = spec.strokeWidth ?? (encode.strokeWidth as { value?: number } | undefined)?.value;
+    if (width !== undefined && !(width >= 0 && Number.isFinite(width)))
+      throw new RangeError(`point strokeWidth: expected 0 or more pixels; received ${width}`);
+    this.#ringWidth = width ?? (this.#stroke !== undefined ? 1 : 0);
+    this.channels = {
+      color: color.compiled,
+      size: size.compiled,
+      opacity: opacity.compiled,
+      symbol: symbol.compiled,
+      radius,
+      shape: this.#symbol,
+      outline: this.#ringWidth,
+    };
+    this.featured = !!(color.compiled || size.compiled || opacity.compiled || symbol.compiled);
     // Outlines reach half their width past the shape, along the axes it is placed on.
-    const outline = this.#ringWidth / 2;
-    const extent = radius * reach + outline;
-    this.inset = { x: extent, y: extent };
+    const extent = radius * this.#reaches[SYMBOLS.indexOf(this.#symbol)]! + this.#ringWidth / 2;
+    this.inset = size.compiled || symbol.compiled ? undefined : { x: extent, y: extent };
   }
 
   channelKind(axis: "x" | "y") {
@@ -496,7 +448,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
   series(
     key: MarkKey,
     palette: Palette,
-    _hidden: ReadonlySet<string>,
+    hidden: ReadonlySet<string>,
     bands: Bands,
     context: BandContext,
   ) {
@@ -505,7 +457,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
     // A category position is each row's band index on the chart's axis.
     const banded = (axis: "x" | "y") =>
       bandIndices(table, fields[axis], bands[axis]?.keys ?? [], context);
-    return buildSeries(
+    const series = buildSeries(
       table,
       this.#split.sources(),
       this.#banded.x ? banded("x") : table.numbers(fields.x as never),
@@ -514,6 +466,8 @@ export class PointMark implements Mark<DrawnPointSpec> {
       spec.fill,
       this.#banded.y ? banded("y") : undefined,
     );
+    // Rows the legend hides by value go, as hidden series do.
+    return withoutHidden(series, hidden, key, table);
   }
 
   xExtent(series: readonly Series[], log: boolean) {
@@ -531,19 +485,23 @@ export class PointMark implements Mark<DrawnPointSpec> {
   }
 
   geometry(series: readonly Series[], frame: Frame): PointGeometry[] {
-    const encoding = this.#encoding(frame, categoriesOf(series));
+    const looks = looksOf(series);
+    const encoding = this.#encoding(frame, looks);
     // With no color value at all, no point has the value it encodes.
     if (this.#toneField !== undefined && !encoding.color) return [];
     const radius = this.#radius;
     const reachOf = this.#reaches;
     const fixedReach = reachOf[SYMBOLS.indexOf(this.#symbol)]!;
-    const opacity = typeof this.spec.fillOpacity === "number" ? this.spec.fillOpacity : 1;
+    const opacity = this.#opacity;
+    const area = looks?.area;
+    const opacityOf = looks?.opacity;
+    const shapeOf = looks?.shape;
     // Points of one size, color, opacity, and circle shape can take the fast paths.
     const encoded =
       encoding.radius !== undefined ||
       encoding.palette !== undefined ||
       encoding.opacity !== undefined ||
-      this.#symbolField !== undefined ||
+      !!(area || opacityOf || shapeOf) ||
       this.#symbol !== "circle";
     const { plot, pixelRatio } = frame;
     const out: PointGeometry[] = [];
@@ -553,18 +511,13 @@ export class PointMark implements Mark<DrawnPointSpec> {
       field === undefined ? undefined : this.table.numbers(field as never);
     const sizes = read(this.#sizeField);
     const tones = read(this.#toneField);
-    const categories = encoding.categories;
+    const toneOf = looks?.color;
     const alphas = read(this.#opacityField);
-    const codes =
-      this.#symbolField !== undefined
-        ? this.table.categories(this.#symbolField as never).codes
-        : undefined;
-    const shapeOf = codes && this.#shapesByCode();
     // Outlined points are drawn one by one, each outline over its point, on the CPU.
     const ring =
       this.#ringWidth > 0
         ? {
-            color: painted(frame.paint, this.spec.stroke, "point stroke") ?? surface(frame.theme),
+            color: painted(frame.paint, this.#stroke, "point stroke") ?? surface(frame.theme),
             width: this.#ringWidth,
           }
         : undefined;
@@ -584,7 +537,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
         frame,
         this.#spread!.axis,
         this.#spread!.shares,
-        (row) => this.#reach(row, radiusOf),
+        (row) => this.#reach(row, radiusOf, looks),
         values,
         this.table.version,
       );
@@ -595,9 +548,10 @@ export class PointMark implements Mark<DrawnPointSpec> {
       if (frame.hidden.has(s.key)) continue;
       const opaque =
         encoding.opacity === undefined &&
+        !opacityOf &&
         opacity >= 1 &&
         (encoding.color !== undefined ||
-          (categories ? encoding.palette!.every(isOpaqueColor) : isOpaqueColor(s.color)));
+          (toneOf ? encoding.palette!.every(isOpaqueColor) : isOpaqueColor(s.color)));
       // Device-pixel occupancy for sampling; only opaque plain points qualify,
       // since overlapping translucent or varied points look different from one.
       const sample = this.spec.sampling === "pixel" && opaque && !encoded;
@@ -646,10 +600,16 @@ export class PointMark implements Mark<DrawnPointSpec> {
       const coords = frame.floats(s.key, "point", length * 2);
       const occupied = sample ? frame.bytes(s.key, "occupied", columns * rows) : undefined;
       occupied?.fill(0);
-      const radii = sizes && frame.floats(s.key, "radius", length);
-      const colorIndex = encoding.palette && frame.bytes(s.key, "color", length);
-      const opacities = alphas && frame.floats(s.key, "opacity", length);
-      const symbols = codes && frame.bytes(s.key, "symbol", length);
+      const radii = (sizes || area) && frame.floats(s.key, "radius", length);
+      // Points index more colors than bytes hold (identity colors) by floats.
+      const colorIndex =
+        encoding.palette &&
+        (encoding.palette.length > 256
+          ? frame.floats(s.key, "colors", length)
+          : frame.bytes(s.key, "color", length));
+      const opacities = (alphas || opacityOf) && frame.floats(s.key, "opacity", length);
+      const symbols = shapeOf && frame.bytes(s.key, "symbol", length);
+      let largest = radius;
       // Capture identity alongside positions; static and sampled charts keep none.
       let items: PointItems | undefined;
       if (frame.keyed && !sample && length <= MOVING_POINTS) {
@@ -669,17 +629,21 @@ export class PointMark implements Mark<DrawnPointSpec> {
       for (let k = start; k < end; k++) {
         const row = rowOf(s, k);
         // A point missing a value it encodes is not drawn.
-        const r = sizes ? encoding.radius!(sizes[row]!) : radius;
-        const tone = tones
-          ? encoding.color!.index(tones[row]!)
-          : categories
-            ? (categories.tones[categories.codes[row]!] ?? NONE)
-            : 0;
-        const alpha = alphas ? encoding.opacity!(alphas[row]!) : opacity;
-        const shape = codes ? (shapeOf![codes[row]!] ?? NONE) : 0;
+        const r = sizes
+          ? encoding.radius!(sizes[row]!)
+          : area
+            ? Math.sqrt(area(row) / Math.PI)
+            : radius;
+        const tone = tones ? encoding.color!.index(tones[row]!) : toneOf ? toneOf(row) : 0;
+        const alpha = alphas
+          ? encoding.opacity!(alphas[row]!)
+          : opacityOf
+            ? opacityOf(row)
+            : opacity;
+        const shape = shapeOf ? shapeOf(row) : 0;
         if (!(r > 0 && tone >= 0 && Number.isFinite(alpha) && shape >= 0)) continue;
         // Points whose shape reaches into what the mark is cut to are drawn.
-        const reach = r * (codes ? reachOf[shape]! : fixedReach) + this.#ringWidth / 2;
+        const reach = r * (shapeOf ? reachOf[shape]! : fixedReach) + this.#ringWidth / 2;
         const placed = placeRow(s, row, frame, reach, box);
         if (!placed) continue;
         const [px, py] = placed;
@@ -695,6 +659,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
         coords[count * 2] = px;
         coords[count * 2 + 1] = py;
         if (radii) radii[count] = r;
+        if (r > largest) largest = r;
         if (colorIndex) colorIndex[count] = tone;
         if (opacities) opacities[count] = alpha;
         if (symbols) symbols[count] = shape;
@@ -718,7 +683,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
         fill: s.color,
         fillOpacity: opacity,
         opaque,
-        radius,
+        radius: area ? largest : radius,
         symbol: this.#symbol,
         coords,
         count,
@@ -726,7 +691,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
         colors: colorIndex && {
           index: colorIndex,
           palette: encoding.palette!,
-          ...(categories && { categorical: true }),
+          ...(toneOf && { categorical: true }),
         },
         opacities,
         symbols,
@@ -743,29 +708,24 @@ export class PointMark implements Mark<DrawnPointSpec> {
    * draw/point.ts): each row's color, by which they paint; undefined for
    * points painted in row order.
    */
-  #paintedTone(s: Series, encoding: Encoding): ((row: number) => number) | undefined {
-    const opacity = typeof this.spec.fillOpacity === "number" ? this.spec.fillOpacity : 1;
-    const { palette, categories, color } = encoding;
+  #paintedTone(encoding: Encoding): ((row: number) => number) | undefined {
+    const { palette, looks, color } = encoding;
     if (
       !palette ||
       this.#ringWidth > 0 ||
       encoding.opacity !== undefined ||
-      opacity < 1 ||
-      (color === undefined && !(categories ? palette.every(isOpaqueColor) : isOpaqueColor(s.color)))
+      looks?.opacity ||
+      this.#opacity < 1 ||
+      (color === undefined && !palette.every(isOpaqueColor))
     )
       return undefined;
     const tones =
       this.#toneField === undefined ? undefined : this.table.numbers(this.#toneField as never);
-    return (row) =>
-      tones
-        ? color!.index(tones[row]!)
-        : categories
-          ? (categories.tones[categories.codes[row]!] ?? NONE)
-          : 0;
+    return tones ? (row) => color!.index(tones[row]!) : looks!.color;
   }
 
   /** How sizes, colors, and opacities follow their fields, with the current data. */
-  #encoding(frame: Frame, categories: CategoryColors | undefined): Encoding {
+  #encoding(frame: Frame, looks: PointLooks | undefined): Encoding {
     const { table } = this;
     const out: Encoding = {};
     const radius = this.#radiusScale();
@@ -782,10 +742,8 @@ export class PointMark implements Mark<DrawnPointSpec> {
       out.color = color;
       out.palette = this.#palette(color);
     }
-    if (categories) {
-      out.categories = { codes: categories.codes, tones: categories.tones };
-      out.palette = categories.colors;
-    }
+    if (looks) out.looks = looks;
+    if (looks?.color) out.palette = looks.colors;
     return out;
   }
 
@@ -839,7 +797,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
             stops: scale.legendStops(),
             domain: scale.domain,
             midpoint: scale.midpoint,
-            title: this.spec.color!,
+            title: this.#toneField!,
           },
         ]
       : [];
@@ -856,22 +814,19 @@ export class PointMark implements Mark<DrawnPointSpec> {
     theme: Theme,
     paint: PaintReader,
   ): { color: string; glyph: string; stroke?: string } {
+    const looks = s.features?.points;
     const entry = {
-      color: this.#toneField === undefined && !this.#colorField ? s.color : theme.muted,
-      glyph: legendGlyph(this.#legendSymbol(s)).glyph,
+      color: this.#toneField === undefined && !looks?.color ? s.color : theme.muted,
+      glyph: legendGlyph(this.#legendSymbol(s, looks)).glyph,
     };
-    const stroke = painted(paint, this.spec.stroke, "point stroke");
+    const stroke = painted(paint, this.#stroke, "point stroke");
     return stroke !== undefined && this.#ringWidth > 0 ? { ...entry, stroke } : entry;
   }
 
   /** A series' shape: its own when the symbol field also splits series, else a circle. */
-  #legendSymbol(s: Series): SymbolName {
-    const field = this.#symbolField;
-    if (field === undefined) return this.#symbol;
-    if (field !== this.#series) return "circle";
-    const shapes = this.#shapes!;
-    shapes.places(this.table);
-    return SYMBOLS[(shapes.of(s.label) ?? 0) % CYCLE]!;
+  #legendSymbol(s: Series, looks: PointLooks | undefined): SymbolName {
+    if (!looks?.shape) return this.#symbol;
+    return SYMBOLS[looks.seriesShape?.(s.label) ?? 0] ?? "circle";
   }
 
   /**
@@ -904,29 +859,9 @@ export class PointMark implements Mark<DrawnPointSpec> {
         }),
       });
     }
-    const field = this.#symbolField;
-    if (field !== undefined && field !== this.#series) {
-      const { dictionary } = this.table.categories(field as never);
-      const shapeOf = this.#shapesByCode();
-      out.push({
-        title: field,
-        channel: "shape",
-        // The values in the table now, in order of appearance.
-        entries: this.#shapes!.order(this.table).map((code) => {
-          const shape = SYMBOLS[shapeOf[code]!]!;
-          const { glyph, reach } = legendGlyph(shape);
-          return { label: dictionary[code]!, glyph, r: reach, shape };
-        }),
-      });
-    }
-    const categories = this.#colorField !== undefined ? categoriesOf(series) : undefined;
-    if (categories) out.push(scaleKey(categories));
+    // Keys of the values channels map through scales, from the feature compiler.
+    out.push(...(looksOf(series)?.keys ?? []));
     return out;
-  }
-
-  /** The shape (an index into SYMBOLS) of each code of the symbol field; -1 for none. */
-  #shapesByCode(): Int32Array {
-    return this.#shapes!.tones(this.table, CYCLE);
   }
 
   /** The stream identity of a series of whole columns, for GPU uploads that follow appends. */
@@ -969,22 +904,13 @@ export class PointMark implements Mark<DrawnPointSpec> {
       if (field === undefined) continue;
       text += `, ${field} ${format.value(this.table.numbers(field as never)[row]!)}`;
     }
-    const symbols = this.#symbolField !== this.#series ? this.#symbolField : undefined;
-    for (const field of [this.#colorField, symbols]) {
-      if (field === undefined) continue;
-      const { codes, dictionary } = this.table.categories(field as never);
-      text += `, ${field} ${dictionary[codes[row]!] ?? ""}`;
-    }
-    return text;
+    return text + (s.features?.points?.text(row, format.value) ?? "");
   }
 
   /** The color a row's point is drawn in: its series', or from the `color` field. */
   pointColor(s: Series, row: number, theme: Theme, paint: PaintReader): string {
-    const categories = this.#colorField !== undefined ? s.features?.categories : undefined;
-    if (categories) {
-      const tone = categories.tones[categories.codes[row]!] ?? NONE;
-      return tone < 0 ? s.color : categories.colors[tone]!;
-    }
+    const looks = s.features?.points;
+    if (looks?.color) return looks.colors[looks.color(row)] ?? s.color;
     if (this.#toneField === undefined) return s.color;
     return (
       this.#colorScale(theme, paint)?.color(this.table.numbers(this.#toneField as never)[row]!) ??
@@ -1006,35 +932,31 @@ export class PointMark implements Mark<DrawnPointSpec> {
       if (lit === null) lit = frame.highlighted?.(this.table);
       if (lit && lit[rowA] !== lit[rowB]) return lit[rowA]! > lit[rowB]!;
       if (lit && !lit[rowA]) return a > b;
-      if (toneOf === null)
-        toneOf = this.#paintedTone(s, this.#encoding(frame, categoriesOf(series)));
+      if (toneOf === null) toneOf = this.#paintedTone(this.#encoding(frame, looksOf(series)));
       const [first, second] = toneOf ? [toneOf(rowA), toneOf(rowB)] : [0, 0];
       return first !== second ? first > second : a > b;
     };
   }
 
   /** How far a row's point reaches from its center, in pixels; NaN when it is not drawn. */
-
-  reach(row: number): number {
-    return this.#reach(row, this.#radiusScale());
+  reach(row: number, s: Series): number {
+    return this.#reach(row, this.#radiusScale(), s.features?.points);
   }
 
   /** Whether a row is drawn: rows missing a value they encode, or sized to nothing, are not. */
-  shows(_s: Series, row: number): boolean {
-    return this.#reach(row, this.#radiusScale()) > 0;
+  shows(s: Series, row: number): boolean {
+    return this.reach(row, s) > 0;
   }
 
-  #drawn(row: number): boolean {
+  #drawn(row: number, looks: PointLooks | undefined): boolean {
     const finite = (field: string | undefined) =>
       field === undefined || Number.isFinite(this.table.numbers(field as never)[row]);
-    const held = (field: string | undefined) =>
-      field === undefined || this.table.categories(field as never).codes[row]! >= 0;
     return (
       finite(this.#sizeField) &&
       finite(this.#toneField) &&
       finite(this.#opacityField) &&
-      held(this.#symbolField) &&
-      held(this.#colorField)
+      (looks?.color?.(row) ?? 0) >= 0 &&
+      !Number.isNaN(looks?.opacity?.(row))
     );
   }
 
@@ -1051,13 +973,10 @@ export class PointMark implements Mark<DrawnPointSpec> {
   ): string | undefined {
     const { x: bandX, y: bandY } = this.#banded;
     // Points of no encoded field are drawn wherever they are placed.
-    const encodes = [
-      this.#sizeField,
-      this.#toneField,
-      this.#colorField,
-      this.#opacityField,
-      this.#symbolField,
-    ].some((field) => field !== undefined);
+    const looks = looksOf(parts);
+    const encodes =
+      !!looks ||
+      [this.#sizeField, this.#toneField, this.#opacityField].some((field) => field !== undefined);
     if (!bandX && !bandY && !encodes) return undefined;
     const radiusOf = this.#radiusScale();
     // Parts hold the chart's band indices, which panels may place apart.
@@ -1074,7 +993,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
         const y = s.y[row]!;
         const placed =
           (bandX ? x >= 0 : Number.isFinite(x)) && (bandY ? y >= 0 : Number.isFinite(y));
-        if (!placed || (encodes && !(this.#reach(row, radiusOf) > 0))) continue;
+        if (!placed || (encodes && !(this.#reach(row, radiusOf, looks) > 0))) continue;
         points++;
         if (bandY && !used[y]) {
           used[y] = 1;
@@ -1108,7 +1027,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
   #visible(s: Series, frame: Frame): [number, number] {
     if (this.#banded.x) return [0, s.length];
     const box = this.#bounds(frame);
-    const reach = this.inset.x;
+    const reach = this.inset?.x ?? s.features?.points?.reach ?? 0;
     return visibleRange(
       s,
       frame.x.invert(box.x - reach),
@@ -1123,16 +1042,19 @@ export class PointMark implements Mark<DrawnPointSpec> {
   }
 
   /** How far a row's point and outline reach from its center, in pixels; NaN when it is not drawn. */
-  #reach(row: number, radiusOf: ((value: number) => number) | undefined): number {
-    if (!this.#drawn(row)) return Number.NaN;
+  #reach(
+    row: number,
+    radiusOf: ((value: number) => number) | undefined,
+    looks: PointLooks | undefined,
+  ): number {
+    if (!this.#drawn(row, looks)) return Number.NaN;
     const r = radiusOf
       ? radiusOf(this.table.numbers(this.#sizeField as never)[row]!)
-      : this.#radius;
-    const shape =
-      this.#symbolField !== undefined
-        ? this.#shapesByCode()[this.table.categories(this.#symbolField as never).codes[row]!]!
-        : SYMBOLS.indexOf(this.#symbol);
-    return r > 0 ? r * this.#reaches[shape]! + this.#ringWidth / 2 : Number.NaN;
+      : looks?.area
+        ? Math.sqrt(looks.area(row) / Math.PI)
+        : this.#radius;
+    const shape = looks?.shape ? looks.shape(row) : SYMBOLS.indexOf(this.#symbol);
+    return r > 0 && shape >= 0 ? r * this.#reaches[shape]! + this.#ringWidth / 2 : Number.NaN;
   }
 
   /** Where a row is drawn, from where its values place it: spread across its band. */
@@ -1209,7 +1131,7 @@ export class PointMark implements Mark<DrawnPointSpec> {
           this.#visible(s, frame),
           this.#bounds(frame),
           placeRow,
-          (row) => this.#reach(row, radiusOf),
+          (row) => this.#reach(row, radiusOf, s.features?.points),
         );
         indexes.set(s.key, index);
       }
@@ -1223,6 +1145,99 @@ export class PointMark implements Mark<DrawnPointSpec> {
       });
     }
   }
+}
+
+/**
+ * A point's channel as its options give it (`given`: in `encode`, else as
+ * an option of its own), and who reads it: the mark, a number field it
+ * maps itself (`own`: a color ramp, sizes by area, opacities) or a
+ * constant, or the feature compiler (`compiled`).
+ */
+interface PointChannelOf<V> {
+  readonly given: unknown;
+  readonly own?: string | undefined;
+  readonly compiled?: PointChannel<V> | undefined;
+}
+
+/** Refuses a channel set as option `flat` and in `encode` as `name`. */
+function refuseBoth(options: object, flat: string, name: string): void {
+  if ((options as Record<string, unknown>)[flat] !== undefined)
+    throw new ChartError({
+      code: "invalid-option",
+      path: `encode.${name}`,
+      message: `point encode.${name}: set as ${flat} and as encode.${name}; give one`,
+    });
+}
+
+/**
+ * Sorts a point's channels by who reads them (see `PointChannelOf`),
+ * checking the fields they name and the constants they give: colors as
+ * text, as the validator does, since the chart reads them as it draws.
+ */
+function pointChannels(spec: Frozen<PointSpec>, table: Table) {
+  const encode = (spec.encode ?? {}) as Record<string, unknown>;
+  const options = spec as unknown as Record<string, unknown>;
+  const channel = <V>(
+    name: ChannelName,
+    flat: string,
+    channels: readonly string[],
+    numbers: boolean,
+  ): PointChannelOf<V> => {
+    const own = channels.find((c) => encode[c] !== undefined);
+    if (own) refuseBoth(options, own === name ? flat : own, own);
+    const path = own ? `encode.${own}` : flat;
+    const given = own ? encode[own] : options[flat];
+    if (typeof given === "string") {
+      if (name === "symbol" && SYMBOLS.includes(given as SymbolName)) {
+        if (table.has(given))
+          throw new Error(
+            `point symbol: "${given}" names both a shape and a field; give { field: "${given}" } to encode the field`,
+          );
+        return { given };
+      }
+      if (name === "symbol" && !table.has(given))
+        throw new RangeError(
+          `point symbol: no shape or field "${given}"; name a category field or one of ${SYMBOLS.map((s) => `"${s}"`).join(", ")}`,
+        );
+      requireField(table, given, numbers ? NUMERIC : POSITION, `point ${path}`);
+      return table.kind(given) === "category"
+        ? { given, compiled: { spec: { field: given }, path } }
+        : { given, own: given };
+    }
+    if (typeof given !== "object" || given === null) return { given };
+    const c = given as ChannelSpec<V> & { field?: string; scale?: unknown };
+    for (const [key, value] of "value" in c
+      ? [["value", c.value]]
+      : "condition" in c
+        ? [
+            ["condition.then", c.condition.then],
+            ["condition.otherwise", c.condition.otherwise],
+          ]
+        : []) {
+      const problem = outputProblem(name, value, () => true);
+      if (problem)
+        throw new ChartError({
+          code: "invalid-option",
+          path: `${path}.${key}`,
+          message: `point ${path}.${key}: expected ${problem}; received ${JSON.stringify(value)}`,
+        });
+    }
+    if (c.field !== undefined) {
+      requireField(table, c.field, POSITION, `point ${path}.field`);
+      // A number field without a scale is mapped as its name is.
+      if (c.scale === undefined && table.kind(c.field) !== "category" && name !== "symbol")
+        return { given, own: c.field };
+    }
+    return { given, compiled: { spec: c, path } };
+  };
+  const color = channel<string>("color", "color", ["fill", "color"], false);
+  return {
+    // A fill set flat wins over the color, as a line's stroke and a bar's fill do.
+    color: spec.fill === undefined ? color : { given: undefined },
+    size: channel<number>("size", "size", ["size"], true),
+    opacity: channel<number>("opacity", "fillOpacity", ["opacity"], true),
+    symbol: channel<SymbolName>("symbol", "symbol", ["symbol"], false),
+  };
 }
 
 /** Whether a point at (px, py) reaching `reach` pixels from it shows in `box`, what its mark is cut to. */
@@ -1383,7 +1398,8 @@ export function point<S extends Schema>(
   const { symbol } = options;
   if (typeof symbol === "object") spec.symbol = symbol as ChannelSpec<SymbolName>;
   else if (symbol !== undefined)
-    spec.symbol = SYMBOLS.includes(symbol as SymbolName) ? symbol : { field: symbol };
+    spec.symbol =
+      SYMBOLS.includes(symbol as SymbolName) || !table.has(symbol) ? symbol : { field: symbol };
   if (options.colors) spec.colors = [...options.colors];
   if (options.colorDomain) spec.colorDomain = [options.colorDomain[0], options.colorDomain[1]];
   if (options.jitter) spec.jitter = { ...options.jitter };
@@ -1407,7 +1423,7 @@ function legendGlyph(symbol: SymbolName): { glyph: string; reach: number } {
   return { glyph: symbolPath(symbol, 0, 0, r), reach: r * reach };
 }
 
-/** Points' category colors, which every series of the mark shares (see the feature compiler). */
-function categoriesOf(series: readonly Series[]): CategoryColors | undefined {
-  return series[0]?.features?.categories;
+/** What points' channels give rows, which every series of the mark shares (see the feature compiler). */
+function looksOf(series: readonly Series[]): PointLooks | undefined {
+  return series[0]?.features?.points;
 }

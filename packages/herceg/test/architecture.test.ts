@@ -51,9 +51,11 @@ describe("architecture", () => {
   // The feature compiler follows the same rule. What it imports besides its
   // own modules no line chart's module imports: expression compilation (the
   // builders `col` and `when` are data/expr.ts), symbols' shapes, automatic
-  // padding's solver (for lines' markers), and the guide compiler's pattern
-  // formats. Charts that import these themselves (grids the first, points
-  // the second and third) get them in a chunk of their own.
+  // padding's solver (for lines' markers), the guide compiler's pattern
+  // formats, what channels draw (`outputProblem`), and the placement of
+  // labels following series and of text blocks. Charts that import these
+  // themselves (grids the first, points the second and third) get them in a
+  // chunk of their own.
   // Colors are told from names through the kit (FeatureKit.isColor).
   it("the feature compiler imports only types from the line chart's modules", () => {
     const features = join(SRC, "marks/features");
@@ -62,6 +64,10 @@ describe("architecture", () => {
       "draw/symbol-shapes.ts",
       "model/clearance.ts",
       "format/patterns.ts",
+      "spec/channels.ts",
+      "layout/attached.ts",
+      "layout/block.ts",
+      "draw/text-items.ts",
     ].map((path) => join(SRC, path));
     for (const file of files(features)) {
       const source = readFileSync(file, "utf8");

@@ -256,60 +256,34 @@ describe("colors by category", () => {
     expect(strokes(constant)).toEqual(["red"]);
   });
 
-  it("refuse a field whose value changes within a series, naming what splits it", () => {
+  it("refuse a style map's field whose value changes within a series, naming what splits it", () => {
     const mixed = table({
       t: [0, 1, 0, 1],
       v: [1, 2, 3, 4],
       kind: ["a", "b", "a", "a"],
       g: ["p", "p", "q", "q"],
     });
-    // A color field splits the rows itself, unless series says otherwise.
-    expect(() => build({ marks: [line(mixed, { x: "t", y: "v", color: "kind" })] })).not.toThrow();
-    expect(() =>
-      build({ marks: [line(mixed, { x: "t", y: "v", color: "kind", series: false })] }),
-    ).toThrow(
-      'line (mark 0) color: field "kind" changes within the line; lines take one color per series, so split them by a series field or give a constant color',
-    );
-    expect(() =>
-      build({ marks: [line(mixed, { x: "t", y: "v", color: "kind", series: "g" })] }),
-    ).toThrow(
-      'line (mark 0) color: field "kind" changes within series "p" (by "g"); lines take one color per series, so split them by another field or give a constant color',
+    const style = { by: { field: "kind", map: { a: { dash: "--" } } } } as const;
+    expect(() => build({ marks: [line(mixed, { x: "t", y: "v", style, series: false })] })).toThrow(
+      'line (mark 0) style.by.field: field "kind" changes within the line; a style map gives each series one look, so split them by a series field, or give the looks in encode, where they change along a series',
     );
     let thrown: unknown;
     try {
-      build({ marks: [line(mixed, { x: "t", y: "v", color: "kind", series: "g" })] });
+      build({ marks: [line(mixed, { x: "t", y: "v", style, series: "g" })] });
     } catch (error) {
       thrown = error;
     }
     expect(errorInfo(thrown as ChartError)).toEqual({
       code: "series-varies",
-      message: expect.stringContaining('changes within series "p"'),
+      message: expect.stringContaining('changes within series "p" (by "g")'),
       phase: "validate",
-      path: "marks[0].color",
+      path: "marks[0].style.by.field",
       mark: 0,
     });
-    // Placed at the paint that reads the field, where a style map's paint wins over it.
-    const pathOf = (mark: ReturnType<typeof line> | ReturnType<typeof area>) => {
-      try {
-        build({ marks: [mark] });
-      } catch (error) {
-        return (error as ChartError).path;
-      }
-      return undefined;
-    };
-    const style = { by: { map: { p: { stroke: "#123456", fill: "#123456" } } } };
-    expect([
-      pathOf(
-        line(mixed, { x: "t", y: "v", series: "g", encode: { stroke: { field: "kind" } }, style }),
-      ),
-      pathOf(
-        area(mixed, { x: "t", y: "v", series: "g", encode: { fill: { field: "kind" } }, style }),
-      ),
-    ]).toEqual(["marks[0].encode.stroke", "marks[0].encode.fill"]);
   });
 
   it.each([false, true])(
-    "check a streaming series' color over the rows appended alone (positions in bands: %s)",
+    "check a streaming series' style over the rows appended alone (positions in bands: %s)",
     (banded) => {
       const n = 1000;
       const at = (i: number) => (banded ? `p${i % 50}` : i);
@@ -336,7 +310,8 @@ describe("colors by category", () => {
         });
         return { ...found, codes };
       }) as typeof rows.categories;
-      const chart = model({ marks: [line(rows, { x: "t", y: "v", series: "g", color: "kind" })] });
+      const style = { by: { field: "kind", map: {} } } as const;
+      const chart = model({ marks: [line(rows, { x: "t", y: "v", series: "g", style })] });
       chart.scene(estimateText);
       reads = 0;
       rows.append({ t: [at(n), at(n + 1)] as never, v: [1, 1], kind: ["a", "a"], g: ["p", "p"] });
@@ -347,9 +322,10 @@ describe("colors by category", () => {
     },
   );
 
-  it("forget what was checked of series a rolling window leaves, colors missing or not", () => {
+  it("forget what was checked of series a rolling window leaves, values missing or not", () => {
     const stream = table({ t: [0], v: [1], g: ["s0"], kind: ["a"] }, { maxRows: 2 });
-    const chart = model({ marks: [line(stream, { x: "t", y: "v", series: "g", color: "kind" })] });
+    const style = { by: { field: "kind", map: {} } } as const;
+    const chart = model({ marks: [line(stream, { x: "t", y: "v", series: "g", style })] });
     chart.scene(estimateText);
     // What is kept of series' checks, by series key and the field checked.
     const sizes: number[] = [];
@@ -380,7 +356,7 @@ describe("colors by category", () => {
               x: "x",
               y: "v",
               series: false,
-              color: "c",
+              style: { by: { field: "c", map: {} } },
             }),
           ],
         });
@@ -399,18 +375,15 @@ describe("colors by category", () => {
 
   it("check rows a category axis draws out of order, and only rows still in the table", () => {
     const placed = table({ t: ["a", "b", "c"], v: [1, 2, 3], kind: ["k", "k", "k"] });
-    const chart = model({
-      marks: [line(placed, { x: "t", y: "v", color: "kind", series: false })],
-    });
+    const style = { by: { field: "kind", map: {} } } as const;
+    const chart = model({ marks: [line(placed, { x: "t", y: "v", style, series: false })] });
     chart.scene(estimateText);
     // Drawn at "a", before the rows checked: checked all the same.
     placed.append({ t: ["a"], v: [4], kind: ["m"] });
     expect(() => chart.scene(estimateText)).toThrow("changes within the line");
     // A value whose rows the window dropped says nothing of the rows after it.
     const rolling = table({ t: [0, 1], v: [1, 2], kind: ["a", null] }, { maxRows: 2 });
-    const stream = model({
-      marks: [line(rolling, { x: "t", y: "v", color: "kind", series: false })],
-    });
+    const stream = model({ marks: [line(rolling, { x: "t", y: "v", style, series: false })] });
     stream.scene(estimateText);
     rolling.append({ t: [2], v: [3], kind: ["b"] });
     expect(() => stream.scene(estimateText)).not.toThrow();
@@ -454,7 +427,7 @@ describe("colors by category", () => {
         marks: [line(sites, { x: "t", y: "v", series: "site", color: "site" })],
       }),
     ).toThrow(
-      'chart scales.color.map["Site A"] (read by line (mark 0) color): expected a color, such as "#3266d6"; received 3',
+      'chart scales.color.map["Site A"] (read by line (mark 0) color): expected a CSS color; received 3',
     );
     // Placed at the key, whatever it holds.
     const pathOf = (key: string) => {

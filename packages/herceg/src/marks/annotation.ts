@@ -15,8 +15,9 @@ import type { LabelSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Coordinate } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen } from "../spec/spec.ts";
-import { type Frame, NUMERIC, type RowParts, requireField } from "./mark.ts";
-import type { Pending } from "./pending.ts";
+import type { ContentWriter } from "./features/content.ts";
+import { markKey, rowKey, shownItems } from "./hidden.ts";
+import { type Frame, type MarkKey, NUMERIC, type RowParts, requireField } from "./mark.ts";
 
 /** Fields whose values can be drawn as text: categories and numbers. */
 export type TextField<S extends Schema> = string extends keyof S
@@ -41,11 +42,22 @@ export function position<P>(value: P): Exclude<P, Date> {
 
 const SUMMARY_ITEMS = 10;
 
-/** Annotations' options round 2 freezes before its streams draw them (see pending.ts). */
-export const ANNOTATION_PENDING: readonly Pending[] = [
-  ["label.content", "C", "give text or a field"],
-  ["legend", "C", "drop legend", (value) => value === true],
-];
+/**
+ * Refuses `legend: true` on an annotation of `type` without a label, or
+ * with a label of parts (`content`), which would name no one entry.
+ */
+export function checkLegend(spec: { legend?: unknown; label?: unknown }, type: string): void {
+  if (spec.legend !== true) return;
+  const content = (spec.label as { content?: unknown } | undefined)?.content !== undefined;
+  if (spec.label === undefined || content)
+    throw new ChartError({
+      code: "invalid-option",
+      path: "legend",
+      message: content
+        ? `${type} legend: true lists the ${type} by its label's text or field, and a label of parts has neither; give text or a field, or drop legend`
+        : `${type} legend: true lists the ${type} by its label; give it a label, or drop legend`,
+    });
+}
 
 /** A position ready to read: a constant, or a column with a value per row. */
 export type Channel = number | NumericArray;
@@ -83,12 +95,17 @@ function fieldOf(position: Frozen<AnnotationPosition> | undefined): string | und
   return (share as { field?: string }).field;
 }
 
-/** Whether an annotation reads a table: a place or its label is a field. */
+/** Whether an annotation reads a table: a place, its label, or a part of its label's content is a field. */
 export function readsTable(
   positions: readonly (Frozen<AnnotationPosition> | undefined)[],
-  label: string | undefined,
+  label: string | Frozen<LabelSpec> | undefined,
 ): boolean {
-  return label !== undefined || positions.some((p) => fieldOf(p) !== undefined);
+  const own = typeof label === "object" ? label : undefined;
+  return (
+    own?.field !== undefined ||
+    !!own?.content?.some((part) => typeof part === "object" && part.field !== undefined) ||
+    positions.some((p) => fieldOf(p) !== undefined)
+  );
 }
 
 /** Checks an annotation's fields and reads its places and text. */
@@ -117,8 +134,8 @@ export class AnnotationData {
     this.label = label;
     this.#role = role;
     const text = label?.field;
-    if (label && (label.text === undefined) === (text === undefined))
-      throw new Error(`${role} label: needs one of text and field`);
+    if (label && [label.text, text, label.content].filter((v) => v !== undefined).length !== 1)
+      throw new Error(`${role} label: needs one of text, field, and content`);
     this.#scales = scales;
     let scaled = false;
     for (const [channel, place] of Object.entries(positions)) {
@@ -137,7 +154,7 @@ export class AnnotationData {
       scaled ||= scale !== undefined && scale !== own;
     }
     this.scaled = scaled;
-    if (!readsTable(Object.values(positions), text)) {
+    if (!readsTable(Object.values(positions), label)) {
       this.table = undefined;
       return;
     }
@@ -179,6 +196,15 @@ export class AnnotationData {
     let size = 0;
     for (const part of rows) size += part.length;
     return size;
+  }
+
+  /** The items of `rows` (every item without them) the legend leaves shown of mark `mark` (see marks/hidden.ts). */
+  shown(
+    hidden: ReadonlySet<string>,
+    mark: MarkKey,
+    rows: RowParts | undefined,
+  ): RowParts | undefined {
+    return shownItems(hidden, mark, this.table, this.count, rows);
   }
 
   /**
@@ -287,11 +313,49 @@ export class AnnotationData {
   }
 
   /**
-   * Text of an item: the constant label, or the label field's value at its
-   * row, numbers written with `write` (the chart's locale's by default).
+   * The legend entries of the annotation, as mark `mark`, by its label: one
+   * for constant text, or one per value of its label's field among `rows`,
+   * in the order rows first hold them, numbers written with `write` (see
+   * `Mark.labelEntries`).
    */
-  text(item: number, locale: string | undefined, write?: Formatter): string {
+  entries(
+    mark: MarkKey,
+    locale: string | undefined,
+    rows?: RowParts,
+    write?: Formatter,
+  ): { key: string; label: string }[] {
     const label = this.label;
+    const field = label?.field;
+    if (field === undefined)
+      return label?.text === undefined ? [] : [{ key: markKey(mark), label: label.text }];
+    const seen = new Set<string>();
+    const entries: { key: string; label: string }[] = [];
+    this.each(rows, (item) => {
+      const value = this.table!.value(field as never, item);
+      if (value === null || seen.has(String(value))) return;
+      seen.add(String(value));
+      entries.push({
+        key: rowKey(mark, field, String(value)),
+        label: this.text(item, locale, write),
+      });
+    });
+    return entries;
+  }
+
+  /**
+   * Text of an item: the constant label, or the label field's value at its
+   * row, numbers written with `write` (the chart's locale's by default); or
+   * a label of parts written by `content`, the value at its place `at` (a rule's).
+   */
+  text(
+    item: number,
+    locale: string | undefined,
+    write?: Formatter,
+    content?: ContentWriter,
+    at = Number.NaN,
+  ): string {
+    const label = this.label;
+    if (content) return content(item, "", at);
     if (label?.field === undefined) return label?.text ?? "";
     const value = this.table!.value(label.field as never, item);
     if (value === null) return "";
@@ -318,13 +382,16 @@ export class AnnotationData {
    * `rows` (every item without them): their text and where they are, as
    * `where` describes it (undefined for items that are not drawn), such as
    * "Rules: deploy v41 (x 03:00), deploy v42 (x 08:30)." At most ten items
-   * are listed.
+   * are listed; labels of parts are written by `content`, at the value
+   * `valued` gives an item.
    */
   summary(
     [one, many]: [string, string],
     locale: string | undefined,
     where: (item: number) => string | undefined,
     rows?: RowParts,
+    content?: ContentWriter,
+    valued?: (item: number) => number,
   ): string | undefined {
     const items: string[] = [];
     let total = 0;
@@ -333,7 +400,7 @@ export class AnnotationData {
       if (at === undefined) return;
       total++;
       if (items.length >= SUMMARY_ITEMS) return;
-      const text = this.labeled ? this.text(i, locale) : "";
+      const text = this.labeled ? this.text(i, locale, undefined, content, valued?.(i)) : "";
       items.push(text ? `${text} (${at})` : at);
     });
     if (total === 0) return undefined;
