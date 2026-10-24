@@ -66,8 +66,8 @@ describe("panels", () => {
     expect(panel).toMatchObject({
       key: "",
       label: "",
-      x: { type: "linear", domain: [0, 10], bandwidth: 0, group: "", canSetViewport: true },
-      y: { type: "linear", domain: [0, 4], bandwidth: 0, group: "", canSetViewport: true },
+      x: { type: "linear", domain: [0, 10], bandwidth: 0, instance: "", canSetViewport: true },
+      y: { type: "linear", domain: [0, 4], bandwidth: 0, instance: "", canSetViewport: true },
     });
     expect(panel!.yRight).toBeUndefined();
     const { plot, x, y } = panel!;
@@ -101,7 +101,7 @@ describe("panels", () => {
       facet: facet("region"),
     });
     expect(
-      shared.getPanels().map(({ key, x, y }) => [key, x!.group, y!.group, y!.canSetViewport]),
+      shared.getPanels().map(({ key, x, y }) => [key, x!.instance, y!.instance, y!.canSetViewport]),
     ).toEqual([
       ["a", "", "", true],
       ["b", "", "", true],
@@ -114,8 +114,8 @@ describe("panels", () => {
       x: { scope: "panel" },
     });
     const [a, b] = own.getPanels();
-    expect(a!.x!.group).not.toBe(b!.x!.group);
-    expect(a!.y!.group).not.toBe(b!.y!.group);
+    expect(a!.x!.instance).not.toBe(b!.x!.instance);
+    expect(a!.y!.instance).not.toBe(b!.y!.instance);
     expect([a!.x!.canSetViewport, a!.y!.canSetViewport]).toEqual([true, false]);
     expect(b!.plot.x).toBeGreaterThan(a!.plot.x + a!.plot.width);
   });

@@ -5,12 +5,49 @@ import type { Inspection, Viewport } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import type { ChartError } from "../spec/errors.ts";
 import type { Selection } from "./brushed.ts";
+import type { Axis, AxisInfo, ScaleInstance } from "./handle.ts";
 import { report } from "./scheduler.ts";
 
 /** The panel a view or selection is set in, for charts whose panels have scales of their own. */
 export interface PanelTarget {
   /** A panel's key: its facet value (both, in a grid, as a JSON array) or subplot id. */
   panel?: string;
+}
+
+/** A scale instance's view after a change: ascending, or null where it is fitted (its domain or its data). */
+export interface ScaleView extends ScaleInstance {
+  readonly view: readonly [number, number] | null;
+}
+
+/** A panel's whole view after a change, and the type of each axis it has then. */
+export interface PanelViewport extends Readonly<Viewport> {
+  readonly panel: string;
+  readonly types: Readonly<Partial<Record<Axis, AxisInfo["type"]>>>;
+}
+
+/**
+ * One change of view, committed whole before any listener hears of it:
+ * the scale instances it changed and every panel drawing one of them. A
+ * change a listener makes is the next one, reported once this one has
+ * reached every listener, so listeners hear each change, in order. An
+ * instance with a view that is no longer drawn (its panels gone, or
+ * sharing scales otherwise) is reported fitted (`view` null) with the
+ * panels it had, of which those no longer drawn have no view in `views`.
+ */
+export interface ViewportEvent {
+  /** Counts the chart's changes of view from 0: one per change, none for calls refused or changing nothing. */
+  readonly viewRevision: number;
+  readonly cause: ViewCause;
+  /**
+   * The panel the change was made in: a gesture's, a call's `panel`, or
+   * that of the sync channel it came on; absent for changes naming none
+   * (`setViewport` without a panel, data, options).
+   */
+  readonly panel?: string;
+  /** Each instance whose view changed, once: by scale (x, y, yRight), then by its first panel. */
+  readonly scales: readonly ScaleView[];
+  /** Each panel still drawing one of them, once, in reading order, with its whole view now. */
+  readonly views: readonly PanelViewport[];
 }
 
 /** Chart events by name, with what their listeners receive. */

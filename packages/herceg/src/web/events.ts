@@ -5,9 +5,10 @@
 // positions are their labels rather than band indices.
 
 import type { Selection } from "../dom/brushed.ts";
-import type { ChartEvents } from "../dom/events.ts";
+import type { ChartEvents, ViewCause } from "../dom/events.ts";
 import type { Axis, AxisInfo, Chart } from "../dom/handle.ts";
 import type { Inspection, Viewport } from "../model/model.ts";
+import type { Expression } from "../spec/spec.ts";
 
 type Ends = [number, number] | [string, string];
 type Range = readonly [number, number];
@@ -39,6 +40,73 @@ export interface SelectionPayload {
 
 /** The categories of a selection's x and y axes; null for an axis of other values. */
 type Categories = [string[] | null, string[] | null];
+
+/** A scale instance (`ScaleInstance`), with whether its values are times rather than its type. */
+export interface ScaleInstancePayload {
+  scale: Axis;
+  instance: string;
+  /** Whether its values are times, in epoch milliseconds. */
+  time: boolean;
+  panels: string[];
+}
+
+/** A scale instance's view (`ScaleView`), null where it is fitted. */
+export interface ScaleViewPayload extends ScaleInstancePayload {
+  view: Ends | null;
+}
+
+/** A panel's whole view (`PanelViewport`). */
+export interface PanelViewportPayload extends ViewportPayload {
+  panel: string;
+}
+
+/** A change of view (`ViewportEvent`). */
+export interface ViewportEventPayload {
+  viewRevision: number;
+  cause: ViewCause;
+  panel?: string;
+  scales: ScaleViewPayload[];
+  views: PanelViewportPayload[];
+}
+
+/** What a selection belongs to (`SelectionOwner`). */
+export interface SelectionOwnerPayload {
+  scales: ScaleInstancePayload[];
+  panels: string[];
+}
+
+/** A `select` event: the selection, null once cleared, and what it belongs to (or, cleared, belonged to). */
+export interface SelectEventPayload {
+  owner: SelectionOwnerPayload;
+  selection: SelectionPayload | null;
+}
+
+/** An `edge` event: the scale instance, the end its view came near, and what moved it there. */
+export interface EdgePayload extends ScaleInstancePayload {
+  side: "start" | "end";
+  domain: [number, number];
+  bound: number;
+  cause: ViewCause;
+}
+
+/**
+ * A `rowSelection` event: a channel a chart binds, of a table named by its
+ * name in the spec's `data`, and what it holds: a condition, or rows by
+ * identity in the table's generation `generation` (a row's position plus
+ * the rows dropped before it, `Table.rowOffset`, so they stay the rows'
+ * across drops), or null for none.
+ */
+export interface RowSelectionPayload {
+  data: string;
+  channel: string;
+  selection:
+    | { kind: "predicate"; expression: Expression }
+    | { kind: "rows"; rows: number[]; generation: number }
+    | null;
+}
+
+/** A `visibility` event, which is JSON as it is. */
+export type VisibilityPayload = ChartEvents["visibility"];
 
 export interface InspectionPayload {
   /** "item" for a pie slice, whose value is the slice's. */
@@ -85,7 +153,7 @@ function scalesOf(chart: Chart, panel?: string): Scales {
   const axes = chart.getPanels().filter(({ x }) => x);
   const found =
     panel === undefined
-      ? (axes.find(({ x }) => x!.group === "") ?? axes[0])
+      ? (axes.find(({ x }) => x!.instance === "") ?? axes[0])
       : axes.find(({ key }) => key === panel);
   return { x: found?.x, y: found?.y, yRight: found?.yRight };
 }
@@ -99,7 +167,7 @@ export function edgePayload(chart: Chart, edge: ChartEvents["edge"]) {
   const panels = chart.getPanels();
   const panel =
     panels.find(({ key }) => edge.panels?.includes(key)) ??
-    panels.find(({ x }) => x?.group === "") ??
+    panels.find(({ x }) => x?.instance === "") ??
     panels.find(({ x }) => x);
   return { ...edge, time: panel?.[edge.scale]?.type === "time" };
 }

@@ -37,16 +37,53 @@ export interface AxisInfo {
   /** Category axes: each band's width in pixels; 0 on other axes. */
   readonly bandwidth: number;
   /**
-   * Names the scale the axis shows: panels whose axis has the same group
-   * share its domain (and on x, its viewport), though each maps it to
-   * pixels of its own. Opaque.
+   * Names the instance of the scale the axis shows (see `ScaleInstance`):
+   * panels whose axis has the same instance share its domain (and on x,
+   * its viewport), though each maps it to pixels of its own. Opaque.
    */
-  readonly group: string;
+  readonly instance: string;
   /**
    * Whether `setViewport` zooms the axis: not on category axes, nor on y
    * axes of panels that have y scales of their own.
    */
   readonly canSetViewport: boolean;
+}
+
+/**
+ * One instance of a position scale: the panels sharing one domain, and one
+ * view, along it (see the `scope` of the chart's `x`, `y`, and `yRight`).
+ * A map's or network's plane is an instance of x and one of y, which the
+ * panels drawing it share.
+ */
+export interface ScaleInstance {
+  /** The scale: "x", or the left or right y axis'. */
+  readonly scale: Axis;
+  /**
+   * Names the instance among the scale's: the same in each of its panels
+   * (`AxisInfo.instance`), and another for each other instance of the scale
+   * (another scale's may be the same: an instance is its scale and its
+   * name). The instance every panel shares stays one as panels come and
+   * go; one of panels sharing a scale by row, column, or panel is another
+   * once its panels change, or its categories do. Opaque: compare it,
+   * never read it; not kept across mounts.
+   */
+  readonly instance: string;
+  /** Its type as last drawn: a plane's axes are "linear". */
+  readonly type: AxisInfo["type"];
+  /** On a category axis, its categories in band index order (as `AxisInfo.categories`). */
+  readonly categories?: readonly string[] | undefined;
+  /** The keys of the panels drawing with it, in reading order; panels without the axis are not among them. */
+  readonly panels: readonly string[];
+}
+
+/**
+ * What a selection belongs to: the scale instances it has ranges on (an x
+ * brush's x, a y brush's y, a rectangle's or a lasso's both), and the
+ * panels drawing all of them, which show it.
+ */
+export interface SelectionOwner {
+  readonly scales: readonly ScaleInstance[];
+  readonly panels: readonly string[];
 }
 
 /** A panel as the last frame drew it. */
@@ -337,7 +374,7 @@ export function panelInfo(panel: DrawnPanel): PanelInfo {
   };
 }
 
-function axisInfo(scale: PositionScale, group: string, canSetViewport: boolean): AxisInfo {
+function axisInfo(scale: PositionScale, instance: string, canSetViewport: boolean): AxisInfo {
   return {
     type: scale.type,
     domain: [...scale.domain],
@@ -345,7 +382,7 @@ function axisInfo(scale: PositionScale, group: string, canSetViewport: boolean):
     // Category lists are kept while they are unchanged, never changed in place.
     categories: scale.categories,
     bandwidth: Math.abs(scale.bandwidth ?? 0),
-    group,
+    instance,
     canSetViewport,
   };
 }

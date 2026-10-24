@@ -3,7 +3,20 @@
 // page what the user does as DOM events, and the JSON those events carry.
 // Importing it changes nothing on the page: `observe` starts mounting.
 
-export type { InspectionPayload, SelectionPayload, ViewportPayload } from "./web/events.ts";
+export type {
+  EdgePayload,
+  InspectionPayload,
+  PanelViewportPayload,
+  RowSelectionPayload,
+  ScaleInstancePayload,
+  ScaleViewPayload,
+  SelectEventPayload,
+  SelectionOwnerPayload,
+  SelectionPayload,
+  ViewportEventPayload,
+  ViewportPayload,
+  VisibilityPayload,
+} from "./web/events.ts";
 export { inspectionPayload, selectionPayload, viewportPayload } from "./web/events.ts";
 export { loadPayload, type PayloadSource } from "./web/load.ts";
 export { getChart, type HercegEventMap, mount, unmount } from "./web/mount.ts";

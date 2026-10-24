@@ -1,0 +1,1695 @@
+{
+  "about": "Changes of view through the chart's API and the viewport events they make, as the engine and the Python package both keep them: each case a chart (its portable spec over data, as contracts.json gives specs data) and actions in order. setViewport takes view (an x pair, an object of x, y, yRight, or null) and panel; it makes the events listed, in order (none when it changes nothing), or throws error, changing nothing. getViewport returns what returns says. update replaces the table's columns with data, and its events are those the next frame makes. Events are the JSON viewportEventPayload makes (web/events.ts): instance names are opaque, so they are written as placeholders ($x): in a case, a placeholder of a scale stands for one name of that scale's, and two placeholders of a scale for two (instances of different scales may share a name). scopes give each scale's scope in the case (insets keep scales of their own beside \"chart\"). Read by packages/herceg/test/web/viewport-events.test.ts and Python's live tests.",
+  "data": {
+    "t": [0, 1, 2, 3, 4, 5, 6, 7],
+    "v": [1, 3, 2, 5, 4, 6, 5, 8],
+    "w": [10, 30, 20, 50, 40, 60, 50, 80],
+    "region": ["eu", "eu", "eu", "eu", "us", "us", "us", "us"],
+    "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+    "quad": ["a", "a", "b", "b", "c", "c", "d", "d"],
+    "when": {
+      "type": "time",
+      "values": [
+        1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000, 1700018000000,
+        1700021600000, 1700025200000
+      ]
+    }
+  },
+  "cases": [
+    {
+      "contract": "interaction.viewport-event.chart",
+      "name": "one panel: each change is one event, a reset of both axes one too, and a reset of nothing none",
+      "scopes": {
+        "x": "chart",
+        "y": "chart"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 3]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": [1, 3]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [1, 3],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 10]
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$y",
+                  "time": false,
+                  "panels": [""],
+                  "view": [0, 10]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [1, 3],
+                  "y": [0, 10],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "returns": {
+            "x": [1, 3],
+            "y": [0, 10],
+            "yRight": null
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": null,
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": null
+                },
+                {
+                  "scale": "y",
+                  "instance": "$y",
+                  "time": false,
+                  "panels": [""],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": null,
+          "events": []
+        },
+        {
+          "do": "setViewport",
+          "view": [2, 4],
+          "events": [
+            {
+              "viewRevision": 4,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": [2, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [2, 4],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "contract": "interaction.viewport-event.chart.time",
+      "name": "a time axis: views in epoch milliseconds, the scale and the panel's x marked as times",
+      "scopes": {
+        "x": "chart",
+        "y": "chart"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "when",
+            "y": "v"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1700003600000, 1700010800000]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": true,
+                  "panels": [""],
+                  "view": [1700003600000, 1700010800000]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [1700003600000, 1700010800000],
+                  "y": null,
+                  "yRight": null,
+                  "time": ["x"]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "contract": "interaction.viewport-event.chart.limits",
+      "name": "a view past the extent is moved inside with its span, and reported as shown",
+      "scopes": {
+        "x": "chart",
+        "y": "chart"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ],
+        "interaction": {
+          "limits": {
+            "x": {
+              "extent": [0, 7]
+            }
+          }
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [-2, 1]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": [0, 3]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [0, 3],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [-1, 9]
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": [0, 7]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [0, 7],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [-5, 20]
+          },
+          "events": []
+        }
+      ]
+    },
+    {
+      "contract": "interaction.set-viewport.subplots",
+      "name": "subplots sharing x, each with its own y: a panel names the y it zooms; the panels sharing x follow",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "b"
+          }
+        ],
+        "x": {
+          "scope": "chart"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "panel": "b",
+          "returns": {
+            "x": null,
+            "y": null,
+            "yRight": null
+          }
+        },
+        {
+          "do": "getViewport",
+          "returns": {
+            "x": null,
+            "y": null,
+            "yRight": null
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [2, 3],
+            "y": [0, 4]
+          },
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
+          }
+        },
+        {
+          "do": "getViewport",
+          "panel": "a",
+          "returns": {
+            "x": null,
+            "y": [0, 4],
+            "yRight": null
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2],
+            "y": [0, 50]
+          },
+          "panel": "b",
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "panel": "b",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": [1, 2]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$yb",
+                  "time": false,
+                  "panels": ["b"],
+                  "view": [0, 50]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": [1, 2],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": [1, 2],
+                  "y": [0, 50],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "returns": {
+            "x": [1, 2],
+            "y": null,
+            "yRight": null
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2]
+          },
+          "events": []
+        },
+        {
+          "do": "setViewport",
+          "view": null,
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": null
+                },
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": [0, 50],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 1]
+          },
+          "panel": "zz",
+          "error": {
+            "code": "unknown-reference",
+            "message": "setViewport: no panel \"zz\"; name one of \"a\", \"b\""
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": null,
+          "events": [
+            {
+              "viewRevision": 4,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yb",
+                  "time": false,
+                  "panels": ["b"],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "contract": "interaction.set-viewport.subplots.shared-y",
+      "name": "subplots sharing y, each with its own x: one y range moves both, once",
+      "scopes": {
+        "x": "panel",
+        "y": "chart"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "b"
+          }
+        ],
+        "x": {
+          "scope": "panel"
+        },
+        "y": {
+          "scope": "chart"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$y",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 6]
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$y",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": [0, 6]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": [0, 6],
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": [0, 6],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [0, 1]
+          },
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport x: the panels have x scales of their own; name one with { panel }"
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [0, 1]
+          },
+          "panel": "b",
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "api",
+              "panel": "b",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$xb",
+                  "time": false,
+                  "panels": ["b"],
+                  "view": [0, 1]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "b",
+                  "x": [0, 1],
+                  "y": [0, 6],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "returns": {
+            "x": null,
+            "y": [0, 6],
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.set-viewport.subplots.right-y",
+      "name": "right y axes of panels' own: set apart from the left, reset with it, and refused where a panel has no such axis",
+      "scopes": {
+        "x": "chart",
+        "y": "panel",
+        "yRight": "panel"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          },
+          {
+            "id": "c"
+          }
+        ],
+        "x": {
+          "scope": "chart"
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "a",
+            "axis": "right"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "b"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "c",
+            "axis": "right"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "yRight": [0, 100]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "yRight",
+                  "instance": "$yra",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 100]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": null,
+                  "yRight": [0, 100],
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "yRight": [0, 100]
+          },
+          "panel": "b",
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport yRight: panel \"b\" has no right y axis; drop yRight"
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 5]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 5]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": [0, 5],
+                  "yRight": [0, 100],
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 1]
+          },
+          "panel": "c",
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport y: panel \"c\" has no left y axis; drop y"
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "yRight": [0, 9]
+          },
+          "panel": "c",
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "api",
+              "panel": "c",
+              "scales": [
+                {
+                  "scale": "yRight",
+                  "instance": "$yrc",
+                  "time": false,
+                  "panels": ["c"],
+                  "view": [0, 9]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "c",
+                  "x": null,
+                  "y": null,
+                  "yRight": [0, 9],
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": null,
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 4,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": null
+                },
+                {
+                  "scale": "yRight",
+                  "instance": "$yra",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "contract": "interaction.set-viewport.facets",
+      "name": "facet panels with y scales of their own, sharing x: a y range names its panel, an x range none",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ],
+        "facet": {
+          "field": "region"
+        },
+        "y": {
+          "scope": "panel"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "us",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "us",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yus",
+                  "time": false,
+                  "panels": ["us"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "us",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2]
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["eu", "us"],
+                  "view": [1, 2]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "eu",
+                  "x": [1, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "us",
+                  "x": [1, 2],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.viewport-event.facets.removed",
+      "name": "a facet panel whose rows go: its zoomed y is reported fitted with the panel it had, the x every panel shares keeps its view, and the panel comes back with that x and its own y unzoomed",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ],
+        "facet": {
+          "field": "region"
+        },
+        "y": {
+          "scope": "panel"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["eu", "us"],
+                  "view": [1, 2]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "eu",
+                  "x": [1, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "us",
+                  "x": [1, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "us",
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "panel": "us",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yus",
+                  "time": false,
+                  "panels": ["us"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "us",
+                  "x": [1, 2],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "update",
+          "data": {
+            "t": [0, 1, 2, 3, 4, 5, 6, 7],
+            "v": [1, 3, 2, 5, 4, 6, 5, 8],
+            "w": [10, 30, 20, 50, 40, 60, 50, 80],
+            "region": ["eu", "eu", "eu", "eu", "eu", "eu", "eu", "eu"],
+            "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "quad": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "when": {
+              "type": "time",
+              "values": [
+                1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000,
+                1700018000000, 1700021600000, 1700025200000
+              ]
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "data",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yus",
+                  "time": false,
+                  "panels": ["us"],
+                  "view": null
+                }
+              ],
+              "views": []
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "panel": "eu",
+          "returns": {
+            "x": [1, 2],
+            "y": null,
+            "yRight": null
+          }
+        },
+        {
+          "do": "update",
+          "data": {
+            "t": [0, 1, 2, 3, 4, 5, 6, 7],
+            "v": [1, 3, 2, 5, 4, 6, 5, 8],
+            "w": [10, 30, 20, 50, 40, 60, 50, 80],
+            "region": ["eu", "eu", "eu", "eu", "us", "us", "us", "us"],
+            "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "quad": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "when": {
+              "type": "time",
+              "values": [
+                1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000,
+                1700018000000, 1700021600000, 1700025200000
+              ]
+            }
+          },
+          "events": []
+        },
+        {
+          "do": "getViewport",
+          "panel": "us",
+          "returns": {
+            "x": [1, 2],
+            "y": null,
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.viewport-event.facets.regrouped",
+      "name": "facet panels that wrap anew share y with other panels: the zoomed y of the row they left is reported fitted, though every panel is still drawn",
+      "scopes": {
+        "x": "chart",
+        "y": "row"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ],
+        "facet": {
+          "field": "quad",
+          "columns": 2
+        },
+        "y": {
+          "scope": "row"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yab",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "update",
+          "data": {
+            "t": [0, 1, 2, 3, 4, 5, 6, 7],
+            "v": [1, 3, 2, 5, 4, 6, 5, 8],
+            "w": [10, 30, 20, 50, 40, 60, 50, 80],
+            "region": ["eu", "eu", "eu", "eu", "us", "us", "us", "us"],
+            "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "quad": ["a", "a", "c", "c", "b", "b", "d", "d"],
+            "when": {
+              "type": "time",
+              "values": [
+                1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000,
+                1700018000000, 1700021600000, 1700025200000
+              ]
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "data",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yab",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "panel": "a",
+          "returns": {
+            "x": null,
+            "y": null,
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.viewport-event.subplots.replaced",
+      "name": "a panel's x scale whose numbers become categories is another instance: the zoomed one is reported fitted, though the panel stays",
+      "scopes": {
+        "x": "panel",
+        "y": "panel"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          }
+        ],
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$xa",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [1, 2]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": [1, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "update",
+          "data": {
+            "t": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "v": [1, 3, 2, 5, 4, 6, 5, 8],
+            "w": [10, 30, 20, 50, 40, 60, 50, 80],
+            "region": ["eu", "eu", "eu", "eu", "us", "us", "us", "us"],
+            "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "quad": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "when": {
+              "type": "time",
+              "values": [
+                1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000,
+                1700018000000, 1700021600000, 1700025200000
+              ]
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "data",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$xa",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "panel": "a",
+          "returns": {
+            "x": null,
+            "y": null,
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.set-viewport.insets",
+      "name": "an inset's own scales beside the chart's x: its views leave its parent's alone, an x range without a panel is the parent's, and a reset resets both",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "main"
+          },
+          {
+            "id": "zoom"
+          }
+        ],
+        "layout": {
+          "type": "panel",
+          "panel": "main",
+          "insets": [
+            {
+              "panel": "zoom"
+            }
+          ]
+        },
+        "x": {
+          "scope": "chart"
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "main"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "zoom"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2],
+            "y": [0, 3]
+          },
+          "panel": "zoom",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "zoom",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$xz",
+                  "time": false,
+                  "panels": ["zoom"],
+                  "view": [1, 2]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$yz",
+                  "time": false,
+                  "panels": ["zoom"],
+                  "view": [0, 3]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "zoom",
+                  "x": [1, 2],
+                  "y": [0, 3],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [0, 4]
+          },
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$xm",
+                  "time": false,
+                  "panels": ["main"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "main",
+                  "x": [0, 4],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": null,
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$xm",
+                  "time": false,
+                  "panels": ["main"],
+                  "view": null
+                },
+                {
+                  "scale": "x",
+                  "instance": "$xz",
+                  "time": false,
+                  "panels": ["zoom"],
+                  "view": null
+                },
+                {
+                  "scale": "y",
+                  "instance": "$yz",
+                  "time": false,
+                  "panels": ["zoom"],
+                  "view": null
+                }
+              ],
+              "views": [
+                {
+                  "panel": "main",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "zoom",
+                  "x": null,
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "contract": "interaction.set-viewport.chart.category",
+      "name": "a category x axis does not zoom: a range is refused, a reset is nothing to report",
+      "scopes": {
+        "x": "chart",
+        "y": "chart"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "name",
+            "y": "v"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [0, 2]
+          },
+          "error": {
+            "code": "invalid-option",
+            "message": "setViewport x: the x axis shows categories, which do not zoom; drop x"
+          }
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "x": null
+          },
+          "events": []
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$y",
+                  "time": false,
+                  "panels": [""],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

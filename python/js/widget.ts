@@ -502,7 +502,7 @@ class Widget {
       // The chart's view is of the x scale its panels share, if they share
       // one; subplots' planes, and panels with x scales of their own (insets,
       // say), have views of their own.
-      if (!config.panels || chart.getPanels().some(({ x }) => x?.group === ""))
+      if (!config.panels || chart.getPanels().some(({ x }) => x?.instance === ""))
         this.#show(view, "viewport", this.#state("viewport"));
       // Views of panels whose x is the chart's now are the chart's view, and go.
       const panels = chart.getPanels();
@@ -511,7 +511,7 @@ class Widget {
           const panel = key.slice("viewport:".length);
           const own =
             planes.includes(panel) ||
-            panels.some(({ key, x }) => key === panel && x !== undefined && x.group !== "");
+            panels.some(({ key, x }) => key === panel && x !== undefined && x.instance !== "");
           if (own) this.#show(view, "viewport", this.#state("viewport", panel), false, panel);
           else this.#states.delete(key);
         }
@@ -818,7 +818,7 @@ class Widget {
     const restored = chartViewport(chart, viewport);
     // Charts whose panels have y scales of their own have no y viewport.
     const panels = chart.getPanels();
-    const first = panels.find(({ x }) => x?.group === "") ?? panels.find(({ x }) => x);
+    const first = panels.find(({ x }) => x?.instance === "") ?? panels.find(({ x }) => x);
     chart.setViewport({
       x: restored.x,
       y:

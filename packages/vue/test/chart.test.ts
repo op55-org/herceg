@@ -939,7 +939,7 @@ describe("<Chart>", () => {
       new Set(
         chart()
           .getPanels()
-          .map((p) => p.x!.group),
+          .map((p) => p.x!.instance),
       ).size;
     expect(groups()).toBe(2);
     x.value = {};

@@ -73,6 +73,7 @@ import {
   type LegendTarget,
   type MarkSpec,
   type NavigatorSpec,
+  type PanelInteractionSpec,
   type PanelLayoutSpec,
   type PanelSpec,
   type PanelTitleSpec,
@@ -448,10 +449,32 @@ function syncChannel(cursor: boolean, ...scales: readonly string[]): Check {
     checkProperties(v as Record<string, unknown>, path, ["group"], {
       group: string,
       scale: oneOf(...scales),
+      panel: string,
       ...(cursor && cursorShow),
     });
   };
 }
+
+/** What a chart's `interaction` and a panel's own check alike: all but `sync`, the chart's. */
+const panelInteraction = {
+  pan: axesPreset,
+  zoom: axesPreset,
+  brush: oneOf("x", "y", "xy", "lasso"),
+  bindings: (v, at) => {
+    if (!Array.isArray(v)) fail(at, "a list of bindings", v);
+    for (const [k, item] of v.entries()) binding(item, `${at}[${k}]`);
+  },
+  limits: (v, at) => {
+    object(v, at);
+    properties(v as Record<string, unknown>, at, {
+      x: scaleLimits,
+      y: scaleLimits,
+      yRight: scaleLimits,
+    } satisfies ChecksOf<ViewLimitsSpec>);
+  },
+  rotate: boolean,
+  drag: boolean,
+} satisfies ChecksOf<PanelInteractionSpec>;
 
 const curve = oneOf("linear", "step", "step-before", "step-after", "monotone");
 
@@ -3010,6 +3033,10 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
             x: axis,
             y: axis,
             yRight: axis,
+            interaction: (v, at) => {
+              object(v, at);
+              properties(v as Record<string, unknown>, at, panelInteraction);
+            },
           } satisfies ChecksOf<PanelSpec>);
           const id = panel.id as string;
           if (id === "" || id === "*") fail(`${at}.id`, 'a name other than "" and "*"', id);
@@ -3064,21 +3091,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       interaction: (i, path) => {
         object(i, path);
         properties(i as Record<string, unknown>, path, {
-          pan: axesPreset,
-          zoom: axesPreset,
-          brush: oneOf("x", "y", "xy", "lasso"),
-          bindings: (v, at) => {
-            if (!Array.isArray(v)) fail(at, "a list of bindings", v);
-            for (const [k, item] of v.entries()) binding(item, `${at}[${k}]`);
-          },
-          limits: (v, at) => {
-            object(v, at);
-            properties(v as Record<string, unknown>, at, {
-              x: scaleLimits,
-              y: scaleLimits,
-              yRight: scaleLimits,
-            } satisfies ChecksOf<ViewLimitsSpec>);
-          },
+          ...panelInteraction,
           sync: (v, at) => {
             if (typeof v === "string") return;
             object(v, at);
@@ -3093,8 +3106,6 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
               },
             } satisfies ChecksOf<SyncSpec>);
           },
-          rotate: boolean,
-          drag: boolean,
         } satisfies ChecksOf<InteractionSpec>);
       },
       navigator: (v, path) => {
@@ -3113,6 +3124,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
             });
           },
           halo,
+          panel: string,
         } satisfies ChecksOf<NavigatorSpec>);
       },
       animation: (a, path) => {

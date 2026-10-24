@@ -202,4 +202,38 @@ describe("limits and sync in specs", () => {
     );
     expect(() => validateSpec(spec({ panels: { group: "a" } }))).toThrow("interaction.sync.panels");
   });
+
+  it("take panels as targets of sync channels and the navigator, and panels' own settings but sync", () => {
+    const spec = (more: object) =>
+      ({
+        version: 1,
+        data: { t: { columns: { x: [0, 1], y: [1, 2] } } },
+        panels: [{ id: "a" }, { id: "b" }],
+        marks: [{ type: "line", data: "t", x: "x", y: "y", panel: "a" }],
+        ...more,
+      }) as never;
+    const sync = {
+      cursor: { group: "c", panel: "a" },
+      viewport: { group: "v", scale: "y", panel: "b" },
+      selection: { group: "s", panel: "a" },
+    };
+    expect(() => validateSpec(spec({ interaction: { sync } }))).not.toThrow();
+    expect(() => validateSpec(spec({ navigator: { panel: "a" } }))).not.toThrow();
+    const own = { zoom: "xy", bindings: [], limits: { y: {} }, brush: "lasso" };
+    expect(() =>
+      validateSpec(spec({ panels: [{ id: "a", interaction: own }, { id: "b" }] })),
+    ).not.toThrow();
+    expect(() =>
+      validateSpec(spec({ interaction: { sync: { viewport: { group: "v", panel: 1 } } } })),
+    ).toThrow("interaction.sync.viewport.panel: expected a string");
+    expect(() => validateSpec(spec({ navigator: { panel: ["a"] } }))).toThrow(
+      "navigator.panel: expected a string",
+    );
+    expect(() =>
+      validateSpec(spec({ panels: [{ id: "a", interaction: { sync: "g" } }, { id: "b" }] })),
+    ).toThrow("panels[0].interaction.sync");
+    expect(() =>
+      validateSpec(spec({ panels: [{ id: "a", interaction: { zoom: "z" } }, { id: "b" }] })),
+    ).toThrow("panels[0].interaction.zoom");
+  });
 });

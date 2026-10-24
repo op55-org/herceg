@@ -257,7 +257,19 @@ export interface PanelSpec {
   y?: AxisSpec;
   /** The panel's right y axis, for its marks with `axis: "right"`: the chart's `yRight`, with these settings. */
   yRight?: AxisSpec;
+  /**
+   * How the panel answers input: the chart's `interaction`, with these
+   * settings in place of its own, one by one; `bindings` replaces the
+   * chart's list, and each scale's `limits` replace the chart's for that
+   * scale (`{}` clears them). Panels sharing a scale must agree on its
+   * limits. What the chart shares with other charts is the chart's
+   * (`interaction.sync`, whose channels name a panel to share its scales).
+   */
+  interaction?: PanelInteractionSpec;
 }
+
+/** A panel's own `interaction`: the chart's settings but `sync`. */
+export type PanelInteractionSpec = Omit<InteractionSpec, "sync">;
 
 export interface WrappedFacetSpec {
   field: Field;
@@ -832,10 +844,15 @@ export interface SyncSpec {
   panels?: boolean | CursorShowSpec;
 }
 
-/** A sync channel: its group's name and the chart's scale it carries. */
+/**
+ * A sync channel: its group's name and the chart's scale it carries, of
+ * the panel `panel` names (a subplot's id or a facet panel's key), or by
+ * default the one every panel shares.
+ */
 export interface SyncChannelSpec {
   group: string;
   scale?: "x" | "y";
+  panel?: string;
 }
 
 /**
@@ -859,10 +876,15 @@ export interface CursorShowSpec {
 /** The cursor's channel, and how the chart shows the cursors it receives (one tooltip at most). */
 export interface CursorSyncSpec extends SyncChannelSpec, CursorShowSpec {}
 
-/** The selection's channel: its group's name, and what of selections it carries ("xy", all, by default). */
+/**
+ * The selection's channel: its group's name, what of selections it carries
+ * ("xy", all, by default), and the panel whose scales carry it (see
+ * `SyncChannelSpec`).
+ */
 export interface SelectionSyncSpec {
   group: string;
   scale?: "x" | "y" | "xy";
+  panel?: string;
 }
 
 /** What selects rows in a chart bound to a selection store: range and rectangle brushes, lassos, and clicks. */
@@ -921,6 +943,12 @@ export interface NavigatorSpec {
    * window only.
    */
   marks?: readonly string[];
+  /**
+   * The panel whose x scale the window moves (a subplot's id or a facet
+   * panel's key): the strip draws the marks of the panels sharing that
+   * scale, under all the panels. By default the x scale every panel shares.
+   */
+  panel?: string;
 }
 
 export interface AnimationSpec {

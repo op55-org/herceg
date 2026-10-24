@@ -80,7 +80,15 @@ export { fromRows, Table, table } from "./data/table.ts";
 export type { Selection } from "./dom/brushed.ts";
 export { type ChartOptions, type ChartUpdate, createChart } from "./dom/chart.ts";
 export { showFailure } from "./dom/errors.ts";
-export type { ChartEvents, ChartListener, PanelTarget, ViewCause } from "./dom/events.ts";
+export type {
+  ChartEvents,
+  ChartListener,
+  PanelTarget,
+  PanelViewport,
+  ScaleView,
+  ViewCause,
+  ViewportEvent,
+} from "./dom/events.ts";
 export type {
   Axis,
   AxisInfo,
@@ -92,6 +100,8 @@ export type {
   ItemPositions,
   LegendEntry,
   PanelInfo,
+  ScaleInstance,
+  SelectionOwner,
 } from "./dom/handle.ts";
 export { type Hydration, hydrateChart, hydration } from "./dom/hydrate.ts";
 export type { RenderTooltip } from "./dom/tooltip.ts";

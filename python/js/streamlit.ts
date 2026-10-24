@@ -456,15 +456,15 @@ function restore(
   }
   const panels = chart.getPanels().filter((panel) => panel.x);
   // The chart's own view is of the panels sharing x (an inset may come first).
-  const shared = <P extends { x?: { group: string } | undefined }>(list: readonly P[]) =>
-    list.find(({ x }) => x?.group === "") ?? list[0];
+  const shared = <P extends { x?: { instance: string } | undefined }>(list: readonly P[]) =>
+    list.find(({ x }) => x?.instance === "") ?? list[0];
   const first = shared(kept.panels);
   // A panel's x range carries to the panel of the same key; one every panel
   // shares, also to a panel that is new. Panels sharing a scale take the
   // first one's.
   const zoomed = new Set<string>();
   for (const { key, x } of panels) {
-    const group = x!.group;
+    const group = x!.instance;
     const before = kept.panels.find((panel) => panel.key === key) ?? (group ? undefined : first);
     if (!before || zoomed.has(group)) continue;
     zoomed.add(group);
@@ -486,7 +486,7 @@ function restore(
   const from = kept.panels.find(({ key }) => selectionPanels?.includes(key));
   const at =
     panels.find(({ key }) => selectionPanels?.includes(key)) ??
-    panels.find(({ x }) => x!.group === "");
+    panels.find(({ x }) => x!.instance === "");
   const next = selection &&
     from &&
     at && {
@@ -551,7 +551,7 @@ function selectionPanels({ chart, planes }: Instance): readonly string[] | undef
   const [first] = panels;
   if (first === undefined) return undefined;
   const x = chart.getPanels().find(({ key }) => key === first)?.x;
-  return (x ? x.group !== "" : planes.includes(first)) ? panels : undefined;
+  return (x ? x.instance !== "" : planes.includes(first)) ? panels : undefined;
 }
 
 /** The chart's one tree's drill root, and each subplot tree's, by panel. */
@@ -652,7 +652,7 @@ function reportViewport(instance: Instance): void {
   // networks have views of their own, as panels with x scales of their own
   // (insets, say) do; a chart of nothing else has no view but theirs.
   const axes = chart.getPanels().filter(({ x }) => x);
-  const own = axes.length === 0 ? instance.planes.length === 0 : axes.some(({ x }) => !x!.group);
+  const own = axes.length === 0 ? instance.planes.length === 0 : axes.some(({ x }) => !x!.instance);
   const view = own ? viewportPayload(chart, chart.getViewport()) : null;
   const panels: Record<string, ViewportPayload> = Object.fromEntries([
     ...instance.planes.map((panel) => [
@@ -660,7 +660,7 @@ function reportViewport(instance: Instance): void {
       viewportPayload(chart, chart.getViewport({ panel }), true),
     ]),
     ...axes
-      .filter(({ x }) => x!.group)
+      .filter(({ x }) => x!.instance)
       .map(({ key }) => [
         key,
         viewportPayload(chart, chart.getViewport({ panel: key }), false, key),

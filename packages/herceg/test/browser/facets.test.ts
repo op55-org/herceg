@@ -1085,7 +1085,7 @@ describe("right axes in panels", () => {
     expect(viewports[0]!.y && viewports[0]!.yRight).not.toBeNull();
     expect(a!.yRight!.domain).toEqual(after!.yRight!.domain);
     const [info] = chart.getPanels();
-    expect([info!.yRight!.group, info!.yRight!.canSetViewport]).toEqual(["", true]);
+    expect([info!.yRight!.instance, info!.yRight!.canSetViewport]).toEqual(["", true]);
     chart.destroy();
   });
 
@@ -1133,7 +1133,7 @@ describe("right axes in panels", () => {
     });
     const [a, b] = chart.getPanels();
     expect(a!.yRight!.canSetViewport).toBe(false);
-    expect(a!.yRight!.group).not.toBe(b!.yRight!.group);
+    expect(a!.yRight!.instance).not.toBe(b!.yRight!.instance);
     expect(() => chart.setViewport({ yRight: [0, 10] })).toThrow("no one y range");
     chart.setViewport({ y: [0, 20] });
     expect(chart.getViewport()).toEqual({ x: null, y: [0, 20], yRight: null });
