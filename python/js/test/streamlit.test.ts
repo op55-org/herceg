@@ -567,7 +567,7 @@ describe("Streamlit component", () => {
     // Reordered: the outline would cover other bars, so it goes.
     const reordered = run(parent, bars(["c", "a", "b"], "lasso"));
     await frame();
-    expect(band(parent)?.getAttribute("visibility") ?? "hidden").toBe("hidden");
+    await expect.poll(() => band(parent)?.getAttribute("visibility") ?? "hidden").toBe("hidden");
     expect(reordered.state).toEqual([["selection", null]]);
   });
 
@@ -594,7 +594,7 @@ describe("Streamlit component", () => {
     const reordered = run(parent, bars(["b", "a", "c"]));
     expect(reordered.state).toEqual([["selection", { x: ["b", "a"], ...whole }]]);
     await frame();
-    expect(band(parent)!.getAttribute("visibility")).toBe("visible");
+    await expect.poll(() => band(parent)?.getAttribute("visibility")).toBe("visible");
     // Gone: the brush goes, and the script hears so.
     const replaced = run(parent, bars(["x", "y", "z"]));
     expect(replaced.state).toEqual([["selection", null]]);
@@ -750,7 +750,7 @@ describe("Streamlit component with panels' own x scales", () => {
     const [, selected] = first.state.at(-1)!;
     const next = run(parent, panel("b"));
     await frame();
-    expect(band(parent)!.getAttribute("visibility")).toBe("visible");
+    await expect.poll(() => band(parent)?.getAttribute("visibility")).toBe("visible");
     // The script already has this selection.
     expect(next.state).toEqual([]);
     expect(selected).not.toBeNull();

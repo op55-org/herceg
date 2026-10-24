@@ -776,7 +776,7 @@ describe("notebook widget", () => {
     expect(model.messages("select")).toHaveLength(1);
     model.receive({ type: "select", revision: 2, selection: null });
     await frame();
-    expect(band(first!)!.getAttribute("visibility")).toBe("hidden");
+    await expect.poll(() => band(first!)?.getAttribute("visibility")).toBe("hidden");
   });
 
   it("reports row selections numbered as Python numbers rows, and shows Python's", async () => {
@@ -1077,7 +1077,7 @@ describe("notebook widget", () => {
       // The brush that draws the restored lasso loads on demand.
       await vi.dynamicImportSettled();
       await frame();
-      expect(band(host)!.getAttribute("visibility")).toBe("visible");
+      await expect.poll(() => band(host)?.getAttribute("visibility")).toBe("visible");
       const learned = model.messages("select").map(({ selection }) => selection);
       expect(learned).toEqual(
         categories ? [] : [expect.objectContaining({ categories: [["a", "b"], null] })],
@@ -1287,11 +1287,11 @@ describe("notebook widget", () => {
       selection: { x: ["d", "d"], y: null, lasso: null },
     });
     await frame();
-    expect(band(host!)!.getAttribute("visibility")).toBe("visible");
+    await expect.poll(() => band(host!)?.getAttribute("visibility")).toBe("visible");
     expect(left()).toBeGreaterThan(before);
     replace(5, ["e", "f"]);
     await frame();
-    expect(band(host!)!.getAttribute("visibility")).toBe("hidden");
+    await expect.poll(() => band(host!)?.getAttribute("visibility")).toBe("hidden");
     // The second report waits out the throttle.
     await new Promise((resolve) => setTimeout(resolve, 250));
     // Python drops the first report: it was made before Python selected "d".
