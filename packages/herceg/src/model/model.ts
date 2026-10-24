@@ -1650,6 +1650,46 @@ export class ChartModel {
       tickCountOf({ spec } as AxisContext, size, false);
     /** How panel `i`'s axis of scale `axis` writes its tick labels. */
     const tickPaint = (axis: ScaleName, i: number) => styles.axisText("tickLabel", axis, i);
+    /**
+     * A continuous axis over `range` (`pixels` long) from `base`, found as
+     * `source` says, with `count` ticks. Domains and views set are shown as
+     * they are, unless padding is given; fitted ones are rounded (`nice`),
+     * their ticks on the rounded values, then widened by the padding given
+     * or by `clear`, for what marks draw past their values. Ranges drawn
+     * already have their padding, and say what their ticks were chosen in
+     * (`within`).
+     */
+    const planRange = (
+      context: AxisContext,
+      base: [number, number],
+      source: RangeSource,
+      pixels: number,
+      range: readonly [number, number],
+      count: number,
+      nice: boolean,
+      clear: (rounded: [number, number]) => [number, number],
+      within?: readonly [number, number] | null,
+    ): AxisPlan => {
+      const { padding } = context;
+      const rounded = source === "fit" ? niceAxisDomain(base, context, count, nice) : base;
+      const domain =
+        padding && source !== "drawn"
+          ? padding.pad(rounded, pixels)
+          : source !== "fit"
+            ? base
+            : clear(rounded);
+      // Ticks go inside the padding: of a range drawn already, where they were.
+      const ticksIn = !padding
+        ? nice
+          ? rounded
+          : domain
+        : source === "drawn"
+          ? (within ?? padding.unpad(base, pixels))
+          : rounded;
+      const plan = planAxis(context, domain, range, count, ticksIn);
+      if (padding) plan.padded = pixels;
+      return plan;
+    };
     /** A continuous y axis for the marks on one side, from `base`, found as `source` says. */
     const planValueAxis = (
       axisContext: AxisContext,
@@ -1659,33 +1699,19 @@ export class ChartModel {
       size: number,
       within?: readonly [number, number] | null,
     ): AxisPlan => {
-      const { spec, padding } = axisContext;
-      const count = tickCount(spec, size);
+      const { spec } = axisContext;
       const sideDrawn = sideMarks.filter(({ series }) => series.length > 0);
-      // Domains and views set are shown as they are, unless padding is
-      // given; fitted ones are rounded, their ticks on the rounded values,
-      // then widened by the padding given or for what marks draw past their
-      // values. Ranges drawn already have their padding.
-      const fixed = source !== "fit";
-      const nice = !fixed && (spec?.nice ?? !sideDrawn.some(({ mark }) => mark.tight));
-      const rounded = fixed ? base : niceAxisDomain(base, axisContext, count, nice);
-      const domain =
-        padding && source !== "drawn"
-          ? padding.pad(rounded, size)
-          : fixed
-            ? base
-            : padDomain("y", rounded, size, axisContext.type, sideDrawn);
-      // Ticks go inside the padding: of a range drawn already, where they were.
-      const ticksIn = !padding
-        ? nice
-          ? rounded
-          : domain
-        : source === "drawn"
-          ? (within ?? padding.unpad(base, size))
-          : rounded;
-      const plan = planAxis(axisContext, domain, [plotTop + size, plotTop], count, ticksIn);
-      if (padding) plan.padded = size;
-      return plan;
+      return planRange(
+        axisContext,
+        base,
+        source,
+        size,
+        [plotTop + size, plotTop],
+        tickCount(spec, size),
+        source === "fit" && (spec?.nice ?? !sideDrawn.some(({ mark }) => mark.tight)),
+        (rounded) => padDomain("y", rounded, size, axisContext.type, sideDrawn),
+        within,
+      );
     };
 
     /** The category y axis of panel `i` over the plot from `y`, `size` tall. */
@@ -1915,37 +1941,23 @@ export class ChartModel {
       within?: readonly [number, number],
     ): AxisPlan => {
       const context = xContexts[h]!;
-      const { type, spec, padding } = context;
+      const { type, spec, breaks } = context;
       if (type === "band") return planCategoriesX(h, [left, left + plotWidth]);
-      const count = xTicks(context, plotWidth);
-      const range = [left, left + plotWidth] as const;
-      // As for y: ticks on the rounded domain, inside the padding given or the room for glyphs.
-      const auto = source === "fit";
-      const nice = auto && (spec?.nice ?? xMeasures[h]!);
-      const rounded = auto ? niceAxisDomain(shown, context, count, nice) : shown;
       // Room at the ends is time shown: on axes with breaks, positions.
       const room = (d: [number, number], as: AxisType) =>
         padDomain("x", d, plotWidth, as, xDrawn[h]);
-      const { breaks } = context;
-      const domain =
-        padding && source !== "drawn"
-          ? padding.pad(rounded, plotWidth)
-          : !auto
-            ? shown
-            : breaks
-              ? breaks.inPositions(rounded, (d) => room(d, "linear"))
-              : room(rounded, type);
-      // As for y; a range drawn already says what its ticks were chosen in.
-      const ticksIn = !padding
-        ? nice
-          ? rounded
-          : domain
-        : source === "drawn"
-          ? (within ?? padding.unpad(shown, plotWidth))
-          : rounded;
-      const plan = planAxis(context, domain, range, count, ticksIn);
-      if (padding) plan.padded = plotWidth;
-      return plan;
+      return planRange(
+        context,
+        shown,
+        source,
+        plotWidth,
+        [left, left + plotWidth],
+        xTicks(context, plotWidth),
+        source === "fit" && (spec?.nice ?? xMeasures[h]!),
+        (rounded) =>
+          breaks ? breaks.inPositions(rounded, (d) => room(d, "linear")) : room(rounded, type),
+        within,
+      );
     };
     let xPlans: AxisPlan[] = [];
     // Where each group's first label starts and last one ends, by plot

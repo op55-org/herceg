@@ -4748,7 +4748,9 @@ resizes, and drawn in the pointer overlay, clipped to each plot. The chart
 keeps the selection and its rules (`dom/brushed.ts`); the drag and its
 drawing (`dom/brush.ts`) load with a dynamic `import()` when a chart can
 brush or first has a selection to show, so charts that never brush carry
-none of it, and a press made before it arrives drags once it has. When zoom
+none of it, and a press made before it arrives drags once it has. The brush
+gets the selection rules from the chart rather than importing them, so
+bundlers split no shared chunk out of the chart's. When zoom
 is on along every axis a selection has a range on, releasing the brush (or
 Enter, for a selection made with the keyboard or received from a synced
 chart) sets the viewport instead; lassos never zoom. Synced charts share

@@ -12,6 +12,7 @@
 import type { Bindings } from "../model/bindings.ts";
 import type { Controls } from "../model/item-views.ts";
 import type { ChartModel } from "../model/model.ts";
+import type { normalize } from "./brushed.ts";
 import type { Chart } from "./handle.ts";
 
 /** What a chart lends its controls. */
@@ -33,6 +34,8 @@ export interface ControlsHost {
   onPlot(target: EventTarget | null): boolean;
   /** Where the keyboard cursor is: its panel's key, and the item's if it is on one. */
   cursor(): { panel: string; key: string | undefined } | undefined;
+  /** How a selection's ends sit on a panel's scales, for a brush of the controls' own (brushed.ts). */
+  readonly normalize: typeof normalize;
 }
 
 export type { Controls };

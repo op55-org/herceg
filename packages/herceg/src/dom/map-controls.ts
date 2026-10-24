@@ -19,7 +19,6 @@ import type { ChartConfig } from "../model/model.ts";
 import type { Rect, Scene } from "../scene/scene.ts";
 import type { Theme } from "../theme.ts";
 import { Brush, type BrushPanel } from "./brush.ts";
-import { DRAG_THRESHOLD } from "./brushed.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
 import { RESET_GLYPH, type ToolButton, Toolbar } from "./toolbar.ts";
 
@@ -32,6 +31,13 @@ const PAN = 1 / 8;
  * times its scale; a view set beyond either is left there.
  */
 const MAX_ZOOM = 256;
+
+/**
+ * Pixels a press moves before it pans or lassos, as before it brushes
+ * (brushed.ts); not imported from there, which would split brushed.ts out
+ * of the chart's bundle into a chunk of its own.
+ */
+export const DRAG_THRESHOLD = 3;
 
 let lassos = 0;
 
@@ -183,7 +189,11 @@ export class Controls implements ChartControls {
     if (this.#lassos && !this.#brush) {
       const group = this.#root.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "g");
       this.#host.overlay.append(group);
-      this.#brush = new Brush(group, `herceg-${this.#family}-lasso-${++lassos}`);
+      this.#brush = new Brush(
+        group,
+        `herceg-${this.#family}-lasso-${++lassos}`,
+        this.#host.normalize,
+      );
       this.#brush.mode = "lasso";
     } else if (!this.#lassos && this.#brush) {
       this.#brush.element.remove();

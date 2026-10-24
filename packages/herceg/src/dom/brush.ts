@@ -8,7 +8,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import type { Rect } from "../scene/scene.ts";
 import type { BrushSpec } from "../spec/spec.ts";
 import type { Theme } from "../theme.ts";
-import { DRAG_THRESHOLD, normalize, type Selection } from "./brushed.ts";
+import type { normalize, Selection } from "./brushed.ts";
 
 /** A plotting area the brush draws in: its plot and scales. */
 export interface BrushPanel {
@@ -18,6 +18,12 @@ export interface BrushPanel {
   x: PositionScale;
   y: PositionScale;
 }
+
+/**
+ * Pixels a drag moves before it selects (brushed.ts); not imported, which
+ * would split brushed.ts out of the chart's bundle into a chunk of its own.
+ */
+const DRAG_THRESHOLD = 3;
 
 /** Most points a lasso keeps; longer drags keep every other one, then every fourth... */
 const LASSO_POINTS = 400;
@@ -34,10 +40,13 @@ export class Brush {
   #shown = false;
   /** Prefix of the clip paths' ids, unique in the page. */
   readonly #id: string;
+  /** How a selection's ends sit on a panel's scales (brushed.ts), handed in for the same reason. */
+  readonly #normalize: typeof normalize;
 
-  constructor(element: SVGGElement, id: string) {
+  constructor(element: SVGGElement, id: string, ends: typeof normalize) {
     this.element = element;
     this.#id = id;
+    this.#normalize = ends;
   }
 
   get dragging(): boolean {
@@ -69,7 +78,7 @@ export class Brush {
     const drag = this.#drag;
     this.#drag = null;
     if (!drag) return null;
-    return selectionOf(drag.points, drag.panel, this.mode);
+    return selectionOf(drag.points, drag.panel, this.mode, this.#normalize);
   }
 
   cancel(): void {
@@ -79,7 +88,9 @@ export class Brush {
   /** Draws the drag in progress, or else `selected`, in every panel (they share scales). */
   draw(panels: readonly BrushPanel[], theme: Theme, selected: Selection | null): void {
     const drag = this.#drag;
-    const selection = drag ? selectionOf(drag.points, drag.panel, this.mode, true) : selected;
+    const selection = drag
+      ? selectionOf(drag.points, drag.panel, this.mode, this.#normalize, true)
+      : selected;
     if (!selection) {
       // Most frames have no brush: leave the hidden outlines alone.
       if (this.#shown)
@@ -128,15 +139,16 @@ export class Brush {
 }
 
 /**
- * What pixel points select in a panel. Ranges need a drag of a few pixels
- * along their axis, rectangles and lassos a few pixels each way (a flat one
- * would select nothing, or zoom to nothing); `partial` keeps smaller ones,
- * for drawing a drag as it starts.
+ * What pixel points select in a panel, its ends placed by `normalize`.
+ * Ranges need a drag of a few pixels along their axis, rectangles and
+ * lassos a few pixels each way (a flat one would select nothing, or zoom
+ * to nothing); `partial` keeps smaller ones, for drawing a drag as it starts.
  */
 function selectionOf(
   points: readonly [number, number][],
   panel: BrushPanel,
   mode: BrushSpec,
+  normalize: (scale: PositionScale, a: number, b: number) => readonly [number, number],
   partial = false,
 ): Selection | null {
   const { x, y } = panel;
