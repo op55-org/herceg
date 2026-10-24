@@ -14,10 +14,9 @@
 import type { NodeMoves } from "../marks/graph.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
-import { DRAG_THRESHOLD } from "./brushed.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
 import { LayoutFrames } from "./layout-frames.ts";
-import { Controls as PlaneControls } from "./map-controls.ts";
+import { DRAG_THRESHOLD, Controls as PlaneControls } from "./map-controls.ts";
 import { RESET_GLYPH } from "./toolbar.ts";
 
 /** Pixels a key press moves a node. */

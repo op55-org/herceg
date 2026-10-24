@@ -1832,6 +1832,7 @@ export class MountedChart implements Chart, ExportsScene {
             legend: this.#legend.element,
             invalidate: () => this.#invalidate(false),
             cursor: () => this.#controller?.keyboard ?? undefined,
+            normalize,
           }),
         ),
       // Drills, moves, and views of maps and networks report themselves.
@@ -2016,7 +2017,7 @@ export class MountedChart implements Chart, ExportsScene {
     this.#brushLoading = import("./brush.ts")
       .then(({ Brush }) => {
         if (this.#destroyed) return;
-        this.#brush = new Brush(this.#brushLayer, `${this.#id}-brush`);
+        this.#brush = new Brush(this.#brushLayer, `${this.#id}-brush`, normalize);
         this.#brush.mode = this.#options.interaction?.brush ?? "x";
         // A selection made while it loaded shows now, or when the chart is
         // back on screen if it left while the brush loaded.
