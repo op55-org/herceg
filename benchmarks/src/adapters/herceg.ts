@@ -28,6 +28,16 @@ import {
 import type { Adapter, ChartHandle, ChartKind, ChartOptions, Point } from "../page/adapter.ts";
 import { clientPoint } from "../page/adapter.ts";
 
+// A chart Herceg refuses throws, so the harness records the refusal rather
+// than timing a chart that draws its error in place.
+const REFUSALS = { errorMode: "throw" } as const;
+
+/** What a chart refuses in a later frame reaches the harness as an uncaught error. */
+function watched(chart: Chart): Chart {
+  chart.on("error", ({ error }) => reportError(error));
+  return chart;
+}
+
 // Herceg reads the benchmark's typed arrays in place: a table wraps them
 // without copying. The table's maxRows makes it a rolling window, which is
 // Herceg's documented streaming path.
@@ -72,12 +82,15 @@ function lineKind(fill: boolean): ChartKind<SeriesData> {
     ): ChartHandle<SeriesData> {
       const source = seriesTable(data);
       const fields = data.ys.map((_, s) => `s${s}`);
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        marks: [fill ? area(source, { x: "t", y: fields }) : line(source, { x: "t", y: fields })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          marks: [fill ? area(source, { x: "t", y: fields }) : line(source, { x: "t", y: fields })],
+        }),
+      );
       return {
         setData: (next) => source.reset(columnsOf(next)),
         append: (x, ys, keep) => appendTo(source, x, ys, keep),
@@ -173,12 +186,15 @@ export const adapter: Adapter = {
     create(container, data, options) {
       const source = table(barColumns(data));
       const fields = data.series.map((_, i) => `s${i}`);
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        marks: [bar(source, { x: "category", y: fields })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          marks: [bar(source, { x: "category", y: fields })],
+        }),
+      );
       return { ...common(chart), setData: (next) => source.reset(barColumns(next)) };
     },
   },
@@ -186,12 +202,15 @@ export const adapter: Adapter = {
     prepare: (data) => table({ x: data.x, y: data.y }),
     create(container, data, options) {
       const source = table({ x: data.x, y: data.y });
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        marks: [point(source, { x: "x", y: "y", radius: 1.5 })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          marks: [point(source, { x: "x", y: "y", radius: 1.5 })],
+        }),
+      );
       return {
         ...common(chart),
         setData: (next: PointData) => source.reset({ x: next.x, y: next.y }),
@@ -203,14 +222,17 @@ export const adapter: Adapter = {
     prepare: (data) => table(gridColumns(data)),
     create(container, data, options) {
       const source = table(gridColumns(data));
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        // Same ramp and no color legend, as configured for the other libraries.
-        legend: false,
-        marks: [heatmap(source, { x: "c", y: "r", color: "v", colors: ["#f7fbff", "#08306b"] })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          // Same ramp and no color legend, as configured for the other libraries.
+          legend: false,
+          marks: [heatmap(source, { x: "c", y: "r", color: "v", colors: ["#f7fbff", "#08306b"] })],
+        }),
+      );
       return { ...common(chart), setData: (next) => source.reset(gridColumns(next)) };
     },
   },
@@ -218,12 +240,15 @@ export const adapter: Adapter = {
     prepare: (data) => table(candleColumns(data)),
     create(container, data, options) {
       const source = table(candleColumns(data));
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        marks: [candlestick(source, { x: "t", open: "o", high: "h", low: "l", close: "c" })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          marks: [candlestick(source, { x: "t", open: "o", high: "h", low: "l", close: "c" })],
+        }),
+      );
       return { ...common(chart), setData: (next) => source.reset(candleColumns(next)) };
     },
   },
@@ -231,14 +256,17 @@ export const adapter: Adapter = {
     prepare: (data) => table({ v: data.values }),
     create(container, data, options) {
       const source = table({ v: data.values });
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        // The fixed grid and x range every library is given: 5 wide from 25 to 175.
-        x: { domain: [25, 175] },
-        marks: [histogram(source, { x: "v", bins: { step: 5, start: 25 } })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          // The fixed grid and x range every library is given: 5 wide from 25 to 175.
+          x: { domain: [25, 175] },
+          marks: [histogram(source, { x: "v", bins: { step: 5, start: 25 } })],
+        }),
+      );
       return {
         ...common(chart),
         setData: (next: SampleData) => source.reset({ v: next.values }),
@@ -249,23 +277,26 @@ export const adapter: Adapter = {
     prepare: (data) => table(bubbleColumns(data)),
     create(container, data, options) {
       const source = table(bubbleColumns(data));
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        // No size key or color legend, as configured for the other libraries.
-        legend: false,
-        marks: [
-          point(source, {
-            x: "x",
-            y: "y",
-            size: "s",
-            radiusRange: [BUBBLE.minRadius, BUBBLE.maxRadius],
-            color: "v",
-            colors: BUBBLE.colors,
-          }),
-        ],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          // No size key or color legend, as configured for the other libraries.
+          legend: false,
+          marks: [
+            point(source, {
+              x: "x",
+              y: "y",
+              size: "s",
+              radiusRange: [BUBBLE.minRadius, BUBBLE.maxRadius],
+              color: "v",
+              colors: BUBBLE.colors,
+            }),
+          ],
+        }),
+      );
       return { ...common(chart), setData: (next) => source.reset(bubbleColumns(next)) };
     },
   },
@@ -275,12 +306,15 @@ export const adapter: Adapter = {
     prepare: (data) => table({ x: data.x, y: data.y, z: data.z }),
     create(container, data, options) {
       const source = table({ x: data.x, y: data.y, z: data.z });
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        marks: [point3d(source, { x: "x", y: "y", z: "z" })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          marks: [point3d(source, { x: "x", y: "y", z: "z" })],
+        }),
+      );
       return {
         ...solid(chart),
         setData: (next: Point3Data) => source.reset({ x: next.x, y: next.y, z: next.z }),
@@ -291,12 +325,15 @@ export const adapter: Adapter = {
     prepare: (data) => table(surfaceColumns(data)),
     create(container, data, options) {
       const source = table(surfaceColumns(data));
-      const chart = createChart(container, {
-        width: options.width,
-        height: options.height,
-        tooltip: options.tooltip,
-        marks: [surface(source, { x: "x", y: "y", z: "z" })],
-      });
+      const chart = watched(
+        createChart(container, {
+          ...REFUSALS,
+          width: options.width,
+          height: options.height,
+          tooltip: options.tooltip,
+          marks: [surface(source, { x: "x", y: "y", z: "z" })],
+        }),
+      );
       return {
         ...solid(chart),
         setData: (next: SurfaceData) => source.reset(surfaceColumns(next)),
