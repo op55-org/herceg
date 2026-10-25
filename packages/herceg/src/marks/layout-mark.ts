@@ -17,7 +17,8 @@ import type { CameraSpec, InteractionSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import type { MovedNodes, NodeMoves } from "./graph.ts";
-import { type ChartMark, type LegendScale, type Mark, seriesOf } from "./mark.ts";
+import { markKey } from "./hidden.ts";
+import { type ChartMark, type LegendScale, type Mark, type MarkKey, seriesOf } from "./mark.ts";
 import type { LayoutClock, NodePositions } from "./node-positions.ts";
 import type { Drill } from "./tree-data.ts";
 
@@ -355,6 +356,49 @@ export function insidePolygon(
 
 export function isLayoutMark(mark: object): mark is LayoutMark {
   return (mark as Partial<LayoutMark>).layout === true;
+}
+
+/**
+ * Whether layout mark `mark` (`id`, as `LayoutFrame.id`) is hidden whole
+ * in `frame`, by its key `{"mark":id}` (marks/hidden.ts), with none of its
+ * legend's items shown there unlike it (by a panel's own legend, as series
+ * of a mark hidden whole may be): then it draws nothing (`drawnHidden`),
+ * whatever it draws besides items.
+ */
+export function hiddenWhole(
+  mark: LayoutMark,
+  id: MarkKey,
+  frame: Pick<LayoutFrame, "hidden" | "color" | "theme" | "paint">,
+): boolean {
+  const { hidden } = frame;
+  if (!hidden.has(markKey(id))) return false;
+  return mark.legend(id, frame.color, frame.theme, frame.paint).every(({ key }) => hidden.has(key));
+}
+
+/**
+ * What a layout mark hidden whole draws of `laid`, its layout where it is
+ * laid out still: no geometry and no items, but what it laid out (a
+ * plane's view, a tree's drill, a network's moves and pending work), so
+ * that showing it again draws it as it was. Its summary says it is hidden.
+ */
+export function drawnHidden(
+  laid: Pick<LayoutResult, "plane" | "drill" | "moves" | "pending"> = {},
+): LayoutResult {
+  const { plane, drill, moves, pending } = laid;
+  return {
+    geometry: [],
+    itemAt: () => undefined,
+    count: 0,
+    item: () => {
+      throw new RangeError("a hidden mark has no items");
+    },
+    indexOf: () => -1,
+    summary: () => "Hidden.",
+    plane,
+    drill,
+    moves,
+    pending,
+  };
 }
 
 /**

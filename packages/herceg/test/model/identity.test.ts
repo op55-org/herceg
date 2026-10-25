@@ -857,7 +857,7 @@ describe("identity in specs", () => {
 
   it("refuses an origin of no table, of itself, or of a cycle", () => {
     expect(() => loadSpec(spec("summarry") as never)).toThrow(
-      'spec.data.intervals.origin: expected the name of another table in spec.data; received "summarry"',
+      'data.intervals.origin: expected the name of another table in data; received "summarry"',
     );
     const cycle = spec("summary");
     (cycle.data.summary as Record<string, unknown>).origin = "intervals";

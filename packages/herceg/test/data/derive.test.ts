@@ -661,12 +661,12 @@ describe("derived tables in specs", () => {
   });
 
   it("rejects unknown sources, cycles, and malformed steps", () => {
-    expect(() => loadSpec(spec([], "nope"))).toThrow(/spec\.data\.totals\.source: no table "nope"/);
+    expect(() => loadSpec(spec([], "nope"))).toThrow(/data\.totals\.source: no table "nope"/);
     const cycle: ChartSpec = {
       data: { a: { source: "b", transform: [] }, b: { source: "a", transform: [] } } as never,
       marks: [],
     };
-    expect(() => loadSpec(cycle)).toThrow(/spec\.data\.a\.source: the table derives from itself/);
+    expect(() => loadSpec(cycle)).toThrow(/data\.a\.source: the table derives from itself/);
     expect(() => loadSpec(spec([{ explode: true }]))).toThrow(/a transform \(filter/);
     // Unknown step options are reported like any others; two transforms in a step are refused.
     const filter = [">", ["field", "v"], 1];

@@ -5,7 +5,14 @@
 
 import { labelHalo } from "../draw/label-halo.ts";
 import { labelsDrawing, textDrawing } from "../draw/labels.ts";
-import { type TextAt, textItem } from "../layout/text.ts";
+import {
+  type MeasureText,
+  padded,
+  type TextAt,
+  textBox,
+  textItem,
+  textLines,
+} from "../layout/text.ts";
 import type { LabelsGeometry, Rect, TextGeometry } from "../scene/scene.ts";
 import type { Frozen } from "../spec/spec.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
@@ -51,6 +58,32 @@ export interface PlacedLabel {
   baseline: TextAt["baseline"];
   /** The box behind it, where placed with it (see `anchorBlock`); else padded about the text. */
   box?: Rect | undefined;
+}
+
+/**
+ * A label's box: the one placed with it, or its text's lines as `paint`
+ * sets them from its point, in a box as `textItem` draws one (the text
+ * moved in by its padding), else bare.
+ */
+export function labelBox(label: PlacedLabel, paint: TextPaint, measure: MeasureText): Rect {
+  if (label.box) return label.box;
+  const lines = textLines(label.text, paint, measure);
+  const at: TextAt = { ...label, angle: 0 };
+  return paint.background
+    ? textBox(lines, padded(at, paint.padding), paint)
+    : textBox(lines, at, { ...paint, padding: [0, 0, 0, 0] });
+}
+
+/** `label` moved by (`dx`, `dy`), with its box. */
+export function movedLabel(label: PlacedLabel, [dx, dy]: readonly [number, number]): PlacedLabel {
+  if (dx === 0 && dy === 0) return label;
+  const { box } = label;
+  return {
+    ...label,
+    x: label.x + dx,
+    y: label.y + dy,
+    ...(box && { box: { ...box, x: box.x + dx, y: box.y + dy } }),
+  };
 }
 
 /**

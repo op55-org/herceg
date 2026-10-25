@@ -186,11 +186,9 @@ export interface LegendContent {
   hidden: ReadonlySet<string> & Partial<Pick<HiddenKeys, "hiddenIn" | "panels" | "groups">>;
   /** Layout marks' entries, by key, whose looks swatches draw beside series' (`swatches: "mark"`). */
   also?: readonly LegendEntry[] | undefined;
-  /**
-   * In charts of subplots, what each panel draws, its items' colors, and
-   * what lists them in panels' legends (loaded with subplots).
-   */
+  /** In charts of subplots, what each panel draws, and what lists it in panels' legends (loaded with subplots). */
   split?: PanelSplit | undefined;
+  /** Layout marks' items' colors, by key. */
   color?: ((key: string) => string) | undefined;
   panelLegends?: typeof PanelLegends | undefined;
 }

@@ -320,7 +320,7 @@ describe("panels", () => {
         [],
       );
     expect(spec({ layout: { type: "grid", columns: [1, 1] } })).toThrow(
-      "spec.layout: expected a spec with panels",
+      "layout: expected a spec with panels",
     );
     expect(spec({ panels: [{ id: "top" }] })).toThrow("marks[0].panel");
     expect(
@@ -334,7 +334,7 @@ describe("panels", () => {
         code: "unsupported",
         path: "facet",
         message:
-          "spec.facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
+          "facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
       }),
     );
   });
@@ -533,8 +533,8 @@ describe("panels in weighted columns", () => {
         marks: [{ type: "line", data: "m", x: "t", y: "v", panel: "*" }],
       } as never);
     expect(spec([2, 1])().config.panels).toBeDefined();
-    expect(spec([2, -1])).toThrow("spec.layout.columns[1]");
-    expect(spec([])).toThrow("spec.layout.columns");
+    expect(spec([2, -1])).toThrow("layout.columns[1]");
+    expect(spec([])).toThrow("layout.columns");
   });
 });
 

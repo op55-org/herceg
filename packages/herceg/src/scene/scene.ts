@@ -233,6 +233,8 @@ export interface RuleGeometry extends Geometry {
   x2: number;
   y2: number;
   label: string | undefined;
+  /** The width of `label`, and the plot its box stays inside (see `ruleLabel`). */
+  labelIn?: { readonly width: number; readonly plot: Rect } | undefined;
 }
 
 /**

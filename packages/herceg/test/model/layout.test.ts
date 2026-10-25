@@ -76,7 +76,7 @@ describe("padding", () => {
 
   it("is refused when negative, from specs", () => {
     expect(() => loadSpec({ marks: [], padding: { top: -1 } }, [])).toThrow(
-      "spec.padding.top: expected a number of at least 0; received -1",
+      "padding.top: expected a number of at least 0; received -1",
     );
   });
 });

@@ -239,6 +239,8 @@ export class Interaction {
   readonly #tips: Tooltip[] = [];
   /** What the keyboard's cursor shared with the cursor channel and the charts there show, or null. */
   #keyShared: string | null = null;
+  /** What the pointer shared last, by value and panel, which a new scene shares again where it reads otherwise. */
+  #pointerShared: string | null = null;
   /** A crosshair per panel shown; the first stays, hidden, when none is. */
   readonly #crosshairs: SVGLineElement[];
   /** Clip paths keeping a panel's crosshair off the insets over it, by panel key; and how many were made. */
@@ -253,6 +255,9 @@ export class Interaction {
   /** Whether the tooltip shows tooltip fields and `renderTooltip`'s content. */
   #content: Promise<void> | undefined;
   #pointer: { x: number; y: number } | null = null;
+  /** What the pointer read last, of a scene, which sharing it and drawing it read once (`#read`). */
+  #reading: { x: number; y: number; scene: Scene; inspection: Inspection | undefined } | null =
+    null;
   #keyboard: KeyboardCursor | null = null;
   #press: Press | null = null;
   /** Where each touch is, for pinches. */
@@ -429,6 +434,8 @@ export class Interaction {
     }
     const scene = host.scene();
     if (!scene) return;
+    // New data may move what a pointer at rest reads, and so its cursor.
+    if (frame && this.#pointer) this.#sharePointer(this.#pointer.x, this.#pointer.y, true);
     const { theme } = scene;
     const panels = host.model.panels();
     // Panels without insets over them any more need no clip.
@@ -672,7 +679,10 @@ export class Interaction {
   /**
    * Reports each scale instance whose view came within its limits'
    * threshold of an end (`interaction.limits`, `edge`), once until it is
-   * farther away than the threshold and hysteresis again.
+   * farther away than the threshold and hysteresis again. An instance
+   * without a view shows all of its data, near no end: a page loading
+   * history on edges would otherwise widen the extent, refit, and hear of
+   * the new end at once, again and again.
    */
   #reportEdges(): void {
     const { model, events } = this.#host;
@@ -682,15 +692,13 @@ export class Interaction {
     for (const instance of model.instances.values()) {
       const { scale: name, instance: group, type } = instance;
       const { edge, extent } = model.limitsOf(name, group) ?? {};
-      if (!edge || type === "band") continue;
+      if (!edge || type === "band" || !model.viewOf(name, group)) continue;
       const { threshold = 0.1, hysteresis = 0.05 } = edge === true ? {} : edge;
       const panel = panels.find(({ key }) => key === instance.panels[0]);
       const scale = panel?.[name];
       if (!scale) continue;
-      // A view fitted to the data is at the data's ends: only the extent
-      // bounds it then. The data bounds a zoomed x scale every panel shares.
-      const zoomed = name === "x" && group === "" && model.viewOf("x", "");
-      const data = zoomed ? model.dataXExtent() : undefined;
+      // The data bounds an x scale every panel shares, where the extent does not.
+      const data = name === "x" && group === "" ? model.dataXExtent() : undefined;
       // The view shown, without the padding drawn around it.
       const [a, b] = unpadded(panel.plans[name], scale.domain as [number, number]);
       const domain = [Math.min(a, b), Math.max(a, b)] as const;
@@ -734,7 +742,7 @@ export class Interaction {
     // A chart being turned, panned, or dragged shows no tooltip.
     if (model.items?.busy) return undefined;
     // The model applies the configured tooltip mode.
-    if (this.#pointer) return model.inspect(this.#pointer.x, this.#pointer.y);
+    if (this.#pointer) return this.#read(this.#pointer.x, this.#pointer.y);
     const keyboard = this.#keyboard;
     if (keyboard)
       return (
@@ -862,6 +870,52 @@ export class Interaction {
     return cursorAxis(model.panels().map(({ key }) => model.inspectorOf(key)));
   }
 
+  /**
+   * Shares the pointer's cursor at (x, y) along the axis the data is placed
+   * on, if the cursor channel carries it; over no panel, none. `again`, only
+   * where it stands elsewhere than it last did.
+   */
+  #sharePointer(x: number, y: number, again = false): void {
+    const host = this.#host;
+    const axis = this.#cursorAxis();
+    if (host.cursorScale() !== axis) return;
+    const panel = this.#panelAt(x, y);
+    const value = panel ? this.#sharedAt(panel, axis, x, y) : null;
+    const shared = JSON.stringify([value, panel?.key]);
+    if (again && shared === this.#pointerShared) return;
+    this.#pointerShared = shared;
+    host.shareCursor(value, panel);
+    // The charts there show the pointer's now: the keyboard shares again where it is.
+    this.#keyShared = null;
+  }
+
+  /**
+   * The value the pointer's cursor at (x, y) over `panel` stands at along
+   * `axis`, which peers show: what it reads, where its crosshair is drawn
+   * (a line's nearest point, a calendar's cell), else the pointer's value.
+   */
+  #sharedAt(panel: DrawnPanel, axis: "x" | "y", x: number, y: number): number | string | null {
+    const read = this.#host.model.items?.busy ? undefined : this.#read(x, y);
+    if (read?.axis !== axis || (read.panel ?? "") !== panel.key)
+      return this.#valueAt(panel, axis, x, y);
+    const { categories } = panel[axis];
+    return categories ? (categories[read.value] ?? null) : read.value;
+  }
+
+  /**
+   * What the pointer at (x, y) reads in the scene shown, read once for
+   * the cursor it shares and the frame drawing it, which pointer moves
+   * come once each before.
+   */
+  #read(x: number, y: number): Inspection | undefined {
+    const scene = this.#host.scene();
+    const last = this.#reading;
+    if (last && last.scene === scene && last.x === x && last.y === y) return last.inspection;
+    const inspection = this.#host.model.inspect(x, y);
+    this.#reading = scene ? { x, y, scene, inspection } : null;
+    return inspection;
+  }
+
   /** The value under a pixel of `panel` along `axis`: a category by name on category axes. */
   #valueAt(panel: DrawnPanel, axis: "x" | "y", x: number, y: number): number | string | null {
     const scale = panel[axis];
@@ -943,18 +997,10 @@ export class Interaction {
         }
       }
       host.schedule();
-      // Share the value under the pointer along the axis the data is placed
-      // on, if the cursor channel carries it; over no panel, none.
-      const axis = this.#cursorAxis();
-      if (host.cursorScale() === axis) {
-        const panel = this.#panelAt(x, y);
-        host.shareCursor(panel ? this.#valueAt(panel, axis, x, y) : null, panel);
-        // The charts there show the pointer's now: the keyboard shares again where it is.
-        this.#keyShared = null;
-      }
+      this.#sharePointer(x, y);
     });
     on("pointerleave", (event) => {
-      this.#pointer = null;
+      this.#pointer = this.#reading = this.#pointerShared = null;
       // A captured drag leaves only when released; any other press ends here.
       this.#press = null;
       if (this.#tap?.pointer === event.pointerId) this.#tap = null;

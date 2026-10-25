@@ -50,12 +50,13 @@ import {
   View,
 } from "../three/camera.ts";
 import { FaceBuffer, FaceIndex } from "../three/faces.ts";
-import type {
-  LayoutControls,
-  LayoutFrame,
-  LayoutItem,
-  LayoutMark,
-  LayoutResult,
+import {
+  hiddenWhole,
+  type LayoutControls,
+  type LayoutFrame,
+  type LayoutItem,
+  type LayoutMark,
+  type LayoutResult,
 } from "./layout-mark.ts";
 import { legendParts } from "./legend-parts.ts";
 import type { ColorRamp, GlyphKey, MARK } from "./mark.ts";
@@ -397,19 +398,23 @@ export class Plot3D implements LayoutMark {
       this.#config.boxAspect,
     );
     const base = { ...frame, view, axes, faces: this.#faces };
+    // Layers hidden whole draw nothing, in a box planned over every layer.
+    const shown = this.layers.flatMap((layer, i) =>
+      hiddenWhole(layer, this.#id(i), frame) ? [] : [i],
+    );
     const box = boxGeometry(view, axes, theme, measure, bounds);
-    const batches = frame.clouds && !frame.inPanel ? this.#batches(base) : undefined;
+    const batches = frame.clouds && !frame.inPanel ? this.#batches(base, shown) : undefined;
     // A GPU painter draws large charts; their faces are made only for a
     // canvas the painter cannot draw on. The keyboard and summaries read the
     // layers' data, and the pointer finds what the painter drew from it too.
     let placed: { lost: boolean; placed: Placed } | undefined;
     const place = (lost = false) => {
-      if (placed?.lost !== lost) placed = { lost, placed: this.#place(base, lost) };
+      if (placed?.lost !== lost) placed = { lost, placed: this.#place(base, lost, shown) };
       return placed.placed;
     };
     let reading: Reading | undefined;
     const read = () => {
-      reading ??= this.#read(base);
+      reading ??= this.#read(base, shown);
       return reading;
     };
     let onCpu = batches === undefined;
@@ -424,7 +429,7 @@ export class Plot3D implements LayoutMark {
       geometry,
       // The pointer reads what drew the scene: the faces as they were placed, or the GPU's data.
       itemAt: (px, py) =>
-        onCpu ? place(placed?.lost ?? false).itemAt(px, py) : this.#pick(base, px, py),
+        onCpu ? place(placed?.lost ?? false).itemAt(px, py) : this.#pick(base, px, py, shown),
       get count() {
         return read().count;
       },
@@ -449,9 +454,9 @@ export class Plot3D implements LayoutMark {
     return result;
   }
 
-  /** Every layer's items, one layer after another, in reading order. */
-  #read(base: Omit<Frame3D, "id">): Reading {
-    const layers = this.layers.map((layer, i) => layer.items({ ...base, id: this.#id(i) }));
+  /** The items of the layers `shown` (by index), one layer after another, in reading order. */
+  #read(base: Omit<Frame3D, "id">, shown: readonly number[]): Reading {
+    const layers = shown.map((i) => this.layers[i]!.items({ ...base, id: this.#id(i) }));
     const starts = [0];
     for (const layer of layers) starts.push(starts[starts.length - 1]! + layer.count);
     const layerOf = (index: number) => {
@@ -464,7 +469,7 @@ export class Plot3D implements LayoutMark {
       count: starts[layers.length]!,
       item(i) {
         const l = layerOf(i);
-        return { ...layers[l]!.item(i - starts[l]!), layer: l };
+        return { ...layers[l]!.item(i - starts[l]!), layer: shown[l]! };
       },
       indexOf(key) {
         for (let l = 0; l < layers.length; l++) {
@@ -481,11 +486,14 @@ export class Plot3D implements LayoutMark {
    * opaque, and of what the painter draws) and drawing them all on the CPU
    * would cost at least GPU_FACES_3D faces.
    */
-  #batches(frame: Omit<Frame3D, "id">): Omit<Batches3D, "faces"> | undefined {
+  #batches(
+    frame: Omit<Frame3D, "id">,
+    shown: readonly number[],
+  ): Omit<Batches3D, "faces"> | undefined {
     const batches: Batch3D[] = [];
     let cost = 0;
-    for (const [i, layer] of this.layers.entries()) {
-      const batch = layer.batch?.({ ...frame, id: this.#id(i) });
+    for (const i of shown) {
+      const batch = this.layers[i]!.batch?.({ ...frame, id: this.#id(i) });
       if (!batch) return undefined;
       batches.push(batch);
       cost +=
@@ -516,11 +524,16 @@ export class Plot3D implements LayoutMark {
   }
 
   /** What a GPU painter shows at (px, py): of the layers' items there, the nearest the eye. */
-  #pick(base: Omit<Frame3D, "id">, px: number, py: number): LayoutItem | undefined {
+  #pick(
+    base: Omit<Frame3D, "id">,
+    px: number,
+    py: number,
+    shown: readonly number[],
+  ): LayoutItem | undefined {
     let best: Hit3D | undefined;
     let layer = -1;
-    for (const [i, each] of this.layers.entries()) {
-      const hit = each.pick?.({ ...base, id: this.#id(i) }, px, py);
+    for (const i of shown) {
+      const hit = this.layers[i]!.pick?.({ ...base, id: this.#id(i) }, px, py);
       // At one depth the later layer shows, as the painter draws it.
       if (hit && (!best || ahead(hit, best, base.view.distance))) {
         best = hit;
@@ -530,18 +543,18 @@ export class Plot3D implements LayoutMark {
     return best && { ...best.item, layer };
   }
 
-  /** Every layer's faces, drawn in one order, and what the pointer is on. */
-  #place(base: Omit<Frame3D, "id">, lost: boolean): Placed {
+  /** The faces of the layers `shown` (by index), drawn in one order, and what the pointer is on. */
+  #place(base: Omit<Frame3D, "id">, lost: boolean, shown: readonly number[]): Placed {
     const { faces, bounds } = base;
     faces.reset();
-    const surfaces = this.layers.flatMap((layer, i) => (layer.ranker ? [i] : []));
+    const surfaces = shown.filter((i) => this.layers[i]!.ranker);
     // With one surface, its cells' order places everything.
     const surface = surfaces.length === 1 ? surfaces[0]! : -1;
     const rank =
       surface < 0 ? undefined : this.layers[surface]!.ranker!({ ...base, id: this.#id(surface) });
     const ranges: number[] = [0];
-    const results = this.layers.map((layer, i) => {
-      const result = layer.place({ ...base, id: this.#id(i), rank, lost });
+    const results = shown.map((i) => {
+      const result = this.layers[i]!.place({ ...base, id: this.#id(i), rank, lost });
       ranges.push(faces.count);
       return result;
     });
@@ -563,7 +576,7 @@ export class Plot3D implements LayoutMark {
         const face = written[at]!;
         const l = layerOf(face);
         const item = results[l]!.itemOfFace(local[face]!, px, py);
-        return item && { ...item, layer: l };
+        return item && { ...item, layer: shown[l]! };
       },
     };
   }

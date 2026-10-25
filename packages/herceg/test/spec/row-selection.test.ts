@@ -65,7 +65,7 @@ describe("row selections in specs", () => {
       ],
     };
     expect(() => loadSpec(spec({ channel: "c" }, two))).toThrow(
-      "spec.rowSelection.data: missing; the marks read several tables, so name one",
+      "rowSelection.data: missing; the marks read several tables, so name one",
     );
     const loaded = loadSpec(
       spec(
@@ -78,7 +78,7 @@ describe("row selections in specs", () => {
     );
     expect([...loaded.stores.keys()]).toEqual(["a", "b"]);
     expect(() => loadSpec(spec({ data: "z", channel: "c" }))).toThrow(
-      'spec.rowSelection.data: no table "z" in spec.data; name one of "trips"',
+      'rowSelection.data: no table "z" in data; name one of "trips"',
     );
   });
 
@@ -89,16 +89,16 @@ describe("row selections in specs", () => {
       }),
     ).toThrow('stores.trips: the store given is of another table; give a store of table "trips"');
     expect(() => validateSpec(spec({ channel: "" }))).toThrow(
-      "spec.rowSelection.channel: expected a channel's name",
+      "rowSelection.channel: expected a channel's name",
     );
     expect(() => validateSpec(spec({ channel: "c", events: ["drag" as "click"] }))).toThrow(
-      'spec.rowSelection.events[0]: expected "brush", "lasso", or "click"; received "drag"',
+      'rowSelection.events[0]: expected "brush", "lasso", or "click"; received "drag"',
     );
     expect(() => validateSpec(spec({ channel: "c", effect: "filter" as "none" }))).toThrow(
-      "spec.rowSelection.effect",
+      "rowSelection.effect",
     );
     expect(() => validateSpec({ ...spec({} as RowSelectionSpec) })).toThrow(
-      "spec.rowSelection.channel: required",
+      "rowSelection.channel: required",
     );
     expect(() => validateSpec(spec([]))).toThrow("expected a binding or a list of them");
     const gauge = {
@@ -180,17 +180,15 @@ describe("row selections in specs", () => {
   it("refuse selections of rows the table lacks, and conditions it cannot test", () => {
     expect(() =>
       validateSpec(spec({ channel: "c", selection: { kind: "rows", rows: [-1] } })),
-    ).toThrow(
-      "spec.rowSelection.selection.rows[0]: expected a row position, 0 or more; received -1",
-    );
+    ).toThrow("rowSelection.selection.rows[0]: expected a row position, 0 or more; received -1");
     expect(() => validateSpec(spec({ channel: "c", selection: { kind: "row" } as never }))).toThrow(
-      'spec.rowSelection.selection.kind: expected "predicate" or "rows"; received "row"',
+      'rowSelection.selection.kind: expected "predicate" or "rows"; received "row"',
     );
     expect(() =>
       validateSpec(spec({ channel: "c", selection: { kind: "rows", rowz: [1] } as never })),
-    ).toThrow("spec.rowSelection.selection.rows: required");
+    ).toThrow("rowSelection.selection.rows: required");
     expect(() => loadSpec(spec({ channel: "c", selection: { kind: "rows", rows: [3] } }))).toThrow(
-      "spec.rowSelection.selection.rows[0]: expected a position among the table's 3 rows; received 3",
+      "rowSelection.selection.rows[0]: expected a position among the table's 3 rows; received 3",
     );
     expect(() =>
       loadSpec(
@@ -199,13 +197,11 @@ describe("row selections in specs", () => {
           selection: { kind: "predicate", expression: [">", ["field", "speed"], 1] },
         }),
       ),
-    ).toThrow('spec.rowSelection.selection.expression: expression: no field "speed"');
+    ).toThrow('rowSelection.selection.expression: expression: no field "speed"');
     expect(() =>
       loadSpec(
         spec({ channel: "c", selection: { kind: "predicate", expression: ["field", "km"] } }),
       ),
-    ).toThrow(
-      "spec.rowSelection.selection.expression: A selection needs a true or false condition",
-    );
+    ).toThrow("rowSelection.selection.expression: A selection needs a true or false condition");
   });
 });

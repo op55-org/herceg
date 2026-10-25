@@ -203,7 +203,7 @@ export function textHeight(paint: TextPaint, text = ""): number {
  * the text's own would go without one: the text moves inside the box by its
  * padding, in the text's own turn.
  */
-function padded(at: TextAt, [top, right, bottom, left]: TextPaint["padding"]): TextAt {
+export function padded(at: TextAt, [top, right, bottom, left]: TextPaint["padding"]): TextAt {
   const dx = at.anchor === "start" ? left : at.anchor === "end" ? -right : (left - right) / 2;
   return moved(at, dx, at.baseline === "hanging" ? top : (top - bottom) / 2);
 }

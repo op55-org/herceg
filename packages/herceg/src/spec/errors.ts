@@ -86,19 +86,17 @@ export class ChartError extends Error implements ChartErrorInfo {
 /**
  * `error`, thrown by what the chart's options at `location` built (a mark
  * of `marks`, named `mark`), placed there as a chart error: its message
- * starting at the location and, for a ChartError, its path within it. A
- * location the chart's own options start with "spec." in messages only.
+ * starting at the location and, for a ChartError, its path within it.
  */
 export function within(location: string, error: unknown, mark?: string | number): ChartError {
   const message = `${location}: ${(error as Error).message}`;
-  const path = location.replace(/^spec\.?/, "");
   if (error instanceof ChartError) {
     error.message = message;
-    error.path = error.path === undefined ? path : `${path}.${error.path}`;
+    error.path = error.path === undefined ? location : `${location}.${error.path}`;
     error.mark ??= mark;
     return error;
   }
-  return new ChartError({ code: "invalid-option", path, mark, message }, error);
+  return new ChartError({ code: "invalid-option", path: location, mark, message }, error);
 }
 
 /** A chart error as JSON-safe data, as other runtimes take it: without its stack and cause. */

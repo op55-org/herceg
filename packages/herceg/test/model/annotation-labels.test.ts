@@ -356,3 +356,29 @@ describe("region labels", () => {
     expect(above.y).toBeLessThan(y.map(2.2));
   });
 });
+
+describe("annotation labels in boxes", () => {
+  it("keep the whole box inside the plot, however their padding leans", () => {
+    const style = {
+      background: { fill: "#eee" },
+      padding: { top: 2, right: 4, bottom: 2, left: 24 },
+    };
+    const { scene } = build({
+      marks: [
+        line(data, { x: "x", y: "y" }),
+        region({ x1: 2.9, x2: 3, label: { text: "region", style } }),
+        rule({ x: 3, label: { text: "vertical", style } }),
+        rule({ y: 2.5, label: { text: "horizontal", style: { ...style, padding: 20 } } }),
+      ],
+    });
+    const plot = scene.panels[0]!.plot;
+    const boxes = labels(scene).map(({ text, box }) => ({ text, box: box! }));
+    expect(boxes.map(({ text }) => text).sort()).toEqual(["horizontal", "region", "vertical"]);
+    for (const { box } of boxes) {
+      expect(box.x).toBeGreaterThanOrEqual(plot.x - 1e-9);
+      expect(box.y).toBeGreaterThanOrEqual(plot.y - 1e-9);
+      expect(box.x + box.width).toBeLessThanOrEqual(plot.x + plot.width + 1e-9);
+      expect(box.y + box.height).toBeLessThanOrEqual(plot.y + plot.height + 1e-9);
+    }
+  });
+});

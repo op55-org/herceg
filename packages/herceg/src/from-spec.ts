@@ -60,12 +60,22 @@ const restoring = new WeakMap<Chart, VisibilityState>();
 
 /**
  * What `chart` hides now, as its `visibility` events report it; while
- * `restoreVisibility` waits to restore a state, that state.
+ * `restoreVisibility` waits to restore a state, or given `state` (one an
+ * application holds to show in it), that state, of the subplots the chart
+ * has (which it knows without loading): a chart made in its place in turn
+ * does not take back what this one let go of.
  */
-export function visibilityState(chart: Chart): VisibilityState {
-  const pending = restoring.get(chart);
-  if (pending) return pending;
+export function visibilityState(chart: Chart, state = restoring.get(chart)): VisibilityState {
   const model = MountedChart.modelOf(chart);
+  if (state) {
+    const has = ([panel]: [string, unknown]) =>
+      model.config.panels?.list.some(({ id }) => id === panel) ?? false;
+    const given = Object.entries(state.panels ?? {});
+    if (given.every(has)) return state;
+    const { panels: _, ...rest } = state;
+    const own = given.filter(has);
+    return own.length > 0 ? { ...rest, panels: Object.fromEntries(own) } : rest;
+  }
   const { hidden } = model;
   return { hiddenKeys: [...hidden], ...model.config.panels?.overrides(hidden.panels) };
 }

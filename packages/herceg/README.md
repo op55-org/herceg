@@ -959,6 +959,12 @@ text(peaks, {
 | `place.outside` | A rule's label outside the plot, beside the axis at its start or end; the chart keeps room for it there unless `reserve: false`. A region's label outside its edge. |
 | `place.offset` | Pixels away from its place. |
 
+Rules' and regions' labels in the plot stay inside it, in every output: a
+rule's label at the plot's edge goes to the rule's other side (a vertical
+rule's left of it, a horizontal rule's at the top below it), and a label
+too big for its place moves in from the edge it would cross. Labels placed
+`outside` a rule go beside the axis, as asked.
+
 Annotations count toward the axes' domains only with `contributeDomain:
 true`, so by default they show where the data is; thresholds meant to stay
 in view say so, or the chart sets a domain. An annotation in a chart with
@@ -3753,7 +3759,7 @@ when coming near its ends is reported:
 | Option | Values | What it does |
 | --- | --- | --- |
 | `extent` | `[from, to]`, either `null` for no end on that side (epoch ms on time axes) | Every view asked for stays inside: by dragging, the wheel, keys, `setViewport`, brushes, and synced charts, and views kept when the limits change. A pan keeps its span and stops at the end; a view wider than the extent shows the extent. A view fitted to the data (the first, or after a reset) shows the data, or the axis' `domain`: give that to start inside. Limits that run backwards are refused when the chart's controller loads, or by `update`. |
-| `edge` | `true`, or `{ threshold?, hysteresis? }` | Reports an `edge` event when the view comes within `threshold` (a fraction of its span, 0.1 by default) of an end of the extent, or, on an x scale every panel shares, of the data where the extent has none (while the view is zoomed or panned), and again only once it has moved `hysteresis` (0.05) farther away, or the end moved. A chart reports the edges its views are near when it attaches its controller, on its first frame after that. |
+| `edge` | `true`, or `{ threshold?, hysteresis? }` | Reports an `edge` event when the view comes within `threshold` (a fraction of its span, 0.1 by default) of an end of the extent, or, on an x scale every panel shares, of the data where the extent has none, and again only once it has moved `hysteresis` (0.05) farther away, or the end moved. Only a view set (zoomed, panned, synced, or by `setViewport`) comes near an end: a scale fitted to its data shows all of it and reports none, when the chart starts or as the extent widens. A chart reports the edges its views are near when it attaches its controller, on its first frame after that. |
 
 A chart of recent prices that loads older ones as the reader pans back:
 
@@ -3784,7 +3790,9 @@ chart.on("edge", async ({ side }) => {
 The view holds while the data grows, so a reader dragging back goes on
 into what has loaded, and the extent widens with it. An edge is reported
 once on coming near; a view that stays near reports nothing more until it
-has moved away, or the end moved (as here, once history loads).
+has moved away, or the end moved (as here, once history loads). The chart
+starts fitted to what is loaded, near no end, so it loads nothing until the
+reader pans.
 
 ### Syncing charts
 
@@ -3804,7 +3812,7 @@ createChart(d, { marks: byHour, interaction: { sync: { cursor: { group: "hosts",
 
 | Channel | Values | What it shares |
 | --- | --- | --- |
-| `cursor` | a group's name, or `{ group, scale?: "x" \| "y", panel?, snap?, tooltip? }` | The pointer's or keyboard cursor's position along `scale` (x by default), shown in the other charts as a crosshair and the points there. A chart takes part along the axis its data is placed on (y for horizontal bars, x otherwise), whatever it draws: where no point is under the cursor (a heatmap's gap, rules, text), the crosshair crosses the plot alone. `snap` and `tooltip` say how this chart shows the cursors it receives (below). |
+| `cursor` | a group's name, or `{ group, scale?: "x" \| "y", panel?, snap?, tooltip? }` | The pointer's or keyboard cursor's position along `scale` (x by default), shown in the other charts as a crosshair and the points there: where its crosshair is drawn, at what it reads (a line's nearest point, a heatmap's or calendar's cell), else at the pointer. A chart takes part along the axis its data is placed on (y for horizontal bars, x otherwise), whatever it draws: where no point is under the cursor (a heatmap's gap, rules, text), the crosshair crosses the plot alone. `snap` and `tooltip` say how this chart shows the cursors it receives (below). |
 | `viewport` | a group's name, or `{ group, scale?: "x" \| "y", panel? }` | The range in view along `scale` |
 | `selection` | a group's name, or `{ group, scale?: "x" \| "y" \| "xy", panel? }` | Brushed ranges: along x or y alone, or (`"xy"`, the default) the whole selection, rectangles and lassos too |
 | `panels` | `true`, `false`, or `{ snap?, tooltip? }` | The cursor across the chart's own panels (facets, subplots): where the pointer or keyboard is in one, the others show a crosshair and their points at the same x. On by default for panels sharing an x scale; `true` or an object also for panels with x scales of their own (the value read on each one's scale); `false` turns it off. |
@@ -4049,7 +4057,8 @@ breaks, scenes of more than 2,000 bars, slices, and rules, 10,000 points
 a navigator or `sync`, charts off screen, charts the pointer is over,
 pressed, or read with the keyboard, pages preferring reduced motion, and
 charts whose frames seem to take over 10 ms (judged from earlier frames,
-alone or with the charts beside them). Moving the pointer, pressing, and keys
+alone or with the charts beside them, though not from a chart's first, which
+does one-time work). Moving the pointer, pressing, and keys
 show the new values and axes before they act, and `render()`, export, and a
 chart's first frame always draw them. Wheel zoom, panning, new data, resizes,
 and export show views at once too, as does drilling into a treemap or
@@ -4305,7 +4314,7 @@ The short form `legend` and `legend({ ... })` take:
 | `columns`, `rows` | Entries in a grid of this many columns, or rows; one of them. |
 | `order` | `"row"` fills row by row (the default with `columns`), `"column"` down each column (the default with `rows`). |
 | `title` | A string, or `{ text, style? }`, above the entries. |
-| `entries` | Entries of your own, after what `include` lists, each with a `key` of its own: `[{ key, label, swatch? \| sample?: { mark }, targets? }]`. A `swatch` is `{ type: "line", stroke, strokeWidth?, dash? }`, `{ type: "rect", fill, stroke? }`, `{ type: "symbol", symbol?, fill, stroke?, size? }` (a point's shape, `"circle"` by default; lines, boxes, and symbols take `opacity`), or `{ type: "composite", parts }`, drawn over one another and centered; `sample` draws a mark's look, its symbol for points. `targets` are what an entry hides and shows: `{ mark }` whole, `{ mark, field, values }` (a series field's series, or the rows of points, unstacked bars, and annotations holding the values), or `{ scale, values }` in every mark reading that scale; entries without targets explain. |
+| `entries` | Entries of your own, after what `include` lists, each with a `key` of its own: `[{ key, label, swatch? \| sample?: { mark }, targets? }]`. A `swatch` is `{ type: "line", stroke, strokeWidth?, dash? }`, `{ type: "rect", fill, stroke? }`, `{ type: "symbol", symbol?, fill, stroke?, size? }` (a point's shape, `"circle"` by default; lines, boxes, and symbols take `opacity`), or `{ type: "composite", parts }`, drawn over one another and centered; `sample` draws a mark's look, its symbol for points. `targets` are what an entry hides and shows: `{ mark }` whole (any mark: a pie, a gauge, a map's or a 3D chart's layer alone), `{ mark, field, values }` (a series field's series, or the rows of points, unstacked bars, and annotations holding the values), or `{ scale, values }` in every mark reading that scale; entries without targets explain. |
 | `swatches` | `"mark"`: swatches that look like the marks: a line of a line's width and dash, with its markers, a box of an area's or bar's fill (a bar's outline and opacity too), a point's symbol. |
 | `style` | `legendLabel`, `legendTitle`, `tickLabel`. |
 | `include` | What it lists: `{ mark, channel }` (a mark's `id` and `"series"`, `"color"`, `"size"`, or `"symbol"`), `{ scale }` (a scale of categories in `scales`, by name), or `{ mark }` (a mark whole: its series, or an annotation's entries); `[]` for its `entries` alone; every scale by default. A `legend()` listing scales takes their place in the automatic legend. |
@@ -4429,7 +4438,9 @@ and their panels (and a lasso's plane). `panels` names the panels a change
 belongs to when they are only some (a subplot's map, network, tree, or 3D
 chart: `drill`, `itemMove`, and `camera` events). `drill` and `itemMove`
 events follow `setDrillRoot` and `setItemPosition` too, as `camera` events
-follow `setCamera`. `edge` events (see View limits) give the scale
+follow `setCamera`. `edge` events (see View limits) report that a view
+came near an end of its extent (a scale fitted to its data reports none),
+giving the scale
 instance (`scale`, `instance`, `type`, `panels`), the `side`
 (`"start"`, its low values, or `"end"`), the `domain` in view (the view,
 without the scale's padding), the `bound`

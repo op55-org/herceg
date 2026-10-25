@@ -1,7 +1,8 @@
 // Sync channels scoped to a panel: a channel naming a panel carries that
 // panel's instance of its scale, and only changes of that instance; what a
 // synced chart sends lands on it alone. Same-realm sync is synchronous.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { time } from "../../../src/data/column.ts";
 import { table } from "../../../src/data/table.ts";
 import type { Chart, ChartOptions } from "../../../src/dom/chart.ts";
 import { columns, inset, panel } from "../../../src/layout.ts";
@@ -13,6 +14,7 @@ import { facet } from "../../../src/model/facet.ts";
 import { panels } from "../../../src/model/panels.ts";
 import type { InteractionSpec, SyncSpec } from "../../../src/spec/spec.ts";
 import { contractTest } from "../../helpers/contracts.ts";
+import { modelOf } from "../helpers.ts";
 import { drag, frame, heard, key, mount, pointer, rows, wheel, within } from "./helpers.ts";
 
 const data = rows();
@@ -358,6 +360,99 @@ describe("cursors on charts that read nothing under them", () => {
       (box) => box.style.display !== "none",
     );
     expect(boxes.map((box) => box.textContent)).toEqual(["2"]);
+  });
+});
+
+describe("cursors shared from what the pointer reads", () => {
+  const crosshairX = (chart: Chart) => {
+    const shown = [...chart.root.querySelectorAll("svg line")].find(
+      (line) =>
+        line.getAttribute("visibility") === "visible" &&
+        line.getAttribute("x1") === line.getAttribute("x2"),
+    );
+    return shown ? Number(shown.getAttribute("x1")) : undefined;
+  };
+
+  it("share the time of the calendar cell the crosshair is drawn at", async () => {
+    const days = table({
+      day: time(Float64Array.from([0, 1, 2, 7, 8, 9], (d) => Date.UTC(2026, 0, 5 + d))),
+      v: [2, 4, 3, 20, 40, 30],
+    });
+    const options: ChartOptions = {
+      marks: [heatmap(days, { date: "day", color: "v" })],
+      timeZone: "UTC",
+      interaction: { zoom: "x", sync: { cursor: "days" } },
+    };
+    const a = await mount(options);
+    const b = await mount(options);
+    // The peer shows another range, so that it finds the value, not the pixel.
+    b.setViewport([Date.UTC(2025, 11, 29), Date.UTC(2026, 0, 26)]);
+    const hovers = heard(a, "hover");
+    // Thursday noon of the second week, on Tuesday's row: the cell of Tuesday the 13th.
+    const x = a.toPixel(Date.UTC(2026, 0, 15, 12), { axis: "x" })!;
+    const y = a.toPixel(1, { axis: "y" })!;
+    pointer(a, "pointermove", x, y);
+    await frame();
+    await frame();
+    const read = hovers.at(-1)?.inspection;
+    expect(read?.points.map(({ value }) => value)).toEqual([40]);
+    const cell = read!.value;
+    expect(Math.abs(cell - Date.UTC(2026, 0, 15, 12))).toBeGreaterThan(86_400_000);
+    expect(Math.abs(crosshairX(a)! - a.toPixel(cell, { axis: "x" })!)).toBeLessThanOrEqual(1);
+    expect(Math.abs(crosshairX(b)! - b.toPixel(cell, { axis: "x" })!)).toBeLessThanOrEqual(1);
+  });
+
+  it("share a line's nearest point, where its crosshair is drawn, not the pointer's value", async () => {
+    const sync = { sync: { cursor: "nearest" } };
+    const trend = await mount({ marks: [line(data, { x: "t", y: "v" })], interaction: sync });
+    // Rules alone, which read nothing: the cursor received is a line alone at its value.
+    const rules = await mount({
+      marks: [rule(table({ t: [0.5, 8.5] }), { x: "t" })],
+      interaction: sync,
+    });
+    const [, y] = within(trend, "", 0.5, 0.5);
+    pointer(trend, "pointermove", trend.toPixel(2.4, { axis: "x" })!, y);
+    await frame();
+    expect(Math.abs(crosshairX(trend)! - trend.toPixel(2, { axis: "x" })!)).toBeLessThanOrEqual(1);
+    expect(Math.abs(crosshairX(rules)! - rules.toPixel(2, { axis: "x" })!)).toBeLessThanOrEqual(1);
+  });
+
+  it("share again where new data moves what a pointer at rest reads", async () => {
+    const sync = { sync: { cursor: "rest" } };
+    const shared = table({ t: [0, 10], v: [0, 1] });
+    const options = {
+      marks: [line(shared, { x: "t", y: "v" })],
+      x: { domain: [0, 10] },
+      interaction: sync,
+    } as ChartOptions;
+    const trend = await mount(options);
+    const peer = await mount(options);
+    const [, y] = within(trend, "", 0.5, 0.5);
+    pointer(trend, "pointermove", trend.toPixel(6, { axis: "x" })!, y);
+    await frame();
+    expect(Math.abs(crosshairX(peer)! - peer.toPixel(10, { axis: "x" })!)).toBeLessThanOrEqual(1);
+    shared.reset({ t: [0, 7, 10], v: [0, 0.5, 1] });
+    await frame();
+    await frame();
+    expect(Math.abs(crosshairX(trend)! - trend.toPixel(7, { axis: "x" })!)).toBeLessThanOrEqual(1);
+    expect(Math.abs(crosshairX(peer)! - peer.toPixel(7, { axis: "x" })!)).toBeLessThanOrEqual(1);
+  });
+
+  it("read what the pointer is on once for the cursor shared and the frame drawing it", async () => {
+    const sync = { sync: { cursor: "once" } };
+    const trend = await mount({ marks: [line(data, { x: "t", y: "v" })], interaction: sync });
+    await mount({ marks: [line(data, { x: "t", y: "v" })], interaction: sync });
+    const model = modelOf(trend);
+    const inspect = vi.spyOn(model, "inspect");
+    const [x, y] = within(trend, "", 0.4, 0.5);
+    pointer(trend, "pointermove", x, y);
+    await frame();
+    expect(inspect).toHaveBeenCalledTimes(1);
+    // A scene drawn anew is read anew.
+    trend.setViewport([1, 8]);
+    await frame();
+    expect(inspect).toHaveBeenCalledTimes(2);
+    inspect.mockRestore();
   });
 });
 

@@ -221,7 +221,7 @@ function loadRowSelection(
   const bindings = (Array.isArray(spec) ? spec : [spec]) as readonly RowSelectionSpec[];
   return rowSelection(
     ...bindings.map(({ data, channel, events, effect, selection }, i) => {
-      const path = Array.isArray(spec) ? `spec.rowSelection[${i}]` : "spec.rowSelection";
+      const path = Array.isArray(spec) ? `rowSelection[${i}]` : "rowSelection";
       let name = data;
       if (name === undefined) {
         if (read.length !== 1)
@@ -231,7 +231,7 @@ function loadRowSelection(
       const table = name === undefined ? undefined : tables.get(name);
       if (!table)
         throw new Error(
-          `${path}.data: no table ${JSON.stringify(name)} in spec.data; name one of ${names(tables)}`,
+          `${path}.data: no table ${JSON.stringify(name)} in data; name one of ${names(tables)}`,
         );
       let store = given?.get(name!) ?? stores.get(name!);
       if (store && store.source !== table)
@@ -301,7 +301,7 @@ function loadTables(
       return done;
     }
     const entry = data[name];
-    if (!entry) throw new Error(`spec.data: no table "${name}"`);
+    if (!entry) throw new Error(`data: no table "${name}"`);
     if (!("source" in entry)) {
       const loaded = loadTable(name, entry, buffers);
       tables.set(name, loaded);
@@ -309,7 +309,7 @@ function loadTables(
       if (origin !== undefined) {
         if (!Object.hasOwn(data, origin))
           throw new Error(
-            `spec.data.${name}.origin: no table "${origin}" in spec.data; name one of ${names(data)}`,
+            `data.${name}.origin: no table "${origin}" in data; name one of ${names(data)}`,
           );
         // Tables are made from others, through origins and sources, never from themselves.
         const from = (at: string) => {
@@ -320,7 +320,7 @@ function loadTables(
         for (let at: string | undefined = origin; at !== undefined; at = from(at)) {
           if (seen.has(at))
             throw new Error(
-              `spec.data.${name}.origin: the table is made from itself; name a table it is made from`,
+              `data.${name}.origin: the table is made from itself; name a table it is made from`,
             );
           seen.add(at);
         }
@@ -330,20 +330,18 @@ function loadTables(
       return loaded;
     }
     if (loading.has(name))
-      throw new Error(
-        `spec.data.${name}.source: the table derives from itself; derive it from another`,
-      );
+      throw new Error(`data.${name}.source: the table derives from itself; derive it from another`);
     loading.add(name);
     if (!Object.hasOwn(data, entry.source))
       throw new Error(
-        `spec.data.${name}.source: no table "${entry.source}" in spec.data; name one of ${names(data)}`,
+        `data.${name}.source: no table "${entry.source}" in data; name one of ${names(data)}`,
       );
     const source = load(entry.source);
     let derived: Table;
     try {
       derived = deriveTable(source, entry.transform, { name });
     } catch (error) {
-      throw within(`spec.data.${name}`, error);
+      throw within(`data.${name}`, error);
     }
     tables.set(name, derived);
     return derived;
@@ -359,7 +357,7 @@ function loadTable(name: string, data: ColumnsSpec, buffers: readonly SpecBuffer
     try {
       columns[field] = loadColumn(column, buffers);
     } catch (error) {
-      throw within(`spec.data.${name}.columns.${field}`, error);
+      throw within(`data.${name}.columns.${field}`, error);
     }
   }
   try {
@@ -367,7 +365,7 @@ function loadTable(name: string, data: ColumnsSpec, buffers: readonly SpecBuffer
       ? fromMatrix(columns, { x: data.matrix.x, y: data.matrix.y }, { name })
       : table(columns, { name });
   } catch (error) {
-    throw within(`spec.data.${name}`, error);
+    throw within(`data.${name}`, error);
   }
 }
 
@@ -648,11 +646,10 @@ function annotationTable(
 function tableFor(name: string | undefined, tables: Map<string, Table>): Table {
   if (name !== undefined) {
     const found = tables.get(name);
-    if (!found)
-      throw new Error(`data: no table "${name}" in spec.data; name one of ${names(tables)}`);
+    if (!found) throw new Error(`data: no table "${name}" in data; name one of ${names(tables)}`);
     return found;
   }
-  if (tables.size === 0) throw new Error("data: the spec has no tables; add one to spec.data");
+  if (tables.size === 0) throw new Error("data: the spec has no tables; add one to data");
   if (tables.size > 1)
     throw new Error(`data: missing; the spec has several tables, so name one of ${names(tables)}`);
   return tables.values().next().value!;

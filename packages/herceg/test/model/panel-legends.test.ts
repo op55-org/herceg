@@ -1136,6 +1136,30 @@ describe("panel legends of what legends compose", () => {
     expect(drawnIn(chart.scene(estimateText), "share", "arc")).toBe(1);
   });
 
+  it("mix an entry naming a layout mark hidden whole where its panel shows some of its items", () => {
+    const rows = table({ kind: ["a", "b"], v: [1, 2] });
+    const of = panels(columns([1, 1], [panel("share"), panel("other")]));
+    const chart = model({
+      marks: [pie(rows, { category: "kind", value: "v", panel: "share", id: "pie" })],
+      panels: of,
+      legend: { entries: [{ key: "mine", label: "Mine", targets: [{ mark: "pie" }] }] },
+      guides: [legend({ panel: "share" })],
+    });
+    const mine = () =>
+      legends(chart.scene(estimateText))
+        .find((g) => g.panel === undefined)!
+        .entries.find(({ label }) => label === "Mine")!;
+    chart.hidden.add('{"mark":"pie"}');
+    expect([mine().hidden, mine().mixed]).toEqual([true, undefined]);
+    expect(drawnIn(chart.scene(estimateText), "share", "arc")).toBe(0);
+    const a = legends(chart.scene(estimateText))
+      .find((g) => g.panel === "share")!
+      .entries.find(({ label }) => label === "a")!;
+    press(chart, a, "share", of);
+    expect(drawnIn(chart.scene(estimateText), "share", "arc")).toBe(1);
+    expect([mine().hidden, mine().mixed]).toEqual([false, true]);
+  });
+
   it("read what showing an entry leaves without copying what series stand for", () => {
     const chart = model({ marks, panels: layout, legend: true });
     chart.scene(estimateText);

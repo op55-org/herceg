@@ -403,7 +403,7 @@ describe("interaction.drag in specs", () => {
       ],
     });
     expect(() => validateSpec(spec("pie"))).toThrow(
-      /spec\.interaction\.drag: expected a spec with a graph mark/,
+      /interaction\.drag: expected a spec with a graph mark/,
     );
     validateSpec(spec("graph"));
   });

@@ -159,7 +159,7 @@ describe("limits in panels", () => {
 });
 
 describe("edges in panels", () => {
-  /** The edge events after the chart's first frames, which report the ends fitted views are near. */
+  /** The edge events after the chart's first frames. */
   async function edges(chart: Chart) {
     await frame();
     await frame();
@@ -220,7 +220,7 @@ describe("edges in panels", () => {
           { y: { scope: "chart" } },
         ),
       );
-      // Away from both ends first, which the fitted view starts near.
+      // Away from both ends first.
       chart.setViewport({ y: [80, 120] });
       const events = await edges(chart);
       chart.setViewport({ y: [150, 195] });

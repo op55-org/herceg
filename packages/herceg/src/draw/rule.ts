@@ -1,19 +1,40 @@
+import { shiftInside } from "../layout/place.ts";
 import type { Drawing, RuleGeometry } from "../scene/scene.ts";
 import { cssFont } from "../style/style.ts";
 import { dashAttribute, escapeXml, n } from "./markup.ts";
 import { paintLines } from "./text-items.ts";
 
 /**
- * Where a rule's label goes, on its alphabetic baseline: inside the top of
- * a vertical rule, above the right end of a horizontal one.
+ * Where a rule's label goes, on its alphabetic baseline, from the rule's
+ * point (a vertical rule's top, a horizontal one's right end): inside the
+ * top of a vertical rule, above the right end of a horizontal one; moved
+ * to keep its box in the plot where the mark says (`labelIn`, see
+ * `shiftInside`), wherever the rule is drawn, moving ones' included. Its
+ * box is its width, its font size above its baseline, and a quarter below.
  */
 export function ruleLabel(
   rule: RuleGeometry,
   fontSize: number,
 ): { x: number; y: number; anchor: "start" | "end" } {
-  return rule.x1 === rule.x2
-    ? { x: rule.x1 + 4, y: rule.y1 + fontSize, anchor: "start" }
-    : { x: rule.x2 - 4, y: rule.y1 - 4, anchor: "end" };
+  const vertical = rule.x1 === rule.x2;
+  const [dx, dy, anchor] = vertical ? [4, fontSize, "start" as const] : [-4, -4, "end" as const];
+  const x = (vertical ? rule.x1 : rule.x2) + dx;
+  const y = rule.y1 + dy;
+  if (!rule.labelIn) return { x, y, anchor };
+  const { width, plot } = rule.labelIn;
+  const box = {
+    x: anchor === "end" ? x - width : x,
+    y: y - fontSize,
+    width,
+    height: fontSize * 1.25,
+  };
+  const [mx, my] = shiftInside(box, plot, ruleLine(rule));
+  return { x: x + mx, y: y + my, anchor };
+}
+
+/** A rule's line, across which its labels may move to stay in the plot (see `shiftInside`). */
+export function ruleLine(rule: RuleGeometry): { axis: "x" | "y"; at: number } {
+  return rule.x1 === rule.x2 ? { axis: "x", at: rule.x1 } : { axis: "y", at: rule.y1 };
 }
 
 /** Reference lines, with their label at the top (vertical) or right end (horizontal). */

@@ -910,7 +910,7 @@ describe("facet panels with x scales of their own", () => {
     expect(spec({ x: { scope: "panel" } })).not.toThrow();
     expect(spec({ y: { scope: "panel" } })).not.toThrow();
     expect(spec({ x: { scope: "each" } })).toThrow(
-      'spec.x.scope: expected "chart", "panel", "row", or "column"',
+      'x.scope: expected "chart", "panel", "row", or "column"',
     );
   });
 });

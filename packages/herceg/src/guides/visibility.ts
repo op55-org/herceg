@@ -9,6 +9,7 @@
 // name them by a field's value, and where something hides rows of their mark.
 
 import type { Table } from "../data/table.ts";
+import type { LayoutMark } from "../marks/layout-mark.ts";
 import type { Mark, RowParts } from "../marks/mark.ts";
 import type { Series } from "../marks/series.ts";
 import type { MarkSeries } from "../model/inspect.ts";
@@ -48,16 +49,30 @@ interface Scope {
   values?: Map<MarkKey, Map<string, Set<string>>>;
 }
 
-/** What keys name drawn in a scope: a series, or a mark of items (an annotation), with its rows there. */
+/**
+ * What keys name drawn in a scope: a series, or a mark of items (an
+ * annotation) with its rows there, or a layout mark, as hidden as its
+ * items are, or a mark drawing none of those (a dendrogram), which is
+ * hidden whole or not.
+ */
 interface Unit {
   /** Its panel of subplots; undefined in the chart, and for marks of every panel. */
   readonly panel: string | undefined;
-  readonly mark: Mark;
+  readonly mark: Mark | LayoutMark;
   readonly place: MarkKey;
-  /** Undefined for an annotation, whose rows are `rows`, or all of its table's. */
+  /** Undefined for a mark without series, whose rows are `rows`, or all of its table's. */
   readonly s: Series | undefined;
   readonly rows: RowParts | undefined;
+  /**
+   * A layout mark's items, by their own keys, read once asked: hidden one
+   * by one, or by its mark whole, or shown by its panel's legend while
+   * the mark is hidden whole.
+   */
+  readonly items?: (() => readonly string[]) | undefined;
 }
+
+/** The rows of a unit of a mark whose rows the legend does not hide (`Unit`). */
+const NO_ROWS: RowParts = [];
 
 /** What entries name as a scene draws it, by key and by mark, whatever is hidden. */
 export interface Drawn {
@@ -242,8 +257,12 @@ export class Visibility {
       return false;
     };
     const { byKey, byMark, items } = this.#drawn;
-    const unitTouched = (unit: Unit) =>
-      touches(unit.panel, unit.s ? [unit.s.key, groups?.get(unit.s.key)] : [], unit.place);
+    const unitTouched = ({ panel, s, items: own, place }: Unit) =>
+      touches(
+        panel,
+        s ? [s.key, groups?.get(s.key)] : (own?.().flatMap((key) => [key, groups?.get(key)]) ?? []),
+        place,
+      );
     for (const key of keys) {
       if ((byKey.get(key) ?? []).some(unitTouched)) return true;
       const predicate = predicateOf(key);
@@ -360,8 +379,17 @@ export class Visibility {
     return this.#loose.get(identity);
   }
 
-  /** How much of a unit is hidden: all where it is hidden whole, else as many of its rows as are. */
+  /**
+   * How much of a unit is hidden: of a layout mark, as many of its items
+   * as are; else all where it is hidden whole, or as many of its rows as are.
+   */
   #status(unit: Unit): Status {
+    const items = unit.items?.();
+    if (items?.length) {
+      const scope = this.#scope(unit.panel);
+      const hidden = items.filter((key) => scope.hides(key)).length;
+      return hidden === 0 ? NONE : hidden === items.length ? ALL : SOME;
+    }
     if (this.#whole(unit)) return ALL;
     if (!this.#values(unit)) return NONE;
     // The chart's series as the scene drew them, from those rows: their rows were counted then.
@@ -378,13 +406,25 @@ export class Visibility {
     return this.#scope(panel).hides(s ? s.key : markKey(place));
   }
 
-  /** What would still hide a unit whole, were an entry shown in `panel` (`#deciding`). */
+  /**
+   * What would still hide a unit whole, and a layout mark's items hidden
+   * by their own keys, were an entry shown in `panel` (`#deciding`).
+   */
   #hiding(unit: Unit, panel: string | undefined, shown?: ReadonlySet<string>): string[] {
-    if (!this.#whole(unit)) return [];
-    const { s, place } = unit;
+    const { s, place, items } = unit;
+    const scope = this.#scope(unit.panel);
+    const { groups } = this.#content.hidden;
+    const own = (items?.() ?? []).flatMap((key) => {
+      const chain = [key, groups?.get(key)];
+      const set = chain.some(
+        (k) => k !== undefined && (shown?.has(k) || scope.own?.has(k) || scope.stored(k)),
+      );
+      return set ? this.#deciding(scope, chain, panel, shown) : [];
+    });
+    if (!this.#whole(unit)) return own;
     const whole = markKey(place);
-    const chain = s ? [s.key, this.#content.hidden.groups?.get(s.key), whole] : [whole];
-    return this.#deciding(this.#scope(unit.panel), chain, panel, shown);
+    const chain = s ? [s.key, groups?.get(s.key), whole] : [whole];
+    return [...this.#deciding(scope, chain, panel, shown), ...own];
   }
 
   /**
@@ -765,11 +805,18 @@ function heldValues(
   return { at: table.numbers(field as never), held };
 }
 
-/** What a scene draws that entries name: its marks' series and rows in each scope, and layout items. */
+/**
+ * What a scene draws that entries name: its marks' series and rows in each
+ * scope, its layout marks, and layout items.
+ */
 export function drawnOf(
   content: LegendContent,
   marks: readonly MarkSeries[],
   places: ReadonlyMap<object, MarkKey>,
+  /** The chart's layout marks, as its config lists them (a map's layers apart). */
+  layouts: readonly LayoutMark[],
+  /** The keys of a layout mark's items. */
+  itemKeys: (mark: LayoutMark) => readonly string[],
   /** In charts of subplots, layout marks' items in each panel: their identities' keys and their own. */
   items: Iterable<readonly [panel: string, identity: string, keys: readonly string[]]> = [],
 ): Drawn {
@@ -791,8 +838,15 @@ export function drawnOf(
     const units = drawn.byMark.get(place) ?? [];
     drawn.byMark.set(place, units);
     const whole = markKey(place);
-    if (mark.labelEntries) {
-      const unit: Unit = { panel, mark, place, s: undefined, rows };
+    // Annotations hide their rows; marks of no series (a dendrogram) are hidden whole only.
+    if (mark.labelEntries || series.length === 0) {
+      const unit: Unit = {
+        panel,
+        mark,
+        place,
+        s: undefined,
+        rows: mark.labelEntries ? rows : NO_ROWS,
+      };
       units.push(unit);
       index(whole, unit);
       return;
@@ -803,9 +857,18 @@ export function drawnOf(
       for (const key of [s.key, s.entry, groups?.get(s.key), whole]) index(key, unit);
     }
   };
+  // A layout mark, as hidden as its items; they are named by keys of
+  // their own, which `byMark` leaving it out tells (`Visibility.#item`).
+  const addLayout = (panel: string | undefined, mark: LayoutMark) => {
+    const place = places.get(mark)!;
+    let keys: readonly string[] | undefined;
+    const items = () => (keys ??= itemKeys(mark));
+    index(markKey(place), { panel, mark, place, s: undefined, rows: NO_ROWS, items });
+  };
   const { split } = content;
   if (!split) {
     for (const { mark, series } of marks) add(undefined, mark, series);
+    for (const mark of layouts) addLayout(undefined, mark);
     return drawn;
   }
   // Marks of every panel follow the chart's visibility in each.
@@ -815,6 +878,9 @@ export function drawnOf(
       if (split.members?.[p]?.[m] === false || mark.spec.panel === "*") return;
       add(panel, mark, series, rows);
     });
+    // The layout mark the panel draws, or a map's or a 3D box's layers.
+    const item = split.items?.[p]?.mark;
+    for (const mark of item?.layers ?? (item ? [item] : [])) addLayout(panel, mark);
   });
   for (const [panel, identity, keys] of items) {
     const list = drawn.items.get(identity) ?? [];

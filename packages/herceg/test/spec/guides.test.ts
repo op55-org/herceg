@@ -22,33 +22,33 @@ describe("tick forms", () => {
   it("refuses functions, which a spec cannot hold", () => {
     const spec = { marks, y: { ticks: () => [1] } } as unknown as ChartSpec;
     expect(() => validateSpec(spec)).toThrow(
-      "spec.y.ticks: a function cannot be in a spec; give a count, { every }, or { values }",
+      "y.ticks: a function cannot be in a spec; give a count, { every }, or { values }",
     );
     const format = { marks, y: { format: () => "" } } as unknown as ChartSpec;
-    expect(() => validateSpec(format)).toThrow(/^spec\.y\.format: a function cannot be in a spec/);
+    expect(() => validateSpec(format)).toThrow(/^y\.format: a function cannot be in a spec/);
   });
 
   it("refuses intervals the axis cannot take", () => {
     expect(valid({ x: { type: "time", ticks: { every: 5 } } })).toThrow(
-      /^spec\.x\.ticks\.every: expected a time interval on a time axis/,
+      /^x\.ticks\.every: expected a time interval on a time axis/,
     );
     expect(valid({ y: { type: "log", ticks: { every: 10 } } })).toThrow(
       /a log axis, which has no even steps/,
     );
     expect(valid({ y: { type: "linear", ticks: { every: "day" } } })).toThrow(
-      /^spec\.y\.ticks\.every: expected a number on a linear axis/,
+      /^y\.ticks\.every: expected a number on a linear axis/,
     );
     expect(valid({ x: { ticks: { every: "fortnight" } } })).toThrow(
-      /^spec\.x\.ticks\.every: "fortnight" is not a time interval/,
+      /^x\.ticks\.every: "fortnight" is not a time interval/,
     );
     expect(valid({ x: { ticks: { every: "day", anchor: 1 } } })).toThrow(
-      /^spec\.x\.ticks\.anchor: expected no anchor with a calendar interval/,
+      /^x\.ticks\.anchor: expected no anchor with a calendar interval/,
     );
   });
 
   it("refuses mixed forms as unknown properties", () => {
     const spec = { marks, y: { ticks: { count: 5, every: 2 } } } as unknown as ChartSpec;
-    expect(checkSpec(spec)).toEqual(["spec.y.ticks.every"]);
+    expect(checkSpec(spec)).toEqual(["y.ticks.every"]);
   });
 });
 
@@ -57,21 +57,19 @@ describe("format patterns", () => {
     expect(valid({ y: { format: { number: ",.2f" } } })).not.toThrow();
     expect(valid({ x: { type: "time", format: { time: "%b %-d" } } })).not.toThrow();
     expect(valid({ y: { format: { number: ",.2q" } } })).toThrow(
-      /^spec\.y\.format\.number: ",\.2q" is not a number pattern herceg reads/,
+      /^y\.format\.number: ",\.2q" is not a number pattern herceg reads/,
     );
     expect(valid({ x: { type: "time", format: { time: "%Q" } } })).toThrow(
-      /^spec\.x\.format\.time: "%Q" at character 1/,
+      /^x\.format\.time: "%Q" at character 1/,
     );
   });
 
   it("refuses a pattern for the other kind of axis, and mixed forms", () => {
     expect(valid({ x: { type: "time", format: { number: ".1f" } } })).toThrow(
-      /^spec\.x\.format\.number: expected \{ time: "\.\.\." \}/,
+      /^x\.format\.number: expected \{ time: "\.\.\." \}/,
     );
     const mixed = { marks, y: { format: { number: ".1f", maximumFractionDigits: 1 } } };
-    expect(checkSpec(mixed as unknown as ChartSpec)).toEqual([
-      "spec.y.format.maximumFractionDigits",
-    ]);
+    expect(checkSpec(mixed as unknown as ChartSpec)).toEqual(["y.format.maximumFractionDigits"]);
   });
 });
 
@@ -83,7 +81,7 @@ describe("scales and guides", () => {
     ).not.toThrow();
     const other = { marks, scales: { temperature: { domain: [0, 1] } } } as unknown as ChartSpec;
     expect(() => validateSpec(other)).toThrow(
-      'spec.scales.temperature.type: expected "ordinal", "identity", or a position scale\'s "linear", "log", or "time"; received undefined',
+      'scales.temperature.type: expected "ordinal", "identity", or a position scale\'s "linear", "log", or "time"; received undefined',
     );
   });
 
@@ -105,10 +103,10 @@ describe("scales and guides", () => {
       }),
     ).not.toThrow();
     expect(valid({ guides: [{ type: "axis", scale: "x", place: { side: "left" } }] })).toThrow(
-      'spec.guides[0].place.side: expected "top" or "bottom" for an x axis; received "left"',
+      'guides[0].place.side: expected "top" or "bottom" for an x axis; received "left"',
     );
     expect(valid({ guides: [{ type: "axis", scale: "y", layers: [{ id: "major" }] }] })).toThrow(
-      /^spec\.guides\[0\]\.layers\[0\]\.id: expected a name other than "major"/,
+      /^guides\[0\]\.layers\[0\]\.id: expected a name other than "major"/,
     );
     expect(
       valid({
@@ -117,27 +115,25 @@ describe("scales and guides", () => {
           { type: "legend", id: "a" },
         ],
       }),
-    ).toThrow('spec.guides[1].id: expected an id no other guide has; received "a"');
+    ).toThrow('guides[1].id: expected an id no other guide has; received "a"');
     expect(
       valid({
         guides: [
           { type: "colorbar", scale: { mark: "heat", channel: "color", panel: "a" } as never },
         ],
       }),
-    ).toThrow(/^spec\.guides\[0\]\.scale\.panel: /);
+    ).toThrow(/^guides\[0\]\.scale\.panel: /);
     expect(
       valid({
         guides: [{ type: "axis", scale: "x", labels: { rotation: { candidates: [0, 180] } } }],
       }),
-    ).toThrow(
-      /^spec\.guides\[0\]\.labels\.rotation\.candidates\[1\]: expected degrees from -90 to 90/,
-    );
+    ).toThrow(/^guides\[0\]\.labels\.rotation\.candidates\[1\]: expected degrees from -90 to 90/);
     expect(valid({ guides: [{ type: "legend", columns: 2, rows: 2 }] })).toThrow(
-      /^spec\.guides\[0\]\.rows: expected columns or rows, not both/,
+      /^guides\[0\]\.rows: expected columns or rows, not both/,
     );
     const unknown = { marks, guides: [{ type: "ruler" }] } as unknown as ChartSpec;
     expect(() => validateSpec(unknown)).toThrow(
-      'spec.guides[0].type: expected "axis", "legend", or "colorbar"; received "ruler"',
+      'guides[0].type: expected "axis", "legend", or "colorbar"; received "ruler"',
     );
   });
 
@@ -161,7 +157,7 @@ describe("scales and guides", () => {
         },
       }),
     ).toThrow(
-      /^spec\.legend\.entries\[0\]\.swatch\.type: expected "line", "rect", "symbol", or "composite"/,
+      /^legend\.entries\[0\]\.swatch\.type: expected "line", "rect", "symbol", or "composite"/,
     );
   });
 

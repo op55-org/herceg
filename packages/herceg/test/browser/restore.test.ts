@@ -308,6 +308,22 @@ describe("restoreVisibility", () => {
     expect(restored).toEqual({ hiddenKeys: [BY_ID] });
   });
 
+  it("give the state it waits to restore of its own subplots, which a chart in its place takes", async () => {
+    const before = mount(options());
+    before.setVisibility(Y, false, { panel: "b" });
+    const state = visibilityState(before);
+    before.destroy();
+    // Without subplot b, still loading: what b's legend hid is not its to give.
+    const between = mount(options(false));
+    between.select({ x: [0.2, 0.5], y: null, lasso: null }, { panel: "a" });
+    expect(between.loading).toBeDefined();
+    const waiting = restoreVisibility(between, state);
+    expect(visibilityState(between)).toEqual({ hiddenKeys: [] });
+    const after = mount(options());
+    expect(await restoreVisibility(after, visibilityState(between))).toEqual({ hiddenKeys: [] });
+    await waiting;
+  });
+
   it("give the state it waits to restore meanwhile", async () => {
     const chart = mount(options());
     // Showing a selection loads the brush that draws it.

@@ -2,6 +2,7 @@ import type { NumericField, Schema, Table } from "../data/table.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
+import { shiftInside } from "../layout/place.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RectGeometry } from "../scene/scene.ts";
@@ -20,7 +21,15 @@ import {
   readsTable,
   type TextField,
 } from "./annotation.ts";
-import { labelPaint, labelsGeometry, type PlacedLabel, plainText, textGeometry } from "./labels.ts";
+import {
+  labelBox,
+  labelPaint,
+  labelsGeometry,
+  movedLabel,
+  type PlacedLabel,
+  plainText,
+  textGeometry,
+} from "./labels.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -269,7 +278,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       labelPaint(theme, theme.text, label.style && frame.read(label.style, "region label.style"));
     let count = 0;
     data.each(rows, (i) => {
-      // Each region is clipped to the plot, so a label stays in its visible part.
+      // Each region is clipped to the plot, its label placed in its visible part.
       const across = this.#span(xs, "x", i, frame.x, frame, plot.x, plot.x + plot.width);
       const down = this.#span(ys, "y", i, frame.y, frame, plot.y, plot.y + plot.height);
       if (!across || !down) return;
@@ -283,7 +292,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
           given & (((across[2] & 1) << 3) | (across[2] & 2) | (down[2] & 1) | ((down[2] & 2) << 1));
       if (paint) {
         const text = data.text(i, frame.locale, write, frame.features?.of(this)?.content);
-        placed.push(
+        const label: PlacedLabel =
           this.#plain && paint.verticalAlign === undefined
             ? {
                 text,
@@ -292,8 +301,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
                 anchor: "start",
                 baseline: "middle",
               }
-            : this.#place(text, across, down, paint, frame.measure),
-        );
+            : this.#place(text, across, down, paint, frame.measure);
+        // Its box stays inside the plot where the visible part is too small for it.
+        placed.push(movedLabel(label, shiftInside(labelBox(label, paint, frame.measure), plot)));
       }
       count++;
     });

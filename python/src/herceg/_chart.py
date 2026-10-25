@@ -1034,16 +1034,18 @@ def _output_settings(function: Callable[_P, _R]) -> Callable[_P, _R]:
     return output
 
 
-# Where the engine's refusals of a spec begin: spec.description, spec.marks[1].strokeWidth.
-_SPEC_LOCATION = re.compile(r"spec\.(?:marks\[(\d+)\]\.?)?([^:]*): ")
+# Where the engine's refusals of a spec begin: at the path they refuse,
+# description or marks[1].strokeWidth.
+_SPEC_LOCATION = re.compile(r"(?:marks\[(\d+)\]\.?)?([^:]*): ")
 
 
 def in_python(error: ChartError, chart: Chart) -> ChartError:
     """The engine's refusal of a chart's spec located as Python's own are:
-    ``spec.marks[1].strokeWidth: ...`` as ``line stroke_width: ...``, and
-    ``spec.description: ...`` as ``Chart description: ...``."""
+    ``marks[1].strokeWidth: ...`` as ``line stroke_width: ...``, and
+    ``description: ...`` as ``Chart description: ...``, for a message that
+    starts at the path it refuses."""
     found = _SPEC_LOCATION.match(str(error))
-    if found is None:
+    if found is None or python_path(found.group(0)[:-2]) != error.path:
         return error
     index, rest = found.groups()
     kinds = [spec["type"] for spec, _ in chart._marks]

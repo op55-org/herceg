@@ -597,7 +597,9 @@ selectable, and clicks still focus the chart.
 view inside `extent` (numbers, or datetimes on time axes; `None` for no end),
 however it is made, and reports coming near an end, to a live chart's
 `on_edge` (below): within `hg.Edge(threshold=0.1)` of the view's span, and
-again once it moved `hysteresis` (0.05) away, or the end moved.
+again once it moved `hysteresis` (0.05) away, or the end moved. Only a view
+set (zoomed, panned, synced, or by `set_viewport`) comes near an end: a
+scale fitted to its data shows all of it and reports none.
 
 ```python
 live = hg.Chart(recent, pan="x", limits={"x": hg.ViewLimits(extent=(first, None), edge=True)})
