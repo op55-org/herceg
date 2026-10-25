@@ -52,7 +52,7 @@ function order(output: string, colors: readonly string[], as = (color: string) =
 const COLORS = ["#ff0000", "#00ff00", "#0000ff"];
 
 describe("paint order", () => {
-  contractTest("mark.z-index.order.spec", () => {
+  contractTest("mark.z-index.order.svg", () => {
     // As declared: a rule between two lines paints between them, rules and
     // text no longer above all data.
     expect(order(renderToSVG(chart([red(), green(), blue()])), COLORS)).toEqual(COLORS);

@@ -36,7 +36,7 @@
   "scripts": {
     "prepublishOnly": "node ../../scripts/check-publish.mjs",
     "build": "tsc -p tsconfig.build.json",
-    "test:browser": "vitest run"
+    "test:browser": "node ../../scripts/contracts/run.mjs vue -- vitest run"
   },
   "dependencies": {
     "herceg": "0.0.0"

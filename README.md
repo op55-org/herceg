@@ -43,6 +43,7 @@ benchmark suite.
 - [python](python/README.md): the Python package.
 - [docs/architecture.md](docs/architecture.md): how it works and why.
 - [docs/comparison.md](docs/comparison.md): feature and benchmark comparison.
+- [docs/capabilities.md](docs/capabilities.md): what each mark supports on every surface, as tests prove it.
 - [benchmarks/README.md](benchmarks/README.md): benchmark methodology.
 - [AGENTS.md](AGENTS.md): engineering principles and contribution rules.
 - [CHANGELOG.md](CHANGELOG.md): what each release contains.

@@ -101,3 +101,5 @@ hg.Chart(
         "depth": hg.Scale(type="linear"),
     },
 )
+hg.Swatch(type="symbol", fill="#d62728", symbol="square")
+hg.Swatch(type="symbol", fill="#d62728", symbol="hexagon")  # type: ignore[arg-type]

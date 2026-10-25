@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { browserServer, browsers } from "../../scripts/browser/browsers.ts";
+import { commands } from "../../scripts/browser/commands.ts";
 
 const engine = (file: string) => new URL(`../herceg/src/${file}`, import.meta.url).pathname;
 
@@ -19,11 +20,15 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.tsx"],
+    // The dashboard's tests drag with the mouse, which Firefox captures only once it has been over the page.
+    setupFiles: ["../../scripts/browser/setup.ts"],
     api: browserServer,
     browser: {
       enabled: true,
       headless: true,
       instances: browsers,
+      // Real input, for the dashboard in a scrolling page.
+      commands,
     },
   },
 });

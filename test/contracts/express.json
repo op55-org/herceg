@@ -1,0 +1,264 @@
+{
+  "about": "herceg.express recipes against capabilities.json, each a whole recipe (all the marks it draws): its cells as works, refused, or na, proved in Python as `<recipe>.<capability>.python`, or unproved: declared to work, with no test proving it yet, which a proof makes works. capabilities lists the capabilities every recipe declares. utilities are the module's exports that draw no chart, each with the proofs of what it does.",
+  "capabilities": [
+    "placement.panel",
+    "legend.toggle",
+    "export.svg",
+    "export.pdf",
+    "express.statistics",
+    "express.recompute"
+  ],
+  "recipes": {
+    "lineplot": {
+      "title": "lineplot (estimate and interval)",
+      "inventory": "lineplot",
+      "works": ["placement.panel"],
+      "unproved": [
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "barplot": {
+      "title": "barplot (estimate and error bars)",
+      "inventory": "barplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "pointplot": {
+      "title": "pointplot (estimates and error bars)",
+      "inventory": "pointplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "stripplot": {
+      "title": "stripplot",
+      "inventory": "stripplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "swarmplot": {
+      "title": "swarmplot",
+      "inventory": "swarmplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "boxplot": {
+      "title": "boxplot",
+      "inventory": "boxplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "boxenplot": {
+      "title": "boxenplot",
+      "inventory": "boxenplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "violinplot": {
+      "title": "violinplot (density and box)",
+      "inventory": "violinplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "histplot": {
+      "title": "histplot",
+      "inventory": "histplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "kdeplot": {
+      "title": "kdeplot",
+      "inventory": "kdeplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "ecdfplot": {
+      "title": "ecdfplot",
+      "inventory": "ecdfplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "rugplot": {
+      "title": "rugplot",
+      "inventory": "rugplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "regplot": {
+      "title": "regplot (points, fit, and band)",
+      "inventory": "regplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "residplot": {
+      "title": "residplot",
+      "inventory": "residplot",
+      "unproved": [
+        "placement.panel",
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ]
+    },
+    "pairplot": {
+      "title": "pairplot (grid of panels)",
+      "inventory": "pairplot",
+      "unproved": [
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ],
+      "refused": {
+        "placement.panel": {
+          "error": {
+            "code": "invalid-option",
+            "path": "panel",
+            "message": "pairplot panel: draws several panels, in a chart of its own; drop panel"
+          },
+          "alternative": {
+            "text": "Draw it as a chart of its own, which a page or dashboard places beside others.",
+            "proofs": ["pairplot.own-chart.python"]
+          }
+        }
+      }
+    },
+    "jointplot": {
+      "title": "jointplot (joint and marginal panels)",
+      "inventory": "jointplot",
+      "unproved": [
+        "legend.toggle",
+        "export.svg",
+        "export.pdf",
+        "express.statistics",
+        "express.recompute"
+      ],
+      "refused": {
+        "placement.panel": {
+          "error": {
+            "code": "invalid-option",
+            "path": "panel",
+            "message": "jointplot panel: draws several panels, in a chart of its own; drop panel"
+          },
+          "alternative": {
+            "text": "Draw it as a chart of its own, which a page or dashboard places beside others.",
+            "proofs": ["jointplot.own-chart.python"]
+          }
+        }
+      }
+    },
+    "clustermap": {
+      "title": "clustermap (heatmap and dendrograms)",
+      "inventory": "clustermap",
+      "unproved": ["export.svg", "export.pdf", "express.statistics", "express.recompute"],
+      "refused": {
+        "placement.panel": {
+          "error": {
+            "code": "invalid-option",
+            "path": "panel",
+            "message": "clustermap panel: draws several panels, in a chart of its own; drop panel"
+          },
+          "alternative": {
+            "text": "Draw it as a chart of its own, which a page or dashboard places beside others.",
+            "proofs": ["clustermap.own-chart.python"]
+          }
+        }
+      },
+      "na": {
+        "legend.toggle": "It colors cells by value, which its colorbar explains: it draws no series a legend entry could hide."
+      }
+    }
+  },
+  "utilities": {
+    "statistics": {
+      "title": "hx.statistics: what a recipe computed",
+      "proofs": ["express.statistics.panels.python", "express.statistics.refused.python"]
+    },
+    "recompute": {
+      "title": "hx.recompute: a recipe made again from new data",
+      "proofs": [
+        "express.recompute.added-marks.python",
+        "express.recompute.reuse.python",
+        "express.recompute.refused.python"
+      ]
+    }
+  }
+}

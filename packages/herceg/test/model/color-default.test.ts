@@ -137,7 +137,7 @@ describe("scales of each panel's own", () => {
     });
 
   contractTest(
-    "scale.ordinal.scope.panel",
+    "scale.ordinal.scope.each-panel",
     () => {
       const model = build({
         scales: { regions: { type: "ordinal", scope: "panel" } },

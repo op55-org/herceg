@@ -8,6 +8,7 @@
       "!**/node_modules",
       "!tmp",
       "!benchmarks/results",
+      "!docs/capabilities.json",
       "!benchmarks/.build",
       "!python/.venv",
       "!python/src/herceg/static"

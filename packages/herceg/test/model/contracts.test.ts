@@ -106,7 +106,7 @@ describe("mark functions", () => {
     ).toMatchObject({ code: "field-type", path: "at.x.fraction.field" });
   });
 
-  contractTest("mark.z-index.order.factory", () => {
+  contractTest("mark.z-index.order.paint", () => {
     // Every mark function keeps zIndex, which orders the panel's painting.
     const cells = heatmap(rows, { x: "t", y: "region", color: "v", zIndex: 2 });
     expect(cells.spec.zIndex).toBe(2);
@@ -300,7 +300,7 @@ describe("mark functions", () => {
     expect(box(depth(0.1))).not.toThrow();
   });
 
-  contractTest("text.vertical-align.factory", () => {
+  contractTest("text.vertical-align.styles", () => {
     // Taken wherever text styles are, and malformed values refused by the validator.
     const lines = line(rows, { x: "t", y: "v" });
     const build = (options: object) => {
