@@ -223,6 +223,13 @@ async function main() {
     for (const library of libraries) {
       for (const s of scenarios) {
         const ingest = paced(s);
+        // A browser left without pages while the other runs can exit (headed
+        // Firefox on macOS does after a minute or so): start it again.
+        if (!(ingest ? realtime : latency).browser.isConnected()) {
+          const fresh = await launch(ingest);
+          if (ingest) realtime = fresh;
+          else latency = fresh;
+        }
         const { context } = ingest ? realtime : latency;
         const started = performance.now();
         const opened: { page?: Page; cdp?: CDPSession } = {};
