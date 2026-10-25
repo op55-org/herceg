@@ -15,17 +15,33 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = json.loads((ROOT / "packages/herceg/test/fixtures/viewport-events.json").read_text())
 
 
+#: The fixture's cases the capability matrix holds Python to (test/contracts/interaction.json).
+DECLARED = set(json.loads((ROOT / "test/contracts/interaction.json").read_text())["fixture"])
+
+
+def _events_of(case: dict) -> list[dict]:
+    return [event for action in case["actions"] for event in action.get("events", [])]
+
+
 def _events() -> list[dict]:
-    return [
-        event
+    return [event for case in FIXTURE["cases"] for event in _events_of(case)]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            case,
+            id=case["contract"],
+            marks=[pytest.mark.contract(f"{case['contract']}.python")]
+            if case["contract"] in DECLARED
+            else [],
+        )
         for case in FIXTURE["cases"]
-        for action in case["actions"]
-        for event in action.get("events", [])
-    ]
-
-
-def test_every_event_of_the_engines_fixture_decodes():
-    events = _events()
+    ],
+)
+def test_every_event_of_the_engines_fixture_decodes(case):
+    events = _events_of(case)
     assert events
     for payload in events:
         event = decode_viewport_event(payload)

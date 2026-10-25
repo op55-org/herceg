@@ -91,8 +91,8 @@
   "scripts": {
     "prepublishOnly": "node ../../scripts/check-publish.mjs",
     "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run --project unit",
-    "test:browser": "vitest run --project browser",
+    "test": "node ../../scripts/contracts/run.mjs herceg-unit -- vitest run --project unit",
+    "test:browser": "node ../../scripts/contracts/run.mjs herceg-browser -- vitest run --project browser",
     "bench": "node --experimental-strip-types bench/core.ts"
   },
   "devDependencies": {

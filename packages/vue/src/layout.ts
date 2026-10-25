@@ -170,14 +170,23 @@ function layoutComponent<P>(
   return component as unknown as Component<P>;
 }
 
-/** A component that goes only where its parent component reads it, and is refused elsewhere. */
-function placedComponent<P>(name: string, where: string): Component<P> {
-  const component = (() => null) as unknown as PartComponent;
+/**
+ * A component that goes only where its parent component reads it, and is
+ * refused elsewhere; the parent reads its `flags` (boolean options) as true
+ * from bare attributes.
+ */
+function placedComponent<P>(
+  name: string,
+  where: string,
+  flags: readonly string[] = [],
+): Component<P> & { flags: readonly string[] } {
+  const component = (() => null) as unknown as PartComponent & { flags: readonly string[] };
   component.displayName = name;
+  component.flags = flags;
   component.addTo = () => {
     throw new Error(`<${name}> goes in ${where}`);
   };
-  return component as unknown as Component<P>;
+  return component as unknown as Component<P> & { flags: readonly string[] };
 }
 
 /** Tracks of `children.length` weights 1, or `weights`, which must give one per child. */
@@ -258,9 +267,10 @@ function split(children: VNode[], drawn: Drawn[], definition: PanelDefinition) {
 }
 
 function insetOf(vnode: VNode, drawn: Drawn[]): InsetOptions {
-  const { place, width, height, indicator, ...definition } = optionsOf(vnode.props, [
-    "indicator",
-  ]) as InsetProps;
+  const { place, width, height, indicator, ...definition } = optionsOf(
+    vnode.props,
+    Inset.flags,
+  ) as InsetProps;
   const insets = split(vnodesOf(slotOf(vnode)), drawn, definition);
   return toInset(definition, given({ place, width, height, indicator, insets }));
 }
@@ -285,4 +295,5 @@ export const Panel = /* @__PURE__ */ layoutComponent(
 export const Inset = /* @__PURE__ */ placedComponent<InsetProps>(
   "Inset",
   "a <Panel> or another <Inset>",
+  ["indicator"],
 );

@@ -1,0 +1,370 @@
+{
+  "about": "Documented defaults, each proved the same on every surface: a chart drawn without the option draws as one given its default, and otherwise than one given `other` (`<contract>.spec` in the engine, `<contract>.python` with Python's keyword, whose own default is None or the same value, and whose spec leaves the option out or writes the default). Each case draws `mark` (Python: `python.method` with `python.args`) over table `table`; `option` is the mark's, or with `at: \"chart\"` the chart's. The engine draws in a local time zone other than UTC and `other`'s, so that \"local\" is told apart from both.",
+  "tables": {
+    "samples": {
+      "kind": ["k", "k", "k", "k", "k", "k", "m", "m", "m", "m", "m", "m"],
+      "category": ["a", "b", "c", "a", "b", "c", "a", "b", "c", "a", "b", "c"],
+      "y": [2, 4, 3, 20, 40, 30, 5, 7, 6, 11, 13, 90]
+    },
+    "links": {
+      "source": ["a", "a", "b", "c", "d"],
+      "target": ["b", "c", "d", "d", "e"]
+    },
+    "days": {
+      "day": {
+        "type": "time",
+        "values": [
+          "2026-01-05",
+          "2026-01-06",
+          "2026-01-07",
+          "2026-01-12",
+          "2026-01-13",
+          "2026-01-14"
+        ]
+      },
+      "y": [2, 4, 3, 20, 40, 30]
+    },
+    "spread": {
+      "kind": [
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "k",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m",
+        "m"
+      ],
+      "y": [
+        10.0, 10.5, 11.4, 11.8, 13.5, 15.6, 17.2, 20.1, 23.4, 26.2, 30.3, 34.8, 38.8, 44.1, 49.8,
+        55.0, 61.5, 68.4, 74.8, 82.5, 90.6, 98.2, 107.1, 116.4, 125.2, 135.3, 145.8, 155.8, 167.1,
+        178.8, 190.0, 202.5, 215.4, 227.8, 241.5, 255.6, 269.2, 284.1, 299.4, 314.2, 4.0, 7.0, 8.9,
+        11.9, 13.8, 15.7, 18.7, 20.6, 22.5, 25.5, 27.4, 29.3, 32.3, 34.2, 37.2, 39.1, 41.0, 44.0,
+        45.9, 47.8, 50.8, 52.7, 54.6, 57.6, 59.5, 62.5, 64.4, 66.3, 69.3, 71.2, 73.1, 76.1, 78.0,
+        79.9, 82.9, 84.8, 87.8, 89.7, 91.6, 94.6
+      ]
+    }
+  },
+  "defaults": [
+    {
+      "contract": "default.boxplot.whiskers",
+      "table": "samples",
+      "mark": {
+        "type": "boxplot",
+        "x": "kind",
+        "y": "y"
+      },
+      "python": {
+        "method": "boxplot",
+        "args": {
+          "x": "kind",
+          "y": "y"
+        }
+      },
+      "option": "whiskers",
+      "value": "tukey",
+      "other": "range"
+    },
+    {
+      "contract": "default.boxen.outlier-proportion",
+      "table": "spread",
+      "mark": {
+        "type": "boxen",
+        "x": "kind",
+        "y": "y",
+        "depth": "proportion"
+      },
+      "python": {
+        "method": "boxen",
+        "args": {
+          "x": "kind",
+          "y": "y",
+          "depth": "proportion"
+        }
+      },
+      "option": "outlierProportion",
+      "value": 0.007,
+      "other": 0.05
+    },
+    {
+      "contract": "default.boxen.trust-alpha",
+      "table": "spread",
+      "mark": {
+        "type": "boxen",
+        "x": "kind",
+        "y": "y",
+        "depth": "trustworthy"
+      },
+      "python": {
+        "method": "boxen",
+        "args": {
+          "x": "kind",
+          "y": "y",
+          "depth": "trustworthy"
+        }
+      },
+      "option": "trustAlpha",
+      "value": 0.05,
+      "other": 0.001
+    },
+    {
+      "contract": "default.violin.inner",
+      "table": "samples",
+      "mark": {
+        "type": "violin",
+        "x": "kind",
+        "y": "y"
+      },
+      "python": {
+        "method": "violin",
+        "args": {
+          "x": "kind",
+          "y": "y"
+        }
+      },
+      "option": "inner",
+      "value": "box",
+      "other": "none"
+    },
+    {
+      "contract": "default.histogram.normalize",
+      "table": "samples",
+      "mark": {
+        "type": "histogram",
+        "x": "y"
+      },
+      "python": {
+        "method": "histogram",
+        "args": {
+          "x": "y"
+        }
+      },
+      "option": "normalize",
+      "value": "count",
+      "other": "percent"
+    },
+    {
+      "contract": "default.histogram.element",
+      "table": "samples",
+      "mark": {
+        "type": "histogram",
+        "x": "y"
+      },
+      "python": {
+        "method": "histogram",
+        "args": {
+          "x": "y"
+        }
+      },
+      "option": "element",
+      "value": "bars",
+      "other": "step"
+    },
+    {
+      "contract": "default.pie.inner-radius",
+      "table": "samples",
+      "mark": {
+        "type": "pie",
+        "category": "category",
+        "value": "y"
+      },
+      "python": {
+        "method": "pie",
+        "args": {
+          "category": "category",
+          "value": "y"
+        }
+      },
+      "option": "innerRadius",
+      "value": 0,
+      "other": 0.5
+    },
+    {
+      "contract": "default.pie.sort",
+      "table": "samples",
+      "mark": {
+        "type": "pie",
+        "category": "category",
+        "value": "y"
+      },
+      "python": {
+        "method": "pie",
+        "args": {
+          "category": "category",
+          "value": "y"
+        }
+      },
+      "option": "sort",
+      "value": "value",
+      "other": "input"
+    },
+    {
+      "contract": "default.funnel.sort",
+      "table": "samples",
+      "mark": {
+        "type": "funnel",
+        "category": "category",
+        "value": "y"
+      },
+      "python": {
+        "method": "funnel",
+        "args": {
+          "category": "category",
+          "value": "y"
+        }
+      },
+      "option": "sort",
+      "value": "input",
+      "other": "value"
+    },
+    {
+      "contract": "default.graph.layout",
+      "table": "links",
+      "mark": {
+        "type": "graph",
+        "source": "source",
+        "target": "target"
+      },
+      "python": {
+        "method": "graph",
+        "args": {
+          "source": "source",
+          "target": "target"
+        }
+      },
+      "option": "layout",
+      "value": "force",
+      "other": "circular"
+    },
+    {
+      "contract": "default.graph.labels",
+      "table": "links",
+      "mark": {
+        "type": "graph",
+        "source": "source",
+        "target": "target"
+      },
+      "python": {
+        "method": "graph",
+        "args": {
+          "source": "source",
+          "target": "target"
+        }
+      },
+      "option": "labels",
+      "value": true,
+      "other": false
+    },
+    {
+      "contract": "default.heatmap.week-start",
+      "table": "days",
+      "mark": {
+        "type": "heatmap",
+        "date": "day",
+        "color": "y"
+      },
+      "python": {
+        "method": "heatmap",
+        "args": {
+          "date": "day",
+          "color": "y"
+        }
+      },
+      "option": "weekStart",
+      "value": "mon",
+      "other": "sun"
+    },
+    {
+      "contract": "default.chart.time-zone",
+      "table": "days",
+      "mark": {
+        "type": "line",
+        "x": "day",
+        "y": "y"
+      },
+      "python": {
+        "method": "line",
+        "args": {
+          "x": "day",
+          "y": "y"
+        }
+      },
+      "at": "chart",
+      "option": "timeZone",
+      "value": "local",
+      "other": "Asia/Kathmandu"
+    }
+  ]
+}

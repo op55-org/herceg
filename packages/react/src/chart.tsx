@@ -64,27 +64,27 @@ export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" 
    */
   initial?: Hydration | undefined;
   /** The view changed (zoom, pan, reset, sync): x, y, and right y ranges, each null when not zoomed. */
-  onViewport?: ChartListener<"viewport">;
+  onViewport?: ChartListener<"viewport"> | undefined;
   /** The view came near an end of what `interaction.limits` allows, as to load more data. */
-  onEdge?: ChartListener<"edge">;
+  onEdge?: ChartListener<"edge"> | undefined;
   /** The selection changed (`interaction.brush`): x and y ranges and a lasso's outline, null when cleared. */
-  onSelect?: ChartListener<"select">;
+  onSelect?: ChartListener<"select"> | undefined;
   /** The data under the pointer or keyboard cursor changed, as for a tooltip of your own. */
-  onHover?: ChartListener<"hover">;
+  onHover?: ChartListener<"hover"> | undefined;
   /** The plot was clicked, with the data under the pointer (and with `rowSelection`, the rows it selected). */
-  onClick?: ChartListener<"click">;
+  onClick?: ChartListener<"click"> | undefined;
   /** A channel `rowSelection` binds changed, by any chart or grid: what it holds now. */
-  onRowSelection?: ChartListener<"rowSelection">;
+  onRowSelection?: ChartListener<"rowSelection"> | undefined;
   /** A 3D chart's camera moved (dragged, zoomed, reset, keys, `setCamera`); once a frame at most. */
-  onCamera?: ChartListener<"camera">;
+  onCamera?: ChartListener<"camera"> | undefined;
   /** A treemap or sunburst was drilled into a node or back out: its key (null for the whole tree) and path. */
-  onDrill?: ChartListener<"drill">;
+  onDrill?: ChartListener<"drill"> | undefined;
   /** A network's node was moved (dragged, keys, `setItemPosition`) or put back (null). */
-  onItemMove?: ChartListener<"itemMove">;
+  onItemMove?: ChartListener<"itemMove"> | undefined;
   /** Series or items were hidden or shown (legend, `setVisibility`): the keys now hidden. */
-  onVisibility?: ChartListener<"visibility">;
+  onVisibility?: ChartListener<"visibility"> | undefined;
   /** The chart drew a frame of its data: its panels and pixel mapping describe it, for overlays. */
-  onRender?: ChartListener<"render">;
+  onRender?: ChartListener<"render"> | undefined;
   /**
    * Something kept the chart from drawing: options or mark elements it
    * refused, code it could not load, a frame that failed. With

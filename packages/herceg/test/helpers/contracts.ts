@@ -5,6 +5,15 @@
 
 import { it, type TestFunction } from "vitest";
 
+declare module "vitest" {
+  interface TaskMeta {
+    /** The contract the test proves, for scripts/check-contracts.mjs. */
+    contract?: string;
+    /** Where it ran: "node", or the browser engine ("chromium", "firefox", "webkit"). */
+    engine?: string;
+  }
+}
+
 /**
  * Lowercase words of letters, digits, and hyphens joined by dots: what the
  * contract is about (a mark, a guide, an export), the behavior, and where
@@ -20,5 +29,12 @@ export function contractTest(id: string, fn: TestFunction, name?: string): void 
     throw new Error(`contractTest: "${id}" is not a contract ID; write words.joined.by-dots`);
   if (seen.has(id)) throw new Error(`contractTest: "${id}" is proved twice in this file`);
   seen.add(id);
-  it(name === undefined ? `[contract:${id}]` : `[contract:${id}] ${name}`, fn);
+  it(name === undefined ? `[contract:${id}]` : `[contract:${id}] ${name}`, (context) => {
+    // Recorded before the test runs, so a failure reports them too. A
+    // browser project is named for its engine ("browser (webkit)").
+    const project = context.task.file.projectName ?? "";
+    context.task.meta.contract = id;
+    context.task.meta.engine = /chromium|firefox|webkit/.exec(project)?.[0] ?? "node";
+    return fn(context);
+  });
 }

@@ -1,0 +1,417 @@
+{
+  "about": "What a capability of the matrix promises, and what its proofs must observe. Each row of marks.json declares every capability of the groups for marks once, and each recipe of express.json those express.json lists (groups `for` express are recipes' alone): works (its proof observes the result), refused (requesting it fails with a structured error naming an alternative that is tested to work), or not applicable (the concept has no target in that row; allowed only where na says what its proof observes). A row's proof of a capability is the contract test `<row>.<capability>`, run in the capability's suite; `shared` lists proofs every row's cell also needs. Read by scripts/check-contracts.mjs, scripts/generate-capabilities.mjs, and the proofs.",
+  "groups": [
+    {
+      "id": "placement",
+      "title": "Placement",
+      "capabilities": [
+        "placement.panel",
+        "placement.facet",
+        "placement.facet-in-cell",
+        "placement.nested",
+        "placement.span",
+        "placement.inset"
+      ]
+    },
+    {
+      "id": "selection",
+      "title": "Selection",
+      "capabilities": [
+        "selection.brush-x",
+        "selection.brush-y",
+        "selection.brush-xy",
+        "selection.lasso",
+        "selection.rows-x",
+        "selection.rows-y",
+        "selection.rows-xy",
+        "selection.rows-lasso",
+        "selection.click",
+        "selection.receive",
+        "selection.highlight"
+      ]
+    },
+    {
+      "id": "legends",
+      "title": "Legends",
+      "capabilities": [
+        "legend.categorical",
+        "legend.colorbar",
+        "legend.entry",
+        "legend.toggle",
+        "legend.panel-toggle"
+      ]
+    },
+    {
+      "id": "reading",
+      "title": "Reading",
+      "capabilities": [
+        "reading.nearest-x",
+        "reading.nearest-y",
+        "reading.nearest",
+        "reading.fields",
+        "reading.keyboard",
+        "reading.description"
+      ]
+    },
+    {
+      "id": "rendering",
+      "title": "Rendering",
+      "capabilities": ["rendering.svg", "rendering.canvas", "rendering.auto"]
+    },
+    {
+      "id": "lifecycle",
+      "title": "Lifecycle",
+      "capabilities": [
+        "lifecycle.view-animation",
+        "lifecycle.value-animation",
+        "lifecycle.cursor-sync",
+        "lifecycle.viewport-sync",
+        "lifecycle.selection-sync",
+        "lifecycle.hydration"
+      ]
+    },
+    {
+      "id": "export",
+      "title": "Export",
+      "capabilities": ["export.svg", "export.png", "export.pdf"]
+    },
+    {
+      "id": "integration",
+      "title": "Integration",
+      "capabilities": [
+        "integration.react",
+        "integration.vue",
+        "integration.svelte",
+        "integration.widget",
+        "integration.streamlit",
+        "integration.web"
+      ]
+    },
+    {
+      "id": "express",
+      "title": "Express",
+      "for": "express",
+      "capabilities": ["express.statistics", "express.recompute"]
+    }
+  ],
+  "capabilities": {
+    "placement.panel": {
+      "title": "Named panel",
+      "works": "The row's mark drawn in one of two panels of one size draws what it draws in the other; the line beside it draws as alone; no other panel draws anything.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "placement.facet": {
+      "title": "Facets",
+      "works": "Split by the chart's facet field into panels N and S, each panel draws what the mark draws over that group's rows alone.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "placement.facet-in-cell": {
+      "title": "Facets in a layout cell",
+      "works": "A layout cell splits the mark's rows into facet panels inside it.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "placement.nested": {
+      "title": "Nested layout",
+      "works": "In columns of rows of four panels of one size, the mark draws in its panel what it draws in another, at its place in the nesting; the others draw nothing of it.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "placement.span": {
+      "title": "Spanning cell",
+      "works": "In a cell spanning both columns above two panels, the mark draws as in the top panel of rows of a panel and a grid of two: across both columns.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "placement.inset": {
+      "title": "Inset",
+      "works": "In one of two insets of one size over a panel, the mark draws what it draws in the other; the panel draws its line as without it.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "legend.categorical": {
+      "title": "Categorical legend",
+      "works": "The legend lists the mark's categories, in order, each entry's swatch in the color the mark draws it with.",
+      "na": "Beside a line of two series, the legend lists the line's series and no entry of the row's mark.",
+      "suite": "herceg-unit"
+    },
+    "legend.colorbar": {
+      "title": "Colorbar",
+      "works": "A colorbar naming the mark (guides: colorbar with scale { mark, channel: \"color\" }), colored by a number field, labels ticks within the field's extent.",
+      "na": "A colorbar naming the mark is refused, as it colors nothing by numbers; one naming a point beside it, colored by a number, is drawn.",
+      "suite": "herceg-unit"
+    },
+    "export.pdf": {
+      "title": "PDF",
+      "works": "renderToPDF writes a document qpdf checks clean, whose page MuPDF draws with the mark's colors at every place inside its plots the mark draws at, and its text in its place; MuPDF reads the text the SVG export writes.",
+      "na": null,
+      "suite": "herceg-unit"
+    },
+    "legend.entry": {
+      "title": "Entry of your own",
+      "works": "A legend entry of the chart's own naming the mark (targets: [{ mark }]) is listed, and clicking it hides the whole mark and nothing else, and shows it again.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "legend.toggle": {
+      "title": "Toggle",
+      "works": "Clicking the legend's first entry of the mark hides what it names and nothing else (the chart's hidden keys say so), and clicking it again shows it all.",
+      "na": "Beside a line of two series in another panel, the legend's entries are the line's, and hiding them all leaves the mark as it was.",
+      "suite": "herceg-browser"
+    },
+    "legend.panel-toggle": {
+      "title": "Panel toggle",
+      "works": "With a legend per panel, clicking the first entry of one panel's legend hides it in that panel alone, and clicking it again shows it.",
+      "na": "A panel's legend beside the mark lists a line's series, and nothing of the mark.",
+      "suite": "herceg-browser"
+    },
+    "reading.nearest-x": {
+      "title": "Nearest x",
+      "works": "With tooltip mode nearest-x, the pointer on a datum reads every series' point at its x: the hover event's points, their labels, rows, and texts, are the fixture's. Annotations of a table along x (rules, text) read their row at its x.",
+      "na": "A constant annotation (a rule, region, or text at given values) reads no rows: the pointer and the arrow keys read nothing of it, and the description names it without promising the keys read values. A region of a table spans every x: mode nearest-x reads nothing of it where mode nearest reads it.",
+      "suite": "herceg-browser"
+    },
+    "reading.nearest-y": {
+      "title": "Nearest y",
+      "works": "With tooltip mode nearest-y, the pointer on a datum reads every series' point at its y, as the fixture lists them. Annotations of a table along y (regions, text) read their row at its y.",
+      "na": "A constant annotation (a rule, region, or text at given values) reads no rows: the pointer and the arrow keys read nothing of it, and the description names it without promising the keys read values. A rule of a table spans every y: mode nearest-y reads nothing of it where mode nearest reads it.",
+      "suite": "herceg-browser"
+    },
+    "reading.nearest": {
+      "title": "Nearest",
+      "works": "With tooltip mode nearest, the pointer on a datum, a bin, a group, a cell, an item, a merge, or an annotation of a table reads that one, as the fixture says; inside a stacked segment, the segment it is in.",
+      "na": "A constant annotation (a rule, region, or text at given values) reads no rows: the pointer and the arrow keys read nothing of it, and the description names it without promising the keys read values.",
+      "suite": "herceg-browser"
+    },
+    "reading.fields": {
+      "title": "Tooltip fields",
+      "works": "With tooltip fields naming a field of the table, the pointer on an item that stands for one row (a point, bar, cell, slice, stage, leaf, link, node, merge, sample, or annotation of a table) reads that field of its row too.",
+      "na": "A constant annotation reads no table, so it has no row whose fields could be read.",
+      "suite": "herceg-browser"
+    },
+    "reading.keyboard": {
+      "title": "Keyboard",
+      "works": "Focused, the chart announces what the arrow keys move to, in order: the fixture's first two announcements.",
+      "na": "A constant annotation (a rule, region, or text at given values) reads no rows: the pointer and the arrow keys read nothing of it, and the description names it without promising the keys read values.",
+      "suite": "herceg-browser"
+    },
+    "reading.description": {
+      "title": "Description",
+      "works": "The chart's accessible description names what the mark draws: its series or items and their extent, as the fixture lists.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "rendering.svg": {
+      "title": "SVG",
+      "works": "Forced to SVG, the chart draws the mark as SVG elements in its colors (or an image of its cells), with no canvas.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "rendering.canvas": {
+      "title": "Canvas",
+      "works": "Forced to Canvas, the canvas shows the mark's colors, and the SVG draws none of the mark.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "rendering.auto": {
+      "title": "Automatic",
+      "works": "Left to choose, a chart of few vertices draws as forced SVG does; dense marks move to Canvas past 4,000 vertices and back under 2,000 (a shared proof).",
+      "na": null,
+      "suite": "herceg-browser",
+      "shared": ["rendering.auto.switch"]
+    },
+    "export.svg": {
+      "title": "SVG",
+      "works": "toSVG writes a well-formed SVG document at the chart's size, with the live chart's text, which the browser draws with the mark's colors at every place inside its plots the mark draws at, and its text in its place; exports draw the chart as it is now (a shared proof).",
+      "na": null,
+      "suite": "herceg-browser",
+      "shared": ["export.current-state"]
+    },
+    "export.png": {
+      "title": "PNG",
+      "works": "toPNG writes a PNG of the SVG export at the chart's size (or a dpi's), which shows the mark's colors at every place inside its plots the mark draws at, and its text in its place; exports draw the chart as it is now (a shared proof).",
+      "na": null,
+      "suite": "herceg-browser",
+      "shared": ["export.current-state"]
+    },
+    "selection.brush-x": {
+      "title": "Brush x",
+      "works": "Dragging reports the x range dragged (and no y range) as the select event and chart.selection, without a store and so without rows.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "selection.brush-y": {
+      "title": "Brush y",
+      "works": "Dragging reports the y range dragged (and no x range) as the select event and chart.selection, without a store and so without rows.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "selection.brush-xy": {
+      "title": "Brush xy",
+      "works": "Dragging reports both ranges dragged as the select event and chart.selection, without a store and so without rows.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "selection.lasso": {
+      "title": "Lasso",
+      "works": "Drawing a lasso reports its outline as the select event and chart.selection, without a store and so without rows.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "selection.rows-x": {
+      "title": "Rows by x",
+      "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "selection.rows-y": {
+      "title": "Rows by y",
+      "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "selection.rows-xy": {
+      "title": "Rows by xy",
+      "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "selection.rows-lasso": {
+      "title": "Rows by lasso",
+      "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "selection.click": {
+      "title": "Click",
+      "works": "Clicking a point, bar, bin, group, cell, or item writes exactly the rows it stands for to the store.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "selection.receive": {
+      "title": "Receive",
+      "works": "A chart bound to receive only (events: []) gets the selection another view writes: its rowSelection event reports it, and where the chart highlights, its description counts the rows selected.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "selection.highlight": {
+      "title": "Highlight",
+      "works": "On Canvas, a selection draws a row it holds as it is and dims a row it does not hold, where the fixture says they are; a selection of no rows dims both, and clearing it draws the mark as before.",
+      "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
+      "suite": "herceg-browser"
+    },
+    "lifecycle.view-animation": {
+      "title": "View animation",
+      "works": "With animation on, a view asked for moves gradually (setViewport along a continuous axis, a map's or network's view, a treemap's or sunburst's drill): mid-way the mark draws neither where it was nor where it goes, and it ends as a chart without animation draws it.",
+      "na": "A chart of items without axes or a view of its own (a pie, gauge, funnel, radar, Sankey diagram, or 3D chart, whose camera gestures turn and magnify at once) has no view to move: setViewport refuses the axes it lacks, and its drawing stays.",
+      "suite": "herceg-browser"
+    },
+    "lifecycle.value-animation": {
+      "title": "Value animation",
+      "works": "With animation.values, a value changed in place (Table.set) moves the mark gradually: mid-way it draws neither the old value nor the new, and it ends as a chart without animation draws it, inside a layout's panels as alone (a shared proof).",
+      "na": "A constant annotation draws given values, not a table's: beside a line whose values move, it stays as drawn.",
+      "suite": "herceg-browser",
+      "shared": ["lifecycle.value-animation.layout"]
+    },
+    "lifecycle.cursor-sync": {
+      "title": "Cursor sync",
+      "works": "Two charts in a cursor group: the pointer on one shows the cursor at that value in the other, though it shows another range (its crosshair at the value's pixel), once and without echo; a channel naming a panel carries that panel's cursor only (a shared proof).",
+      "na": null,
+      "suite": "herceg-browser",
+      "shared": ["lifecycle.cursor-sync.panel"]
+    },
+    "lifecycle.viewport-sync": {
+      "title": "Viewport sync",
+      "works": "Two charts in a viewport group: a view set on one (setViewport) is the other's at once, along x or, where x shows categories, along y; each reports it once.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "lifecycle.selection-sync": {
+      "title": "Selection sync",
+      "works": "Two charts in a selection group: a range selected on one is the other's selection, in data values, reported once on each.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "lifecycle.hydration": {
+      "title": "Hydration",
+      "works": "A chart drawn on the server (renderToSnapshot) is hydrated: its element and geometry nodes are taken over, not written again; it reads its datum, takes an update, and leaves the page when destroyed.",
+      "na": null,
+      "suite": "herceg-browser"
+    },
+    "integration.react": {
+      "title": "React",
+      "works": "The row's mark element (<Line> ...) in a <Chart> draws what the chart of its spec draws, reports the datum under the pointer and a refused option through its onHover and onError props, takes a new prop on the chart it made, and leaves nothing when unmounted.",
+      "na": null,
+      "suite": "react"
+    },
+    "integration.vue": {
+      "title": "Vue",
+      "works": "The row's mark component in a Vue <Chart> draws what the chart of its spec draws, reports the datum under the pointer and a refused option through its hover and error events, takes a new prop on the chart it made, and leaves nothing when unmounted.",
+      "na": null,
+      "suite": "vue"
+    },
+    "integration.svelte": {
+      "title": "Svelte",
+      "works": "The row's mark component in a Svelte <Chart> draws what the chart of its spec draws, reports the datum under the pointer and a refused option through its onhover and onerror props, takes a new prop on the chart it made, and leaves nothing when unmounted.",
+      "na": null,
+      "suite": "svelte"
+    },
+    "integration.widget": {
+      "title": "Notebook widget",
+      "works": "The row's chart sent from Python to the notebook widget draws what the chart of its spec draws, reports the datum under the pointer and a refused change back to Python, takes a change of options on the chart it made, and leaves nothing when closed.",
+      "na": "A custom mark is a TypeScript function: a spec sent from Python cannot hold it.",
+      "suite": "python-js"
+    },
+    "integration.streamlit": {
+      "title": "Streamlit",
+      "works": "The row's chart sent from Python to the Streamlit component draws what the chart of its spec draws, reports the datum under the pointer and a refused change, takes new options on the chart it made, and leaves nothing when removed.",
+      "na": "A custom mark is a TypeScript function: a spec sent from Python cannot hold it.",
+      "suite": "python-js"
+    },
+    "integration.web": {
+      "title": "Web fragment",
+      "works": "The row's chart written as a web fragment by Python draws, once mounted, what the chart of its spec draws, reports the datum under the pointer and a refused payload, and leaves nothing when unmounted.",
+      "na": "A custom mark is a TypeScript function: a spec sent from Python cannot hold it.",
+      "suite": "python-js"
+    },
+    "express.statistics": {
+      "title": "Statistics",
+      "works": "hx.statistics(chart) gives what the recipe computed (estimates, intervals, densities, fits, bins), equal to the fixture's values computed apart, and with panel= those of the plot drawn in that panel.",
+      "na": null,
+      "suite": "python"
+    },
+    "express.recompute": {
+      "title": "Recompute",
+      "works": "hx.recompute(chart, data) makes the recipe again from new data: what it draws and its statistics follow the new rows, together (an estimate with its band), and marks added after it read the new table.",
+      "na": null,
+      "suite": "python"
+    }
+  },
+  "gpu": {
+    "about": "Where a GPU draws marks (WebGL2), which no renderer option asks for: the chart hands geometry past a size to the GPU painter, and draws it on the CPU where WebGL2 is unavailable. Each path's proofs show the painter holding the mark's data and the canvas showing it, and the fallback drawing it without WebGL2.",
+    "paths": {
+      "points": {
+        "title": "Points",
+        "when": "A series of 100,000 points or more, on number or time axes",
+        "proofs": ["rendering.gpu.points", "rendering.gpu.fallback.points"]
+      },
+      "point3d": {
+        "title": "3D points",
+        "when": "3D charts of 20,000 faces or more",
+        "proofs": ["rendering.gpu.point3d", "rendering.gpu.fallback.3d"]
+      },
+      "line3d": {
+        "title": "3D lines",
+        "when": "3D charts of 20,000 faces or more",
+        "proofs": ["rendering.gpu.line3d", "rendering.gpu.fallback.3d"]
+      },
+      "surface": {
+        "title": "Surfaces",
+        "when": "3D charts of 20,000 faces or more (a surface's cell counts two)",
+        "proofs": ["rendering.gpu.surface", "rendering.gpu.fallback.3d"]
+      }
+    }
+  }
+}

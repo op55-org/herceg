@@ -6254,10 +6254,129 @@ are ordinary tests named with the ID: `contractTest(id, fn, name)` in
 TypeScript (`test/helpers/contracts.ts`, `[contract:id] name`) and
 `@pytest.mark.contract(id)` in Python (`tests/conftest.py`, which records
 the ID as a JUnit property), each ID proved once. The spec's contracts are
-cases both read (`test/fixtures/contracts.json`): a chart's spec and the
-same chart made in Python, either drawn (Python making the same spec) or
-refused with the same code, path, and message in each language's spelling,
-and export settings with the plan they make or the error they raise.
+cases both read (`packages/herceg/test/fixtures/contracts.json`): a chart's
+spec and the same chart made in Python, either drawn (Python making the
+same spec) or refused with the same code, path, and message in each
+language's spelling, and export settings with the plan they make or the
+error they raise. Each drawn case is made again through the mark
+functions, each adapter's components, Python's helpers and panels, and the
+widget, Streamlit, and web pages, which must draw what its spec draws.
+
+The capability matrix declares what every mark supports, in
+`test/contracts/` at the repository root:
+
+- `capabilities.json`: the groups (placement, selection, legends, reading,
+  lifecycle, rendering, export, integration), each capability's meaning
+  when it works, and the suite whose tests prove it.
+- `marks.json`: a row per mark and variant (bars and stacked bars, lines
+  along x and along y, annotations constant and of a table), its name on
+  every surface (the spec's type, the mark function, Python's method and
+  helper, each adapter's component, or the reason it has none), and one of
+  four states for every capability: **works**; **unproved**, declared to
+  work with no test proving it yet (the notebook widget's, Streamlit's,
+  and web fragments' cells, and most Express recipes'), which obliges no
+  proof; **refused**, with the `ChartError` it raises (code and message,
+  "location: problem; correction") and an alternative whose own proofs
+  show it working; or **not applicable**, with the reason. Only intersections where behavior
+  can change are their own capabilities (a layout and animation, an inset
+  and hit testing, panels and sync, export and hidden series), not every
+  pair.
+- `express.json`: Express recipes against the capabilities that apply to
+  a whole recipe, and Express's utilities with their proofs.
+- `interaction.json` and `behaviors.json`: interaction in panels, facets,
+  and insets, and other contracts (the acceptance fixtures among them),
+  each with the suite proving it.
+- `api.json`: the API audit (below).
+- `fixtures/`: each row's chart (`rows.json`: tables, its mark, and what a
+  capability's proof needs of it) and the documented defaults
+  (`defaults.json`).
+
+A cell is proved by the test with ID `<row>.<capability>`
+(`bar-stack.legend.toggle`), and an Express recipe's by
+`<recipe>.<capability>.python`. A proof reads its row's declared state to
+choose what it asserts: that the capability works, that asking for it
+raises the declared error, or that what it would apply to is absent.
+
+`npm run contracts` (`scripts/check-contracts.mjs`) fails unless:
+
+- the declarations are complete and well formed: every row declares every
+  capability of its table once, every refusal has its error and a proved
+  alternative, every not-applicable cell its reason;
+- they name what exists, both ways: every spec mark type, mark function,
+  Python method, helper, Express function, and adapter component is a row
+  (or listed as something else), and every name a row gives exists, found
+  with TypeScript's compiler API and Python's `inspect`;
+- the API audit passes (below);
+- every proof they oblige passed in its suite's last complete run of this
+  exact source, in every browser engine, proved by one test, and no test
+  proves a contract no declaration names, or a cell declared unproved
+  (which a proof makes works); every proof's suite is declared
+  (a capability's, `interaction.json`'s `suites`, or `behaviors.json`'s,
+  for an alternative's proof outside the matrix).
+
+Each suite (`herceg-unit`, `herceg-browser`, `react`, `vue`, `svelte`,
+`python-js`, `python`, `python-web`) runs through `scripts/contracts/run.mjs`,
+which writes its report and a run record under
+`tmp/contracts/<revision>-<hash>/`, keyed by the commit and a hash of the
+tree's changes, so a report proves only the source it ran on. `npm run
+contracts:docs` writes `docs/capabilities.md` and `docs/capabilities.json`
+from a complete passing check; CI's contracts job checks every other job's
+reports of the commit and fails if those docs are stale. The check lists
+the unproved cells and counts them; the docs mark them supported but not
+yet proved (○, not ✓), and give the totals of each state at the top.
+
+The API audit (`scripts/contracts/api.mjs`) compares every option, string
+choice, event, and handle member of the spec with each surface's, found in
+their code: the spec's mark types and the mark functions' options;
+Python's methods, panel methods, helpers, and `Chart`, `widget.update`, and
+`HelperOptions` keywords (with the `Literal` choices of their annotations,
+and the dataclasses and TypedDicts they take), and the chart's options each
+helper and Express function unpacks; the adapters' chart props, event
+listeners, and the boolean options Vue reads from bare attributes; the
+handle's members against the notebook widget's; and Express's keywords,
+each taking the same choices in every function that takes it (the core's,
+where a mark takes it), against seaborn's function of the same name (its
+parameters, and matplotlib's `color` where it takes `**kwargs`), and the
+settings of seaborn's keyword dicts Express types (`histplot`'s
+`kde_options`, seaborn's `kde_kws`) against the class they hold. It compares the settings of options
+both sides type at any depth (the spec's axis and Python's
+`hg.AxisOptions`, then the axis' ticks and `hg.Ticks`), those of named
+types once a pair wherever they are met (`settings TicksSpec hg.Ticks`),
+reading unions, intersections, lists, and records of settings as
+TypeScript types them; settings one side holds by name (Python's
+`limits={"x": hg.ViewLimits(...)}`) are compared with each of the other
+side's named settings (the spec's `limits.x`, `limits.y`). Each surface's convention spells a spec name
+(`strokeWidth`, `stroke_width`; `onSelect`, `onselect`, `@select`,
+`on_select`; `getHiddenKeys` as the widget's `hidden_keys`), and `api.json`
+lists every difference with its reason: a name spelled otherwise (Python's
+`from_`; a helper's `x_axis`, since its `x` names a column), an option
+whose settings are a surface's own keywords (Python's `zoom=` and `pan=`),
+an option a surface does not take, one of a surface's own, choices that
+differ (with the surface's, which it must keep), and settings one side types and the other takes untyped (a dict,
+`Any`, an instance made by a helper). Anything else the audit finds fails,
+as does an entry no longer needed. The adapters' components are checked
+at compile time instead, where TypeScript tells types apart at any depth:
+`packages/react/test/props.types.tsx`, `packages/vue/test/props.types.ts`,
+and `packages/svelte/test/props.ts` require each component's props to be
+exactly what its engine function takes (a mark component its mark
+function's options and table, over a table of every kind of field; a
+layout component its helper's options; `<Chart>` `ChartUpdate`'s options
+and a listener per event), and the check requires such a comparison of
+every component each adapter exports. The documented defaults are proved
+alike: a chart drawn without the option draws as one given its default and
+otherwise than one given another value, in the spec (in a local time zone
+other than UTC) and with Python's keyword, whose own default is None or
+that value.
+
+The acceptance fixtures are permanent tests of whole workloads from users'
+reports: the React dashboard (`packages/react/test/fixtures/Dashboard.tsx`)
+draws two y axes, labelled and stepped thresholds, estimated stretches,
+event badges on stems, day labels inside grey plots, unequal panels sharing
+y with x of their own, an inset, and panel and chart legends, and is
+navigated, synchronized, selected, hydrated, scrolled past in a page with
+real wheel and mouse input, and given input before its code loads, in
+every browser engine. What is wrong in one is fixed, not
+refused.
 
 ## Package layout
 

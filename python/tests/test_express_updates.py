@@ -116,6 +116,7 @@ def test_arguments_keep_the_objects_they_name():
     assert np.allclose(later, hx.statistics(chart).tables["estimates"]["tip"] + 10)
 
 
+@pytest.mark.contract("express.recompute.added-marks.python")
 def test_marks_added_to_the_chart_are_added_again():
     events = {"x": [2.0, 8.0], "label": ["start", "stop"]}
     first = (
@@ -139,11 +140,13 @@ def test_pairplot_keeps_the_columns_it_paired():
     assert spec(again)["panels"] == spec(first)["panels"]
 
 
+@pytest.mark.contract("express.recompute.refused.python")
 def test_recompute_refuses_charts_express_did_not_make():
     with pytest.raises(ValueError, match="hx.recompute chart: the chart was not made by"):
         hx.recompute(hg.Chart(DATA).bar(x="day", y="tip"), DATA)
 
 
+@pytest.mark.contract("express.recompute.reuse.python")
 def test_groups_whose_values_are_unchanged_reuse_their_bootstrap_results(monkeypatch):
     calls = []
     interval = numerics.interval

@@ -24,6 +24,7 @@ jobs:
           xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0
       - run: npm run lint
       - run: npm run test:release
+      - run: npm run test:contracts
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
@@ -45,6 +46,12 @@ jobs:
       # Firefox has WebGL only with a display: Xvfb's, drawn by Mesa's
       # software renderer (llvmpipe), as Chrome draws with SwiftShader.
       - run: xvfb-run --auto-servernum npm run test:browser
+      # The suites' reports, which the contracts job checks.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: contracts-check
+          path: tmp/contracts/
       - run: npm run bench:size
 
   python:
@@ -77,9 +84,40 @@ jobs:
           key: playwright-${{ steps.playwright.outputs.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
       - run: npx playwright install --with-deps firefox webkit
       - run: xvfb-run --auto-servernum npm run test:python-web
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: contracts-python
+          path: tmp/contracts/
       # The built wheel must carry the JavaScript bundles and work outside the checkout.
       - run: cd python && uv build
       - run: |
           uv venv /tmp/wheel
           uv pip install --python /tmp/wheel/bin/python "$(ls python/dist/*.whl)[export]"
           cd /tmp && /tmp/wheel/bin/python -c "import herceg as hg; c = hg.line({'x': [1, 2], 'y': [3, 4]}, x='x', y='y'); assert c.to_svg().startswith('<svg') and 'hercegPython' in c.to_html()"
+
+  # Every declared contract proved by the other jobs' runs of this commit
+  # (scripts/check-contracts.mjs), and docs/capabilities.md and .json what
+  # that complete run writes.
+  contracts:
+    needs: [check, python]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          cache-dependency-glob: python/uv.lock
+      - run: npm ci
+      # The inventory imports the Python package, widget included.
+      - run: npm run build:python
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: contracts-*
+          path: tmp/contracts/
+          merge-multiple: true
+      - run: npm run contracts
+      - run: npm run contracts:docs -- --check

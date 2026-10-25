@@ -374,6 +374,7 @@ export const Contour = /* @__PURE__ */ markComponent(
 export const Heatmap = /* @__PURE__ */ markComponent(
   "Heatmap",
   ({ data, ...options }: WithData<HeatmapOptions<Schema>, Schema>) => heatmap(data, options),
+  ["xBanded", "yBanded"],
 ) as unknown as <S extends Schema>(props: WithData<HeatmapOptions<S>, S>) => null;
 
 /** Horizontal (`y`) or vertical (`x`) reference lines, constant or one per row of `data`. */
@@ -381,7 +382,7 @@ export const Rule = /* @__PURE__ */ markComponent(
   "Rule",
   ({ data, ...options }: RuleOptions & { data?: Table<Schema> }) =>
     data ? rule(data, options as RuleDataOptions<Schema>) : rule(options),
-  ["contributeDomain"],
+  ["contributeDomain", "legend"],
 ) as unknown as <T = undefined>(props: RuleProps<T>) => null;
 
 /** Shaded x or y ranges, constant or one per row of `data`. */
@@ -389,7 +390,7 @@ export const Region = /* @__PURE__ */ markComponent(
   "Region",
   ({ data, ...options }: RegionOptions & { data?: Table<Schema> }) =>
     data ? region(data, options as RegionDataOptions<Schema>) : region(options),
-  ["contributeDomain"],
+  ["contributeDomain", "legend"],
 ) as unknown as <T = undefined>(props: RegionProps<T>) => null;
 
 /** Text labels, constant or one per row of `data`. */
@@ -397,7 +398,7 @@ export const Text = /* @__PURE__ */ markComponent(
   "Text",
   ({ data, ...options }: TextOptions & { data?: Table<Schema> }) =>
     data ? text(data, options as TextDataOptions<Schema>) : text(options),
-  ["contributeDomain"],
+  ["contributeDomain", "legend"],
 ) as unknown as <T = undefined>(props: TextProps<T>) => null;
 
 /**

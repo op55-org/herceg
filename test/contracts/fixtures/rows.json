@@ -1,0 +1,1547 @@
+{
+  "about": "Each matrix row's chart: the table its mark reads (from tables) and the mark as the portable spec writes it, without its data; custom has no spec, so its proofs make it (packages/herceg/test/contracts/matrix.ts). Every table of rows has a field group of two values, N and S, which facets split by (the table of a network's nodes has none: facets split its links), and series and categories read the field kind (k and m) where the mark has them. constant marks a row whose mark reads no rows (an annotation at given values), which a chart of facets needs another mark beside to split. Histograms bin at given edges, so that facets bin alike. categories are the categories a row's legend lists, in order: what the mark tells apart by color; entry the one entry a mark of no categories lists for itself, where it lists one. colorbar gives a row colored by numbers: the options that color it so, and the extent of its colors, which a colorbar's labels stay within. toggle gives the options that list a row in the legend where it is not listed by default (annotations, with legend: true); hiddenStay marks a row that draws an entry's hidden shapes in its fill for no data rather than leaving them out (a map keeps its regions). Read by the matrix's proofs on every surface. selection says how the row's rows are selected (packages/herceg/test/browser/contracts/selection.test.ts): the binding's events where it takes only some, the gestures, in data values (fractional band indices on category axes; epoch ms on time axes), or the item an inspection names (label) and a square around its anchor, for marks without axes, the rows each gesture selects, chosen by the rules of src/model/selected-rows.ts, not read from the engine, and where a selection of the table's receive rows is drawn as is (on) and dimmed (off); selections gives each table's defaults: brushes' ranges, the point clicked, and the rows another view selects (receive). data names the table bound where the mark's rows are another's (a network's nodes); effect, the binding's effect. lifecycle says what moves the row (packages/herceg/test/browser/contracts/lifecycle.test.ts): the value its animation moves to, or that shows at once without one (change: field, row, value, a change the mark draws; lifecycle gives each table's), the axis or view its view moves along where it is not the first continuous axis (view: \"x\", \"y\", or a map's or network's view). reading says how the row reads (packages/herceg/test/browser/contracts/reading.test.ts): where the pointer goes (at, in data values, or an item by its label and the text an inspection gives it), the points it reads there as label, row (null for a summary), and text, by nearest (points), nearest-x (x), and nearest-y (y) where those differ, what nearest reads inside an item, nearer another's edge (inside), the tooltip fields a field of the table shows (fields, as label and text; field, fieldsAt, and fieldsMark give another field, target, or mark options where the row's own read no single row's fields), the first two announcements of the arrow keys (keys), and what the description names (describes); selections' read and field are each table's default target and field.",
+  "tables": {
+    "samples": {
+      "x": [0, 1, 2, 3, 4, 5],
+      "y": [2, 4, 3, 20, 40, 30],
+      "low": [1, 3, 2, 10, 30, 20],
+      "high": [3, 5, 4, 30, 50, 40],
+      "category": ["a", "b", "c", "a", "b", "c"],
+      "kind": ["k", "m", "k", "m", "k", "m"],
+      "note": ["one", "two", "three", "four", "five", "six"],
+      "day": {
+        "type": "time",
+        "values": [
+          "2026-01-05",
+          "2026-01-06",
+          "2026-01-07",
+          "2026-01-12",
+          "2026-01-13",
+          "2026-01-14"
+        ]
+      },
+      "group": ["N", "N", "N", "S", "S", "S"]
+    },
+    "field": {
+      "x": [0, 1, 2, 0, 1, 2, 0, 1, 2, 4, 5, 6, 4, 5, 6, 4, 5, 6],
+      "y": [0, 0, 0, 1, 1, 1, 2, 2, 2, 10, 10, 10, 11, 11, 11, 12, 12, 12],
+      "z": [0, 1, 0, 1, 3, 1, 0, 1, 0, 0, 1, 0, 1, 3, 1, 0, 1, 0],
+      "group": [
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "N",
+        "S",
+        "S",
+        "S",
+        "S",
+        "S",
+        "S",
+        "S",
+        "S",
+        "S"
+      ]
+    },
+    "tree": {
+      "first": [0, 2],
+      "second": [1, 3],
+      "height": [1, 2],
+      "group": ["N", "S"]
+    },
+    "links": {
+      "source": ["a", "b", "a", "c"],
+      "target": ["b", "c", "c", "b"],
+      "value": [3, 2, 4, 1],
+      "group": ["N", "N", "S", "S"]
+    },
+    "nodes": {
+      "node": ["a", "b", "c"],
+      "kind": ["k", "m", "m"],
+      "size": [1, 2, 3]
+    },
+    "world": {
+      "shape": {
+        "type": "geometry",
+        "coordinates": [0, 0, 10, 0, 10, 10, 0, 10, 0, 0, 20, 0, 30, 0, 30, 10, 20, 10, 20, 0],
+        "ringOffsets": [0, 5, 10],
+        "polygonOffsets": [0, 1, 2],
+        "geometryOffsets": [0, 1, 2]
+      },
+      "name": ["west", "east"],
+      "kind": ["k", "m"],
+      "group": ["N", "S"],
+      "value": [3, 7]
+    },
+    "spatial": {
+      "x": [0, 1, 2, 3],
+      "y": [1, 3, 2, 4],
+      "z": [2, 4, 1, 3],
+      "kind": ["k", "m", "k", "m"],
+      "group": ["N", "N", "S", "S"]
+    },
+    "grid": {
+      "x": [0, 1, 0, 1],
+      "y": [0, 0, 1, 1],
+      "z": [1, 2, 3, 4],
+      "group": ["N", "N", "S", "S"]
+    }
+  },
+  "selections": {
+    "samples": {
+      "x": [1.5, 3.5],
+      "y": [12, 28],
+      "click": [3, 20],
+      "receive": [1, 3],
+      "read": [3, 20],
+      "field": "note"
+    },
+    "field": {
+      "x": [0.5, 1.5],
+      "y": [0.5, 1.5],
+      "click": [1, 1],
+      "receive": [4],
+      "field": "group"
+    },
+    "tree": {
+      "receive": [0],
+      "field": "group"
+    },
+    "links": {
+      "receive": [0, 2],
+      "field": "group"
+    },
+    "nodes": {
+      "receive": [1]
+    },
+    "world": {
+      "receive": [1],
+      "field": "name"
+    },
+    "spatial": {
+      "field": "group"
+    },
+    "grid": {
+      "field": "group"
+    }
+  },
+  "rows": {
+    "line": {
+      "table": "samples",
+      "mark": {
+        "type": "line",
+        "x": "x",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [2, 12],
+          "off": [4, 40]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 2", "2. k: 3"],
+        "describes": ["2 series", "k", "m", "40"]
+      }
+    },
+    "line-y": {
+      "table": "samples",
+      "mark": {
+        "type": "line",
+        "x": "y",
+        "y": "x",
+        "series": "kind",
+        "orient": "y"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "x": [12, 28],
+        "y": [1.5, 3.5],
+        "click": [20, 3],
+        "rows": {
+          "brush-x": [3],
+          "brush-y": [2, 3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [12, 2],
+          "off": [40, 4]
+        }
+      },
+      "reading": {
+        "at": [20, 3],
+        "points": [["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 2", "2. k: 3"],
+        "describes": ["2 series", "k", "m", "40"]
+      },
+      "lifecycle": {
+        "cursor": "y"
+      }
+    },
+    "area": {
+      "table": "samples",
+      "mark": {
+        "type": "area",
+        "x": "x",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [2, 6],
+          "off": [4.5, 10]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 2", "2. k: 3"],
+        "describes": ["2 series", "k", "m", "40"]
+      }
+    },
+    "area-range": {
+      "table": "samples",
+      "mark": {
+        "type": "area",
+        "x": "x",
+        "y1": "low",
+        "y2": "high",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3, 5],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [2, 12],
+          "off": [4.5, 30]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "10 – 30"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 1 – 3", "2. k: 2 – 4"],
+        "describes": ["2 series", "k", "m", "50"]
+      },
+      "lifecycle": {
+        "change": ["high", 3, 36]
+      }
+    },
+    "bar": {
+      "table": "samples",
+      "mark": {
+        "type": "bar",
+        "x": "x",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": [3.2, 10],
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3.2, 10],
+          "off": [3.8, 20]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 2", "2. k: 3"],
+        "describes": ["2 series", "k", "m", "40"]
+      }
+    },
+    "bar-stack": {
+      "table": "samples",
+      "mark": {
+        "type": "bar",
+        "x": "category",
+        "y": "y",
+        "series": "kind",
+        "stack": true
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "x": [-0.4, 0.4],
+        "click": [0, 10],
+        "rows": {
+          "brush-x": [0, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [0, 12],
+          "off": [1, 20]
+        }
+      },
+      "reading": {
+        "at": [0, 22],
+        "points": [["m", 3, "20"]],
+        "x": [["k", 0, "2"], ["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["a. k: 2. m: 20", "b. k: 40. m: 4"],
+        "describes": ["2 series", "k", "m", "40"],
+        "inside": {
+          "at": [0, 8],
+          "points": [["m", 3, "20"]]
+        }
+      }
+    },
+    "point": {
+      "table": "samples",
+      "mark": {
+        "type": "point",
+        "x": "x",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        },
+        "domain": [2, 40]
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 20],
+          "off": [4, 40]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 2", "2. k: 3"],
+        "describes": ["2 series", "k", "m", "40"]
+      }
+    },
+    "histogram": {
+      "table": "samples",
+      "mark": {
+        "type": "histogram",
+        "x": "y",
+        "bins": [0, 15, 30, 45],
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "x": [12, 28],
+        "click": [22, 0.5],
+        "rows": {
+          "brush-x": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [22, 0.5],
+          "off": [7.5, 1.5]
+        },
+        "y": [0.5, 1.5]
+      },
+      "reading": {
+        "at": [7.5, 2],
+        "points": [["k", null, "0 – 15: 2"]],
+        "x": [["k", null, "0 – 15: 2"], ["m", null, "0 – 15: 1"]],
+        "keys": ["7.5. k: 0 – 15: 2. m: 0 – 15: 1", "22.5. k: 15 – 30: 0. m: 15 – 30: 1"],
+        "describes": ["2 series", "k", "m", "0 – 15"]
+      }
+    },
+    "histogram-2d": {
+      "table": "samples",
+      "mark": {
+        "type": "histogram",
+        "x": "x",
+        "y": "y",
+        "bins": {
+          "x": [0, 3, 6],
+          "y": [0, 25, 50]
+        }
+      },
+      "colorbar": {
+        "options": {},
+        "domain": [0, 3]
+      },
+      "selection": {
+        "click": [4.5, 37.5],
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "click": [4, 5]
+        },
+        "highlight": {
+          "on": [4.5, 12.5],
+          "off": [4.5, 37.5]
+        }
+      },
+      "reading": {
+        "at": [4.5, 37.5],
+        "points": [["x 3 – 6, y 25 – 50", null, "2"]],
+        "keys": ["4.5. x 3 – 6, y 25 – 50: 2", "4.5. x 3 – 6, y 25 – 50: 2"],
+        "describes": ["6 values", "3"]
+      },
+      "lifecycle": {
+        "change": ["y", 4, 10]
+      }
+    },
+    "boxplot": {
+      "table": "samples",
+      "mark": {
+        "type": "boxplot",
+        "x": "kind",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "x": [-0.4, 0.4],
+        "click": [-0.2, 3],
+        "rows": {
+          "brush-x": [0, 2, 4],
+          "click": [0, 2, 4]
+        },
+        "highlight": {
+          "on": [1.2, 12],
+          "off": [-0.2, 10]
+        }
+      },
+      "reading": {
+        "at": [-0.2, 3],
+        "points": [["k", null, "median 3, quartiles 2.5 to 21.5, whiskers 2 to 40, 3 values"]],
+        "keys": [
+          "k. k: median 3, quartiles 2.5 to 21.5, whiskers 2 to 40, 3 values",
+          "m. m: median 20, quartiles 12 to 25, whiskers 4 to 30, 3 values"
+        ],
+        "describes": ["k", "m", "3", "20"]
+      }
+    },
+    "boxen": {
+      "table": "samples",
+      "mark": {
+        "type": "boxen",
+        "x": "kind",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "x": [-0.4, 0.4],
+        "click": [-0.2, 3],
+        "rows": {
+          "brush-x": [0, 2, 4],
+          "click": [0, 2, 4]
+        },
+        "highlight": {
+          "on": [1.2, 12],
+          "off": [-0.2, 3]
+        }
+      },
+      "reading": {
+        "at": [-0.2, 3],
+        "points": [
+          [
+            "k",
+            null,
+            "median 3, quartiles 2.5 to 21.5, 1 level from 2.5 to 21.5, 3 values, 2 outliers"
+          ]
+        ],
+        "keys": [
+          "k. k: median 3, quartiles 2.5 to 21.5, 1 level from 2.5 to 21.5, 3 values, 2 outliers",
+          "m. m: median 20, quartiles 12 to 25, 1 level from 12 to 25, 3 values, 2 outliers"
+        ],
+        "describes": ["k", "m", "3", "20"]
+      }
+    },
+    "violin": {
+      "table": "samples",
+      "mark": {
+        "type": "violin",
+        "x": "kind",
+        "y": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "x": [-0.4, 0.4],
+        "click": [-0.2, 3],
+        "rows": {
+          "brush-x": [0, 2, 4],
+          "click": [0, 2, 4]
+        },
+        "highlight": {
+          "on": [1.2, 12],
+          "off": [-0.2, 3]
+        }
+      },
+      "reading": {
+        "at": [-0.2, 3],
+        "points": [["k", null, "median 3, quartiles 2.5 to 21.5, values from 2 to 40, 3 values"]],
+        "keys": [
+          "k. k: median 3, quartiles 2.5 to 21.5, values from 2 to 40, 3 values",
+          "m. m: median 20, quartiles 12 to 25, values from 4 to 30, 3 values"
+        ],
+        "describes": ["k", "m", "3", "20"]
+      }
+    },
+    "rug": {
+      "table": "samples",
+      "mark": {
+        "type": "rug",
+        "x": "x",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": [3, 0.012],
+        "lasso": [[1.5, 0.1], [3.5, 0.1], [3.5, -0.02], [1.5, -0.02]],
+        "rows": {
+          "brush-x": [2, 3],
+          "lasso": [2, 3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 0.012],
+          "off": [4, 0.012]
+        },
+        "y": [0.3, 0.7]
+      },
+      "reading": {
+        "at": [3, 0.012],
+        "points": [["m", 3, "3"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 0", "2. k: 2"],
+        "describes": ["2 series", "k", "m", "5"]
+      },
+      "lifecycle": {
+        "change": ["x", 3, 3.5]
+      }
+    },
+    "errorbar": {
+      "table": "samples",
+      "mark": {
+        "type": "errorbar",
+        "x": "x",
+        "y1": "low",
+        "y2": "high",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3, 5],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 20],
+          "off": [4, 40]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "10 – 30"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 1 – 3", "2. k: 2 – 4"],
+        "describes": ["2 series", "k", "m", "50"]
+      },
+      "lifecycle": {
+        "change": ["high", 3, 36]
+      }
+    },
+    "candlestick": {
+      "table": "samples",
+      "mark": {
+        "type": "candlestick",
+        "x": "x",
+        "open": "low",
+        "high": "high",
+        "low": "low",
+        "close": "y"
+      },
+      "entry": "y",
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": [3, 15],
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3, 5],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 25],
+          "off": [4, 45]
+        }
+      },
+      "reading": {
+        "points": [["y", 3, "open 10, high 30, low 10, close 20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. y: open 1, high 3, low 1, close 2", "1. y: open 3, high 5, low 3, close 4"],
+        "describes": ["6 candles", "1", "50"]
+      }
+    },
+    "heatmap": {
+      "table": "samples",
+      "mark": {
+        "type": "heatmap",
+        "x": "x",
+        "y": "category",
+        "color": "y"
+      },
+      "colorbar": {
+        "options": {},
+        "domain": [2, 40]
+      },
+      "selection": {
+        "y": [-0.4, 0.4],
+        "click": [3, 0],
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [0, 3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 0],
+          "off": [4, 1]
+        }
+      },
+      "reading": {
+        "at": [3, 0],
+        "points": [["a", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. a: 2", "3. a: 20"],
+        "describes": ["6 cells", "2", "40"]
+      }
+    },
+    "heatmap-calendar": {
+      "table": "samples",
+      "mark": {
+        "type": "heatmap",
+        "date": "day",
+        "color": "y"
+      },
+      "colorbar": {
+        "options": {},
+        "domain": [2, 40]
+      },
+      "selection": {
+        "x": [1768089600000, 1768694400000],
+        "y": [0.6, 1.4],
+        "click": [1768478400000, 1],
+        "rows": {
+          "brush-x": [3, 4, 5],
+          "brush-y": [1, 4],
+          "brush-xy": [4],
+          "lasso": [4],
+          "click": [4]
+        },
+        "highlight": {
+          "on": [1768478400000, 0],
+          "off": [1768478400000, 1]
+        }
+      },
+      "reading": {
+        "at": [1768478400000, 1],
+        "points": [["Tue", 4, "40"]],
+        "fields": [["note", "five"]],
+        "keys": ["Jan 5, 2026, 00:00. Mon: 2", "Jan 12, 2026, 00:00. Mon: 20"],
+        "describes": ["6 cells", "2", "40"]
+      }
+    },
+    "contour": {
+      "table": "field",
+      "mark": {
+        "type": "contour",
+        "x": "x",
+        "y": "y",
+        "color": "z",
+        "thresholds": [0.5, 2],
+        "variant": "bands"
+      },
+      "colorbar": {
+        "options": {},
+        "domain": [0, 3]
+      },
+      "selection": {
+        "effect": "none",
+        "rows": {
+          "brush-x": [1, 4, 7],
+          "brush-y": [3, 4, 5],
+          "brush-xy": [4]
+        },
+        "events": ["brush"]
+      },
+      "reading": {
+        "at": [1, 0.3],
+        "points": [["z", null, "0.5 – 2"]],
+        "keys": ["1.25. z: 0.5 – 2", "5.25. z: 0.5 – 2"],
+        "describes": ["0.5 – 2", "2 regions"]
+      }
+    },
+    "dendrogram": {
+      "table": "tree",
+      "mark": {
+        "type": "dendrogram",
+        "first": "first",
+        "second": "second",
+        "height": "height",
+        "leaves": ["a", "b", "c"],
+        "label": "Clusters",
+        "stroke": "#8c564b"
+      },
+      "reading": {
+        "describes": ["Clusters", "3 leaves", "2 merges"]
+      },
+      "selection": {
+        "rows": {},
+        "x": [-0.4, 0.4],
+        "y": [0.3, 0.7]
+      }
+    },
+    "rule": {
+      "table": "samples",
+      "mark": {
+        "type": "rule",
+        "y": 10,
+        "label": "Target",
+        "contributeDomain": true,
+        "stroke": "#d62728",
+        "strokeWidth": 2
+      },
+      "constant": true,
+      "toggle": {
+        "legend": true
+      },
+      "reading": {
+        "describes": ["Target", "10"]
+      },
+      "selection": {
+        "rows": {},
+        "x": [0.3, 0.7],
+        "y": [9.6, 10.4]
+      },
+      "lifecycle": {
+        "view": "y"
+      }
+    },
+    "rule-table": {
+      "table": "samples",
+      "mark": {
+        "type": "rule",
+        "x": "x",
+        "label": {
+          "field": "note"
+        },
+        "stroke": "#d62728",
+        "strokeWidth": 2
+      },
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "toggle": {
+        "legend": true
+      },
+      "reading": {
+        "describes": ["one", "six"]
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 0.5],
+          "off": [4, 0.5]
+        },
+        "click": [3, 0.5],
+        "y": [0.3, 0.7]
+      },
+      "lifecycle": {
+        "change": ["x", 3, 3.5]
+      }
+    },
+    "region": {
+      "table": "samples",
+      "mark": {
+        "type": "region",
+        "x1": 0,
+        "x2": 2,
+        "y1": 1,
+        "y2": 3,
+        "label": "Window",
+        "contributeDomain": true,
+        "fill": "#ff7f0e"
+      },
+      "constant": true,
+      "toggle": {
+        "legend": true
+      },
+      "reading": {
+        "describes": ["Window", "0 to 2"]
+      },
+      "selection": {
+        "rows": {},
+        "x": [0.5, 1.5],
+        "y": [1.5, 2.5]
+      }
+    },
+    "region-table": {
+      "table": "samples",
+      "mark": {
+        "type": "region",
+        "y1": "low",
+        "y2": "high",
+        "label": {
+          "field": "note"
+        },
+        "fill": "#ff7f0e"
+      },
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "toggle": {
+        "legend": true
+      },
+      "reading": {
+        "describes": ["one", "six", "10 to 30"]
+      },
+      "selection": {
+        "rows": {
+          "brush-y": [3, 5],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [0.5, 15],
+          "off": [0.5, 45]
+        },
+        "click": [0.5, 15],
+        "x": [0.3, 0.7]
+      },
+      "lifecycle": {
+        "change": ["high", 3, 36],
+        "view": "y"
+      }
+    },
+    "text": {
+      "table": "samples",
+      "mark": {
+        "type": "text",
+        "x": 1,
+        "y": 2,
+        "label": {
+          "text": "Note",
+          "style": {
+            "color": "#9467bd"
+          }
+        },
+        "contributeDomain": true
+      },
+      "constant": true,
+      "toggle": {
+        "legend": true
+      },
+      "reading": {
+        "describes": ["Note"]
+      },
+      "selection": {
+        "rows": {},
+        "x": [0.95, 1.05],
+        "y": [1.95, 2.05]
+      }
+    },
+    "text-table": {
+      "table": "samples",
+      "mark": {
+        "type": "text",
+        "x": "x",
+        "y": "y",
+        "label": {
+          "field": "note",
+          "style": {
+            "color": "#9467bd"
+          }
+        }
+      },
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "toggle": {
+        "legend": true
+      },
+      "reading": {
+        "describes": ["one", "six"]
+      },
+      "selection": {
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": [3, 20],
+          "off": [4, 40]
+        }
+      }
+    },
+    "pie": {
+      "table": "samples",
+      "mark": {
+        "type": "pie",
+        "category": "category",
+        "value": "y",
+        "labels": false
+      },
+      "categories": ["b", "c", "a"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": {
+          "label": "a"
+        },
+        "rows": {
+          "click": [0, 3]
+        },
+        "receive": [0, 3],
+        "highlight": {
+          "on": {
+            "label": "a"
+          },
+          "off": {
+            "label": "c"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "a"
+        },
+        "points": [["a", null, "22 (22.2%)"]],
+        "keys": ["y. b: 44 (44.4%)", "y. c: 33 (33.3%)"],
+        "describes": ["3 slices", "99", "b"],
+        "fieldsMark": {
+          "category": "note"
+        },
+        "field": "kind",
+        "fieldsAt": {
+          "label": "four"
+        },
+        "fields": [["kind", "m"]]
+      }
+    },
+    "treemap": {
+      "table": "samples",
+      "mark": {
+        "type": "treemap",
+        "path": ["kind", "category"],
+        "value": "y"
+      },
+      "categories": ["m", "k"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": {
+          "label": "m / a"
+        },
+        "rows": {
+          "click": [3]
+        },
+        "highlight": {
+          "on": {
+            "label": "m / a"
+          },
+          "off": {
+            "label": "k / b"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "m / a"
+        },
+        "points": [["m / a", null, "20 (20.2%)"]],
+        "keys": ["y. m: 54 (54.5%)", "y. m / c: 30 (30.3%)"],
+        "describes": ["6 leaves", "2 groups", "99"],
+        "fields": [["note", "four"]]
+      }
+    },
+    "sunburst": {
+      "table": "samples",
+      "mark": {
+        "type": "sunburst",
+        "path": ["kind", "category"],
+        "value": "y",
+        "labels": false
+      },
+      "categories": ["m", "k"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": {
+          "label": "k"
+        },
+        "rows": {
+          "click": [0, 2, 4]
+        },
+        "highlight": {
+          "on": {
+            "label": "m / a"
+          },
+          "off": {
+            "label": "k / b"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "k"
+        },
+        "points": [["k", null, "45 (45.5%)"]],
+        "keys": ["y. m: 54 (54.5%)", "y. m / c: 30 (30.3%)"],
+        "describes": ["6 leaves", "2 groups", "99"],
+        "fieldsAt": {
+          "label": "m / a"
+        },
+        "fields": [["note", "four"]]
+      }
+    },
+    "gauge": {
+      "table": "samples",
+      "mark": {
+        "type": "gauge",
+        "value": "y"
+      },
+      "reading": {
+        "at": {
+          "label": "y"
+        },
+        "points": [["y", 5, "30 of 0 to 100"]],
+        "keys": ["y. y: 30 of 0 to 100", "y. y: 30 of 0 to 100"],
+        "describes": ["30", "0 to 100"],
+        "fields": [["note", "six"]]
+      },
+      "lifecycle": {
+        "change": ["y", 5, 45]
+      }
+    },
+    "funnel": {
+      "table": "samples",
+      "mark": {
+        "type": "funnel",
+        "category": "category",
+        "value": "y"
+      },
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "selection": {
+        "click": {
+          "label": "b"
+        },
+        "rows": {
+          "click": [1, 4]
+        },
+        "receive": [0, 3],
+        "highlight": {
+          "on": {
+            "label": "a"
+          },
+          "off": {
+            "label": "c"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "b"
+        },
+        "points": [["b", null, "44, 200% of the first stage"]],
+        "keys": ["y. a: 22", "y. b: 44, 200% of the first stage"],
+        "describes": ["3 stages", "22", "33"],
+        "fieldsMark": {
+          "category": "note"
+        },
+        "field": "kind",
+        "fieldsAt": {
+          "label": "four"
+        },
+        "fields": [["kind", "m"]]
+      }
+    },
+    "radar": {
+      "table": "samples",
+      "mark": {
+        "type": "radar",
+        "category": "category",
+        "value": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "k",
+          "text": "b: 40 (of 0 to 40)"
+        },
+        "points": [["k", 4, "b: 40 (of 0 to 40)"]],
+        "keys": ["y. k: a: 2 (of 0 to 40)", "y. k: b: 40 (of 0 to 40)"],
+        "describes": ["2 series", "3 spokes", "40"],
+        "fields": [["note", "five"]]
+      }
+    },
+    "sankey": {
+      "table": "links",
+      "mark": {
+        "type": "sankey",
+        "source": "source",
+        "target": "target",
+        "value": "value"
+      },
+      "colorbar": {
+        "options": {
+          "color": "value"
+        }
+      },
+      "selection": {
+        "click": {
+          "label": "a → b"
+        },
+        "rows": {
+          "click": [0]
+        },
+        "highlight": {
+          "on": {
+            "label": "a → b"
+          },
+          "off": {
+            "label": "b → c"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "a → b"
+        },
+        "points": [["a → b", null, "3"]],
+        "keys": ["value. a: 7 out", "value. b: 3 in, 2 out"],
+        "describes": ["3 nodes", "a → c"],
+        "fields": [["group", "N"]]
+      }
+    },
+    "graph": {
+      "table": "links",
+      "mark": {
+        "type": "graph",
+        "source": "source",
+        "target": "target",
+        "nodes": "nodes",
+        "node": "node",
+        "color": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "size"
+        }
+      },
+      "selection": {
+        "data": "nodes",
+        "click": {
+          "label": "b"
+        },
+        "lasso": {
+          "label": "b"
+        },
+        "rows": {
+          "lasso": [1],
+          "click": [1]
+        },
+        "highlight": {
+          "on": {
+            "label": "b"
+          },
+          "off": {
+            "label": "a"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "b"
+        },
+        "points": [["b", null, "2 links (kind m)"]],
+        "keys": ["Links. a: 2 links (kind k)", "Links. b: 2 links (kind m)"],
+        "describes": ["3 nodes", "3 links"],
+        "field": "size",
+        "fields": [["size", "2"]]
+      },
+      "lifecycle": {
+        "view": {
+          "x": [0.2, 0.6],
+          "y": [0.2, 0.6]
+        },
+        "change": ["target", 0, "c"]
+      }
+    },
+    "geoshape": {
+      "table": "world",
+      "mark": {
+        "type": "geoshape",
+        "labelField": "name",
+        "color": "kind"
+      },
+      "categories": ["k", "m"],
+      "hiddenStay": true,
+      "colorbar": {
+        "options": {
+          "color": "value"
+        },
+        "domain": [3, 7]
+      },
+      "selection": {
+        "click": {
+          "label": "east"
+        },
+        "lasso": {
+          "label": "west"
+        },
+        "rows": {
+          "lasso": [0],
+          "click": [1]
+        },
+        "highlight": {
+          "on": {
+            "label": "east"
+          },
+          "off": {
+            "label": "west"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "east"
+        },
+        "points": [["east", 1, "m"]],
+        "fields": [["name", "east"]],
+        "keys": ["kind. west: k", "kind. east: m"],
+        "describes": ["2 regions", "k", "m"]
+      },
+      "lifecycle": {
+        "view": {
+          "x": [0.2, 0.6],
+          "y": [0.2, 0.6]
+        },
+        "change": ["kind", 1, "k"]
+      }
+    },
+    "geopoint": {
+      "table": "samples",
+      "mark": {
+        "type": "geopoint",
+        "longitude": "x",
+        "latitude": "y",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "y"
+        },
+        "domain": [2, 40]
+      },
+      "selection": {
+        "click": {
+          "label": "Point 4"
+        },
+        "lasso": {
+          "label": "Point 4"
+        },
+        "rows": {
+          "lasso": [3],
+          "click": [3]
+        },
+        "highlight": {
+          "on": {
+            "label": "Point 4"
+          },
+          "off": {
+            "label": "Point 5"
+          }
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "Point 4"
+        },
+        "points": [["Point 4", 3, "20° N, 3° E"]],
+        "fields": [["note", "four"]],
+        "keys": ["Location. Point 1: 2° N, 0° E", "Location. Point 2: 4° N, 1° E"],
+        "describes": ["6 points"]
+      },
+      "lifecycle": {
+        "view": {
+          "x": [0.2, 0.6],
+          "y": [0.2, 0.6]
+        }
+      }
+    },
+    "point3d": {
+      "table": "spatial",
+      "mark": {
+        "type": "point3d",
+        "x": "x",
+        "y": "y",
+        "z": "z",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "z"
+        },
+        "domain": [1, 4]
+      },
+      "reading": {
+        "at": {
+          "label": "m",
+          "text": "x 1, y 3, z 4"
+        },
+        "points": [["m", 1, "x 1, y 3, z 4"]],
+        "fields": [["group", "N"]],
+        "keys": ["Points. k: x 0, y 1, z 2", "Points. m: x 1, y 3, z 4"],
+        "describes": ["4 points", "2 series"]
+      }
+    },
+    "line3d": {
+      "table": "spatial",
+      "mark": {
+        "type": "line3d",
+        "x": "x",
+        "y": "y",
+        "z": "z",
+        "series": "kind"
+      },
+      "categories": ["k", "m"],
+      "colorbar": {
+        "options": {
+          "color": "z"
+        }
+      },
+      "reading": {
+        "at": {
+          "label": "m",
+          "text": "x 1, y 3, z 4"
+        },
+        "points": [["m", 1, "x 1, y 3, z 4"]],
+        "fields": [["group", "N"]],
+        "keys": ["Line. k: x 0, y 1, z 2", "Line. k: x 2, y 2, z 1"],
+        "describes": ["4 points", "2 series"]
+      }
+    },
+    "surface": {
+      "table": "grid",
+      "mark": {
+        "type": "surface",
+        "x": "x",
+        "y": "y",
+        "z": "z"
+      },
+      "colorbar": {
+        "options": {},
+        "domain": [1, 4]
+      },
+      "reading": {
+        "at": {
+          "label": "Surface",
+          "text": "x 1, y 0, z 2"
+        },
+        "points": [["Surface", 1, "x 1, y 0, z 2"]],
+        "keys": ["Surface. Surface: x 0, y 0, z 1", "Surface. Surface: x 1, y 0, z 2"],
+        "describes": ["2 by 2", "4"],
+        "fields": [["group", "N"]]
+      }
+    },
+    "custom": {
+      "table": "samples",
+      "categories": ["k", "m"],
+      "selection": {
+        "effect": "none",
+        "rows": {
+          "brush-x": [2, 3],
+          "brush-y": [3],
+          "brush-xy": [3],
+          "lasso": [3],
+          "click": [3]
+        }
+      },
+      "reading": {
+        "points": [["m", 3, "20"]],
+        "fields": [["note", "four"]],
+        "keys": ["0. k: 2", "2. k: 3"],
+        "describes": ["k", "m", "40"]
+      }
+    }
+  },
+  "lifecycle": {
+    "samples": {
+      "change": ["y", 3, 14]
+    },
+    "field": {
+      "change": ["z", 4, 1.5]
+    },
+    "tree": {
+      "change": ["height", 1, 3]
+    },
+    "links": {
+      "change": ["value", 0, 5]
+    },
+    "nodes": {
+      "change": ["size", 1, 4]
+    },
+    "world": {
+      "change": ["value", 1, 2]
+    },
+    "spatial": {
+      "change": ["z", 1, 2]
+    },
+    "grid": {
+      "change": ["z", 1, 3.5]
+    }
+  }
+}

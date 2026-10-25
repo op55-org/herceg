@@ -53,6 +53,7 @@ import {
   GeoPoint,
   GeoShape,
   Graph,
+  Heatmap,
   Histogram,
   Line,
   Line3D,
@@ -111,6 +112,7 @@ const components = {
   Funnel,
   Radar,
   GeoShape,
+  Heatmap,
   Histogram,
   GeoPoint,
   Line3D,
@@ -1205,6 +1207,30 @@ it("casts bare dodge and swarm flags of lines, areas, and points", async () => {
     { dodge: true },
     { swarm: true },
   ]);
+});
+
+it("casts bare banded flags of heatmaps", async () => {
+  const data = table({ x: [0, 1], y: [0, 1], v: [1, 2] });
+  const { view, chart } = chartRef();
+  mount(
+    `<Chart ref="view"><Heatmap :data="data" x="x" y="y" color="v" x-banded y-banded /></Chart>`,
+    () => ({ data, view }),
+  );
+  await nextTick();
+  await chart().loading;
+  expect(optionsOf(chart()).marks[0]!.spec).toMatchObject({ xBanded: true, yBanded: true });
+});
+
+it("casts bare legend flags of annotations", async () => {
+  const data = table({ x: [0, 1], v: [1, 2] });
+  const { view, chart } = chartRef();
+  mount(
+    `<Chart ref="view"><Line :data="data" x="x" y="v" /><Rule :y="1" label="limit" legend /><Region :x1="0" :x2="1" label="window" legend /><Text :x="0" :y="1" label="note" legend /></Chart>`,
+    () => ({ data, view }),
+  );
+  await nextTick();
+  await chart().loading;
+  expect(optionsOf(chart()).marks.map((m) => m.spec.legend)).toEqual([undefined, true, true, true]);
 });
 
 it("casts bare histogram boolean flags and keeps their values in the mark spec", async () => {

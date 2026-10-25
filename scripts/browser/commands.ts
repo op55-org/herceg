@@ -18,6 +18,8 @@ export interface MouseInput {
   y: number;
   /** For presses and releases: 2 for the second of a double click. */
   clickCount?: number;
+  /** For the wheel: sideways, then down, in pixels. */
+  deltaX?: number;
   deltaY?: number;
   shift?: boolean;
   /** Control held, as the wheel zooms with it. */
@@ -57,7 +59,7 @@ const mouse: BrowserCommand<[MouseInput]> = async (context, input) => {
     const clickCount = input.clickCount ?? 1;
     if (input.type === "press") await page.mouse.down({ clickCount });
     else if (input.type === "release") await page.mouse.up({ clickCount });
-    else if (input.type === "wheel") await page.mouse.wheel(0, input.deltaY ?? 0);
+    else if (input.type === "wheel") await page.mouse.wheel(input.deltaX ?? 0, input.deltaY ?? 0);
     for (const start = Date.now(); frame && (await frame.evaluate(seen, type)) === before; )
       if (Date.now() - start > 2000)
         throw new Error(`mouse: no ${type} reached the test's frame at (${input.x}, ${input.y})`);

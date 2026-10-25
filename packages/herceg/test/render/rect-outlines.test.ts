@@ -49,7 +49,7 @@ describe("outlines of some sides", () => {
     expect(trace(sideMask(["left", "right"]))).toBe("M10 0L10 20M0 20L0 0");
   });
 
-  contractTest("bar.stroke-sides.spec", () => {
+  contractTest("bar.stroke-sides.svg", () => {
     // Capped bars: their fill, then a path of each bar's top, whichever way it goes.
     const svg = renderToSVG(
       chart([bar(zones, { x: "zone", y: "gain", stroke: "#ff0000", strokeSides: ["top"] })]),
@@ -67,7 +67,7 @@ describe("outlines of some sides", () => {
     expect(outlined[0]![1]).not.toContain('fill="none"');
   });
 
-  contractTest("region.stroke.spec", () => {
+  contractTest("region.stroke.outlined", () => {
     // A band across the plot outlines its two edges.
     const svg = renderToSVG(chart([region({ x1: 0.25, x2: 0.5, stroke: "#ff0000" })]));
     const [edges] = stroked(svg, "#ff0000");
