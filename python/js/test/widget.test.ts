@@ -215,6 +215,9 @@ describe("notebook widget", () => {
       _listening: [],
     });
     const model = new MockModel({ _chart: state, _listening: [] });
+    // Frames take no time from the first: values change at once after a
+    // slow frame, and a loaded machine's first frame can be.
+    vi.useFakeTimers({ toFake: ["performance"] });
     const [host] = mount(model);
     const [staticHost] = mount(reference);
     host!.style.cssText = "position:fixed;left:0;top:0;width:400px";
