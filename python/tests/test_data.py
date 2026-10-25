@@ -6,6 +6,7 @@ import polars as pl
 import pyarrow as pa
 import pytest
 
+import herceg as hg
 from herceg._data import convert, to_columns
 
 JAN_1 = 1_767_225_600_000  # 2026-01-01T00:00:00Z in epoch milliseconds
@@ -103,7 +104,7 @@ def test_records_and_mappings():
 
 
 def test_unsupported_input_is_explained():
-    with pytest.raises(TypeError, match="data: expected a pandas, Polars, or PyArrow table"):
+    with pytest.raises(hg.ChartError, match="data: expected a pandas, Polars, or PyArrow table"):
         to_columns(42)
     with pytest.raises(ValueError, match="one-dimensional"):
         convert(np.zeros((2, 2)))
@@ -142,7 +143,7 @@ def test_object_columns_are_inferred_not_stringified():
     assert columns["day"].kind == "time" and columns["day"].values[0] == JAN_1
     assert columns["count"].kind == "number"
     assert columns["missing"].values.tolist() == [-1, 0]
-    with pytest.raises(TypeError, match="Column 'mixed': the column mixes number and text"):
+    with pytest.raises(hg.ChartError, match="Column 'mixed': the column mixes number and text"):
         to_columns({"mixed": ["a", 1]})
     times = convert([pd.NaT, dt.datetime(2026, 1, 1), np.nan])
     assert np.isnan(times.values[0]) and times.values[1] == JAN_1 and np.isnan(times.values[2])

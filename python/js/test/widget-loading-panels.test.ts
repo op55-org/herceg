@@ -31,6 +31,13 @@ it("lets a panel's settings go with it through charts drawn before the panels ar
     } as Snapshot["spec"],
   });
   const model = new MockModel({ _chart: subplots(0, ["a", "b"], false), _listening: [] });
+  // Python drawing the chart again from other marks (an express chart computed again).
+  const redraw = (shot: Snapshot) =>
+    model.receive(
+      { type: "chart", revision: shot.revision, spec: shot.spec, rows: {} },
+      // Python's buffers, as the comm delivers them.
+      shot.buffers as DataView[],
+    );
   const widget = widgetModule();
   cleanups.push(widget.initialize({ model }));
   const host = document.createElement("div");
@@ -45,13 +52,11 @@ it("lets a panel's settings go with it through charts drawn before the panels ar
   first.setVisibility(entry!.key, false);
   first.setVisibility(entry!.key, true, { panel: "a" });
   // Drawn with c in a's place, it waits; drawn with a again before it is done.
-  model.set("_chart", subplots(1, ["c", "b"], true));
+  redraw(subplots(1, ["c", "b"], true));
   expect((listener.mock.instances.at(-1) as MountedChart).getPanels()).toEqual([]);
-  model.set("_chart", subplots(2, ["a", "b"], true));
+  redraw(subplots(2, ["a", "b"], true));
   const last = listener.mock.instances.at(-1) as MountedChart;
-  await last.loading;
-  last.render();
   // a is a new panel: it shows the chart's visibility.
-  expect(last.getHiddenKeys()).toEqual([entry!.key]);
+  await vi.waitFor(() => expect(last.getHiddenKeys()).toEqual([entry!.key]));
   expect(last.getHiddenKeys({ panel: "a" })).toEqual([entry!.key]);
 });

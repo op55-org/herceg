@@ -37,7 +37,7 @@ DATA = {"x": [0.0, 1.0], "y": [1.0, 2.0], "group": ["a", "b"]}
         ("heatmap", "vmin", "did you mean 'color_domain'?"),
         ("heatmap", "vmax", "did you mean 'color_domain'?"),
         ("histogram", "density", 'did you mean normalize="density"?'),
-        ("line", "zorder", "marks draw in the order given; add the mark later to draw it on top"),
+        ("line", "zorder", "did you mean 'z_index'? marks draw in the order given, or by z_index"),
     ],
 )
 def test_matplotlib_option_errors_name_only_options_the_mark_takes(surface, mark, foreign, hint):
@@ -164,7 +164,7 @@ def test_dash_errors_list_all_accepted_strings(bad, surface):
         else:
             hg.Chart().rule(y=1, dash=bad)
     assert str(error.value).startswith(
-        f'{mark} dash: expected an array or "-", "--", ":", or "-.";'
+        f'{mark} dash: expected a pixel pattern such as [4, 2], or "-", "--", ":", or "-.";'
     )
 
 

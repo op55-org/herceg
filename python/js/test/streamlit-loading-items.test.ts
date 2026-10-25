@@ -76,6 +76,8 @@ it("keeps untouched nodes where a data change left them through reruns before lo
     await frame();
     // A data change lays the ring out from where it was.
     run(parent, ring(true, false));
+    // Once it has restored the views, which waits for what the chart loads.
+    await charts().at(-1)!.loading;
     await frame();
     const far = place("n10");
     // A panel's legend, then a title: two runs while the compiler loads.

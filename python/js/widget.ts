@@ -21,11 +21,17 @@ import {
   type Viewport,
 } from "herceg";
 import {
+  type ChartErrorInfo,
   type ChartSpec,
   type ColumnSpec,
+  chartError,
   type Expression,
+  errorInfo,
   loadSpec,
+  restoreVisibility,
   type SpecBuffer,
+  type VisibilityState,
+  visibilityState,
 } from "herceg/spec";
 import { resolveCamera, sameCamera } from "../../packages/herceg/src/three/camera.ts";
 import {
@@ -40,9 +46,11 @@ import {
   inspectionPayload,
   MOVES,
   namesCategories,
+  ownPanels,
   PLANES,
   positionsValue,
   recordPosition,
+  restoreViewportState,
   type SelectionPayload,
   selectionPayload,
   selectionReport,
@@ -50,8 +58,12 @@ import {
   showItemPositions,
   statePanels,
   targetOf,
+  type ViewportEventPayload,
   type ViewportPayload,
+  type ViewportStatePayload,
+  viewportEventPayload,
   viewportPayload,
+  viewportStatePayload,
 } from "./events.ts";
 import { planeKeys } from "./planes.ts";
 import { resetColumns } from "./tables.ts";
@@ -63,25 +75,48 @@ export interface Model {
   on(event: string, callback: (...args: never[]) => void): void;
 }
 
+/**
+ * What a chart's views show: its axes, as the engine reads them
+ * (`viewportStatePayload`), and each map's or network's subplot's plane,
+ * which that leaves out, by panel.
+ */
+export interface ViewsPayload {
+  axes: ViewportStatePayload;
+  planes: Record<string, ViewportPayload>;
+}
+
+/**
+ * A change of view Python asks for (`set_viewport`), which each display's
+ * chart makes or refuses: the axes given (none to reset every one) of
+ * `panel`'s instances, or of those every panel shares.
+ */
+export interface ViewportRequest {
+  request: number;
+  viewport: Partial<Omit<ViewportPayload, "time">> | null;
+  panel?: string;
+}
+
 /** Interaction state shared by Python and every display. */
 interface ViewStates {
   camera: Camera | null;
   select: SelectionPayload | null;
-  viewport: ViewportPayload | null;
+  viewport: ViewsPayload | null;
   drill: DrillPayload | null;
   itemMove: ItemPositionsPayload;
+  visibility: VisibilityState | null;
 }
 type ViewEvent = keyof ViewStates;
 type ViewState = ViewStates[ViewEvent];
 const stateKeys = {
   camera: "camera",
   select: "selection",
-  viewport: "viewport",
+  viewport: "views",
   drill: "drill_root",
   itemMove: "item_positions",
+  visibility: "visibility",
 } as const;
-/** Events whose state each map or network subplot (or tree subplot) has of its own. */
-type PanelEvent = "viewport" | "drill" | "itemMove" | "camera";
+/** Events whose state each network subplot (or tree or 3D subplot) has of its own. */
+type PanelEvent = "drill" | "itemMove" | "camera";
 
 /**
  * Where a state is kept: the event's name for the chart's, "event:panel"
@@ -89,17 +124,6 @@ type PanelEvent = "viewport" | "drill" | "itemMove" | "camera";
  */
 function stateKey(event: ViewEvent, panel = ""): string {
   return panel === "" ? event : `${event}:${panel}`;
-}
-
-/**
- * How much a hidden key (JSON) names: 0 a mark whole (`{"mark":…}`), 1
- * what series stand for (`{"field":…,"value":…}`), 2 rows or a group of a
- * mark's items (`{"mark":…,"field":…}`), 3 a series or an item (`[…]`).
- */
-function breadthOf(key: string): number {
-  if (key[0] === "[") return 3;
-  const { mark, ...rest } = JSON.parse(key) as { mark?: unknown };
-  return mark === undefined ? 1 : Object.keys(rest).length > 0 ? 2 : 0;
 }
 
 /**
@@ -126,10 +150,19 @@ export interface Snapshot {
   spec: ChartSpec;
   buffers: SpecBuffer[];
   selection: SelectionPayload | null;
-  viewport: ViewportPayload | null;
+  /** The views as a display last reported them; null before any did. */
+  viewport: ViewsPayload | null;
+  /** Python's changes of view no display has made yet, in order. */
+  viewportRequests?: ViewportRequest[];
+  /**
+   * What the legends hide, as a display last reported or Python set it,
+   * and whether of a chart drawn before this one (`carried`), whose marks
+   * may be others now.
+   */
+  visibility?: { state: VisibilityState; carried: boolean } | null;
   drill_root: DrillPayload | null;
   item_positions: ItemPositionsPayload;
-  /** The states of subplots' maps, networks, and trees, by event and panel. */
+  /** The states of subplots' networks, trees, and 3D marks, by event and panel. */
   panel_states?: Partial<Record<PanelEvent, Record<string, ViewState>>>;
   /**
    * Per table a row selection binds, how Python numbers its rows: the rows
@@ -167,7 +200,9 @@ export type Update = { revision: number } & (
   | { type: "options"; options: Record<string, unknown> }
   | { type: "select"; selection: SelectionPayload | null; origin?: string }
   | { type: "camera"; camera: Camera | null; panel?: string; origin?: string }
-  | { type: "viewport"; viewport: ViewportPayload | null; panel?: string; origin?: string }
+  | { type: "viewport"; views: ViewsPayload | null; origin?: string }
+  | ({ type: "setViewport" } & ViewportRequest)
+  | { type: "visibility"; visibility: VisibilityState | null; origin?: string }
   | { type: "drill"; drill_root: DrillPayload | null; panel?: string; origin?: string }
   | { type: "itemMove"; item_positions: ItemPositionsPayload; panel?: string; origin?: string }
   | { type: "rows"; table: string; channel: string; selection: RowsPayload | null; origin?: string }
@@ -181,14 +216,24 @@ interface View {
   positions: Map<string, ItemPositionsPayload>;
   /** The last error shown above the chart. */
   error: HTMLElement | undefined;
-  /** What panels' legends hid and showed unlike the chart, as its chart last said. */
-  overrides?: Overrides | undefined;
-  /** While its chart waits for its panels, the visibility it is to restore, which a chart drawn before then takes over. */
-  pending?: { hidden: readonly string[]; overrides: Overrides | undefined } | undefined;
+  /** The ids of its chart's subplots. */
+  panels?: readonly string[];
+  /**
+   * While its chart takes the views agreed on (see `#follow`): the changes
+   * of view it made meanwhile, which go to no one, and Python's requests
+   * waiting for it.
+   */
+  following?: { event: ViewportEventPayload | undefined; requests: ViewportRequest[] } | undefined;
+  /** While its chart restores what the legends hid: done once it has, which later states wait for. */
+  visibility?: Promise<void> | undefined;
+  /**
+   * The latest state sent to it while it restores, which it shows once it
+   * has: what restoring hides meanwhile goes to no one.
+   */
+  newer?: { state: VisibilityState | null } | undefined;
 }
 
-/** By panel, the keys its legends hid and showed unlike the chart. */
-type Overrides = Readonly<Record<string, { hidden: readonly string[]; shown: readonly string[] }>>;
+type Range = readonly [number, number];
 
 const DEFAULT_HEIGHT = 320;
 /** Hover, zoom, and selection reach Python at most this often, the latest last. */
@@ -234,6 +279,14 @@ class Widget {
   /** Moves not reported yet, by panel, and the view they come from. */
   #pendingPositions = new Map<string, ItemPositionsPayload>();
   #itemSource: View | undefined;
+  /**
+   * Python's changes of view no display has made or refused yet: every
+   * display drawn makes them, and the first to settle one tells Python.
+   */
+  #requests: ViewportRequest[] = [];
+
+  /** Whether what the legends hide was agreed on for a chart drawn before this one. */
+  #visibilityCarried = false;
 
   constructor(model: Model) {
     this.#model = model;
@@ -249,7 +302,7 @@ class Widget {
       // that has applied as many changes already draws the same chart.
       if (!this.#resyncing && snapshot.revision <= this.#revision) return;
       this.#load(snapshot);
-      for (const view of this.#views) this.#mount(view, true);
+      for (const view of this.#views) this.#mount(view, true, true);
     });
     model.on("msg:custom", (message: Update | CursorMessage, buffers: DataView[]) =>
       this.#receive(message, buffers ?? []),
@@ -291,7 +344,8 @@ class Widget {
     // Views and rows waiting to be reported predate the snapshot's.
     this.#outbox.cancel("select");
     this.#outbox.cancelAll("camera");
-    this.#outbox.cancelAll("viewport");
+    this.#outbox.cancel("viewport");
+    this.#outbox.cancel("visibility");
     this.#outbox.cancelAll("drill");
     this.#cancelItems();
     this.#outbox.cancelAll("rows:");
@@ -299,9 +353,12 @@ class Widget {
       ["camera", snapshot.camera ?? null],
       ["select", snapshot.selection],
       ["viewport", snapshot.viewport],
+      ["visibility", snapshot.visibility?.state ?? null],
       ["drill", snapshot.drill_root],
       ["itemMove", snapshot.item_positions],
     ]);
+    this.#requests = [...(snapshot.viewportRequests ?? [])];
+    this.#visibilityCarried = snapshot.visibility?.carried ?? false;
     for (const [event, states] of Object.entries(snapshot.panel_states ?? {}))
       for (const [panel, state] of Object.entries(states))
         this.#states.set(stateKey(event as PanelEvent, panel), state);
@@ -417,42 +474,26 @@ class Widget {
   }
 
   /**
-   * Draws the chart in a view. A chart drawn again (`again`, from a whole
-   * chart Python sent) keeps what its legends hid, in the chart and in each
-   * panel, whose keys name the values series stand for
-   * (`{"field":…,"value":…}`), or series, rows, or the whole of marks named
-   * by an id the chart still has (`["id",…]`, `{"mark":"id",…}`; a mark's
-   * place may hold another mark now), and the keyboard focus.
+   * Draws the chart in a view. A chart drawn again (`again`) keeps its
+   * views (as the views agreed on) and the keyboard focus, and, drawn from
+   * other marks Python sent, what its legends hid where its marks and
+   * series still are (see `restoreVisibility`); drawn from a snapshot
+   * (`snapshot`), it hides what the snapshot says.
    */
-  #mount(view: View, again = false) {
+  #mount(view: View, again = false, snapshot = false) {
     const previous = again ? view.chart : undefined;
-    const named = new Set(this.#config?.marks.map(({ spec }) => spec.id) ?? []);
-    const kept = (keys: readonly string[]) =>
-      keys.filter((key) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(key);
-        } catch {
-          return false;
-        }
-        if (typeof parsed !== "object" || parsed === null) return false;
-        const owner = Array.isArray(parsed) ? parsed[0] : (parsed as { mark?: unknown }).mark;
-        if (owner !== undefined) return typeof owner === "string" && named.has(owner);
-        return "value" in parsed;
-      });
-    // A chart still waiting to restore hands on what it was to restore.
-    const pending = previous ? view.pending : undefined;
-    const hidden = kept(pending?.hidden ?? previous?.getHiddenKeys() ?? []);
-    const overrides = !this.#config?.panels
-      ? undefined
-      : pending
-        ? pending.overrides
-        : previous && view.overrides;
-    view.overrides = undefined;
-    view.pending = undefined;
+    // Read before the chart goes: what it hides, is still to restore, or
+    // was sent to show once it has.
+    const before =
+      previous &&
+      (view.newer ? (view.newer.state ?? { hiddenKeys: [] }) : visibilityState(previous));
+    const carried = before && !snapshot ? ownPanels(before, view.panels ?? []) : undefined;
     const focused = again && view.element.contains(view.element.ownerDocument.activeElement);
     view.chart?.destroy();
     view.chart = undefined;
+    view.following = undefined;
+    view.visibility = undefined;
+    view.newer = undefined;
     view.error?.remove();
     view.element.replaceChildren();
     this.#size(view);
@@ -468,54 +509,42 @@ class Widget {
       return;
     }
     view.chart = chart;
+    view.panels = this.#config.panels?.list.map(({ id }) => id) ?? [];
     view.positions = new Map();
-    chart.on("visibility", ({ panels }) => {
-      view.overrides = panels;
-    });
     if (focused) view.element.querySelector<HTMLElement>("[tabindex]")?.focus();
     const config = this.#config;
-    // Each subplot's map, network, or tree has a state of its own.
-    const planes = config.panels ? statePanels(config, PLANES) : [];
+    // Each subplot's network or tree has a state of its own.
     const cameras = statePanels(config, CAMERAS);
     const drills = statePanels(config, DRILLS);
     const moves = statePanels(config, MOVES);
+    // What the legends hid: the chart's before, or as agreed on, which a
+    // chart replaced since agreed on for other marks. Restoring waits for
+    // what the chart loads itself; a state sent meanwhile is newer.
+    const restoring = carried ?? (this.#visibilityCarried ? this.#state("visibility") : null);
+    if (restoring) {
+      const done: Promise<void> = restoreVisibility(chart, restoring).then(
+        () => {
+          if (view.visibility === done) view.visibility = undefined;
+        },
+        () => {},
+      );
+      view.visibility = done;
+    }
     // What Python and the last chart left: restored before listening, so
     // that restoring does not echo back to Python, or for a subplot chart
     // whose first scene waits for its guides, once its panels are known
     // (what is reported then is what Python has, and goes no further).
     const restore = () => {
-      if (hidden.length) chart.setHiddenKeys(hidden);
-      // Each panel's own settings, broad before narrow, as setting one
-      // replaces the narrower ones it covers (model/panel-legends.ts): of
-      // marks whole, of what series stand for, of rows (or groups of a
-      // mark's items), then of series.
-      for (const [panel, own] of Object.entries(overrides ?? {})) {
-        if (!config.panels?.list.some(({ id }) => id === panel)) continue;
-        for (const breadth of [0, 1, 2, 3])
-          for (const [keys, visible] of [
-            [own.hidden, false],
-            [own.shown, true],
-          ] as const) {
-            const set = kept(keys).filter((key) => breadthOf(key) === breadth);
-            if (set.length) chart.setVisibility(set, visible, { panel });
-          }
-      }
-      // The chart's view is of the x scale its panels share, if they share
-      // one; subplots' planes, and panels with x scales of their own (insets,
-      // say), have views of their own.
-      if (!config.panels || chart.getPanels().some(({ x }) => x?.instance === ""))
-        this.#show(view, "viewport", this.#state("viewport"));
-      // Views of panels whose x is the chart's now are the chart's view, and go.
-      const panels = chart.getPanels();
-      for (const key of [...this.#states.keys()])
-        if (key.startsWith("viewport:")) {
-          const panel = key.slice("viewport:".length);
-          const own =
-            planes.includes(panel) ||
-            panels.some(({ key, x }) => key === panel && x !== undefined && x.instance !== "");
-          if (own) this.#show(view, "viewport", this.#state("viewport", panel), false, panel);
-          else this.#states.delete(key);
+      const agreed = this.#state("visibility");
+      if (view.newer || (!restoring && agreed)) {
+        try {
+          this.#showVisibility(view, view.newer ? view.newer.state : agreed);
+        } catch (error) {
+          this.#refused(error);
         }
+      }
+      // Python's changes of view no display made yet: this one makes them too.
+      void this.#follow(view, this.#state("viewport"), this.#requests);
       for (const panel of cameras)
         this.#show(view, "camera", this.#state("camera", panel), true, panel);
       for (const panel of drills)
@@ -541,21 +570,17 @@ class Widget {
     chart.on("select", (selection) =>
       this.#report("select", view, selectionReport(selection, selection.owner)),
     );
-    // Python reads views by panel: a subplot's map or network names its
-    // panel, as does each panel of an x scale that panels have of their
-    // own; panels of the x every panel shares, and a map or network of the
-    // whole chart, are the chart's own ("").
-    chart.on("viewport", ({ views }) => {
-      const axes = chart.getPanels();
-      const reported = new Set<string>();
-      for (const { panel, types: _, ...shown } of views) {
-        const x = axes.find(({ key }) => key === panel)?.x;
-        const key = x ? (x.instance === "" ? "" : panel) : config.panels ? panel : "";
-        if (reported.has(key)) continue;
-        reported.add(key);
-        const payload = viewportPayload(chart, shown, planes.includes(key), key || undefined);
-        this.#report("viewport", view, payload, key);
-      }
+    // Python reads the views as the engine does, by scale instance and
+    // panel, beside the planes of subplots' maps and networks. A change
+    // made while the chart takes the views agreed on goes to no one: what
+    // it comes to is reported once it has.
+    chart.on("viewport", (event) => {
+      const payload = viewportEventPayload(event);
+      if (view.following) view.following.event = merged(view.following.event, payload);
+      else this.#report("viewport", view, this.#viewsOf(chart), "", false, payload);
+    });
+    chart.on("visibility", (state) => {
+      if (!view.newer) this.#report("visibility", view, state);
     });
     chart.on("drill", (root) => {
       if (!this.#applying) this.#report("drill", view, drillPayload(root), root.panels?.[0] ?? "");
@@ -583,30 +608,16 @@ class Widget {
       for (const panel of moves) this.#show(view, "itemMove", this.#positions(panel), true, panel);
     });
     if (!waiting) restored();
-    else {
-      // What a chart drawn before then takes over: what this one would
-      // restore, of its panels and marks.
-      view.pending = {
-        hidden,
-        overrides:
-          overrides &&
-          Object.fromEntries(
-            Object.entries(overrides)
-              .filter(([panel]) => config.panels?.list.some(({ id }) => id === panel))
-              .map(([panel, own]) => [panel, { hidden: kept(own.hidden), shown: kept(own.shown) }]),
-          ),
-      };
+    else
       waiting.then(
         () => {
           if (view.chart !== chart) return;
-          view.pending = undefined;
           chart.render();
           restore();
           restored();
         },
         () => {},
       );
-    }
     chart.on("hover", ({ inspection }) => {
       if (!this.#listening("hover")) return;
       this.#outbox.post("hover", {
@@ -625,6 +636,139 @@ class Widget {
     chart.on("camera", ({ camera, panels }) =>
       this.#report("camera", view, camera, panels?.[0] ?? ""),
     );
+  }
+
+  /** What a display's chart shows: its axes' views, and its subplots' maps' and networks'. */
+  #viewsOf(chart: Chart): ViewsPayload {
+    const planes = this.#config?.panels ? statePanels(this.#config, PLANES) : [];
+    return {
+      axes: viewportStatePayload(chart),
+      planes: Object.fromEntries(
+        planes.map((panel) => [panel, viewportPayload(chart, chart.getViewport({ panel }), true)]),
+      ),
+    };
+  }
+
+  /**
+   * Gives a display's chart the views agreed on (`views`; none before a
+   * display reported any): its axes' through the engine, which finds each
+   * scale instance again where it is the same one and fits the others, and
+   * its subplots' planes. Then makes Python's `requests` not yet made. A
+   * change of view made meanwhile goes to no one; if the chart then shows
+   * other views than those agreed on (limits it applies, panels it lacks),
+   * those are reported, with the changes that made them.
+   */
+  async #follow(view: View, views: ViewsPayload | null, requests: readonly ViewportRequest[] = []) {
+    const chart = view.chart!;
+    const following = {
+      event: view.following?.event,
+      requests: [...(view.following?.requests ?? []), ...requests],
+    };
+    view.following = following;
+    try {
+      if (views?.axes.scales.length) await restoreViewportState(chart, views.axes);
+    } catch (error) {
+      // A state another chart reported that this one cannot read: its own views stay.
+      console.error("herceg: could not restore the views", error);
+    }
+    // A chart drawn again since, or another state to follow, which won.
+    if (view.chart !== chart || view.following !== following) return;
+    try {
+      this.#showPlanes(chart, views);
+    } catch (error) {
+      console.error("herceg: could not restore a map's or network's view", error);
+    }
+    view.following = undefined;
+    for (const request of following.requests) this.#make(view, request);
+    const now = this.#viewsOf(chart);
+    if (valuesOf("viewport", now) !== valuesOf("viewport", this.#state("viewport")))
+      this.#report("viewport", view, now, "", false, following.event);
+  }
+
+  /** Shows the views of maps and networks agreed on: the chart's one, or each subplot's. */
+  #showPlanes(chart: Chart, views: ViewsPayload | null) {
+    const config = this.#config!;
+    if (!config.panels) {
+      const plane = config.marks.some((mark) => PLANES.includes(mark.spec.type));
+      const shown = views?.axes.view;
+      if (plane && shown)
+        chart.setViewport({ x: shown.x as Range | null, y: shown.y as Range | null });
+      return;
+    }
+    for (const panel of statePanels(config, PLANES)) {
+      const shown = views?.planes[panel];
+      if (shown)
+        chart.setViewport({ x: shown.x as Range | null, y: shown.y as Range | null }, { panel });
+    }
+  }
+
+  /**
+   * Makes a change of view Python asked for in a display's chart, as its
+   * engine takes it, and settles it (see `#settle`). A display taking the
+   * views agreed on makes it once it has.
+   */
+  #make(view: View, request: ViewportRequest) {
+    if (view.following) {
+      view.following.requests.push(request);
+      return;
+    }
+    const chart = view.chart!;
+    const { viewport, panel } = request;
+    const target = panel === undefined ? undefined : { panel };
+    try {
+      if (viewport === null) chart.setViewport(null, target);
+      else if (this.#plane(panel)) {
+        const { x, y } = viewport as { x?: Range | null; y?: Range | null };
+        chart.setViewport({ ...(x !== undefined && { x }), ...(y !== undefined && { y }) }, target);
+      } else {
+        // Categories named by label are read off the data as drawn.
+        if (Object.values(viewport).some((ends) => typeof ends?.[0] === "string")) chart.render();
+        const shown = chartViewport(chart, { x: null, y: null, yRight: null, ...viewport }, panel);
+        const change: Partial<Viewport> = {};
+        for (const axis of ["x", "y", "yRight"] as const)
+          if (viewport[axis] !== undefined) change[axis] = shown[axis];
+        chart.setViewport(change, target);
+      }
+    } catch (error) {
+      this.#settle(request, error);
+      return;
+    }
+    this.#settle(request);
+  }
+
+  /**
+   * Tells Python a display made a change of view it asked for, or refused
+   * it (`error`): the first display to do either settles it, and the
+   * others' make no news.
+   */
+  #settle({ request }: ViewportRequest, error?: unknown) {
+    const at = this.#requests.findIndex((pending) => pending.request === request);
+    if (at < 0) return;
+    this.#requests.splice(at, 1);
+    if (error === undefined) this.#model.send({ type: "applied", request, origin: this.#origin });
+    else this.#refused(error, request);
+  }
+
+  /** Whether `panel` (none for the chart's own view) is a map's or network's plane. */
+  #plane(panel: string | undefined): boolean {
+    const config = this.#config!;
+    if (panel === undefined)
+      return !config.panels && config.marks.some((mark) => PLANES.includes(mark.spec.type));
+    return !!config.panels && statePanels(config, PLANES).includes(panel);
+  }
+
+  /**
+   * Tells Python what a chart refused of what it asked (`request`, a change
+   * of view), or of an update: as the engine says it, with its code and path.
+   */
+  #refused(error: unknown, request?: number) {
+    const info: ChartErrorInfo = errorInfo(chartError(error, "compile"));
+    this.#model.send({
+      type: "error",
+      error: info,
+      origin: this.#origin,
+      ...(request !== undefined && { request }),
+    });
   }
 
   #size({ element }: View) {
@@ -729,6 +873,7 @@ class Widget {
     payload: ViewStates[K],
     panel = "",
     resend = false,
+    change?: ViewportEventPayload,
   ) {
     const key = stateKey(event, panel);
     const same = valuesOf(event, payload) === valuesOf(event, this.#state(event, panel));
@@ -747,7 +892,19 @@ class Widget {
     }
     // The revision tells Python which of its changes this one was made after.
     const value = { [stateKeys[event]]: payload, ...(panel && { panel }) };
-    const report = { type: event, ...value, origin: this.#origin, revision: this.#revision };
+    const report: Record<string, unknown> = {
+      type: event,
+      ...value,
+      origin: this.#origin,
+      revision: this.#revision,
+    };
+    // Changes of view held back by the throttle reach Python as one, of
+    // every instance and panel they changed.
+    if (event === "viewport") {
+      const held = this.#outbox.held(key) as { event?: ViewportEventPayload } | undefined;
+      const all = merged(held?.event, change);
+      if (all) report.event = all;
+    }
     this.#outbox.post(key, report);
   }
 
@@ -772,6 +929,14 @@ class Widget {
 
   #show(view: View, event: ViewEvent, payload: ViewState, restore = false, panel = "") {
     const chart = view.chart!;
+    if (event === "viewport") {
+      void this.#follow(view, payload as ViewsPayload | null);
+      return;
+    }
+    if (event === "visibility") {
+      this.#showVisibility(view, payload as VisibilityState | null);
+      return;
+    }
     if (event === "camera") {
       chart.setCamera(payload as Camera | null, targetOf(panel));
       return;
@@ -800,42 +965,34 @@ class Widget {
         ...(target !== undefined && { panel: target }),
       });
       if (selection?.lasso && !selection.categories) this.#learnCategories(chart, selection);
-      return;
     }
-    const viewport = payload as ViewportPayload | null;
-    // Categories named by label are read off the data as drawn: changes
-    // still to draw are drawn first.
-    const labels = [viewport?.x, viewport?.y].some((ends) => typeof ends?.[0] === "string");
-    if (labels) chart.render();
-    const panels = chart.getPanels();
-    if (panel !== "") {
-      // A subplot's plane: numbers in its units; a panel's own x scale: as
-      // on its axis, unless it shows categories, which do not zoom.
-      const plane = statePanels(this.#config!, PLANES).includes(panel);
-      const zooms = panels.find(({ key }) => key === panel)?.x?.canSetViewport;
-      if (!plane && !zooms) return;
-      chart.setViewport(
-        plane
-          ? ({ x: viewport?.x ?? null, y: viewport?.y ?? null } as Viewport)
-          : { x: chartViewport(chart, viewport, panel).x },
-        { panel },
-      );
-      return;
+  }
+
+  /**
+   * Hides what `state` says in a display's chart: at once (refusals thrown),
+   * or once it has restored what its legends hid, which `state` is newer
+   * than (refusals going back to Python).
+   */
+  #showVisibility(view: View, state: VisibilityState | null) {
+    const chart = view.chart!;
+    const show = () => chart.setHiddenKeys(state?.hiddenKeys ?? [], { panels: state?.panels });
+    if (!view.visibility) {
+      view.newer = undefined;
+      return show();
     }
-    const restored = chartViewport(chart, viewport);
-    // Charts whose panels have y scales of their own have no y viewport.
-    const first = panels.find(({ x }) => x?.instance === "") ?? panels.find(({ x }) => x);
-    chart.setViewport({
-      x: first?.x && !first.x.canSetViewport ? null : restored.x,
-      y:
-        (!this.#config?.panels &&
-          this.#config?.marks.some((mark) => PLANES.includes(mark.spec.type))) ||
-        (first?.y?.canSetViewport && first.y.instance === "")
-          ? restored.y
-          : null,
-      yRight:
-        first?.yRight?.canSetViewport && first.yRight.instance === "" ? restored.yRight : null,
+    const newer = { state };
+    view.newer = newer;
+    const done: Promise<void> = view.visibility.then(() => {
+      if (view.visibility === done) view.visibility = undefined;
+      if (view.chart !== chart) return;
+      if (view.newer === newer) view.newer = undefined;
+      try {
+        show();
+      } catch (error) {
+        this.#refused(error);
+      }
     });
+    view.visibility = done;
   }
 
   /**
@@ -875,6 +1032,7 @@ class Widget {
     } catch (error) {
       console.error("herceg: could not apply an update from Python", error);
       for (const view of this.#views) showError(view, error);
+      this.#refused(error);
       return;
     }
     // An update applied: the banner over a chart of one that was not goes.
@@ -927,6 +1085,10 @@ class Widget {
         // again keeping their zoom and brush, and reports still on their
         // way to Python go on.
         this.#loadChart(message.spec, buffers, message.rows);
+        // Changes of view asked for the chart it replaces go, as in Python;
+        // what the legends hide was agreed on for its marks.
+        this.#requests = [];
+        this.#visibilityCarried = true;
         // Its networks' data is new, so their moved nodes go, as Python lets
         // go of them, with any moves still waiting to be reported.
         this.#cancelItems();
@@ -938,6 +1100,9 @@ class Widget {
         }
         return;
       case "options":
+        // Changes of view asked for before go, as in Python: the options may change the scales.
+        this.#requests = [];
+        for (const view of this.#views) if (view.following) view.following.requests = [];
         this.#updateOptions(message.options);
         return;
       case "rows":
@@ -982,14 +1147,23 @@ class Widget {
         }
         return;
       }
+      case "setViewport": {
+        const { type: _, revision: __, ...request } = message;
+        // Every display makes it, those drawn later too while none has.
+        this.#requests.push(request);
+        for (const view of this.#views) if (this.#ready(view)) this.#make(view, request);
+        return;
+      }
       case "camera":
       case "select":
       case "viewport":
+      case "visibility":
       case "drill": {
         // This browser's own view, back from Python: it is already drawn,
         // and newer ones may be on their way.
         if (message.origin === this.#origin) return;
-        const panel = message.type === "select" ? "" : (message.panel ?? "");
+        const panel =
+          message.type === "camera" || message.type === "drill" ? (message.panel ?? "") : "";
         const key = stateKey(message.type, panel);
         // A view from Python or another browser replaces any not yet reported.
         this.#outbox.cancel(key);
@@ -999,9 +1173,17 @@ class Widget {
             : message.type === "select"
               ? message.selection
               : message.type === "viewport"
-                ? message.viewport
-                : message.drill_root;
+                ? message.views
+                : message.type === "visibility"
+                  ? message.visibility
+                  : message.drill_root;
         this.#states.set(key, payload);
+        if (message.type === "visibility") {
+          this.#visibilityCarried = false;
+          // Displays waiting for their panels show it once they have them.
+          for (const view of this.#views)
+            if (view.chart && !this.#ready(view)) view.newer = { state: message.visibility };
+        }
         // Rows travel apart ("rows"): the browser whose view was brushed wrote
         // them, and Python sets them with `row_selection`.
         const name = panel ? "widget.panel_drill_roots" : "widget.drill_root";
@@ -1012,6 +1194,11 @@ class Widget {
           try {
             this.#show(view, message.type, payload, false, panel);
           } catch (error) {
+            // Keys a chart cannot hide go back to Python, refused.
+            if (message.type === "visibility") {
+              this.#refused(error);
+              return;
+            }
             if (message.type !== "drill") throw error;
             this.#report("drill", view, root(), panel);
             throw new Error(
@@ -1040,6 +1227,8 @@ class Widget {
   /**
    * A map's view and lasso belong to its resolved projection, which a data
    * update can change: they go where it did, each subplot's on its own.
+   * Displays fit those views, and report it; without one, the views agreed
+   * on lose them, and Python hears so.
    */
   #keepMapView() {
     const next = this.#config ? planeKeys(this.#config) : new Map<string, string>();
@@ -1047,8 +1236,21 @@ class Widget {
     this.#planeKeys = next;
     for (const [panel, key] of previous ?? []) {
       if (!key.startsWith("map:") || next.get(panel) === key) continue;
-      this.#outbox.cancel(stateKey("viewport", panel));
-      this.#report("viewport", undefined, null, panel);
+      const ready = [...this.#views].filter((view) => this.#ready(view));
+      const target = panel === "" ? undefined : { panel };
+      for (const view of ready) view.chart!.setViewport({ x: null, y: null }, target);
+      const agreed = this.#state("viewport");
+      if (!ready.length && agreed) {
+        const fitted = { x: null, y: null, yRight: null, time: [] };
+        this.#outbox.cancel("viewport");
+        this.#report(
+          "viewport",
+          undefined,
+          panel === ""
+            ? { ...agreed, axes: { ...agreed.axes, view: fitted } }
+            : { ...agreed, planes: { ...agreed.planes, [panel]: fitted } },
+        );
+      }
       if (panel !== "" && !this.#state("select")?.panels?.includes(panel)) continue;
       this.#outbox.cancel("select");
       this.#report("select", undefined, null);
@@ -1192,18 +1394,37 @@ function appendBatch(table: Table, rows: Table): Parameters<Table["append"]>[0] 
 }
 
 /**
- * A selection's or viewport's values, whichever axes hold times: equal for
- * an echo of the same state. A viewport of no zoom is no viewport.
+ * A state's values, whichever axes hold times: equal for an echo of the
+ * same state.
  */
 function valuesOf(event: ViewEvent, state: ViewState): string {
-  if (event === "drill" || event === "camera") return JSON.stringify(state);
+  if (event === "drill" || event === "camera" || event === "visibility")
+    return JSON.stringify(state);
+  if (event === "viewport") {
+    // Displays count their own changes of view: the views are what count.
+    const views = state as ViewsPayload | null;
+    return JSON.stringify(views && [{ ...views.axes, viewRevision: 0 }, views.planes]);
+  }
   if (event === "itemMove") return positionsValue(state as ItemPositionsPayload);
-  const ranges = state as SelectionPayload | ViewportPayload | null;
-  const { x = null, y = null } = ranges ?? {};
-  const yRight = ranges && "yRight" in ranges ? ranges.yRight : null;
-  const lasso = ranges && "lasso" in ranges ? ranges.lasso : null;
-  const panels = ranges && "panels" in ranges ? ranges.panels : undefined;
-  return JSON.stringify([x, y, yRight, lasso, panels]);
+  const selection = state as SelectionPayload | null;
+  const { x = null, y = null, lasso = null, panels } = selection ?? {};
+  return JSON.stringify([x, y, lasso, panels]);
+}
+
+/**
+ * Changes of view as one (`a`, then `b`): each instance's and panel's last
+ * view, in the order first changed, with what made the last change.
+ */
+function merged(
+  a: ViewportEventPayload | undefined,
+  b: ViewportEventPayload | undefined,
+): ViewportEventPayload | undefined {
+  if (!a || !b) return a ?? b;
+  const scales = new Map(a.scales.map((scale) => [`${scale.scale} ${scale.instance}`, scale]));
+  for (const scale of b.scales) scales.set(`${scale.scale} ${scale.instance}`, scale);
+  const views = new Map(a.views.map((view) => [view.panel, view]));
+  for (const view of b.views) views.set(view.panel, view);
+  return { ...b, scales: [...scales.values()], views: [...views.values()] };
 }
 
 /**
@@ -1247,6 +1468,11 @@ class Throttle {
         if (latest) this.post(kind, latest);
       }, THROTTLE_MS),
     );
+  }
+
+  /** The message of this kind waiting to be sent, if one is. */
+  held(kind: string): object | undefined {
+    return this.#pending.get(kind);
   }
 
   /** Drops a message of this kind still waiting to be sent; whether there was one. */

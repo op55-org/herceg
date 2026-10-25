@@ -38,7 +38,9 @@ def test_navigator_options_are_checked():
         hg.Chart(DATA, navigator=hg.Navigator(marks=["a", "a"]))
     with pytest.raises(ValueError, match="Navigator marks: expected a list of mark ids"):
         hg.Chart(DATA, navigator=hg.Navigator(marks="a"))
-    with pytest.raises(TypeError, match="Chart navigator: expected True, False, an hg.Navigator"):
+    with pytest.raises(
+        hg.ChartError, match="Chart navigator: expected True, False, an hg.Navigator"
+    ):
         hg.Chart(DATA, navigator=40)  # type: ignore[arg-type]
     # One window shows one x range, which every panel must share.
     for scope in ("panel", "row", "column"):
@@ -46,8 +48,8 @@ def test_navigator_options_are_checked():
             with pytest.raises(
                 ValueError,
                 match=(
-                    "Chart navigator: needs one x scale shared by every panel, and x's scope is "
-                    f'"{scope}"; give x scope "chart" or drop navigator'
+                    "Chart navigator: moves the x scale every panel shares, and x's scope is "
+                    f'"{scope}"; name the panel whose x it moves'
                 ),
             ):
                 hg.Chart(KEYED, navigator=True, x=hg.AxisOptions(scope=scope), **layout)  # type: ignore[arg-type]

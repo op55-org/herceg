@@ -3,14 +3,18 @@
 
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
+import { contractTest } from "../../../packages/herceg/test/helpers/contracts.ts";
 import { MOUSE } from "../../../scripts/browser/mouse.ts";
-import type { SelectionPayload, ViewportPayload } from "../events.ts";
-import widgetModule, { type Snapshot } from "../widget.ts";
+import type { SelectionPayload, ViewportEventPayload } from "../events.ts";
+import widgetModule, { type Snapshot, type ViewsPayload } from "../widget.ts";
 import { controlTime, pointPath } from "./animation.ts";
 import { itemChart, key } from "./items.ts";
 import { focusMap, mapSpec } from "./maps.ts";
 import { threeSpec } from "./three.ts";
-import { MockModel, number, snapshot } from "./widget-model.ts";
+import { MockModel, number, oneView, snapshot, views } from "./widget-model.ts";
+
+/** A report of the views to Python. */
+type ViewsReport = { views: ViewsPayload; event?: ViewportEventPayload; origin: string };
 
 /** Rows as Python sends them: columns indexing the message's buffers. */
 function rows(t: number[], v: number[], host: string[]) {
@@ -98,7 +102,10 @@ describe("notebook widget", () => {
           ...initial,
           revision: 1,
           buffers,
-          viewport: kept.viewport,
+          viewport: {
+            axes: { viewRevision: 1, scales: [], views: [], view: { ...kept.viewport, time: [] } },
+            planes: {},
+          },
           selection: kept.selection,
         });
       else
@@ -116,7 +123,10 @@ describe("notebook widget", () => {
         expect(chart.selection).toBeNull();
       }
       await new Promise((resolve) => setTimeout(resolve, 120));
-      expect(model.messages("viewport").at(-1)).toMatchObject({ viewport: null, revision: 1 });
+      expect(model.messages("viewport").at(-1)).toMatchObject({
+        views: { axes: { view: { x: null, y: null } } },
+        revision: 1,
+      });
       expect(model.messages("select").at(-1)).toMatchObject({ selection: null, revision: 1 });
     },
   );
@@ -192,7 +202,13 @@ describe("notebook widget", () => {
     const [host] = mount(model);
     expect(figure(host!).getAttribute("aria-label")).toBe("Live");
     expect(vertices(host!)).toBe(3);
-    expect(model.sent).toEqual([{ type: "ready", revision: 0 }]);
+    // Python hears what the chart shows, of no change.
+    expect(model.sent).toEqual([
+      { type: "ready", revision: 0 },
+      { type: "viewport", views: expect.any(Object), origin: expect.any(String), revision: 0 },
+    ]);
+    const [report] = model.messages("viewport") as ViewsReport[];
+    expect({ ...report!.views.axes, viewRevision: 1 }).toEqual(oneView(null).axes);
   });
 
   it("animates keyed points when Python replaces and reorders the rows", async () => {
@@ -325,7 +341,7 @@ describe("notebook widget", () => {
     expect(vertices(host!)).toBe(4);
   });
 
-  it("keeps the values its legend hid and the focus when the whole chart is sent again", async () => {
+  it("keeps the values its legend hid and the focus when the chart is drawn again from other marks", async () => {
     // An express chart whose marks changed: a mark more, of the same series column.
     const grouped = (revision: number, bands: number): Snapshot => ({
       ...snapshot(),
@@ -363,14 +379,18 @@ describe("notebook widget", () => {
     await frame();
     expect(button("a").getAttribute("aria-pressed")).toBe("false");
     host!.querySelector<HTMLElement>("[tabindex]")!.focus();
-    model.set("_chart", twoHosts(grouped(1, 1)));
+    const next = twoHosts(grouped(1, 1));
+    model.receive(
+      { type: "chart", revision: 1, spec: next.spec, rows: {} },
+      next.buffers as DataView[],
+    );
     await frame();
     expect(button("a").getAttribute("aria-pressed")).toBe("false");
     expect(button("b").getAttribute("aria-pressed")).toBe("true");
     expect(document.activeElement).toBe(host!.querySelector("[tabindex]"));
   });
 
-  it("keeps what a panel set of a mark, what its series stand for, its rows, and its series when the chart is sent again", async () => {
+  it("keeps what a panel set of a mark, what its series stand for, its rows, and its series when the chart is drawn again", async () => {
     const listener = vi.spyOn(MountedChart.prototype, "on");
     const base = snapshot();
     const shot: Snapshot = {
@@ -406,13 +426,71 @@ describe("notebook widget", () => {
     chart.setVisibility('{"mark":"p","field":"t","equals":"1"}', false, { panel: "a" });
     chart.setVisibility('["p","b"]', true, { panel: "a" });
     const hidden = [...chart.getHiddenKeys({ panel: "a" })].sort();
-    model.set("_chart", { ...shot, revision: 1 });
+    model.receive(
+      { type: "chart", revision: 1, spec: shot.spec, rows: {} },
+      shot.buffers as DataView[],
+    );
     const again = listener.mock.instances.at(-1) as MountedChart;
     expect(again).not.toBe(chart);
     await again.loading;
     expect(again.getHiddenKeys()).toEqual([whole]);
     expect([...again.getHiddenKeys({ panel: "a" })].sort()).toEqual(hidden);
   });
+
+  contractTest(
+    "visibility.remount.orphans-pruned.widget",
+    async () => {
+      const listener = vi.spyOn(MountedChart.prototype, "on");
+      const base = snapshot();
+      const marks = {
+        p: { type: "point", data: "data", id: "p", x: "t", y: "v", series: "host", panel: "a" },
+        q: { type: "point", data: "data", id: "q", x: "t", y: "v", panel: "b" },
+      };
+      const shot = (revision: number, drawn: (keyof typeof marks)[]): Snapshot => ({
+        ...base,
+        revision,
+        spec: {
+          ...base.spec,
+          panels: [{ id: "a" }, { id: "b" }],
+          layout: { type: "grid", columns: [1, 1] },
+          data: {
+            data: {
+              columns: {
+                t: number(0),
+                v: number(1),
+                host: { type: "category", codes: 2, dictionary: ["a", "b"] },
+              },
+            },
+          },
+          marks: drawn.map((id) => marks[id]),
+        } as Snapshot["spec"],
+        buffers: [...base.buffers.slice(0, 2), new DataView(new Int32Array([0, 0, 1]).buffer)],
+      });
+      const model = new MockModel({ _chart: shot(0, ["p", "q"]), _listening: [] });
+      mount(model);
+      const chart = () => listener.mock.instances.at(-1) as MountedChart;
+      const first = chart();
+      await first.loading;
+      const b = JSON.stringify({ field: "host", value: "b" });
+      first.setHiddenKeys([b], { panels: { a: { hidden: [b], shown: [] } } });
+      // The redraw that takes away the only mark whose series stand for hosts lets go of b.
+      model.set("_chart", shot(1, ["q"]));
+      await vi.waitFor(() => expect(chart()).not.toBe(first));
+      const without = chart();
+      await vi.waitFor(async () => {
+        await without.loading;
+        expect(without.getHiddenKeys()).toEqual([]);
+      });
+      expect(without.getHiddenKeys({ panel: "a" })).toEqual([]);
+      // Back again, b is shown: what hid it went with its scope.
+      model.set("_chart", shot(2, ["p", "q"]));
+      await vi.waitFor(() => expect(chart()).not.toBe(without));
+      await chart().loading;
+      expect(chart().getHiddenKeys()).toEqual([]);
+      expect(chart().getHiddenKeys({ panel: "a" })).toEqual([]);
+    },
+    "lets go of what the legends hid of a scope a redraw takes away, which does not return with it",
+  );
 
   it("draws a chart sent again with other marks, keeping zoom not yet reported to Python", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -440,7 +518,7 @@ describe("notebook widget", () => {
     wheel();
     await frame();
     wheel();
-    // The first zoom is reported at once, the second waits for the throttle.
+    // What the chart first showed went at once; the zooms wait for the throttle.
     expect(model.messages("viewport")).toHaveLength(1);
     const { spec, buffers } = snapshot({ interaction: { zoom: true }, title: "Again" });
     model.receive(
@@ -454,9 +532,9 @@ describe("notebook widget", () => {
     );
     expect(figure(host!).getAttribute("aria-label")).toBe("Again");
     vi.advanceTimersByTime(200);
-    const reports = model.messages("viewport") as { viewport: { x: [number, number] } }[];
+    const reports = model.messages("viewport") as ViewsReport[];
     expect(reports).toHaveLength(2);
-    const [start, end] = reports[1]!.viewport.x;
+    const [start, end] = reports[1]!.views.axes.view!.x as [number, number];
     const shown = host!.querySelector("svg path:is([clip-path], [clip-path] *)");
     expect(shown).not.toBeNull();
     expect(end - start).toBeLessThan(2);
@@ -514,7 +592,10 @@ describe("notebook widget", () => {
     expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: null });
     expect(chart.selection).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(model.messages("viewport").at(-1)).toMatchObject({ viewport: null, revision: 1 });
+    expect(model.messages("viewport").at(-1)).toMatchObject({
+      views: { axes: { view: { x: null, y: null } } },
+      revision: 1,
+    });
     expect(model.messages("select").at(-1)).toMatchObject({ selection: null, revision: 1 });
   });
 
@@ -553,7 +634,7 @@ describe("notebook widget", () => {
       ...(nodes && { nodes, node: "id" }),
       panel,
     });
-    const view: ViewportPayload = { x: [0, 1], y: [0, 1], yRight: null, time: [] };
+    const view = { x: [0, 1] as [number, number], y: [0, 1] as [number, number] };
     const model = new MockModel({
       _chart: {
         ...snapshot(),
@@ -575,7 +656,7 @@ describe("notebook widget", () => {
           marks: [graph("a", "nodes"), graph("b")],
         },
         buffers: [new Int32Array([0]), new Int32Array([0]), Int32Array.from(names, (_, i) => i)],
-        panel_states: { viewport: { a: view, b: view } },
+        viewport: views([], { a: view, b: view }),
       } as Snapshot,
       _listening: [],
     });
@@ -936,50 +1017,46 @@ describe("notebook widget", () => {
     expect(selected.selection?.x).not.toBeNull();
   });
 
-  it("starts from Python's viewport, reports zooming, and follows Python", async () => {
+  it("starts from the views agreed on, reports zooming, and follows another browser's", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
     const model = new MockModel({
-      _chart: {
-        ...snapshot({ interaction: { zoom: true } }),
-        viewport: { x: [0.5, 1.5], y: null, yRight: null },
-      },
+      _chart: { ...snapshot({ interaction: { zoom: true } }), viewport: oneView([0.5, 1.5]) },
       _listening: [],
     });
     const [host] = mount(model);
+    const chart = listener.mock.instances[0] as MountedChart;
     const labels = () => figure(host!).querySelector("svg")!.textContent;
+    await vi.waitFor(() => expect(chart.getViewport().x).toEqual([0.5, 1.5]));
     await frame();
     const zoomed = labels();
-    // Double-clicking resets the zoom.
+    // What it shows is what Python has: nothing to report.
+    expect(model.messages("viewport")).toHaveLength(0);
+    // Double-clicking resets the zoom, a change of the x instance.
     figure(host!).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     await frame();
-    const [reset] = model.messages("viewport");
-    expect(reset).toEqual({
-      type: "viewport",
-      viewport: { x: null, y: null, yRight: null, time: [] },
-      origin: reset!.origin,
-      revision: 0,
-    });
+    const [reset] = model.messages("viewport") as ViewsReport[];
+    expect(reset!.views.axes.view).toEqual({ x: null, y: null, yRight: null, time: [] });
+    expect(reset!.event!.scales.map(({ scale, view }) => [scale, view])).toContainEqual([
+      "x",
+      null,
+    ]);
     expect(labels()).not.toBe(zoomed);
-    // Python's broadcast of this browser's own range changes nothing here.
+    // Python's broadcast of this browser's own views changes nothing here.
     model.receive({
       type: "viewport",
       revision: 1,
-      viewport: { x: [0.5, 1.5], y: null, yRight: null },
-      origin: reset!.origin as string,
+      views: oneView([0.5, 1.5]),
+      origin: reset!.origin,
     });
     await frame();
     expect(labels()).not.toBe(zoomed);
-    // A viewport from Python is drawn without being echoed back.
-    model.receive({
-      type: "viewport",
-      revision: 2,
-      viewport: { x: [0.5, 1.5], y: null, yRight: null },
-    });
-    await frame();
-    expect(labels()).toBe(zoomed);
+    // Another browser's are drawn without being echoed back.
+    model.receive({ type: "viewport", revision: 2, views: oneView([0.5, 1.5]) });
+    await vi.waitFor(() => expect(labels()).toBe(zoomed));
     expect(model.messages("viewport")).toHaveLength(1);
   });
 
-  it("reports both y axes with the axes holding times, and shows Python's whole viewport", async () => {
+  it("reports both y axes with the axes holding times, and makes Python's change of every axis", async () => {
     const base = snapshot({ interaction: { zoom: "xy" } });
     const spec = {
       ...base.spec,
@@ -1009,21 +1086,27 @@ describe("notebook widget", () => {
         clientY: rect.top + rect.height / 2,
       }),
     );
-    const [zoomed] = model.messages("viewport") as { viewport: ViewportPayload }[];
-    const { x, y, yRight, time } = zoomed!.viewport;
+    await vi.waitFor(() => expect(model.messages("viewport")).toHaveLength(2));
+    const [, zoomed] = model.messages("viewport") as ViewsReport[];
+    const { x, y, yRight, time } = zoomed!.views.axes.view!;
     expect(time).toEqual(["x"]);
     expect([x, y, yRight].every((ends) => ends !== null && ends[0] < ends[1])).toBe(true);
-    // Python's viewport replaces the whole view: the right axis no longer zoomed.
+    // Python's change sets every axis: the right one no longer zoomed.
     const ticks = () =>
       [...figure(host!).querySelectorAll("svg text")].map((t) => t.textContent).join(" ");
     model.receive({
-      type: "viewport",
+      type: "setViewport",
       revision: 1,
+      request: 1,
       viewport: { x: [0, 2], y: [0, 10], yRight: null },
     });
     await frame();
     expect(ticks()).toContain("10");
-    expect(model.messages("viewport")).toHaveLength(1);
+    expect(model.messages("applied")).toMatchObject([{ request: 1 }]);
+    await vi.waitFor(() => expect(model.messages("viewport")).toHaveLength(3));
+    const made = model.messages("viewport").at(-1) as ViewsReport;
+    expect(made.views.axes.view).toMatchObject({ y: [0, 10], yRight: null });
+    expect(made.event!.cause).toBe("api");
   });
 
   it("reports y and lasso selections, and lets a lasso go when its categories move", async () => {
@@ -1186,7 +1269,7 @@ describe("notebook widget", () => {
     };
   }
 
-  it("drops zooming not yet reported when Python sets the viewport", async () => {
+  it("reports what Python's change of view made over zooming not yet reported", async () => {
     // The throttle's timer runs only when the test says so; frames still run.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     onTestFinished(() => {
@@ -1211,18 +1294,92 @@ describe("notebook widget", () => {
       );
     };
     wheel(-100);
-    // Each wheel zooms from the scale last drawn.
     await frame();
     wheel(-100);
-    // The first zoom is sent at once; the second waits for the throttle.
+    // What the chart first showed went at once; the zooms wait for the throttle.
     expect(model.messages("viewport")).toHaveLength(1);
-    model.receive({
-      type: "viewport",
-      revision: 1,
-      viewport: { x: [0.25, 0.75], y: null, yRight: null },
-    });
+    model.receive({ type: "setViewport", revision: 1, request: 1, viewport: { x: [0.25, 0.75] } });
     vi.advanceTimersByTime(200);
-    expect(model.messages("viewport")).toHaveLength(1);
+    // One report, of every change held back, as Python's change left the views.
+    const reports = model.messages("viewport") as ViewsReport[];
+    expect(reports).toHaveLength(2);
+    expect(reports[1]).toMatchObject({
+      views: { axes: { view: { x: [0.25, 0.75] } } },
+      event: { cause: "api" },
+      revision: 1,
+    });
+  });
+
+  it("keeps Python's change of view for the next display when the one taking it goes first", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    // A display takes the views agreed on first, then Python's change.
+    const model = new MockModel({
+      _chart: {
+        ...snapshot({ interaction: { zoom: true } }),
+        viewport: views([{ scale: "x", panels: [""], view: [0.5, 1.5] }]),
+      },
+      _listening: [],
+    });
+    const widget = widgetModule();
+    cleanups.push(widget.initialize({ model }));
+    const host = document.createElement("div");
+    host.style.width = "400px";
+    document.body.append(host);
+    hosts.push(host);
+    const remove = widget.render({ model, el: host });
+    model.receive({ type: "setViewport", revision: 1, request: 1, viewport: { x: [0.25, 0.75] } });
+    // Gone before it has: the change is still Python's to have made.
+    remove();
+    await frame();
+    expect(model.messages("applied")).toEqual([]);
+    cleanups.push(widget.render({ model, el: host }));
+    const next = listener.mock.instances.at(-1) as MountedChart;
+    await vi.waitFor(() => expect(next.getViewport().x).toEqual([0.25, 0.75]));
+    expect(model.messages("applied")).toMatchObject([{ request: 1 }]);
+  });
+
+  it("drops Python's change of view a display had not made yet when the options change", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const model = new MockModel({
+      _chart: {
+        ...snapshot({ interaction: { zoom: true } }),
+        viewport: views([{ scale: "x", panels: [""], view: [0.5, 1.5] }]),
+      },
+      _listening: [],
+    });
+    mount(model);
+    const chart = listener.mock.instances[0] as MountedChart;
+    model.receive({ type: "setViewport", revision: 1, request: 1, viewport: { x: [0.25, 0.75] } });
+    // As Python drops it: the options may change the scales.
+    model.receive({ type: "options", revision: 2, options: { title: "Other" } });
+    await vi.waitFor(() => expect(chart.getViewport().x).toEqual([0.5, 1.5]));
+    await frame();
+    expect(chart.getViewport().x).toEqual([0.5, 1.5]);
+    expect(model.messages("applied")).toEqual([]);
+  });
+
+  it("hides what a snapshot Python sends says over what a display hid before it", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const base = snapshot();
+    const spec = { ...base.spec, marks: [{ ...base.spec.marks[0]!, color: "host" }] };
+    const model = new MockModel({ _chart: { ...base, spec }, _listening: [] });
+    mount(model);
+    const chart = listener.mock.instances[0] as MountedChart;
+    await chart.loading;
+    const key = JSON.stringify({ field: "host", value: "a" });
+    chart.setHiddenKeys([key]);
+    // A browser that missed an update gets the whole chart, Python's state with it.
+    const shown = { hiddenKeys: [] };
+    model.set("_chart", {
+      ...base,
+      spec,
+      revision: 3,
+      visibility: { state: shown, carried: false },
+    });
+    const again = listener.mock.instances.at(-1) as MountedChart;
+    expect(again).not.toBe(chart);
+    await again.loading;
+    await vi.waitFor(() => expect(again.getHiddenKeys()).toEqual([]));
   });
 
   it("reads a panel's view of categories off the data Python replaced just before", () => {
@@ -1267,15 +1424,19 @@ describe("notebook widget", () => {
       [new Int32Array([0, 1, 2]), new Float64Array([1, 2, 3])],
     );
     // No frame between: the panel's axis is of the categories just sent,
-    // which do not zoom; the view is let go, refusing nothing.
+    // which do not zoom; Python hears the range refused, as the engine says it.
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     model.receive({
-      type: "viewport",
+      type: "setViewport",
       revision: 2,
-      viewport: { x: ["d", "e"], y: null, yRight: null },
+      request: 1,
+      viewport: { x: ["d", "e"] },
       panel: "a",
     });
     expect(chart.getViewport({ panel: "a" }).x).toBeNull();
+    expect(model.messages("error")).toMatchObject([
+      { request: 1, error: { code: "unsupported", panel: "a" } },
+    ]);
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
   });
@@ -1494,9 +1655,9 @@ describe("widget item interaction", () => {
     expect(model.messages("drill").at(-1)).toMatchObject({ drill_root: null, panel: "b" });
   });
 
-  it("keeps each panel's own x view and the selection of the panel brushed", async () => {
+  it("keeps each panel's own views, along y too, and the selection of the panel brushed", async () => {
     const listener = vi.spyOn(MountedChart.prototype, "on");
-    const base = snapshot({ interaction: { zoom: "x", brush: "x" } });
+    const base = snapshot({ interaction: { zoom: "xy", brush: "y" } });
     const [marked] = base.spec.marks;
     const subplots: Snapshot = {
       ...base,
@@ -1509,56 +1670,100 @@ describe("widget item interaction", () => {
           { ...marked!, panel: "errors" },
         ],
       } as Snapshot["spec"],
-      // Python's states: each panel's view, its own as the x scale is.
-      panel_states: {
-        viewport: {
-          latency: null,
-          errors: { x: [1, 2], y: null, yRight: null, time: [] },
-        },
-      },
+      // Python's views: each panel's own x, as subplots' x scales are.
+      viewport: views([
+        { scale: "x", panels: ["latency"], view: null, own: true },
+        { scale: "x", panels: ["errors"], view: [1, 2], own: true },
+      ]),
     };
     const model = new MockModel({ _chart: subplots, _listening: [] });
     mount(model);
     const chart = listener.mock.instances[0] as MountedChart;
+    await vi.waitFor(() => expect(chart.getViewport({ panel: "errors" }).x).toEqual([1, 2]));
     expect(document.querySelector('[role="alert"]')).toBeNull();
-    expect(chart.getViewport({ panel: "errors" }).x).toEqual([1, 2]);
     expect(chart.getViewport({ panel: "latency" }).x).toBeNull();
-    // Zooming each panel reports its own view.
+    // Zooming a panel reports the views, the change made in it.
     chart.setViewport({ x: [0, 1] }, { panel: "latency" });
     await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(model.messages("viewport").at(-1)).toMatchObject({
-      viewport: { x: [0, 1] },
-      panel: "latency",
-    });
-    chart.setViewport({ x: [0.5, 1.5] }, { panel: "errors" });
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(model.messages("viewport").at(-1)).toMatchObject({
-      viewport: { x: [0.5, 1.5] },
-      panel: "errors",
-    });
-    // Python sets one panel's view: the other keeps its own.
+    const report = () => model.messages("viewport").at(-1) as ViewsReport;
+    const shown = (panel: string) => report().views.axes.views.find((v) => v.panel === panel);
+    expect(shown("latency")).toMatchObject({ x: [0, 1] });
+    expect(report().event).toMatchObject({ panel: "latency" });
+    // Python's change of one panel's x and y: the other keeps its own.
     model.receive({
-      type: "viewport",
+      type: "setViewport",
       revision: 1,
-      viewport: { x: [0.25, 0.75], y: null, yRight: null },
+      request: 1,
+      viewport: { x: [0.25, 0.75], y: [1, 2] },
       panel: "latency",
     });
-    expect(chart.getViewport({ panel: "latency" }).x).toEqual([0.25, 0.75]);
-    expect(chart.getViewport({ panel: "errors" }).x).toEqual([0.5, 1.5]);
+    expect(chart.getViewport({ panel: "latency" })).toMatchObject({ x: [0.25, 0.75], y: [1, 2] });
+    expect(chart.getViewport({ panel: "errors" })).toMatchObject({ x: [1, 2], y: null });
     // A brush is the selection of the panel brushed, and Python's goes in the panel it names.
-    chart.select({ x: [0.5, 1], y: null, lasso: null }, { panel: "errors" });
+    chart.select({ x: null, y: [1.5, 2.5], lasso: null }, { panel: "errors" });
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(model.messages("select").at(-1)!.selection).toMatchObject({
       panels: ["errors"],
-      x: [0.5, 1],
+      y: [1.5, 2.5],
     });
     model.receive({
       type: "select",
       revision: 2,
-      selection: { x: [0, 0.5], y: null, lasso: null, panels: ["latency"] },
+      selection: { x: null, y: [1, 1.5], lasso: null, panels: ["latency"] },
     });
     expect(chart.selectionOwner?.panels ?? null).toEqual(["latency"]);
-    expect(chart.selection?.x).toEqual([0, 0.5]);
+    expect(chart.selection?.y).toEqual([1, 1.5]);
+  });
+
+  it("sends back a change of view the chart refuses, in the engine's words", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const base = snapshot({ interaction: { zoom: "x" } });
+    const [marked] = base.spec.marks;
+    const model = new MockModel({
+      _chart: {
+        ...base,
+        spec: {
+          ...base.spec,
+          panels: [{ id: "a" }, { id: "b" }],
+          layout: { type: "grid", columns: [1, 1] },
+          marks: [
+            { ...marked!, panel: "a" },
+            { ...marked!, panel: "b" },
+          ],
+        } as Snapshot["spec"],
+      } as Snapshot,
+      _listening: [],
+    });
+    mount(model);
+    const chart = listener.mock.instances[0] as MountedChart;
+    await vi.waitFor(() => expect(chart.getPanels()).toHaveLength(2));
+    // The panels have x scales of their own: a range without a panel is no one's.
+    model.receive({ type: "setViewport", revision: 1, request: 1, viewport: { x: [0, 1] } });
+    model.receive({
+      type: "setViewport",
+      revision: 2,
+      request: 2,
+      viewport: { yRight: [0, 1] },
+      panel: "a",
+    });
+    model.receive({
+      type: "setViewport",
+      revision: 3,
+      request: 3,
+      viewport: { x: [0, 1] },
+      panel: "z",
+    });
+    const errors = model.messages("error") as {
+      request: number;
+      error: { code: string; path: string };
+    }[];
+    expect(errors.map(({ request, error }) => [request, error.code, error.path])).toEqual([
+      [1, "invalid-option", "x"],
+      [2, "unknown-reference", "yRight"],
+      [3, "unknown-reference", "panel"],
+    ]);
+    expect(model.messages("applied")).toEqual([]);
+    expect(chart.getViewport({ panel: "a" }).x).toBeNull();
   });
 
   it("reads the chart's view on the panels sharing x, past an inset of its own", () => {
@@ -1603,19 +1808,19 @@ describe("widget item interaction", () => {
           new DataView(new Int32Array([0, 1, 2]).buffer),
           new DataView(new Float64Array([1, 2, 3]).buffer),
         ],
-        // The chart's view, by category labels.
-        viewport: { x: ["a", "b"], y: null, yRight: null, time: [] },
       } as Snapshot,
       _listening: [],
     });
     mount(model);
     const chart = listener.mock.instances[0] as MountedChart;
     expect(chart.getPanels().filter(({ x }) => x)[0]!.key).toBe("detail");
-    // The chart's x shows categories, which do not zoom: nothing is shown or refused.
+    // The chart's x shows categories, which do not zoom: a range of them is refused.
+    model.receive({ type: "setViewport", revision: 1, request: 1, viewport: { x: ["a", "b"] } });
+    expect(model.messages("error")).toMatchObject([{ request: 1, error: { code: "unsupported" } }]);
     expect(chart.getViewport().x).toBeNull();
   });
 
-  it("lets a panel's view go once its x is the chart's, in outputs shown later", () => {
+  it("lets a panel's view go once its x is the chart's, in outputs shown later", async () => {
     const listener = vi.spyOn(MountedChart.prototype, "on");
     const base = snapshot({ interaction: { zoom: "x" } });
     const [marked] = base.spec.marks;
@@ -1631,7 +1836,10 @@ describe("widget item interaction", () => {
             { ...marked!, panel: "b" },
           ],
         } as Snapshot["spec"],
-        panel_states: { viewport: { a: { x: [1, 2], y: null, yRight: null, time: [] } } },
+        viewport: views([
+          { scale: "x", panels: ["a"], view: [1, 2], own: true },
+          { scale: "x", panels: ["b"], view: null, own: true },
+        ]),
       } as Snapshot,
       _listening: [],
     });
@@ -1646,15 +1854,16 @@ describe("widget item interaction", () => {
       return listener.mock.instances.at(-1) as MountedChart;
     };
     show();
-    // x becomes the chart's; Python lets a's view go and sets the chart's.
+    // x becomes the chart's; another browser's views of it reach this one,
+    // and an output shown later takes them.
     model.receive({ type: "options", revision: 1, options: { x: { scope: "chart" } } });
-    model.receive({ type: "viewport", revision: 2, viewport: null, panel: "a" });
     model.receive({
       type: "viewport",
-      revision: 3,
-      viewport: { x: [0.25, 1.25], y: null, yRight: null },
+      revision: 2,
+      views: views([{ scale: "x", panels: ["a", "b"], view: [0.25, 1.25] }]),
     });
-    expect(show().getViewport().x).toEqual([0.25, 1.25]);
+    const later = show();
+    await vi.waitFor(() => expect(later.getViewport().x).toEqual([0.25, 1.25]));
   });
 
   it("keeps each map subplot's view, letting go of one whose projection new data changes", async () => {
@@ -1679,7 +1888,7 @@ describe("widget item interaction", () => {
       buffers: [-100, -90, -100, -90].map((lon, i) =>
         i % 2 ? new Float64Array([30, 40]) : new Float64Array([lon, lon + 10]),
       ),
-      panel_states: { viewport: { b: { x: [0, 0.1], y: [0, 0.1], yRight: null, time: [] } } },
+      viewport: views([], { b: { x: [0, 0.1], y: [0, 0.1] } }),
     };
     const model = new MockModel({ _chart: subplots, _listening: [] });
     const [host] = mount(model);
@@ -1707,8 +1916,7 @@ describe("widget item interaction", () => {
     expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(model.messages("viewport").at(-1)).toMatchObject({
-      viewport: null,
-      panel: "a",
+      views: { planes: { a: { x: null, y: null }, b: { x: [0, 0.1] } } },
       revision: 1,
     });
     expect(model.messages("select").at(-1)!.selection).not.toBeNull();
@@ -2261,33 +2469,55 @@ describe("widget item interaction", () => {
     };
   };
 
-  it("reports moves when a peer hides the node, then applies them when it is shown", async () => {
+  it("hides in every output what one's legend hid, and applies Python's moves of hidden nodes", async () => {
     const model = new MockModel({ _chart: groupedNetwork(), _listening: [] });
     const [first, second] = mount(model, 2);
     await vi.dynamicImportSettled();
-    const toggle = second!.querySelector<HTMLButtonElement>(
-      '[aria-label="Legend"] button[title="Hide North"]',
-    )!;
-    toggle.click();
+    const toggle = (host: HTMLElement, label: string) =>
+      host.querySelector<HTMLButtonElement>(`[aria-label="Legend"] button[title="${label}"]`)!;
+    toggle(second!, "Hide North").click();
     await frame();
-    key(first!, "ArrowRight");
-    key(first!, "ArrowRight", true);
-    await frame();
-    expect(model.messages("itemMove")).toHaveLength(1);
-    const positions = model.messages("itemMove")[0]!.item_positions as Record<
-      string,
-      [number, number]
-    >;
-    expect(positions['[0,"East"]']).toBeDefined();
-    // Python can change the same known override while another output hides it.
+    // One widget, one legend: every output hides North, and Python hears so once.
+    expect(toggle(first!, "Show North")).not.toBeNull();
+    await vi.waitFor(() => expect(model.messages("visibility")).toHaveLength(1));
+    expect(
+      (model.messages("visibility")[0]!.visibility as { hiddenKeys: string[] }).hiddenKeys,
+    ).toHaveLength(1);
+    // Python moves a hidden node; shown again, it is where Python put it in both.
     model.receive({ type: "itemMove", revision: 1, item_positions: { '[0,"East"]': [10, 20] } });
-    toggle.click();
+    toggle(first!, "Show North").click();
     await frame();
     const geometry = (host: ParentNode) =>
       host.querySelector('[data-kind="point"]')!.getAttribute("d");
     expect(geometry(first!)).toBe(geometry(second!));
     expect(second!.querySelector('[role="alert"]')).toBeNull();
-    expect(model.messages("itemMove")).toHaveLength(1);
+    expect(model.messages("itemMove")).toHaveLength(0);
+  });
+
+  it("restores what the legends hid from Python's snapshot, and hides Python's keys", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const base = snapshot();
+    const [marked] = base.spec.marks;
+    const spec = { ...base.spec, marks: [{ ...marked!, color: "host", id: "lines" }] };
+    // Series are hidden by what they stand for.
+    const key = JSON.stringify({ field: "host", value: "a" });
+    const hidden = { hiddenKeys: [key] };
+    const model = new MockModel({
+      _chart: { ...base, spec, visibility: { state: hidden, carried: false } },
+      _listening: [],
+    });
+    mount(model);
+    const chart = listener.mock.instances[0] as MountedChart;
+    expect(chart.getHiddenKeys()).toEqual([key]);
+    model.receive({ type: "visibility", revision: 1, visibility: { hiddenKeys: [] } });
+    expect(chart.getHiddenKeys()).toEqual([]);
+    // Keys of a subplot the chart lacks are refused, and Python hears why.
+    model.receive({
+      type: "visibility",
+      revision: 2,
+      visibility: { hiddenKeys: [], panels: { nowhere: { hidden: [key], shown: [] } } },
+    });
+    expect(model.messages("error")).toMatchObject([{ error: { path: "panels" } }]);
   });
 
   it("lets go of a move a display hides once the data loses its node, as one that drew it says", async () => {
@@ -2388,8 +2618,13 @@ describe("widget item interaction", () => {
           data: { data: { columns: { lon: number(0), lat: number(1) } } },
           marks: [{ type: "geopoint", data: "data", longitude: "lon", latitude: "lat" }],
         },
-        viewport: { x: [-0.1, 0.1], y: [0.02, 0.08], yRight: null },
+        viewport: views([], {}),
       };
+      const plane = (x: [number, number], y: [number, number]) => ({
+        axes: { viewRevision: 1, scales: [], views: [], view: { x, y, yRight: null, time: [] } },
+        planes: {},
+      });
+      map.viewport = plane([-0.1, 0.1], [0.02, 0.08]);
       const center = kind === "map" ? 0.05 : 50;
       if (kind === "graph") {
         const fixture = itemChart("graph");
@@ -2397,32 +2632,35 @@ describe("widget item interaction", () => {
           ...base,
           ...fixture,
           spec: { ...fixture.spec, interaction: { zoom: true, drag: true } },
-          viewport: { x: [-80, 80], y: [20, 80], yRight: null },
+          viewport: plane([-80, 80], [20, 80]),
         };
       }
       const model = new MockModel({ _chart: map, _listening: [] });
       const [host] = mount(model);
       await vi.dynamicImportSettled();
       key(host!, "+");
-      const zoomed = model.messages("viewport")[0]!.viewport as ViewportPayload;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const view = () => (model.messages("viewport").at(-1) as ViewsReport).views.axes.view!;
+      const zoomed = view();
       expect((Number(zoomed.y![0]) + Number(zoomed.y![1])) / 2).toBeCloseTo(center);
       model.set("_chart", { ...map, revision: 1 });
       await vi.dynamicImportSettled();
       await new Promise((resolve) => setTimeout(resolve, 120));
       key(host!, "+");
-      const restored = model.messages("viewport").at(-1)!.viewport as ViewportPayload;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const restored = view();
       expect(restored.y).toEqual(zoomed.y);
       model.receive({
-        type: "viewport",
+        type: "setViewport",
         revision: 2,
+        request: 1,
         viewport:
-          kind === "map"
-            ? { x: [-0.1, 0.1], y: [0.2, 0.4], yRight: null }
-            : { x: [-80, 80], y: [100, 200], yRight: null },
+          kind === "map" ? { x: [-0.1, 0.1], y: [0.2, 0.4] } : { x: [-80, 80], y: [100, 200] },
       });
       await new Promise((resolve) => setTimeout(resolve, 120));
       key(host!, "+");
-      const assigned = model.messages("viewport").at(-1)!.viewport as ViewportPayload;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const assigned = view();
       expect((Number(assigned.y![0]) + Number(assigned.y![1])) / 2).toBeCloseTo(
         kind === "map" ? 0.3 : 150,
       );

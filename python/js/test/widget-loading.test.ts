@@ -2,10 +2,11 @@
 // the guide compiler. A test file of its own: each runs in a page of its
 // own, where the compiler has not loaded yet.
 
+import { visibilityState } from "herceg/spec";
 import { afterEach, expect, it, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
 import widgetModule, { type Snapshot } from "../widget.ts";
-import { MockModel, snapshot } from "./widget-model.ts";
+import { MockModel, snapshot, views } from "./widget-model.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -48,10 +49,11 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
         { type: "point3d", x: "t", y: "v", z: "v", data: "data", panel: "c" },
       ],
     } as Snapshot["spec"],
-    panel_states: {
-      viewport: { a: null, b: { x: [1, 2], y: null, yRight: null, time: [] } },
-      camera: { c: camera },
-    },
+    viewport: views([
+      { scale: "x", panels: ["a"], view: null, own: true },
+      { scale: "x", panels: ["b"], view: [1, 2], own: true },
+    ]),
+    panel_states: { camera: { c: camera } },
   };
   const model = new MockModel({ _chart: subplots, _listening: ["camera"] });
   const widget = widgetModule();
@@ -65,16 +67,16 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
   // waits for them.
   expect(chart.getPanels()).toEqual([]);
   model.receive({
-    type: "viewport",
+    type: "setViewport",
     revision: 1,
-    viewport: { x: [0.5, 1.5], y: null, yRight: null },
+    request: 1,
+    viewport: { x: [0.5, 1.5] },
     panel: "a",
   });
   expect(host.querySelector('[role="alert"]')).toBeNull();
-  await chart.loading;
-  await frame();
+  await vi.waitFor(() => expect(chart.getViewport({ panel: "a" }).x).toEqual([0.5, 1.5]));
   expect(chart.getViewport({ panel: "b" }).x).toEqual([1, 2]);
-  expect(chart.getViewport({ panel: "a" }).x).toEqual([0.5, 1.5]);
+  expect(model.messages("applied")).toMatchObject([{ request: 1 }]);
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(chart.getCamera({ panel: "c" })).toMatchObject(camera);
   await new Promise((resolve) => setTimeout(resolve, 150));
@@ -82,7 +84,7 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
   for (const message of model.messages("camera").filter(({ panel }) => panel === "c"))
     expect(message.camera).toMatchObject({ azimuth: 140 });
   // What clicks on panel a's legends hid stays hidden there when Python
-  // sends the chart again: what series stand for, and a named mark's series.
+  // draws the chart again: what series stand for, and a named mark's series.
   const [entry] = chart.getLegend();
   const buttons = [
     ...host.querySelectorAll<HTMLButtonElement>('[aria-label="Legend"] button'),
@@ -101,13 +103,17 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
     .filter((key) => key.startsWith('["q"') || key.startsWith('{"mark":"q"'));
   expect(quiet).toContain('{"mark":"q"}');
   await frame();
-  model.set("_chart", { ...subplots, revision: 2 });
+  // As an express chart computed again draws it.
+  model.receive(
+    { type: "chart", revision: 2, spec: subplots.spec, rows: {} },
+    subplots.buffers as DataView[],
+  );
   const again = listener.mock.instances.at(-1) as MountedChart;
   expect(again).not.toBe(chart);
-  await again.loading;
-  await frame();
-  expect(again.getHiddenKeys({ panel: "a" })).toEqual(
-    expect.arrayContaining([entry!.key, ...quiet]),
+  await vi.waitFor(() =>
+    expect(again.getHiddenKeys({ panel: "a" })).toEqual(
+      expect.arrayContaining([entry!.key, ...quiet]),
+    ),
   );
   expect(again.getHiddenKeys()).not.toContain(entry!.key);
   expect(again.getViewport({ panel: "b" }).x).toEqual([1, 2]);
@@ -122,11 +128,21 @@ it("restores panels' views and cameras, and keeps what a panel's legend hid, onc
   const pressed = () =>
     [button("Quiet"), button("Other")].map((b) => b.getAttribute("aria-pressed"));
   expect(pressed()).toEqual(["true", "false"]);
-  model.set("_chart", { ...subplots, revision: 3 });
+  // Python's snapshot holds what this browser reported of it.
+  const state = visibilityState(again);
+  const reported = await vi.waitFor(() => {
+    const last = model.messages("visibility").at(-1)?.visibility;
+    expect(last).toEqual(state);
+    return last as typeof state;
+  });
+  model.set("_chart", {
+    ...subplots,
+    revision: 3,
+    visibility: { state: reported, carried: false },
+  });
   const third = listener.mock.instances.at(-1) as MountedChart;
   expect(third).not.toBe(again);
-  await third.loading;
+  await vi.waitFor(() => expect(third.getHiddenKeys()).toEqual([entry!.key]));
   third.render();
-  expect(third.getHiddenKeys()).toEqual([entry!.key]);
   expect(pressed()).toEqual(["true", "false"]);
 });

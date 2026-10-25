@@ -18,6 +18,8 @@ from typing import Any
 
 import numpy as np
 
+from ._errors import ChartError
+
 #: Geometry types a geometry column holds.
 SHAPES = ("Polygon", "MultiPolygon")
 
@@ -59,7 +61,7 @@ def check_crs(source: Any) -> None:
         return
     if getattr(crs, "is_geographic", True) is False:
         name = getattr(crs, "name", None) or str(crs)
-        raise ValueError(
+        raise ChartError(
             f"data: the shapes are in a projected coordinate reference system ({name}), and "
             "maps read longitude and latitude in degrees; reproject first, as with "
             "gdf.to_crs(4326)"
@@ -85,12 +87,12 @@ def pack(values: Sequence[Any]) -> tuple[np.ndarray, Shapes]:
                 if kind == "Point"
                 else ""
             )
-            raise TypeError(
+            raise ChartError(
                 f"row {row}: expected a polygon or multipolygon; received a {what}{hint}"
             )
         parts: Any = [shape.get("coordinates")] if kind == "Polygon" else shape.get("coordinates")
         if not isinstance(parts, Sequence) or isinstance(parts, str):
-            raise TypeError(f"row {row}: the {kind} has no coordinates")
+            raise ChartError(f"row {row}: the {kind} has no coordinates")
         for polygon in parts:
             for ring in polygon:
                 for position in ring:
@@ -117,7 +119,7 @@ def _position(position: Any, row: int) -> tuple[float, float]:
     try:
         lon, lat = float(position[0]), float(position[1])
     except (TypeError, ValueError, IndexError):
-        raise TypeError(
+        raise ChartError(
             f"row {row}: expected positions as [longitude, latitude]; received {position!r}"
         ) from None
     return lon, lat
@@ -141,7 +143,7 @@ def _check(shapes: Shapes) -> None:
     spans = np.maximum.reduceat(xy[:, 0], filled) - np.minimum.reduceat(xy[:, 0], filled)
     if (spans > 360).any():
         ring = int(np.flatnonzero(shapes.ring_offsets[1:] > starts)[np.argmax(spans > 360)])
-        raise ValueError(
+        raise ChartError(
             f"ring {ring}: spans {spans.max():g} degrees of longitude; a ring spans at most 360"
         )
 
@@ -160,7 +162,7 @@ def feature_columns(collection: Mapping[str, Any]) -> dict[str, list[Any]]:
     as a column of its own, as herceg's ``fromGeoJSON`` reads them."""
     features = collection.get("features")
     if not isinstance(features, Sequence):
-        raise TypeError(
+        raise ChartError(
             f"FeatureCollection features: expected a list; received {type(features).__name__}"
         )
     kinds = {
@@ -176,7 +178,7 @@ def feature_columns(collection: Mapping[str, Any]) -> dict[str, list[Any]]:
     elif kinds <= set(SHAPES):
         columns["geometry"] = GeometryList(f.get("geometry") for f in features)
     else:
-        raise TypeError(
+        raise ChartError(
             "FeatureCollection features: expected polygons and multipolygons, or points; "
             f"received {', '.join(sorted(map(str, kinds)))}"
         )
@@ -190,7 +192,7 @@ def feature_columns(collection: Mapping[str, Any]) -> dict[str, list[Any]]:
         if any(isinstance(v, (Mapping, list, tuple)) for v in values):
             continue  # Nested properties have no column kind.
         if name in columns:
-            raise ValueError(
+            raise ChartError(
                 f"FeatureCollection properties: {name!r} also names the column of the "
                 "features' shapes, points, or ids; rename the property"
             )
@@ -208,7 +210,7 @@ def feature_key(feature: Mapping[str, Any], key: str) -> Any:
         return feature.get("id")
     if key.startswith("properties."):
         return (feature.get("properties") or {}).get(key[len("properties.") :])
-    raise ValueError(
+    raise ChartError(
         f'geoshape feature_id_key: expected "id" or "properties.<name>"; received {json.dumps(key)}'
     )
 

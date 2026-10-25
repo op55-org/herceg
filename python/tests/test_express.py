@@ -286,9 +286,9 @@ def test_facets_palette_and_options_pass_through():
 
 
 def test_mistakes_are_refused_with_the_column_or_option_named():
-    with pytest.raises(KeyError, match="no column 'tips'"):
+    with pytest.raises(hg.ChartError, match="no column 'tips'"):
         hx.barplot(TIPS, x="day", y="tips")
-    with pytest.raises(TypeError, match="holds category values; expected number"):
+    with pytest.raises(hg.ChartError, match="holds category values; expected number"):
         hx.barplot(TIPS, x="day", y="sex")
     with pytest.raises(ValueError, match="barplot errorbar: expected the method"):
         hx.barplot(TIPS, x="day", y="tip", errorbar=("iqr", 50))
@@ -448,7 +448,7 @@ def test_histplot_layouts_orientation_and_refusals():
     assert spec["x"]["title"] == "Count" and spec["y"]["title"] == "flipper"
     discrete = hx.histplot({"n": [1, 2, 2, 5]}, x="n", discrete=True)
     assert marks(discrete)[0]["bins"] == [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]
-    with pytest.raises(ValueError, match="histplot needs exactly one of x and y"):
+    with pytest.raises(ValueError, match="histplot x: give x or y, one of them"):
         hx.histplot(PENGUINS)
     with pytest.raises(ValueError, match="layered bars only"):
         hx.histplot(PENGUINS, x="flipper", series="species", multiple="stack", kde=True)
@@ -463,7 +463,7 @@ def test_histplot_layouts_orientation_and_refusals():
             f'or "density"; received "{refused}"',
         ):
             hx.histplot(PENGUINS, x="flipper", normalize=refused)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="histplot kde_options: unknown bandwidth"):
+    with pytest.raises(ValueError, match='histplot kde_options: unknown "bandwidth"'):
         hx.histplot(PENGUINS, x="flipper", kde=True, kde_options={"bandwidth": 1})  # type: ignore[typeddict-unknown-key]
     sparse = hx.histplot(PENGUINS, x="flipper", kde=True, kde_options={"grid_size": 30})
     assert len(hx.statistics(sparse).tables["kde"]["flipper"]) == 30
@@ -748,9 +748,10 @@ def test_express_charts_render_and_update_wherever_charts_do():
     # Rows the chart draws stream in as in any chart; jitter keeps earlier points in place.
     widget.append({"species": ["Adelie"], "flipper": [200.0], "sex": ["f"]})
     widget.update(title="More strips")
-    # Subplots with x scales of their own keep a view each.
+    # Subplots with x scales of their own zoom each, once a browser shows them.
     pairs = hx.pairplot(PENGUINS, vars=["flipper", "mass"]).widget()
-    assert sorted(pairs.panel_viewports) == ["0,0", "0,1", "1,0", "1,1"]
+    assert pairs.get_viewport(panel="0,1") is None
+    pairs.set_viewport(x=(180.0, 200.0), panel="0,1")
     streamlit = pytest.importorskip("herceg.streamlit")
     spec, buffers = hx.histplot(PENGUINS, x="flipper", kde=True).to_spec()
     assert len(streamlit._payload(spec, buffers, [])) % 8 == 0
@@ -773,8 +774,11 @@ def test_express_plots_draw_in_a_panel_of_another_chart():
     # Each panel's statistics are its plot's.
     assert hx.statistics(chart, panel="flippers").function == "histplot"
     assert hx.statistics(chart, panel=masses).function == "boxplot"
-    with pytest.raises(ValueError, match="hx.statistics: the chart's express plots are in its"):
+    with pytest.raises(
+        hg.ChartError, match="hx.statistics chart: the chart's express plots"
+    ) as raised:
         hx.statistics(chart)
+    assert raised.value.path == "chart"
     with pytest.raises(ValueError, match="no express plot in panel 'nope'"):
         hx.statistics(chart, panel="nope")
     # The panel takes the plot's axis titles where it has none.
@@ -874,7 +878,7 @@ def test_one_column_on_both_axes():
         hx.regplot({"v": [1.0, 2.0], "w": [1.0, 2.0]}, x="v", y="w", series="w")
     # Categories and values cannot share a column either.
     for function in (hx.barplot, hx.pointplot, hx.stripplot, hx.boxplot, hx.violinplot):
-        with pytest.raises(ValueError, match="x and y name the same column 'v'"):
+        with pytest.raises(ValueError, match="y: names x's column 'v' too"):
             function(data, x="v", y="v")
 
 
@@ -1180,13 +1184,18 @@ def test_whiskers_take_the_box_plot_marks_values():
     assert np.array_equal(
         hx.statistics(hidden).tables["boxes"]["low"], hx.statistics(default).tables["boxes"]["low"]
     )
-    for refused, shown in ((math.inf, "inf"), (-1, "-1"), (True, "True"), ("iqr", '"iqr"')):
+    for refused, shown in ((math.inf, "inf"), (-1, "-1"), ("iqr", '"iqr"')):
         with pytest.raises(
             ValueError,
             match=r'boxplot whiskers: expected "tukey", "range", or a finite nonnegative IQR '
             rf"multiple; received {shown}",
         ):
             hx.boxplot(PENGUINS, x="species", y="flipper", whiskers=refused)  # type: ignore[arg-type]
+    with pytest.raises(
+        hg.ChartError,
+        match='boxplot whiskers: expected "tukey", "range", or a finite number; received True',
+    ):
+        hx.boxplot(PENGUINS, x="species", y="flipper", whiskers=True)
 
 
 @pytest.mark.parametrize("inner", ["quart", "quartile", None, "stick"])
@@ -1220,9 +1229,14 @@ def test_jitter_is_the_point_marks_fraction_of_the_band():
     assert jitter_of(still) is None and hx.statistics(still).seed is None
     with pytest.raises(ValueError, match="stripplot seed: the Jitter given as jitter has its own"):
         hx.stripplot(PENGUINS, x="species", y="flipper", jitter=hg.Jitter(0.2, 9), seed=1)
-    for refused in (1.5, -0.1, math.nan, "wide", None, hg.Jitter(width=2)):
+    for refused in (1.5, -0.1, math.nan, hg.Jitter(width=2)):
         with pytest.raises(ValueError, match="stripplot jitter: expected True, False, a width"):
             hx.stripplot(PENGUINS, x="species", y="flipper", jitter=refused)  # type: ignore[arg-type]
+    # A word is no width at all: refused by the option's type.
+    with pytest.raises(hg.ChartError, match="stripplot jitter: expected True, False, a finite"):
+        hx.stripplot(PENGUINS, x="species", y="flipper", jitter="wide")  # type: ignore[arg-type]
+    with pytest.raises(hg.ChartError, match="stripplot jitter: expected True, False, a finite"):
+        hx.stripplot(PENGUINS, x="species", y="flipper", jitter=None)  # type: ignore[arg-type]
 
 
 def test_common_norm_is_off_unless_asked_as_in_the_histogram_mark():

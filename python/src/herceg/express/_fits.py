@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import math
-import numbers
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ import numpy as np
 from .._chart import _LINE_CHANNELS, _POINT_CHANNELS, Chart
 from .._data import Column
 from .._encoding import Encodings, SeriesLabels
+from .._errors import ChartError, is_integer, is_number
 from . import _numerics as numerics
 from . import _regression as regression
 from ._common import (
@@ -39,6 +39,7 @@ from ._common import (
     neutral,
     number_column,
     readable,
+    real,
     record,
     refuse_facets,
     reused,
@@ -152,24 +153,24 @@ def regplot(
             )
     if x_jitter is not None or y_jitter is not None:
         name = "x_jitter" if x_jitter is not None else "y_jitter"
-        raise ValueError(
+        raise ChartError(
             f"regplot {name}: jitter would move points off their values, which tooltips and "
             "the keyboard read; draw the points with hg.Chart.point over binned values, or "
             "use x_estimator"
         )
     for name, flag in (("scatter", scatter), ("fit_reg", fit_reg), ("truncate", truncate)):
         if not isinstance(flag, bool):
-            raise TypeError(f"regplot {name}: expected True or False; received {shown(flag)}")
+            raise ChartError(f"regplot {name}: expected True or False; received {shown(flag)}")
     check_ci(ci, "regplot")
     grid_size = check_grid_size(grid_size, "regplot grid_size")
     _check_lowess(frac, it, delta, "regplot")
     n_boot = check_n_boot(n_boot, "regplot")
     if weight is not None and model.kind != "polynomial":
-        raise ValueError(
+        raise ChartError(
             f"regplot weight: weights weigh least-squares fits; drop weight, or {model.option}"
         )
     if weight is not None and units is not None:
-        raise ValueError(
+        raise ChartError(
             "regplot units: weighted fits resample rows with their weights; drop units or weight"
         )
     estimating = x_estimator is not None or x_bins is not None
@@ -205,24 +206,24 @@ def regplot(
     dropped = len(xc) - len(rows)
     xv, yv = values(xc), values(yc)
     if model.kind == "logistic" and len(rows) and not ((yv[rows] >= 0) & (yv[rows] <= 1)).all():
-        raise ValueError(
+        raise ChartError(
             f"regplot logistic: column {y!r} holds values outside 0 to 1; a logistic fit "
             "takes outcomes (0 or 1) or proportions"
         )
     # Rows of no weight take no part in the fit, nor in its domain.
     weighing = rows if weights is None else rows[weights[rows] > 0]
     if logx and len(weighing) and not (xv[weighing] > 0).all():
-        raise ValueError(
+        raise ChartError(
             f"regplot logx: column {x!r} holds values at or below 0; logx fits y against log x"
         )
     # Removing a column's effect moves values off the domain a model takes.
     if logx and x_partial is not None:
-        raise ValueError(
+        raise ChartError(
             "regplot x_partial: x with another column's effect removed may fall at or "
             "below 0, which logx cannot take; drop x_partial or logx"
         )
     if model.kind == "logistic" and y_partial is not None:
-        raise ValueError(
+        raise ChartError(
             "regplot y_partial: outcomes with another column's effect removed are not 0 "
             "or 1, which a logistic fit takes; drop y_partial or logistic"
         )
@@ -393,7 +394,7 @@ def regplot(
             **marks.supporting(estimate_table, paint, "fill"),
         )
         if x_ci is not None and not (x_ci == "ci" and ci is None):
-            chart.error_bar(
+            chart.errorbar(
                 x=x,
                 y1=low,
                 y2=high,
@@ -446,14 +447,14 @@ def _model(
     order: int, logistic: bool, robust: bool, lowess: bool, logx: bool, function: str
 ) -> _Model:
     if not (isinstance(order, int) and not isinstance(order, bool) and order >= 1):
-        raise ValueError(
+        raise ChartError(
             f"{function} order: expected a whole number of at least 1; received {shown(order)}"
         )
     for name, flag in (("logistic", logistic), ("robust", robust), ("lowess", lowess)):
         if not isinstance(flag, bool):
-            raise TypeError(f"{function} {name}: expected True or False; received {shown(flag)}")
+            raise ChartError(f"{function} {name}: expected True or False; received {shown(flag)}")
     if not isinstance(logx, bool):
-        raise TypeError(f"{function} logx: expected True or False; received {shown(logx)}")
+        raise ChartError(f"{function} logx: expected True or False; received {shown(logx)}")
     chosen = [
         name
         for name, flag in (
@@ -466,7 +467,7 @@ def _model(
         if flag
     ]
     if len(chosen) > 1:
-        raise ValueError(
+        raise ChartError(
             f"{function} {chosen[1]}: {' and '.join(chosen)} each choose the fit; give one"
         )
     if logistic:
@@ -543,7 +544,7 @@ def _sentence(
 
 
 def _bin_count(x_bins: Any) -> int:
-    return int(x_bins) if isinstance(x_bins, numbers.Integral) else len(x_bins)
+    return int(x_bins) if is_integer(x_bins) else len(x_bins)
 
 
 def _x_estimates(
@@ -637,8 +638,8 @@ def _estimate_table(
 def _check_x_ci(x_ci: Any, function: str) -> None:
     if x_ci in (None, "ci", "sd"):
         return
-    if isinstance(x_ci, bool) or not (isinstance(x_ci, numbers.Real) and 0 < float(x_ci) <= 100):
-        raise ValueError(
+    if isinstance(x_ci, bool) or not (is_number(x_ci) and 0 < float(x_ci) <= 100):
+        raise ChartError(
             f'{function} x_ci: expected "ci", "sd", a percentage above 0 and at most 100, or '
             f"None; received {shown(x_ci)}"
         )
@@ -647,9 +648,9 @@ def _check_x_ci(x_ci: Any, function: str) -> None:
 def _check_bins(x_bins: Any, function: str) -> None:
     if x_bins is None:
         return
-    if isinstance(x_bins, numbers.Integral) and not isinstance(x_bins, bool):
+    if is_integer(x_bins) and not isinstance(x_bins, bool):
         if int(x_bins) < 1:
-            raise ValueError(
+            raise ChartError(
                 f"{function} x_bins: expected a count of at least 1 or bin centers; "
                 f"received {shown(x_bins)}"
             )
@@ -659,7 +660,7 @@ def _check_bins(x_bins: Any, function: str) -> None:
     except (TypeError, ValueError):
         centers = np.array([np.nan])
     if centers.ndim != 1 or len(centers) == 0 or not np.isfinite(centers).all():
-        raise ValueError(
+        raise ChartError(
             f"{function} x_bins: expected a count of at least 1 or finite bin centers; "
             f"received {shown(x_bins)}"
         )
@@ -667,8 +668,8 @@ def _check_bins(x_bins: Any, function: str) -> None:
 
 def check_ci(ci: float | None, function: str) -> None:
     """Refuses a confidence level that is not a percentage."""
-    if ci is not None and not (0 < ci <= 100):
-        raise ValueError(
+    if ci is not None and not (real(ci) and 0 < ci <= 100):
+        raise ChartError(
             f"{function} ci: expected a percentage above 0 and at most 100; received {shown(ci)}"
         )
 
@@ -781,7 +782,7 @@ def residplot(
     model = _model(order, False, robust, False, False, "residplot")
     marks = mark_options("residplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
     if not isinstance(lowess, bool):
-        raise TypeError(f"residplot lowess: expected True or False; received {shown(lowess)}")
+        raise ChartError(f"residplot lowess: expected True or False; received {shown(lowess)}")
     _check_lowess(frac, it, delta, "residplot")
     refuse_facets(options, "residplot", "residplot fits all the rows at once")
     source = Source(data)
@@ -800,8 +801,9 @@ def residplot(
     if partials[1] is not None:
         yv = regression.regress_out(yv, values(partials[1])[rows])
     if len(np.unique(xv)) <= model.order:
-        raise ValueError(
-            f"an order-{model.order} fit needs more than {model.order} distinct {x} values"
+        raise ChartError(
+            f"residplot order: an order-{model.order} fit needs more than {model.order} "
+            f"distinct {x} values; lower order"
         )
     residual = yv - regression.fit(xv, yv, model.kind, model.order)(xv)  # type: ignore[arg-type]
     (name,) = outputs.named("residual")
@@ -836,13 +838,13 @@ def residplot(
 
 
 def _check_lowess(frac: float, it: int, delta: float, function: str) -> None:
-    if not (0 < frac <= 1):
-        raise ValueError(
+    if not (real(frac) and 0 < frac <= 1):
+        raise ChartError(
             f"{function} frac: expected a number above 0 and at most 1; received {shown(frac)}"
         )
     if not (isinstance(it, int) and not isinstance(it, bool) and it >= 0):
-        raise ValueError(
+        raise ChartError(
             f"{function} it: expected a whole number of at least 0; received {shown(it)}"
         )
-    if not (delta >= 0):
-        raise ValueError(f"{function} delta: expected at least 0; received {shown(delta)}")
+    if not (real(delta) and delta >= 0):
+        raise ChartError(f"{function} delta: expected at least 0; received {shown(delta)}")

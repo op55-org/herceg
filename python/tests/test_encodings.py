@@ -47,7 +47,9 @@ def test_colors_by_column_go_through_the_charts_color_scale():
 def test_ordinal_scales_are_scales_of_categories_and_position_scales_place_values():
     with pytest.raises(TypeError, match="unexpected keyword argument 'nice'"):
         hg.OrdinalScale(nice=True)  # type: ignore[call-arg]
-    with pytest.raises(TypeError, match="OrdinalScale domain: a scale of categories' domain is"):
+    with pytest.raises(
+        hg.ChartError, match="OrdinalScale domain: a scale of categories' domain is"
+    ):
         hg.OrdinalScale(domain=[1, 2])  # type: ignore[list-item]
     with pytest.raises(TypeError, match="unexpected keyword argument 'map'"):
         hg.Scale(map={"A": "#000"})  # type: ignore[call-arg]
@@ -93,14 +95,26 @@ def test_channels_are_checked_in_python_names():
     with pytest.raises(hg.ChartError, match="Channel series: names series through a scale"):
         hg.Channel(series=True)
     assert hg.Channel(series=True, scale="fit")._spec() == {"series": True, "scale": "fit"}
-    with pytest.raises(TypeError, match="Encodings opacity: an expression gives a channel only"):
+    with pytest.raises(
+        hg.ChartError, match="Encodings opacity: an expression gives a channel only"
+    ):
         hg.Encodings(opacity=hg.col("gain"))
-    with pytest.raises(TypeError, match="Encodings color: a condition's then is a constant"):
+    with pytest.raises(hg.ChartError, match="Encodings color: a condition's then is a constant"):
         hg.Encodings(color=hg.when(hg.col("gain") > 1, hg.col("site"), "#000"))
     with pytest.raises(ValueError, match="area encode: has no dash channel; give"):
         hg.Chart(SITES).area(x="t", y="gain", encode=hg.Encodings(dash=hg.Channel(value="--")))
     with pytest.raises(ValueError, match="line style: has no leader; give"):
         hg.Chart(SITES).line(x="t", y="gain", style=hg.MarkStyle(leader={"stroke": "#000"}))
+    # Text draws one look, as the engine refuses it.
+    with pytest.raises(
+        hg.ChartError, match="^text style by: draws one look, not looks by value; drop by$"
+    ):
+        hg.Chart(SITES).text(
+            label="peak",
+            x="t",
+            y="gain",
+            style=hg.MarkStyle(by={"field": "site", "map": {"a": {"stroke": "#000"}}}),
+        )
     with pytest.raises(ValueError, match="line markers: expected True, False, or a shape"):
         hg.Chart(SITES).line(x="t", y="gain", markers="hexagon")
 
@@ -151,7 +165,7 @@ def test_continuity_takes_durations_calendar_units_and_columns():
     assert "region" in columns(chart)
     with pytest.raises(ValueError, match="Continuity break_by: expected"):
         hg.Continuity(break_by="fortnight")
-    with pytest.raises(TypeError, match="Continuity break_by: expected a calendar unit"):
+    with pytest.raises(hg.ChartError, match="Continuity break_by: expected a calendar unit"):
         hg.Continuity(break_by=hg.col("a") > 1)
     with pytest.raises(ValueError, match="Continuity max_gap: expected a positive number"):
         hg.Continuity(max_gap=0)
@@ -203,7 +217,7 @@ def test_bars_group_unless_asked_to_overlap_and_take_outlines_and_label_objects(
     assert 'stroke="#222222"' in chart.to_svg()
     with pytest.raises(ValueError, match="bar dodge: stacked bars pile up in one slot"):
         hg.bar(sales, x="month", y="v", series="r", dodge=True, stack=True)
-    with pytest.raises(TypeError, match="BarLabels style: expected an hg.TextStyle"):
+    with pytest.raises(hg.ChartError, match="BarLabels style: expected an hg.TextStyle"):
         hg.BarLabels(style="percent")
     inside = hg.BarLabels(place=hg.LabelPlace(attachment="center", outside=False))
     assert inside._spec() == {"place": {"attachment": "center", "outside": False}}

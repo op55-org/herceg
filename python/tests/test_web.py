@@ -163,31 +163,100 @@ def test_what_pages_post_back_reads_as_python_values():
 
 
 def test_what_pages_post_back_is_checked():
-    with pytest.raises(ValueError, match=r'^web\.selection: expected JSON; received "\{x"'):
+    with pytest.raises(ValueError, match=r'^web\.selection value: expected JSON; received "\{x"'):
         web.selection("{x")
-    with pytest.raises(ValueError, match=r"^web\.selection: expected an object, not \[1\]"):
+    with pytest.raises(ValueError, match=r"^web\.selection value: expected an object, not \[1\]"):
         web.selection("[1]")
     # Integers too large for a float, as JSON text can hold them.
     huge = "1" + "0" * 400
-    with pytest.raises(ValueError, match=r"^web\.selection: a range's ends are finite numbers"):
+    with pytest.raises(
+        ValueError, match=r"^web\.selection value: a range's ends are finite numbers"
+    ):
         web.selection(f'{{"x": [0, {huge}], "y": null, "lasso": null}}')
-    with pytest.raises(ValueError, match=r"^web\.viewport: a range's ends are finite numbers"):
+    with pytest.raises(
+        ValueError, match=r"^web\.viewport value: a range's ends are finite numbers"
+    ):
         web.viewport(f'{{"x": [{huge}, 1], "y": null, "yRight": null}}')
-    with pytest.raises(ValueError, match=r"^web\.inspection: points\[0\]: expected"):
+    with pytest.raises(ValueError, match=r"^web\.inspection value: points\[0\]: expected"):
         web.inspection(
             f'{{"axis": "x", "label": "", "value": 1, "points": [{{"mark": 0, "key": "k", '
             f'"label": "l", "text": "t", "value": {huge}}}]}}'
         )
-    with pytest.raises(ValueError, match=r"^web\.viewport: time names axes"):
+    with pytest.raises(ValueError, match=r"^web\.viewport value: time names axes"):
         web.viewport({"x": [1, 2], "time": ["z"]})
-    with pytest.raises(ValueError, match=r'^web\.inspection: axis is "x", "y", or "item"'):
+    with pytest.raises(ValueError, match=r'^web\.inspection value: axis is "x", "y", or "item"'):
         web.inspection({"axis": "z", "label": "", "points": []})
-    with pytest.raises(ValueError, match=r"^web\.inspection: points\[0\]: expected mark, key"):
+    with pytest.raises(
+        ValueError, match=r"^web\.inspection value: points\[0\]: expected mark, key"
+    ):
         web.inspection({"axis": "x", "label": "", "value": 1, "points": [{"mark": "0"}]})
     point = {"mark": 0, "key": "k", "label": "p99", "text": "1", "value": 1}
     field = {"field": "host", "label": "Host", "kind": "category", "text": "a"}
-    with pytest.raises(ValueError, match=r"^web\.inspection: points\[0\]\.fields\[0\]: expected"):
+    with pytest.raises(
+        ValueError, match=r"^web\.inspection value: points\[0\]\.fields\[0\]: expected"
+    ):
         web.inspection({"axis": "x", "label": "", "points": [{**point, "fields": [field]}]})
     assert web.inspection(
         {"axis": "x", "label": "", "points": [{**point, "fields": [{**field, "value": "a"}]}]}
     )
+
+
+@pytest.mark.contract("web.events.details.python")
+def test_page_events_details_read_as_the_widget_hears_them():
+    t0 = dt.datetime(2026, 1, 1)
+    ms = (t0 - dt.datetime(1970, 1, 1)).total_seconds() * 1000
+    shared = {"scale": "x", "instance": "", "time": True, "panels": ["a", "b"]}
+    change = web.viewport_event(
+        {
+            "id": "latency",
+            "viewRevision": 3,
+            "cause": "wheel",
+            "panel": "a",
+            "scales": [{**shared, "view": [ms, ms + 60_000]}],
+            "views": [
+                {"panel": key, "x": [ms, ms + 60_000], "y": None, "yRight": None, "time": ["x"]}
+                for key in ("a", "b")
+            ],
+        }
+    )
+    assert change.cause == "wheel" and change.panel == "a" and change.view_revision == 3
+    assert change.scales == (hg.ScaleView("x", "", ("a", "b"), (t0, t0 + dt.timedelta(minutes=1))),)
+    assert change.views["b"] == hg.Viewport(x=(t0, t0 + dt.timedelta(minutes=1)))
+    selected = web.select_event(
+        json.dumps(
+            {
+                "id": "latency",
+                "owner": {"scales": [shared], "panels": ["a", "b"]},
+                "selection": {"x": [ms, ms + 1000], "y": None, "lasso": None, "time": ["x"]},
+            }
+        )
+    )
+    assert selected.owner == hg.SelectionOwner((hg.ScaleInstance("x", "", ("a", "b")),), ("a", "b"))
+    assert selected.selection == hg.Selection(x=(t0, t0 + dt.timedelta(seconds=1)))
+    near = web.edge(
+        {
+            **shared,
+            "id": "latency",
+            "side": "end",
+            "domain": [ms, ms + 1000],
+            "bound": ms + 1000,
+            "cause": "pointer",
+        }
+    )
+    assert near.side == "end" and near.bound == t0 + dt.timedelta(seconds=1)
+    key = json.dumps({"field": "host", "value": "a"})
+    hidden = web.visibility(
+        {"id": "latency", "hiddenKeys": [key], "panels": {"b": {"hidden": [], "shown": [key]}}}
+    )
+    assert hidden == hg.VisibilityState((key,), {"b": hg.PanelVisibility((), (key,))})
+    with pytest.raises(
+        hg.ChartError, match=r"^web\.viewport_event value: cause is one of .*, not 'drag'"
+    ) as refused:
+        web.viewport_event({"viewRevision": 1, "cause": "drag", "scales": [], "views": []})
+    assert refused.value.path == "value"
+    with pytest.raises(
+        hg.ChartError, match=r"^web\.select_event value: a select event has an owner"
+    ):
+        web.select_event('{"selection": null}')
+    with pytest.raises(hg.ChartError, match=r"^web\.visibility value: expected JSON"):
+        web.visibility("{")

@@ -8,16 +8,26 @@ wherever the builder is taken (``{"field": "site"}`` for
 from __future__ import annotations
 
 import datetime as _dt
-import numbers
+import functools
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import numpy as np
 
-from ._data import listed, shown
+from ._data import duration_ms, listlike
 from ._derive import Expr
-from ._errors import ChartError
+from ._errors import (
+    ChartError,
+    is_number,
+    key_path,
+    listed,
+    located,
+    placed,
+    refuses,
+    shown,
+)
 from ._guides import Format, IdentityScale, format_spec
 from ._style import (
     StrokeStyle,
@@ -29,13 +39,18 @@ from ._style import (
     _fraction,
     _number,
     _spec,
+    built_spec,
 )
 
-# Point shapes: a symbol column's values take the first eight in turn; "x" is named only.
-SYMBOLS = ("circle", "square", "triangle", "diamond", "cross", "star", "wye", "triangle-down", "x")
+#: A point's shape: a symbol column's values take the first eight in turn; "x" is named only.
+SymbolName = Literal[
+    "circle", "square", "triangle", "diamond", "cross", "star", "wye", "triangle-down", "x"
+]
+SYMBOLS: tuple[str, ...] = get_args(SymbolName)
 
 #: The calendar units a line breaks at the boundaries of, in the chart's time zone.
-CALENDAR_UNITS = ("minute", "hour", "day", "week", "month", "year")
+CalendarBreak = Literal["minute", "hour", "day", "week", "month", "year"]
+CALENDAR_UNITS: tuple[str, ...] = get_args(CalendarBreak)
 
 Dash = Sequence[float] | Literal["-", "--", ":", "-."]
 
@@ -44,14 +59,13 @@ def dash_spec(value: Any, role: str) -> Any:
     """A dash as the spec takes it: a named dash or a pixel pattern."""
     if value is None:
         return None
-    if isinstance(value, str):
-        _choice(value, ("-", "--", ":", "-."), role)
+    if isinstance(value, str) and value in ("-", "--", ":", "-."):
         return value
-    if isinstance(value, Sequence):
+    if listlike(value):
         for i, step in enumerate(value):
             _number(step, f"{role}[{i}]")
         return [float(step) for step in value]
-    raise TypeError(
+    raise ChartError(
         f'{role}: expected a pixel pattern such as [4, 2], or "-", "--", ":", or "-."; '
         f"received {shown(value)}"
     )
@@ -61,16 +75,17 @@ def _constant(value: Any, role: str) -> Any:
     """A channel's constant: text (colors, shapes, dashes), a number, or a pixel pattern."""
     if isinstance(value, str):
         return value
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+    if is_number(value) and not isinstance(value, bool):
         number = float(value)
         return int(number) if number.is_integer() else number
     if isinstance(value, Sequence):
         return dash_spec(value, role)
-    raise TypeError(
+    raise ChartError(
         f"{role}: expected a color, a shape, a number, or a dash; received {shown(value)}"
     )
 
 
+@refuses
 @dataclass
 class Channel:
     """A value per row: a column's value read through a scale (``field``,
@@ -94,9 +109,9 @@ class Channel:
         if len(given) != 1:
             raise ChartError("Channel: give field, value, or series=True, one of them")
         if self.field is not None and (not isinstance(self.field, str) or not self.field):
-            raise TypeError(f"Channel field: expected a column name; received {shown(self.field)}")
+            raise ChartError(f"Channel field: expected a column name; received {shown(self.field)}")
         if self.series is not None and self.series is not True:
-            raise TypeError(
+            raise ChartError(
                 "Channel series: expected True, the series' names through a scale; "
                 f"received {shown(self.series)}"
             )
@@ -114,7 +129,7 @@ class Channel:
             if isinstance(self.scale, Mapping):
                 # The spec's form, as the chart's scales take it.
                 if dict(self.scale) != {"type": "identity"}:
-                    raise TypeError(
+                    raise ChartError(
                         'Channel scale: an identity scale is {"type": "identity"}; give '
                         f"hg.IdentityScale(); received {shown(self.scale)}"
                     )
@@ -126,7 +141,7 @@ class Channel:
                         "scales for series=True"
                     )
             elif not isinstance(self.scale, str) or not self.scale:
-                raise TypeError(
+                raise ChartError(
                     f"Channel scale: expected the name of one of the chart's scales, or "
                     f"hg.IdentityScale(); received {shown(self.scale)}"
                 )
@@ -150,7 +165,7 @@ def output_problem(
     """Why ``value`` cannot be what ``channel`` (as the spec names it) draws,
     or None where it can, as the engine's ``outputProblem`` says; ``is_color``
     tells a CSS color (herceg's parser by default)."""
-    number = isinstance(value, numbers.Real) and not isinstance(value, bool)
+    number = is_number(value) and not isinstance(value, bool)
     if channel in ("color", "fill", "stroke"):
         from ._colors import is_color as parsed
 
@@ -160,8 +175,7 @@ def output_problem(
         return None if value in SYMBOLS else f"a shape: {', '.join(SYMBOLS)}"
     if channel == "dash":
         lengths = isinstance(value, list) and all(
-            isinstance(n, numbers.Real) and not isinstance(n, bool) and 0 <= float(n) < float("inf")
-            for n in value
+            is_number(n) and not isinstance(n, bool) and 0 <= float(n) < float("inf") for n in value
         )
         return (
             None
@@ -182,21 +196,22 @@ def channel_spec(value: Any, role: str) -> Any:
     if isinstance(value, Expr):
         json = value.to_json()
         if not (isinstance(json, list) and len(json) == 4 and json[0] == "if"):
-            raise TypeError(
+            raise ChartError(
                 f"{role}: an expression gives a channel only as a condition; give "
                 "hg.when(condition, then, otherwise), or hg.Channel(field=...) for a column"
             )
         _, when, then, otherwise = json
         for name, branch in (("then", then), ("otherwise", otherwise)):
             if isinstance(branch, list) or branch is None:
-                raise TypeError(
+                raise ChartError(
                     f"{role}: a condition's {name} is a constant, such as a color or a number; "
                     "for a column's values give hg.Channel(field=...)"
                 )
         return {"condition": {"when": when, "then": then, "otherwise": otherwise}}
-    return _built(value, Channel, role)._spec()
+    return built_spec(value, Channel, role)
 
 
+@refuses
 @dataclass
 class Encodings:
     """A mark's channels, each an ``hg.Channel`` or ``hg.when(...)``.
@@ -239,17 +254,18 @@ def encodings_spec(value: Any, takes: Sequence[str], role: str) -> Any:
     built: Encodings = _built(value, Encodings, f"{role} encode")
     for name in built._names():
         if name not in takes:
-            raise ValueError(f"{role} encode: has no {name} channel; give {listed(takes)}")
-    return built._spec()
+            raise ChartError(f"{role} encode: has no {name} channel; give {listed(takes)}")
+    return placed(f"{role} encode", built._spec)
 
 
+@refuses
 @dataclass
 class MarkerStyle:
     """A point drawn at each observation of a line: its ``symbol``,
     ``radius`` in pixels (3 by default), and paint (the line's color by
     default)."""
 
-    symbol: str | None = None
+    symbol: SymbolName | None = None
     radius: float | None = None
     fill: str | None = None
     stroke: str | None = None
@@ -270,6 +286,7 @@ class MarkerStyle:
         )
 
 
+@refuses
 @dataclass
 class SeriesStyle:
     """How one series looks (for bars, one row): its paint, and its markers
@@ -296,6 +313,7 @@ class SeriesStyle:
         self.marker = _built(self.marker, MarkerStyle, "SeriesStyle marker")
 
 
+@refuses
 @dataclass
 class StyleMap:
     """Looks by value: each series whose ``field`` (a column constant within
@@ -309,18 +327,25 @@ class StyleMap:
 
     def __post_init__(self) -> None:
         if not isinstance(self.map, Mapping):
-            raise TypeError(
+            raise ChartError(
                 f'StyleMap map: expected a dict of looks by value, such as {{"Average": '
                 f'hg.SeriesStyle(dash="--")}}; received {shown(self.map)}'
             )
+        # Keys are values of the data, kept whole in paths (map["North South"]).
         self.map = {
-            str(key): _built(style, SeriesStyle, f"StyleMap map[{key!r}]")
+            str(key): located(
+                key_path("map", str(key)),
+                functools.partial(_built, style, SeriesStyle, f"StyleMap map[{key!r}]"),
+            )
             for key, style in self.map.items()
         }
         if self.field is not None and not isinstance(self.field, str):
-            raise TypeError(f"StyleMap field: expected a column name; received {shown(self.field)}")
+            raise ChartError(
+                f"StyleMap field: expected a column name; received {shown(self.field)}"
+            )
 
 
+@refuses
 @dataclass
 class MarkStyle:
     """How a mark's parts look: looks by value (``by``), its markers
@@ -339,17 +364,20 @@ class MarkStyle:
 
 
 def mark_style_spec(value: Any, parts: Sequence[str], role: str) -> Any:
-    """A mark's ``style``, refusing parts the mark does not have."""
+    """A mark's ``style``, refusing parts the mark does not have (looks by
+    value, ``by``, among them)."""
     if value is None:
         return None
     built: MarkStyle = _built(value, MarkStyle, f"{role} style")
+    if built.by is not None and "by" not in parts:
+        raise ChartError(f"{role} style by: draws one look, not looks by value; drop by")
     for name in ("marker", "leader"):
         if getattr(built, name) is not None and name not in parts:
-            has = listed(("by", *parts))
-            raise ValueError(f"{role} style: has no {name}; give {has}")
+            raise ChartError(f"{role} style: has no {name}; give {listed(parts)}")
     return _spec(built)
 
 
+@refuses
 @dataclass(frozen=True)
 class Duration:
     """An elapsed time, in milliseconds, seconds, minutes, and hours (which
@@ -365,7 +393,7 @@ class Duration:
         for name in ("milliseconds", "seconds", "minutes", "hours"):
             _number(getattr(self, name), f"Duration {name}")
         if self._milliseconds() <= 0:
-            raise ValueError("Duration: expected a positive time; give milliseconds, ..., hours")
+            raise ChartError("Duration: expected a positive time; give milliseconds, ..., hours")
 
     def _milliseconds(self) -> float:
         return (
@@ -378,13 +406,22 @@ def _gap_spec(value: Any) -> Any:
     if isinstance(value, _dt.timedelta):
         value = Duration(milliseconds=value / _dt.timedelta(milliseconds=1))
     elif isinstance(value, np.timedelta64):
-        value = Duration(milliseconds=float(value / np.timedelta64(1, "ms")))
+        if np.isnat(value):
+            raise ChartError("Continuity max_gap: expected a duration; received NaT, no duration")
+        milliseconds = duration_ms(value)
+        if milliseconds is None:
+            raise ChartError(
+                f"Continuity max_gap: {shown(value)} has no fixed length (months, years, or no "
+                "unit); give a fixed duration, or break_by the calendar unit"
+            )
+        value = Duration(milliseconds=milliseconds)
     if isinstance(value, Duration):
         return {"milliseconds": value._milliseconds()}
     _number(value, "Continuity max_gap", positive=True)
     return float(value)
 
 
+@refuses
 @dataclass
 class Continuity:
     """Which neighboring observations a line or area connects, decided before
@@ -396,12 +433,12 @@ class Continuity:
     ``hg.col(name)``, a change of a column's value."""
 
     defined: Expr | None = None
-    max_gap: Any = None
-    break_by: str | Expr | None = None
+    max_gap: float | Duration | _dt.timedelta | np.timedelta64 | None = None
+    break_by: CalendarBreak | Expr | None = None
 
     def __post_init__(self) -> None:
         if self.defined is not None and not isinstance(self.defined, Expr):
-            raise TypeError(
+            raise ChartError(
                 "Continuity defined: expected an expression such as hg.col('quality') >= 0.8; "
                 f"received {shown(self.defined)}"
             )
@@ -417,7 +454,7 @@ class Continuity:
             return by
         json = by.to_json() if isinstance(by, Expr) else None
         if not (isinstance(json, list) and len(json) == 2 and json[0] == "field"):
-            raise TypeError(
+            raise ChartError(
                 f"Continuity break_by: expected a calendar unit ({listed(CALENDAR_UNITS)}) or "
                 f"hg.col(name); received {shown(by)}"
             )
@@ -437,7 +474,7 @@ def condition_spec(value: Any, role: str) -> Any:
     if value is None:
         return None
     if not isinstance(value, Expr):
-        raise TypeError(
+        raise ChartError(
             f"{role}: expected an expression such as hg.col('e') < hg.col('limit'); "
             f"received {shown(value)}"
         )
@@ -452,8 +489,8 @@ Frame = Literal["plot", "chart"]
 def _offset(value: Any, role: str) -> Any:
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not np.isfinite(value):
-        raise TypeError(
+    if isinstance(value, bool) or not is_number(value) or not np.isfinite(value):
+        raise ChartError(
             f"{role} offset: expected a finite number of pixels; received {shown(value)}"
         )
     return float(value)
@@ -462,15 +499,16 @@ def _offset(value: Any, role: str) -> Any:
 def _share(value: Any, field: Any, role: str, expected: str) -> None:
     """Checks a coordinate's constant ``value`` or number ``field``, one of them."""
     if (value is None) == (field is None):
-        raise ValueError(f"{role}: give a value or field, one of them")
+        raise ChartError(f"{role}: give a value or field, one of them")
     if field is not None and (not isinstance(field, str) or not field):
-        raise TypeError(f"{role} field: expected a column name; received {shown(field)}")
+        raise ChartError(f"{role} field: expected a column name; received {shown(field)}")
     if value is not None and (
-        isinstance(value, bool) or not isinstance(value, numbers.Real) or not np.isfinite(value)
+        isinstance(value, bool) or not is_number(value) or not np.isfinite(value)
     ):
-        raise TypeError(f"{role}: expected {expected}; received {shown(value)}")
+        raise ChartError(f"{role} value: expected {expected}; received {shown(value)}")
 
 
+@refuses
 @dataclass(frozen=True)
 class Fraction:
     """A place a share of the plot (or with ``frame="chart"``, the chart)
@@ -496,6 +534,7 @@ class Fraction:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass(frozen=True)
 class Pixels:
     """A place ``value`` pixels from the plot's (or the chart's) left or top
@@ -529,18 +568,19 @@ def length_spec(value: Any, role: str) -> Any:
         return None
     if isinstance(value, Mapping):
         if set(value) != {"px"}:
-            raise ValueError(
+            raise ChartError(
                 f'{role}: expected hg.Pixels(n) or {{"px": n}}; received {shown(value)}'
             )
         value = Pixels(value["px"])
     if not isinstance(value, Pixels):
-        raise TypeError(f"{role}: expected hg.Pixels(n), a length; received {shown(value)}")
+        raise ChartError(f"{role}: expected hg.Pixels(n), a length; received {shown(value)}")
     if value.field is not None or value.frame is not None or value.offset is not None:
-        raise ValueError(f"{role}: a length is pixels alone; drop field, frame, and offset")
+        raise ChartError(f"{role}: a length is pixels alone; drop field, frame, and offset")
     _number(value.value, role)
     return {"px": float(value.value)}  # type: ignore[arg-type]
 
 
+@refuses
 @dataclass(frozen=True)
 class DataPosition:
     """A value on an axis' scale (a number, a datetime, or a category's
@@ -556,21 +596,21 @@ class DataPosition:
 
     def __post_init__(self) -> None:
         if (self.value is None) == (self.field is None):
-            raise ValueError("DataPosition: give a value or field, one of them")
+            raise ChartError("DataPosition: give a value or field, one of them")
         if self.field is not None and (not isinstance(self.field, str) or not self.field):
-            raise TypeError(
+            raise ChartError(
                 f"DataPosition field: expected a column name; received {shown(self.field)}"
             )
         # A category's value, or a finite number or a datetime.
         if self.value is not None and not isinstance(self.value, str):
             at = instant(self.value, "DataPosition value")
             if not np.isfinite(at):
-                raise TypeError(
+                raise ChartError(
                     f"DataPosition value: expected a finite number; received {shown(self.value)}"
                 )
         _offset(self.offset, "DataPosition")
         if self.scale is not None and (not isinstance(self.scale, str) or not self.scale):
-            raise TypeError(
+            raise ChartError(
                 f"DataPosition scale: expected a scale's name; received {shown(self.scale)}"
             )
 
@@ -589,16 +629,19 @@ class DataPosition:
 
 def instant(value: Any, role: str) -> float:
     """A number as itself, a datetime as epoch milliseconds."""
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+    if is_number(value) and not isinstance(value, bool):
         return float(value)
     from ._data import _time_ms
 
     try:
-        return _time_ms(value)
+        ms = _time_ms(value)
     except TypeError:
-        raise TypeError(
+        raise ChartError(
             f"{role}: expected a number or a datetime; received {shown(value)}"
         ) from None
+    if not math.isfinite(ms):
+        raise ChartError(f"{role}: expected a datetime; received {shown(value)}, no time")
+    return ms
 
 
 #: An annotation's place along an axis: a number or datetime, a column name,
@@ -628,6 +671,7 @@ def coordinate_field(value: Any) -> str | None:
     return value.field if isinstance(value, (DataPosition, Fraction, Pixels)) else None
 
 
+@refuses
 @dataclass(frozen=True)
 class Position:
     """A point: a place on each axis, which may mix kinds (``x`` a fraction
@@ -651,6 +695,7 @@ def tagged_spec(value: Any, role: str) -> dict[str, Any]:
 # Labels --------------------------------------------------------------------------
 
 
+@refuses
 @dataclass
 class LabelPlace:
     """Where a label goes on what it labels: ``attachment`` along it (a rule's
@@ -673,13 +718,14 @@ class LabelPlace:
         for name in ("outside", "reserve"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, bool):
-                raise TypeError(
+                raise ChartError(
                     f"LabelPlace {name}: expected True or False; received {shown(value)}"
                 )
         if self.offset is not None:
             _offset(self.offset, "LabelPlace")
 
 
+@refuses
 @dataclass(frozen=True)
 class LabelPart:
     """A part of a label's text, between literal strings: a column's value
@@ -698,19 +744,19 @@ class LabelPart:
     def __post_init__(self) -> None:
         given = [name for name in ("field", "series", "value") if getattr(self, name) is not None]
         if len(given) != 1:
-            raise ValueError("LabelPart: give field, series=True, or value=True, one of them")
+            raise ChartError("LabelPart: give field, series=True, or value=True, one of them")
         for name in ("series", "value"):
             # True itself: 1 equals True, but is no flag.
             if getattr(self, name) is not None and getattr(self, name) is not True:
-                raise TypeError(
+                raise ChartError(
                     f"LabelPart {name}: expected True; received {shown(getattr(self, name))}"
                 )
         if self.field is not None and (not isinstance(self.field, str) or not self.field):
-            raise TypeError(
+            raise ChartError(
                 f"LabelPart field: expected a column name; received {shown(self.field)}"
             )
         if self.series and self.format is not None:
-            raise ValueError("LabelPart format: a series' name is written as it is; drop format")
+            raise ChartError("LabelPart format: a series' name is written as it is; drop format")
 
     def _spec(self) -> dict[str, Any]:
         spec: dict[str, Any] = (
@@ -731,12 +777,13 @@ def content_spec(value: Any, role: str) -> Any:
     if value is None:
         return None
     if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence) or not value:
-        raise TypeError(
+        raise ChartError(
             f'{role}: expected a list of parts, such as ["Peak ", hg.LabelPart(value=True)]; '
             f"received {shown(value)}"
         )
     return [
-        part if isinstance(part, str) else _built(part, LabelPart, role)._spec() for part in value
+        part if isinstance(part, str) else built_spec(part, LabelPart, f"{role}[{i}]")
+        for i, part in enumerate(value)
     ]
 
 
@@ -797,6 +844,7 @@ def _content_problem(content: Any) -> tuple[str, str] | None:
     return None
 
 
+@refuses
 @dataclass
 class SeriesLabels:
     """Labels following each series of a line or area: at its ``at``
@@ -820,7 +868,7 @@ class SeriesLabels:
         self.place = _built(self.place, LabelPlace, "SeriesLabels place")
         for name in ("attachment", "side"):
             if getattr(self.place, name, None) is not None:
-                raise ValueError(
+                raise ChartError(
                     f"SeriesLabels place.{name}: labels go where they follow their series; "
                     f"drop {name}"
                 )
@@ -837,6 +885,7 @@ class SeriesLabels:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass(frozen=True)
 class MarkAnchor:
     """A place on another mark's series that text follows: the ``mark``'s
@@ -849,7 +898,7 @@ class MarkAnchor:
 
     def __post_init__(self) -> None:
         if not isinstance(self.mark, str) or not self.mark:
-            raise TypeError(f"MarkAnchor mark: expected a mark's id; received {shown(self.mark)}")
+            raise ChartError(f"MarkAnchor mark: expected a mark's id; received {shown(self.mark)}")
         _choice(self.at, _LABEL_AT, "MarkAnchor at")
         if self.edge is not None:
             _choice(self.edge, _EDGES, "MarkAnchor edge")
@@ -859,6 +908,7 @@ class MarkAnchor:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass
 class Label:
     """A label: constant ``text``, each row's ``field`` (numbers written
@@ -875,9 +925,9 @@ class Label:
 
     def __post_init__(self) -> None:
         if sum(value is not None for value in (self.text, self.field, self.content)) != 1:
-            raise ValueError("Label: give text, field, or content, one of them")
+            raise ChartError("Label: give text, field, or content, one of them")
         if self.content is not None and self.format is not None:
-            raise ValueError("Label format: content's parts have formats of their own; drop format")
+            raise ChartError("Label format: content's parts have formats of their own; drop format")
         content_spec(self.content, "Label content")
         self.style = _built(self.style, TextStyle, "Label style")
         self.place = _built(self.place, LabelPlace, "Label place")
@@ -900,10 +950,11 @@ def label_spec(value: Any, role: str, *, places: bool = True) -> Any:
         return value
     built: Label = _built(value, Label, f"{role} label")
     if not places and built.place is not None:
-        raise ValueError(f"{role} label: text goes where at says; drop place")
-    return built._spec()
+        raise ChartError(f"{role} label: text goes where at says; drop place")
+    return placed(f"{role} label", built._spec)
 
 
+@refuses
 @dataclass
 class BarLabels:
     """Bars' value labels: each bar's value (or with ``field``, a column's),
@@ -925,7 +976,7 @@ class BarLabels:
 
     def __post_init__(self) -> None:
         if self.content is not None and (self.field is not None or self.format is not None):
-            raise ValueError(
+            raise ChartError(
                 "BarLabels content: its parts name fields and formats of their own; "
                 "drop field and format"
             )
@@ -937,7 +988,7 @@ class BarLabels:
         if self.place is not None:
             for name in ("side", "reserve", "offset"):
                 if getattr(self.place, name) is not None:
-                    raise ValueError(
+                    raise ChartError(
                         f"BarLabels place: bars' labels take attachment and outside; drop {name}"
                     )
 
@@ -960,6 +1011,28 @@ def fraction_option(value: Any, role: str) -> Any:
     return value
 
 
+def pixels_option(value: Any, role: str) -> Any:
+    """A width in pixels, refused unless a finite number of at least 0."""
+    if value is not None and (
+        isinstance(value, bool)
+        or not is_number(value)
+        or not np.isfinite(float(value))
+        or float(value) < 0
+    ):
+        raise ChartError(f"{role}: expected 0 or more pixels; received {shown(value)}")
+    return value
+
+
+def choice_option(value: Any, choices: Sequence[Any], role: str) -> Any:
+    """One of `choices` (strings, True, or False); None leaves it to its default."""
+    if value is None or any(
+        value is choice or (isinstance(value, str) and value == choice) for choice in choices
+    ):
+        return value
+    raise ChartError(f"{role}: expected {listed(choices)}; received {shown(value)}")
+
+
+@refuses
 @dataclass
 class Stack:
     """How an area stack piles its series: ``offset`` (``"zero"``,
@@ -980,7 +1053,7 @@ class Stack:
         if self.order is not None:
             _choice(self.order, ("input", "inside-out"), "Stack order")
             if self.order == "inside-out" and self.offset in (None, "zero"):
-                raise ValueError(
+                raise ChartError(
                     'Stack order: inside-out orders nonnegative stacks; give offset="fill", '
                     '"center", or "wiggle", or drop order'
                 )

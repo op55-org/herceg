@@ -146,7 +146,9 @@ function exported(run: () => string): string | { error: string; info: ChartError
         fonts?: (Omit<FontSource, "data"> & { data: string })[];
       } & Record<string, unknown>;
       const prepared = fonts?.length
-        ? prepareFonts(fonts.map((font) => ({ ...font, data: decodeBase64(font.data) })))
+        ? withFonts(() =>
+            prepareFonts(fonts.map((font) => ({ ...font, data: decodeBase64(font.data) }))),
+          )
         : undefined;
       return JSON.stringify(
         specToSnapshot(JSON.parse(spec) as ChartSpec, buffers.map(decodeBase64), {
@@ -169,7 +171,9 @@ function exported(run: () => string): string | { error: string; info: ChartError
       const prepared = {
         ...settings,
         ...(fonts?.length && {
-          fonts: prepareFonts(fonts.map((font) => ({ ...font, data: decodeBase64(font.data) }))),
+          fonts: withFonts(() =>
+            prepareFonts(fonts.map((font) => ({ ...font, data: decodeBase64(font.data) }))),
+          ),
           ...(fallback && { fallback }),
           ...(missingGlyph !== undefined && { missingGlyph }),
         }),

@@ -62,7 +62,7 @@ def test_row_coordinates_are_checked_as_the_engine_checks_them():
         chart().line(x="t", y=hg.DataPosition(field="v", scale="x"))
     assert (refused.value.code, refused.value.path) == ("invalid-option", "marks[0].y.scale")
     with pytest.raises(hg.ChartError) as refused:
-        chart().error_bar(x="t", y=hg.Fraction(field="lane"), y_error="v")
+        chart().errorbar(x="t", y=hg.Fraction(field="lane"), y_error="v")
     assert (refused.value.code, refused.value.path) == ("invalid-option", "marks[0].y")
 
 

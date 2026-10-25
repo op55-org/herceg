@@ -1,8 +1,10 @@
 // The Streamlit component's front end, called the way Streamlit calls it:
 // once per script run, with the payload herceg.streamlit.payload builds.
 
+import { visibilityState } from "herceg/spec";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
+import { contractTest } from "../../../packages/herceg/test/helpers/contracts.ts";
 import { MOUSE } from "../../../scripts/browser/mouse.ts";
 import type { Header } from "../streamlit.ts";
 import { itemChart, key } from "./items.ts";
@@ -169,7 +171,8 @@ describe("Streamlit component", () => {
     await vi.dynamicImportSettled();
     await frame();
     expect(sliders()).toHaveLength(3);
-    expect(sliders()[1]!.getAttribute("aria-valuetext")).toBe(shown);
+    // Once the new chart has restored the view, which waits for what it loads.
+    await expect.poll(() => sliders()[1]!.getAttribute("aria-valuetext")).toBe(shown);
   });
 
   it("reports a brushed range and clicks only when the script reacts to them", async () => {
@@ -568,7 +571,7 @@ describe("Streamlit component", () => {
     const reordered = run(parent, bars(["c", "a", "b"], "lasso"));
     await frame();
     await expect.poll(() => band(parent)?.getAttribute("visibility") ?? "hidden").toBe("hidden");
-    expect(reordered.state).toEqual([["selection", null]]);
+    await expect.poll(() => reordered.state).toEqual([["selection", null]]);
   });
 
   it("clears the script's selection when a new chart cannot keep the brush", async () => {
@@ -578,7 +581,8 @@ describe("Streamlit component", () => {
     await frame();
     // Bars along categories replace the line: a range of numbers means nothing there.
     const next = run(parent, bars(["a", "b"]));
-    expect(next.state).toEqual([["selection", null]]);
+    // Once the new chart has restored the views, which waits for what it loads.
+    await expect.poll(() => next.state).toEqual([["selection", null]]);
     expect(band(parent)?.getAttribute("visibility") ?? "hidden").toBe("hidden");
   });
 
@@ -592,12 +596,12 @@ describe("Streamlit component", () => {
     expect(state).toEqual([["selection", { x: ["a", "b"], ...whole }]]);
     // Reordered: the brush covers "a" and "b" where they are now.
     const reordered = run(parent, bars(["b", "a", "c"]));
-    expect(reordered.state).toEqual([["selection", { x: ["b", "a"], ...whole }]]);
+    await expect.poll(() => reordered.state).toEqual([["selection", { x: ["b", "a"], ...whole }]]);
     await frame();
     await expect.poll(() => band(parent)?.getAttribute("visibility")).toBe("visible");
     // Gone: the brush goes, and the script hears so.
     const replaced = run(parent, bars(["x", "y", "z"]));
-    expect(replaced.state).toEqual([["selection", null]]);
+    await expect.poll(() => replaced.state).toEqual([["selection", null]]);
   });
 
   it("follows the app's light or dark theme unless the chart has its own", async () => {
@@ -999,6 +1003,91 @@ it("reports and keeps each subplot tree's root and map's view across reruns", as
   }
 });
 
+it("reports the views once a rerun's chart has restored them, axes and a map's alike", async () => {
+  const listener = vi.spyOn(MountedChart.prototype, "on");
+  try {
+    const parent = host();
+    const spec = (title: string) =>
+      ({
+        title,
+        width: 400,
+        height: 300,
+        renderer: "svg",
+        interaction: { zoom: true },
+        projection: "equirectangular",
+        panels: [{ id: "line" }, { id: "map" }],
+        layout: { type: "grid", columns: [1, 1] },
+        data: {
+          data: {
+            columns: {
+              x: { type: "number", dtype: "float64", buffer: 0 },
+              y: { type: "number", dtype: "float64", buffer: 1 },
+            },
+          },
+        },
+        marks: [
+          { type: "line", x: "x", y: "y", data: "data", panel: "line" },
+          { type: "geopoint", data: "data", longitude: "x", latitude: "y", panel: "map" },
+        ],
+      }) as Header["spec"];
+    const buffers = [new Float64Array([0, 1, 2]), new Float64Array([1, 3, 2])];
+    run(parent, payload(spec("Before"), buffers, ["viewport"]));
+    await vi.dynamicImportSettled();
+    const chart = listener.mock.instances[0] as MountedChart;
+    chart.setViewport({ x: [0.5, 1.5] }, { panel: "line" });
+    chart.setViewport({ x: [0, 0.1], y: [0, 0.1] }, { panel: "map" });
+    await frame();
+    const next = run(parent, payload(spec("After"), buffers, ["viewport"]));
+    const restored = listener.mock.instances.at(-1) as MountedChart;
+    await expect.poll(() => restored.getViewport({ panel: "map" }).x).toEqual([0, 0.1]);
+    expect(restored.getViewport({ panel: "line" }).x).toEqual([0.5, 1.5]);
+    await frame();
+    // What it shows is what the script had: nothing to hear, not a view half restored.
+    expect(next.state.filter(([name]) => name === "viewport")).toEqual([]);
+  } finally {
+    listener.mockRestore();
+  }
+});
+
+it("keeps a brush along the right y axis of a chart drawing on it alone", async () => {
+  const listener = vi.spyOn(MountedChart.prototype, "on");
+  try {
+    const parent = host();
+    const right = (title: string) =>
+      payload(
+        {
+          title,
+          width: 400,
+          height: 200,
+          renderer: "svg",
+          interaction: { brush: "y" },
+          data: {
+            data: {
+              columns: {
+                x: { type: "number", dtype: "float64", buffer: 0 },
+                y: { type: "number", dtype: "float64", buffer: 1 },
+              },
+            },
+          },
+          marks: [{ type: "line", x: "x", y: "y", data: "data", axis: "right" }],
+        } as Header["spec"],
+        [new Float64Array([0, 1, 2]), new Float64Array([1, 3, 2])],
+        ["select"],
+      );
+    run(parent, right("Before"));
+    await vi.dynamicImportSettled();
+    const chart = listener.mock.instances[0] as MountedChart;
+    chart.select({ x: null, y: [1.5, 2.5], lasso: null });
+    await frame();
+    run(parent, right("After"));
+    const next = listener.mock.instances.at(-1) as MountedChart;
+    expect(next).not.toBe(chart);
+    await expect.poll(() => next.selection?.y).toEqual([1.5, 2.5]);
+  } finally {
+    listener.mockRestore();
+  }
+});
+
 it("reports each subplot's own x view and the panel of the selection", async () => {
   const listener = vi.spyOn(MountedChart.prototype, "on");
   try {
@@ -1036,8 +1125,8 @@ it("reports each subplot's own x view and the panel of the selection", async () 
       x?: unknown;
       panels: Record<string, { x: unknown }>;
     };
-    // No view is the whole chart's: each panel has its own.
-    expect(view.x).toBeUndefined();
+    // No x view is the whole chart's: each panel has its own.
+    expect(view.x).toBeNull();
     expect(view.panels.latency!.x).toEqual([0, 1]);
     expect(view.panels.errors!.x).toEqual([1, 2]);
     chart.select({ x: [1.2, 1.8], y: null, lasso: null }, { panel: "errors" });
@@ -1572,3 +1661,71 @@ it("keeps cameras across Streamlit reruns and resets only changed defaults", asy
     listener.mockRestore();
   }
 });
+
+// Last: its panels' legend loads the guide compiler, which charts above wait for.
+contractTest(
+  "visibility.remount.kept.streamlit",
+  async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    try {
+      const parent = host();
+      const spec = (title: string) =>
+        ({
+          title,
+          width: 400,
+          height: 200,
+          renderer: "svg",
+          legend: true,
+          panels: [{ id: "a" }, { id: "b" }],
+          layout: { type: "grid", columns: [1, 1] },
+          data: {
+            data: {
+              columns: {
+                t: { type: "number", dtype: "float64", buffer: 0 },
+                v: { type: "number", dtype: "float64", buffer: 1 },
+                host: { type: "category", codes: 2, dictionary: ["a", "b"] },
+              },
+            },
+          },
+          marks: [
+            { type: "point", data: "data", id: "p", x: "t", y: "v", series: "host", panel: "a" },
+            { type: "point", data: "data", id: "q", x: "t", y: "v", series: "host", panel: "b" },
+          ],
+        }) as Header["spec"];
+      const buffers = [
+        new Float64Array([0, 1, 2]),
+        new Float64Array([1, 3, 2]),
+        new Int32Array([0, 0, 1]),
+      ];
+      run(parent, payload(spec("Before"), buffers, []));
+      const chart = listener.mock.instances.at(-1) as MountedChart;
+      await chart.loading;
+      await frame();
+      const pressed = (label: string) =>
+        [...parent.querySelectorAll("button")]
+          .find((button) => button.textContent === label)
+          ?.getAttribute("aria-pressed");
+      // The user hides host a in the legend; the app hides q but in panel b.
+      [...parent.querySelectorAll("button")].find((button) => button.textContent === "a")!.click();
+      await expect.poll(() => pressed("a")).toBe("false");
+      chart.setVisibility('{"mark":"q"}', false);
+      chart.setVisibility('{"mark":"q"}', true, { panel: "b" });
+      // Panel b shows all of q, host a too: the legend's a is hidden in some panels only.
+      await expect.poll(() => pressed("a")).toBe("mixed");
+      const state = visibilityState(chart);
+      expect(state).toEqual({
+        hiddenKeys: [JSON.stringify({ field: "host", value: "a" }), '{"mark":"q"}'],
+        panels: { b: { hidden: [], shown: ['{"mark":"q"}'] } },
+      });
+      // A run that changes only the title draws a new chart, hiding what the old one hid.
+      run(parent, payload(spec("After"), buffers, []));
+      const next = listener.mock.instances.at(-1) as MountedChart;
+      expect(next).not.toBe(chart);
+      await expect.poll(() => visibilityState(next)).toEqual(state);
+      await expect.poll(() => pressed("a")).toBe("mixed");
+    } finally {
+      listener.mockRestore();
+    }
+  },
+  "keeps what the legends hid, in the chart and its panels, across a rerun that draws a new chart",
+);

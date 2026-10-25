@@ -116,7 +116,7 @@ def test_scales_take_their_scopes_alike_as_dicts_and_objects():
 def test_label_parts_take_true_itself_as_a_flag():
     # 1 equals True, but is no flag: as objects and as dicts alike.
     for flag in ("value", "series"):
-        with pytest.raises(TypeError, match=f"LabelPart {flag}: expected True"):
+        with pytest.raises(hg.ChartError, match=f"LabelPart {flag}: expected True"):
             hg.LabelPart(**{flag: 1})
         with pytest.raises(hg.ChartError) as raised:
             hg.Chart(CONTRACTS["data"]).bar("region", "v", labels={"content": [{flag: 1}]})
@@ -126,18 +126,18 @@ def test_label_parts_take_true_itself_as_a_flag():
 @pytest.mark.contract("position.coordinate.malformed.python")
 def test_coordinates_and_targets_refuse_what_they_cannot_be_as_they_are_made():
     # Before any chart, so before what round 2 does not draw yet is refused.
-    with pytest.raises(TypeError, match="DataPosition field: expected a column name"):
+    with pytest.raises(hg.ChartError, match="DataPosition field: expected a column name"):
         hg.DataPosition(field=3)
     for value in (True, math.nan, math.inf, [1]):
-        with pytest.raises(TypeError, match="DataPosition value: expected a"):
+        with pytest.raises(hg.ChartError, match="DataPosition value: expected a"):
             hg.DataPosition(value=value)
     hg.DataPosition(value="eu")
     hg.DataPosition(value=dt.datetime(2026, 1, 1))
     for make in (hg.Fraction, hg.Pixels):
-        with pytest.raises(TypeError, match="offset: expected a finite number of pixels"):
+        with pytest.raises(hg.ChartError, match="offset: expected a finite number of pixels"):
             make(field="v", offset=math.nan)
     # A list of values, not an iterator that checking them would use up.
-    with pytest.raises(TypeError, match="LegendTarget values: expected a list of values"):
+    with pytest.raises(hg.ChartError, match="LegendTarget values: expected a list; received an it"):
         hg.LegendTarget(scale="s", values=iter(["eu"]))
 
 

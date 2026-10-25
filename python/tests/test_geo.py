@@ -128,19 +128,22 @@ def test_geodataframes_are_read_without_geopandas_and_their_reference_system_is_
 def test_shapes_that_are_not_polygons_or_degrees_are_refused():
     point = {"type": "Point", "coordinates": [0, 0]}
     with pytest.raises(
-        TypeError,
-        match="Column 'shape': row 1: expected a polygon or multipolygon; received a Point",
+        hg.ChartError,
+        match="geoshape geometry: column 'shape': row 1: expected a polygon or multipolygon; "
+        "received a Point",
     ):
         hg.Chart({"shape": [{"type": "Polygon", "coordinates": [square(0, 0)]}, point]}).geoshape(
             "shape"
         )
     meters = {"type": "Polygon", "coordinates": [square(500_000, 4_000_000, 1000)]}
     with pytest.raises(
-        ValueError, match="Column 'shape': coordinate .* reproject the data to WGS 84"
+        hg.ChartError,
+        match="geoshape geometry: column 'shape': coordinate .* reproject the data to WGS 84",
     ):
         hg.Chart({"shape": [meters]}).geoshape("shape")
     with pytest.raises(
-        TypeError, match=r"Column 'shape': row 0: expected positions as \[longitude, latitude\]"
+        hg.ChartError,
+        match=r"geoshape geometry: column 'shape': row 0: expected positions as \[longitude, ",
     ):
         hg.Chart({"shape": [{"type": "Polygon", "coordinates": [[[0, "a"]]]}]}).geoshape("shape")
     with pytest.raises(
@@ -273,9 +276,10 @@ def test_projections_take_names_parameters_and_boxes():
     }
     assert projection(hg.Projection(fit="world"))["fit"] == "world"
     with pytest.raises(
-        ValueError, match='Projection type: expected "equal-earth", .*; received "robinson"'
-    ):
+        hg.ChartError, match='Chart projection: expected "equal-earth", .*; received "robinson"'
+    ) as refused:
         hg.Chart(collection(), projection="robinson")
+    assert refused.value.path == "projection"
     with pytest.raises(
         ValueError,
         match="Projection fit: expected longitudes and latitudes in degrees, south below north",
@@ -293,10 +297,11 @@ def test_derived_tables_carry_shapes_but_cannot_read_them():
         "transform": [{"filter": [">", ["field", "gdp"], 15]}],
     }
     with pytest.raises(
-        TypeError, match="filter: column 'geometry' holds shapes, which expressions cannot read"
+        hg.ChartError,
+        match="filter condition: column 'geometry' holds shapes, which expressions cannot read",
     ):
         hg.derive(collection()).filter(hg.col("geometry") > 1)
-    with pytest.raises(TypeError, match="sort: column 'geometry' holds geometry values"):
+    with pytest.raises(hg.ChartError, match="sort: column 'geometry' holds geometry values"):
         hg.derive(collection()).sort("geometry")
 
 
@@ -361,7 +366,10 @@ def test_empty_collections_and_wide_rings():
     spec, _ = hg.choropleth(blank, "v").to_spec()
     assert spec["data"]["data"]["columns"]["geometry"]["type"] == "geometry"
     wide = {"type": "Polygon", "coordinates": [[[-200, 0], [200, 0], [200, 1], [-200, 0]]]}
-    with pytest.raises(ValueError, match="Column 'shape': ring 0: spans 400 degrees of longitude"):
+    with pytest.raises(
+        ValueError,
+        match="geoshape geometry: column 'shape': ring 0: spans 400 degrees of longitude",
+    ):
         hg.Chart({"shape": [wide]}).geoshape("shape")
 
 

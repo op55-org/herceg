@@ -51,20 +51,22 @@ def test_notebook_display_is_an_isolated_iframe():
 
 
 def test_what_the_renderer_refuses_raises_its_message():
-    # Python leaves theme names to the spec's checks; the error is the renderer's
-    # message alone, without V8's report of where in the bundle it was thrown.
-    themed = hg.Chart(DATA, theme="drak").line(x="t", y="v")  # type: ignore[arg-type]
-    with pytest.raises(ValueError) as refused:
-        themed.to_svg()
-    assert str(refused.value) == (
-        'spec.theme: expected "light", "dark", "high-contrast", "high-contrast-dark", '
-        'or "auto"; received "drak"'
-    )
+    # A spec the engine refuses (Python refuses its description sooner, given to
+    # the chart): the error is the renderer's message, located in Python's
+    # names, without V8's report of where in the bundle it was thrown.
+    described = hg.Chart(DATA).line(x="t", y="v")
+    described._options = {**described._options, "description": 5}
+    with pytest.raises(hg.ChartError) as refused:
+        described.to_svg()
+    assert str(refused.value) == "Chart description: expected a string; received 5"
+    assert refused.value.path == "description"
     # Messages carrying the caller's text keep it whole, line breaks included.
     family = "No\n\n    at family"
     with pytest.raises(ValueError) as refused:
         unicode_chart().to_pdf(fonts=unicode_fonts(), fallback=[family])
-    assert str(refused.value) == f"fallback family {family.lower()} is not registered"
+    assert str(refused.value) == (
+        f"to_pdf fallback: family {family.lower()} is not registered; name a family fonts gives"
+    )
 
 
 def test_svg_matches_the_typescript_renderer(tmp_path):
@@ -234,12 +236,15 @@ def test_unicode_pdf_requires_coverage_and_allows_explicit_replacement():
     ):
         unicode_chart("雪").to_pdf(fonts=unicode_fonts())
     assert unicode_chart("雪").to_pdf(fonts=unicode_fonts(), missing_glyph="?").startswith(b"%PDF")
+    # Refused at the option given.
     with pytest.raises(
-        ValueError, match="to_pdf fallback and missing_glyph: choose among embedded"
-    ):
+        hg.ChartError, match="to_pdf missing_glyph: chooses among embedded"
+    ) as refused:
         chart().to_pdf(missing_glyph="?")
-    with pytest.raises(ValueError, match="supply fonts, or leave them out"):
+    assert refused.value.path == "missing_glyph"
+    with pytest.raises(hg.ChartError, match="supply fonts, or leave fallback out") as refused:
         chart().to_pdf(fallback=["Symbols"])
+    assert refused.value.path == "fallback"
 
 
 def test_uncovered_text_falls_back_and_is_refused_alike_in_every_format(tmp_path):
@@ -847,9 +852,9 @@ def test_pdf_page_options_validate_in_python(options, location):
 
 
 def test_pdf_document_rejects_empty_and_non_chart_pages(tmp_path):
-    with pytest.raises(ValueError, match="to_pdf charts:.*; supply"):
+    with pytest.raises(ValueError, match="to_pdf charts: expected"):
         hg.to_pdf([])
-    with pytest.raises(TypeError, match=r"to_pdf charts\[1\]:.*; supply"):
+    with pytest.raises(hg.ChartError, match=r"to_pdf charts\[1\]: expected an hg.Chart; received"):
         hg.to_pdf([chart(), "invalid"])
     with pytest.raises(ValueError, match="save charts:"):
         hg.save([], tmp_path / "report.pdf")
@@ -973,12 +978,12 @@ def test_pdf_summary_language_uses_catalog_not_chart_locale(
 
 
 def test_pdf_module_validates_chart_sequences_and_reports_fitting_correction(tmp_path):
-    with pytest.raises(TypeError, match="to_pdf charts:.*; supply"):
+    with pytest.raises(hg.ChartError, match="to_pdf charts: expected"):
         hg.to_pdf(42)
-    with pytest.raises(TypeError, match=r"save charts\[1\]:.*; supply"):
+    with pytest.raises(hg.ChartError, match=r"save charts\[1\]: expected an hg.Chart; received"):
         hg.save([chart(), "invalid"], tmp_path / "invalid.pdf")
     assert not (tmp_path / "invalid.pdf").exists()
-    with pytest.raises(TypeError, match="save charts:.*; supply"):
+    with pytest.raises(hg.ChartError, match="save charts: expected"):
         hg.save(42, tmp_path / "invalid.pdf")
     large = hg.Chart(width=1e16, height=320)
     with pytest.raises(ValueError, match="to_pdf scale:.*; reduce chart dimensions or margins"):

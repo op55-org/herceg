@@ -12,7 +12,7 @@ again from them, and the new chart's tables replace the old ones
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -22,17 +22,14 @@ from ._chart import (
     OPTIONS,
     Camera,
     assemble_spec,
-    axis_scope,
     check_layout_options,
-    check_y_zoom,
     columns_spec,
-    on_right_axis,
     remaining_moves,
-    scope_of,
     spec_options,
     table_name,
 )
-from ._data import Column, Table, shown
+from ._data import Column, Table
+from ._errors import ChartError, UnknownOption, key_path, located, shown
 from ._guides import guides_spec
 from ._rows import bound_tables
 from .express._common import Call, call_of, panel_plots, remake
@@ -51,11 +48,14 @@ class LiveChart:
         chart._check_spec()
         self._settings = settings
         # Panels' legends (``panel.legend``) go after the guides the options list.
-        self._panel_guides = guides_spec(chart._panel_guides) if chart._panel_guides else []
+        given = len(settings.get("guides") or [])
+        self._panel_guides = (
+            located("guides", lambda: guides_spec(chart._panel_guides, given))
+            if chart._panel_guides
+            else []
+        )
         self._options = self._spec_options(settings)
         self._layout = chart._layout_spec()
-        # Facets of one field and grids of a row and a column field alike.
-        _check_live(settings, "facet" in self._layout)
         self._marks = chart._mark_specs()
         # What option updates are checked against: the layout marks and the subplots.
         self._layouts = chart._layouts()
@@ -97,11 +97,12 @@ class LiveChart:
 
     def state_panels(self, event: str, table: str | None = None) -> list[str]:
         """The keys of the states the chart's trees (``"drill"``), networks
-        (``"itemMove"``), or maps and networks (``"viewport"``) have: each
-        subplot's of theirs, or ``""`` for the chart's one (its facet panels
-        share it). The chart's own viewport, ``""``, is not listed. With
-        ``table``, only those of marks reading it (a network's links or
-        nodes), directly or through tables derived from it."""
+        (``"itemMove"``), 3D marks (``"camera"``), or maps and networks
+        (``"viewport"``, their planes) have: each subplot's of theirs, or
+        ``""`` for the chart's one (its facet panels share it), which the
+        planes' are not listed as. With ``table``, only those of marks
+        reading it (a network's links or nodes), directly or through tables
+        derived from it."""
         kinds = _STATE_MARKS[event]
         marks = [
             mark
@@ -114,50 +115,21 @@ class LiveChart:
         ]
         if "panels" not in self._layout:
             return [""] if marks and event != "viewport" else []
-        panels = list(dict.fromkeys(mark["panel"] for mark in marks))
-        if event == "viewport" and table is None:
-            panels += self.own_views
-        return panels
+        return list(dict.fromkeys(mark["panel"] for mark in marks))
 
-    @property
-    def own_views(self) -> list[str]:
-        """The subplots with axes whose x scales are their own, which have
-        views of their own as maps' and networks' subplots do: every one,
-        unless the panels share the chart's x scale (x's scope "chart"),
-        beside which insets have theirs."""
-        if "panels" not in self._layout:
-            return []
-        drawn = {mark["panel"] for mark in self._layouts}
-        axes = [panel["id"] for panel in self._layout["panels"] if panel["id"] not in drawn]
-        if not self.shares_x:
-            return axes
-        insets = _inset_ids(self._layout.get("layout"))
-        return [panel for panel in axes if panel in insets]
-
-    @property
-    def view_groups(self) -> dict[str, list[str]]:
-        """Each panel of `own_views` with the others sharing its x scale (as
-        x's scope groups them), itself among them."""
-        own = self.own_views
-        if not own:
-            return {}
-        keys = _scale_groups(
-            self._layout.get("layout"),
-            self.panel_ids,
-            scope_of(self._settings, "x", subplots=True),
-        )
-        return {panel: [other for other in own if keys[other] == keys[panel]] for panel in own}
+    def plane(self, panel: str | None) -> bool:
+        """Whether the view of `panel` (None for the chart's own) is a map's or
+        network's plane, in its units, rather than of axes."""
+        if panel is None:
+            return not self._subplots and any(
+                mark["type"] in _STATE_MARKS["viewport"] for mark in self._layouts
+            )
+        return panel in self.state_panels("viewport")
 
     @property
     def panel_ids(self) -> list[str]:
         """The ids of the chart's subplots; none without them."""
         return [panel["id"] for panel in self._layout.get("panels", [])]
-
-    @property
-    def shares_x(self) -> bool:
-        """Whether the panels with axes share the chart's x scale, whose view is
-        the chart's own (``viewport``); insets have scales of their own beside it."""
-        return scope_of(self._settings, "x", subplots="panels" in self._layout) == "chart"
 
     def remaining_moves(self, positions: dict[str, Any]) -> dict[str, Any]:
         """A network state's moved nodes without those its data no longer has
@@ -181,45 +153,6 @@ class LiveChart:
                 camera.azimuth = 180
             cameras[panel] = camera._spec()
         return cameras
-
-    @property
-    def has_view(self) -> bool:
-        """Whether the chart has a view of its own (``viewport``): of its axes,
-        or of its one map or network, which facet panels share; not when every
-        subplot draws a layout mark, whose maps and networks have their own,
-        or the only subplots with axes are insets, with x scales of their own."""
-        if not self._subplots:
-            return True
-        drawn = {mark["panel"] for mark in self._layouts}
-        own = set(self.own_views)
-        return self.shares_x and any(
-            panel["id"] not in drawn and panel["id"] not in own
-            for panel in self._layout.get("panels", [])
-        )
-
-    @property
-    def plane_view(self) -> bool:
-        """Whether the chart's own view is of its one map's or network's plane
-        (which facet panels share), not of axes."""
-        planes = ("graph", "geoshape", "geopoint")
-        return not self._subplots and any(mark["type"] in planes for mark in self._layouts)
-
-    @property
-    def shares_y(self) -> bool:
-        """Whether every panel shares one y scale, so the chart has one y viewport."""
-        return (
-            scope_of(self._settings, "y", subplots=False) == "chart"
-            and "panels" not in self._layout
-        )
-
-    @property
-    def shares_y_right(self) -> bool:
-        """Whether every panel shares one right y scale (scoped as y unless
-        y_right's scope says), so the chart has one right y viewport."""
-        return (
-            scope_of(self._settings, "y_right", subplots=False) == "chart"
-            and "panels" not in self._layout
-        )
 
     def to_spec(self) -> Message:
         options = self._options
@@ -246,7 +179,7 @@ class LiveChart:
         _check_max_rows(max_rows)
         name = self._table_name(data, "widget.append")
         if any(column.kind == "geometry" for column in self._tables[name].values()):
-            raise ValueError(
+            raise ChartError(
                 "widget.append: a table of shapes is replaced whole; call widget.replace()"
             )
         batch = self._batch(name, rows, "widget.append")
@@ -277,13 +210,13 @@ class LiveChart:
         are joined again."""
         joins = [] if data is None or self._sources_read(data) else self._joins_of(data)
         if len(joins) > 1:
-            raise ValueError(
+            raise ChartError(
                 "widget.replace data: the rows are joined to the features of several geoshape "
                 "marks; make a chart per map, or join the rows with GeoPandas first (merge)"
             )
         if joins:
             _, name, join = joins[0]
-            batch = self._batch(name, rows, "widget.replace", join.rejoin(Table(_one_row(rows))))
+            batch = self._batch(name, rows, "widget.replace", join.rejoin(_rows_table(rows)))
         else:
             name = self._table_name(data, "widget.replace")
             batch = self._batch(name, rows, "widget.replace")
@@ -307,14 +240,11 @@ class LiveChart:
                 if fixed
                 else f"the options are {', '.join(OPTIONS)}"
             )
-            raise TypeError(
+            raise UnknownOption(
                 f"widget.update: unknown chart option {', '.join(map(repr, unknown))}; {hint}"
             )
         settings = {**self._settings, **changes}
-        _check_live(settings, "facet" in self._layout)
         # Checked before anything changes, as the chart checks it when made.
-        if "facet" in self._layout:
-            check_y_zoom(settings, right=any(on_right_axis(mark) for mark in self._marks))
         check_layout_options(settings, self._layouts, self._subplots)
         options = self._spec_options(settings)
         changed = self._changed_options(options)
@@ -381,12 +311,12 @@ class LiveChart:
         express plots drawn in panels, which do not follow it."""
         name = self._named(data, method)
         if name in self._matrices:
-            raise ValueError(
+            raise ChartError(
                 f"{method} data: a matrix (hg.matrix) changes whole; make a new chart with "
                 "its new values"
             )
         if name in self._computed_from:
-            raise ValueError(
+            raise ChartError(
                 f"{method} data: the express plots in panels {self._plots} computed what they "
                 "draw from these rows when they were drawn, and would not follow new ones; "
                 "make the chart again from the new data"
@@ -397,23 +327,23 @@ class LiveChart:
         """The table `data` names, for `method` (as messages name it)."""
         if data is None:
             if self._default is None:
-                raise ValueError(
+                raise ChartError(
                     f"{method} data: the chart has no data of its own; pass data= to choose a table"
                 )
             name = self._default
         else:
             found = next((name for source, name in self._sources if source is data), None)
             if found is None:
-                raise ValueError(
+                raise ChartError(
                     f"{method} data: expected the object passed to the chart or to one of its marks"
                 )
             name = found
         if name in self._derived:
-            raise ValueError(
+            raise ChartError(
                 f"{method} data: a derived table follows its source; pass the source's data"
             )
         if name not in self._tables:
-            raise ValueError(f"{method} data: no mark of the chart reads its columns")
+            raise ChartError(f"{method} data: no mark of the chart reads its columns")
         return name
 
     def _source_of(self, name: str) -> Any:
@@ -433,21 +363,19 @@ class LiveChart:
         to the kinds the table holds, for `method` (as messages name it)."""
         current = self._tables[name]
         if table is None:
-            table = Table(_one_row(rows))
+            table = _rows_table(rows)
         missing = [field for field in current if field not in table.names]
         if missing:
-            raise KeyError(
+            raise ChartError(
                 f"{method} rows: no column {', '.join(map(repr, missing))}; "
-                f"the chart reads {', '.join(map(repr, current))}"
+                f"the chart reads {', '.join(map(repr, current))}",
+                code="unknown-field",
+                path="rows",
             )
-        batch = {
-            field: _as_kind(table.column(field), column, field, method)
+        return {
+            field: _as_kind(_read_rows(table, field, method), column, field, method)
             for field, column in current.items()
         }
-        lengths = {field: len(column) for field, column in batch.items()}
-        if len(set(lengths.values())) > 1:
-            raise ValueError(f"{method} rows: expected columns of one length; received {lengths}")
-        return batch
 
 
 class ExpressData:
@@ -488,22 +416,20 @@ class ExpressData:
         self.columns, self.chart, self.call = columns, chart, call
 
     def _batch(self, rows: Any, method: str) -> dict[str, Column]:
-        table = Table(_one_row(rows))
+        table = _rows_table(rows)
         missing = [field for field in self.columns if field not in table.names]
         if missing:
-            raise KeyError(
+            raise ChartError(
                 f"{method} rows: no column {', '.join(map(repr, missing))}; the "
                 f"{self.call.function.__name__} chart is computed from "
-                f"{', '.join(map(repr, self.columns))}"
+                f"{', '.join(map(repr, self.columns))}",
+                code="unknown-field",
+                path="rows",
             )
-        batch = {
-            field: _as_kind(table.column(field), column, field, method)
+        return {
+            field: _as_kind(_read_rows(table, field, method), column, field, method)
             for field, column in self.columns.items()
         }
-        lengths = {field: len(column) for field, column in batch.items()}
-        if len(set(lengths.values())) > 1:
-            raise ValueError(f"{method} rows: expected columns of one length; received {lengths}")
-        return batch
 
 
 def _copied(column: Column) -> Column:
@@ -525,7 +451,7 @@ def _check_max_rows(max_rows: int | None) -> None:
     if max_rows is not None and not (
         isinstance(max_rows, int) and not isinstance(max_rows, bool) and max_rows >= 1
     ):
-        raise ValueError(
+        raise ChartError(
             "widget.append max_rows: expected a whole number of at least 1; "
             f"received {shown(max_rows)}"
         )
@@ -548,7 +474,7 @@ def check_live_rows(chart: Chart) -> None:
     derived = {table_name(index) for index in chart._derived}
     for spec in bound_tables(chart._spec_options().get("rowSelection")):
         if spec["data"] in derived:
-            raise ValueError(
+            raise ChartError(
                 "SelectionBinding data: live charts report rows of data Python holds, and a "
                 "derived table's rows are computed in the browser; bind the table it derives from"
             )
@@ -563,123 +489,37 @@ _STATE_MARKS = {
 }
 
 
-def _check_live(settings: dict[str, Any], faceted: bool) -> None:
-    """Live charts keep the view of each subplot's x scale apart, but not of
-    a facet panel's: their panels come from the data."""
-    scope = axis_scope(settings, "x")
-    if faceted and scope not in (None, "chart"):
-        raise ValueError(
-            'Chart x scope: expected "chart" in a live faceted chart, whose panels come from '
-            f'the data; received "{scope}". Draw panels of their own x scales as subplots '
-            "(chart.columns(), chart.rows()), or show the chart with chart.show() or to_html()"
-        )
+def _rows_table(rows: Any) -> Table:
+    """The table of rows a widget is given: a table, or one row as a
+    mapping of single values; refused at ``rows``."""
+    if isinstance(rows, Mapping) and all(_single(value) for value in rows.values()):
+        rows = {field: [value] for field, value in rows.items()}
+    return located("rows", lambda: Table(rows))
 
 
-def _scale_groups(layout: Any, ids: list[str], scope: Any) -> dict[str, str]:
-    """Which instance of a scale each panel of a layout spec draws with under
-    `scope`, as a key that panels sharing it have alike: as the engine groups
-    them (see layout/compile.ts, scopeGroups). Insets have their own unless
-    a list of panels names them."""
-    named: set[str] = set()
-
-    def collect(node: Any) -> None:
-        if not isinstance(node, Mapping):
-            return
-        if node.get("type") == "panel":
-            named.add(node["panel"])
-            named.update(_inset_ids({"type": "panel", "insets": node.get("insets")}))
-        for cell in node.get("cells") or []:
-            collect(cell.get("content"))
-
-    collect(layout)
-    unnamed = [panel for panel in ids if panel not in named]
-    # Each panel's footprints from the root grid down: (grid, rows, columns).
-    chains: dict[str, list[tuple[str, tuple[int, int], tuple[int, int]]]] = {}
-    grid_ids: dict[str, str] = {}
-    insets = _inset_ids(layout)
-
-    def grid(node: Mapping[str, Any], path: str, chain: list[Any]) -> None:
-        if node.get("id") is not None:
-            grid_ids[path] = node["id"]
-        columns = len(node.get("columns") or [1])
-        cells = node.get("cells")
-        if cells is None:
-            cells = [
-                {"row": i // columns, "column": i % columns, "content": {"panel": panel}}
-                for i, panel in enumerate(unnamed)
-            ]
-            unnamed.clear()
-        # By row, then column, as the engine reads them; paths keep the list's indexes.
-        ordered = sorted(enumerate(cells), key=lambda item: (item[1]["row"], item[1]["column"]))
-        for k, cell in ordered:
-            row, column = cell["row"], cell["column"]
-            rows = (row, row + cell.get("rowSpan", 1))
-            across = (column, column + cell.get("columnSpan", 1))
-            inner = [*chain, (path, rows, across)]
-            content = cell["content"]
-            if content.get("type") == "grid":
-                grid(content, f"{path}.cells[{k}].content", inner)
-            else:
-                chains[content["panel"]] = inner
-
-    if layout is None:
-        grid({"columns": [1]}, "layout", [])
-    elif layout.get("type") == "panel":
-        grid({"cells": [{"row": 0, "column": 0, "content": layout}]}, "layout", [])
-    else:
-        grid(layout, "layout", [])
-
-    def key(panel: str) -> str:
-        own = f"panel {panel}"
-        if isinstance(scope, Mapping) and "panels" in scope:
-            return "listed" if panel in scope["panels"] else own
-        if scope == "panel" or panel in insets:
-            return own
-        if scope == "chart":
-            return "chart"
-        chain = chains[panel]
-        if scope in ("row", "column"):
-            depth, by = len(chain) - 1, scope
-        else:
-            wanted = scope["layout"]
-            depth = next(
-                (d for d, (path, _, _) in enumerate(chain) if grid_ids.get(path) == wanted), -1
-            )
-            if depth < 0:
-                return own
-            by = scope["by"]
-        path, rows, across = chain[depth]
-        return f"{depth} {path} {by} {rows if by == 'row' else across}"
-
-    return {panel: key(panel) for panel in ids}
+def _single(value: Any) -> bool:
+    """Whether a row's value is one value, not a column of them."""
+    if isinstance(value, (str, bytes)):
+        return True
+    if isinstance(value, (Sequence, Mapping, set, frozenset)):
+        return False
+    try:
+        return bool(np.ndim(value) == 0)
+    except ValueError:
+        return False  # ragged lists are no single value
 
 
-def _inset_ids(layout: Any) -> set[str]:
-    """The ids of the panels a layout spec draws over others."""
-    found: set[str] = set()
-
-    def insets(nodes: Any) -> None:
-        for node in nodes or []:
-            found.add(node["panel"])
-            insets(node.get("insets"))
-
-    def walk(node: Any) -> None:
-        if not isinstance(node, Mapping):
-            return
-        if node.get("type") == "panel":
-            insets(node.get("insets"))
-        for cell in node.get("cells") or []:
-            walk(cell.get("content"))
-
-    walk(layout)
-    return found
-
-
-def _one_row(rows: Any) -> Any:
-    """A mapping of single values as a row of columns; other rows as they are."""
-    if isinstance(rows, Mapping) and all(np.ndim(value) == 0 for value in rows.values()):
-        return {field: [value] for field, value in rows.items()}
-    return rows
+def _read_rows(table: Table, field: str, method: str) -> Column:
+    """A column of the rows given, its refusal at ``rows`` and the column."""
+    try:
+        return table.column(field)
+    except ChartError as error:
+        problem = str(error).removeprefix(f"Column {field!r}: ")
+        raise ChartError(
+            f"{method} rows: column {field!r}: {problem}",
+            code=error.code,
+            path=key_path("rows", field),
+        ) from None
 
 
 def _length(columns: dict[str, Column]) -> int:
@@ -697,9 +537,10 @@ def _as_kind(column: Column, current: Column, field: str, method: str) -> Column
                 codes, shapes = _geo.pack([None] * len(column))
                 return Column("geometry", codes, shapes=shapes)
             return Column(current.kind, column.values.astype("<f8"))
-        raise TypeError(
+        raise ChartError(
             f"{method} rows: column {field!r} holds {column.kind} values; "
-            f"expected {current.kind} values, as the chart's column holds"
+            f"expected {current.kind} values, as the chart's column holds",
+            path=key_path("rows", field),
         )
     if column.kind in ("category", "geometry"):
         return column

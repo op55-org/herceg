@@ -5,12 +5,12 @@ how far its views may go (``limits=``), and what it shares with other charts
 from __future__ import annotations
 
 import math
-import numbers
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any, Literal
 
-from ._data import listed, shown
+from ._data import listlike
+from ._errors import Role, hinted, is_number, listed, shown
 from ._events import _milliseconds
 
 Modifier = Literal["shift", "ctrl", "alt", "meta"]
@@ -33,29 +33,79 @@ _CURSOR_KEYS = (
 )
 
 
-def _modifiers(value: Sequence[Modifier] | None, role: str) -> list[str] | None:
+def _modifiers(value: Sequence[Modifier] | None, role: Role) -> list[str] | None:
     """The keys held, in one order, each once; None for none, as the spec leaves them out."""
     if value is None:
         return None
     if isinstance(value, str) or not isinstance(value, Sequence):
-        raise TypeError(f"{role}: expected a list of keys held; received {shown(value)}")
+        raise role.error(f"expected a list of keys held; received {shown(value)}")
     for key in value:
         if key not in _MODIFIERS:
-            raise ValueError(f"{role}: expected {listed(_MODIFIERS)}; received {shown(key)}")
+            raise role.error(f"expected {listed(_MODIFIERS)}; received {shown(key)}")
     return sorted(set(value), key=_MODIFIERS.index) or None
 
 
-def _choice(value: Any, choices: Sequence[Any], role: str) -> Any:
+def _choice(value: Any, choices: Sequence[Any], role: Role) -> Any:
     # True and False equal 1 and 0, which are not the choices they look like.
     if value is not None and (isinstance(value, bool) or value not in choices):
-        raise ValueError(f"{role}: expected {listed(choices)}; received {shown(value)}")
+        raise role.error(f"expected {listed(choices)}; received {shown(value)}")
     return value
 
 
-def _flag(value: Any, role: str) -> bool:
+def _flag(value: Any, role: Role) -> bool:
     if not isinstance(value, bool):
-        raise TypeError(f"{role}: expected True or False; received {shown(value)}")
+        raise role.error(f"expected True or False; received {shown(value)}")
     return value
+
+
+#: The axes ``zoom`` and ``pan`` act on, besides ``True`` (x) and ``False``.
+_PRESETS = ("x", "y", "xy")
+_BRUSHES = ("x", "y", "xy", "lasso")
+
+
+def preset_spec(value: Any, role: Role) -> bool | str | None:
+    """``zoom=`` or ``pan=`` as the spec takes it (see `_PRESETS`), None when not given."""
+    if value is None or isinstance(value, bool) or (isinstance(value, str) and value in _PRESETS):
+        return value
+    raise role.error(f'expected True, False, "x", "y", or "xy"; received {shown(value)}')
+
+
+def brush_spec(value: Any, role: Role) -> str | None:
+    """``brush=`` as the spec takes it: "x", "y", "xy", "lasso", or None for none."""
+    if value is None or (isinstance(value, str) and value in _BRUSHES):
+        return value
+    raise role.error(f'expected "x", "y", "xy", "lasso", or None; received {shown(value)}')
+
+
+def panel_interaction_spec(
+    role: Role,
+    *,
+    zoom: Any = None,
+    pan: Any = None,
+    brush: Any = None,
+    bindings: Any = None,
+    limits: Any = None,
+    rotate: Any = None,
+    drag: Any = None,
+) -> dict[str, Any] | None:
+    """A panel's own ``interaction``: what it sets in place of the chart's
+    settings, one by one; ``False`` turns the chart's ``zoom``, ``pan``,
+    ``rotate``, or ``drag`` off there, ``bindings`` replace the chart's
+    list, and each scale's ``limits`` replace the chart's for that scale
+    (``hg.ViewLimits()`` clears them). None without any."""
+    for name, flag in (("rotate", rotate), ("drag", drag)):
+        if flag is not None and not isinstance(flag, bool):
+            raise role.field(name).error(f"expected True, False, or None; received {shown(flag)}")
+    spec = {
+        "zoom": preset_spec(zoom, role.field("zoom")),
+        "pan": preset_spec(pan, role.field("pan")),
+        "brush": brush_spec(brush, role.field("brush")),
+        "bindings": bindings_spec(bindings, role.field("bindings")),
+        "limits": limits_spec(limits, role.field("limits")),
+        "rotate": rotate,
+        "drag": drag,
+    }
+    return {key: value for key, value in spec.items() if value is not None} or None
 
 
 def _clean(spec: dict[str, Any]) -> dict[str, Any]:
@@ -65,6 +115,7 @@ def _clean(spec: dict[str, Any]) -> dict[str, Any]:
 # Gestures ------------------------------------------------------------------
 
 
+@hinted
 @dataclass(frozen=True)
 class WheelGesture:
     """The wheel (or a trackpad's two-finger scroll) along an ``axis``, either by
@@ -75,17 +126,18 @@ class WheelGesture:
     modifiers: Sequence[Modifier] | None = None
     focused: bool = False
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return _clean(
             {
                 "type": "wheel",
-                "axis": _choice(self.axis, ("x", "y"), f"{role} axis"),
-                "modifiers": _modifiers(self.modifiers, f"{role} modifiers"),
-                "focused": True if _flag(self.focused, f"{role} focused") else None,
+                "axis": _choice(self.axis, ("x", "y"), role.field("axis")),
+                "modifiers": _modifiers(self.modifiers, role.field("modifiers")),
+                "focused": True if _flag(self.focused, role.field("focused")) else None,
             }
         )
 
 
+@hinted
 @dataclass(frozen=True)
 class DragGesture:
     """A press that moves: by a mouse ``button`` (0, the primary, by default), or
@@ -95,26 +147,28 @@ class DragGesture:
     pointer: Literal["mouse", "touch", "pen"] | None = None
     modifiers: Sequence[Modifier] | None = None
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return _clean(
             {
                 "type": "drag",
-                "button": _choice(self.button, (0, 1, 2), f"{role} button") or None,
-                "pointer": _choice(self.pointer, ("mouse", "touch", "pen"), f"{role} pointer"),
-                "modifiers": _modifiers(self.modifiers, f"{role} modifiers"),
+                "button": _choice(self.button, (0, 1, 2), role.field("button")) or None,
+                "pointer": _choice(self.pointer, ("mouse", "touch", "pen"), role.field("pointer")),
+                "modifiers": _modifiers(self.modifiers, role.field("modifiers")),
             }
         )
 
 
+@hinted
 @dataclass(frozen=True)
 class PinchGesture:
     """Two fingers moving apart or together (trackpad pinches arrive as the
     wheel with Ctrl held)."""
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return {"type": "pinch"}
 
 
+@hinted
 @dataclass(frozen=True)
 class KeyGesture:
     """A ``key``, as browsers name it ("+", "a", "ArrowLeft"), while the chart has
@@ -124,27 +178,31 @@ class KeyGesture:
     key: str
     modifiers: Sequence[Modifier] | None = None
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         if not isinstance(self.key, str) or not self.key:
-            raise ValueError(f"{role} key: expected a key's name; received {shown(self.key)}")
-        modifiers = _modifiers(self.modifiers, f"{role} modifiers")
+            raise role.field("key").error(f"expected a key's name; received {shown(self.key)}")
+        modifiers = _modifiers(self.modifiers, role.field("modifiers"))
         if self.key in _CURSOR_KEYS and not set(modifiers or ()) - {"shift"}:
-            raise ValueError(
-                f"{role} key: {shown(self.key)} moves the keyboard cursor; "
+            raise role.field("key").error(
+                f"{shown(self.key)} moves the keyboard cursor; "
                 "bind another key, or hold ctrl, alt, or meta"
             )
         return _clean({"type": "key", "key": self.key, "modifiers": modifiers})
 
 
+@hinted
 @dataclass(frozen=True)
 class DoubleClickGesture:
     """A double click on the plot."""
 
     modifiers: Sequence[Modifier] | None = None
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return _clean(
-            {"type": "doubleClick", "modifiers": _modifiers(self.modifiers, f"{role} modifiers")}
+            {
+                "type": "doubleClick",
+                "modifiers": _modifiers(self.modifiers, role.field("modifiers")),
+            }
         )
 
 
@@ -154,6 +212,7 @@ Gesture = WheelGesture | DragGesture | PinchGesture | KeyGesture | DoubleClickGe
 # Actions -------------------------------------------------------------------
 
 
+@hinted
 @dataclass(frozen=True)
 class PanAction:
     """Pans these ``axes`` (x by default, a map's or network's plane both ways):
@@ -163,25 +222,26 @@ class PanAction:
     axes: Axes | None = None
     step: tuple[float, float] | None = None
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         step = self.step
         if step is not None and (
-            len(step) != 2
-            or not all(isinstance(v, numbers.Real) and math.isfinite(v) for v in step)
+            not listlike(step)
+            or len(step) != 2
+            or not all(is_number(v) and math.isfinite(v) for v in step)
         ):
-            raise ValueError(
-                f"{role} step: expected two fractions of the view, across and up; "
-                f"received {shown(step)}"
+            raise role.field("step").error(
+                f"expected two fractions of the view, across and up; received {shown(step)}"
             )
         return _clean(
             {
                 "type": "pan",
-                "axes": _choice(self.axes, ("x", "y", "xy"), f"{role} axes"),
+                "axes": _choice(self.axes, ("x", "y", "xy"), role.field("axes")),
                 "step": None if step is None else [float(v) for v in step],
             }
         )
 
 
+@hinted
 @dataclass(frozen=True)
 class ZoomAction:
     """Zooms these ``axes``: the wheel and pinches about the pointer, a double
@@ -191,21 +251,22 @@ class ZoomAction:
     axes: Axes | None = None
     factor: float | None = None
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         factor = self.factor
-        if factor is not None and not (
-            isinstance(factor, numbers.Real) and math.isfinite(factor) and factor > 0
-        ):
-            raise ValueError(f"{role} factor: expected a positive number; received {shown(factor)}")
+        if factor is not None and not (is_number(factor) and math.isfinite(factor) and factor > 0):
+            raise role.field("factor").error(
+                f"expected a positive number; received {shown(factor)}"
+            )
         return _clean(
             {
                 "type": "zoom",
-                "axes": _choice(self.axes, ("x", "y", "xy"), f"{role} axes"),
+                "axes": _choice(self.axes, ("x", "y", "xy"), role.field("axes")),
                 "factor": None if factor is None else float(factor),
             }
         )
 
 
+@hinted
 @dataclass(frozen=True)
 class BrushAction:
     """Selects what a drag covers: a range along x or y, a rectangle ("xy"), or a
@@ -215,53 +276,58 @@ class BrushAction:
     shape: Literal["x", "y", "xy", "lasso"] | None = None
     zoom: bool = False
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return _clean(
             {
                 "type": "brush",
-                "shape": _choice(self.shape, ("x", "y", "xy", "lasso"), f"{role} shape"),
-                "zoom": True if _flag(self.zoom, f"{role} zoom") else None,
+                "shape": _choice(self.shape, ("x", "y", "xy", "lasso"), role.field("shape")),
+                "zoom": True if _flag(self.zoom, role.field("zoom")) else None,
             }
         )
 
 
+@hinted
 @dataclass(frozen=True)
 class ResetAction:
     """Back to the configured view."""
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return {"type": "reset"}
 
 
+@hinted
 @dataclass(frozen=True)
 class PageScrollAction:
     """Nothing: the page scrolls or zooms as it would, and later bindings are not tried."""
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return {"type": "pageScroll"}
 
 
+@hinted
 @dataclass(frozen=True)
 class CursorAction:
     """The cursor follows a drag, which pans nothing (as a touch scrubs along a line)."""
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return {"type": "cursor"}
 
 
+@hinted
 @dataclass(frozen=True)
 class OrbitAction:
     """A 3D chart's camera turns with a drag."""
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return {"type": "orbit"}
 
 
+@hinted
 @dataclass(frozen=True)
 class MoveItemAction:
     """A network's node moves with a drag that starts on it."""
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         return {"type": "moveItem"}
 
 
@@ -293,6 +359,7 @@ _ACTIONS: dict[type[Any], tuple[type[Any], ...]] = {
 }
 
 
+@hinted
 @dataclass(frozen=True)
 class Binding:
     """A ``gesture`` and the ``action`` it performs, as ``bindings=`` lists them::
@@ -307,39 +374,39 @@ class Binding:
     gesture: Gesture
     action: Action
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         takes = _ACTIONS.get(type(self.gesture))
         if takes is None:
-            raise TypeError(
-                f"{role} gesture: expected an hg.WheelGesture, hg.DragGesture, hg.PinchGesture, "
+            raise role.field("gesture").error(
+                f"expected an hg.WheelGesture, hg.DragGesture, hg.PinchGesture, "
                 f"hg.KeyGesture, or hg.DoubleClickGesture; received {type(self.gesture).__name__}"
             )
         if not isinstance(self.action, takes):
             names = ", ".join(f"hg.{kind.__name__}" for kind in takes)
-            raise TypeError(
-                f"{role} action: a {type(self.gesture).__name__} performs {names}; "
+            raise role.field("action").error(
+                f"a {type(self.gesture).__name__} performs {names}; "
                 f"received {type(self.action).__name__}"
             )
         return {
-            "gesture": self.gesture._spec(f"{role} gesture"),
-            "action": self.action._spec(f"{role} action"),
+            "gesture": self.gesture._spec(role.field("gesture")),
+            "action": self.action._spec(role.field("action")),
         }
 
 
 def bindings_spec(
-    value: Sequence[Binding] | None, role: str, *, brushes_rows: bool = False
+    value: Sequence[Binding] | None, role: Role, *, brushes_rows: bool = False
 ) -> list[dict[str, Any]] | None:
     """The spec of ``bindings=``; refuses a gesture bound twice, and a brush that
     zooms in a chart whose brushes select rows."""
     if value is None:
         return None
     if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence):
-        raise TypeError(f"{role}: expected a list of hg.Binding; received {shown(value)}")
+        raise role.error(f"expected a list of hg.Binding; received {shown(value)}")
     specs: list[dict[str, Any]] = []
     for i, binding in enumerate(value):
-        at = f"{role}[{i}]"
+        at = role.index(i)
         if not isinstance(binding, Binding):
-            raise TypeError(f"{at}: expected an hg.Binding; received {type(binding).__name__}")
+            raise at.error(f"expected an hg.Binding; received {type(binding).__name__}")
         spec = binding._spec(at)
         gesture = {key: v for key, v in spec["gesture"].items() if key != "modifiers"}
         for k, other in enumerate(specs):
@@ -347,11 +414,15 @@ def bindings_spec(
             if same == gesture and other["gesture"].get("modifiers") == spec["gesture"].get(
                 "modifiers"
             ):
-                raise ValueError(f"{at}: duplicates binding {k}; remove one or change its gesture")
+                raise at.error(f"duplicates binding {k}; remove one or change its gesture")
         if spec["action"].get("zoom") is True and brushes_rows:
-            raise ValueError(
-                f"{at} action zoom: brushes select rows for row_selection, which never zoom; "
-                'drop zoom, or "brush" from the binding\'s events'
+            raise (
+                at.field("action")
+                .field("zoom")
+                .error(
+                    "brushes select rows for row_selection, which never zoom; "
+                    'drop zoom, or "brush" from the binding\'s events'
+                )
             )
         specs.append(spec)
     return specs
@@ -360,6 +431,7 @@ def bindings_spec(
 # Limits --------------------------------------------------------------------
 
 
+@hinted
 @dataclass(frozen=True)
 class Edge:
     """When a view nearing an end of its limits is reported (``widget.on_edge``):
@@ -371,16 +443,17 @@ class Edge:
     threshold: float = 0.1
     hysteresis: float = 0.05
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         for name in ("threshold", "hysteresis"):
             value = getattr(self, name)
-            if not (isinstance(value, numbers.Real) and math.isfinite(value) and float(value) >= 0):
-                raise ValueError(
-                    f"{role} {name}: expected a number of at least 0; received {shown(value)}"
+            if not (is_number(value) and math.isfinite(value) and float(value) >= 0):
+                raise role.field(name).error(
+                    f"expected a number of at least 0; received {shown(value)}"
                 )
         return {"threshold": float(self.threshold), "hysteresis": float(self.hysteresis)}
 
 
+@hinted
 @dataclass(frozen=True)
 class ViewLimits:
     """How far the view of a scale may go, and when it nears its ends.
@@ -397,20 +470,20 @@ class ViewLimits:
     extent: tuple[Any, Any] | None = None
     edge: bool | Edge | Mapping[str, float] = False
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         spec: dict[str, Any] = {}
         if self.extent is not None:
-            if isinstance(self.extent, str) or len(self.extent) != 2:
-                raise ValueError(
-                    f"{role} extent: expected two ends, either of them None; "
-                    f"received {shown(self.extent)}"
+            if not listlike(self.extent) or len(self.extent) != 2:
+                raise role.field("extent").error(
+                    f"expected two ends, either of them None; received {shown(self.extent)}"
                 )
+            extent = role.field("extent")
             ends = [
-                None if end is None else _milliseconds(end, f"{role} extent") for end in self.extent
+                None if end is None else extent.check(_milliseconds, end) for end in self.extent
             ]
             if ends[0] is not None and ends[1] is not None and not ends[0] < ends[1]:
-                raise ValueError(
-                    f"{role} extent: expected two ends, ascending; received {shown(self.extent)}"
+                raise role.field("extent").error(
+                    f"expected two ends, ascending; received {shown(self.extent)}"
                 )
             spec["extent"] = ends
         edge = self.edge
@@ -418,41 +491,39 @@ class ViewLimits:
             known = [f.name for f in fields(Edge)]
             unknown = [key for key in edge if key not in known]
             if unknown:
-                raise ValueError(
-                    f"{role} edge: unknown key {shown(unknown[0])}; name one of {listed(known)}"
+                raise role.field("edge").error(
+                    f"unknown key {shown(unknown[0])}; name one of {listed(known)}"
                 )
             edge = Edge(**edge)
         if edge is True:
             spec["edge"] = True
         elif isinstance(edge, Edge):
-            spec["edge"] = edge._spec(f"{role} edge")
+            spec["edge"] = edge._spec(role.field("edge"))
         elif edge is not False:
-            raise TypeError(
-                f"{role} edge: expected True, False, or an hg.Edge; received {shown(edge)}"
+            raise role.field("edge").error(
+                f"expected True, False, or an hg.Edge; received {shown(edge)}"
             )
         return spec
 
 
-def limits_spec(value: Mapping[str, ViewLimits] | None, role: str) -> dict[str, Any] | None:
+def limits_spec(value: Mapping[str, ViewLimits] | None, role: Role) -> dict[str, Any] | None:
     """The spec of ``limits=``: by scale, "x", "y", or "y_right"."""
     if value is None:
         return None
     if not isinstance(value, Mapping):
-        raise TypeError(
-            f'{role}: expected a dict of hg.ViewLimits by scale ("x", "y", "y_right"); '
+        raise role.error(
+            f'expected a dict of hg.ViewLimits by scale ("x", "y", "y_right"); '
             f"received {shown(value)}"
         )
     spec: dict[str, Any] = {}
     for name, limits in value.items():
         if name not in ("x", "y", "y_right"):
-            raise ValueError(
-                f'{role}: expected the scales "x", "y", or "y_right"; received {shown(name)}'
-            )
+            raise role.error(f'expected the scales "x", "y", or "y_right"; received {shown(name)}')
         if not isinstance(limits, ViewLimits):
-            raise TypeError(
-                f"{role} {name}: expected an hg.ViewLimits; received {type(limits).__name__}"
+            raise role.field(name).error(
+                f"expected an hg.ViewLimits; received {type(limits).__name__}"
             )
-        spec["yRight" if name == "y_right" else name] = limits._spec(f"{role} {name}")
+        spec["yRight" if name == "y_right" else name] = limits._spec(role.field(name))
     return spec
 
 
@@ -463,6 +534,7 @@ CursorSnap = Literal["nearest", "previous", "next"]
 _SNAPS = ("nearest", "previous", "next")
 
 
+@hinted
 @dataclass(frozen=True)
 class SyncChannel:
     """A sync channel: the ``group`` of charts it is shared with, and the chart's
@@ -473,23 +545,29 @@ class SyncChannel:
     series' last point at or before it ("previous", for readings at other
     frequencies: an hourly series' 10:00 for 10:37), or its first at or after
     it ("next"), along x; ``tooltip=True`` shows the chart's tooltip
-    there too. Given as ``hg.Sync(panels=...)``, without a group, it says
-    the same of the cursor across the chart's own panels."""
+    there too. ``panel`` names the panel whose scale carries the channel (a
+    subplot's id, or a facet panel's key); by default, the scale every panel
+    shares. Given as ``hg.Sync(panels=...)``, without a group, it says the
+    same of the cursor across the chart's own panels."""
 
     group: str | None = None
     scale: Literal["x", "y", "xy"] | None = None
     tooltip: bool | None = None
     snap: CursorSnap | None = None
+    panel: str | None = None
 
-    def _show(self, role: str) -> dict[str, Any]:
+    def _show(self, role: Role) -> dict[str, Any]:
         return _clean(
             {
-                "snap": _choice(self.snap, _SNAPS, f"{role} snap"),
-                "tooltip": None if self.tooltip is None else _flag(self.tooltip, f"{role} tooltip"),
+                "snap": _choice(self.snap, _SNAPS, role.field("snap")),
+                "tooltip": None
+                if self.tooltip is None
+                else _flag(self.tooltip, role.field("tooltip")),
             }
         )
 
 
+@hinted
 @dataclass(frozen=True)
 class Sync:
     """What a chart shares, each channel with the charts of its group: the
@@ -510,61 +588,69 @@ class Sync:
     selection: str | SyncChannel | None = None
     panels: bool | SyncChannel | None = None
 
-    def _spec(self, role: str) -> dict[str, Any]:
+    def _spec(self, role: Role) -> dict[str, Any]:
         spec: dict[str, Any] = {}
         for name in ("cursor", "viewport", "selection"):
             channel = getattr(self, name)
             if channel is None:
                 continue
             if isinstance(channel, str):
-                spec[name] = _group(channel, f"{role} {name}")
+                spec[name] = _group(channel, role.field(name))
                 continue
             if not isinstance(channel, SyncChannel):
-                raise TypeError(
-                    f"{role} {name}: expected a group's name or an hg.SyncChannel; "
+                raise role.field(name).error(
+                    f"expected a group's name or an hg.SyncChannel; "
                     f"received {type(channel).__name__}"
                 )
+            # Showing it checks the channel's fields first.
+            shows = channel._show(role.field(name))
             scales = ("x", "y", "xy") if name == "selection" else ("x", "y")
             if name != "cursor" and (channel.snap is not None or channel.tooltip is not None):
-                raise ValueError(
-                    f"{role} {name}: snap and tooltip are how a cursor shows; "
-                    "give them to the cursor's channel"
+                raise role.field(name).error(
+                    "snap and tooltip are how a cursor shows; give them to the cursor's channel"
                 )
             spec[name] = _clean(
                 {
-                    "group": _group(channel.group, f"{role} {name} group"),
-                    "scale": _choice(channel.scale, scales, f"{role} {name} scale"),
-                    **channel._show(f"{role} {name}"),
+                    "group": _group(channel.group, role.field(name).field("group")),
+                    "scale": _choice(channel.scale, scales, role.field(name).field("scale")),
+                    "panel": _panel(channel.panel, role.field(name).field("panel")),
+                    **shows,
                 }
             )
         panels = self.panels
         if isinstance(panels, bool):
             spec["panels"] = panels
         elif isinstance(panels, SyncChannel):
-            if panels.group is not None or panels.scale is not None:
-                raise ValueError(
-                    f"{role} panels: the chart's own panels share the cursor; "
-                    "drop group and scale, giving snap or tooltip"
+            shows = panels._show(role.field("panels"))
+            if panels.group is not None or panels.scale is not None or panels.panel is not None:
+                raise role.field("panels").error(
+                    "the chart's own panels share the cursor; "
+                    "drop group, scale, and panel, giving snap or tooltip"
                 )
-            spec["panels"] = panels._show(f"{role} panels")
+            spec["panels"] = shows
         elif panels is not None:
-            raise TypeError(
-                f"{role} panels: expected True, False, or an hg.SyncChannel; "
-                f"received {type(panels).__name__}"
+            raise role.field("panels").error(
+                f"expected True, False, or an hg.SyncChannel; received {type(panels).__name__}"
             )
         return spec
 
 
-def _group(value: Any, role: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{role}: expected a group's name; received {shown(value)}")
+def _panel(value: Any, role: Role) -> str | None:
+    if value is not None and (not isinstance(value, str) or value in ("", "*")):
+        raise role.error(f"expected a panel's id (or a facet panel's key); received {shown(value)}")
     return value
 
 
-def sync_spec(value: str | Sync | None, role: str) -> str | dict[str, Any] | None:
+def _group(value: Any, role: Role) -> str:
+    if not isinstance(value, str) or not value:
+        raise role.error(f"expected a group's name; received {shown(value)}")
+    return value
+
+
+def sync_spec(value: str | Sync | None, role: Role) -> str | dict[str, Any] | None:
     """The spec of ``sync=``: a group's name for every channel, or an hg.Sync."""
     if value is None or isinstance(value, str):
         return value
     if not isinstance(value, Sync):
-        raise TypeError(f"{role}: expected a group's name or an hg.Sync; received {shown(value)}")
+        raise role.error(f"expected a group's name or an hg.Sync; received {shown(value)}")
     return value._spec(role)

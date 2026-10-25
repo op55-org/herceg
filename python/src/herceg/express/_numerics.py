@@ -36,6 +36,8 @@ from typing import Literal, get_args
 
 import numpy as np
 
+from .._errors import ChartError, is_integer, listed, shown
+
 #: Bytes the arrays of one chunk of resamples, kernels, or windows take
 #: together: enough elements per NumPy call that its overhead is lost in the
 #: work (measured: chunks of 64 MiB are no faster, of 4 MiB up to 15% slower).
@@ -532,6 +534,24 @@ def ecdf(
 #: Most bins along an axis, as the histogram mark takes them.
 MAX_BINS = 1000
 
+#: The rules ``numpy.histogram_bin_edges`` chooses bins by.
+BIN_RULES = ("auto", "fd", "doane", "scott", "stone", "rice", "sturges", "sqrt")
+
+
+def check_bins(bins: object, role: str) -> None:
+    """Refuses ``bins`` given as a rule's name NumPy does not know or as a
+    count below one, as ``role`` (``"jointplot"``) says it."""
+    if isinstance(bins, str) and bins not in BIN_RULES:
+        raise ChartError(
+            f"{role} bins: expected a number of bins or a rule's name ({listed(BIN_RULES)}); "
+            f"received {shown(bins)}",
+            path="bins",
+        )
+    if is_integer(bins) and not isinstance(bins, bool) and bins < 1:
+        raise ChartError(
+            f"{role} bins: expected a number of bins of at least 1; received {bins}", path="bins"
+        )
+
 
 def bin_edges(
     values: np.ndarray,
@@ -546,10 +566,11 @@ def bin_edges(
     steps of ``binwidth``, or ``numpy.histogram_bin_edges``; refused, before
     they are made where that can be known, past ``MAX_BINS`` bins. ``role``
     names the function in errors."""
+    check_bins(bins, role)
     start, stop = (float(values.min()), float(values.max())) if binrange is None else binrange
     if discrete:
         if stop - start + 1 > MAX_BINS:
-            raise ValueError(
+            raise ChartError(
                 f"{role} discrete: a bin per whole number from {start:g} to {stop:g} makes "
                 f"{stop - start + 1:.0f} bins, past the {MAX_BINS} a histogram takes; "
                 "drop discrete or give bins"
@@ -557,7 +578,7 @@ def bin_edges(
         return np.arange(start - 0.5, stop + 1.5)
     if binwidth is not None:
         if (stop - start) / binwidth > MAX_BINS:
-            raise ValueError(
+            raise ChartError(
                 f"{role} binwidth: steps of {binwidth:g} from {start:g} to {stop:g} make "
                 f"about {(stop - start) / binwidth:.0f} bins, past the {MAX_BINS} a histogram "
                 "takes; give a wider binwidth"
@@ -568,13 +589,19 @@ def bin_edges(
         return edges
     if isinstance(bins, np.ndarray):
         return bins
-    if isinstance(bins, (int, np.integer)) and bins > MAX_BINS:
-        raise ValueError(
+    if weights is not None and isinstance(bins, str):
+        raise ChartError(
+            f"{role} bins: NumPy's {shown(bins)} rule bins unweighted values alone; give "
+            "weighted rows a number of bins or edges",
+            path="bins",
+        )
+    if is_integer(bins) and bins > MAX_BINS:
+        raise ChartError(
             f"{role} bins: expected at most {MAX_BINS} bins, as a histogram takes; received {bins}"
         )
     edges = np.histogram_bin_edges(values, bins, binrange, weights)
     if len(edges) - 1 > MAX_BINS:
-        raise ValueError(
+        raise ChartError(
             f"{role} bins: the {bins!r} rule makes {len(edges) - 1} bins, past the {MAX_BINS} "
             "a histogram takes; give a count or a binwidth"
         )
@@ -659,9 +686,11 @@ def linkage(rows: np.ndarray, method: LinkageMethod, metric: Metric) -> np.ndarr
     ):
         if value not in choices:
             options = ", ".join(repr(choice) for choice in choices)
-            raise ValueError(f"clustermap {name}: expected one of {options}; received {value!r}")
+            raise ChartError(f"clustermap {name}: expected one of {options}; received {value!r}")
     if method == "ward" and metric != "euclidean":
-        raise ValueError("ward linkage needs the euclidean metric")
+        raise ChartError(
+            'clustermap metric: ward linkage needs the euclidean metric; use "euclidean"'
+        )
     try:
         from scipy.cluster import hierarchy
     except ImportError:

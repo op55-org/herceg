@@ -16,8 +16,9 @@ from typing import Any, Literal
 
 import numpy as np
 
-from ._data import listed, shown
+from ._data import listlike
 from ._derive import Expr
+from ._errors import ChartError, listed, refuses, shown
 
 #: What selects rows: range and rectangle brushes, lassos, and clicks.
 Gesture = Literal["brush", "lasso", "click"]
@@ -25,6 +26,7 @@ Gesture = Literal["brush", "lasso", "click"]
 GESTURES: tuple[Gesture, ...] = ("brush", "lasso", "click")
 
 
+@refuses
 @dataclass(frozen=True, eq=False)
 class SelectionBinding:
     """Binds a chart to a channel of a selection of its data's rows.
@@ -55,27 +57,27 @@ class SelectionBinding:
 
     def __post_init__(self) -> None:
         if not isinstance(self.channel, str) or not self.channel:
-            raise ValueError(
+            raise ChartError(
                 f"SelectionBinding channel: expected a name; received {shown(self.channel)}"
             )
-        if isinstance(self.events, str):
-            raise TypeError(
+        if not listlike(self.events):
+            raise ChartError(
                 'SelectionBinding events: expected a list of gestures, such as ["brush", "click"]; '
                 f"received {shown(self.events)}"
             )
         unknown = [event for event in self.events if event not in GESTURES]
         if unknown:
-            raise ValueError(
+            raise ChartError(
                 f"SelectionBinding events: expected {listed(GESTURES)}; "
                 f"received {shown(unknown[0])}"
             )
         if self.effect not in ("highlight", "none"):
-            raise ValueError(
+            raise ChartError(
                 'SelectionBinding effect: expected "highlight" or "none"; '
                 f"received {shown(self.effect)}"
             )
-        if isinstance(self.fields, str) or not all(isinstance(f, str) for f in self.fields):
-            raise TypeError(
+        if not listlike(self.fields) or not all(isinstance(f, str) for f in self.fields):
+            raise ChartError(
                 'SelectionBinding fields: expected a list of column names, such as ["fare"]; '
                 f"received {shown(self.fields)}"
             )
@@ -116,15 +118,20 @@ def bindings(value: Any) -> tuple[SelectionBinding, ...]:
     """A chart's ``row_selection`` as bindings: one, several, or none."""
     if value is None:
         return ()
+    if not isinstance(value, (SelectionBinding, Sequence)) or isinstance(value, str):
+        raise ChartError(
+            "Chart row_selection: expected an hg.SelectionBinding or a list of them; "
+            f"received {type(value).__name__}"
+        )
     found = (value,) if isinstance(value, SelectionBinding) else tuple(value)
-    for binding in found:
+    for i, binding in enumerate(found):
         if not isinstance(binding, SelectionBinding):
-            raise TypeError(
-                "Chart row_selection: expected hg.SelectionBinding values; "
+            raise ChartError(
+                f"Chart row_selection[{i}]: expected an hg.SelectionBinding; "
                 f"received {type(binding).__name__}"
             )
     if not found:
-        raise ValueError(
+        raise ChartError(
             'Chart row_selection: needs a binding, as hg.SelectionBinding("name"); received none'
         )
     return found
@@ -210,7 +217,7 @@ def encode(
     if isinstance(value, Expr):
         return {"kind": "predicate", "expression": value._json}, []
     if isinstance(value, (str, bytes)):
-        raise TypeError(
+        raise ChartError(
             f"{name}: expected a condition, positions of rows (whole numbers), or a boolean "
             f"mask; received {shown(value)}"
         )
@@ -218,19 +225,19 @@ def encode(
     if rows.dtype == bool:
         if rows.ndim != 1 or (length is not None and rows.shape != (length,)):
             many = "a value" if length is None else f"{length} values"
-            raise ValueError(
+            raise ChartError(
                 f"{name}: expected a mask of {many}, one per row; received shape {rows.shape}"
             )
         rows = np.flatnonzero(rows)
     if rows.ndim != 1 or (rows.size and not np.issubdtype(rows.dtype, np.integer)):
-        raise TypeError(
+        raise ChartError(
             f"{name}: expected positions of rows (whole numbers) or a boolean mask; "
             f"received {rows.dtype} values of shape {rows.shape}"
         )
     limit = np.iinfo(np.uint32).max if length is None else length
     if rows.size and (rows.min() < 0 or rows.max() >= limit):
         outside = int(rows[(rows < 0) | (rows >= limit)][0])
-        raise ValueError(
+        raise ChartError(
             f"{name}: expected positions among the data's {length} rows; received {outside}"
             if length is not None
             else f"{name}: expected positions of rows, 0 or more; received {outside}"

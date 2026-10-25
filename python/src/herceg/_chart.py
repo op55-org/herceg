@@ -8,7 +8,7 @@ import functools
 import inspect
 import json
 import math
-import numbers
+import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, is_dataclass
@@ -24,13 +24,14 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
+    get_args,
 )
 
 import numpy as np
 
 from . import _geo, _render
 from ._colors import is_color
-from ._data import Column, Matrix, Table, listed, shown
+from ._data import Column, Matrix, Table, listlike
 from ._derive import BinSpec, Derived, Expr, _fields_of, bin_spec
 from ._encoding import (
     SYMBOLS,
@@ -49,10 +50,13 @@ from ._encoding import (
     RowPosition,
     SeriesLabels,
     Stack,
+    SymbolName,
     channel_spec,
+    choice_option,
     condition_spec,
     coordinate_field,
     coordinate_spec,
+    dash_spec,
     encodings_spec,
     fraction_option,
     label_dict_problem,
@@ -60,9 +64,31 @@ from ._encoding import (
     length_spec,
     mark_style_spec,
     output_problem,
+    pixels_option,
     tagged_spec,
 )
-from ._errors import ChartError, key_path, located, python_path
+from ._errors import (
+    Arguments,
+    ChartError,
+    Hint,
+    Role,
+    UnknownOption,
+    check_hints,
+    checks_hints,
+    hints_of,
+    is_integer,
+    is_number,
+    key_path,
+    keys_shown,
+    listed,
+    located,
+    python_path,
+    python_values,
+    refuses,
+    refusing,
+    renamed,
+    shown,
+)
 from ._guides import (
     Format,
     GridLines,
@@ -72,6 +98,7 @@ from ._guides import (
     OrdinalScale,
     Padding,
     Scale,
+    Scope,
     Ticks,
     format_spec,
     grid_spec,
@@ -89,7 +116,10 @@ from ._interaction import (
     Sync,
     ViewLimits,
     bindings_spec,
+    brush_spec,
     limits_spec,
+    panel_interaction_spec,
+    preset_spec,
     sync_spec,
 )
 from ._layout import (
@@ -97,6 +127,7 @@ from ._layout import (
     Grid,
     GridCells,
     InsetAnchor,
+    InsetIndicator,
     Tracks,
     _Inset,
     inset_spec,
@@ -109,6 +140,7 @@ from ._style import (
     AXIS_ROLES,
     PANEL_ROLES,
     HaloOption,
+    Insets,
     Place,
     Side,
     Style,
@@ -118,6 +150,7 @@ from ._style import (
     _built,
     _camel,
     _spec,
+    built_spec,
     halo_spec,
     insets,
     style_spec,
@@ -149,11 +182,82 @@ HistogramElement = Literal["bars", "step", "poly"]
 CellReduce = Literal["last", "mean", "sum", "min", "max"]
 
 
+def _seams_spec(seams: Any) -> Any:
+    """An axis's ``seams`` as the spec takes them."""
+    if seams is None or isinstance(seams, bool):
+        return seams
+    if not isinstance(seams, Mapping) or any(key != "min_spacing" for key in seams):
+        raise ChartError(
+            "AxisOptions seams: expected True, False, or a dict with min_spacing; "
+            f"received {shown(seams)}"
+        )
+    spacing = seams.get("min_spacing", 40)
+    if (
+        isinstance(spacing, bool)
+        or not is_number(spacing)
+        or not math.isfinite(spacing)
+        or spacing <= 0
+    ):
+        raise (
+            Role("AxisOptions")
+            .field("seams")
+            .field("min_spacing")
+            .error(f"expected a finite, positive number of pixels; received {shown(spacing)}")
+        )
+    return {"minSpacing": float(seams["min_spacing"])} if seams else {}
+
+
+class Seams(TypedDict, total=False):
+    """How an axis marks its breaks: ``min_spacing``, the fewest pixels
+    between two seams it draws (40 by default)."""
+
+    min_spacing: float
+
+
+class ForceLayout(TypedDict, total=False):
+    """A network placed by a force simulation; ``settle`` (True by default)
+    lets the nodes near one moved by hand settle around it."""
+
+    type: Literal["force"]
+    settle: bool
+
+
+class _Circular(TypedDict):
+    type: Literal["circular"]
+
+
+class CircularLayout(_Circular, total=False):
+    """A network on one circle, by group, then by ``sort``."""
+
+    sort: Literal["degree", "input", "name"]
+
+
+class _Layered(TypedDict):
+    type: Literal["layered"]
+
+
+class LayeredLayout(_Layered, total=False):
+    """A network in layers along its links' ``direction``."""
+
+    direction: Literal["down", "right", "up", "left"]
+
+
+#: How a network's nodes are placed: a layout's name, or its settings.
+GraphLayout = Literal["force", "circular", "layered"] | ForceLayout | CircularLayout | LayeredLayout
+
+
+class BinsByAxis(TypedDict, total=False):
+    """A 2D histogram's bins along each axis (each left out takes the default)."""
+
+    x: BinSpec | None
+    y: BinSpec | None
+
+
 class HeatmapSampling(TypedDict, total=False):
     """How a pixel showing several heatmap cells colors them: by their
     ``"mean"``, ``"max"``, or ``"min"``."""
 
-    reduce: Literal["mean", "max", "min"]
+    reduce: Literal["mean", "max", "min"] | None
 
 
 _NUMERIC = ("number", "time")
@@ -195,6 +299,7 @@ SCHEMES = (
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
+@refuses
 @dataclass(frozen=True)
 class Break:
     """Time a time axis leaves out, in the chart's ``time_zone``, so the time
@@ -230,38 +335,42 @@ class Break:
             if value is not None
         ]
         if len(given) != 1 and not (not given and self.end is not None):
-            raise ValueError(
+            raise ChartError(
                 "Break: expected one of weekdays, hours, dates, or start and end; "
                 f"received {' and '.join(given) or 'none'}"
             )
         if self.weekdays is not None:
-            days = [self.weekdays] if isinstance(self.weekdays, str) else list(self.weekdays)
+            days = (
+                [self.weekdays]
+                if isinstance(self.weekdays, str) or not listlike(self.weekdays)
+                else list(self.weekdays)
+            )
             bad = [day for day in days if day not in _WEEKDAYS]
             if not days or bad:
-                raise ValueError(
+                raise ChartError(
                     f"Break weekdays: expected names from {listed(_WEEKDAYS)}; "
                     f"received {shown(self.weekdays)}"
                 )
             return {"weekdays": days}
         if self.hours is not None:
-            if isinstance(self.hours, str) or len(self.hours) != 2:
-                raise ValueError(
+            if not listlike(self.hours) or len(self.hours) != 2:
+                raise ChartError(
                     'Break hours: expected two times of day, as ("16:00", "09:30"); '
                     f"received {shown(self.hours)}"
                 )
             return {"hours": [_clock(value) for value in self.hours]}
         if self.dates is not None:
-            dates = [self.dates] if isinstance(self.dates, str | _dt.date) else list(self.dates)
+            dates: list[Any] = list(self.dates) if listlike(self.dates) else [self.dates]
             if not dates:
-                raise ValueError(
+                raise ChartError(
                     f"Break dates: expected at least one date; received {shown(self.dates)}"
                 )
             return {"dates": [_iso_date(value) for value in dates]}
         if self.start is None or self.end is None:
-            raise ValueError("Break: a span of instants needs both start and end")
+            raise ChartError("Break: a span of instants needs both start and end")
         start, end = _instant(self.start, "start"), _instant(self.end, "end")
         if not end > start:
-            raise ValueError(
+            raise ChartError(
                 f"Break end: expected an instant after start; received {shown(self.end)}"
             )
         return {"from": start, "to": end}
@@ -271,26 +380,26 @@ def _clock(value: str | _dt.time) -> str:
     """A time of day as "HH:MM"."""
     if isinstance(value, _dt.time):
         if value.second or value.microsecond:
-            raise ValueError(f"Break hours: expected whole minutes; received {value!r}")
+            raise ChartError(f"Break hours: expected whole minutes; received {value!r}")
         return f"{value.hour:02d}:{value.minute:02d}"
     if not isinstance(value, str) or len(value.split(":")) != 2:
-        raise ValueError(f'Break hours: expected times of day as "HH:MM"; received {shown(value)}')
+        raise ChartError(f'Break hours: expected times of day as "HH:MM"; received {shown(value)}')
     return value
 
 
 def _iso_date(value: str | _dt.date) -> str:
     if isinstance(value, _dt.datetime):
-        raise ValueError(f"Break dates: expected dates, not datetimes; received {value!r}")
+        raise ChartError(f"Break dates: expected dates, not datetimes; received {value!r}")
     if isinstance(value, _dt.date):
         return value.isoformat()
     try:
         _dt.date.fromisoformat(value)
     except (TypeError, ValueError):
-        raise ValueError(
+        raise ChartError(
             f'Break dates: expected dates or "YYYY-MM-DD" strings; received {shown(value)}'
         ) from None
     if len(value) != 10:
-        raise ValueError(
+        raise ChartError(
             f'Break dates: expected dates or "YYYY-MM-DD" strings; received {shown(value)}'
         )
     return value
@@ -298,7 +407,7 @@ def _iso_date(value: str | _dt.date) -> str:
 
 def _instant(value: Any, role: str) -> int:
     """An instant as whole epoch milliseconds."""
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+    if is_number(value) and not isinstance(value, bool):
         ms = float(value)
     else:
         from ._data import _time_ms
@@ -306,11 +415,11 @@ def _instant(value: Any, role: str) -> int:
         try:
             ms = _time_ms(value)
         except TypeError:
-            raise TypeError(
+            raise ChartError(
                 f"Break {role}: expected a number or a datetime; received {shown(value)}"
             ) from None
     if not (math.isfinite(ms) and ms == int(ms)):
-        raise ValueError(f"Break {role}: expected a whole millisecond; received {shown(value)}")
+        raise ChartError(f"Break {role}: expected a whole millisecond; received {shown(value)}")
     return int(ms)
 
 
@@ -319,17 +428,27 @@ def _break(rule: Break | dict[str, Any]) -> dict[str, Any]:
         return rule._spec()
     if isinstance(rule, dict):
         fields = dict(rule)
-        # The spec's names for a span of instants.
-        if "from" in fields or "to" in fields:
+        # The spec's names for a span of instants, refused as they were given.
+        aliased = "from" in fields or "to" in fields
+        if aliased:
             fields["start"], fields["end"] = fields.pop("from", None), fields.pop("to", None)
+        if any(key not in ("weekdays", "hours", "dates", "start", "end") for key in fields):
+            raise ChartError(
+                "AxisOptions breaks: expected keys weekdays, hours, dates, or from and to; "
+                f"received {keys_shown(rule)}"
+            )
         try:
             return Break(**fields)._spec()
-        except TypeError:
-            raise ValueError(
-                "AxisOptions breaks: expected keys weekdays, hours, dates, or from and to; "
-                f"received {sorted(rule)}"
+        except ChartError as error:
+            if not aliased:
+                raise
+            said = {"start": "from", "end": "to"}
+            problem = str(error).split(": ", 1)[-1].replace("start and end", "from and to")
+            role = Role("Break")
+            raise (role.field(said[error.path]) if error.path in said else role).error(
+                problem
             ) from None
-    raise TypeError(
+    raise ChartError(
         f"AxisOptions breaks: expected hg.Break objects or dicts; received {shown(rule)}"
     )
 
@@ -352,16 +471,14 @@ _TIME_FORMAT = frozenset(
 
 def _check_format(format: dict[str, Any] | None, role: str, known: frozenset[str]) -> None:
     """Refuses Intl options that do not exist, which Intl would silently ignore."""
+    if format is not None and not isinstance(format, Mapping):
+        raise ChartError(f"{role}: expected a dict of Intl options; received {shown(format)}")
     unknown = [key for key in format or () if key not in known]
     if unknown:
-        raise ValueError(f"{role}: {shown(unknown[0])} is not an Intl format option")
+        raise ChartError(f"{role}: {shown(unknown[0])} is not an Intl format option")
 
 
-#: Which panels share one instance of a scale (``AxisOptions.scope``): a
-#: name, or ``{"layout": id, "by": "row" or "column"}``, or ``{"panels": [ids]}``.
-Scope = Literal["chart", "panel", "row", "column"] | Mapping[str, Any]
-
-
+@refuses
 @dataclass
 class AxisOptions:
     """Scale and axis options for x or y. Unset options use herceg's defaults.
@@ -411,12 +528,13 @@ class AxisOptions:
     tooltip_format: Format | dict[str, Any] | None = None
     show: bool | None = None
     breaks: Sequence[Break | dict[str, Any]] | None = None
-    seams: bool | dict[str, float] | None = None
+    seams: bool | Seams | None = None
     scope: Scope | None = None
     repeat: Literal["outer", "all"] | None = None
     style: Style | dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        _seams_spec(self.seams)  # checked as made, before its hints are
         for name in ("format", "tooltip_format"):
             value = getattr(self, name)
             # Intl options as a dict of their names; patterns are hg.Format.
@@ -426,52 +544,48 @@ class AxisOptions:
         padding_spec(self.padding, "AxisOptions padding")
         grid_spec(self.grid, "AxisOptions grid")
         if self.repeat is not None and self.repeat not in ("outer", "all"):
-            raise ValueError(
+            raise ChartError(
                 f'AxisOptions repeat: expected "outer" or "all"; received {shown(self.repeat)}'
             )
 
     def _spec(self) -> dict[str, Any]:
-        seams = self.seams
-        if seams is not None and not isinstance(seams, bool):
-            if not isinstance(seams, dict) or any(key != "min_spacing" for key in seams):
-                raise ValueError(
-                    "AxisOptions seams: expected True, False, or a dict with min_spacing; "
-                    f"received {shown(seams)}"
-                )
-            spacing = seams.get("min_spacing", 40)
-            if (
-                isinstance(spacing, bool)
-                or not isinstance(spacing, (int, float))
-                or not math.isfinite(spacing)
-                or spacing <= 0
-            ):
-                raise ValueError(
-                    "AxisOptions seams min_spacing: expected a finite, positive number of pixels; "
-                    f"received {shown(spacing)}"
-                )
-            seams = {"minSpacing": seams["min_spacing"]} if seams else {}
+        seams = _seams_spec(self.seams)
         if seams is not None and seams is not False and self.breaks is None:
-            raise ValueError(
+            raise ChartError(
                 "AxisOptions seams: mark the breaks of a time x axis, and the axis has none; "
                 "give breaks or drop seams"
             )
+        if self.domain is not None and (not listlike(self.domain)):
+            raise ChartError(
+                f"AxisOptions domain: expected a list of its ends or categories; "
+                f"received {shown(self.domain)}"
+            )
+        if self.breaks is not None and (not listlike(self.breaks)):
+            raise ChartError(
+                f"AxisOptions breaks: expected a list of hg.Break; received {shown(self.breaks)}"
+            )
         spec = {
-            "type": self.type,
+            "type": choice_option(self.type, ("linear", "log", "time"), "AxisOptions type"),
             "domain": (
-                [_domain_end(v, "AxisOptions domain") for v in self.domain]
+                [_domain_end(v, f"AxisOptions domain[{i}]") for i, v in enumerate(self.domain)]
                 if self.domain is not None
                 else None
             ),
             "title": self.title,
-            "nice": self.nice,
-            "zero": self.zero,
+            "nice": _flag(self.nice, "AxisOptions nice"),
+            "zero": _flag(self.zero, "AxisOptions zero"),
             "padding": padding_spec(self.padding, "AxisOptions padding"),
             "grid": grid_spec(self.grid, "AxisOptions grid"),
             "ticks": ticks_spec(self.ticks, "AxisOptions ticks"),
             "format": format_spec(self.format, "AxisOptions format"),
             "tooltipFormat": format_spec(self.tooltip_format, "AxisOptions tooltip_format"),
-            "show": self.show,
-            "breaks": [_break(rule) for rule in self.breaks] if self.breaks is not None else None,
+            "show": _flag(self.show, "AxisOptions show"),
+            "breaks": [
+                located(f"breaks[{i}]", functools.partial(_break, rule))
+                for i, rule in enumerate(self.breaks)
+            ]
+            if self.breaks is not None
+            else None,
             "seams": seams,
             "scope": scope_spec(self.scope, "AxisOptions scope"),
             "repeat": self.repeat,
@@ -486,6 +600,7 @@ ProjectionName = Literal[
 PROJECTIONS = ("equal-earth", "natural-earth", "mercator", "equirectangular", "conic-equal-area")
 
 
+@refuses
 @dataclass
 class Projection:
     """How a map is projected (the chart's ``projection``).
@@ -509,11 +624,11 @@ class Projection:
 
     def _spec(self) -> dict[str, Any]:
         if self.type not in PROJECTIONS:
-            raise ValueError(
+            raise ChartError(
                 f"Projection type: expected {listed(PROJECTIONS)}; received {shown(self.type)}"
             )
         if self.central_meridian is not None and not _finite(self.central_meridian):
-            raise ValueError(
+            raise ChartError(
                 "Projection central_meridian: expected a finite longitude; "
                 f"received {shown(self.central_meridian)}"
             )
@@ -521,17 +636,17 @@ class Projection:
         if self.parallels is not None:
             parallels = _range(self.parallels, "Projection parallels", minimum=-90)
             if parallels is not None and parallels[1] > 90:
-                raise ValueError(
+                raise ChartError(
                     "Projection parallels: expected latitudes from -90 to 90; "
                     f"received {self.parallels!r}"
                 )
         fit: Any = self.fit
-        if fit not in (None, "data", "world"):
+        if not (fit is None or (isinstance(fit, str) and fit in ("data", "world"))):
             try:
                 (west, south), (east, north) = fit
                 box = [[float(west), float(south)], [float(east), float(north)]]
             except (TypeError, ValueError):
-                raise ValueError(
+                raise ChartError(
                     'Projection fit: expected "data", "world", or ((west, south), (east, north)); '
                     f"received {shown(fit)}"
                 ) from None
@@ -543,7 +658,7 @@ class Projection:
                 and -90 <= south < north <= 90
                 and west != east
             ):
-                raise ValueError(
+                raise ChartError(
                     "Projection fit: expected longitudes and latitudes in degrees, south below "
                     f"north and west apart from east; received {fit!r}"
                 )
@@ -559,6 +674,7 @@ class Projection:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass(frozen=True)
 class TooltipField:
     """A column a mark's tooltips show of the row they are at, besides its
@@ -575,7 +691,7 @@ class TooltipField:
 
     def __post_init__(self) -> None:
         if not isinstance(self.field, str):
-            raise TypeError(
+            raise ChartError(
                 f"TooltipField field: expected a column name; received {shown(self.field)}"
             )
         _check_format(self.format, "TooltipField format", _NUMBER_FORMAT | _TIME_FORMAT)
@@ -585,6 +701,7 @@ class TooltipField:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass
 class Tooltip:
     """Tooltip options: ``mode`` ("nearest-x", "nearest-y", or "nearest"; by
@@ -594,10 +711,12 @@ class Tooltip:
 
     ``fields`` are columns of the row a tooltip is at that it shows besides a
     mark's values, such as a count that is not plotted: column names or
-    ``hg.TooltipField``. They belong to marks whose points are rows (lines,
-    areas, bars, points, heatmaps, maps, 3D points and lines): give them to
-    the mark, ``chart.line(..., tooltip=hg.Tooltip(fields=["requests"]))``,
-    or to a one-call helper, ``hg.line(..., tooltip=...)``, whose one mark
+    ``hg.TooltipField``. They belong to marks whose points or items are rows
+    (lines, areas, bars, points, heatmaps, maps, 3D points, lines, and
+    surfaces, radars, and gauges; pie slices, funnel stages, tree nodes, and
+    Sankey links that are one row): give them to the mark,
+    ``chart.line(..., tooltip=hg.Tooltip(fields=["requests"]))``, or to a
+    one-call helper, ``hg.line(..., tooltip=...)``, whose one mark
     takes them. The keyboard's announcements and hover events read them too.
     """
 
@@ -607,68 +726,72 @@ class Tooltip:
 
     def _spec(self) -> dict[str, Any]:
         if self.fields is not None:
-            raise ValueError(
+            raise ChartError(
                 "Chart tooltip fields: belong to the marks whose rows they show; give "
                 "them to a mark, as in chart.line(..., tooltip=hg.Tooltip(fields=[...]))"
             )
         spec: dict[str, Any] = {}
         if self.mode is not None:
-            spec["mode"] = self.mode
-        if self.axis_labels:
+            spec["mode"] = choice_option(self.mode, get_args(TooltipMode), "Tooltip mode")
+        if _flag(self.axis_labels, "Tooltip axis_labels"):
             spec["axisLabels"] = True
         return spec
 
     def _mark_spec(self, mark: str) -> dict[str, Any]:
         """The tooltip of mark ``mark``: its fields."""
+        role = Role(mark).field("tooltip")
         if self.mode is not None or self.axis_labels:
             option = "mode" if self.mode is not None else "axis_labels"
-            raise ValueError(
-                f"{mark} tooltip {option}: is the chart's; give it to the chart's tooltip"
-            )
+            raise role.field(option).error("is the chart's; give it to the chart's tooltip")
         if self.fields is None:
             return {}
-        if isinstance(self.fields, str):
-            raise ValueError(
-                f"{mark} tooltip fields: expected a list of columns; received {shown(self.fields)}"
-            )
+        at = role.field("fields")
+        if isinstance(self.fields, str) or not listlike(self.fields):
+            raise at.error(f"expected a list of columns; received {shown(self.fields)}")
         fields: list[Any] = []
         for i, entry in enumerate(self.fields):
             if isinstance(entry, TooltipField):
-                fields.append(entry._spec())
+                fields.append(located(at.index(i), entry._spec))
             elif isinstance(entry, str):
                 fields.append(entry)
             else:
-                raise TypeError(
-                    f"{mark} tooltip fields[{i}]: expected a column name or an hg.TooltipField; "
-                    f"received {shown(entry)}"
+                raise at.index(i).error(
+                    f"expected a column name or an hg.TooltipField; received {shown(entry)}"
                 )
         return {"fields": fields}
 
 
+@refuses
 @dataclass
 class Animation:
     """Animation options (the chart's ``animation``): ``duration`` in
-    milliseconds, and ``values``, with which bars, pie slices, and lines and
-    areas whose x values stay also move to changed values when a live
-    chart's data is replaced, the axes with them, besides the axes moving to
-    views asked for. ``animation=True`` is ``Animation()``, and a number is a
-    duration."""
+    milliseconds, and ``values``, with which marks also move to changed
+    values when a live chart's data is replaced, the axes with them, besides
+    the axes moving to views asked for: bars (stacked, labeled, and
+    histograms'), pie slices, gauges, points, lines and areas along x (lines
+    along y too) whose rows stay, error bars, candlesticks, regions, text,
+    and heatmaps' and 2D histograms' cells, in every panel. Charts with box plots, boxen plots,
+    violins, rugs, contours, dendrograms, custom marks, treemaps, sunbursts,
+    funnels, radars, Sankey diagrams, networks, maps, or 3D marks refuse
+    ``values`` as they draw. ``animation=True`` is ``Animation()``, and a
+    number is a duration."""
 
     duration: float = 250
     values: bool = False
 
     def _spec(self) -> dict[str, Any]:
         if not (_finite(self.duration) and self.duration >= 0):
-            raise ValueError(
+            raise ChartError(
                 "Animation duration: expected milliseconds of at least 0; "
                 f"received {shown(self.duration)}"
             )
         spec: dict[str, Any] = {"duration": self.duration}
-        if self.values:
+        if _flag(self.values, "Animation values"):
             spec["values"] = True
         return spec
 
 
+@refuses
 @dataclass
 class Navigator:
     """A range navigator (the chart's ``navigator``): a strip under the plot
@@ -681,39 +804,49 @@ class Navigator:
     ``marks`` names the ``id`` of each mark the strip draws (by default every
     line, area, scatter, bar, and candlestick mark). ``navigator=True`` is
     ``Navigator()``. The chart needs a number or time x axis; with facets or
-    panels, the strip goes under all of them, draws every panel's marks, and
-    moves the x range they share, so the x axis' scope must be ``"chart"``.
+    panels, the strip goes under all of them and moves the x range they
+    share, or with ``panel`` (a subplot's id, or a facet panel's key), that
+    panel's x range, drawing the marks of the panels sharing it.
     """
 
     height: float | None = None
     marks: Sequence[str] | None = None
     halo: HaloOption | None = None
+    panel: str | None = None
 
     def _spec(self) -> dict[str, Any]:
         spec: dict[str, Any] = {}
         if self.height is not None:
             if isinstance(self.height, bool) or not (_finite(self.height) and self.height >= 16):
-                raise ValueError(
+                raise ChartError(
                     f"Navigator height: expected at least 16 pixels; received {shown(self.height)}"
                 )
             spec["height"] = float(self.height)
         if self.marks is not None:
-            if isinstance(self.marks, str) or not all(isinstance(m, str) for m in self.marks):
-                raise ValueError(
+            if not listlike(self.marks) or not all(isinstance(m, str) for m in self.marks):
+                raise ChartError(
                     f"Navigator marks: expected a list of mark ids; received {shown(self.marks)}"
                 )
             ids = list(self.marks)
             repeated = next((m for i, m in enumerate(ids) if m in ids[:i]), None)
             if repeated is not None:
-                raise ValueError(
+                raise ChartError(
                     f"Navigator marks: {shown(repeated)} is listed twice; list each mark once"
                 )
             spec["marks"] = ids
         if self.halo is not None:
             spec["halo"] = _halo(self.halo, "Navigator")
+        if self.panel is not None:
+            if not isinstance(self.panel, str) or self.panel in ("", "*"):
+                raise ChartError(
+                    "Navigator panel: expected a panel's id (or a facet panel's key); "
+                    f"received {shown(self.panel)}"
+                )
+            spec["panel"] = self.panel
         return spec
 
 
+@refuses
 @dataclass
 class Jitter:
     """How points in the bands of a category axis spread (``Chart.point``'s
@@ -727,17 +860,18 @@ class Jitter:
 
     def _spec(self) -> dict[str, Any]:
         if isinstance(self.width, bool) or not (_finite(self.width) and 0 <= self.width <= 1):
-            raise ValueError(
+            raise ChartError(
                 f"Jitter width: expected a number from 0 to 1; received {shown(self.width)}"
             )
-        if isinstance(self.seed, bool) or not isinstance(self.seed, numbers.Integral):
-            raise ValueError(f"Jitter seed: expected a whole number; received {shown(self.seed)}")
+        if isinstance(self.seed, bool) or not is_integer(self.seed):
+            raise ChartError(f"Jitter seed: expected a whole number; received {shown(self.seed)}")
         spec: dict[str, Any] = {"width": float(self.width)}
         if self.seed:
             spec["seed"] = int(self.seed)
         return spec
 
 
+@refuses
 @dataclass
 class Camera:
     """Where a 3D chart is seen from at first (the chart's ``camera``).
@@ -757,21 +891,21 @@ class Camera:
 
     def _spec(self) -> dict[str, Any]:
         if not _finite(self.azimuth):
-            raise ValueError(
+            raise ChartError(
                 "Camera azimuth: expected a finite number of degrees; "
                 f"received {shown(self.azimuth)}"
             )
         if not (_finite(self.elevation) and -90 <= self.elevation <= 90):
-            raise ValueError(
+            raise ChartError(
                 "Camera elevation: expected degrees from -90 to 90; "
                 f"received {shown(self.elevation)}"
             )
         if not (_finite(self.zoom) and 0.5 <= self.zoom <= 10):
-            raise ValueError(
+            raise ChartError(
                 f"Camera zoom: expected a number from 0.5 to 10; received {shown(self.zoom)}"
             )
         if not isinstance(self.perspective, bool):
-            raise ValueError(
+            raise ChartError(
                 f"Camera perspective: expected True or False; received {shown(self.perspective)}"
             )
         spec: dict[str, Any] = {
@@ -793,7 +927,7 @@ class _SharedOptions(TypedDict, total=False):
     legend: bool | LegendOptions | dict[str, Any] | None
     scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]] | None
     guides: Sequence[Guide] | None
-    padding: float | dict[str, float] | None
+    padding: float | Insets | None
     tooltip: bool | TooltipMode | Tooltip | None
     zoom: bool | Literal["x", "y", "xy"] | None
     pan: bool | Literal["x", "y", "xy"] | None
@@ -865,15 +999,78 @@ def _own_options(function: Callable[..., Any]) -> set[str]:
     }
 
 
+def _settings(owner: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """Makes a method's refusals of its arguments (``Panel.inset width:
+    ...``) ChartErrors at the argument, checked by their type hints first."""
+
+    def decorate(function: Callable[_P, _R]) -> Callable[_P, _R]:
+        settings = set(inspect.signature(function).parameters) - {"self"}
+        hinted = checks_hints(owner)(function)
+
+        @functools.wraps(function)
+        def method(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with refusing((owner,), settings):
+                return cast("_R", hinted(*args, **kwargs))
+
+        return method
+
+    return decorate
+
+
+def _output_settings(function: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Makes an output's refusals of its settings (``to_svg sizing: ...``)
+    ChartErrors at the setting they name, as the chart's of its options."""
+    settings = set(inspect.signature(function).parameters) - {"self"}
+    hinted = checks_hints(function.__name__)(function)
+
+    @functools.wraps(function)
+    def output(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with refusing((function.__name__,), settings):
+            try:
+                return hinted(*args, **kwargs)
+            except ChartError as error:
+                raise in_python(error, cast(Chart, args[0])) from None
+
+    return output
+
+
+# Where the engine's refusals of a spec begin: spec.description, spec.marks[1].strokeWidth.
+_SPEC_LOCATION = re.compile(r"spec\.(?:marks\[(\d+)\]\.?)?([^:]*): ")
+
+
+def in_python(error: ChartError, chart: Chart) -> ChartError:
+    """The engine's refusal of a chart's spec located as Python's own are:
+    ``spec.marks[1].strokeWidth: ...`` as ``line stroke_width: ...``, and
+    ``spec.description: ...`` as ``Chart description: ...``."""
+    found = _SPEC_LOCATION.match(str(error))
+    if found is None:
+        return error
+    index, rest = found.groups()
+    kinds = [spec["type"] for spec, _ in chart._marks]
+    if index is None:
+        where = f"Chart {python_path(rest)}"
+    elif int(index) < len(kinds):
+        where = " ".join(filter(None, (_method(kinds[int(index)]), python_path(rest))))
+    else:
+        return error
+    return ChartError.from_info(error.info(), f"{where}: {str(error)[found.end() :]}")
+
+
 def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
     """Keep method signatures while reporting unknown options like helpers do."""
     known = _own_options(function)
+    arguments = Arguments(function)
+    owner = "Chart" if function.__name__ == "__init__" else function.__name__
 
     @functools.wraps(function)
     def checked(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         for name in kwargs:
             if name not in known:
-                raise TypeError(_unknown_option(function, name, known))
+                raise UnknownOption(_unknown_option(function, name, known))
+        given = arguments.of(args, kwargs)
+        if given is None or "self" not in given:
+            return function(*args, **kwargs)  # Python says what the call gets wrong
+        chart = cast("Chart", given["self"])
         # Text styles' vertical_align is checked where it is given.
         # Styles are in dicts and options objects (and the guides' list),
         # never in data, scales, or other lists, which may be long.
@@ -885,14 +1082,41 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
                 else None
             )
             if problem:
-                chart = cast("Chart", args[0])
                 at = (
                     name
                     if function.__name__ == "__init__"
                     else f"marks[{len(chart._marks)}].{name}"
                 )
                 raise ChartError(f"{at}{problem[0]}: {problem[1]}", path=f"{at}{problem[0]}")
-        return function(*args, **kwargs)
+        # Refusals are ChartErrors at the option they name: the chart's own
+        # (``x``), or the mark's, at the place it takes (``marks[2].color``).
+        # NumPy's scalars are taken as Python's; other values the method's own
+        # checks let through are refused after them (theirs say more).
+        hints = hints_of(function)
+        if function.__name__ == "__init__":
+            with refusing(("Chart",), known):
+                changed, later = python_values(owner, given, hints)
+                taken, named = arguments.replaced(args, kwargs, changed)
+                function(*taken, **named)
+                check_hints(owner, given, later)
+                return cast("_R", None)
+        index = len(chart._marks)
+        mark, panel = kwargs.get("id"), kwargs.get("panel")
+        with refusing(
+            (function.__name__,),
+            known,
+            f"marks[{index}]",
+            mark=mark if isinstance(mark, str) else index,
+            panel=panel if isinstance(panel, str) else None,
+        ):
+            changed, later = python_values(owner, given, hints)
+            taken, named = arguments.replaced(args, kwargs, changed)
+            # Refused as the mark is added (see `_add`).
+            outer, chart._unchecked = chart._unchecked, (owner, given, later)
+            try:
+                return function(*taken, **named)
+            finally:
+                chart._unchecked = outer
 
     return checked
 
@@ -909,7 +1133,7 @@ def _markers(value: Any) -> Any:
     if value is None or isinstance(value, bool):
         return value
     if value not in SYMBOLS:
-        raise ValueError(
+        raise ChartError(
             f"line markers: expected True, False, or a shape ({listed(SYMBOLS)}); "
             f"received {shown(value)}"
         )
@@ -919,20 +1143,11 @@ def _markers(value: Any) -> Any:
 def _continuity(value: Any, mark: str) -> Any:
     if value is None:
         return None
-    return _built(value, Continuity, f"{mark} continuity")._spec()
+    return built_spec(value, Continuity, f"{mark} continuity")
 
 
 def _dash(value: Dash | None, mark: str) -> str | list[float] | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        if value not in ("-", "--", ":", "-."):
-            raise ValueError(
-                f'{mark} dash: expected an array or "-", "--", ":", or "-."; '
-                f"received {shown(value)}"
-            )
-        return value
-    return list(value)
+    return dash_spec(value, f"{mark} dash")
 
 
 def _check_stack(stack: AreaStack, mark: str) -> None:
@@ -943,17 +1158,16 @@ def _check_stack(stack: AreaStack, mark: str) -> None:
             if mark == "area"
             else 'choose True, False, or "fill"; use an area for "center" or "wiggle"'
         )
-        raise ValueError(f"{mark} stack: unsupported stack {shown(stack)}; {correction}")
+        raise ChartError(f"{mark} stack: unsupported stack {shown(stack)}; {correction}")
 
 
 def _check_stack_values(table: _Columns, fields: str | Sequence[str], mark: str) -> None:
     for field in [fields] if isinstance(fields, str) else fields:
         values = table.column(field).values
         if np.any(np.isfinite(values) & (values < 0)):
-            raise ValueError(
-                f"{mark} stack {field}: negative values have no nonnegative share "
-                "or stream thickness; "
-                "use stack=True for signed values"
+            raise ChartError(
+                f"{mark} stack: column {field!r} has negative values, which have no "
+                "nonnegative share or stream thickness; use stack=True for signed values"
             )
 
 
@@ -995,7 +1209,7 @@ class Chart:
         scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]]
         | None = None,
         guides: Sequence[Guide] | None = None,
-        padding: float | dict[str, float] | None = None,
+        padding: float | Insets | None = None,
         tooltip: bool | TooltipMode | Tooltip | None = True,
         zoom: bool | Literal["x", "y", "xy"] | None = False,
         pan: bool | Literal["x", "y", "xy"] | None = None,
@@ -1018,50 +1232,57 @@ class Chart:
         row_selection: SelectionBinding | Sequence[SelectionBinding] | None = None,
     ) -> None:
         if facet_columns is not None and facet is None:
-            raise ValueError("Chart facet_columns: wraps the panels of facet; give facet")
+            raise ChartError("Chart facet_columns: wraps the panels of facet; give facet")
         if facet is not None and (facet_row is not None or facet_column is not None):
-            raise ValueError(
+            raise ChartError(
                 "Chart facet: facet, or facet_row and facet_column, not both; drop one"
             )
-        panel_list = [Panel(p) if isinstance(p, str) else p for p in panels or ()]
+        if panels is not None and (
+            not listlike(panels) or not all(isinstance(p, (str, Panel)) for p in panels)
+        ):
+            raise ChartError(
+                f"Chart panels: expected a list of panel ids or hg.Panel; received {shown(panels)}"
+            )
+        given_panels = () if panels is None else panels
+        panel_list = [Panel(p) if isinstance(p, str) else p for p in given_panels]
         for i, panel in enumerate(panel_list):
             _check_panel(panel, f"panels[{i}]")
         if panels is not None and not panel_list:
-            raise ValueError(f"Chart panels: expected at least one panel; received {panels!r}")
+            raise ChartError(f"Chart panels: expected at least one panel; received {panels!r}")
         ids = [p.id for p in panel_list]
         bad = [i for i in ids if not isinstance(i, str) or i in ("", "*")]
         if bad:
-            raise ValueError(
+            raise ChartError(
                 'Chart panels: expected ids that are names other than "" and "*"; '
                 f"received {shown(bad[0])}"
             )
         if len(set(ids)) != len(ids):
             repeated = next(i for n, i in enumerate(ids) if i in ids[:n])
-            raise ValueError(
+            raise ChartError(
                 f"Chart panels: {shown(repeated)} names two panels; give each panel its own id"
             )
         if layout is not None and not panel_list:
-            raise ValueError(
+            raise ChartError(
                 "Chart layout: places the chart's panels, and it has none; give panels, or "
                 "lay panels out with chart.columns, rows, grid, or mosaic"
             )
-        layout_spec = _layout_option(layout)
+        layout_spec = located("layout", lambda: _layout_option(layout))
         if panel_list and (facet is not None or facet_row is not None or facet_column is not None):
-            raise ValueError("Chart panels: facets or panels, not both; drop one")
-        if panel_list:
-            _check_subplot_ranges({"zoom": zoom, "pan": pan, "brush": brush})
+            raise ChartError("Chart panels: facets or panels, not both; drop one")
         axes = {"x": x, "y": y, "y_right": y_right, "scales": scales}
-        # One window shows one x range, so every panel must share it.
+        # One window shows one x range: every panel's, or the named panel's.
         x_scope = axis_scope(axes, "x")
-        if _navigator(navigator) is not None and x_scope not in (None, "chart"):
-            raise ValueError(
-                "Chart navigator: needs one x scale shared by every panel, and x's scope is "
-                f'{shown(x_scope)}; give x scope "chart" or drop navigator'
+        strip = located("navigator", lambda: _navigator(navigator), "Navigator")
+        targets = isinstance(strip, Mapping) and "panel" in strip
+        if strip is not None and not targets and x_scope not in (None, "chart"):
+            raise ChartError(
+                "Chart navigator: moves the x scale every panel shares, and x's scope is "
+                f"{shown(x_scope)}; name the panel whose x it moves, as "
+                'hg.Navigator(panel="latency"), or give x scope "chart"'
             )
-        check_y_zoom({"zoom": zoom, "pan": pan, **axes}, right=False, subplots=bool(panel_list))
-        _animation(animation)
+        located("animation", lambda: _animation(animation), "Animation")
         if facet_row is not None and facet_row == facet_column:
-            raise ValueError(
+            raise ChartError(
                 f"Chart facet_column: {facet_column!r} is facet_row too; "
                 "facet rows and columns by different fields"
             )
@@ -1071,7 +1292,7 @@ class Chart:
             and not isinstance(facet_columns, bool)
             and facet_columns >= 1
         ):
-            raise ValueError(
+            raise ChartError(
                 "Chart facet_columns: expected a whole number of at least 1; "
                 f"received {shown(facet_columns)}"
             )
@@ -1087,6 +1308,8 @@ class Chart:
         self._root: Cell | None = None
         # Legends of panels (`panel.legend`), after the chart's `guides`.
         self._panel_guides: list[Guide] = []
+        # The options of the mark being added and their type hints, checked as it is added.
+        self._unchecked: tuple[str, Mapping[str, Any], Mapping[str, Hint]] | None = None
         self._tables: list[tuple[Any, _Columns]] = []
         # Derived tables by index, with the index of the table they derive from.
         self._derived: dict[int, int] = {}
@@ -1137,15 +1360,18 @@ class Chart:
         self._options = spec_options(self._settings)
         # Bindings to channels of row selections, one per table (see SelectionBinding).
         self._row_selection = bindings_of(row_selection)
+        # Bindings given in a list are refused at their index.
+        self._bindings_listed = not isinstance(row_selection, SelectionBinding)
         # A brush bound to zoom cannot select rows too.
         bindings_spec(
             bindings,
-            "Chart bindings",
+            _CHART.field("bindings"),
             brushes_rows=any("brush" in binding.events for binding in self._row_selection),
         )
 
     # Layout ----------------------------------------------------------------
 
+    @checks_hints("Chart.columns")
     def columns(
         self, widths: Tracks, *, gap: float | None = None, id: str | None = None
     ) -> list[Cell]:
@@ -1165,6 +1391,7 @@ class Chart:
         own unless a scale's ``scope`` shares them."""
         return self._lay_out("Chart.columns", lambda cell: cell.columns(widths, gap=gap, id=id))
 
+    @checks_hints("Chart.rows")
     def rows(
         self, heights: Tracks, *, gap: float | None = None, id: str | None = None
     ) -> list[Cell]:
@@ -1172,6 +1399,7 @@ class Chart:
         (see ``columns``)."""
         return self._lay_out("Chart.rows", lambda cell: cell.rows(heights, gap=gap, id=id))
 
+    @checks_hints("Chart.grid")
     def grid(
         self,
         *,
@@ -1193,6 +1421,7 @@ class Chart:
             "Chart.grid", lambda cell: cell.grid(rows=rows, columns=columns, gap=gap, id=id)
         )
 
+    @checks_hints("Chart.mosaic")
     def mosaic(
         self,
         layout: Sequence[Sequence[str | None]],
@@ -1215,30 +1444,35 @@ class Chart:
         """
         role = "Chart.mosaic"
         cells = mosaic_cells(layout, role)
+        if panels is not None and not isinstance(panels, Mapping):
+            raise ChartError(
+                f"{role} panels: expected a dict of hg.Panel by their ids; "
+                f"received {shown(panels)}",
+                path="panels",
+            )
         given = dict(panels or {})
+        at = Role(role).field("panels")
         for key, panel in given.items():
             if not isinstance(panel, Panel):
-                raise TypeError(
-                    f"{role} panels[{key!r}]: expected an hg.Panel; received {shown(panel)}"
-                )
+                raise at.key(str(key)).error(f"expected an hg.Panel; received {shown(panel)}")
             if panel.id != key:
-                raise ValueError(
-                    f"{role} panels[{key!r}]: the panel's id is {shown(panel.id)}; give it the "
-                    "id of its key"
+                raise at.key(key).error(
+                    f"the panel's id is {shown(panel.id)}; give it the id of its key"
                 )
         unknown = [key for key in given if key not in {cell[0] for cell in cells}]
         if unknown:
-            raise ValueError(
-                f"{role} panels: {shown(unknown[0])} is in no cell of the mosaic; place it or "
-                "drop its settings"
+            raise at.key(unknown[0]).error(
+                "is in no cell of the mosaic; place it or drop its settings",
+                code="unknown-reference",
             )
 
         def lay(root: Cell) -> dict[str, Panel]:
-            grid = root.grid(
-                rows=rows if rows is not None else len(layout),
-                columns=columns if columns is not None else len(layout[0]),
-                gap=gap,
-                id=id,
+            grid = root._grid(
+                rows if rows is not None else len(layout),
+                columns if columns is not None else len(layout[0]),
+                gap,
+                id,
+                "mosaic",
             )
             out: dict[str, Panel] = {}
             for name, row, column, row_span, column_span in cells:
@@ -1252,6 +1486,11 @@ class Chart:
                     y_right=settings.y_right,
                     camera=settings.camera,
                     style=settings.style,
+                    zoom=settings.zoom,
+                    pan=settings.pan,
+                    brush=settings.brush,
+                    bindings=settings.bindings,
+                    limits=settings.limits,
                 )
             return out
 
@@ -1262,16 +1501,16 @@ class Chart:
         refused where the chart has facets, panels of its own, or a layout
         already. A layout refused leaves the chart as it was."""
         if self._facets:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: lays out panels, and the chart has facets; facets or panels, not both"
             )
         if self._layout is not None or (self._panels and self._root is None):
-            raise ValueError(
+            raise ChartError(
                 f"{role}: the chart's panels and layout are given (panels=, layout=); lay them "
                 "out there, or make every panel with the chart's columns, rows, grid, or mosaic"
             )
         if self._root is not None:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: the chart is laid out already; lay out one of the cells it was "
                 "divided into"
             )
@@ -1279,7 +1518,7 @@ class Chart:
             (i for i, (mark, _) in enumerate(self._marks) if mark.get("panel") is None), None
         )
         if unplaced is not None:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: the chart's {_method(self._marks[unplaced][0]['type'])} names no panel; "
                 "lay out the panels first, then add marks through them (panel.line(...))"
             )
@@ -1302,6 +1541,13 @@ class Chart:
         y_right: Any = None,
         camera: Any = None,
         style: Any = None,
+        zoom: Any = None,
+        pan: Any = None,
+        brush: Any = None,
+        bindings: Any = None,
+        limits: Any = None,
+        rotate: Any = None,
+        drag: Any = None,
     ) -> Panel:
         """A panel of the chart's layout, bound to it so that it takes marks;
         its id given, or its place among the chart's panels."""
@@ -1313,19 +1559,36 @@ class Chart:
             while id in taken:
                 id, k = f"panel-{n}-{k}", k + 1
         elif not isinstance(id, str) or id in ("", "*"):
-            raise ValueError(
-                f'Panel id: expected a name other than "" and "*"; received {shown(id)}'
+            raise ChartError(
+                f'Panel id: expected a name other than "" and "*"; received {shown(id)}',
+                path=f"panels[{len(self._panels)}].id",
             )
         elif id in taken:
-            raise ValueError(f"Panel id: {shown(id)} names two panels; give each panel its own id")
-        made = Panel(id, title=title, x=x, y=y, y_right=y_right, camera=camera, style=style)
+            raise ChartError(
+                f"Panel id: {shown(id)} names two panels; give each panel its own id",
+                path=f"panels[{len(self._panels)}].id",
+            )
+        made = located(
+            f"panels[{len(self._panels)}]",
+            lambda: Panel(
+                id,
+                title=title,
+                x=x,
+                y=y,
+                y_right=y_right,
+                camera=camera,
+                style=style,
+                zoom=zoom,
+                pan=pan,
+                brush=brush,
+                bindings=bindings,
+                limits=limits,
+                rotate=rotate,
+                drag=drag,
+            ),
+        )
         # Refuses settings the spec cannot take, here rather than at output.
         _check_panel(made, f"panels[{len(self._panels)}]")
-        if not self._panels:
-            settings = self._settings
-            _check_subplot_ranges(
-                {"zoom": settings["zoom"], "pan": settings["pan"], "brush": settings["brush"]}
-            )
         made._chart = self
         self._panels.append(made)
         return made
@@ -1350,7 +1613,7 @@ class Chart:
         stroke_opacity: float | None = None,
         encode: Encodings | Mapping[str, Any] | None = None,
         style: MarkStyle | Mapping[str, Any] | None = None,
-        markers: bool | str | None = None,
+        markers: bool | SymbolName | None = None,
         continuity: Continuity | Mapping[str, Any] | None = None,
         where: Expr | None = None,
         curve: Curve | None = None,
@@ -1390,7 +1653,7 @@ class Chart:
         ``where`` leaves rows out as gaps, meeting the line where the
         condition changes.
         """
-        places = self._places("line", {"x": x, "y": y}, axis == "right")
+        places = self._places("line", {"x": x, "y": y}, axis == "right", needed=True)
         x, y = places.columns["x"], places.columns["y"]
         table = self._mark_table(data)
         self._check_places(table, "line", places)
@@ -1403,7 +1666,7 @@ class Chart:
         self._single_or_series(values, split, "line", inferred=series is None)
         self._check_dodge(table, "line", dodge, along, x_spec if along == "x" else y_spec, split)
         positions = x_spec if along == "x" else y_spec
-        style_spec = mark_style_spec(style, ("marker",), "line")
+        style_spec = mark_style_spec(style, ("by", "marker"), "line")
         self._check_series_style(table, split, style_spec, "line", positions)
         return self._add(
             {
@@ -1412,10 +1675,10 @@ class Chart:
                 "y": places.spec("y", y_spec),
                 "orient": orient,
                 "series": series,
-                "dodge": dodge or None,
+                "dodge": _flag(dodge, "line dodge") or None,
                 "color": color,
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "line stroke_width"),
                 "dash": _dash(dash, "line"),
                 "opacity": fraction_option(opacity, "line opacity"),
                 "strokeOpacity": fraction_option(stroke_opacity, "line stroke_opacity"),
@@ -1424,7 +1687,7 @@ class Chart:
                 "markers": _markers(markers),
                 "continuity": _continuity(continuity, "line"),
                 "where": condition_spec(where, "line where"),
-                "curve": curve,
+                "curve": choice_option(curve, get_args(Curve), "line curve"),
                 "label": label,
                 "labels": self._series_labels(labels, "line"),
                 "legend": _mark_legend(legend, "line"),
@@ -1514,7 +1777,7 @@ class Chart:
             _check_stack(stack, "area")
             spread, gaps = stack, None
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 f"area stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
         places = self._places(
@@ -1531,7 +1794,7 @@ class Chart:
         along_x = y1 is not None or y2 is not None
         along_y = x1 is not None or x2 is not None
         if along_x and along_y:
-            raise ValueError("area: a band along x (y1, y2) or along y (x1, x2), not both")
+            raise ChartError("area: a band along x (y1, y2) or along y (x1, x2), not both")
         x_spec: str | list[str] | None
         y_spec: str | list[str] | None
         runs: Orient
@@ -1541,20 +1804,20 @@ class Chart:
             ends = (y1, y2) if along_x else (x1, x2)
             if ends[0] is None or ends[1] is None:
                 missing = low if ends[0] is None else high
-                raise ValueError(f"area {missing}: a band needs both {low} and {high}")
+                raise ChartError(f"area {missing}: a band needs both {low} and {high}")
             if values is not None:
                 other = "y" if along_x else "x"
-                raise ValueError(f"area {other}: {other}, or {low} and {high}, not both; drop one")
+                raise ChartError(f"area {other}: {other}, or {low} and {high}, not both; drop one")
             if spread:
                 raise ChartError(
                     f"area stack: a band ({low} and {high}) does not stack; drop stack"
                 )
             if orient is not None and orient != runs:
-                raise ValueError(
+                raise ChartError(
                     f"area orient: a band between {low} and {high} runs along {runs}; drop orient"
                 )
             if position is None or not isinstance(position, str):
-                raise ValueError(f"area {runs}: a band runs along one {runs} column; give it")
+                raise ChartError(f"area {runs}: a band runs along one {runs} column; give it")
             self._require(table, position, (*_NUMERIC, "category"), f"area {runs}")
             self._require(table, ends[0], _NUMERIC, f"area {low}")
             self._require(table, ends[1], _NUMERIC, f"area {high}")
@@ -1564,7 +1827,7 @@ class Chart:
             _left_along_y("area", runs, axis)
         else:
             if x is None or y is None:
-                raise ValueError(
+                raise ChartError(
                     "area: needs x and y, or a band: y1 and y2 along x, or x1 and x2 along y"
                 )
             runs, x_values, y_values = self._oriented(table, "area", x, y, orient)
@@ -1577,20 +1840,20 @@ class Chart:
                     self._tables[table][1], y_values if runs == "x" else x_values, "area"
                 )
             if dodge and spread:
-                raise ValueError(
+                raise ChartError(
                     "area dodge: a stack's layers stand on each other; drop dodge or stack"
                 )
             self._check_dodge(table, "area", dodge, runs, x_spec if runs == "x" else y_spec, split)
         positions = x_spec if runs == "x" else y_spec
-        style_spec = mark_style_spec(style, (), "area")
+        style_spec = mark_style_spec(style, ("by",), "area")
         self._check_series_style(table, split, style_spec, "area", positions)
         if gaps is not None and split is None:
-            raise ValueError(
+            raise ChartError(
                 "area stack gaps: for stacks by a series column; give series, or drop gaps"
             )
         if spread and (where is not None or continuity is not None):
             option = "where" if where is not None else "continuity"
-            raise ValueError(
+            raise ChartError(
                 f"area {option}: stacked areas cannot leave rows out yet; drop it or the stack"
             )
         return self._add(
@@ -1605,20 +1868,20 @@ class Chart:
                 "orient": orient,
                 "series": series,
                 "stack": _spec(stacking) if isinstance(stacking, Stack) else stack or None,
-                "dodge": dodge or None,
+                "dodge": _flag(dodge, "area dodge") or None,
                 "color": color,
                 "fill": fill,
-                "fillOpacity": fill_opacity,
-                "line": line,
+                "fillOpacity": fraction_option(fill_opacity, "area fill_opacity"),
+                "line": _flag(line, "area line"),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "area stroke_width"),
                 "opacity": fraction_option(opacity, "area opacity"),
                 "strokeOpacity": fraction_option(stroke_opacity, "area stroke_opacity"),
                 "encode": channels,
                 "style": style_spec,
                 "continuity": _continuity(continuity, "area"),
                 "where": condition_spec(where, "area where"),
-                "curve": curve,
+                "curve": choice_option(curve, get_args(Curve), "area curve"),
                 "label": label,
                 "labels": self._series_labels(labels, "area"),
                 "legend": _mark_legend(legend, "area"),
@@ -1690,10 +1953,11 @@ class Chart:
         """
         _check_stack(stack, "bar")
         if dodge and stack:
-            raise ValueError("bar dodge: stacked bars pile up in one slot; drop dodge or stack")
-        # A width's pixels at their own path, as the spec's validator says.
+            raise ChartError("bar dodge: stacked bars pile up in one slot; drop dodge or stack")
+        # A width's pixels at their own path, as the spec's validator says
+        # (pixels of a column, or offset, `length_spec` refuses as no length).
         px: Any = (
-            width.value
+            (width.value if width.field is None else 0)
             if isinstance(width, Pixels)
             else width.get("px", 0)
             if isinstance(width, Mapping)
@@ -1712,14 +1976,17 @@ class Chart:
             )
             pattern = value_labels.format
             if isinstance(pattern, Mapping) and not {"number", "time"} & set(pattern):
-                _check_format(dict(pattern), "bar labels format", _NUMBER_FORMAT)
+                self._option(
+                    "bar labels format",
+                    lambda: _check_format(dict(pattern), "bar labels format", _NUMBER_FORMAT),
+                )
         for name, value in (("stroke_opacity", stroke_opacity), ("opacity", opacity)):
             fraction_option(value, f"bar {name}")
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 f"bar stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
-        places = self._places("bar", {"x": x, "y": y}, axis == "right")
+        places = self._places("bar", {"x": x, "y": y}, axis == "right", needed=True)
         x, y = places.columns["x"], places.columns["y"]
         table = self._mark_table(data)
         self._check_places(table, "bar", places)
@@ -1728,13 +1995,13 @@ class Chart:
         split = self._series_of(table, series, color, channels, fill, "fill", "bar")
         if isinstance(y, str) and self._kind(table, y) == "category":
             if axis == "right":
-                raise ValueError('bar axis: horizontal bars have no right axis; drop axis="right"')
+                raise ChartError('bar axis: horizontal bars have no right axis; drop axis="right"')
             xs = self._require_many(table, x, _NUMERIC, "bar x")
             self._single_or_series(xs, split, "bar", inferred=series is None)
             ys: str | list[str] = y
         else:
             if not isinstance(x, str):
-                raise ValueError(
+                raise ChartError(
                     "bar x: several columns need a category y, for horizontal bars; "
                     "give one x column"
                 )
@@ -1756,20 +2023,22 @@ class Chart:
                 "y": places.spec("y", ys),
                 "series": series,
                 "stack": stack or None,
-                "dodge": dodge,
+                "dodge": _flag(dodge, "bar dodge"),
                 "color": color,
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "bar fill_opacity"),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "bar stroke_width"),
                 "strokeOpacity": stroke_opacity,
                 "dash": _dash(dash, "bar"),
                 "opacity": opacity,
                 "encode": channels,
-                "style": mark_style_spec(style, (), "bar"),
+                "style": mark_style_spec(style, ("by",), "bar"),
                 "label": label,
                 "legend": _mark_legend(legend, "bar"),
-                "labels": value_labels._spec() if value_labels else labels or None,
+                "labels": self._option("bar labels", value_labels._spec)
+                if value_labels
+                else labels or None,
                 "axis": axis,
                 "facet": _mark_facet(facet, "bar"),
                 "panel": panel,
@@ -1815,23 +2084,23 @@ class Chart:
         during zoom and pan. Missing and nonfinite values are omitted.
         """
         if (x is not None) == (y is not None):
-            raise ValueError("rug: needs exactly one of x and y")
+            raise ChartError("rug: needs exactly one of x and y")
         sides = ("bottom", "top") if x is not None else ("left", "right")
         if side is not None and side not in sides:
             along = "x" if x is not None else "y"
-            raise ValueError(
+            raise ChartError(
                 f"rug side: expected {listed(sides)} for a rug along {along}; "
                 f"received {shown(side)}"
             )
         if y is not None and axis == "right":
-            raise ValueError('rug axis: a rug along y has no right axis; drop axis="right"')
+            raise ChartError('rug axis: a rug along y has no right axis; drop axis="right"')
         if length is not None and not (_finite(length) and length > 0):
-            raise ValueError(
+            raise ChartError(
                 "rug length: expected a finite, positive number of pixels; "
                 f"received {shown(length)}"
             )
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 "rug stroke_width: expected a finite number of at least 0; "
                 f"received {shown(stroke_width)}"
             )
@@ -1865,7 +2134,7 @@ class Chart:
         )
 
     @_check_method_options
-    def error_bar(
+    def errorbar(
         self,
         *,
         x: str | RowPosition | None = None,
@@ -1905,48 +2174,48 @@ class Chart:
         vertical = y_error is not None or (y1 is not None and y2 is not None)
         horizontal = x_error is not None or (x1 is not None and x2 is not None)
         if vertical == horizontal:
-            raise ValueError(
-                "error_bar: needs x with y1 and y2 or with y and y_error (vertical), "
+            raise ChartError(
+                "errorbar: needs x with y1 and y2 or with y and y_error (vertical), "
                 "or y with x1 and x2 or with x and x_error (horizontal)"
             )
         if horizontal and axis == "right":
-            raise ValueError(
-                'error_bar axis: horizontal error bars have no right axis; drop axis="right"'
+            raise ChartError(
+                'errorbar axis: horizontal error bars have no right axis; drop axis="right"'
             )
         places = self._places(
-            "error_bar", {"x": x, "y": y, "x1": x1, "x2": x2, "y1": y1, "y2": y2}, axis == "right"
+            "errorbar", {"x": x, "y": y, "x1": x1, "x2": x2, "y1": y1, "y2": y2}, axis == "right"
         )
         # A symmetric interval's center is a column, as its error is.
         center_at = "x" if horizontal else "y"
         if (x_error if horizontal else y_error) is not None and center_at in places.specs:
             raise ChartError(
-                f"error_bar {center_at}: a center with {center_at}_error is a column; "
+                f"errorbar {center_at}: a center with {center_at}_error is a column; "
                 "give a column's name",
                 code="invalid-option",
-                path=self._path("error_bar", center_at),
+                path=self._path("errorbar", center_at),
             )
         x, y = places.column("x"), places.column("y")
         x1, x2 = places.column("x1"), places.column("x2")
         y1, y2 = places.column("y1"), places.column("y2")
         table = self._mark_table(data)
-        self._check_places(table, "error_bar", places)
+        self._check_places(table, "errorbar", places)
         along, other = ("y", "x") if horizontal else ("x", "y")
         position = y if horizontal else x
         if position is None:
-            raise ValueError(f"error_bar {along}: needs the column the bars stand at")
-        self._require(table, position, ("number", "time", "category"), f"error_bar {along}")
+            raise ChartError(f"errorbar {along}: needs the column the bars stand at")
+        self._require(table, position, ("number", "time", "category"), f"errorbar {along}")
         error = x_error if horizontal else y_error
         if error is not None:
             center = x if horizontal else y
             if center is None:
-                raise ValueError(
-                    f"error_bar {other}: {other}_error is measured from {other}; give {other}"
+                raise ChartError(
+                    f"errorbar {other}: {other}_error is measured from {other}; give {other}"
                 )
-            self._require(table, center, _NUMERIC, f"error_bar {other}")
-            self._require(table, error, _NUMERIC, f"error_bar {other}_error")
+            self._require(table, center, _NUMERIC, f"errorbar {other}")
+            self._require(table, error, _NUMERIC, f"errorbar {other}_error")
         else:
-            self._require(table, x1 if horizontal else y1, _NUMERIC, f"error_bar {other}1")
-            self._require(table, x2 if horizontal else y2, _NUMERIC, f"error_bar {other}2")
+            self._require(table, x1 if horizontal else y1, _NUMERIC, f"errorbar {other}1")
+            self._require(table, x2 if horizontal else y2, _NUMERIC, f"errorbar {other}2")
         # A column of another form would be dropped, so it is refused.
         given = dict(x=x, y=y, x1=x1, x2=x2, y1=y1, y2=y2, x_error=x_error, y_error=y_error)
         used = (
@@ -1959,17 +2228,17 @@ class Chart:
             None,
         )
         if extra is not None:
-            raise ValueError(
-                f"error_bar {extra}: bars from {', '.join(used)} take no {extra}; drop {extra}"
+            raise ChartError(
+                f"errorbar {extra}: bars from {', '.join(used)} take no {extra}; drop {extra}"
             )
-        self._require(table, series, ("category",), "error_bar series")
-        split = self._color_series(table, series, color, "error_bar")
+        self._require(table, series, ("category",), "errorbar series")
+        split = self._color_series(table, series, color, "errorbar")
         if dodge:
             if split is None:
-                raise ValueError("error_bar dodge: places series side by side; give series")
+                raise ChartError("errorbar dodge: places series side by side; give series")
             if self._kind(table, position) != "category":
-                raise ValueError(
-                    f"error_bar dodge: needs a category {along}; "
+                raise ChartError(
+                    f"errorbar dodge: needs a category {along}; "
                     f"column {position!r} holds {self._kind(table, position)} values"
                 )
         return self._add(
@@ -1985,17 +2254,17 @@ class Chart:
                 "yError": y_error,
                 "series": series,
                 "color": color,
-                "dodge": dodge or None,
+                "dodge": _flag(dodge, "errorbar dodge") or None,
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
-                "cap": cap,
+                "strokeWidth": pixels_option(stroke_width, "errorbar stroke_width"),
+                "cap": pixels_option(cap, "errorbar cap"),
                 "label": label,
-                "legend": _mark_legend(legend, "error_bar"),
+                "legend": _mark_legend(legend, "errorbar"),
                 "axis": axis,
-                "facet": _mark_facet(facet, "error_bar"),
+                "facet": _mark_facet(facet, "errorbar"),
                 "panel": panel,
-                "clip": _clip(clip, "error_bar"),
-                "tooltip": self._mark_tooltip(table, tooltip, "error_bar"),
+                "clip": _clip(clip, "errorbar"),
+                "tooltip": self._mark_tooltip(table, tooltip, "errorbar"),
                 "zIndex": z_index,
                 "id": id,
             },
@@ -2074,7 +2343,7 @@ class Chart:
         problem = _point_size_problem(radius, size, radius_range, encode)
         if problem:
             raise ChartError(problem[1], path=self._path("point", problem[0]))
-        places = self._places("point", {"x": x, "y": y}, axis == "right")
+        places = self._places("point", {"x": x, "y": y}, axis == "right", needed=True)
         x, y = cast("str", places.columns["x"]), cast("str", places.columns["y"])
         # Channels: a column's name or a constant, or a channel (an
         # hg.Channel, its dict, or hg.when) as the spec writes it; a symbol's
@@ -2091,18 +2360,36 @@ class Chart:
             ("fill_opacity", fill_opacity),
             ("symbol", symbol),
         ):
+            # A symbol's dict may map values to symbols; others' dicts are channels.
             given = forms - {"field"} if option == "symbol" else forms
             if isinstance(value, (Channel, Expr)) or (
-                isinstance(value, Mapping) and bool(set(value) & given)
+                isinstance(value, Mapping) and (option != "symbol" or bool(set(value) & given))
             ):
                 self._check_channel_dict(value, "point", _camel(option))
                 role = f"point {option}"
                 channels[_camel(option)] = self._option(
                     role, functools.partial(channel_spec, value, role)
                 )
+        for option, value, expected in (
+            ("color", color, "a column's name, a color, or an hg.Channel"),
+            ("size", size, "a column's name or an hg.Channel"),
+            (
+                "fill_opacity",
+                fill_opacity,
+                "a number from 0 to 1, a column's name, or an hg.Channel",
+            ),
+        ):
+            constant = option == "fill_opacity" and _finite(value)
+            if not (value is None or constant or isinstance(value, (str, Channel, Expr, Mapping))):
+                raise ChartError(
+                    f"point {option}: expected {expected}; received {shown(value)}",
+                    path=self._path("point", option),
+                )
         if isinstance(encode, Mapping):
             for name, item in encode.items():
-                self._check_channel_dict(item, "point", f"encode.{_camel(name)}")
+                # Keys that are no channel's name are refused as encode is built.
+                if isinstance(name, str):
+                    self._check_channel_dict(item, "point", f"encode.{_camel(name)}")
         encoded = self._option(
             "point encode", lambda: encodings_spec(encode, _POINT_CHANNELS, "point")
         )
@@ -2129,13 +2416,13 @@ class Chart:
             self._require(table, size, _NUMERIC, "point size")
         if isinstance(fill_opacity, str):
             self._require(table, fill_opacity, _NUMERIC, "point fill_opacity")
-        elif isinstance(fill_opacity, numbers.Real) and not 0 <= fill_opacity <= 1:
-            raise ValueError(
+        elif is_number(fill_opacity) and not 0 <= fill_opacity <= 1:
+            raise ChartError(
                 "point fill_opacity: expected a number from 0 to 1 or a column; "
                 f"received {shown(fill_opacity)}"
             )
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 f"point stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
         if isinstance(color, str):
@@ -2145,27 +2432,25 @@ class Chart:
             table, cast("str | Mapping[str, str] | None", symbol)
         )
         spread = (
-            Jitter(width=jitter)
-            if isinstance(jitter, numbers.Real) and not isinstance(jitter, bool)
-            else jitter
+            Jitter(width=jitter) if is_number(jitter) and not isinstance(jitter, bool) else jitter
         )
         if spread is not None and not isinstance(spread, Jitter):
-            raise ValueError(
+            raise ChartError(
                 "point jitter: expected a width from 0 to 1 or an hg.Jitter; "
                 f"received {shown(jitter)}"
             )
         if not isinstance(swarm, bool):
-            raise TypeError(f"point swarm: expected True or False; received {shown(swarm)}")
+            raise ChartError(f"point swarm: expected True or False; received {shown(swarm)}")
         if swarm and spread is not None:
-            raise ValueError("point swarm: places points itself; drop jitter or swarm")
+            raise ChartError("point swarm: places points itself; drop jitter or swarm")
         if swarm and sampling == "pixel":
-            raise ValueError('point sampling: a swarm places every point; drop sampling="pixel"')
+            raise ChartError('point sampling: a swarm places every point; drop sampling="pixel"')
         if dodge or spread is not None or swarm:
             option = "dodge" if dodge else "jitter" if spread is not None else "swarm"
             if (self._kind(table, x) == "category") == (self._kind(table, y) == "category"):
-                raise ValueError(f"point {option}: needs exactly one category column, x or y")
+                raise ChartError(f"point {option}: needs exactly one category column, x or y")
             if dodge and split is None:
-                raise ValueError("point dodge: places series side by side; give series")
+                raise ChartError("point dodge: places series side by side; give series")
         return self._add(
             {
                 "type": "point",
@@ -2179,16 +2464,18 @@ class Chart:
                 "fill": fill,
                 "fillOpacity": channels.get("fillOpacity", fill_opacity),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "point stroke_width"),
                 "color": color,
                 "colors": _colors(colors, "point colors"),
                 "colorDomain": _range(color_domain, "point color_domain"),
                 "colorMidpoint": _midpoint(color_midpoint, color_domain, "point"),
                 "symbol": symbol_spec,
                 "encode": encoded,
-                "sampling": sampling,
-                "dodge": dodge or None,
-                "jitter": spread._spec() if spread is not None else None,
+                "sampling": choice_option(sampling, ("none", "pixel"), "point sampling"),
+                "dodge": _flag(dodge, "point dodge") or None,
+                "jitter": self._option("point jitter", spread._spec)
+                if spread is not None
+                else None,
                 "swarm": swarm or None,
                 "label": label,
                 "legend": _mark_legend(legend, "point"),
@@ -2209,7 +2496,7 @@ class Chart:
         x: str | None = None,
         *,
         y: str | None = None,
-        bins: BinSpec | Mapping[str, BinSpec] | None = None,
+        bins: BinSpec | BinsByAxis | None = None,
         series: str | None = None,
         color: str | None = None,
         weight: str | None = None,
@@ -2259,9 +2546,9 @@ class Chart:
         dodges, cumulative counts, or elements.
         """
         if x is None and y is None:
-            raise ValueError("histogram: needs x, y, or both")
+            raise ChartError("histogram: needs x, y, or both")
         if normalize not in (None, "count", "frequency", "probability", "percent", "density"):
-            raise ValueError(
+            raise ChartError(
                 'histogram normalize: expected "count", "frequency", "probability", "percent", '
                 f'or "density"; received {shown(normalize)}'
             )
@@ -2273,7 +2560,7 @@ class Chart:
                 "color": color,
                 "common_norm": common_norm or None,
                 "cumulative": cumulative or None,
-                "dodge": dodge or None,
+                "dodge": _flag(dodge, "histogram dodge") or None,
                 "stack": stack or None,
                 "element": element,
                 "fill": fill,
@@ -2281,17 +2568,17 @@ class Chart:
             }
             given = next((name for name, value in bars.items() if value is not None), None)
             if given == "series":
-                raise ValueError(
+                raise ChartError(
                     "histogram series: a 2D histogram of x and y counts one distribution; "
                     "facet by the column instead"
                 )
             if given is not None:
-                raise ValueError(
+                raise ChartError(
                     f"histogram {given}: for bars of x or y; a 2D histogram of both takes none, "
                     "so drop it"
                 )
             if axis == "right":
-                raise ValueError(
+                raise ChartError(
                     "histogram axis: a 2D histogram places cells, on no right axis; "
                     'drop axis="right"'
                 )
@@ -2331,11 +2618,11 @@ class Chart:
             None,
         )
         if cells is not None:
-            raise ValueError(
+            raise ChartError(
                 f"histogram {cells}: colors the cells of 2D histograms of x and y; bars take fill"
             )
         if y is not None and axis == "right":
-            raise ValueError(
+            raise ChartError(
                 'histogram axis: a horizontal histogram (y) has no right axis; drop axis="right"'
             )
         for name, flag in (
@@ -2344,26 +2631,26 @@ class Chart:
             ("dodge", dodge),
         ):
             if not isinstance(flag, bool):
-                raise ValueError(
+                raise ChartError(
                     f"histogram {name}: expected True or False; received {shown(flag)}"
                 )
         if not isinstance(stack, bool) and stack != "fill":
-            raise ValueError(
+            raise ChartError(
                 f'histogram stack: expected True, False, or "fill"; received {shown(stack)}'
             )
         if dodge and stack:
-            raise ValueError("histogram dodge: dodge or stack, not both; drop one")
+            raise ChartError("histogram dodge: dodge or stack, not both; drop one")
         if element not in (None, "bars", "step", "poly"):
-            raise ValueError(
+            raise ChartError(
                 f'histogram element: expected "bars", "step", or "poly"; received {shown(element)}'
             )
         if dodge and element not in (None, "bars"):
-            raise ValueError(
+            raise ChartError(
                 "histogram dodge: places bars side by side in each bin; drop dodge, or draw "
                 'element="bars"'
             )
         if isinstance(bins, Mapping) and ("x" in bins or "y" in bins):
-            raise ValueError(
+            raise ChartError(
                 'histogram bins: {"x": ..., "y": ...} bins both axes of a 2D histogram; '
                 f"give one bin definition for {'x' if x is not None else 'y'}"
             )
@@ -2388,11 +2675,11 @@ class Chart:
                 "normalize": normalize,
                 "commonNorm": common_norm or None,
                 "cumulative": cumulative or None,
-                "dodge": dodge or None,
+                "dodge": _flag(dodge, "histogram dodge") or None,
                 "stack": stack or None,
                 "element": element,
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "histogram fill_opacity"),
                 "label": label,
                 "legend": _mark_legend(legend, "histogram"),
                 "axis": axis,
@@ -2436,7 +2723,7 @@ class Chart:
         the open ticked to its left and the close to its right.
         """
         if variant not in (None, "candlestick", "ohlc"):
-            raise ValueError(
+            raise ChartError(
                 f'candlestick variant: expected "candlestick" or "ohlc"; received {shown(variant)}'
             )
         table = self._mark_table(data)
@@ -2477,6 +2764,7 @@ class Chart:
         inner_radius: float | None = None,
         sort: Literal["value", "input"] | None = None,
         labels: bool | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2485,16 +2773,15 @@ class Chart:
 
         ``inner_radius``, a fraction of the pie's radius below 1, makes a
         donut. Slices go largest first, clockwise from the top, unless
-        ``sort="input"``. A pie has its chart to itself; with facets, each
+        ``sort="input"``. ``tooltip=hg.Tooltip(fields=[...])`` shows more of
+        the row of a slice that is one row. A pie has its chart to itself; with facets, each
         panel, a pie of the panel's rows; with panels, the one ``panel`` names.
         """
         self._layout_place("pie")
         if inner_radius is not None and not (
-            isinstance(inner_radius, numbers.Real)
-            and not isinstance(inner_radius, bool)
-            and 0 <= inner_radius < 1
+            is_number(inner_radius) and not isinstance(inner_radius, bool) and 0 <= inner_radius < 1
         ):
-            raise ValueError(
+            raise ChartError(
                 "pie inner_radius: expected a fraction of at least 0 and below 1; "
                 f"received {shown(inner_radius)}"
             )
@@ -2507,8 +2794,9 @@ class Chart:
                 "category": category,
                 "value": value,
                 "innerRadius": inner_radius,
-                "sort": sort,
-                "labels": labels,
+                "sort": choice_option(sort, ("value", "input"), "pie sort"),
+                "labels": _flag(labels, "pie labels"),
+                "tooltip": self._mark_tooltip(table, tooltip, "pie"),
                 "panel": panel,
                 "id": id,
             },
@@ -2526,6 +2814,7 @@ class Chart:
         bands: Sequence[float | tuple[float, str]] | None = None,
         label: str | None = None,
         format: dict[str, Any] | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2537,7 +2826,8 @@ class Chart:
         above ``min`` and at most ``max``: numbers, or ``(to, color)`` pairs.
         Each starts where the previous one ends, the first at ``min``; colors
         default to the theme's palette. ``format`` takes Intl.NumberFormat
-        options for the value and the dial's ends. A gauge has its chart to
+        options for the value and the dial's ends; ``tooltip=hg.Tooltip(fields=[...])``
+        shows more of the row the needle shows. A gauge has its chart to
         itself; with facets, each panel, the last value of the panel's rows;
         with panels, the one ``panel`` names.
         """
@@ -2547,8 +2837,11 @@ class Chart:
         self._require(table, value, ("number",), "gauge value")
         low = 0.0 if min is None else min
         high = 100.0 if max is None else max
-        if not (_finite(low) and _finite(high) and low < high):
-            raise ValueError(
+        for name, end in (("min", low), ("max", high)):
+            if not _finite(end):
+                raise ChartError(f"gauge {name}: expected a finite number; received {shown(end)}")
+        if not low < high:
+            raise ChartError(
                 "gauge min: expected a finite min below a finite max; "
                 f"received {low!r} and {high!r}"
             )
@@ -2561,6 +2854,7 @@ class Chart:
                 "bands": _gauge_bands(bands, low, high),
                 "label": label,
                 "format": format,
+                "tooltip": self._mark_tooltip(table, tooltip, "gauge"),
                 "panel": panel,
                 "id": id,
             },
@@ -2576,6 +2870,7 @@ class Chart:
         data: Any = None,
         sort: Literal["input", "value"] | None = None,
         labels: bool | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         halo: HaloOption | None = None,
         id: str | None = None,
@@ -2587,7 +2882,8 @@ class Chart:
 
         Stages keep the column's order unless ``sort="value"`` puts the
         largest first. ``labels=False`` leaves out the stage names and the
-        values with their share of the first stage. A funnel has its chart to
+        values with their share of the first stage; ``tooltip=hg.Tooltip(fields=[...])``
+        shows more of the row of a stage that is one row. A funnel has its chart to
         itself; with facets, each panel, a funnel of the panel's rows; with
         panels, the one ``panel`` names.
         """
@@ -2601,8 +2897,9 @@ class Chart:
                 "halo": _halo(halo, "funnel"),
                 "category": category,
                 "value": value,
-                "sort": sort,
-                "labels": labels,
+                "sort": choice_option(sort, ("value", "input"), "funnel sort"),
+                "labels": _flag(labels, "funnel labels"),
+                "tooltip": self._mark_tooltip(table, tooltip, "funnel"),
                 "panel": panel,
                 "id": id,
             },
@@ -2660,51 +2957,53 @@ class Chart:
         precomputed = any(value is not None for value in statistics.values()) or count is not None
         if precomputed:
             if x is not None and y is not None:
-                raise ValueError(
+                raise ChartError(
                     "boxplot: raw x and y values or precomputed statistics "
                     "(low, q1, median, q3, high, count), not both; drop one"
                 )
             if x is None and y is None:
-                raise ValueError("boxplot: precomputed boxes need a category x or y")
+                raise ChartError("boxplot: precomputed boxes need a category x or y")
             missing = [name for name, value in statistics.items() if value is None]
             if missing:
-                raise ValueError(
+                raise ChartError(
                     f"boxplot {missing[0]}: precomputed boxes need low, q1, median, q3, and high; "
                     f"give {', '.join(missing)}"
                 )
             if whiskers is not None:
-                raise ValueError(
+                raise ChartError(
                     "boxplot whiskers: low and high already give precomputed boxes their "
                     "whisker ends; drop whiskers"
                 )
             if notch and count is None:
-                raise ValueError("boxplot notch: precomputed boxes need count to notch; give count")
+                raise ChartError("boxplot notch: precomputed boxes need count to notch; give count")
             if outliers is not None:
-                raise ValueError(
+                raise ChartError(
                     "boxplot outliers: precomputed boxes have none to draw; drop outliers"
                 )
         elif x is None or y is None:
-            raise ValueError(f"boxplot {'x' if x is None else 'y'}: raw values need both x and y")
+            raise ChartError(f"boxplot {'x' if x is None else 'y'}: raw values need both x and y")
         if (
             whiskers is not None
             and whiskers not in ("tukey", "range")
             and not (
-                isinstance(whiskers, numbers.Real)
+                is_number(whiskers)
                 and not isinstance(whiskers, bool)
                 and math.isfinite(whiskers)
                 and whiskers >= 0
             )
         ):
-            raise ValueError(
+            raise ChartError(
                 'boxplot whiskers: expected "tukey", "range", or a finite nonnegative IQR '
                 f"multiple; received {shown(whiskers)}"
             )
-        if isinstance(whiskers, numbers.Real):
+        if is_number(whiskers):
             whiskers = float(whiskers)
         if notch is not None and not isinstance(notch, bool):
-            raise TypeError(f"boxplot notch: expected True or False; received {shown(notch)}")
+            raise ChartError(f"boxplot notch: expected True or False; received {shown(notch)}")
         if outliers is not None and not isinstance(outliers, bool):
-            raise TypeError(f"boxplot outliers: expected True or False; received {shown(outliers)}")
+            raise ChartError(
+                f"boxplot outliers: expected True or False; received {shown(outliers)}"
+            )
         return self._distribution(
             {
                 "type": "boxplot",
@@ -2776,10 +3075,8 @@ class Chart:
         every box one color.
         """
         if depth is not None and depth not in ("tukey", "proportion", "trustworthy", "full"):
-            if not (
-                isinstance(depth, numbers.Integral) and not isinstance(depth, bool) and depth >= 1
-            ):
-                raise ValueError(
+            if not (is_integer(depth) and not isinstance(depth, bool) and depth >= 1):
+                raise ChartError(
                     'boxen depth: expected "tukey", "proportion", "trustworthy", "full", or a '
                     f"whole number of levels from 1; received {shown(depth)}"
                 )
@@ -2789,18 +3086,18 @@ class Chart:
             ("trust_alpha", trust_alpha),
         ):
             if value is not None and not (
-                isinstance(value, numbers.Real) and not isinstance(value, bool) and 0 < value < 1
+                is_number(value) and not isinstance(value, bool) and 0 < value < 1
             ):
-                raise ValueError(
+                raise ChartError(
                     f"boxen {name}: expected a number between 0 and 1; received {shown(value)}"
                 )
         if width_method is not None and width_method not in ("exponential", "linear", "area"):
-            raise ValueError(
+            raise ChartError(
                 'boxen width_method: expected "exponential", "linear", or "area"; '
                 f"received {shown(width_method)}"
             )
         if outliers is not None and not isinstance(outliers, bool):
-            raise TypeError(f"boxen outliers: expected True or False; received {shown(outliers)}")
+            raise ChartError(f"boxen outliers: expected True or False; received {shown(outliers)}")
         return self._distribution(
             {
                 "type": "boxen",
@@ -2867,18 +3164,18 @@ class Chart:
         "box", dashed "quartiles" with a solid median, or "none".
         """
         if bandwidth is not None and not (
-            isinstance(bandwidth, numbers.Real)
+            is_number(bandwidth)
             and not isinstance(bandwidth, bool)
             and math.isfinite(bandwidth)
             and bandwidth > 0
         ):
-            raise ValueError(
+            raise ChartError(
                 f"violin bandwidth: expected a positive number; received {shown(bandwidth)}"
             )
         if split is not None and not isinstance(split, bool):
-            raise TypeError(f"violin split: expected True or False; received {shown(split)}")
+            raise ChartError(f"violin split: expected True or False; received {shown(split)}")
         if inner is not None and inner not in ("box", "quartiles", "none"):
-            raise ValueError(
+            raise ChartError(
                 f'violin inner: expected "box", "quartiles", or "none"; received {shown(inner)}'
             )
         return self._distribution(
@@ -2940,18 +3237,18 @@ class Chart:
         self._require(table, series, ("category",), f"{kind} series")
         split = self._color_series(table, series, spec.get("color"), kind)
         if spec.get("split") and split is None:
-            raise ValueError("violin split: halves each category between two series; give series")
+            raise ChartError("violin split: halves each category between two series; give series")
         if horizontal and axis == "right":
             noun = {"boxplot": "box plots", "boxen": "boxen plots", "violin": "violins"}[kind]
-            raise ValueError(
+            raise ChartError(
                 f'{kind} axis: horizontal {noun} have no right axis; drop axis="right"'
             )
         if fill_opacity is not None and not (
-            isinstance(fill_opacity, numbers.Real)
+            is_number(fill_opacity)
             and not isinstance(fill_opacity, bool)
             and 0 <= fill_opacity <= 1
         ):
-            raise ValueError(
+            raise ChartError(
                 f"{kind} fill_opacity: expected a number from 0 to 1; "
                 f"received {shown(fill_opacity)}"
             )
@@ -2962,7 +3259,7 @@ class Chart:
                 "y": y,
                 "series": series,
                 **{key: value for key, value in spec.items() if key != "type"},
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, f"{kind} fill_opacity"),
                 "label": label,
                 "axis": axis,
                 "facet": _mark_facet(facet, kind),
@@ -2982,6 +3279,7 @@ class Chart:
         parent: str | None = None,
         data: Any = None,
         labels: bool | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2991,10 +3289,12 @@ class Chart:
         The tree is ``path``, category columns from the outermost group in, or
         ``node`` and ``parent`` columns naming each row's node and its parent.
         Leaves take their top-level group's color; the legend toggles groups.
+        ``tooltip=hg.Tooltip(fields=[...])`` shows more of the row of a node
+        that is one row.
         A treemap has its chart to itself; with facets, each panel, a treemap
         of the panel's rows; with panels, the one ``panel`` names.
         """
-        return self._tree("treemap", path, value, node, parent, data, labels, panel, id)
+        return self._tree("treemap", path, value, node, parent, data, labels, tooltip, panel, id)
 
     @_check_method_options
     def sunburst(
@@ -3006,13 +3306,14 @@ class Chart:
         parent: str | None = None,
         data: Any = None,
         labels: bool | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """A sunburst: a tree as rings around a center, each node's angle its
         share of its parent's; the tree, and where it is drawn, as for
         ``treemap``."""
-        return self._tree("sunburst", path, value, node, parent, data, labels, panel, id)
+        return self._tree("sunburst", path, value, node, parent, data, labels, tooltip, panel, id)
 
     def _tree(
         self,
@@ -3023,25 +3324,26 @@ class Chart:
         parent: str | None,
         data: Any,
         labels: bool | None,
+        tooltip: Tooltip | None,
         panel: str | None,
         id: str | None,
     ) -> Chart:
         self._layout_place(kind)
         table = self._mark_table(data)
         if path is not None and (node is not None or parent is not None):
-            raise ValueError(f"{kind} path: a path, or node and parent, not both; drop one")
+            raise ChartError(f"{kind} path: a path, or node and parent, not both; drop one")
         if path is not None:
-            if isinstance(path, str) or len(path) == 0:
-                raise ValueError(
+            if not listlike(path) or len(path) == 0:
+                raise ChartError(
                     f"{kind} path: expected a list of at least one column; received {shown(path)}"
                 )
-            for name in path:
-                self._require(table, name, ("category",), f"{kind} path")
+            for i, name in enumerate(path):
+                self._require(table, name, ("category",), f"{kind} path[{i}]", optional=False)
         elif node is not None and parent is not None:
             self._require(table, node, ("category",), f"{kind} node")
             self._require(table, parent, ("category",), f"{kind} parent")
         else:
-            raise ValueError(f"{kind}: needs a path of category columns, or node and parent")
+            raise ChartError(f"{kind}: needs a path of category columns, or node and parent")
         self._require(table, value, ("number",), f"{kind} value")
         return self._add(
             {
@@ -3050,7 +3352,8 @@ class Chart:
                 "node": node,
                 "parent": parent,
                 "value": value,
-                "labels": labels,
+                "labels": _flag(labels, f"{kind} labels"),
+                "tooltip": self._mark_tooltip(table, tooltip, kind),
                 "panel": panel,
                 "id": id,
             },
@@ -3070,6 +3373,7 @@ class Chart:
         fill_opacity: float | None = None,
         points: bool | None = None,
         label: str | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         halo: HaloOption | None = None,
         id: str | None = None,
@@ -3085,8 +3389,9 @@ class Chart:
         draws 3 to 100 spokes. Every spoke shares one scale: from 0 (or the
         smallest value) to a round number above the largest, or ``domain``;
         values outside it are drawn at the rim or the center. A missing value
-        breaks the polygon's outline there and leaves it unfilled. A radar has
-        its chart to itself; with facets, each panel, the values of the
+        breaks the polygon's outline there and leaves it unfilled.
+        ``tooltip=hg.Tooltip(fields=[...])`` shows more of the row each value
+        is. A radar has its chart to itself; with facets, each panel, the values of the
         panel's rows on the table's spokes, each panel scaled to its own
         values unless ``domain`` is given; with panels, the one ``panel`` names.
         """
@@ -3094,21 +3399,22 @@ class Chart:
         table = self._mark_table(data)
         long = category is not None or value is not None
         if long == (fields is not None) or (long and (category is None or value is None)):
-            raise ValueError(
+            raise ChartError(
                 "radar: needs category and value columns (a spoke per category) "
                 "or fields (a spoke per column), not both"
             )
         if fields is not None:
-            if isinstance(fields, str):
-                raise ValueError(
+            if not listlike(fields):
+                raise ChartError(
                     f"radar fields: expected a list of columns; received {shown(fields)}"
                 )
-            for name in fields:
-                self._require(table, name, ("number",), "radar fields")
-            repeated = next((name for i, name in enumerate(fields) if name in fields[:i]), None)
+            for i, name in enumerate(fields):
+                self._require(table, name, ("number",), f"radar fields[{i}]", optional=False)
+            repeated = next((i for i, name in enumerate(fields) if name in fields[:i]), None)
             if repeated is not None:
-                raise ValueError(
-                    f"radar fields: {repeated!r} is listed twice; list each column once"
+                raise ChartError(
+                    f"radar fields[{repeated}]: {fields[repeated]!r} is listed twice; "
+                    "list each column once"
                 )
             _check_spokes(len(fields), "fields", "the fields make")
         else:
@@ -3122,11 +3428,11 @@ class Chart:
                 _check_spokes(spokes, "category", f"{category!r} has")
         self._require(table, series, ("category",), "radar series")
         if fill_opacity is not None and not (
-            isinstance(fill_opacity, numbers.Real)
+            is_number(fill_opacity)
             and not isinstance(fill_opacity, bool)
             and 0 <= fill_opacity <= 1
         ):
-            raise ValueError(
+            raise ChartError(
                 f"radar fill_opacity: expected a number from 0 to 1; received {shown(fill_opacity)}"
             )
         return self._add(
@@ -3138,9 +3444,10 @@ class Chart:
                 "fields": list(fields) if fields is not None else None,
                 "series": series,
                 "domain": _range(domain, "radar domain"),
-                "fillOpacity": fill_opacity,
-                "points": points,
+                "fillOpacity": fraction_option(fill_opacity, "radar fill_opacity"),
+                "points": _flag(points, "radar points"),
                 "label": label,
+                "tooltip": self._mark_tooltip(table, tooltip, "radar"),
                 "panel": panel,
                 "id": id,
             },
@@ -3158,6 +3465,7 @@ class Chart:
         labels: bool | None = None,
         node_width: float | None = None,
         sort: Literal["input", "value"] | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         halo: HaloOption | None = None,
         id: str | None = None,
@@ -3171,22 +3479,22 @@ class Chart:
         left out. Nodes are ordered in their column to keep links short and
         crossings few, unless ``sort="input"`` keeps the order they first
         appear in or ``sort="value"`` puts the largest first. ``node_width``
-        is in pixels. A Sankey diagram has its chart to itself; with facets,
+        is in pixels; ``tooltip=hg.Tooltip(fields=[...])`` shows more of the
+        row of a link that is one row. A Sankey diagram has its chart to
+        itself; with facets,
         each panel, the flows of the panel's rows; with panels, the one
         ``panel`` names.
         """
         self._layout_place("sankey")
         if node_width is not None and not (
-            isinstance(node_width, numbers.Real)
-            and not isinstance(node_width, bool)
-            and 0 < node_width < math.inf
+            is_number(node_width) and not isinstance(node_width, bool) and 0 < node_width < math.inf
         ):
-            raise ValueError(
+            raise ChartError(
                 "sankey node_width: expected a positive number of pixels; "
                 f"received {shown(node_width)}"
             )
         if sort not in (None, "input", "value"):
-            raise ValueError(f'sankey sort: expected "input" or "value"; received {shown(sort)}')
+            raise ChartError(f'sankey sort: expected "input" or "value"; received {shown(sort)}')
         table = self._mark_table(data)
         self._require(table, source, ("category",), "sankey source")
         self._require(table, target, ("category",), "sankey target")
@@ -3198,9 +3506,10 @@ class Chart:
                 "source": source,
                 "target": target,
                 "value": value,
-                "labels": labels,
+                "labels": _flag(labels, "sankey labels"),
                 "nodeWidth": node_width,
                 "sort": sort,
+                "tooltip": self._mark_tooltip(table, tooltip, "sankey"),
                 "panel": panel,
                 "id": id,
             },
@@ -3222,7 +3531,7 @@ class Chart:
         labels: bool | None = None,
         directed: bool | None = None,
         link_label_field: str | None = None,
-        layout: Literal["force", "circular", "layered"] | Mapping[str, Any] | None = None,
+        layout: GraphLayout | None = None,
         panel: str | None = None,
         halo: HaloOption | None = None,
         id: str | None = None,
@@ -3265,24 +3574,25 @@ class Chart:
         layout_spec = _graph_layout(layout)
         node_table = None
         if nodes is not None:
+            node_table = located("nodes", lambda: self._table(nodes))
             if node is None:
-                raise ValueError(
+                raise ChartError(
                     "graph node: a nodes table needs node, the column naming each row's node"
                 )
-            node_table = self._table(nodes)
             self._require(node_table, node, ("category",), "graph node")
             self._require(node_table, color, ("category",), "graph color")
             self._require(node_table, size, ("number",), "graph size")
         elif node is not None or color is not None or size is not None:
             given = "node" if node is not None else "color" if color is not None else "size"
-            raise ValueError(
+            raise ChartError(
                 f"graph {given}: node, color, and size are columns of a nodes table; give nodes"
             )
+        _flag(directed, "graph directed")
         nodes_count, links_count = self._network_size(
             table, source, target, value, node_table, node, directed=directed is True
         )
         if nodes_count > MAX_NODES or links_count > MAX_LINKS:
-            raise ValueError(
+            raise ChartError(
                 f"graph: draws at most {MAX_NODES:,} nodes and {MAX_LINKS:,} links; "
                 f"this network has {nodes_count:,} nodes and {links_count:,} links"
             )
@@ -3296,7 +3606,7 @@ class Chart:
                 "node": node,
                 "color": color,
                 "size": size,
-                "labels": labels,
+                "labels": _flag(labels, "graph labels"),
                 "directed": directed,
                 "linkLabelField": link_label_field,
                 "layout": layout_spec,
@@ -3351,7 +3661,7 @@ class Chart:
         and selects rows. With panels, which options panels with axes take is
         checked once every mark is added (see ``to_spec``)."""
         if self._row_selection and kind not in _SELECTING_LAYOUT_MARKS:
-            raise ValueError(
+            raise ChartError(
                 f"Chart row_selection: a {kind} cannot select rows yet; marks along x "
                 "and y can, as can maps, pies, funnels, treemaps, sunbursts, Sankey "
                 "diagrams, and networks"
@@ -3408,7 +3718,7 @@ class Chart:
         self._map_place("geoshape")
         if geojson is not None:
             if locations is None:
-                raise ValueError(
+                raise ChartError(
                     "geoshape geojson: needs locations, the column naming each row's feature"
                 )
             values = self._mark_table(data)
@@ -3429,7 +3739,7 @@ class Chart:
                 table = same
         else:
             if locations is not None:
-                raise ValueError("geoshape locations: needs geojson, the shapes the rows name")
+                raise ChartError("geoshape locations: needs geojson, the shapes the rows name")
             table = self._mark_table(data)
         if geometry is None:
             geometry = _geometry_column(self._tables[table][0], self._tables[table][1])
@@ -3450,14 +3760,14 @@ class Chart:
             None,
         )
         if color is None and ramp is not None:
-            raise ValueError(f"geoshape {ramp}: colors by a numeric color column; give color")
+            raise ChartError(f"geoshape {ramp}: colors by a numeric color column; give color")
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
-            raise ValueError(
+            raise ChartError(
                 "geoshape fill_opacity: expected a number from 0 to 1; "
                 f"received {shown(fill_opacity)}"
             )
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 f"geoshape stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
         return self._add(
@@ -3470,9 +3780,9 @@ class Chart:
                 "colorDomain": _range(color_domain, "geoshape color_domain"),
                 "colorMidpoint": _midpoint(color_midpoint, color_domain, "geoshape"),
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "geoshape fill_opacity"),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "geoshape stroke_width"),
                 "label": label,
                 "facet": _mark_facet(facet, "geoshape"),
                 "panel": panel,
@@ -3545,12 +3855,12 @@ class Chart:
         self._require(table, color, ("number", "category"), "geopoint color")
         self._check_category_color(table, color, colors, color_domain, color_midpoint, "geopoint")
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
-            raise ValueError(
+            raise ChartError(
                 "geopoint fill_opacity: expected a number from 0 to 1; "
                 f"received {shown(fill_opacity)}"
             )
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 f"geopoint stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
             )
         return self._add(
@@ -3568,9 +3878,9 @@ class Chart:
                 "colorDomain": _range(color_domain, "geopoint color_domain"),
                 "colorMidpoint": _midpoint(color_midpoint, color_domain, "geopoint"),
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "geopoint fill_opacity"),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "geopoint stroke_width"),
                 "label": label,
                 "facet": _mark_facet(facet, "geopoint"),
                 "panel": panel,
@@ -3643,7 +3953,7 @@ class Chart:
         self._check_category_color(table, color, colors, color_domain, color_midpoint, "point_3d")
         _check_size(radius, None, "point_3d")
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
-            raise ValueError(
+            raise ChartError(
                 "point_3d fill_opacity: expected a number from 0 to 1; "
                 f"received {shown(fill_opacity)}"
             )
@@ -3661,7 +3971,7 @@ class Chart:
                 "colorDomain": _range(color_domain, "point_3d color_domain"),
                 "colorMidpoint": _midpoint(color_midpoint, color_domain, "point_3d"),
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "point_3d fill_opacity"),
                 "label": label,
                 "tooltip": self._mark_tooltip(table, tooltip, "point_3d"),
                 "panel": panel,
@@ -3701,7 +4011,7 @@ class Chart:
             self._require(table, field, _NUMERIC, f"line_3d {axis}")
         self._require(table, series, ("category",), "line_3d series")
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width > 0):
-            raise ValueError(
+            raise ChartError(
                 "line_3d stroke_width: expected a positive number of pixels; "
                 f"received {shown(stroke_width)}"
             )
@@ -3713,7 +4023,7 @@ class Chart:
                 "z": z,
                 "series": series,
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "line_3d stroke_width"),
                 "label": label,
                 "tooltip": self._mark_tooltip(table, tooltip, "line_3d"),
                 "panel": panel,
@@ -3738,6 +4048,7 @@ class Chart:
         shading: bool | None = None,
         wireframe: bool | None = None,
         label: str | None = None,
+        tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3754,23 +4065,25 @@ class Chart:
         The surface is colored by height, or by a numeric ``color`` column,
         and shaded by how it faces a light (``shading=False`` keeps colors as
         the legend shows them); ``wireframe=True`` draws its grid lines.
+        ``tooltip=hg.Tooltip(fields=[...])`` shows more of a grid point's row.
         """
         self._check_3d("surface")
         if z is None:
-            raise TypeError(
+            raise ChartError(
                 "surface z: expected a column name or a 2D array of heights; received None"
             )
         if not isinstance(z, str):
+            z = _grid_of(z, "surface", "z")
             if data is not None or color is not None:
                 option = "data" if data is not None else "color"
-                raise ValueError(
+                raise ChartError(
                     f"surface {option}: a z matrix takes no data or color column; drop {option}"
                 )
-            data = _matrix_of(z, x, y, "z", "surface")
+            data = _matrix_of(z, x, y, "z", "surface", "z")
             x, y, z = "x", "y", "z"
         elif not (isinstance(x, str) and isinstance(y, str)):
             axis, value = ("x", x) if not isinstance(x, str) else ("y", y)
-            raise TypeError(
+            raise ChartError(
                 f"surface {axis}: expected a column name, as z names a column; "
                 f"received {shown(value)}"
             )
@@ -3780,7 +4093,7 @@ class Chart:
         self._require(table, z, ("number",), "surface z")
         self._require(table, color, ("number",), "surface color")
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
-            raise ValueError(
+            raise ChartError(
                 "surface fill_opacity: expected a number from 0 to 1; "
                 f"received {shown(fill_opacity)}"
             )
@@ -3794,10 +4107,11 @@ class Chart:
                 "colors": _colors(colors, "surface colors"),
                 "colorDomain": _range(color_domain, "surface color_domain"),
                 "colorMidpoint": _midpoint(color_midpoint, color_domain, "surface"),
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "surface fill_opacity"),
                 "shading": shading,
                 "wireframe": wireframe,
                 "label": label,
+                "tooltip": self._mark_tooltip(table, tooltip, "surface"),
                 "panel": panel,
                 "id": id,
             },
@@ -3807,11 +4121,11 @@ class Chart:
     def _check_3d(self, kind: str) -> None:
         """3D marks use a chart or subplot; only standalone charts restrict axis interaction."""
         if self._facets:
-            raise ValueError(
+            raise ChartError(
                 f"{kind} facet: 3D marks cannot split into facets; use separate marks in panels"
             )
         if self._row_selection:
-            raise ValueError(
+            raise ChartError(
                 f"Chart row_selection: a {kind} cannot select rows yet; marks along x and y can"
             )
         if self._panels:
@@ -3820,9 +4134,9 @@ class Chart:
             (name for name in ("pan", "brush", "limits", "sync") if self._settings.get(name)), None
         )
         if used is not None:
-            raise ValueError(f"Chart {used}: a {kind} has no x axis to act on; drop {used}")
+            raise ChartError(f"Chart {used}: a {kind} has no x axis to act on; drop {used}")
         if self._settings.get("zoom") not in (True, False, None):
-            raise ValueError(
+            raise ChartError(
                 "Chart zoom: 3D charts zoom their camera with zoom=True; "
                 f"received {shown(self._settings['zoom'])}"
             )
@@ -3897,13 +4211,13 @@ class Chart:
         their values: ``"mean"`` (the default), ``"max"``, or ``"min"``.
         """
         if reduce not in (None, "last", "mean", "sum", "min", "max"):
-            raise ValueError(
+            raise ChartError(
                 'heatmap reduce: expected "last", "mean", "sum", "min", or "max"; '
                 f"received {shown(reduce)}"
             )
         sampled = _sampling(sampling)
         if color is None:
-            raise ValueError("heatmap color: needs the numeric column that colors the cells")
+            raise ChartError("heatmap color: needs the numeric column that colors the cells")
         if not isinstance(color, str):
             placed = next(
                 (
@@ -3914,11 +4228,11 @@ class Chart:
                 None,
             )
             if placed is not None:
-                raise ValueError(
+                raise ChartError(
                     f"heatmap {placed}: a color matrix places its cells itself; drop {placed}, or "
                     "name columns"
                 )
-            data = _matrix_of(color, x, y, "value", "heatmap")
+            data = _matrix_of(color, x, y, "value", "heatmap", "color")
             x, y, color = "x", "y", "value"
         table = self._mark_table(data)
         self._require(table, color, _NUMERIC, "heatmap color")
@@ -3953,20 +4267,20 @@ class Chart:
             given = [name for name, option in grid.items() if option is not None]
             given += [name for name, on in (("x_banded", x_banded), ("y_banded", y_banded)) if on]
             if given:
-                raise ValueError(
+                raise ChartError(
                     f"heatmap {given[0]}: a calendar (date) places its days itself; drop {given[0]}"
                 )
             if calendar not in (None, "weeks", "months"):
-                raise ValueError(
+                raise ChartError(
                     f'heatmap calendar: expected "weeks" or "months"; received {shown(calendar)}'
                 )
             if week_start is not None and week_start not in _WEEKDAYS:
-                raise ValueError(
+                raise ChartError(
                     f"heatmap week_start: expected {listed(_WEEKDAYS)}; "
                     f"received {shown(week_start)}"
                 )
             if calendar == "months" and week_start is not None:
-                raise ValueError(
+                raise ChartError(
                     "heatmap week_start: applies to calendars of weeks; "
                     'drop it, or give calendar="weeks"'
                 )
@@ -3980,38 +4294,38 @@ class Chart:
             ("y", y, y1, y2, y_step, y_banded),
         ):
             if one is not None and (low is not None or high is not None):
-                raise ValueError(
+                raise ChartError(
                     f"heatmap {axis}1: {axis} places cells at values, {axis}1 and {axis}2 "
                     "between edges; give one form"
                 )
             if (low is None) != (high is None):
                 missing = f"{axis}1" if low is None else f"{axis}2"
-                raise ValueError(
+                raise ChartError(
                     f"heatmap {missing}: missing; cells between edges need {axis}1 and {axis}2"
                 )
             if one is None and low is None:
-                raise ValueError(
+                raise ChartError(
                     "heatmap: needs x and y (or x1 and x2, y1 and y2), or a date to lay out "
                     "as a calendar"
                 )
             if low is not None and high is not None:
                 option = f"{axis}_step" if step is not None else f"{axis}_banded" if bands else None
                 if option is not None:
-                    raise ValueError(
+                    raise ChartError(
                         f"heatmap {option}: cells between {axis}1 and {axis}2 take their edges "
                         f"from them; drop {option}"
                     )
                 self._require(table, low, _NUMERIC, f"heatmap {axis}1")
                 self._require(table, high, _NUMERIC, f"heatmap {axis}2")
                 if self._kind(table, low) != self._kind(table, high):
-                    raise ValueError(
+                    raise ChartError(
                         f"heatmap {axis}2: {high!r} holds {self._kind(table, high)} values and "
                         f"{axis}1's {low!r} {self._kind(table, low)} values; give edges of one kind"
                     )
                 edges[f"{axis}1"], edges[f"{axis}2"] = low, high
         if calendar is not None or week_start is not None:
             option = "calendar" if calendar is not None else "week_start"
-            raise ValueError(
+            raise ChartError(
                 f"heatmap {option}: applies to calendars of a date; give date or drop {option}"
             )
         self._require(table, x, ("number", "time", "category"), "heatmap x")
@@ -4022,17 +4336,17 @@ class Chart:
         ) -> tuple[float | None, bool | None]:
             """The spec's step and banded option along one axis."""
             if not isinstance(bands, bool):
-                raise ValueError(
+                raise ChartError(
                     f"heatmap {axis}_banded: expected True or False; received {shown(bands)}"
                 )
             category = field is not None and self._kind(table, field) == "category"
             if step is not None:
                 if not (_finite(step) and step > 0):
-                    raise ValueError(
+                    raise ChartError(
                         f"heatmap {axis}_step: expected a positive number; received {shown(step)}"
                     )
                 if category or bands:
-                    raise ValueError(
+                    raise ChartError(
                         f"heatmap {axis}_step: sizes cells along a number or time {axis} axis; "
                         + (
                             f"{field!r} holds categories, so drop {axis}_step"
@@ -4103,44 +4417,45 @@ class Chart:
         for all) and ``stroke_width``; bands ``fill_opacity``.
         """
         if variant not in (None, "lines", "bands"):
-            raise ValueError(
+            raise ChartError(
                 f'contour variant: expected "lines" or "bands"; received {shown(variant)}'
             )
         bands = variant == "bands"
         if color is None:
-            raise ValueError("contour color: needs the number column, or a 2D array, of the field")
+            raise ChartError("contour color: needs the number column, or a 2D array, of the field")
         if not isinstance(color, str):
+            color = _grid_of(color, "contour", "color")
             if data is not None:
-                raise ValueError(
+                raise ChartError(
                     "contour data: a color matrix holds the field itself; drop data, or name "
                     "columns of it"
                 )
-            data = _matrix_of(color, x, y, "value", "contour")
+            data = _matrix_of(color, x, y, "value", "contour", "color")
             x, y, color = "x", "y", "value"
         elif not (isinstance(x, str) and isinstance(y, str)):
             axis, value = ("x", x) if not isinstance(x, str) else ("y", y)
-            raise TypeError(
+            raise ChartError(
                 f"contour {axis}: expected a column name, as color names a column; "
                 f"received {shown(value)}"
             )
         given = ("stroke", stroke) if stroke is not None else ("stroke_width", stroke_width)
         if bands and given[1] is not None:
-            raise ValueError(
+            raise ChartError(
                 f"contour {given[0]}: draws lines; bands take colors and fill_opacity, so drop "
                 f'{given[0]} or use variant="lines"'
             )
         if not bands and fill_opacity is not None:
-            raise ValueError(
+            raise ChartError(
                 "contour fill_opacity: fills bands; lines take stroke and stroke_width, so drop "
                 'it or use variant="bands"'
             )
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
-            raise ValueError(
+            raise ChartError(
                 "contour stroke_width: expected a number of at least 0; "
                 f"received {shown(stroke_width)}"
             )
         if fill_opacity is not None and not (_finite(fill_opacity) and 0 <= fill_opacity <= 1):
-            raise ValueError(
+            raise ChartError(
                 "contour fill_opacity: expected a number from 0 to 1; "
                 f"received {shown(fill_opacity)}"
             )
@@ -4200,12 +4515,12 @@ class Chart:
         With facets, pass ``facet="repeat"`` to draw the whole tree in each.
         """
         if side not in (None, "bottom", "top", "left", "right"):
-            raise ValueError(
+            raise ChartError(
                 'dendrogram side: expected "bottom", "top", "left", or "right"; '
                 f"received {shown(side)}"
             )
-        if stroke_width is not None and (not np.isfinite(stroke_width) or stroke_width < 0):
-            raise ValueError(
+        if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
+            raise ChartError(
                 "dendrogram stroke_width: expected a finite number of at least 0; "
                 f"received {shown(stroke_width)}"
             )
@@ -4214,19 +4529,19 @@ class Chart:
         fields = (first, second, height)
         for option, field in zip(options, fields, strict=True):
             self._require(table, field, ("number",), f"dendrogram {option}")
-        if isinstance(leaves, (str, bytes)):
-            raise TypeError(
+        if not listlike(leaves):
+            raise ChartError(
                 f"dendrogram leaves: expected a list of labels; received {shown(leaves)}"
             )
         labels = list(leaves)
         seen: set[str] = set()
         for i, leaf in enumerate(labels):
             if not isinstance(leaf, str):
-                raise TypeError(
+                raise ChartError(
                     f"dendrogram leaves[{i}]: expected a label (a string); received {shown(leaf)}"
                 )
             if leaf in seen:
-                raise ValueError(
+                raise ChartError(
                     f"dendrogram leaves[{i}]: {shown(leaf)} labels an earlier leaf too; "
                     "give each leaf its own label"
                 )
@@ -4235,7 +4550,7 @@ class Chart:
         rows = len(columns[0])
         n = rows + 1
         if len(labels) != n:
-            raise ValueError(
+            raise ChartError(
                 f"dendrogram leaves: expected {n} labels, for {rows} merge rows; "
                 f"received {len(labels)}"
             )
@@ -4246,18 +4561,18 @@ class Chart:
                 at = f"dendrogram {options[channel]}, row {row}"
                 if channel == 2:
                     if not np.isfinite(value) or value < 0:
-                        raise ValueError(
+                        raise ChartError(
                             f"{at}: expected a finite height of at least 0; received {value}"
                         )
                 else:
                     if not np.isfinite(value) or not value.is_integer() or not 0 <= value < n + row:
-                        raise ValueError(
+                        raise ChartError(
                             f"{at}: expected a whole number naming a leaf or an earlier merge; "
                             f"received {value}"
                         )
                     cluster = int(value)
                     if used[cluster]:
-                        raise ValueError(
+                        raise ChartError(
                             f"{at}: cluster {cluster} is merged more than once; merge it once"
                         )
                     used[cluster] = 1
@@ -4270,7 +4585,7 @@ class Chart:
                 "leaves": labels,
                 "side": side,
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "dendrogram stroke_width"),
                 "label": label,
                 "facet": _mark_facet(facet, "dendrogram"),
                 "panel": panel,
@@ -4316,11 +4631,11 @@ class Chart:
         ``contribute_domain=True``; otherwise they show where the data is.
         """
         if (x is None) == (y is None):
-            raise ValueError("rule: needs exactly one of x and y")
+            raise ChartError("rule: needs exactly one of x and y")
         self._check_label_dict(label, "rule", "label", ("content",))
         label_json = self._option("rule label", lambda: label_spec(label, "rule"))
         if span is not None and (not isinstance(span, (tuple, list)) or len(span) != 2):
-            raise ValueError(
+            raise ChartError(
                 "rule span: expected two places, such as (hg.Fraction(0.25), 10); "
                 f"received {shown(span)}"
             )
@@ -4337,7 +4652,7 @@ class Chart:
                     else None
                 ),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "rule stroke_width"),
                 "strokeOpacity": fraction_option(stroke_opacity, "rule stroke_opacity"),
                 "dash": _dash(dash, "rule"),
                 "label": label_json,
@@ -4395,9 +4710,9 @@ class Chart:
         for start, end, name in ((x1, x2, "x"), (y1, y2, "y")):
             if (start is None) != (end is None):
                 missing = f"{name}1" if start is None else f"{name}2"
-                raise ValueError(f"region {missing}: needs both {name}1 and {name}2, or neither")
+                raise ChartError(f"region {missing}: needs both {name}1 and {name}2, or neither")
         if x1 is None and y1 is None:
-            raise ValueError("region: needs x1 and x2, y1 and y2, or both")
+            raise ChartError("region: needs x1 and x2, y1 and y2, or both")
         # Outlines are checked here, as the engine checks a spec.
         if stroke is not None and not isinstance(stroke, str):
             raise ChartError(
@@ -4423,9 +4738,9 @@ class Chart:
                 "y1": coordinate_spec(y1, "region y1"),
                 "y2": coordinate_spec(y2, "region y2"),
                 "fill": fill,
-                "fillOpacity": fill_opacity,
+                "fillOpacity": fraction_option(fill_opacity, "region fill_opacity"),
                 "stroke": stroke,
-                "strokeWidth": stroke_width,
+                "strokeWidth": pixels_option(stroke_width, "region stroke_width"),
                 "strokeSides": self._option(
                     "region stroke_sides", lambda: _sides(stroke_sides, "region stroke_sides")
                 ),
@@ -4480,7 +4795,7 @@ class Chart:
         (``style=hg.MarkStyle(leader=hg.StrokeStyle(...))``).
         """
         if overlap not in (None, "show", "hide", "move"):
-            raise ValueError(
+            raise ChartError(
                 f'text overlap: expected "show", "hide", or "move"; received {shown(overlap)}'
             )
         anchor: dict[str, Any] | None = None
@@ -4491,19 +4806,17 @@ class Chart:
                     path=f"marks[{len(self._marks)}]",
                 )
             self._check_label_dict(from_, "text", "from_", ("mark", "at", "edge"))
-            anchor = self._option(
-                "text from_", lambda: _built(from_, MarkAnchor, "text from_")._spec()
-            )
+            anchor = self._option("text from_", lambda: built_spec(from_, MarkAnchor, "text from_"))
         if at is not None and (x is not None or y is not None):
-            raise ValueError(
+            raise ChartError(
                 "text at: a place, or its short forms x and y, not both; drop at or x and y"
             )
         if from_ is None and at is None and (x is None or y is None):
-            raise ValueError("text: needs a place; give x and y, or at=hg.Position(x=..., y=...)")
+            raise ChartError("text: needs a place; give x and y, or at=hg.Position(x=..., y=...)")
         if at is not None:
             at = _built(at, Position, "text at")
         if label is None:
-            raise ValueError("text label: needs text or an hg.Label; give label")
+            raise ChartError("text label: needs text or an hg.Label; give label")
         self._check_label_dict(label, "text", "label", ("content",))
         following = from_ is not None
         label_json = self._option("text label", lambda: label_spec(label, "text", places=following))
@@ -4512,11 +4825,11 @@ class Chart:
             place = label_json.get("place") if isinstance(label_json, dict) else None
             for option in ("attachment", "side"):
                 if (place or {}).get(option) is not None:
-                    raise ValueError(
+                    raise ChartError(
                         f"text label place: labels go at from_.at on their series; drop {option}"
                     )
             if data is not None:
-                raise ValueError(
+                raise ChartError(
                     "text data: text following another mark reads that mark's columns; drop data"
                 )
             assert anchor is not None
@@ -4532,7 +4845,7 @@ class Chart:
                 "halo": _halo(halo, "text"),
                 "x": coordinate_spec(x, "text x"),
                 "y": coordinate_spec(y, "text y"),
-                "at": at._spec() if at is not None else None,
+                "at": self._option("text at", at._spec) if at is not None else None,
                 "label": label_json,
                 "overlap": overlap,
                 "style": mark_style_spec(style, ("leader",), "text"),
@@ -4552,6 +4865,11 @@ class Chart:
 
     def to_spec(self) -> tuple[dict[str, Any], list[bytes]]:
         """The portable chart spec and the binary buffers its columns reference."""
+        # What the chart checks of itself whole refuses as its options do.
+        with refusing(("Chart",), OPTIONS):
+            return self._whole_spec()
+
+    def _whole_spec(self) -> tuple[dict[str, Any], list[bytes]]:
         self._check_spec()
         columns = self._used_columns()
         spec, buffers = assemble_spec(
@@ -4585,45 +4903,39 @@ class Chart:
         if self._panels:
             loose = next((m for m, _ in self._marks if m.get("panel") is None), None)
             if loose is not None:
-                raise ValueError(
+                raise ChartError(
                     f'{_method(loose["type"])} panel: expected the id of a panel, or "*" for every '
                     "panel; received None"
                 )
-            settings = self._settings
-            axes = {key: settings.get(key) for key in ("x", "y", "y_right", "scales")}
-            check_y_zoom(
-                {"zoom": settings.get("zoom"), "pan": settings.get("pan"), **axes},
-                right=False,
-                subplots=True,
-            )
         layouts = self._layouts()
         check_layout_options(self._settings, layouts, len(self._panels))
         maps = [mark for mark in layouts if mark["type"] in _MAP_MARKS]
         if self._facets and maps and all(mark.get("facet") == "repeat" for mark in maps):
-            raise ValueError(
+            raise ChartError(
                 f"{maps[0]['type']} facet: every layer of the map repeats, so none splits into "
                 'facet panels; drop facet="repeat" from one'
             )
         if self._settings.get("projection") is not None and not any(
             mark["type"] in _MAP_MARKS for mark, _ in self._marks
         ):
-            raise ValueError(
+            raise ChartError(
                 "Chart projection: projects geoshape and geopoint marks, and the chart has "
                 "none; drop projection"
             )
-        for panel in self._panels:
+        for i, panel in enumerate(self._panels):
             if panel.camera is not None and not any(
                 mark["type"] in _MARKS_3D and mark.get("panel") == panel.id
                 for mark, _ in self._marks
             ):
-                raise ValueError(
+                raise ChartError(
                     f"Panel camera: panel {shown(panel.id)} has no 3D marks; "
-                    "drop camera or add a point_3d, line_3d, or surface mark"
+                    "drop camera or add a point_3d, line_3d, or surface mark",
+                    path=f"panels[{i}].camera",
                 )
         three_d = any(mark["type"] in _MARKS_3D for mark, _ in self._marks)
         for name in ("z", "camera", "box_aspect"):
             if self._settings.get(name) is not None and not three_d:
-                raise ValueError(
+                raise ChartError(
                     f"Chart {name}: an option of 3D charts, and the chart has no point_3d, "
                     f"line_3d, or surface marks; drop {name}"
                 )
@@ -4632,7 +4944,7 @@ class Chart:
         """Refuses a channel naming a scale the chart's ``scales`` does not
         have (the default ``"color"``, ``"symbol"``, and ``"dash"`` it makes),
         and a place naming a position scale it does not have."""
-        declared = scales_spec(self._settings.get("scales")) or {}
+        declared = located("scales", lambda: scales_spec(self._settings.get("scales"))) or {}
         positions = [
             name
             for name, scale in declared.items()
@@ -4697,13 +5009,16 @@ class Chart:
 
         return ChartWidget(self)
 
+    @_output_settings
     def to_html(self, *, full_page: bool = True) -> str:
         """Self-contained HTML that renders the chart, with herceg and the data
         embedded: a page, or with ``full_page=False`` a ``<div>`` and script
         that repeat the engine in every chart. For pages of several charts,
         ``herceg.web`` loads the engine once (``web.assets`` and ``web.fragment``)."""
+        _flag(full_page, "to_html full_page")
         return _render.html(*self.to_spec(), full_page=full_page)
 
+    @_output_settings
     def to_svg(
         self,
         *,
@@ -4744,6 +5059,7 @@ class Chart:
             stroke_scaling=stroke_scaling,
         )
 
+    @_output_settings
     def to_snapshot(
         self,
         *,
@@ -4774,6 +5090,7 @@ class Chart:
             time_zone=time_zone,
         )
 
+    @_output_settings
     def to_image(
         self,
         *,
@@ -4814,6 +5131,7 @@ class Chart:
             fonts=fonts,
         )
 
+    @_output_settings
     def to_png(
         self,
         *,
@@ -4836,6 +5154,7 @@ class Chart:
             location="to_png",
         )
 
+    @_output_settings
     def to_pdf(
         self,
         *,
@@ -4863,6 +5182,7 @@ class Chart:
             language=language,
         )
 
+    @_output_settings
     def save(
         self,
         path: str | PathLike[str],
@@ -4907,7 +5227,8 @@ class Chart:
             "sizing": sizing,
             "preserve_aspect_ratio": preserve_aspect_ratio,
             "stroke_scaling": stroke_scaling,
-            "fallback": fallback or None,
+            # No families is no fallback (an empty array too).
+            "fallback": None if listlike(fallback) and len(fallback) == 0 else fallback,
             "missing_glyph": missing_glyph,
             "page_size": page_size,
             "orientation": orientation,
@@ -4947,8 +5268,8 @@ class Chart:
                     subject=subject,
                     language=language,
                 )
-            except (ValueError, TypeError) as error:
-                raise type(error)(str(error).replace("to_pdf", "save")) from None
+            except ChartError as error:
+                raise renamed(error, "to_pdf", "save") from None
         else:
             content = _render.image(
                 *self.to_spec(),
@@ -4982,21 +5303,27 @@ class Chart:
         once the marks are known."""
         options = self._options
         if self._panel_guides:
-            panel_guides = guides_spec(self._panel_guides)
+            given = len(options.get("guides") or [])
+            panel_guides = located("guides", lambda: guides_spec(self._panel_guides, given))
             options = {**options, "guides": [*(options.get("guides") or []), *panel_guides]}
         if not self._row_selection:
             return options
         names = [self._bound_table(binding) for binding in self._row_selection]
         if len(set(names)) < len(names):
-            raise ValueError(
+            raise ChartError(
                 "Chart row_selection: two bindings select rows of one table; "
                 "give each table one binding"
             )
         for binding, name in zip(self._row_selection, names, strict=True):
             self._check_brush(binding, name)
         specs = [
-            binding._spec(
-                name, self._bound_length(binding) if binding.selection is not None else None
+            located(
+                self._binding_path(binding),
+                functools.partial(
+                    binding._spec,
+                    name,
+                    self._bound_length(binding) if binding.selection is not None else None,
+                ),
             )
             for binding, name in zip(self._row_selection, names, strict=True)
         ]
@@ -5024,16 +5351,17 @@ class Chart:
             if table is None or table_name(table) != name:
                 continue
             if brush == "lasso" and kind in ("histogram", "boxplot", "boxen", "violin"):
-                raise ValueError(
+                raise ChartError(
                     f"SelectionBinding events: lassos cannot select the rows of {kind} marks "
-                    'yet; leave out "lasso"'
+                    'yet; leave out "lasso"',
+                    path=self._binding_path(binding, "events"),
                 )
             if kind == "rug":
                 # A rug's ticks have a place along their own axis only.
                 observed = "x" if mark.get("x") is not None else "y"
                 other = "y" if observed == "x" else "x"
                 if brush in (other, "xy"):
-                    raise ValueError(
+                    raise ChartError(
                         f"Chart brush: a rug's ticks have no {other} value, so its rows are "
                         f"brushed along {observed} only; received {shown(brush)}"
                     )
@@ -5052,7 +5380,7 @@ class Chart:
                 categories = "y" if y is not None and self._kind(table, y) == "category" else "x"
             values = "y" if categories == "x" else "x"
             if brush in (values, "xy"):
-                raise ValueError(
+                raise ChartError(
                     f"Chart brush: a {kind}'s {values} axis holds statistics, so its rows are "
                     f"brushed along {categories} only; received {shown(brush)}"
                 )
@@ -5072,9 +5400,10 @@ class Chart:
             if self._default is not None and self._default in read:
                 return self._default
             if len(read) != 1:
-                raise ValueError(
+                raise ChartError(
                     "SelectionBinding data: the chart has no data of its own and its marks "
-                    "read several tables; give data=, the object given to a mark"
+                    "read several tables; give data=, the object given to a mark",
+                    path=self._binding_path(binding, "data"),
                 )
             return read[0]
         found = next(
@@ -5082,10 +5411,19 @@ class Chart:
             None,
         )
         if found is None or found not in read:
-            raise ValueError(
-                "SelectionBinding data: expected an object given to one of the chart's marks"
+            raise ChartError(
+                "SelectionBinding data: expected an object given to one of the chart's marks",
+                path=self._binding_path(binding, "data"),
             )
         return found
+
+    def _binding_path(self, binding: SelectionBinding, option: str | None = None) -> str:
+        """Where one of the chart's row selection bindings is, or an option of it."""
+        at = "row_selection"
+        if self._bindings_listed:
+            index = next(i for i, bound in enumerate(self._row_selection) if bound is binding)
+            at = f"row_selection[{index}]"
+        return f"{at}.{option}" if option else at
 
     def _layout_spec(self) -> dict[str, Any]:
         """The spec's facet, or its panels and layout; nothing for one panel."""
@@ -5138,15 +5476,19 @@ class Chart:
             index = self._bound_index(binding)
             derived = index in self._derived
             names = self._tables[index][1].names
-            for name in binding.fields:
+            for i, name in enumerate(binding.fields):
                 if derived or name not in names:
-                    raise ValueError(
-                        f"SelectionBinding fields: no column {name!r} in the data it selects"
+                    raise ChartError(
+                        f"SelectionBinding fields[{i}]: no column {name!r} in the data it selects",
+                        code="unknown-field",
+                        path=self._binding_path(binding, f"fields[{i}]"),
                     )
             for name in tested:
                 if name not in names:
-                    raise ValueError(
-                        f"SelectionBinding selection: no column {name!r} in the data it selects"
+                    raise ChartError(
+                        f"SelectionBinding selection: no column {name!r} in the data it selects",
+                        code="unknown-field",
+                        path=self._binding_path(binding, "selection"),
                     )
             used.setdefault(index, set()).update([*binding.fields, *tested])
         # Later tables derive from earlier ones, so needs flow back in one pass.
@@ -5239,14 +5581,28 @@ class Chart:
         if data is not None:
             return self._table(data)
         if self._default is None:
-            raise ValueError("Chart data: the chart has none; pass data to hg.Chart or to the mark")
+            raise ChartError("Chart data: the chart has none; pass data to hg.Chart or to the mark")
         return self._default
 
-    def _require(self, table: int, field: str | None, kinds: tuple[str, ...], role: str) -> None:
-        if field is None:
+    def _require(
+        self,
+        table: int,
+        field: str | None,
+        kinds: tuple[str, ...],
+        role: str,
+        *,
+        optional: bool = True,
+    ) -> None:
+        """Refuses ``field`` unless it names a column of the table holding
+        ``kinds`` of values; None is no column, where ``optional``."""
+        if field is None and optional:
             return
         source = self._tables[table][1]
         path = self._path(role)
+        if not isinstance(field, str):
+            raise ChartError(
+                f"{role}: expected a column's name; received {shown(field)}", path=path
+            )
         if field not in source.names:
             available = ", ".join(repr(name) for name in source.names)
             raise ChartError(
@@ -5254,7 +5610,7 @@ class Chart:
                 code="unknown-field",
                 path=path,
             )
-        kind = source.column(field).kind
+        kind = _read(source, field, role, path).kind
         if kind not in kinds:
             # Categories come from strings, and times (only a heatmap's date takes
             # nothing else) from datetimes, so the usual fix is the column's type.
@@ -5279,7 +5635,7 @@ class Chart:
         if tooltip is None:
             return None
         if not isinstance(tooltip, Tooltip):
-            raise TypeError(
+            raise ChartError(
                 f"{mark} tooltip: expected an hg.Tooltip with fields; received {shown(tooltip)}"
             )
         spec = tooltip._mark_spec(mark)
@@ -5291,29 +5647,33 @@ class Chart:
         return spec or None
 
     def _kind(self, table: int, field: str) -> str | None:
+        """The kind of column `field`; None where the data lacks it, or its
+        values cannot be read, which `_require` refuses at the option
+        reading it."""
         source = self._tables[table][1]
-        return source.column(field).kind if field in source.names else None
+        if field not in source.names:
+            return None
+        try:
+            return source.column(field).kind
+        except ChartError:
+            return None
 
     def _path(self, role: str, option: str | None = None) -> str:
         """Where an option of the mark being added is (``marks[3].color``), from
         its role (``"line color"``), or a chart option's (``"Chart facet"``)."""
         mark, _, rest = role.partition(" ")
-        name = option or rest.replace(" ", "_")
+        name = option or rest.replace(" ", ".")
         return name if mark == "Chart" else f"marks[{len(self._marks)}].{name}"
 
     def _option(self, role: str, make: Callable[[], _T]) -> _T:
-        """``make()``, refusing its value as a ChartError at the path of the
-        option ``role`` names (``"bar width"``)."""
-        try:
-            return make()
-        except ChartError as error:
-            if error.path is not None:
-                raise
-            raise ChartError(str(error), code=error.code, path=self._path(role)) from None
-        except (ValueError, TypeError) as error:
-            raise ChartError(str(error), code="invalid-option", path=self._path(role)) from None
+        """``make()``, its refusals at the option ``role`` names (``"bar
+        labels"``), within the mark being added, or the chart's
+        (``"Chart facet"``)."""
+        return located(role.partition(" ")[2].replace(" ", "."), make)
 
-    def _places(self, mark: str, places: Mapping[str, Any], right: bool = False) -> _RowPlaces:
+    def _places(
+        self, mark: str, places: Mapping[str, Any], right: bool = False, needed: bool = False
+    ) -> _RowPlaces:
         """A mark of rows' positions by option (``x``, ``y1``, ...), checked as
         the engine checks them (marks/row-bindings.ts): a coordinate reads a
         column (``hg.Fraction(field=...)``, not ``hg.Fraction(0.5)``), on the
@@ -5324,6 +5684,11 @@ class Chart:
         specs: dict[str, dict[str, Any]] = {}
         bound: dict[str, tuple[Any, ...]] = {}
         for name, value in places.items():
+            if value is None and needed:
+                raise ChartError(
+                    f"{mark} {name}: expected a column's name or a place of rows; received None",
+                    path=self._path(mark, name),
+                )
             if value is None:
                 continue
             axis = name[0]
@@ -5440,7 +5805,7 @@ class Chart:
             return None
         if series is not None:
             if not isinstance(series, str):
-                raise TypeError(
+                raise ChartError(
                     f"{mark} series: expected a column name, or False; received {shown(series)}"
                 )
             self._require(table, series, ("category",), f"{mark} series")
@@ -5457,7 +5822,7 @@ class Chart:
         if color is None:
             return series
         if not isinstance(color, str):
-            raise TypeError(
+            raise ChartError(
                 f"{mark} color: expected a column name or a color; received {shown(color)}"
             )
         names = self._tables[table][1].names
@@ -5524,7 +5889,7 @@ class Chart:
             )
         self._check_label_dict(labels, mark, "labels", ("at", "edge", "content"))
         return self._option(
-            f"{mark} labels", lambda: _built(labels, SeriesLabels, f"{mark} labels")._spec()
+            f"{mark} labels", lambda: built_spec(labels, SeriesLabels, f"{mark} labels")
         )
 
     def _check_label_dict(self, value: Any, mark: str, option: str, keys: tuple[str, ...]) -> None:
@@ -5690,7 +6055,7 @@ class Chart:
         x and y as the spec writes them, checked: positions are one number,
         time, or category column; values one or several number columns."""
         if orient not in (None, "x", "y"):
-            raise ValueError(f'{mark} orient: expected "x" or "y"; received {shown(orient)}')
+            raise ChartError(f'{mark} orient: expected "x" or "y"; received {shown(orient)}')
 
         def kind(field: str | Sequence[str]) -> str | None:
             return self._kind(table, field) if isinstance(field, str) else None
@@ -5699,16 +6064,16 @@ class Chart:
         position, values = (x, y) if along == "x" else (y, x)
         if not isinstance(position, str):
             if along == "x":
-                raise ValueError(
+                raise ChartError(
                     f"{mark} x: several columns are values along x of a {mark} along y; "
                     'give orient="y", or one x column'
                 )
-            raise ValueError(
+            raise ChartError(
                 f"{mark} y: a {mark} along y has one y column of positions; "
                 'give one y column, or orient="x"'
             )
         if orient == "x" and kind(values) == "category":
-            raise ValueError(
+            raise ChartError(
                 f'{mark} orient: "x" makes y the values, and {values!r} holds categories; '
                 'give orient="y", or a number column as y'
             )
@@ -5728,23 +6093,31 @@ class Chart:
     ) -> None:
         """Dodged lines and areas need a category position and a series column."""
         if not isinstance(dodge, bool):
-            raise TypeError(f"{mark} dodge: expected True or False; received {shown(dodge)}")
+            raise ChartError(f"{mark} dodge: expected True or False; received {shown(dodge)}")
         if not dodge:
             return
         if self._kind(table, position) != "category":
-            raise ValueError(
+            raise ChartError(
                 f"{mark} dodge: places series side by side in the bands of a category {along}; "
                 f"give a category column as {along}, or drop dodge"
             )
         if series is None:
-            raise ValueError(f"{mark} dodge: places series side by side; give series")
+            raise ChartError(f"{mark} dodge: places series side by side; give series")
 
     def _require_many(
         self, table: int, fields: str | Sequence[str], kinds: tuple[str, ...], role: str
     ):
-        names = [fields] if isinstance(fields, str) else list(fields)
-        for name in names:
-            self._require(table, name, kinds, role)
+        if not (isinstance(fields, str) or listlike(fields)):
+            raise ChartError(
+                f"{role}: expected a column's name or a list of them; received {shown(fields)}",
+                path=self._path(role),
+            )
+        if isinstance(fields, str):
+            self._require(table, fields, kinds, role)
+            return fields
+        names = list(fields)
+        for i, name in enumerate(names):
+            self._require(table, name, kinds, f"{role}[{i}]", optional=False)
         return names[0] if len(names) == 1 else names
 
     def _symbol(self, table: int, symbol: str | Mapping[str, str] | None) -> Any:
@@ -5752,7 +6125,7 @@ class Chart:
         ``{"field": column}`` for a category column."""
         if isinstance(symbol, Mapping):
             if set(symbol) != {"field"} or not isinstance(symbol["field"], str):
-                raise ValueError(
+                raise ChartError(
                     'point symbol: expected a shape\'s name or {"field": column}; '
                     f"received {shown(dict(symbol))}"
                 )
@@ -5762,13 +6135,13 @@ class Chart:
             return None
         if symbol in SYMBOLS:
             if self._kind(table, symbol) is not None:
-                raise ValueError(
+                raise ChartError(
                     f"point symbol: {shown(symbol)} names both a shape and a column; "
                     f'give {{"field": {shown(symbol)}}} to encode the column'
                 )
             return symbol
         if self._kind(table, symbol) is None:
-            raise ValueError(
+            raise ChartError(
                 f"point symbol: expected a column or {listed(SYMBOLS)}; received {shown(symbol)}"
             )
         self._require(table, symbol, ("category",), "point symbol")
@@ -5834,7 +6207,7 @@ class Chart:
                 and color.get("scale") is None
                 and self._kind(table, field) in _NUMERIC
             ):
-                raise ValueError(
+                raise ChartError(
                     "point colors: a ramp colors a number column; drop colors, "
                     "color_domain, and color_midpoint"
                 )
@@ -5853,7 +6226,7 @@ class Chart:
         if color is None or self._kind(table, color) != "category":
             return
         if colors is not None or color_domain is not None or color_midpoint is not None:
-            raise ValueError(
+            raise ChartError(
                 f"{mark} colors: {color!r} is a category column, colored by the theme's "
                 "palette; drop colors, color_domain, and color_midpoint"
             )
@@ -5872,12 +6245,11 @@ class Chart:
         table = self._source_table(mark)
         if table is None:
             return
-        spec = {"label": label}
         text = label.get("field") if isinstance(label, dict) else None
         # Written as content parts are: times too, in the chart's zone.
         self._require(table, text, _ANY, "text label field")
-        for field in sorted(_label_fields(spec) - {text}):
-            self._require(table, field, _ANY, "text label.content field")
+        for i, field in _part_fields(label):
+            self._require(table, field, _ANY, f"text label.content[{i}].field")
 
     def _annotation_table(
         self, data: Any, positions: dict[str, Any], label: Any, role: str
@@ -5890,12 +6262,10 @@ class Chart:
         }
         text = label.get("field") if isinstance(label, dict) else None
         # A label of parts reads the columns its parts name.
-        parts = [
-            part["field"]
-            for part in (label.get("content") or [] if isinstance(label, dict) else [])
-            if isinstance(part, dict) and part.get("field") is not None
-        ]
+        parts = _part_fields(label)
         if not fields and text is None and not parts:
+            if data is not None and not isinstance(data, (Derived, Matrix)):
+                Table(data)  # data it reads nothing of is still a table
             return None
         table = self._mark_table(data)
         for name, field in fields.items():
@@ -5907,19 +6277,27 @@ class Chart:
             else:
                 self._require(table, field, _NUMERIC, f"{role} {name}")
         self._require(table, text, ("category", "number"), f"{role} label field")
-        for i, part in enumerate(parts):
+        for i, part in parts:
             self._require(table, part, _ANY, f"{role} label.content[{i}].field")
         return table
 
     def _add(self, spec: dict[str, Any], table: int | None) -> Chart:
         z = spec.get("zIndex")
-        if z is not None and (
-            isinstance(z, bool) or not isinstance(z, numbers.Real) or not math.isfinite(z)
-        ):
+        if z is not None and (isinstance(z, bool) or not is_number(z) or not math.isfinite(z)):
             raise ChartError(
                 f"{_method(spec['type'])} z_index: expected a finite number, where the mark is "
                 f"painted among its panel's marks; received {shown(z)}",
                 path=f"marks[{len(self._marks)}].z_index",
+            )
+        if self._unchecked is not None:
+            check_hints(*self._unchecked)
+        mark_id = spec.get("id")
+        if mark_id is not None and any(mark.get("id") == mark_id for mark, _ in self._marks):
+            raise ChartError(
+                f"{_method(spec['type'])} id: {shown(mark_id)} names another mark; "
+                "give each mark an id of its own",
+                path=f"marks[{len(self._marks)}].id",
+                mark=len(self._marks),
             )
         if spec["type"] in ("rule", "region", "text"):
             self._check_annotation_scales(spec)
@@ -5949,31 +6327,29 @@ class Chart:
             # The layout mark, and a mark that cannot share its chart.
             alone, other = _method(kind), method if layouts else _method(kinds[0])
             if self._facets:
-                raise ValueError(
+                raise ChartError(
                     f"{alone}: has each facet panel to itself; draw the {other} in another chart"
                 )
             if kind in _MAP_MARKS:
-                raise ValueError(
+                raise ChartError(
                     f"{alone}: shares its chart only with geoshape and geopoint marks; "
                     f"draw the {other} in another chart"
                 )
             if kind in _MARKS_3D:
-                raise ValueError(
+                raise ChartError(
                     f"{alone}: shares its chart only with point_3d, line_3d, and surface marks; "
                     f"draw the {other} in another chart"
                 )
-            raise ValueError(f"{alone}: has its chart to itself; draw the {other} in another chart")
+            raise ChartError(f"{alone}: has its chart to itself; draw the {other} in another chart")
         if spec.get("axis") not in (None, "left", "right"):
-            raise ValueError(
+            raise ChartError(
                 f'{method} axis: expected "left" or "right"; received {shown(spec["axis"])}'
             )
-        if self._facets and on_right_axis(spec):
-            check_y_zoom(self._settings, right=True)
         if self._panels:
             panel = spec.get("panel")
             ids = [p.id for p in self._panels]
             if panel is None:
-                raise ValueError(
+                raise ChartError(
                     f'{method} panel: expected the id of a panel, or "*" for every panel; '
                     "received None"
                 )
@@ -5986,10 +6362,10 @@ class Chart:
                     mark=len(self._marks) if spec.get("id") is None else spec["id"],
                 )
         elif spec.get("panel") is not None:
-            raise ValueError(f"{method} panel: the chart has no panels; drop panel")
+            raise ChartError(f"{method} panel: the chart has no panels; drop panel")
         if self._facets and table is not None and spec.get("facet") is None:
             if spec["type"] == "dendrogram":
-                raise ValueError(
+                raise ChartError(
                     "dendrogram facet: a tree cannot be split across facet panels; "
                     'give facet="repeat" to draw it whole in each'
                 )
@@ -6021,42 +6397,42 @@ class Chart:
         if kind not in _LAYOUT_MARKS:
             if panel == "*" and held:
                 first = next(iter(held))
-                raise ValueError(
+                raise ChartError(
                     f'{method} panel: "*" would draw in panel {shown(first)}, which a '
                     f"{held[first]} has to itself; give the id of a panel with axes"
                 )
             if panel in held:
-                raise ValueError(
+                raise ChartError(
                     f"{method} panel: a {held[panel]} has panel {shown(panel)} to itself; "
                     "give the id of a panel with axes"
                 )
             return
         if panel is None or panel == "*":
-            raise ValueError(
+            raise ChartError(
                 f"{method} panel: expected the id of the panel it draws in; received {shown(panel)}"
             )
         if panel in held and not layer:
-            raise ValueError(
+            raise ChartError(
                 f"{method} panel: a {held[panel]} has panel {shown(panel)} to itself; "
                 f"give the {method} a panel of its own"
             )
         for mark, _ in self._marks:
             other = _method(mark["type"])
             if mark.get("panel") == "*":
-                raise ValueError(
+                raise ChartError(
                     f'{method} panel: the {other} with panel="*" draws in panel {shown(panel)} '
                     f"too, and a {method} has its panel to itself; give the {other} the id of "
                     "a panel with axes"
                 )
             if mark.get("panel") == panel and not layer:
-                raise ValueError(
+                raise ChartError(
                     f"{method} panel: a {other} draws in panel {shown(panel)}, and a {method} "
                     "has its panel to itself; give one of them another panel"
                 )
         own = next((p for p in self._panels if p.id == panel), None)
         if own is not None and (own.x is not None or own.y is not None or own.y_right is not None):
             axis = "x" if own.x is not None else "y" if own.y is not None else "y_right"
-            raise ValueError(
+            raise ChartError(
                 f"Panel {axis}: panel {shown(panel)} draws a {method}, which has no axes; "
                 f"drop the panel's {axis}"
             )
@@ -6083,14 +6459,9 @@ class Chart:
             if scope == "chart" or not banded:
                 continue
             if self._settings["sync"] is not None:
-                raise ValueError(
+                raise ChartError(
                     f"Chart sync: panels with categories of their own ({axis} scope "
                     f'{shown(scope)}) cannot sync yet; drop sync or give {axis} scope "chart"'
-                )
-            if axis == "y" and self._settings["brush"] not in (None, "x"):
-                raise ValueError(
-                    "Chart brush: panels with y categories of their own brush along x only; "
-                    f"received {shown(self._settings['brush'])}"
                 )
 
 
@@ -6107,10 +6478,11 @@ def _in_panel(
     def call(self: Panel, *args: _C.args, **kwargs: _C.kwargs) -> Panel:
         chart = self._bound(name)
         given = kwargs.get("panel")
-        if given is not None and given != self.id:
-            raise ValueError(
+        if given is not None and not (isinstance(given, str) and given == self.id):
+            raise ChartError(
                 f"Panel.{name} panel: the mark draws in panel {shown(self.id)}, whose method it "
-                f"is; drop panel={shown(given)}"
+                f"is; drop panel={shown(given)}",
+                path=f"marks[{len(chart._marks)}].panel",
             )
         kwargs["panel"] = self.id
         method(chart, *args, **kwargs)
@@ -6119,6 +6491,7 @@ def _in_panel(
     return call
 
 
+@refuses
 @dataclass
 class Panel:
     """One of a chart's panels: marks with ``panel=id`` draw in it, and a
@@ -6132,6 +6505,15 @@ class Panel:
     ``x``, ``y``, and ``y_right`` set the panel's own axes over the chart's
     ``x``, ``y``, and ``y_right`` (the right axis of its marks with
     ``axis="right"``); panels sharing a scale take the first one's.
+    ``zoom``, ``pan``, ``brush``, ``bindings``, ``limits``, ``rotate``, and
+    ``drag`` set how the panel answers input in place of the chart's
+    settings, one by one: ``zoom=False`` turns the chart's zoom off there
+    (``rotate=False`` stops a 3D panel turning, ``drag=True`` moves a
+    network's nodes in a network panel), ``bindings`` replace the chart's
+    list, and each scale's ``limits`` replace the chart's for that scale
+    (``hg.ViewLimits()`` clears them); panels sharing a scale must agree on
+    its limits. What the chart shares with other charts (``sync``) is the
+    chart's.
     """
 
     id: str
@@ -6141,6 +6523,13 @@ class Panel:
     y_right: AxisOptions | dict[str, Any] | None = None
     camera: Camera | dict[str, Any] | None = None
     style: Style | dict[str, Any] | None = None
+    zoom: bool | Literal["x", "y", "xy"] | None = None
+    pan: bool | Literal["x", "y", "xy"] | None = None
+    brush: Literal["x", "y", "xy", "lasso"] | None = None
+    bindings: Sequence[Binding] | None = None
+    limits: Mapping[str, ViewLimits] | None = None
+    rotate: bool | None = None
+    drag: bool | None = None
     # The chart whose layout made the panel, and the insets drawn over it.
     _chart: Chart | None = dataclass_field(default=None, init=False, repr=False, compare=False)
     _insets: list[_Inset] = dataclass_field(
@@ -6156,6 +6545,16 @@ class Panel:
             "y": _axis(self.y, "Panel y"),
             "yRight": _axis(self.y_right, "Panel y_right"),
             "camera": _camera(self.camera, "Panel camera", partial=True),
+            "interaction": panel_interaction_spec(
+                Role("Panel"),
+                zoom=self.zoom,
+                pan=self.pan,
+                brush=self.brush,
+                bindings=self.bindings,
+                limits=self.limits,
+                rotate=self.rotate,
+                drag=self.drag,
+            ),
         }
         return {key: value for key, value in spec.items() if value is not None}
 
@@ -6167,7 +6566,7 @@ class Panel:
 
     def _bound(self, method: str) -> Chart:
         if self._chart is None:
-            raise ValueError(
+            raise ChartError(
                 f"Panel.{method}: the panel belongs to no chart's layout; add marks with "
                 f"chart.{method}(..., panel={self.id!r}), or make the panel with "
                 "chart.columns(...)[0].panel(...)"
@@ -6182,12 +6581,20 @@ class Panel:
         anchor: InsetAnchor | None = None,
         width: Fraction | Pixels | None = None,
         height: Fraction | Pixels | None = None,
-        indicator: bool | Mapping[str, Any] | None = None,
+        indicator: bool | InsetIndicator | None = None,
         title: str | Title | dict[str, Any] | None = None,
         x: AxisOptions | dict[str, Any] | None = None,
         y: AxisOptions | dict[str, Any] | None = None,
         y_right: AxisOptions | dict[str, Any] | None = None,
+        camera: Camera | dict[str, Any] | None = None,
         style: Style | dict[str, Any] | None = None,
+        zoom: bool | Literal["x", "y", "xy"] | None = None,
+        pan: bool | Literal["x", "y", "xy"] | None = None,
+        brush: Literal["x", "y", "xy", "lasso"] | None = None,
+        bindings: Sequence[Binding] | None = None,
+        limits: Mapping[str, ViewLimits] | None = None,
+        rotate: bool | None = None,
+        drag: bool | None = None,
     ) -> Panel:
         """A panel drawn over this one's plot, with scales of its own unless
         a scope names it: at ``place`` (``hg.Place(inside="top-right")``,
@@ -6197,6 +6604,9 @@ class Panel:
         ``hg.Pixels``). ``indicator=True`` draws a box on this panel around
         the inset's x and y ranges, with lines to the inset's corners; a dict
         of ``connectors`` and ``style`` (an ``hg.StrokeStyle``) changes how.
+        ``camera`` (an inset of 3D marks), ``zoom``, ``pan``, ``brush``,
+        ``bindings``, ``limits``, ``rotate``, and ``drag`` are its own, as
+        ``hg.Panel`` takes them.
         It takes marks through its methods, as a panel does::
 
             detail = latency.inset("detail", x=hg.AxisOptions(domain=(start, end)),
@@ -6205,11 +6615,38 @@ class Panel:
         """
         chart = self._bound("inset")
         role = "Panel.inset"
-        spec = inset_spec(place, anchor, width, height, indicator, role)
-        made = chart._new_panel(id, title=title, x=x, y=y, y_right=y_right, style=style)
+        # How it is placed is the method's; its settings are the chart's panels' (see _new_panel).
+        with refusing((role,), ("place", "anchor", "width", "height", "indicator")):
+            placement: dict[str, Any] = {
+                "place": place,
+                "anchor": anchor,
+                "width": width,
+                "height": height,
+                "indicator": indicator,
+            }
+            hints = hints_of(Panel.inset)
+            placement |= check_hints(role, placement, {name: hints[name] for name in placement})
+            spec = inset_spec(**placement, role=role)
+        made = chart._new_panel(
+            id,
+            title=title,
+            x=x,
+            y=y,
+            y_right=y_right,
+            camera=camera,
+            style=style,
+            zoom=zoom,
+            pan=pan,
+            brush=brush,
+            bindings=bindings,
+            limits=limits,
+            rotate=rotate,
+            drag=drag,
+        )
         self._insets.append(_Inset(made, spec))
         return made
 
+    @_settings("Panel.legend")
     def legend(
         self,
         *,
@@ -6229,25 +6666,25 @@ class Panel:
         chart = self._bound("legend")
         from ._guides import legend as legend_guide
 
-        chart._panel_guides.append(
-            legend_guide(
-                panel=self.id,
-                place=place,
-                columns=columns,
-                rows=rows,
-                order=order,
-                title=title,
-                swatches=swatches,
-                style=style,
-            )
+        guide = legend_guide(
+            panel=self.id,
+            place=place,
+            columns=columns,
+            rows=rows,
+            order=order,
+            title=title,
+            swatches=swatches,
+            style=style,
         )
+        guide._spec()  # its options are refused here, not as the chart is output
+        chart._panel_guides.append(guide)
         return self
 
     line = _in_panel(Chart.line)
     area = _in_panel(Chart.area)
     bar = _in_panel(Chart.bar)
     rug = _in_panel(Chart.rug)
-    error_bar = _in_panel(Chart.error_bar)
+    errorbar = _in_panel(Chart.errorbar)
     point = _in_panel(Chart.point)
     histogram = _in_panel(Chart.histogram)
     candlestick = _in_panel(Chart.candlestick)
@@ -6283,7 +6720,7 @@ def _layout_option(layout: Any) -> dict[str, Any] | None:
         return layout._spec()
     if isinstance(layout, Mapping):
         return dict(layout)
-    raise TypeError(
+    raise ChartError(
         "Chart layout: expected an hg.Grid or a dict of a layout; lay panels out cell by cell "
         f"with chart.columns, rows, grid, or mosaic; received {shown(layout)}"
     )
@@ -6305,7 +6742,7 @@ _MAP_MARKS = ("geoshape", "geopoint")
 _MARKS_3D = ("point3d", "line3d", "surface")
 
 #: Chart methods whose names differ from the type of the mark they add.
-_METHODS = {"errorbar": "error_bar", "point3d": "point_3d", "line3d": "line_3d"}
+_METHODS = {"point3d": "point_3d", "line3d": "line_3d"}
 
 
 def _method(kind: str) -> str:
@@ -6330,14 +6767,19 @@ _GRAPH_LAYOUTS: dict[str, dict[str, tuple[str, ...] | None]] = {
 }
 
 
-def _graph_layout(layout: str | Mapping[str, Any] | None) -> str | dict[str, Any] | None:
+def _graph_layout(layout: GraphLayout | None) -> str | dict[str, Any] | None:
     """A graph's ``layout`` as the spec takes it, checked with Python's spellings."""
     if layout is None:
         return None
+    if not isinstance(layout, (str, Mapping)):
+        raise ChartError(
+            f"graph layout: expected {listed(list(_GRAPH_LAYOUTS))}, or a dict of its type "
+            f"and options; received {shown(layout)}"
+        )
     given: dict[str, Any] = {"type": layout} if isinstance(layout, str) else dict(layout)
     kind = given.get("type", "force") if not isinstance(layout, str) else layout
     if kind not in _GRAPH_LAYOUTS:
-        raise ValueError(
+        raise ChartError(
             f"graph layout: expected {listed(list(_GRAPH_LAYOUTS))}; received {shown(kind)}"
         )
     for option, value in given.items():
@@ -6345,19 +6787,19 @@ def _graph_layout(layout: str | Mapping[str, Any] | None) -> str | dict[str, Any
             continue
         owner = next((name for name, options in _GRAPH_LAYOUTS.items() if option in options), None)
         if owner is None:
-            raise ValueError(f'graph layout["{option}"]: not an option of a {kind} layout; drop it')
+            raise ChartError(f'graph layout["{option}"]: not an option of a {kind} layout; drop it')
         if owner != kind:
-            raise ValueError(
+            raise ChartError(
                 f'graph layout["{option}"]: only a {owner} layout takes it; drop it, '
                 f'or use "type": "{owner}"'
             )
         choices = _GRAPH_LAYOUTS[kind][option]
         if choices is None and not isinstance(value, bool):
-            raise ValueError(
+            raise ChartError(
                 f'graph layout["{option}"]: expected True or False; received {value!r}'
             )
         if choices is not None and value not in choices:
-            raise ValueError(
+            raise ChartError(
                 f'graph layout["{option}"]: expected {listed(choices)}; received {shown(value)}'
             )
     return layout if isinstance(layout, str) else {"type": kind, **given}
@@ -6488,6 +6930,9 @@ _NODE_FIELDS = ("node", "color", "size")
 
 #: Chart options a live chart can change after display: all but data and facets,
 #: which decide the columns sent.
+#: Where the chart's own options are, as their refusals say it.
+_CHART = Role("Chart")
+
 OPTIONS = (
     *("title", "description", "width", "height", "x", "y", "y_right", "legend", "padding"),
     *("scales", "guides"),
@@ -6520,11 +6965,9 @@ def check_layout_options(
     axes take beside them, or what they take when no panel has axes. Panels
     without axes have no scales to share."""
     if settings.get("drag") and not any(mark["type"] == "graph" for mark in layouts):
-        raise ValueError(
+        raise ChartError(
             "Chart drag: moves a network's nodes, and the chart has no graph; drop drag"
         )
-    if subplots:
-        _check_subplot_ranges(settings)
     # Standalone 3D charts check their options as marks are added.
     if not subplots:
         layouts = [mark for mark in layouts if mark["type"] not in _MARKS_3D]
@@ -6534,14 +6977,7 @@ def check_layout_options(
         if not layouts:
             return
     elif len({mark["panel"] for mark in layouts}) < subplots:
-        # Panels with axes zoom and brush along x; maps and networks beside them pan and zoom.
-        zoom, brush = settings.get("zoom"), settings.get("brush")
-        if zoom == "xy" or brush == "lasso":
-            option = "zoom" if zoom == "xy" else "brush"
-            raise ValueError(
-                f"Chart {option}: panels with axes {option} along x only; "
-                f"received {shown(settings[option])}"
-            )
+        # Maps and networks beside panels with axes pan and zoom as those do.
         return
     else:
         _check_subplots(settings, layouts)
@@ -6555,25 +6991,9 @@ def check_layout_options(
         None,
     )
     if scoped is not None:
-        raise ValueError(
+        raise ChartError(
             f"Chart {scoped} scope: every panel draws a {_method(layouts[0]['type'])} or another "
             f"mark without axes, so the panels have no scales to share; drop {scoped}'s scope"
-        )
-
-
-def _check_subplot_ranges(settings: Mapping[str, Any]) -> None:
-    """Subplots zoom and brush along x (maps and networks with every panel
-    pan and zoom both ways, and lasso: see `check_layout_options`)."""
-    for name in ("zoom", "pan"):
-        if settings.get(name) == "y":
-            raise ValueError(
-                f"Chart {name}: charts with panels {name} along x only; "
-                f"received {shown(settings[name])}"
-            )
-    brush = settings.get("brush")
-    if brush in ("y", "xy"):
-        raise ValueError(
-            f"Chart brush: charts with panels brush along x only; received {shown(brush)}"
         )
 
 
@@ -6585,35 +7005,35 @@ def _check_alone(settings: Mapping[str, Any], kind: str) -> None:
     zoom, brush, pan = settings.get("zoom"), settings.get("brush"), settings.get("pan")
     if kind in _MAP_MARKS:
         if zoom in ("x", "y"):
-            raise ValueError(
+            raise ChartError(
                 f'Chart zoom: expected True or "xy", as maps zoom both ways; received {shown(zoom)}'
             )
         if pan in ("x", "y"):
-            raise ValueError(
+            raise ChartError(
                 f'Chart pan: expected True or "xy", as maps pan both ways; received {shown(pan)}'
             )
         if brush not in (None, "lasso"):
-            raise ValueError(f'Chart brush: expected "lasso" for maps; received {shown(brush)}')
+            raise ChartError(f'Chart brush: expected "lasso" for maps; received {shown(brush)}')
     if settings.get("drag") and kind != "graph":
-        raise ValueError(f"Chart drag: moves a network's nodes, and a {kind} has none; drop drag")
+        raise ChartError(f"Chart drag: moves a network's nodes, and a {kind} has none; drop drag")
     drills = kind in ("treemap", "sunburst")
     if drills and zoom not in (True, False, None):
-        raise ValueError(
+        raise ChartError(
             f"Chart zoom: a {kind} drills with zoom=True, not along an axis; received {shown(zoom)}"
         )
     if kind == "graph":
         if pan not in (True, False, None, "xy"):
-            raise ValueError(
+            raise ChartError(
                 f"Chart pan: a graph pans both ways, received {shown(pan)}; "
                 "use pan=True or pan='xy'"
             )
         if zoom not in (True, False, None, "xy"):
-            raise ValueError(
+            raise ChartError(
                 f"Chart zoom: a graph pans and zooms both ways, received {shown(zoom)}; "
                 "use zoom=True or zoom='xy'"
             )
         if brush not in (None, "lasso"):
-            raise ValueError(
+            raise ChartError(
                 f"Chart brush: a graph takes only a lasso, received {shown(brush)}; "
                 "use brush='lasso'"
             )
@@ -6626,7 +7046,7 @@ def _check_alone(settings: Mapping[str, Any], kind: str) -> None:
         else ("zoom", "pan", "brush", "limits", "sync"),
     )
     if used is not None:
-        raise ValueError(f"Chart {used}: a {kind} has no x axis to act on; drop {_dropped(used)}")
+        raise ChartError(f"Chart {used}: a {kind} has no x axis to act on; drop {_dropped(used)}")
 
 
 def _check_subplots(settings: Mapping[str, Any], layouts: Sequence[Mapping[str, Any]]) -> None:
@@ -6646,7 +7066,7 @@ def _check_subplots(settings: Mapping[str, Any], layouts: Sequence[Mapping[str, 
     options = ("zoom", "pan", "brush", "limits", "sync")
     used = _x_option(settings, tuple(name for name in options if not takes.get(name, False)))
     if used is not None:
-        raise ValueError(
+        raise ChartError(
             f"Chart {used}: every panel draws a {_method(layouts[0]['type'])} or another mark "
             f"without axes, so no panel has an x axis; drop {_dropped(used)}"
         )
@@ -6660,46 +7080,40 @@ def _x_option(settings: Mapping[str, Any], options: Sequence[str]) -> str | None
     return used or ("x seams" if seams not in (None, False) else None)
 
 
-def check_y_zoom(settings: Mapping[str, Any], *, right: bool, subplots: bool = False) -> None:
-    """Refuses, as the browser does, zooming along y in charts whose facet panels
-    have y scales of their own (y's scope), or with marks on the right axis
-    (``right``), right y scales of their own (y_right's scope): a y zoom moves
-    both axes through the same pixels, in every panel. Subplots refuse y zoom
-    on their own (see `_check_subplot_ranges`)."""
-    for name in ("zoom", "pan"):
-        value = settings.get(name)
-        if value not in ("y", "xy") or subplots:
-            continue
-        if scope_of(settings, "y", subplots=False) != "chart":
-            raise ValueError(
-                f"Chart {name}: charts whose panels have y scales of their own (y scope) "
-                f"{name} along x only; received {shown(value)}"
-            )
-        if right and scope_of(settings, "y_right", subplots=False) != "chart":
-            raise ValueError(
-                f"Chart {name}: charts whose panels have right y scales of their own "
-                f"(y_right scope) {name} along x only; received {shown(value)}"
-            )
-
-
 def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
     """The spec's chart options from Chart's keyword arguments; unset ones are left out."""
     tooltip = settings["tooltip"]
     animation = settings["animation"]
-    interaction = {
+    for name in ("width", "height"):
+        _size(settings[name], f"Chart {name}")
+    if not (
+        tooltip is None
+        or isinstance(tooltip, (bool, Tooltip))
+        or (isinstance(tooltip, str) and tooltip in get_args(TooltipMode))
+    ):
+        raise ChartError(
+            'Chart tooltip: expected True, False, "nearest-x", "nearest-y", "nearest", or an '
+            f"hg.Tooltip; received {shown(tooltip)}"
+        )
+    choice_option(settings["renderer"], ("auto", "svg", "canvas"), "Chart renderer")
+    if isinstance(settings["theme"], str):
+        choice_option(settings["theme"], get_args(ThemeName), "Chart theme")
+    _flag(settings.get("rotate"), "Chart rotate")
+    _flag(settings.get("drag"), "Chart drag")
+    interaction: dict[str, Any] = {
         key: value
         for key, value in {
-            "zoom": settings["zoom"] or None,
-            "brush": settings["brush"],
-            "bindings": bindings_spec(settings.get("bindings"), "Chart bindings"),
-            "limits": limits_spec(settings.get("limits"), "Chart limits"),
-            "sync": sync_spec(settings["sync"], "Chart sync"),
+            "zoom": preset_spec(settings["zoom"], _CHART.field("zoom")) or None,
+            "brush": brush_spec(settings["brush"], _CHART.field("brush")),
+            "bindings": bindings_spec(settings.get("bindings"), _CHART.field("bindings")),
+            "limits": limits_spec(settings.get("limits"), _CHART.field("limits")),
+            "sync": sync_spec(settings["sync"], _CHART.field("sync")),
         }.items()
         if value
     }
     # False pans nothing, where zoom would.
     if settings.get("pan") is not None:
-        interaction["pan"] = settings["pan"]
+        interaction["pan"] = preset_spec(settings["pan"], _CHART.field("pan"))
     # Dragging turns 3D charts unless asked not to.
     if settings.get("rotate") is False:
         interaction["rotate"] = False
@@ -6725,29 +7139,31 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
         "description": settings["description"],
         "width": settings["width"],
         "height": settings["height"],
-        "x": located("x", lambda: _axis(settings["x"])),
-        "y": located("y", lambda: _axis(settings["y"], "Chart y")),
-        "yRight": located("y_right", lambda: _axis(settings["y_right"], "Chart y_right")),
-        "legend": located("legend", lambda: legend_spec(settings["legend"])),
+        "x": _axis(settings["x"]),
+        "y": _axis(settings["y"], "Chart y"),
+        "yRight": _axis(settings["y_right"], "Chart y_right"),
+        "legend": located("legend", lambda: legend_spec(settings["legend"]), "LegendOptions"),
         "scales": located("scales", lambda: scales_spec(settings.get("scales"))),
         "guides": located("guides", lambda: guides_spec(settings.get("guides"))),
-        "padding": insets(settings.get("padding"), "Chart padding"),
+        "padding": insets(settings.get("padding"), _CHART.field("padding")),
         "tooltip": tooltip
         if tooltip is None or isinstance(tooltip, bool)
-        else tooltip._spec()
+        else located("tooltip", tooltip._spec, "Tooltip", "Chart tooltip")
         if isinstance(tooltip, Tooltip)
         else {"mode": tooltip},
         "interaction": interaction or None,
-        "animation": _animation(animation),
+        "animation": located("animation", lambda: _animation(animation), "Animation"),
         "renderer": settings["renderer"],
-        "theme": theme_spec(settings["theme"]),
+        "theme": located("theme", lambda: theme_spec(settings["theme"])),
         "locale": settings["locale"],
         "timeZone": settings["time_zone"],
-        "projection": _projection(settings.get("projection")),
-        "z": located("z", lambda: _axis(settings.get("z"), "Chart z")),
-        "camera": _camera(settings.get("camera")),
+        "projection": located("projection", lambda: _projection(settings.get("projection"))),
+        "z": _axis(settings.get("z"), "Chart z"),
+        "camera": located("camera", lambda: _camera(settings.get("camera"))),
         "boxAspect": _box_aspect(settings.get("box_aspect")),
-        "navigator": _navigator(settings.get("navigator")),
+        "navigator": located(
+            "navigator", lambda: _navigator(settings.get("navigator")), "Navigator"
+        ),
     }
     return {key: value for key, value in options.items() if value is not None}
 
@@ -6838,7 +7254,7 @@ def _convertible(columns: _Columns) -> str:
             errors.append(error)
             continue
         return name
-    raise ValueError(
+    raise ChartError(
         "derive: counting the rows of this data needs one column of numbers, strings, "
         f"or dates; column {columns.names[0]!r} holds unsupported values"
     ) from errors[0]
@@ -6847,7 +7263,7 @@ def _convertible(columns: _Columns) -> str:
 def _left_along_y(mark: str, along: Orient, axis: str | None) -> None:
     """Lines and areas along y use the left axis, as horizontal bars do."""
     if along == "y" and axis == "right":
-        raise ValueError(
+        raise ChartError(
             f"{mark} axis: {mark}s along y use the left axis, as horizontal bars do; "
             'drop axis="right"'
         )
@@ -6856,7 +7272,7 @@ def _left_along_y(mark: str, along: Orient, axis: str | None) -> None:
 def _clip(clip: Clip | None, mark: str) -> Clip | None:
     """A mark's ``clip``: what its drawing is cut to."""
     if not (clip is None or clip is False or clip in ("plot", "chart")):
-        raise ValueError(f'{mark} clip: expected "plot", "chart", or False; received {shown(clip)}')
+        raise ChartError(f'{mark} clip: expected "plot", "chart", or False; received {shown(clip)}')
     return clip
 
 
@@ -6864,7 +7280,7 @@ def _mark_facet(facet: str | None, mark: str) -> str | None:
     """A mark's ``facet``: None, or ``"repeat"`` to draw all its rows in every
     facet panel instead of splitting them by the facet fields."""
     if facet not in (None, "repeat"):
-        raise ValueError(f'{mark} facet: expected "repeat" or None; received {shown(facet)}')
+        raise ChartError(f'{mark} facet: expected "repeat" or None; received {shown(facet)}')
     return facet
 
 
@@ -6895,9 +7311,9 @@ def _check_size(radius: float | None, size: str | None, mark: str) -> None:
     """Refuses a radius that is not a positive number of pixels, or a radius
     with a size column."""
     if radius is not None and size is not None:
-        raise ValueError(f"{mark} radius: a constant radius or a size column, not both; drop one")
+        raise ChartError(f"{mark} radius: a constant radius or a size column, not both; drop one")
     if radius is not None and not (_finite(radius) and radius > 0):
-        raise ValueError(
+        raise ChartError(
             f"{mark} radius: expected a positive number of pixels; received {shown(radius)}"
         )
 
@@ -6906,9 +7322,9 @@ def _check_spokes(spokes: int, option: str, what: str) -> None:
     """Refuses a radar of too few spokes to make a polygon, or too many to read;
     `what` says what makes them, as in "'k' has"."""
     if spokes < 3:
-        raise ValueError(f"radar {option}: needs at least 3 spokes; {what} {spokes}")
+        raise ChartError(f"radar {option}: needs at least 3 spokes; {what} {spokes}")
     if spokes > 100:
-        raise ValueError(f"radar {option}: draws at most 100 spokes; {what} {spokes}")
+        raise ChartError(f"radar {option}: draws at most 100 spokes; {what} {spokes}")
 
 
 def table_name(index: int) -> str:
@@ -6992,6 +7408,26 @@ def _feature_fields(spec: dict[str, Any]) -> set[str]:
     return fields
 
 
+def _read(source: _Columns, field: str, role: str, path: str | None = None) -> Column:
+    """Column `field` of `source`, its values refused at the option reading
+    it (``line y: column 'v': expected numbers, ...``)."""
+    try:
+        return source.column(field)
+    except ChartError as error:
+        problem = str(error).removeprefix(f"Column {field!r}: ")
+        raise ChartError(f"{role}: column {field!r}: {problem}", path=path) from None
+
+
+def _part_fields(label: Any) -> list[tuple[int, Any]]:
+    """The columns a label's parts name, by the parts' places in its content."""
+    content = label.get("content") if isinstance(label, dict) else None
+    return [
+        (i, part["field"])
+        for i, part in enumerate(content or ())
+        if isinstance(part, dict) and part.get("field") is not None
+    ]
+
+
 def _label_fields(spec: dict[str, Any]) -> set[str]:
     """The columns a mark's labels read: their field, and their parts'."""
     fields: set[str] = set()
@@ -7068,7 +7504,15 @@ def _check_panel(panel: Any, at: str) -> None:
     for name in ("x", "y", "y_right"):
         _check_axis_dict(getattr(panel, name, None), f"{at}.{name}")
     if isinstance(panel, Panel):
-        located(at, panel._spec)
+        with refusing(("Panel",), _PANEL_OPTIONS, at):
+            panel._spec()
+
+
+#: What a panel takes, as refusals name it (``Panel zoom: ...``).
+_PANEL_OPTIONS = frozenset(
+    ("id", "title", "x", "y", "y_right", "camera", "style")
+    + ("zoom", "pan", "brush", "bindings", "limits")
+)
 
 
 def _check_scale_dicts(scales: Any) -> None:
@@ -7096,23 +7540,31 @@ def _check_scale_dicts(scales: Any) -> None:
 def _axis(
     axis: AxisOptions | dict[str, Any] | None, role: str = "Chart x"
 ) -> dict[str, Any] | None:
-    """An axis's spec; `role` is where it was given, as "Chart y" or "Panel x"."""
+    """An axis's spec; `role` is where it was given, as "Chart y" or "Panel
+    x", refused within the chart or the panel."""
     if axis is None:
         return None
+    owner, _, option = role.partition(" ")
+    at = Role(owner).field(option)
     if isinstance(axis, dict):
-        axis = AxisOptions(**axis)
+        given = axis
+        axis = located(at, lambda: _built(given, AxisOptions, role))
+    if not isinstance(axis, AxisOptions):
+        raise at.error(
+            f"expected an hg.AxisOptions or a dict of its options; received {shown(axis)}"
+        )
     if role != "Chart x" and axis.breaks is not None:
-        raise ValueError(f"{role} breaks: only the chart's x axis takes breaks; drop them")
+        raise at.field("breaks").error("only the chart's x axis takes breaks; drop them")
     if role != "Chart x" and axis.seams is not None:
-        raise ValueError(f"{role} seams: only the chart's x axis takes seams; drop them")
+        raise at.field("seams").error("only the chart's x axis takes seams; drop them")
     if role == "Chart z" and axis.style is not None:
-        raise ValueError("Chart z style: a 3D chart's axes take the theme's styles; drop style")
+        raise at.field("style").error("a 3D chart's axes take the theme's styles; drop style")
     for name in ("scope", "repeat"):
         if role not in ("Chart x", "Chart y", "Chart y_right") and getattr(axis, name) is not None:
-            raise ValueError(
-                f"{role} {name}: only the chart's x, y, and y_right take {name}; move it there"
+            raise at.field(name).error(
+                f"only the chart's x, y, and y_right take {name}; move it there"
             )
-    return axis._spec() or None
+    return located(at, axis._spec) or None
 
 
 def axis_scope(settings: Mapping[str, Any], axis: str) -> Any:
@@ -7145,9 +7597,20 @@ def _projection(projection: Any) -> Any:
     if projection is None:
         return None
     if isinstance(projection, str):
+        # A name alone is the option itself.
+        if projection not in PROJECTIONS:
+            raise ChartError(
+                f"Chart projection: expected {listed(PROJECTIONS)}, or an hg.Projection; "
+                f"received {shown(projection)}"
+            )
         projection = Projection(projection)  # type: ignore[arg-type]
-    elif isinstance(projection, dict):
-        projection = Projection(**projection)
+    elif isinstance(projection, Mapping):
+        projection = _built(projection, Projection, "Chart projection")
+    if not isinstance(projection, Projection):
+        raise ChartError(
+            "Chart projection: expected a projection's name, an hg.Projection, or a dict of its "
+            f"fields; received {shown(projection)}"
+        )
     return projection._spec()
 
 
@@ -7158,7 +7621,7 @@ def _animation(animation: Any) -> bool | dict[str, Any] | None:
     if isinstance(animation, Animation):
         return animation._spec()
     if not (_finite(animation) and animation >= 0):
-        raise ValueError(
+        raise ChartError(
             "Chart animation: expected True, False, milliseconds of at least 0, or an "
             f"hg.Animation; received {shown(animation)}"
         )
@@ -7171,10 +7634,10 @@ def _navigator(navigator: Any) -> bool | dict[str, Any] | None:
         return None
     if navigator is True:
         return True
-    if isinstance(navigator, dict):
-        navigator = Navigator(**navigator)
+    if isinstance(navigator, Mapping):
+        navigator = _built(navigator, Navigator, "Chart navigator")
     if not isinstance(navigator, Navigator):
-        raise TypeError(
+        raise ChartError(
             "Chart navigator: expected True, False, an hg.Navigator, or a dict of its fields; "
             f"received {shown(navigator)}"
         )
@@ -7187,11 +7650,11 @@ def _camera(
     """A camera's spec from a Camera or a dict of its fields."""
     if camera is None:
         return None
-    given = set(camera) if partial and isinstance(camera, dict) else None
-    if isinstance(camera, dict):
-        camera = Camera(**camera)
+    given = set(camera) if partial and isinstance(camera, Mapping) else None
+    if isinstance(camera, Mapping):
+        camera = _built(camera, Camera, name)
     if not isinstance(camera, Camera):
-        raise TypeError(
+        raise ChartError(
             f"{name}: expected an hg.Camera or a dict of its fields; received {shown(camera)}"
         )
     spec = camera._spec()
@@ -7208,25 +7671,38 @@ def _box_aspect(aspect: Any) -> list[float] | None:
     except (TypeError, ValueError):
         sides = []
     if len(sides) != 3 or not all(0 < side < math.inf for side in sides):
-        raise ValueError(
+        raise ChartError(
             f"Chart box_aspect: expected three positive lengths; received {shown(aspect)}"
         )
     return sides
 
 
-def _matrix_of(values: Any, x: Any, y: Any, name: str, mark: str) -> Matrix:
-    """A 2D array of values as a matrix: row i, column j at ``y[i]``, ``x[j]``
-    (positions 0, 1, 2, ... without them), in columns "x", "y", and `name`."""
-    grid = np.asarray(values, dtype=np.float64)
+def _grid_of(values: Any, mark: str, option: str) -> np.ndarray:
+    """A 2D array of numbers, given as the mark's `option`."""
+    try:
+        grid = np.asarray(values, dtype=np.float64)
+    except (TypeError, ValueError):
+        raise ChartError(
+            f"{mark} {option}: expected a 2D matrix of numbers, rows of equal length; "
+            f"received {type(values).__name__}"
+        ) from None
     if grid.ndim != 2:
-        raise ValueError(f"{mark} {name}: expected a 2D matrix; received shape {grid.shape}")
+        raise ChartError(f"{mark} {option}: expected a 2D matrix; received shape {grid.shape}")
+    return grid
+
+
+def _matrix_of(values: Any, x: Any, y: Any, name: str, mark: str, option: str) -> Matrix:
+    """A 2D array of values, given as the mark's `option`, as a matrix: row
+    i, column j at ``y[i]``, ``x[j]`` (positions 0, 1, 2, ... without
+    them), in columns "x", "y", and `name`."""
+    grid = _grid_of(values, mark, option)
     rows, columns = grid.shape
 
     def positions(given: Any, count: int, axis: str) -> Any:
         if given is None:
             return np.arange(count, dtype=np.float64)
         if isinstance(given, str):
-            raise TypeError(
+            raise ChartError(
                 f"{mark} {axis}: expected positions along the {name} matrix; "
                 f"received the column name {shown(given)}"
             )
@@ -7234,7 +7710,7 @@ def _matrix_of(values: Any, x: Any, y: Any, name: str, mark: str) -> Matrix:
         if array.ndim != 1 or len(array) != count:
             side = "column" if axis == "x" else "row"
             received = len(array) if array.ndim == 1 else f"an array of shape {array.shape}"
-            raise ValueError(
+            raise ChartError(
                 f"{mark} {axis}: expected {count} values, one per matrix {side}; "
                 f"received {received}"
             )
@@ -7270,7 +7746,7 @@ def _geometry_column(source: Any, columns: Any) -> str:
     for name in ("geometry", active):
         if name is not None and name in columns.names:
             return name
-    raise ValueError(
+    raise ChartError(
         'geoshape geometry: the data has no "geometry" column; name the column holding the shapes'
     )
 
@@ -7283,13 +7759,13 @@ class _JoinedShapes:
 
     def __init__(self, chart: Chart, table: int, geojson: Any, locations: str, key: str) -> None:
         if table in chart._derived:
-            raise ValueError(
+            raise ChartError(
                 "geoshape data: joins the rows of a table to the shapes, and a derived table's "
                 "rows are computed in the browser; join before deriving"
             )
         interface = getattr(geojson, "__geo_interface__", geojson)
         if not _geo.is_feature_collection(interface):
-            raise TypeError(
+            raise ChartError(
                 "geoshape geojson: expected a GeoJSON FeatureCollection; "
                 f"received {type(geojson).__name__}"
             )
@@ -7314,10 +7790,13 @@ class _JoinedShapes:
     def rejoin(self, source: _Columns) -> _Joined:
         """The features joined with the rows of `source`."""
         if self._locations not in source.names:
-            raise KeyError(f"geoshape locations: the rows have no column {self._locations!r}")
+            raise ChartError(
+                f"geoshape locations: the rows have no column {self._locations!r}",
+                code="unknown-field",
+            )
         located = source.column(self._locations)
         if located.kind not in ("category", "number"):
-            raise TypeError(
+            raise ChartError(
                 f"geoshape locations: column {self._locations!r} holds {located.kind} values; "
                 "expected category or number"
             )
@@ -7332,7 +7811,7 @@ class _JoinedShapes:
             if text is None:
                 continue
             if text in row_of:
-                raise ValueError(
+                raise ChartError(
                     f"geoshape locations: {shown(text)} names a feature twice; "
                     "aggregate the rows to one per feature"
                 )
@@ -7340,13 +7819,13 @@ class _JoinedShapes:
         keys = self._keys
         rows = np.array([-1 if k is None else row_of.get(k, -1) for k in keys], dtype=np.intp)
         if values and not (rows >= 0).any():
-            raise ValueError(
+            raise ChartError(
                 f"geoshape locations: no value of {self._locations!r} matches a feature's "
                 f"{self._key} (features: {keys[:3]!r}; rows: "
                 f"{[_geo.key_text(v) for v in values[:3]]!r}); check feature_id_key"
             )
         if "geometry" in source.names:
-            raise ValueError(
+            raise ChartError(
                 'geoshape data: has a column named "geometry", as the joined shapes are; rename it'
             )
         return _Joined(source, rows, self._shapes)
@@ -7392,11 +7871,20 @@ def _colors(colors: str | Sequence[str] | None, role: str) -> str | list[str] | 
     """A scheme name, checked, or a list of colors."""
     if isinstance(colors, str):
         if colors not in SCHEMES:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: unknown scheme {shown(colors)}; name one of {listed(SCHEMES)}"
             )
         return colors
-    return list(colors) if colors is not None else None
+    if colors is None:
+        return None
+    if not listlike(colors):
+        raise ChartError(
+            f"{role}: expected a scheme's name or a list of colors; received {shown(colors)}"
+        )
+    for i, color in enumerate(colors):
+        if not isinstance(color, str):
+            raise ChartError(f"{role}[{i}]: expected a color; received {shown(color)}")
+    return list(colors)
 
 
 def _range(
@@ -7405,13 +7893,20 @@ def _range(
     """Two finite ascending numbers, at least ``minimum``, as a list."""
     if values is None:
         return None
-    low, high = (float(v) for v in values)
-    if not (math.isfinite(low) and math.isfinite(high) and minimum <= low < high):
-        bound = "" if minimum == -math.inf else f", from {minimum:g} up"
-        raise ValueError(
+    bound = "" if minimum == -math.inf else f", from {minimum:g} up"
+    try:
+        low, high = values
+        if not all(_finite(v) for v in (low, high)):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ChartError(
+            f"{role}: expected two finite numbers, ascending{bound}; received {shown(values)}"
+        ) from None
+    if not minimum <= low < high:
+        raise ChartError(
             f"{role}: expected two finite numbers, ascending{bound}; received {values!r}"
         )
-    return [low, high]
+    return [float(low), float(high)]
 
 
 _SIDES = ("top", "right", "bottom", "left")
@@ -7525,20 +8020,24 @@ def _sides(value: Any, role: str) -> list[str] | None:
     """Sides of a rectangle, each once, such as those its outline draws."""
     if value is None:
         return None
-    if isinstance(value, str) or not isinstance(value, Sequence) or len(set(value)) != len(value):
-        raise ValueError(
+    if not listlike(value):
+        raise ChartError(
             f'{role}: expected sides, each once, such as ["top", "bottom"]; received {shown(value)}'
         )
     for side in value:
-        if side not in _SIDES:
-            raise ValueError(f"{role}: expected {listed(_SIDES)}; received {shown(side)}")
+        if not isinstance(side, str) or side not in _SIDES:
+            raise ChartError(f"{role}: expected {listed(_SIDES)}; received {shown(side)}")
+    if len(set(value)) != len(value):
+        raise ChartError(
+            f'{role}: expected sides, each once, such as ["top", "bottom"]; received {shown(value)}'
+        )
     return list(value)
 
 
 def _mark_legend(legend: Any, mark: str) -> Literal[False] | None:
     """A mark's ``legend``: ``False`` leaves it out of the chart's legends."""
     if legend is not None and legend is not False:
-        raise ValueError(
+        raise ChartError(
             f"{mark} legend: expected False, which leaves the mark out of the legends; "
             f"received {shown(legend)}"
         )
@@ -7547,7 +8046,13 @@ def _mark_legend(legend: Any, mark: str) -> Literal[False] | None:
 
 def _finite(value: Any) -> bool:
     """A real, finite number; booleans are not numbers here."""
-    return isinstance(value, numbers.Real) and not isinstance(value, bool) and math.isfinite(value)
+    return is_number(value) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _size(value: Any, role: str) -> None:
+    """Refuses a chart's width or height unless a positive number of pixels."""
+    if value is not None and not (_finite(value) and value > 0):
+        raise ChartError(f"{role}: expected a positive number of pixels; received {shown(value)}")
 
 
 def _gauge_bands(
@@ -7556,24 +8061,28 @@ def _gauge_bands(
     """Gauge bands as the spec takes them, checked as the engine checks them."""
     if bands is None:
         return None
+    if not listlike(bands):
+        raise ChartError(
+            f"gauge bands: expected a list of numbers or (to, color) pairs; received {shown(bands)}"
+        )
     out: list[dict[str, Any]] = []
     previous = low
     for band in bands:
         if isinstance(band, (tuple, list)):
             if len(band) != 2:
-                raise ValueError(
+                raise ChartError(
                     f"gauge bands: expected numbers or (to, color) pairs; received {shown(band)}"
                 )
             to, color = band
         else:
             to, color = band, None
         if not (_finite(to) and low < to <= high):
-            raise ValueError(
+            raise ChartError(
                 f"gauge bands: expected ends above min ({low:g}) and at most max ({high:g}); "
                 f"received {shown(to)}"
             )
         if not to > previous:
-            raise ValueError(
+            raise ChartError(
                 f"gauge bands: expected ends in ascending order; received {to:g} after {previous:g}"
             )
         out.append({"to": float(to)} if color is None else {"to": float(to), "color": color})
@@ -7587,12 +8096,12 @@ def _midpoint(
     """A finite color midpoint, inside the color domain when there is one."""
     if midpoint is None:
         return None
-    if not math.isfinite(midpoint):
-        raise ValueError(
+    if not _finite(midpoint):
+        raise ChartError(
             f"{role} color_midpoint: expected a finite number; received {shown(midpoint)}"
         )
     if domain is not None and not domain[0] <= midpoint <= domain[1]:
-        raise ValueError(
+        raise ChartError(
             f"{role} color_midpoint: expected a value inside color_domain {domain!r}; "
             f"received {midpoint!r}"
         )
@@ -7601,7 +8110,7 @@ def _midpoint(
 
 def _flag(value: Any, role: str) -> bool | None:
     if value is not None and not isinstance(value, bool):
-        raise TypeError(f"{role}: expected True or False; received {shown(value)}")
+        raise ChartError(f"{role}: expected True or False; received {shown(value)}")
     return value
 
 
@@ -7663,28 +8172,56 @@ def helper(function: Callable[_P, _R]) -> Callable[_P, _R]:
     def checked(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         for name in kwargs:
             if name not in known:
-                raise TypeError(_unknown_option(function, name, known))
+                raise UnknownOption(_unknown_option(function, name, known))
         tooltip = kwargs.get("tooltip")
-        if not rows and isinstance(tooltip, Tooltip) and tooltip.fields is not None:
-            raise ValueError(
-                f"{function.__name__} tooltip fields: "
-                + (
-                    "express charts draw tables they compute, without the data's other "
-                    "columns; draw the chart with hg.Chart and give fields to its marks"
-                    if express
-                    else "its points summarize rows, so they have no row's fields to show; "
-                    "drop fields"
+        with refusing((function.__name__,), known):
+            if not rows and isinstance(tooltip, Tooltip) and tooltip.fields is not None:
+                raise (
+                    Role(function.__name__)
+                    .field("tooltip")
+                    .field("fields")
+                    .error(
+                        "express charts draw tables they compute, without the data's other "
+                        "columns; draw the chart with hg.Chart and give fields to its marks"
+                        if express
+                        else "its points summarize rows, so they have no row's fields to show; "
+                        "drop fields"
+                    )
                 )
-            )
-        return function(*args, **kwargs)
+            try:
+                return function(*args, **kwargs)
+            except ChartError as error:
+                raise _helper_axis(error, function.__name__) from None
 
     return checked
 
 
-#: Helpers whose mark's points are rows of the data, which tooltip fields read.
+def _helper_axis(error: ChartError, name: str) -> ChartError:
+    """A refusal of a helper's chart's ``x``, ``y``, or ``z`` (see
+    `_chart_of`) as the helper ``name`` takes it, as ``x_axis``."""
+    path = error.path or ""
+    axis = re.split(r"[.\[]", path, maxsplit=1)[0]
+    if axis not in ("x", "y", "z"):
+        return error
+    message = str(error)
+    if re.match(rf"Chart {axis}[ :]", message):
+        message = f"{name} {axis}_axis{message[len(f'Chart {axis}') :]}"
+    refused = ChartError(
+        message,
+        code=error.code,
+        path=f"{axis}_axis{path[len(axis) :]}",
+        mark=error.mark,
+        panel=error.panel,
+        phase=error.phase,
+    )
+    return refused
+
+
+#: Helpers whose mark's points or items are rows of the data, which tooltip fields read.
 _ROW_HELPERS = frozenset(
     ("line", "area", "bar", "scatter", "scatter_3d", "line_3d", "heatmap")
-    + ("choropleth", "scatter_geo", "candlestick")
+    + ("choropleth", "scatter_geo", "candlestick", "surface", "radar", "gauge")
+    + ("pie", "funnel", "treemap", "sunburst", "sankey")
 )
 
 
@@ -7706,7 +8243,11 @@ def _unknown_option(function: Callable[..., Any], name: str, known: set[str]) ->
         else f"see help({where}.{help_name}) for the options it takes"
     )
     if name == "zorder":
-        hint = "marks draw in the order given; add the mark later to draw it on top"
+        hint = (
+            "did you mean 'z_index'? marks draw in the order given, or by z_index"
+            if "z_index" in known
+            else "marks draw in the order given; add the mark later to draw it on top"
+        )
     elif name == "color" and method and not constructor:
         # Marks without color choose theirs: by series, by category, or one of their own.
         hint = (
@@ -7767,7 +8308,7 @@ def line(
     stroke_opacity: float | None = None,
     encode: Encodings | Mapping[str, Any] | None = None,
     style: MarkStyle | Mapping[str, Any] | None = None,
-    markers: bool | str | None = None,
+    markers: bool | SymbolName | None = None,
     continuity: Continuity | Mapping[str, Any] | None = None,
     where: Expr | None = None,
     curve: Curve | None = None,
@@ -8129,7 +8670,8 @@ def surface(
         hg.surface(df, x="east", y="north", z="height")
         hg.surface(z=heights, x=eastings, y=northings)
     """
-    return _chart_of(data, options).surface(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.surface(
         x,
         y,
         z,
@@ -8141,6 +8683,7 @@ def surface(
         shading=shading,
         wireframe=wireframe,
         label=label,
+        tooltip=tooltip,
         panel=panel,
         id=id,
     )
@@ -8256,22 +8799,22 @@ def _thresholds(thresholds: Any, bands: bool) -> int | list[float] | None:
     """A contour's thresholds as the spec takes them: a count, or increasing values."""
     if thresholds is None:
         return None
-    if isinstance(thresholds, numbers.Real) and not isinstance(thresholds, (bool, np.bool_)):
+    if is_number(thresholds) and not isinstance(thresholds, (bool, np.bool_)):
         count = float(thresholds) if _finite(thresholds) else math.nan
         if not (count.is_integer() and 1 <= count <= 1000):
-            raise ValueError(
+            raise ChartError(
                 "contour thresholds: expected a whole number from 1 to 1000, or values; "
                 f"received {shown(thresholds)}"
             )
         return int(count)
-    if not isinstance(thresholds, (Sequence, np.ndarray)) or isinstance(thresholds, (str, bytes)):
-        raise ValueError(
+    if not listlike(thresholds):
+        raise ChartError(
             "contour thresholds: expected a count or a list of values; "
             f"received {shown(thresholds)}"
         )
     least = 2 if bands else 1
     if not least <= len(thresholds) <= 1000:
-        raise ValueError(
+        raise ChartError(
             f"contour thresholds: expected {least} to 1000 values"
             + (", a band between each two" if bands else "")
             + f"; received {len(thresholds)}"
@@ -8279,11 +8822,11 @@ def _thresholds(thresholds: Any, bands: bool) -> int | list[float] | None:
     values: list[float] = []
     for i, value in enumerate(thresholds):
         if not _finite(value):
-            raise ValueError(
+            raise ChartError(
                 f"contour thresholds[{i}]: expected a finite number; received {shown(value)}"
             )
         if values and not float(value) > values[-1]:
-            raise ValueError(
+            raise ChartError(
                 f"contour thresholds[{i}]: expected a value above {values[-1]:g}, the one "
                 f"before; received {float(value):g}"
             )
@@ -8296,13 +8839,13 @@ def _sampling(sampling: Any) -> dict[str, str] | None:
     if sampling is None:
         return None
     if not isinstance(sampling, Mapping) or set(sampling) - {"reduce"}:
-        raise ValueError(
+        raise ChartError(
             'heatmap sampling: expected {"reduce": "mean", "max", or "min"}; '
             f"received {shown(sampling)}"
         )
     reduce = sampling.get("reduce")
     if reduce not in (None, "mean", "max", "min"):
-        raise ValueError(
+        raise ChartError(
             f'heatmap sampling reduce: expected "mean", "max", or "min"; received {shown(reduce)}'
         )
     return {"reduce": reduce} if reduce is not None else {}
@@ -8315,9 +8858,9 @@ def _bins_2d(bins: Any) -> Any:
     if isinstance(bins, Mapping) and "step" not in bins:
         unknown = set(bins) - {"x", "y"}
         if unknown:
-            raise ValueError(
+            raise ChartError(
                 "histogram bins: a 2D histogram's bins are one definition or "
-                f'{{"x": ..., "y": ...}}; received {", ".join(map(repr, sorted(unknown)))}'
+                f'{{"x": ..., "y": ...}}; received {keys_shown(unknown)}'
             )
         # Axes left out take their default bins; with neither, so do both.
         each = {
@@ -8335,7 +8878,7 @@ def histogram(
     x: str | None = None,
     *,
     y: str | None = None,
-    bins: BinSpec | Mapping[str, BinSpec] | None = None,
+    bins: BinSpec | BinsByAxis | None = None,
     series: str | None = None,
     color: str | None = None,
     weight: str | None = None,
@@ -8401,12 +8944,14 @@ def pie(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A pie, or with ``inner_radius`` a donut, of ``value`` per ``category``."""
-    return _chart_of(data, options).pie(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.pie(
         category,
         value,
         inner_radius=inner_radius,
         sort=sort,
         labels=labels,
+        tooltip=tooltip,
         panel=panel,
         id=id,
     )
@@ -8427,13 +8972,15 @@ def gauge(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A gauge of the last finite value of ``value``, on a dial from ``min`` to ``max``."""
-    return _chart_of(data, options).gauge(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.gauge(
         value,
         min=min,
         max=max,
         bands=bands,
         label=label,
         format=format,
+        tooltip=tooltip,
         panel=panel,
         id=id,
     )
@@ -8453,11 +9000,13 @@ def funnel(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A funnel of ``value`` (or row counts) per stage of ``category``, top to bottom."""
-    return _chart_of(data, options).funnel(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.funnel(
         category,
         value,
         sort=sort,
         labels=labels,
+        tooltip=tooltip,
         panel=panel,
         halo=halo,
         id=id,
@@ -8536,6 +9085,7 @@ def boxen(
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
+    z_index: float | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8556,6 +9106,7 @@ def boxen(
         axis=axis,
         panel=panel,
         clip=clip,
+        z_index=z_index,
         id=id,
     )
 
@@ -8615,12 +9166,14 @@ def treemap(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A treemap of a tree given by ``path`` columns, or ``node`` and ``parent``."""
-    return _chart_of(data, options).treemap(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.treemap(
         path,
         value,
         node=node,
         parent=parent,
         labels=labels,
+        tooltip=tooltip,
         panel=panel,
         id=id,
     )
@@ -8640,12 +9193,14 @@ def sunburst(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A sunburst of a tree given by ``path`` columns, or ``node`` and ``parent``."""
-    return _chart_of(data, options).sunburst(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.sunburst(
         path,
         value,
         node=node,
         parent=parent,
         labels=labels,
+        tooltip=tooltip,
         panel=panel,
         id=id,
     )
@@ -8669,7 +9224,8 @@ def radar(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A radar of ``value`` per ``category``, or of the columns ``fields`` per row."""
-    return _chart_of(data, options).radar(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.radar(
         category,
         value,
         fields=fields,
@@ -8678,6 +9234,7 @@ def radar(
         fill_opacity=fill_opacity,
         points=points,
         label=label,
+        tooltip=tooltip,
         panel=panel,
         halo=halo,
         id=id,
@@ -8700,13 +9257,15 @@ def sankey(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A Sankey diagram of flows from ``source`` to ``target``, sized by ``value``."""
-    return _chart_of(data, options).sankey(
+    chart, tooltip = _rows_chart_of(data, options)
+    return chart.sankey(
         source,
         target,
         value,
         labels=labels,
         node_width=node_width,
         sort=sort,
+        tooltip=tooltip,
         panel=panel,
         halo=halo,
         id=id,
@@ -8727,7 +9286,7 @@ def graph(
     labels: bool | None = None,
     directed: bool | None = None,
     link_label_field: str | None = None,
-    layout: Literal["force", "circular", "layered"] | Mapping[str, Any] | None = None,
+    layout: GraphLayout | None = None,
     panel: str | None = None,
     halo: HaloOption | None = None,
     id: str | None = None,

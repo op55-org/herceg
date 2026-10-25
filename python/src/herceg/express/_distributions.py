@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import math
-import numbers
 import sys
 import warnings
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict, cast
 
 import numpy as np
 
 from .. import _data as hg_data
 from .._chart import _AREA_CHANNELS, _LINE_CHANNELS, AxisOptions, Chart, HelperOptions
-from .._data import Column
+from .._data import Column, listlike
 from .._encoding import Encodings, SeriesLabels
-from .._errors import ChartError
+from .._errors import ChartError, Role, is_number, listed, located
 from . import _numerics as numerics
 from ._common import (
     ExpressOptions,
@@ -35,6 +34,7 @@ from ._common import (
     make_chart,
     number_column,
     readable,
+    real,
     record,
     rows_table,
     shown,
@@ -80,6 +80,10 @@ class KdeOptions(TypedDict, total=False):
     clip: tuple[float | None, float | None]
 
 
+#: A histogram's bins along one axis: about how many, NumPy's rule, or edges.
+Bins = int | str | Sequence[float]
+
+
 @express
 def histplot(
     data: Any,
@@ -91,10 +95,10 @@ def histplot(
     series_order: Sequence[Any] | None = None,
     weight: str | None = None,
     normalize: Normalize = "count",
-    bins: int | str | Sequence[float] = "auto",
-    binwidth: float | None = None,
-    binrange: tuple[float, float] | None = None,
-    discrete: bool = False,
+    bins: Bins | tuple[Bins, Bins] = "auto",
+    binwidth: float | tuple[float, float] | None = None,
+    binrange: tuple[float, float] | tuple[tuple[float, float], tuple[float, float]] | None = None,
+    discrete: bool | tuple[bool, bool] = False,
     cumulative: bool = False,
     common_norm: bool = False,
     multiple: Multiple = "layer",
@@ -136,6 +140,7 @@ def histplot(
 
     ``z_index`` goes to the histogram, as ``Chart.histogram`` takes it.
     """
+    _check_bins(bins, binwidth, binrange, discrete, y is not None and x is not None)
     marks = mark_options("histplot", z_index=z_index)
     if x is not None and y is not None:
         unused = {
@@ -148,12 +153,12 @@ def histplot(
         }
         given = next((name for name, on in unused.items() if on), None)
         if given == "series":
-            raise ValueError(
+            raise ChartError(
                 "histplot series: a bivariate histplot counts one distribution per panel; "
                 "facet by facet_row or facet_column instead"
             )
         if given is not None:
-            raise ValueError(
+            raise ChartError(
                 f"histplot {given}: for histograms of x or y alone; a bivariate histplot takes "
                 "none, so drop it"
             )
@@ -173,7 +178,7 @@ def histplot(
             marks.z_index,
         )
     if colors is not None:
-        raise ValueError(
+        raise ChartError(
             "histplot colors: colors the cells of a bivariate histplot, of x and y; "
             "bars take palette"
         )
@@ -182,11 +187,11 @@ def histplot(
     check_choice(multiple, "histplot multiple", ("layer", "stack", "dodge", "fill"))
     check_choice(element, "histplot element", tuple(_SHAPES))
     if kde and multiple != "layer":
-        raise ValueError(
+        raise ChartError(
             'histplot kde: kernel densities are drawn over layered bars only; pass multiple="layer"'
         )
     if multiple == "dodge" and element != "bars":
-        raise ValueError(
+        raise ChartError(
             'histplot multiple: "dodge" places bars side by side; pass element="bars", '
             "or another multiple"
         )
@@ -210,7 +215,7 @@ def histplot(
     v = values(column)
     w = values(weights_column) if weights_column is not None else None
     if w is not None and np.any(w[rows] < 0):
-        raise ValueError(
+        raise ChartError(
             f"histplot weight: column {weight!r} holds negative values; "
             "weights count rows, from 0 up"
         )
@@ -236,9 +241,10 @@ def histplot(
             v[rows],
             None if w is None else w[rows],
             bins,  # type: ignore[arg-type]
-            binwidth,
-            binrange,
-            discrete,
+            # One column's: pairs are refused above, unless there are two.
+            cast("float | None", binwidth),
+            cast("tuple[float, float] | None", binrange),
+            bool(discrete),
         )
     else:
         edges = np.array([0.0, 1.0])
@@ -247,7 +253,7 @@ def histplot(
     unequal = not np.allclose(widths, widths[0], rtol=1e-6, atol=0)
     if kde and normalize != "density" and not cumulative and unequal:
         # One curve cannot follow counts over bins of different widths.
-        raise ValueError(
+        raise ChartError(
             "histplot kde: kernel densities cannot follow bars over bins of different "
             'widths; give bins of one width, or normalize="density"'
         )
@@ -300,34 +306,44 @@ def histplot(
         "bins": readable(heights),
     }
     kde_table: dict[str, Column] | None = None
+    if kde_options is not None and not isinstance(kde_options, Mapping):
+        raise ChartError(
+            "histplot kde_options: expected a dict of kdeplot's options; "
+            f"received {shown(kde_options)}"
+        )
+    density_options: KdeOptions = kde_options or {}
+    unknown = set(density_options) - {"bw_method", "bw_adjust", "cut", "grid_size", "clip"}
+    if unknown:
+        raise ChartError(
+            f"histplot kde_options: unknown {', '.join(sorted(map(shown, unknown)))}; "
+            "kde_options takes bw_method, bw_adjust, cut, grid_size, and clip"
+        )
     if kde:
-        density_options: KdeOptions = kde_options or {}
-        unknown = set(density_options) - {"bw_method", "bw_adjust", "cut", "grid_size", "clip"}
-        if unknown:
-            raise ValueError(
-                f"histplot kde_options: unknown {', '.join(sorted(unknown))}; "
-                "kde_options takes bw_method, bw_adjust, cut, grid_size, and clip"
-            )
-        kde_table, note, kde_name = densities(
-            v,
-            variables,
-            rows,
-            name,
-            series,
-            bw_method=density_options.get("bw_method", "scott"),
-            bw_adjust=density_options.get("bw_adjust", 1.0),
-            cut=density_options.get("cut", 0.0),
-            grid_size=density_options.get("grid_size", 200),
-            clip=density_options.get("clip", (None, None)),
-            common_norm=common_norm and grouped and normalize != "count",
-            cumulative=cumulative,
-            scale=lambda members: _hist_norm(
-                v[members], None if w is None else w[members], edges, normalize, cumulative
+        # Its refusals are of kde_options' entries.
+        kde_table, note, kde_name = located(
+            "kde_options",
+            lambda: densities(
+                v,
+                variables,
+                rows,
+                name,
+                series,
+                bw_method=density_options.get("bw_method", "scott"),
+                bw_adjust=density_options.get("bw_adjust", 1.0),
+                cut=density_options.get("cut", 0.0),
+                grid_size=density_options.get("grid_size", 200),
+                clip=density_options.get("clip", (None, None)),
+                common_norm=common_norm and grouped and normalize != "count",
+                cumulative=cumulative,
+                scale=lambda members: _hist_norm(
+                    v[members], None if w is None else w[members], edges, normalize, cumulative
+                ),
+                value_kind=column.kind,
+                role="histplot kde_options",
+                common_grid=True,
+                weights=w,
             ),
-            value_kind=column.kind,
-            role="histplot kde_options",
-            common_grid=True,
-            weights=w,
+            "histplot kde_options",
         )
         sentence += " Lines show " + note + ", scaled to the bars."
         tables["kde"] = readable(kde_table)
@@ -466,7 +482,7 @@ def kdeplot(
     )
     for name, given in (("levels", levels), ("thresh", thresh)):
         if given is not None:
-            raise ValueError(
+            raise ChartError(
                 f"kdeplot {name}: sets the contours of a bivariate density, of x and y; drop it"
             )
     axis, name = _one_axis(x, y, "kdeplot")
@@ -498,7 +514,7 @@ def kdeplot(
         bw_adjust=bw_adjust,
         cut=cut,
         grid_size=grid_size,
-        clip=clip or (None, None),
+        clip=(None, None) if clip is None else clip,
         common_norm=common_norm and grouped,
         cumulative=cumulative,
         scale=None,
@@ -800,7 +816,7 @@ def _histplot_2d(
     xv, yv = values(xc), values(yc)
     w = values(weights_column) if weights_column is not None else None
     if w is not None and np.any(w[rows] < 0):
-        raise ValueError(
+        raise ChartError(
             f"histplot weight: column {weight!r} holds negative values; "
             "weights count rows, from 0 up"
         )
@@ -817,9 +833,11 @@ def _histplot_2d(
         axis_bins = (
             bins[i] if isinstance(bins, (list, tuple, np.ndarray)) and len(bins) == 2 else bins
         )
-        axis_width = per_axis(binwidth, i, lambda o: o is None or isinstance(o, numbers.Real))
-        axis_range = per_axis(binrange, i, lambda o: o is None or isinstance(o[0], numbers.Real))
-        axis_discrete = per_axis(discrete, i, lambda o: isinstance(o, bool))
+        if real(axis_bins) and float(axis_bins).is_integer():
+            axis_bins = int(axis_bins)  # a count computed as a float (NumPy takes ints alone)
+        axis_width = per_axis(binwidth, i, lambda o: o is None or is_number(o))
+        axis_range = per_axis(binrange, i, lambda o: o is None or is_number(o[0]))
+        axis_discrete = per_axis(discrete, i, lambda o: isinstance(o, (bool, np.bool_)))
         if (
             w is not None
             and isinstance(axis_bins, str)
@@ -837,7 +855,7 @@ def _histplot_2d(
                 )
                 warned = True
             axis_bins = 10
-        if isinstance(axis_bins, (list, tuple, np.ndarray)):
+        if listlike(axis_bins):
             edges.append(np.asarray(axis_bins, dtype=float))
         elif len(rows):
             edges.append(
@@ -854,7 +872,7 @@ def _histplot_2d(
             edges.append(np.array([0.0, 1.0]))
         # Cells are counted for every pair of bins: refused past the mark's limit first.
         if len(edges[-1]) - 1 > numerics.MAX_BINS:
-            raise ValueError(
+            raise ChartError(
                 f"histplot bins: {len(edges[-1]) - 1} bins along {'xy'[i]}, past the "
                 f"{numerics.MAX_BINS} a histogram takes along each axis; give fewer"
             )
@@ -904,7 +922,7 @@ def _histplot_2d(
 
 def _one_axis(x: str | None, y: str | None, function: str) -> tuple[str, str]:
     if (x is None) == (y is None):
-        raise ValueError(f"{function} needs exactly one of x and y")
+        raise ChartError(f"{function} x: give x or y, one of them")
     return ("x", x) if x is not None else ("y", y)  # type: ignore[return-value]
 
 
@@ -991,6 +1009,36 @@ def _hist_norm(
     return float((heights * np.diff(edges)).sum())
 
 
+def _check_kernel(
+    bw_method: Any, bw_adjust: Any, cut: Any, grid_size: Any, clip: Any, role: str
+) -> None:
+    """Refuses a kernel density's settings that it cannot take."""
+    if not (real(bw_adjust) and bw_adjust > 0):
+        raise ChartError(
+            f"{role} bw_adjust: expected a positive number; received {shown(bw_adjust)}"
+        )
+    if not (real(cut) and cut >= 0):
+        raise ChartError(f"{role} cut: expected a number of at least 0; received {shown(cut)}")
+    try:
+        low, high = clip
+        if not all(end is None or real(end) for end in (low, high)):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ChartError(
+            f"{role} clip: expected (low, high), either of them None; received {shown(clip)}"
+        ) from None
+    if low is not None and high is not None and not low < high:
+        raise ChartError(f"{role} clip: expected low below high; received {shown(clip)}")
+    check_grid_size(grid_size, f"{role} grid_size")
+    if isinstance(bw_method, str):
+        check_choice(bw_method, f"{role} bw_method", ("scott", "silverman"))
+    elif not (real(bw_method) and bw_method > 0 and math.isfinite(bw_method)):
+        raise ChartError(
+            f'{role} bw_method: expected "scott", "silverman", or a positive number; '
+            f"received {shown(bw_method)}"
+        )
+
+
 def densities(
     v: np.ndarray,
     variables: Mapping[str, Levels],
@@ -1017,20 +1065,7 @@ def densities(
     was computed; rows weigh as `weights` say, when given. The density's
     column is `column`, or "density" where x and the variables have no
     such name."""
-    if not (bw_adjust > 0 and math.isfinite(bw_adjust)):
-        raise ValueError(
-            f"{role} bw_adjust: expected a positive number; received {shown(bw_adjust)}"
-        )
-    if not (cut >= 0 and math.isfinite(cut)):
-        raise ValueError(f"{role} cut: expected a number of at least 0; received {shown(cut)}")
-    check_grid_size(grid_size, f"{role} grid_size")
-    if isinstance(bw_method, str):
-        check_choice(bw_method, f"{role} bw_method", ("scott", "silverman"))
-    elif not (bw_method > 0 and math.isfinite(bw_method)):
-        raise ValueError(
-            f'{role} bw_method: expected "scott", "silverman", or a positive number; '
-            f"received {shown(bw_method)}"
-        )
+    _check_kernel(bw_method, bw_adjust, cut, grid_size, clip, role)
     panels = [n for n in variables if n != series]
     grouping = group(list(variables.values()), rows)
     totals: dict[tuple[int, ...], float] = {}
@@ -1164,39 +1199,42 @@ def bivariate(
     gaussian_kde, as Seaborn's, rows weighted by ``w``), and Seaborn's contour
     levels of it: the iso-proportions, and the densities they bound over
     every panel's."""
-    if not (bw_adjust > 0):
-        raise ValueError(
-            f"{role} bw_adjust: expected a positive number; received {shown(bw_adjust)}"
-        )
-    check_grid_size(grid_size, f"{role} grid_size")
-    if isinstance(levels, bool) or not isinstance(levels, (int, Sequence, np.ndarray)):
-        raise ValueError(
+    limits = (None, None) if clip is None else clip
+    _check_kernel(bw_method, bw_adjust, cut, grid_size, limits, role)
+    if isinstance(levels, bool) or not (isinstance(levels, int) or listlike(levels)):
+        raise ChartError(
             f"{role} levels: expected a count or iso-proportions from 0 to 1; "
             f"received {shown(levels)}"
         )
     if isinstance(levels, int):
         if levels < 1:
-            raise ValueError(
+            raise ChartError(
                 f"{role} levels: expected a count of at least 1; received {shown(levels)}"
             )
         if not (isinstance(thresh, (int, float)) and 0 <= thresh <= 1):
-            raise ValueError(
+            raise ChartError(
                 f"{role} thresh: expected a proportion from 0 to 1; received {shown(thresh)}"
             )
         proportions = np.linspace(thresh, 1, levels)
     else:
-        proportions = np.sort(np.asarray(levels, dtype=np.float64))
-        if len(proportions) == 0 or not (
-            np.all(np.isfinite(proportions)) and proportions[0] >= 0 and proportions[-1] <= 1
+        try:
+            proportions = np.sort(np.asarray(levels, dtype=np.float64))
+        except (TypeError, ValueError):
+            proportions = np.empty(0)  # not numbers, or not a flat list of them
+        if (
+            proportions.ndim != 1
+            or len(proportions) == 0
+            or not np.all(np.isfinite(proportions))
+            or proportions[0] < 0
+            or proportions[-1] > 1
         ):
-            raise ValueError(
+            raise ChartError(
                 f"{role} levels: expected iso-proportions from 0 to 1; received {shown(levels)}"
             )
     if len(rows) < 3:
-        raise ValueError(f"a bivariate {role} needs at least three complete rows")
+        raise ChartError(f"{role}: a bivariate density needs at least three complete rows")
     whole = np.vstack([xv[rows], yv[rows]])
     spread = numerics.kernel_covariance(whole, None, bw_method, bw_adjust)
-    limits = clip or (None, None)
     xs = numerics.support(whole[0], math.sqrt(spread[0, 0]), cut, limits, grid_size)
     ys = numerics.support(whole[1], math.sqrt(spread[1, 1]), cut, limits, grid_size)
     panels: list[tuple[tuple[int, ...], np.ndarray]] = []
@@ -1224,7 +1262,7 @@ def bivariate(
     effective = np.unique(thresholds)
     # Without a density (every panel's rows too few or too alike), there is nothing to band.
     if panels and filled and len(effective) < 2:
-        raise ValueError(
+        raise ChartError(
             f"{role} levels: filled contours need two levels or more, a band between each two; "
             f"these resolve to {len(effective)}"
         )
@@ -1284,12 +1322,12 @@ def _bivariate(
 ) -> Chart:
     """kdeplot of two columns: contours of the density of each facet panel, on one grid."""
     if series is not None:
-        raise ValueError(
+        raise ChartError(
             "kdeplot series: a bivariate kdeplot draws one density per panel; "
             "facet by facet_row or facet_column instead"
         )
     if cumulative:
-        raise ValueError("kdeplot cumulative: a bivariate density cannot be cumulative; drop it")
+        raise ChartError("kdeplot cumulative: a bivariate density cannot be cumulative; drop it")
     source = Source(data)
     xc = source.column(x, "kdeplot x", ("number",))
     yc = source.column(y, "kdeplot y", ("number",))
@@ -1374,3 +1412,76 @@ def _bivariate(
 def _stack(keys: list[np.ndarray], width: int) -> np.ndarray:
     """Per-row keys of groups, one block of rows each, as one array."""
     return np.concatenate(keys) if keys else np.zeros((0, width), dtype=np.int64)
+
+
+def _check_bins(bins: Any, binwidth: Any, binrange: Any, discrete: Any, pairs: bool) -> None:
+    """Refuses histplot's ``bins`` unless a count, a rule's name, or edges,
+    ``binwidth`` unless positive, ``discrete`` unless True or False, and
+    ``binrange`` unless (low, high) ascending; of two columns, each may be a
+    pair, one per axis."""
+
+    def count_or_edges(value: Any) -> bool:
+        if isinstance(value, str):
+            return value in numerics.BIN_RULES
+        if real(value) and float(value).is_integer():
+            return value >= 1  # a count, a whole float too (one axis' of two columns)
+        # Each edge a number before the cast, which reads a duration as a count of its units.
+        if not listlike(value) or not all(real(edge) for edge in value):
+            return False
+        edges = np.asarray(value, dtype=float)
+        return edges.ndim == 1 and len(edges) >= 2 and bool(np.all(np.diff(edges) > 0))
+
+    def width(value: Any) -> bool:
+        return value is None or (real(value) and value > 0)
+
+    def ends(value: Any) -> bool:
+        try:
+            low, high = value
+        except (TypeError, ValueError):
+            return False
+        return real(low) and real(high) and low < high
+
+    def either(value: Any, check: Callable[[Any], bool]) -> bool:
+        if check(value):
+            return True
+        # A pair of pairs may be an array of two rows.
+        two = listlike(value) or (hasattr(value, "__array__") and np.ndim(value) == 2)
+        return pairs and two and len(value) == 2 and all(v is None or check(v) for v in value)
+
+    if not pairs and listlike(bins):
+        # One column's edges, each refused where it is (as a pair's are).
+        for i, edge in enumerate(bins):
+            if not real(edge):
+                raise (
+                    Role("histplot bins", "bins")
+                    .index(i)
+                    .error(f"expected a finite number, an edge; received {shown(edge)}")
+                )
+    expected = (
+        f"expected a number of bins, a rule's name ({listed(numerics.BIN_RULES)}), "
+        "or ascending edges"
+    )
+    # Of two columns, two of anything are one per axis, as Seaborn reads them.
+    if pairs and (listlike(bins) or np.ndim(bins) == 2) and len(bins) == 2:
+        for i, axis in enumerate(bins):
+            if not count_or_edges(axis):
+                raise (
+                    Role("histplot bins", "bins")
+                    .index(i)
+                    .error(f"{expected} (of two columns, bins for x and y); received {shown(axis)}")
+                )
+    elif not either(bins, count_or_edges):
+        raise ChartError(f"histplot bins: {expected}; received {shown(bins)}", path="bins")
+    if not either(binwidth, width):
+        raise ChartError(
+            f"histplot binwidth: expected a positive number; received {shown(binwidth)}"
+        )
+    if not either(discrete, lambda value: isinstance(value, (bool, np.bool_))):
+        raise ChartError(
+            f"histplot discrete: expected True or False (a pair, one per axis, with x and y); "
+            f"received {shown(discrete)}"
+        )
+    if binrange is not None and not either(binrange, ends):
+        raise ChartError(
+            f"histplot binrange: expected (low, high), ascending; received {shown(binrange)}"
+        )

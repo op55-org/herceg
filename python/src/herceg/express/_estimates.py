@@ -10,8 +10,9 @@ from typing import Any, Literal, cast
 import numpy as np
 
 from .._chart import _BAR_CHANNELS, _LINE_CHANNELS, _POINT_CHANNELS, Chart, Dash
-from .._data import Column
+from .._data import Column, listlike
 from .._encoding import BarLabels, Encodings, SeriesLabels
+from .._errors import ChartError
 from . import _numerics as numerics
 from ._common import (
     ErrorBar,
@@ -195,7 +196,7 @@ def pointplot(
     check_axes_differ(x, y, "pointplot")
     marks = mark_options("pointplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
     if join is not None:
-        raise ValueError(
+        raise ChartError(
             'pointplot join: Seaborn 0.13 deprecates it; pass linestyle="none" to draw no lines'
         )
     est = _CategoryEstimates(
@@ -257,17 +258,24 @@ def _line_styles(
 ) -> list[str]:
     """Each series level's line style (one level without series), checked."""
     if linestyles is not None and linestyle is not None:
-        raise ValueError(
+        raise ChartError(
             "pointplot linestyle: give one style for every line as linestyle, or one per "
             "series level as linestyles, not both"
         )
     given = linestyles if linestyles is not None else (linestyle if linestyle is not None else "-")
     option = "pointplot linestyles" if linestyles is not None else "pointplot linestyle"
+    if not isinstance(given, str) and not listlike(given):
+        raise ChartError(
+            f"{option}: expected a line style or a list of them, one per series level; "
+            f"received {shown(given)}",
+            path=option.split(" ")[1],
+        )
     styles: list[str] = [given] * len(levels) if isinstance(given, str) else list(given)
-    for style in styles:
-        check_choice(style, option, ("-", "--", ":", "-.", "none", ""))
+    for i, style in enumerate(styles):
+        at = option if isinstance(given, str) else f"{option}[{i}]"
+        check_choice(style, at, ("-", "--", ":", "-.", "none", ""))
     if len(styles) != len(levels):
-        raise ValueError(
+        raise ChartError(
             f"pointplot linestyles: expected {len(levels)} "
             f"{'style' if len(levels) == 1 else 'styles'}, one per series level; "
             f"received {len(styles)}"
@@ -348,12 +356,12 @@ def lineplot(
     roles = [x, y, weight, units, *names]
     if estimator is None:
         if errorbar is not None:
-            raise ValueError(
+            raise ChartError(
                 "lineplot errorbar: intervals require an estimator; "
                 "pass errorbar=None or choose an estimator"
             )
         if weight is not None:
-            raise ValueError(
+            raise ChartError(
                 "lineplot weight: weights weigh an estimate; choose an estimator or drop weight"
             )
         return _lines_of_rows(
@@ -373,7 +381,7 @@ def lineplot(
             outputs,
         )
     if units is not None:
-        raise ValueError(
+        raise ChartError(
             "lineplot units: a line per unit draws each unit's rows; pass estimator=None and "
             "errorbar=None, or drop units"
         )
@@ -404,7 +412,7 @@ def lineplot(
     table[x] = number_column(out[x], xc.kind)
     table[estimated] = number_column(out[estimated])
     interval = aggregation.interval
-    if interval:
+    if interval is not None:
         table[low] = number_column(out[low])
         table[high] = number_column(out[high])
     table[count] = number_column(out[count])
@@ -424,7 +432,7 @@ def lineplot(
         + (
             f"; {'bands' if error_style == 'band' else 'error bars'} show "
             + aggregation.describe_interval()
-            if interval
+            if interval is not None
             else ""
         )
         + "."
@@ -432,7 +440,7 @@ def lineplot(
     )
     chart = make_chart(table, options, sentence=sentence, palette=palette, x_label=x, y_label=y)
     label = None if series else y
-    if interval and error_style == "band":
+    if interval is not None and error_style == "band":
         # A band per series, of the line's table: each stands for what its
         # line does, sharing its color, legend entry, and visibility.
         chart.area(
@@ -444,9 +452,9 @@ def lineplot(
             fill_opacity=0.2,
             **marks.supporting(table, neutral(options.get("theme"))),
         )
-    if interval and error_style == "bars":
+    if interval is not None and error_style == "bars":
         stroke = neutral(options.get("theme")) if marks.colored else None
-        chart.error_bar(x=x, y1=low, y2=high, series=series, label=label, stroke=stroke)
+        chart.errorbar(x=x, y1=low, y2=high, series=series, label=label, stroke=stroke)
     chart.line(x, estimated, series=series, label=label, **marks.primary())
     stats = Statistics(
         "lineplot", sentence, {"estimates": readable(table)}, aggregation.seed, dropped
@@ -531,28 +539,30 @@ class _Aggregation:
         self.units = units
         method = self.interval[0] if isinstance(self.interval, tuple) else None
         name = shown(self.estimator) if isinstance(self.estimator, str) else "a function"
+        # Compared as text alone: a function may be an object whose == is its own.
+        mean = isinstance(self.estimator, str) and self.estimator == "mean"
         if weight is not None:
-            if self.estimator != "mean":
-                raise ValueError(
+            if not mean:
+                raise ChartError(
                     f'{function} weight: weighted estimates are means; pass estimator="mean"'
                 )
             if self.interval is not None and method != "ci":
-                raise ValueError(
+                raise ChartError(
                     f"{function} errorbar: weighted means take bootstrap intervals only; "
                     'pass ("ci", 95) or None'
                 )
             if units is not None:
-                raise ValueError(
+                raise ChartError(
                     f"{function} units: weighted means resample rows with their weights; "
                     "drop units or weight"
                 )
-        if method == "se" and self.estimator != "mean":
-            raise ValueError(
+        if method == "se" and not mean:
+            raise ChartError(
                 f'{function} errorbar: "se" is the standard error of the mean; with '
                 f'estimator={name} pass ("ci", 95), ("sd", 1), or a function of the values'
             )
         if units is not None and method != "ci":
-            raise ValueError(
+            raise ChartError(
                 f"{function} units: units are what bootstrap intervals resample; pass "
                 'errorbar=("ci", 95), or drop units'
             )
@@ -651,11 +661,11 @@ class _CategoryEstimates:
         vc = yc if not horizontal else xc
         if vc.kind != "number":
             axis = "x" if horizontal else "y"
-            raise TypeError(
+            raise ChartError(
                 f"{function} {axis}: column {value!r} holds {vc.kind} values; expected number"
             )
         if series is not None and series == category:
-            raise ValueError(
+            raise ChartError(
                 f"{function} series: column {series!r} is the category axis; "
                 "split by another column"
             )
@@ -667,7 +677,8 @@ class _CategoryEstimates:
         variables = variables_of(
             source, function, facet_row, facet_column, series, series_order, axes=[category, value]
         )
-        cats = levels(source.column(category, f"{function} {'y' if horizontal else 'x'}"), order)
+        axis = f"{function} {'y' if horizontal else 'x'}"
+        cats = levels(source.column(category, axis), order, role=f"{function} order")
         taken = [category, value, *variables]
         weight_values = weight_column(source, aggregation.weight, function, taken)
         ranked = unit_ranks(source, aggregation.units, function, [*taken, aggregation.weight])
@@ -703,7 +714,7 @@ class _CategoryEstimates:
         table = keyed_table(variables, keys)
         table[category] = category_column(codes, cats.labels)
         table[value] = number_column(centers)
-        if aggregation.interval:
+        if aggregation.interval is not None:
             table[self.low] = number_column(lows)
             table[self.high] = number_column(highs)
         table[count] = number_column(counts)
@@ -791,7 +802,7 @@ class _CategoryEstimates:
 
     def error_bars(self, chart: Chart, *, dodge: bool, stroke: str | None = None) -> None:
         """Adds the intervals, if any, on the categories."""
-        if not self.interval:
+        if self.interval is None:
             return
         style: dict[str, Any] = {
             "series": self.series,
@@ -800,16 +811,16 @@ class _CategoryEstimates:
             "label": None if self.series else self.value,
         }
         if self.horizontal:
-            chart.error_bar(y=self.category, x1=self.low, x2=self.high, **style)
+            chart.errorbar(y=self.category, x1=self.low, x2=self.high, **style)
         else:
-            chart.error_bar(x=self.category, y1=self.low, y2=self.high, **style)
+            chart.errorbar(x=self.category, y1=self.low, y2=self.high, **style)
 
     def sentence(self, shapes: str) -> str:
         text = f"{shapes} show {self.aggregation.of(self.value)} for each {self.category}"
         text += by(self.series)
         if self.joined_lines:
             text += ", joined by lines"
-        if self.interval:
+        if self.interval is not None:
             text += "; error bars show " + self.aggregation.describe_interval()
         return text + "." + dropped_sentence(self.dropped, self._roles, self._ordered)
 

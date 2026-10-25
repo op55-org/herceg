@@ -10,6 +10,7 @@ import numpy as np
 
 from .._chart import AxisOptions, Chart, HelperOptions, Panel
 from .._data import Column, Matrix
+from .._errors import ChartError
 from .._layout import Grid
 from . import _numerics as numerics
 from . import _regression as regression
@@ -77,7 +78,7 @@ def pairplot(
     otherwise.
     """
     if diag_kind not in ("auto", "hist", "kde", None):
-        raise ValueError(
+        raise ChartError(
             'pairplot diag_kind: expected "auto", "hist", "kde", or None; '
             f"received {shown(diag_kind)}"
         )
@@ -89,11 +90,11 @@ def pairplot(
         else [
             name
             for name in source.names
-            if name != series and source.column(name, "pairplot").kind == "number"
+            if name != series and source.column(name, "pairplot data").kind == "number"
         ]
     )
     if len(names) < 1 or len(set(names)) != len(names):
-        raise ValueError(
+        raise ChartError(
             f"pairplot vars: expected distinct number columns to pair; received {names!r}"
         )
     if vars is None:
@@ -149,7 +150,8 @@ def pairplot(
         f"Scatter plots pair {', '.join(names)}{by(series)}; the diagonal shows each variable's "
         f"{drawn}."
         + dropped_sentence(
-            len(source.column(names[0], "pairplot")) - len(kept), [series] if series else []
+            len(source.column(names[0], "pairplot data")) - len(kept),
+            [series] if series else [],
         )
     )
     chart = make_chart(table, settings, sentence=sentence, palette=palette)
@@ -218,7 +220,11 @@ def pairplot(
     return record(
         chart,
         Statistics(
-            "pairplot", sentence, tables, None, len(source.column(names[0], "pairplot")) - len(kept)
+            "pairplot",
+            sentence,
+            tables,
+            None,
+            len(source.column(names[0], "pairplot data")) - len(kept),
         ),
     )
 
@@ -254,18 +260,19 @@ def jointplot(
     every part, so all three show the same rows.
     """
     if kind not in ("scatter", "reg", "kde", "hist"):
-        raise ValueError(
+        raise ChartError(
             f'jointplot kind: expected "scatter", "reg", "kde", or "hist"; received {shown(kind)}'
         )
     if filled and kind != "kde":
-        raise ValueError('jointplot filled: fills kind="kde"\'s contours; drop it')
+        raise ChartError('jointplot filled: fills kind="kde"\'s contours; drop it')
     if series is not None and kind in ("kde", "hist"):
-        raise ValueError(
+        raise ChartError(
             f'jointplot series: kind="{kind}" draws one distribution; '
             'give kind="scatter" or "reg" for series'
         )
     if not (ratio > 0):
-        raise ValueError(f"jointplot ratio: expected a positive number; received {shown(ratio)}")
+        raise ChartError(f"jointplot ratio: expected a positive number; received {shown(ratio)}")
+    numerics.check_bins(bins, "jointplot")
     check_ci(ci, "jointplot")
     n_boot = check_n_boot(n_boot, "jointplot")
     refuse_facets(options, "jointplot", "jointplot lays out panels of its own")
@@ -521,25 +528,27 @@ def clustermap(
     """
     refuse_facets(options, "clustermap", "clustermap lays out panels of its own")
     if z_score is not None and standard_scale is not None:
-        raise ValueError(
+        raise ChartError(
             "clustermap z_score: z_score and standard_scale exclude each other; give one"
         )
     for name, axis in (("z_score", z_score), ("standard_scale", standard_scale)):
         if axis not in (None, 0, 1):
-            raise ValueError(
+            raise ChartError(
                 f"clustermap {name}: expected 0 (rows), 1 (columns), or None; "
                 f"received {shown(axis)}"
             )
     if not (0 < dendrogram_ratio < 1):
-        raise ValueError(
+        raise ChartError(
             "clustermap dendrogram_ratio: expected a number between 0 and 1; "
             f"received {shown(dendrogram_ratio)}"
         )
     rows, names, matrix = _matrix(data, index, columns)
     if matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError("clustermap needs at least one row and one column")
+        raise ChartError("clustermap data: needs at least one row and one column")
     if not np.all(np.isfinite(matrix)):
-        raise ValueError("clustermap needs a finite value in every cell; fill or drop missing ones")
+        raise ChartError(
+            "clustermap data: needs a finite value in every cell; fill or drop missing ones"
+        )
     if z_score is not None:
         matrix = _standardized(matrix, z_score)
     if standard_scale is not None:
@@ -654,12 +663,12 @@ def _matrix(
     """A clustermap's row labels, column labels, and values, rows by columns."""
     if isinstance(data, np.ndarray):
         if data.ndim != 2:
-            raise ValueError(
+            raise ChartError(
                 f"clustermap data: expected a two-dimensional array; received {data.ndim}-D"
             )
         if index is not None or columns is not None:
             option = "index" if index is not None else "columns"
-            raise ValueError(
+            raise ChartError(
                 f"clustermap {option}: names columns of a table, but data is an array; "
                 f"drop {option}, or pass a table"
             )
@@ -672,7 +681,9 @@ def _matrix(
         column = source.column(index, "clustermap index")
         if column.kind == "category":
             if np.any(column.values < 0):
-                raise ValueError(f"clustermap index {index!r} has rows without a label")
+                raise ChartError(
+                    f"clustermap index: column {index!r} has rows without a label; fill them"
+                )
             labels = [column.dictionary[code] for code in column.values]
         else:
             labels = [level_label(value, column.kind) for value in values(column)]
@@ -684,19 +695,29 @@ def _matrix(
         names = [
             name
             for name in source.names
-            if name != index and source.column(name, "clustermap").kind == "number"
+            if name != index and source.column(name, "clustermap data").kind == "number"
         ]
     if not names:
-        raise ValueError("clustermap needs number columns to cluster")
+        raise ChartError("clustermap columns: needs number columns to cluster; give columns")
     if columns is None:
         resolved("columns", names)
+    # Columns named are refused at their index; those found, at the data.
     matrix = np.column_stack(
-        [values(source.column(name, "clustermap columns", ("number",))) for name in names]
+        [
+            values(
+                source.column(
+                    name,
+                    "clustermap data" if columns is None else f"clustermap columns[{i}]",
+                    ("number",),
+                )
+            )
+            for i, name in enumerate(names)
+        ]
     )
     if labels is None:
         labels = [str(i) for i in range(matrix.shape[0])]
     if len(set(labels)) != len(labels):
-        raise ValueError(
+        raise ChartError(
             "clustermap row labels must differ: give an index column of distinct labels"
         )
     return labels, [str(name) for name in names], matrix
@@ -709,7 +730,9 @@ def _standardized(matrix: np.ndarray, axis: int) -> np.ndarray:
     deviation = data.std(axis=0, ddof=1)
     if np.any(~(deviation > 0)):
         part = "row" if axis == 0 else "column"
-        raise ValueError(f"z_score cannot standardize a {part} whose values do not vary")
+        raise ChartError(
+            f"clustermap z_score: cannot standardize a {part} whose values do not vary"
+        )
     out = (data - data.mean(axis=0)) / deviation
     return out if axis == 1 else out.T
 
@@ -721,6 +744,8 @@ def _scaled(matrix: np.ndarray, axis: int) -> np.ndarray:
     low, high = data.min(axis=0), data.max(axis=0)
     if np.any(~(high > low)):
         part = "row" if axis == 0 else "column"
-        raise ValueError(f"standard_scale cannot scale a {part} whose values do not vary")
+        raise ChartError(
+            f"clustermap standard_scale: cannot scale a {part} whose values do not vary"
+        )
     out = (data - low) / (high - low)
     return out if axis == 1 else out.T

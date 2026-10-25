@@ -8,12 +8,12 @@ dict of the same keyword names works too (``{"font_size": 14}`` for
 from __future__ import annotations
 
 import math
-import numbers
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, Literal
+from dataclasses import MISSING, dataclass, fields, is_dataclass
+from typing import Any, Literal, TypedDict
 
-from ._data import listed, shown
+from ._data import listlike
+from ._errors import ChartError, Role, is_number, listed, placed, refuses, shown
 
 ThemeName = Literal["light", "dark", "high-contrast", "high-contrast-dark", "auto"]
 THEME_NAMES = ("light", "dark", "high-contrast", "high-contrast-dark", "auto")
@@ -33,25 +33,25 @@ def _camel(name: str) -> str:
 def _number(value: Any, role: str, *, least: float = 0, positive: bool = False) -> None:
     if (
         isinstance(value, bool)
-        or not isinstance(value, numbers.Real)
+        or not is_number(value)
         or not math.isfinite(value)
         or value < least
         or (positive and value <= 0)
     ):
         expected = "a positive number" if positive else f"a number of at least {least:g}"
-        raise ValueError(f"{role}: expected {expected}; received {shown(value)}")
+        raise ChartError(f"{role}: expected {expected}; received {shown(value)}")
 
 
 def _fraction(value: Any, role: str) -> None:
     """Refuses an opacity outside 0 to 1."""
-    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not 0 <= float(value) <= 1:
-        raise ValueError(f"{role}: expected a number from 0 to 1; received {shown(value)}")
+    if isinstance(value, bool) or not is_number(value) or not 0 <= float(value) <= 1:
+        raise ChartError(f"{role}: expected a number from 0 to 1; received {shown(value)}")
 
 
 def _color(value: Any, role: str) -> None:
     """Refuses a color that is not a CSS color string."""
     if not isinstance(value, str) or not value:
-        raise TypeError(f'{role}: expected a CSS color such as "#3266d6"; received {shown(value)}')
+        raise ChartError(f'{role}: expected a CSS color such as "#3266d6"; received {shown(value)}')
 
 
 def _checked(
@@ -75,7 +75,7 @@ def _checked(
 
 def _choice(value: Any, choices: Sequence[str], role: str) -> None:
     if value not in choices:
-        raise ValueError(f"{role}: expected {listed(choices)}; received {shown(value)}")
+        raise ChartError(f"{role}: expected {listed(choices)}; received {shown(value)}")
 
 
 def vertical_align_problem(value: Any, keys: tuple[str, ...]) -> tuple[str, str] | None:
@@ -120,14 +120,53 @@ def _built(value: Any, kind: type[Any], role: str) -> Any:
         known = [f.name for f in fields(kind)]
         unknown = [key for key in value if key not in known]
         if unknown:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: unknown key {shown(unknown[0])}; name one of {listed(known)}"
             )
-        return kind(**value)
-    raise TypeError(
+        missing = [
+            f.name
+            for f in fields(kind)
+            if f.init
+            and f.default is MISSING
+            and f.default_factory is MISSING
+            and f.name not in value
+        ]
+        if missing:
+            them = "it" if len(missing) == 1 else "them"
+            raise ChartError(f"{role}: needs {', '.join(map(shown, missing))}; add {them}")
+        return placed(role, lambda: kind(**value))
+    raise ChartError(
         f"{role}: expected an hg.{kind.__name__} or a dict of its options; "
         f"received {type(value).__name__}"
     )
+
+
+def built_spec(value: Any, kind: type[Any], role: str) -> Any:
+    """`value` as a `kind` (see `_built`), as the spec takes it: what its
+    spec refuses is placed at `role`, as what making it refuses is."""
+    if value is None:
+        raise ChartError(
+            f"{role}: expected an hg.{kind.__name__} or a dict of its options; received None"
+        )
+    return placed(role, lambda: _built(value, kind, role)._spec())
+
+
+def built_list(values: Any, kind: type[Any], role: str) -> list[Any] | None:
+    """`values`, a list, as a list of `kind`s (see `_built`), each refused at
+    its index (``axis layers[1]``); None for None."""
+    if values is None:
+        return None
+    if not listlike(values):
+        raise ChartError(f"{role}: expected a list of hg.{kind.__name__}; received {shown(values)}")
+    built = []
+    for i, value in enumerate(values):
+        if value is None:
+            raise ChartError(
+                f"{role}[{i}]: expected an hg.{kind.__name__} or a dict of its options; "
+                "received None"
+            )
+        built.append(_built(value, kind, f"{role}[{i}]"))
+    return built
 
 
 def _spec(value: Any) -> Any:
@@ -148,24 +187,34 @@ def _spec(value: Any) -> Any:
     return value
 
 
-def insets(value: Any, role: str) -> Any:
+class Insets(TypedDict, total=False):
+    """Pixels on each side, for paddings that differ by side."""
+
+    top: float
+    right: float
+    bottom: float
+    left: float
+
+
+def insets(value: Any, role: Role) -> Any:
     """Padding as the spec takes it: pixels on every side, or a dict of sides."""
     if value is None:
         return None
     if isinstance(value, Mapping):
         unknown = [key for key in value if key not in ("top", "right", "bottom", "left")]
         if unknown:
-            raise ValueError(
-                f"{role}: unknown side {shown(unknown[0])}; "
+            raise role.error(
+                f"unknown side {shown(unknown[0])}; "
                 f"name one of {listed(('top', 'right', 'bottom', 'left'))}"
             )
         for side, pixels in value.items():
-            _number(pixels, f"{role} {side}")
+            role.field(side).check(_number, pixels)
         return dict(value)
-    _number(value, role)
+    role.check(_number, value)
     return value
 
 
+@refuses
 @dataclass
 class TextBox:
     """A box drawn behind text: its fill, outline, and corner radius in pixels."""
@@ -180,6 +229,7 @@ class TextBox:
         _checked(self, "TextBox", colors=("stroke",), widths=("stroke_width", "radius"))
 
 
+@refuses
 @dataclass
 class Halo:
     """An outline drawn around text to keep it readable: its color, width in
@@ -204,12 +254,13 @@ def halo_spec(value: Any, role: str) -> Any:
     if value is None or value is False or value == "auto":
         return value
     if value is True or isinstance(value, str):
-        raise ValueError(
+        raise ChartError(
             f'{role} halo: expected "auto", False, or an hg.Halo; received {shown(value)}'
         )
     return _spec(_built(value, Halo, f"{role} halo"))
 
 
+@refuses
 @dataclass
 class TextStyle:
     """How text looks; unset options inherit from the theme.
@@ -238,7 +289,7 @@ class TextStyle:
     vertical_align: Literal["top", "middle", "bottom"] | None = None
     halo: HaloOption | None = None
     background: TextBox | Literal[False] | Mapping[str, Any] | None = None
-    padding: float | Mapping[str, float] | None = None
+    padding: float | Insets | None = None
 
     def __post_init__(self) -> None:
         if self.font_size is not None:
@@ -248,14 +299,14 @@ class TextStyle:
             or not isinstance(self.font_weight, int)
             or not 1 <= self.font_weight <= 1000
         ):
-            raise ValueError(
+            raise ChartError(
                 "TextStyle font_weight: expected a whole number from 1 to 1000, such as 400 or "
                 f"600; received {shown(self.font_weight)}"
             )
         if self.font_style is not None:
             _choice(self.font_style, ("normal", "italic"), "TextStyle font_style")
         if self.font is not None and (not isinstance(self.font, str) or not self.font):
-            raise TypeError(
+            raise ChartError(
                 f'TextStyle font: expected a CSS font family list such as "Inter, sans-serif"; '
                 f"received {shown(self.font)}"
             )
@@ -270,9 +321,10 @@ class TextStyle:
             self.halo = _built(self.halo, Halo, "TextStyle halo")
         if self.background is not None and self.background is not False:
             self.background = _built(self.background, TextBox, "TextStyle background")
-        insets(self.padding, "TextStyle padding")
+        insets(self.padding, Role("TextStyle").field("padding"))
 
 
+@refuses
 @dataclass
 class StrokeStyle:
     """How a line looks: its color, width in pixels, dash (a pixel pattern
@@ -294,10 +346,16 @@ class StrokeStyle:
         if isinstance(self.dash, str):
             _choice(self.dash, ("-", "--", ":", "-."), "StrokeStyle dash")
         elif self.dash is not None:
+            if not listlike(self.dash):
+                raise ChartError(
+                    'StrokeStyle dash: expected a pixel pattern such as [4, 2], or "-", "--", '
+                    f'":", or "-."; received {shown(self.dash)}'
+                )
             for i, step in enumerate(self.dash):
                 _number(step, f"StrokeStyle dash[{i}]")
 
 
+@refuses
 @dataclass
 class PlotStyle:
     """A plot's area: a background under its grid lines and a border around it."""
@@ -310,6 +368,7 @@ class PlotStyle:
         _checked(self, "PlotStyle", colors=("fill", "stroke"), widths=("stroke_width",))
 
 
+@refuses
 @dataclass
 class LineStyle:
     """Lines, area outlines, and contour lines that set no width of their own."""
@@ -321,6 +380,7 @@ class LineStyle:
             _number(self.stroke_width, "LineStyle stroke_width", positive=True)
 
 
+@refuses
 @dataclass
 class BarStyle:
     """Bars: the radius of the corners at the value end of unstacked bars."""
@@ -331,6 +391,7 @@ class BarStyle:
         _checked(self, "BarStyle", widths=("radius",))
 
 
+@refuses
 @dataclass
 class TooltipStyle:
     """The tooltip's box; its text is the theme's text color."""
@@ -366,6 +427,7 @@ LEGEND_ROLES = ("legend_label", "legend_title", "tick_label")
 PANEL_ROLES = ("plot", "panel_title", *AXIS_ROLES)
 
 
+@refuses
 @dataclass
 class Style:
     """Styles by visual role. A theme's style gives every role its look; an
@@ -414,13 +476,14 @@ def style_spec(value: Any, role: str, allowed: Sequence[str] | None = None) -> A
     if allowed is not None:
         extra = [name for name in style.roles() if name not in allowed]
         if extra:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: styles {listed(allowed)}; drop {shown(extra[0])}, "
                 "which belongs in the theme's style"
             )
     return _spec(style)
 
 
+@refuses
 @dataclass
 class Tokens:
     """A theme's tokens: the colors its styles are made from. Changing one
@@ -438,14 +501,29 @@ class Tokens:
     rise: str | None = None
     fall: str | None = None
 
+    def __post_init__(self) -> None:
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if value is None:
+                continue
+            if f.name in ("palette", "sequential", "diverging"):
+                if not listlike(value) or not all(isinstance(color, str) for color in value):
+                    raise ChartError(
+                        f'Tokens {f.name}: expected a list of colors, such as ["#5b8def", '
+                        f'"#dc6f3a"]; received {shown(value)}'
+                    )
+            elif not isinstance(value, str):
+                raise ChartError(f"Tokens {f.name}: expected a color; received {shown(value)}")
+
     def _spec(self) -> dict[str, Any]:
         return {
-            f.name: list(value) if isinstance(value, (list, tuple)) else value
+            f.name: list(value) if listlike(value) else value
             for f in fields(self)
             if (value := getattr(self, f.name)) is not None
         }
 
 
+@refuses
 @dataclass
 class Theme:
     """Changes to a built-in theme (``extends``, ``"light"`` by default): its
@@ -485,9 +563,10 @@ def theme_spec(theme: Any) -> Any:
     dict of its options) as an object."""
     if theme is None or isinstance(theme, str):
         return theme
-    return _built(theme, Theme, "Chart theme")._spec()
+    return built_spec(theme, Theme, "Chart theme")
 
 
+@refuses
 @dataclass
 class Place:
     """Where a legend or colorbar goes: outside on a ``side`` (``"top"``, ``"right"``,
@@ -510,22 +589,22 @@ class Place:
 
     def __post_init__(self) -> None:
         if (self.side is None) == (self.inside is None):
-            raise ValueError("Place: give a side or inside, one of them")
+            raise ChartError("Place: give a side or inside, one of them")
         if self.side is not None:
             _choice(self.side, ("top", "right", "bottom", "left"), "Place side")
             if self.inset is not None:
-                raise ValueError("Place inset: places inside a plot only; give offset instead")
+                raise ChartError("Place inset: places inside a plot only; give offset instead")
         if self.inside is not None:
             _choice(self.inside, _INSIDE, "Place inside")
             for name in ("align", "offset"):
                 if getattr(self, name) is not None:
-                    raise ValueError(f"Place {name}: places on a side only; drop it")
+                    raise ChartError(f"Place {name}: places on a side only; drop it")
         if self.align is not None:
             _choice(self.align, ("start", "center", "end"), "Place align")
         if self.scope is not None:
             _choice(self.scope, ("chart", "panel"), "Place scope")
         if self.panel is not None and not isinstance(self.panel, str):
-            raise TypeError(
+            raise ChartError(
                 f"Place panel: expected a string; give a panel name instead of {shown(self.panel)}"
             )
         for name in ("offset", "inset"):
@@ -533,6 +612,7 @@ class Place:
                 _number(getattr(self, name), f"Place {name}")
 
 
+@refuses
 @dataclass
 class Title:
     """A chart's or a panel's title: its ``text``, how it looks (``style``, an
@@ -546,12 +626,12 @@ class Title:
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
-            raise TypeError(f"Title text: expected a string; received {shown(self.text)}")
+            raise ChartError(f"Title text: expected a string; received {shown(self.text)}")
         place: Place | None = _built(self.place, Place, "Title place")
         self.place = place
         self.style = _built(self.style, TextStyle, "Title style")
         if place is not None and place.side not in ("top", "bottom"):
-            raise ValueError(
+            raise ChartError(
                 'Title place: expected side "top" or "bottom"; '
                 f"received {shown(place.side or place.inside)}"
             )
@@ -562,7 +642,7 @@ class Title:
                 if getattr(place, name, None) is not None
             ]
             if extra:
-                raise ValueError(
+                raise ChartError(
                     f"Title place: a title takes only side (style.align aligns it); drop {extra[0]}"
                 )
 
@@ -575,7 +655,7 @@ def title_spec(title: Any, role: str, *, placed: bool) -> Any:
     built: Title = _built(title, Title, role)
     place = built.place
     if not placed and place is not None:
-        raise ValueError(f"{role} place: a panel's title goes above it; drop place")
+        raise ChartError(f"{role} place: a panel's title goes above it; drop place")
     spec: dict[str, Any] = {"text": built.text}
     if isinstance(place, Place):
         spec["place"] = {"side": place.side}
