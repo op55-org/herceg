@@ -512,9 +512,8 @@ Plotly draws every 3D chart with WebGL (gl3d) and turns it through
 20,000 points or 10,000 surface cells (a 200 x 200 surface and up), and
 below that on a canvas (SVG for small surfaces); `herceg-cpu` is Herceg with
 WebGL2 unavailable, so every chart is drawn on the CPU, the baseline its GPU
-path is measured against (it refuses surfaces over 250,000 grid points:
-its 1001 x 1001 rows below time the error a chart draws in its place, not
-a surface). `rotate` timings end with the next frame's script, so they
+path is measured against (it refuses surfaces over 250,000 grid points,
+so its 1001 x 1001 rows below are refusals). `rotate` timings end with the next frame's script, so they
 leave out the GPU's own work, for Plotly as for Herceg; `orbit` turns the
 camera a step every frame with the display's refresh on (60 Hz) and
 reports the intervals between frames, which include it. Memory is the retained heap after
@@ -523,38 +522,38 @@ point, 16 MB at a million cells); GPU buffers are not in it (Herceg's are 49
 MB at a million cells). ECharts (through ECharts-GL) is not included.
 
 <!-- results:three -->
-- Date: 2026-10-25, commit 83178b40
+- Date: 2026-10-25, commit 3bcb5300
 - Machine: Apple M6, 12 cores, 32 GB, Darwin 27.0.0
 - Browser: Chrome 155.0.8059.86 through Playwright 1.63.0 (installed Google Chrome), GPU ANGLE (Apple, ANGLE Metal Renderer: Apple M6, Unspecified Version), headed, idle frames every 17.3 ms
 - Viewport 1280x1400, device pixel ratio 2
-- Libraries: herceg 0.0.0 (83178b40), herceg-cpu 0.0.0 (83178b40), plotly 4.1.2
+- Libraries: herceg 0.0.0 (3bcb5300), herceg-cpu 0.0.0 (3bcb5300), plotly 4.1.2
 - Renderers (normal / large config): herceg: auto (svg below 4,000 drawn points, canvas above; 3D charts on WebGL from 20,000 points or 10,000 surface cells) / auto; herceg-cpu: auto without WebGL2 (svg below 4,000 drawn points, canvas above) / auto without WebGL2; plotly: svg / webgl (scattergl)
 
 | Scenario (ms, median ± MAD) | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| scatter3d-10k-init (10,000 points in 3D) | 2.40 ± 0.33 | 3.03 ± 0.55 | 36.3 ± 1.59 |
-| surface-100-init (100 x 100 grid surface) | 11.8 ± 0.73 | 12.7 ± 0.64 | 44.3 ± 3.91 |
-| surface-317-init (317 x 317 grid surface (99,856 cells)) | 26.2 ± 3.57 | 110 ± 4.60 | 72.9 ± 1.40 |
-| surface-1001-init (1001 x 1001 grid surface (1,000,000 cells)) | 243 ± 11.2 | 150 ± 9.67 | 466 ± 41.7 |
+| scatter3d-10k-init (10,000 points in 3D) | 2.40 ± 0.25 | 3.26 ± 0.41 | 36.2 ± 1.36 |
+| surface-100-init (100 x 100 grid surface) | 12.1 ± 0.80 | 12.5 ± 0.93 | 41.7 ± 3.70 |
+| surface-317-init (317 x 317 grid surface (99,856 cells)) | 25.7 ± 2.94 | 109 ± 4.45 | 71.1 ± 1.75 |
+| surface-1001-init (1001 x 1001 grid surface (1,000,000 cells)) | 237 ± 16.7 | error | 458 ± 30.7 |
 
 | Scenario (ms, median ± MAD) | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| rotate-scatter3d-10k (10,000 points in 3D) | 1.31 ± 0.11 | 1.54 ± 0.14 | 5.13 ± 0.24 |
-| rotate-scatter3d-100k (100,000 points in 3D) | 0.27 ± 0.06 | 12.9 ± 1.93 | 11.0 ± 0.58 |
-| rotate-scatter3d-1m (1,000,000 points in 3D) | 0.36 ± 0.09 | 202 ± 2.93 | error |
-| rotate-surface-50 (50 x 50 grid surface) | 2.74 ± 0.30 | 2.63 ± 0.23 | 4.48 ± 0.20 |
-| rotate-surface-200 (200 x 200 grid surface) | 0.32 ± 0.05 | 27.3 ± 1.40 | 6.97 ± 0.28 |
-| rotate-surface-317 (317 x 317 grid surface (99,856 cells)) | 0.37 ± 0.08 | 94.4 ± 2.50 | 11.9 ± 0.47 |
-| rotate-surface-1001 (1001 x 1001 grid surface (1,000,000 cells)) | 0.41 ± 0.12 | 17.6 ± 0.12 | 68.1 ± 0.86 |
+| rotate-scatter3d-10k (10,000 points in 3D) | 1.37 ± 0.15 | 1.48 ± 0.22 | 5.03 ± 0.22 |
+| rotate-scatter3d-100k (100,000 points in 3D) | 0.27 ± 0.07 | 13.6 ± 1.92 | 10.8 ± 0.26 |
+| rotate-scatter3d-1m (1,000,000 points in 3D) | 0.38 ± 0.04 | 203 ± 9.06 | error |
+| rotate-surface-50 (50 x 50 grid surface) | 2.49 ± 0.25 | 2.62 ± 0.29 | 4.36 ± 0.22 |
+| rotate-surface-200 (200 x 200 grid surface) | 0.35 ± 0.08 | 27.4 ± 1.14 | 6.72 ± 0.21 |
+| rotate-surface-317 (317 x 317 grid surface (99,856 cells)) | 0.34 ± 0.08 | 92.7 ± 3.24 | 11.3 ± 0.29 |
+| rotate-surface-1001 (1001 x 1001 grid surface (1,000,000 cells)) | 0.45 ± 0.11 | error | 66.9 ± 2.26 |
 
 | Frame interval (ms, median) | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| orbit-surface-317 (317 x 317 grid surface (99,856 cells), turned every frame) | 16.7 (p95 16.8), 0 of 60 late | 66.7 (p95 83.3), 60 of 60 late | 16.7 (p95 16.8), 0 of 60 late |
-| orbit-surface-1001 (1001 x 1001 grid surface (1,000,000 cells), turned every frame) | 16.7 (p95 17.2), 0 of 60 late | 16.7 (p95 17.0), 0 of 60 late | 66.7 (p95 66.7), 60 of 60 late |
+| orbit-surface-317 (317 x 317 grid surface (99,856 cells), turned every frame) | 16.7 (p95 16.7), 0 of 60 late | 66.7 (p95 83.3), 60 of 60 late | 16.7 (p95 17.0), 0 of 60 late |
+| orbit-surface-1001 (1001 x 1001 grid surface (1,000,000 cells), turned every frame) | 16.7 (p95 16.9), 0 of 60 late | error | 66.7 (p95 66.7), 60 of 60 late |
 
 | Scenario | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| memory-surface-1001 (1001 x 1001 grid surface (1,000,000 cells); source 8.0 MB) | 33 MB heap, 5.1 MB canvas, 56 nodes | 45 MB heap, 5.1 MB canvas, 57 nodes | 1.3 MB heap, 4.6 MB canvas, 78 nodes |
+| memory-surface-1001 (1001 x 1001 grid surface (1,000,000 cells); source 8.0 MB) | 33 MB heap, 5.1 MB canvas, 56 nodes | error | 1.2 MB heap, 4.6 MB canvas, 78 nodes |
 <!-- /results:three -->
 
 ## Grids
