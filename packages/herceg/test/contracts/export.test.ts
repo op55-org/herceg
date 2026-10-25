@@ -43,13 +43,19 @@ function pdfLines(file: string): { text: string; box: Region }[] {
     file,
   ]).toString();
   const scale = 600 / Number(/<page [^>]*width="([\d.]+)"/.exec(xml)![1]);
-  return [...xml.matchAll(/<line bbox="([^"]+)"[^>]*text="([^"]*)"/g)].map(([, bbox, text]) => {
-    const [x0, y0, x1, y1] = bbox!.split(" ").map((v) => Number(v) * scale);
-    return {
-      text: decodeEntities(text!),
-      box: { x: x0!, y: y0!, width: x1! - x0!, height: y1! - y0! },
-    };
-  });
+  return [...xml.matchAll(/<line bbox="([^"]+)"([^>]*)>([\s\S]*?)<\/line>/g)].map(
+    ([, bbox, attributes, inner]) => {
+      const [x0, y0, x1, y1] = bbox!.split(" ").map((v) => Number(v) * scale);
+      // MuPDF 1.25 and later write a line's text; earlier ones (Ubuntu 24.04's) only its characters.
+      const text =
+        /\btext="([^"]*)"/.exec(attributes!)?.[1] ??
+        [...inner!.matchAll(/<char\b[^>]*?\bc="([^"]*)"/g)].map(([, c]) => c).join("");
+      return {
+        text: decodeEntities(text),
+        box: { x: x0!, y: y0!, width: x1! - x0!, height: y1! - y0! },
+      };
+    },
+  );
 }
 
 /** The texts of an SVG document's text elements, in order. */
