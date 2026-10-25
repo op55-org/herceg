@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { geometry } from "../../src/data/geometry.ts";
@@ -1442,6 +1442,10 @@ describe("networks", () => {
   });
 
   it("read nodes, then links, with the keyboard, and hide groups from the legend", () => {
+    // The clock stands still, so the layout ends in the first frame however
+    // slow it is: a layout spread over frames would still move Ana.
+    vi.useFakeTimers({ toFake: ["performance"] });
+    onTestFinished(() => vi.useRealTimers());
     const chart = createChart(host, { locale: "en-US", marks: [network()] });
     chart.root.focus();
     const key = (k: string) =>
