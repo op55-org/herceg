@@ -80,7 +80,7 @@ hg.area(cpu, x="time", y="load", series="host", stack=hg.Stack(gaps="interpolate
 hg.bar(sales, x="region", y=["q1", "q2"])  # grouped: side by side
 hg.bar(sales, x="q1", y="region")  # a category y gives horizontal bars
 hg.bar(sales, x="region", y="q1", labels=True)  # values at the bar ends
-hg.Chart(stats).bar(x="group", y="mean").error_bar(x="group", y="mean", y_error="se")
+hg.Chart(stats).bar(x="group", y="mean").errorbar(x="group", y="mean", y_error="se")
 hg.scatter(cars, x="weight", y="mpg", series="origin", radius=3)
 hg.scatter(countries, x="gdp", y="life", size="population", series="continent")  # bubbles
 hg.scatter(stations, x="lon", y="lat", color="anomaly", colors="rdbu", color_midpoint=0)
@@ -336,10 +336,14 @@ the axes; tooltip fields, below, are marks'), `pan`, `zoom`, `brush`,
 `bindings`, `limits`, and `sync` (see Panning, zooming, and syncing,
 below), `animation` (`True`, milliseconds, or `hg.Animation(duration=250,
 values=True)`: zooming to a brush and double-click reset move the axes
-gradually in HTML output, and with `values`, bars, pie slices, and lines and
-areas whose x values stay and that no labels follow move to the data a live
-chart's `replace` sends,
-with axes whose domains change; points match across replacements with
+gradually in HTML output, and with `values`, marks move to the data a live
+chart's `replace` sends, with axes whose domains change, in every panel:
+bars (stacked, labeled, and histograms'), pie slices, gauges, points, lines
+and areas along x (lines along y too) whose rows stay, error bars, candlesticks, regions, text, and
+heatmaps' and 2D histograms' cells; charts with box plots, boxen plots,
+violins, rugs, contours, dendrograms, custom marks, treemaps, sunbursts,
+funnels, radars, Sankey diagrams, networks, maps, or 3D marks refuse
+`values`; points match across replacements with
 `animation_key="id"` on `Chart.point()` or `hg.scatter()`), `renderer`,
 `theme` (below), `locale`, `time_zone`, and `projection` (maps, above).
 
@@ -808,7 +812,7 @@ points that do not fit at the band's edges):
 (
     hg.Chart(stats)
     .bar(x="day", y="mean", series="sex")
-    .error_bar(x="day", y1="low", y2="high", series="sex", dodge=True)
+    .errorbar(x="day", y1="low", y2="high", series="sex", dodge=True)
     .line(x="day", y="mean", series="sex", dodge=True)
 )
 hg.scatter(tips, x="day", y="tip", series="sex", dodge=True, jitter=0.5)
@@ -1666,8 +1670,8 @@ chart.to_snapshot(id_prefix="latency")  # server-rendered markup for a web page 
 chart.widget()  # a live notebook chart (see below)
 ```
 
-HTML output and notebook display embed the herceg bundle (about 1.0 MiB,
-389 KiB gzipped), so they work offline. Notebooks show each chart in an
+HTML output and notebook display embed the herceg bundle (about 1.1 MiB,
+424 KiB gzipped), so they work offline. Notebooks show each chart in an
 isolated iframe. `chart.to_html(full_page=False)` is a self-contained
 `<div>` and script that repeats the bundle; for a page of several charts,
 use `herceg.web` (see Web pages), which loads it once.
@@ -1695,6 +1699,40 @@ try:
 except hg.ChartError as error:
     print(error.code, error.path)  # series-varies marks[0].color
 ```
+
+A value of the wrong type or shape is refused the same way, at its place
+among nested options: `theme={"tokens": {"palette": 5}}` at
+`theme.tokens.palette`, `x={"ticks": {"count": -1}}` at `x.ticks.count`,
+a look by value at `marks[0].style.by.map["North South"].stroke_width`. An
+object of options refuses as it is made, at its field
+(`hg.Tokens(palette=5)` at `palette`); `hg.to_pdf` places a chart's
+refusal at its index among the charts (`charts[1].x.padding.px`), and the
+engine's own refusals read in Python's names. Functions that are no
+chart's options refuse at their own arguments: outputs at their settings
+(`to_png(dpi=None)` at `dpi`), layouts at theirs (`chart.grid(rows=[0])`
+at `rows[0]`), express functions, `herceg.web`, and a widget's methods at
+their arguments, and a widget's properties at their names
+(`widget.selection = 5` at `selection`). Options typed as text, True or
+False, numbers, or a few words are checked against their types, and None
+is refused where an option does not take it; NumPy's scalars are taken as
+Python's (`np.float64(2)` as `2.0`), and a float that is a whole number
+where a whole number goes. Where an option takes a list, a tuple, a NumPy
+array, or a pandas or Polars Series does too (a Series by position, not by
+its index); a pair or another fixed-length tuple (`clip=(0, 5)`,
+`span=`, `size=`) is read from any of those or from an iterator. An
+iterator is refused where a list goes, since checking it would use it up
+(give `list(values)`), and lists, arrays, and dicts are refused where none
+goes. An object that is callable is taken where a function goes, whatever
+else it is. A keyword a function does not take is Python's `TypeError`,
+naming what was likely meant.
+
+What this covers is what a call is given. A column's values are checked
+where an option reads them, and a refusal of them names that option and
+the column (`line y: column 'v': ...`), not the row; columns no mark reads
+are not converted, so not checked. Missing arguments and arguments given
+twice are Python's `TypeError`, a callback's own failures and a missing
+optional package (Streamlit, the `export` extra) are what they are, and a
+failure to write a file is Python's `OSError`.
 
 `to_snapshot(id_prefix="latency")` renders the chart for a web page, as
 herceg's browser runtime would build it, in a dict of JSON values: put its
@@ -1738,8 +1776,8 @@ svg = spark.line(x="t", y="v", clip=False).to_svg(
 )
 ```
 
-`hg.to_pdf(chart_or_charts, **settings)` returns PDF bytes, and
-`hg.save(chart_or_charts, path, **settings)` saves one chart using
+`hg.to_pdf(charts, **settings)` returns PDF bytes, and
+`hg.save(charts, path, **settings)` saves one chart using
 `Chart.save(path)`, choosing HTML, SVG, PNG, or PDF by extension. A nonempty
 sequence requires a `.pdf` path; use `hg.save` on each chart for other
 formats. Both functions accept charts from `herceg.express`:
@@ -1942,8 +1980,9 @@ live  # display it
 live.append(new_rows, max_rows=10_000)  # stream rows, keeping the last 10,000
 live.replace(today)  # replace every row
 live.update(title="CPU, today", theme="dark")
-live.viewport = (start, end)  # zoom x (y fits its data); None resets every axis
-live.viewport = hg.Viewport(x=(start, end), y=(0, 100))
+live.set_viewport((start, end))  # zoom x, keeping y; None fits every axis
+live.set_viewport(hg.Viewport(x=(start, end), y=(0, 100)))
+live.set_viewport(y=(0, 100))  # set y alone, keeping x
 live.selection = (start, end)  # brush an x range; None clears it
 live.selection = hg.Selection(x=(start, end), y=(50, 100))
 ```
@@ -1962,10 +2001,13 @@ Interaction comes back as properties and callbacks:
 
 ```python
 live.selection  # an hg.Selection, or None
-live.viewport  # an hg.Viewport: x, y, y_right, each None when not zoomed
+live.get_viewport()  # an hg.Viewport: x, y, y_right, each None when not zoomed
+live.hidden_keys  # the series and items the legends hide
 
 live.on_select(lambda selection: print(selection))
-live.on_viewport(lambda viewport: print(viewport.x, viewport.y))
+live.on_viewport(lambda event: print(event.cause, event.views[""].x))
+live.on_visibility(lambda state: print(state.hidden_keys))
+live.on_error(lambda error: print(error))  # what a browser refused of what Python asked
 live.on_hover(lambda inspection: print(inspection))  # None when the pointer leaves
 live.on_click(lambda inspection: print(df.iloc[inspection.points[0].row]))
 live.on_click(callback, remove=True)  # stop calling it
@@ -1973,6 +2015,25 @@ live.on_camera(lambda camera: print(camera.azimuth, camera.elevation))  # standa
 live.on_edge(lambda edge: print(edge.side, edge.bound))  # the view neared an end of `limits`
 live.show_cursor(x=when)  # a crosshair and the points at a time; hide_cursor() hides it
 ```
+
+`on_viewport` receives an `hg.ViewportEvent`, one change of view as the
+engine reports it: the scale instances whose views changed (`scales`, each
+an `hg.ScaleView` with its `scale`, the `panels` drawing it, and its `view`),
+every panel's whole view after it (`views`, by panel key: `""` in a chart of
+one panel), what made it (`cause`: `"pointer"`, `"wheel"`, `"keyboard"`,
+`"api"` for `set_viewport`, `"sync"`, `"data"`, or `"options"`), and the
+panel it was made in. Reports reach Python at most every 100 ms, changes
+meanwhile as one. `set_viewport` asks every browser showing the widget, which
+makes the change within the chart's `limits`; `get_viewport()` and
+`panel_viewports` say what a browser last reported (None and empty before
+one did), and what a browser refuses (an axis the panel lacks, a range on a
+category axis) comes to `on_error` and `error` as an `hg.ChartError`
+(`widget.set_viewport y: ...`), since the call has returned by then.
+`hidden_keys` holds what the legends hide in every panel; `visibility` (an
+`hg.VisibilityState`) holds that and what subplots' own legends hid and
+showed, and setting either hides it in every browser. A chart displayed
+again, or drawn again by `update` or `replace`, keeps the views of the
+scales it still draws and what the legends hid of what it still draws.
 
 `on_edge` receives an `hg.ViewEdge`: the `scale`, the `side` (`"start"`,
 its low values, or `"end"`), the `domain` in view, the `bound` it came near
@@ -2012,19 +2073,20 @@ on its own: `panel_drill_roots` maps each such panel's id to its root, and
 assigning a mapping drills the panels it names; `on_drill(callback,
 panel="b")` hears of one panel's changes, while `drill_root` and a plain
 `on_drill` refuse such a chart, naming the mapping. `item_positions` and
-`panel_item_positions`, `on_item_move(..., panel=)`, and for maps' and
-networks' views `viewport` and `panel_viewports` with `on_viewport(...,
-panel=)`, follow the same rule: `viewport` is the view of the x scale the
-chart's panels share (or its facet panels' shared map's), and each map or
-network panel's view is its own (numbers in its plane's units, without
-`y_right`), as is the x range of each subplot with an x scale of its own
-(subplots, whose x is each panel's unless its scope shares it, and insets);
-a chart without a view of its own (panels all with x scales or planes of
-their own) refuses `viewport` and a plain `on_viewport`, naming
-`panel_viewports`. A `Selection` names the panels it is in (`panels`): a
-brush in a panel with an x scale of its own, or a lasso on a map or network
-panel; in such charts, a selection set from Python names its panel,
-`hg.Selection(x=(start, end), panels=("latency",))`.
+`panel_item_positions` with `on_item_move(..., panel=)` follow the same rule.
+Views follow the chart's scales: `get_viewport()` reads, along each axis,
+the scale every panel shares (or the only one), None along an axis whose
+panels have scales of their own; `get_viewport(panel="latency")` reads what
+that panel shows, and `panel_viewports` every panel's view, a map's or
+network's subplot's plane included (numbers in its plane's units, without
+`y_right`). `set_viewport(..., panel="latency")` zooms the scales that panel
+draws, which the panels sharing them follow, along x, y, or both, and
+`on_viewport(..., panel="latency")` hears of the changes that panel's view
+is in. A chart of map or network subplots alone has no view without a
+panel: `get_viewport()` refuses it, naming `panel`. A `Selection` names the
+panels it is in (`panels`): a brush in a panel with scales of its own, or a
+lasso on a map or network panel; in such charts, a selection set from
+Python names its panel, `hg.Selection(x=(start, end), panels=("latency",))`.
 
 ```python
 tree = hg.treemap(sales, path=["region", "country"], value="revenue", zoom=True).widget()
@@ -2071,14 +2133,14 @@ An `hg.Viewport` holds the visible `x` range and the ranges of the left and
 right y axes, `y` and `y_right`, each None when that axis is not zoomed. An
 `hg.Selection` holds the brushed `x` and `y` ranges (None along an axis the
 brush leaves alone; a lasso's extent) and a `lasso`'s outline as `(x, y)`
-points. Assigning either replaces the whole state: an `(start, end)` pair is
-an x range, so `live.viewport = (start, end)` also resets y. Values are
+points. Assigning a selection replaces it whole; `set_viewport` with an
+`hg.Viewport` sets every axis, fitting those it leaves None, while an
+`(start, end)` pair sets x alone and keeps y. Values are
 Python values: datetimes on time axes (naive, in UTC, like the datetimes
 herceg reads), category labels for ranges on category axes (a lasso's points
 there are band positions, the first category at 0, of the categories it
 was first drawn over, and the lasso goes when new data moves them), and
 numbers otherwise.
-In subplots whose y axes differ, y values are read on the first panel's.
 
 An `hg.Inspection` is what the tooltip shows: the inspected `axis` (`"y"`
 for horizontal bars), the snapped `value` there and its axis `label`, the
@@ -2216,8 +2278,15 @@ when the form is submitted, and `on_click` cannot react, since Streamlit
 sends no clicks from forms. Give a chart a `key` to keep its selection when
 its data changes, and to show several charts with the same content.
 
-`state.viewport` is an `hg.Viewport`, in projected plane units for maps and
-layout units for networks. Compatible redraws preserve both ranges and
+`state.viewport` is an `hg.Viewport`: along each axis, the view of the
+scale every panel shares (None where panels have scales of their own), or a
+map's or network's plane, in projected plane units for maps and layout
+units for networks; `state.panel_viewports` holds every panel's view. A
+rerun that draws the chart again keeps the views of the scales it still
+draws (the one every panel shares, though panels come and go; another, with
+the same panels), what the legends hid of what it still draws, and the
+brush where its values or category labels still are. Compatible redraws of
+maps and networks preserve both ranges and
 lassos after restoring node positions; a network keeps its view, its node
 places, and its moved nodes across reruns that change its data or styles,
 while its mark (by id) and the chart's panels stay the same. Use `on_viewport="rerun"` to
@@ -2338,14 +2407,22 @@ that bubble (and cross shadow roots), each `detail` holding JSON:
 | `herceg:ready` | `{id}`: the chart drew its first frame |
 | `herceg:error` | `{id, error}`: what keeps it from drawing (`code`, `message`, `phase`, and `path`, `mark`, `panel` where known), also shown in its place; `event.preventDefault()` keeps it out of the console |
 | `herceg:click` | `{id, panel?, inspection}`: the data clicked, or `null` off the data |
-| `herceg:select` | `{id, panels?, selection}`: the brush's or lasso's ranges, `null` once cleared |
-| `herceg:viewport` | `{id, panels?, viewport}`: each axis' range, `null` where not zoomed |
+| `herceg:select` | `{id, owner, selection}`: the brush's or lasso's ranges, `null` once cleared, and what they belong to: `owner.scales` (the scale instances the ranges are on) and `owner.panels` (the panels drawing them) |
+| `herceg:viewport` | `{id, viewRevision, cause, panel?, scales, views}`: one change of view: the scale instances whose views changed (`scales`, each `{scale, instance, time, panels, view}`), every panel's whole view after it (`views`, each `{panel, x, y, yRight, time}`), what made it (`cause`: `"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, or `"options"`), and the panel it was made in |
+| `herceg:edge` | `{id, scale, instance, time, panels, side, domain, bound, cause}`: the view came near an end of what the chart's `limits` let a scale show |
+| `herceg:rowselection` | `{id, data, channel, selection}`: a row selection's channel of the table `data` (named as in the payload), holding a condition, rows, or `null` |
+| `herceg:visibility` | `{id, hiddenKeys, panels?}`: what the legends hide, in the whole chart and, by panel, unlike in the rest |
 
 Ranges are numbers, epoch milliseconds on the time axes the payload's `time`
-names, and labels on category axes. `web.selection(value)`,
-`web.inspection(value)`, and `web.viewport(value)` read what a page posts
-back of them (JSON text or a parsed dict) as `hg.Selection`,
-`hg.Inspection`, and `hg.Viewport`, with datetimes for times, and raise
+names, and labels on category axes. `web.selection(value)` (a select
+event's `detail.selection`), `web.inspection(value)` (a click's
+`detail.inspection`), and `web.viewport(value)` (an entry of a viewport
+event's `detail.views`) read what a page posts back of them (JSON text or a
+parsed dict) as `hg.Selection`, `hg.Inspection`, and `hg.Viewport`, with
+datetimes for times; `web.select_event`, `web.viewport_event`, `web.edge`,
+and `web.visibility` read a whole `detail` as `hg.SelectEvent`,
+`hg.ViewportEvent`, `hg.ViewEdge`, and `hg.VisibilityState`, as a live
+widget's callbacks hear them. Each raises
 `ValueError` for anything else. With HTMX, a form posts a chart's selection
 when it changes; a listener in the capture phase fills the form's field
 before HTMX, listening on the form, sends it:
@@ -2426,7 +2503,7 @@ npm run test:python    # build, then run pytest in a uv environment
   send the page a new fragment instead.
 - A widget has no `to_png()` of what it shows: a notebook cell cannot wait
   for the browser's answer to a message it sends, and Python does not know
-  the series hidden through the legend, the browser's size, or its fonts.
+  the browser's size or its fonts.
   `chart.to_png()` and `chart.save()` draw the chart as Python built it
   (its configured domains, not a zoom made in the browser).
 - Live charts need a running kernel. Where widgets are not rendered (GitHub,
@@ -2443,24 +2520,19 @@ npm run test:python    # build, then run pytest in a uv environment
   later can draw it, and `append` copies the table's columns on each call
   (about 0.35 ms for 100 rows into a million-row, three-column window on an
   Apple M6).
-- Each widget sends the engine (about 1.0 MiB, 395 KiB gzipped) to the browser
+- Each widget sends the engine (about 1.1 MiB, 432 KiB gzipped) to the browser
   once. Live charts were tested in JupyterLab 4; Notebook 7, VS Code, and
   Colab support anywidget but have not been tested here.
 - A point's `row` is its position in the data the browser drew when it
   reported the point. In a chart streaming with `max_rows`, rows dropped
   before the callback runs renumber the rest, so by then the row may name
   another record.
-- `chart.widget()` refuses facet panels with x scales of their own (x's
-  `scope`), whose panels come from the data; subplots keep a view each
-  (`panel_viewports`). Charts whose panels have y scales of their own (y's
-  `scope`, subplots) take no y viewport, and those with right y scales of
-  their own (y_right's `scope`) no right one. In Streamlit, every such chart
-  reports each panel's view and the panels of its selection.
 - Express plots drawn in a panel of another chart (`panel=`) do not compute
   again in a live chart: appending to or replacing the data they were
   computed from is refused, naming the panels.
 - In Streamlit, a chart that changes between script runs is sent whole: its
   data and, since the component's code travels inline with it, the engine
-  (about 1.0 MiB, 393 KiB gzipped). Streamlit sends unchanged charts as a
-  reference to what the browser already has. Hover and zoom are not
-  reported to the script, since each report would rerun it.
+  (about 1.1 MiB, 430 KiB gzipped). Streamlit sends unchanged charts as a
+  reference to what the browser already has. Hover is not reported to the
+  script, since each report would rerun it, nor pan and zoom without
+  `on_viewport`.

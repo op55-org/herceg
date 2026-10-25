@@ -269,6 +269,29 @@ def test_bad(name: str) -> Response:
     raise ValueError(name)
 
 
+@app.post("/test/read/<event>")
+def test_read(event: str) -> dict[str, Any]:
+    """What herceg.web reads of an event's detail the page posts, as JSON."""
+    detail = request.get_data(as_text=True)
+    if event == "viewport":
+        change = web.viewport_event(detail)
+        view = change.views[""].x
+        return {
+            "cause": change.cause,
+            "scales": [[s.scale, s.instance, list(s.panels)] for s in change.scales],
+            "x": [end.isoformat() for end in view] if view else None,
+        }
+    if event == "select":
+        selected = web.select_event(detail)
+        x = selected.selection.x if selected.selection else None
+        return {
+            "panels": list(selected.owner.panels),
+            "scales": [[s.scale, s.instance, list(s.panels)] for s in selected.owner.scales],
+            "x": [end.isoformat() for end in x] if x else None,
+        }
+    raise ValueError(event)
+
+
 @app.get("/test/hits")
 def test_hits() -> dict[str, int]:
     return dict(hits)

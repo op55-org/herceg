@@ -9,15 +9,28 @@ builder is taken, a dict of the same keyword names works too."""
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 import math
-import numbers
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Union
 
-from ._data import _time_ms, listed, shown
-from ._errors import ChartError, located
+import numpy as np
+
+from ._data import _time_ms, duration_ms, listlike
+from ._errors import (
+    ChartError,
+    Role,
+    is_number,
+    key_path,
+    listed,
+    located,
+    placed,
+    refuses,
+    shown,
+    unknown_option,
+)
 from ._style import (
     AXIS_ROLES,
     LEGEND_ROLES,
@@ -27,12 +40,35 @@ from ._style import (
     _built,
     _camel,
     _choice,
+    _fraction,
     _number,
     _spec,
+    built_list,
+    built_spec,
     style_spec,
 )
 
-Scope = Literal["chart", "panel", "row", "column"] | Mapping[str, Any]
+if TYPE_CHECKING:
+    from ._encoding import Pixels
+
+
+class LayoutScope(TypedDict):
+    """A scale shared by the panels of each row or column of a layout's
+    grid: ``{"layout": "main", "by": "column"}``."""
+
+    layout: str
+    by: Literal["row", "column"]
+
+
+class PanelsScope(TypedDict):
+    """A scale shared by the panels it names: ``{"panels": ["latency", "errors"]}``."""
+
+    panels: Sequence[str]
+
+
+#: Which panels share one instance of a scale (``AxisOptions.scope``,
+#: ``Scale.scope``): a name, a layout grid's rows or columns, or panels by id.
+Scope = Literal["chart", "panel", "row", "column"] | LayoutScope | PanelsScope
 Collision = Literal["show", "hide", "stagger", "wrap"]
 Channel = Literal["series", "color", "size", "symbol"]
 
@@ -59,23 +95,38 @@ def _instant(value: Any, role: str) -> float:
         "datetime64",
         "Timestamp",
     ):
-        return _time_ms(value)
-    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value):
-        raise ValueError(f"{role}: expected a finite number or a datetime; received {shown(value)}")
+        ms = _time_ms(value)
+        if not math.isfinite(ms):
+            raise ChartError(f"{role}: expected a datetime; received {shown(value)}, no time")
+        return ms
+    if isinstance(value, bool) or not is_number(value) or not math.isfinite(value):
+        raise ChartError(f"{role}: expected a finite number or a datetime; received {shown(value)}")
     return float(value)
 
 
 def _interval(value: Any, role: str) -> Any:
     """A time interval as the spec takes it: calendar steps, or elapsed milliseconds."""
+    if isinstance(value, np.timedelta64):
+        # Of a fixed length alone (months and years are calendar steps),
+        # straight to milliseconds: a timedelta keeps whole microseconds alone.
+        milliseconds = duration_ms(value)
+        if milliseconds is None:
+            raise ChartError(
+                f"{role}: expected an elapsed time; received {shown(value)}; give months and "
+                'years as calendar steps ("month", "3 months")'
+            )
+        if not milliseconds > 0:
+            raise ChartError(f"{role}: expected a positive elapsed time; received {shown(value)}")
+        return {"milliseconds": milliseconds}
     if isinstance(value, _dt.timedelta):
         milliseconds = value / _dt.timedelta(milliseconds=1)
         if not milliseconds > 0:
-            raise ValueError(f"{role}: expected a positive timedelta; received {value!r}")
+            raise ChartError(f"{role}: expected a positive timedelta; received {value!r}")
         return {"milliseconds": milliseconds}
     if isinstance(value, str):
         match = _INTERVAL.match(value.strip())
         if not match or match.group(2) not in _UNITS:
-            raise ValueError(
+            raise ChartError(
                 f'{role}: {shown(value)} is not a time interval; write a unit ("hour", "day", '
                 '"week", "month", "year"), a count and a unit ("6 hours", "15 minutes"), '
                 "or a timedelta for elapsed time"
@@ -83,7 +134,7 @@ def _interval(value: Any, role: str) -> Any:
         step = int(match.group(1) or 1)
         unit = match.group(2)
         if step < 1:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: {shown(value)} steps by {step}; give a count of 1 or more, "
                 'such as "6 hours"'
             )
@@ -92,6 +143,7 @@ def _interval(value: Any, role: str) -> Any:
     return value
 
 
+@refuses
 @dataclass
 class Ticks:
     """Which ticks an axis draws: about ``count`` round values; one ``every``
@@ -105,22 +157,22 @@ class Ticks:
     """
 
     count: int | None = None
-    every: float | str | _dt.timedelta | None = None
+    every: float | str | _dt.timedelta | np.timedelta64 | None = None
     anchor: float | _dt.datetime | None = None
     values: Sequence[Any] | None = None
 
     def __post_init__(self) -> None:
         given = [name for name in ("count", "every", "values") if getattr(self, name) is not None]
         if len(given) != 1:
-            raise ValueError(
+            raise ChartError(
                 f"Ticks: give one of count, every, or values; received {listed(given) or 'none'}"
             )
         if self.count is not None:
             _number(self.count, "Ticks count", positive=True)
         if self.anchor is not None and self.every is None:
-            raise ValueError("Ticks anchor: starts the steps of every; give every or drop anchor")
+            raise ChartError("Ticks anchor: starts the steps of every; give every or drop anchor")
         if isinstance(self.every, str) and self.anchor is not None:
-            raise ValueError(
+            raise ChartError(
                 "Ticks anchor: calendar steps start at calendar boundaries; drop anchor, "
                 "or step by a timedelta"
             )
@@ -130,7 +182,7 @@ class Ticks:
             return self.count
         if self.values is not None:
             if isinstance(self.values, (str, bytes)) or not isinstance(self.values, Sequence):
-                raise TypeError(f"Ticks values: expected a list; received {shown(self.values)}")
+                raise ChartError(f"Ticks values: expected a list; received {shown(self.values)}")
             return {
                 "values": [
                     value if isinstance(value, str) else _instant(value, f"Ticks values[{i}]")
@@ -148,24 +200,24 @@ def ticks_spec(value: Any, role: str) -> Any:
     if value is None:
         return None
     if callable(value):
-        raise TypeError(
+        raise ChartError(
             f"{role}: Python functions cannot travel in a chart; give a count or hg.Ticks"
         )
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+    if is_number(value) and not isinstance(value, bool):
         _number(value, role, positive=True)
         return value
-    return _built(value, Ticks, role)._spec()
+    return built_spec(value, Ticks, role)
 
 
 def _check_number_pattern(pattern: str, role: str) -> None:
     match = _NUMBER.match(pattern)
     if not match:
-        raise ValueError(
+        raise ChartError(
             f"{role}: {shown(pattern)} is not a number pattern herceg reads; write "
             '[sign][,][.precision][~][type] with type d, f, e, g, s, or %, such as ",.2f"'
         )
     if match.group(5) in ("g", "s") and match.group(3) == "0":
-        raise ValueError(f"{role}: {shown(pattern)} asks for 0 significant digits; give 1 or more")
+        raise ChartError(f"{role}: {shown(pattern)} asks for 0 significant digits; give 1 or more")
 
 
 def _check_time_pattern(pattern: str, role: str) -> None:
@@ -175,13 +227,14 @@ def _check_time_pattern(pattern: str, role: str) -> None:
         if not (number or (directive != "" and directive in _NAME_DIRECTIVES)) or (
             flag and not number
         ):
-            raise ValueError(
+            raise ChartError(
                 f"{role}: {shown(found.group(0))} at character {found.start() + 1} of "
                 f"{shown(pattern)} is not a time directive herceg reads; use %Y %y %m %d %e "
                 '%H %I %M %S %L %p %a %A %b %B %z, "-" for no padding (%-d), and %% for "%"'
             )
 
 
+@refuses
 @dataclass
 class Format:
     """How values are written by pattern: ``number``, a d3-format pattern
@@ -194,11 +247,11 @@ class Format:
 
     def __post_init__(self) -> None:
         if (self.number is None) == (self.time is None):
-            raise ValueError("Format: give number or time, one of them")
+            raise ChartError("Format: give number or time, one of them")
         for name in ("number", "time"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, str):
-                raise TypeError(
+                raise ChartError(
                     f"Format {name}: expected a pattern string; received {shown(value)}"
                 )
         if self.number is not None:
@@ -210,25 +263,43 @@ class Format:
         return {"number": self.number} if self.number is not None else {"time": self.time or ""}
 
 
+def _flags(options: Any, owner: str, names: Sequence[str]) -> None:
+    """Refuses those of an object's options `names` that are not None, True, or False."""
+    for name in names:
+        value = getattr(options, name)
+        if value is not None and not isinstance(value, bool):
+            raise ChartError(f"{owner} {name}: expected True or False; received {shown(value)}")
+
+
 def format_spec(value: Any, role: str) -> Any:
     """A format as the spec takes it: Intl options (a dict of Intl names), or an ``hg.Format``."""
     if value is None:
         return None
     if callable(value):
-        raise TypeError(
+        raise ChartError(
             f"{role}: Python functions cannot travel in a chart; give hg.Format or Intl options"
         )
     if isinstance(value, Format):
-        return value._spec()
+        return placed(role, value._spec)
     if isinstance(value, Mapping) and set(value) & {"number", "time"}:
-        return Format(**value)._spec()
+        return placed(role, lambda: _built(value, Format, role)._spec())
     if isinstance(value, Mapping):
+        # Intl's options, each a word, a number, or a flag.
+        for key, option in value.items():
+            if not isinstance(key, str) or not (
+                isinstance(option, (str, bool)) or (is_number(option) and math.isfinite(option))
+            ):
+                raise ChartError(
+                    f"{role}: Intl options are names of text, numbers, or True or False; "
+                    f"received {shown(key)}: {shown(option)}"
+                )
         return dict(value)
-    raise TypeError(
+    raise ChartError(
         f"{role}: expected hg.Format or a dict of Intl options; received {shown(value)}"
     )
 
 
+@refuses
 @dataclass
 class Tick:
     """Tick marks: ``direction`` out from the plot (``"out"``, the default),
@@ -245,6 +316,7 @@ class Tick:
             _number(self.length, "Tick length")
 
 
+@refuses
 @dataclass
 class TickLabels:
     """How tick labels are placed: ``rotation`` in degrees clockwise, from
@@ -271,7 +343,7 @@ class TickLabels:
 
     def __post_init__(self) -> None:
         if self.inside is not None and not isinstance(self.inside, bool):
-            raise TypeError(
+            raise ChartError(
                 f"TickLabels inside: expected True or False; received {shown(self.inside)}"
             )
         if self.gap is not None:
@@ -283,7 +355,15 @@ class TickLabels:
         if self.row is not None and (
             isinstance(self.row, bool) or not isinstance(self.row, int) or self.row < 0
         ):
-            raise ValueError(f"TickLabels row: expected 0, 1, 2, ...; received {shown(self.row)}")
+            raise ChartError(f"TickLabels row: expected 0, 1, 2, ...; received {shown(self.row)}")
+        if self.priority is not None and not (
+            is_number(self.priority)
+            and not isinstance(self.priority, bool)
+            and math.isfinite(self.priority)
+        ):
+            raise ChartError(
+                f"TickLabels priority: expected a number; received {shown(self.priority)}"
+            )
         turns = (
             self.rotation
             if isinstance(self.rotation, Sequence) and not isinstance(self.rotation, str)
@@ -291,9 +371,9 @@ class TickLabels:
         )
         for turn in turns:
             if turn is not None and not (
-                isinstance(turn, numbers.Real) and not isinstance(turn, bool) and -90 <= turn <= 90
+                is_number(turn) and not isinstance(turn, bool) and -90 <= turn <= 90
             ):
-                raise ValueError(
+                raise ChartError(
                     "TickLabels rotation: expected degrees from -90 (reading up) to 90 "
                     f"(reading down); received {shown(turn)}"
                 )
@@ -315,6 +395,7 @@ def _marks(value: Any, kind: type[Any], role: str) -> Any:
     return built._spec() if hasattr(built, "_spec") else _spec(built)
 
 
+@refuses
 @dataclass
 class TickLayer:
     """A layer of an axis' ticks, beside its own: minor ticks, or a row of
@@ -336,7 +417,7 @@ class TickLayer:
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or self.id in ("", "major"):
-            raise ValueError(
+            raise ChartError(
                 f'TickLayer id: expected a name other than "" and "major", the axis\' own ticks; '
                 f"received {shown(self.id)}"
             )
@@ -359,34 +440,35 @@ def scope_spec(scope: Any, role: str) -> Any:
     (``{"panels": ["latency", "errors"]}``)."""
     if scope is None or isinstance(scope, str):
         if scope is not None and scope not in ("chart", "panel", "row", "column"):
-            raise ValueError(
+            raise ChartError(
                 f'{role}: expected "chart", "panel", "row", "column", {{"layout": id, "by": '
                 f'"row" or "column"}}, or {{"panels": [ids]}}; received {shown(scope)}'
             )
         return scope
     if isinstance(scope, Mapping):
+        at = Role(role, "scope")
         if set(scope) == {"panels"}:
             panels = scope["panels"]
-            if (
-                isinstance(panels, str)
-                or not isinstance(panels, Sequence)
-                or not all(isinstance(p, str) for p in panels)
-            ):
-                raise TypeError(
-                    f"{role} panels: expected a list of panel ids; received {shown(panels)}"
+            if not listlike(panels):
+                raise at.field("panels").error(
+                    f"expected a list of panel ids; received {shown(panels)}"
                 )
+            for i, panel in enumerate(panels):
+                if not isinstance(panel, str):
+                    raise (
+                        at.field("panels")
+                        .index(i)
+                        .error(f"expected a panel's id; received {shown(panel)}")
+                    )
             return {"panels": list(panels)}
         if set(scope) == {"layout", "by"}:
-            if not isinstance(scope["layout"], str):
-                raise TypeError(
-                    f"{role} layout: expected a grid's id; received {shown(scope['layout'])}"
-                )
-            if scope["by"] not in ("row", "column"):
-                raise ValueError(
-                    f'{role} by: expected "row" or "column"; received {shown(scope["by"])}'
-                )
-            return {"layout": scope["layout"], "by": scope["by"]}
-    raise ValueError(
+            layout, by = scope["layout"], scope["by"]
+            if not isinstance(layout, str):
+                raise at.field("layout").error(f"expected a grid's id; received {shown(layout)}")
+            if not (isinstance(by, str) and by in ("row", "column")):
+                raise at.field("by").error(f'expected "row" or "column"; received {shown(by)}')
+            return {"layout": layout, "by": by}
+    raise ChartError(
         f'{role}: expected "chart", "panel", "row", "column", {{"layout": id, "by": "row" or '
         f'"column"}}, or {{"panels": [ids]}}; received {shown(scope)}'
     )
@@ -394,16 +476,16 @@ def scope_spec(scope: Any, role: str) -> Any:
 
 #: Room a scale keeps around its data: ``"auto"`` (the default), a share of
 #: its domain on each side, or ``hg.Pixels(n)``; 0 for none.
-Padding = Literal["auto"] | float | Any
+Padding = Union[Literal["auto"], float, "Pixels"]
 
 
 def padding_spec(value: Any, role: str) -> Any:
     """A scale's ``padding`` as the spec takes it."""
     if value is None or value == "auto":
         return value
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+    if is_number(value) and not isinstance(value, bool):
         if not 0 <= float(value) < 0.5:
-            raise ValueError(
+            raise ChartError(
                 f"{role}: expected a share of the domain from 0 up to 0.5, not 0.5; "
                 f"received {shown(value)}"
             )
@@ -413,6 +495,7 @@ def padding_spec(value: Any, role: str) -> Any:
     return length_spec(value, role)
 
 
+@refuses
 @dataclass
 class Scale:
     """A position scale's settings in the chart's ``scales``: ``"x"``,
@@ -440,17 +523,23 @@ class Scale:
             _choice(self.type, ("linear", "log", "time"), "Scale type")
         padding_spec(self.padding, "Scale padding")
         scope_spec(self.scope, "Scale scope")
-        if self.domain is not None and len(self.domain) != 2:
-            raise ValueError(
+        if self.domain is not None and (not listlike(self.domain) or len(self.domain) != 2):
+            raise ChartError(
                 f"Scale domain: a position scale's domain is (low, high); received "
                 f"{shown(self.domain)}"
             )
+        for name in ("nice", "zero"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, bool):
+                raise ChartError(f"Scale {name}: expected True or False; received {shown(value)}")
 
     def _spec(self) -> dict[str, Any]:
         domain = self.domain
         spec = {
             "type": self.type,
-            "domain": [_instant(v, "Scale domain") for v in domain] if domain is not None else None,
+            "domain": [_instant(v, f"Scale domain[{i}]") for i, v in enumerate(domain)]
+            if domain is not None
+            else None,
             "nice": self.nice,
             "zero": self.zero,
             "scope": scope_spec(self.scope, "Scale scope"),
@@ -460,6 +549,7 @@ class Scale:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass
 class OrdinalScale:
     """A scale of categories in the chart's ``scales``, which gives every
@@ -488,14 +578,14 @@ class OrdinalScale:
         if self.scope is not None:
             _choice(self.scope, ("chart", "panel"), "OrdinalScale scope")
         if self.domain is not None and (
-            isinstance(self.domain, str) or any(not isinstance(v, str) for v in self.domain)
+            not listlike(self.domain) or any(not isinstance(v, str) for v in self.domain)
         ):
-            raise TypeError(
+            raise ChartError(
                 "OrdinalScale domain: a scale of categories' domain is their values, "
                 f'such as ["A", "B"]; received {shown(self.domain)}'
             )
         if self.map is not None and not isinstance(self.map, Mapping):
-            raise TypeError(
+            raise ChartError(
                 'OrdinalScale map: expected a dict of outputs by value, such as {"A": "#00ab41"}; '
                 f"received {shown(self.map)}"
             )
@@ -509,7 +599,7 @@ class OrdinalScale:
         if self.map is not None:
             out["map"] = {str(key): _output(value) for key, value in self.map.items()}
         if self.unknown is not None:
-            out["unknown"] = _output(self.unknown)
+            out["unknown"] = _output(self.unknown, "OrdinalScale unknown")
         return out
 
 
@@ -525,10 +615,16 @@ class IdentityScale:
         return {"type": "identity"}
 
 
-def _output(value: Any) -> Any:
+def _output(value: Any, role: str = "OrdinalScale map") -> Any:
     """A scale's output: a color, a shape, a dash, or a number."""
     if isinstance(value, (list, tuple)):
+        if not all(is_number(step) and not isinstance(step, bool) for step in value):
+            raise ChartError(f"{role}: a dash is a list of lengths; received {shown(value)}")
         return [float(step) for step in value]
+    if isinstance(value, bool) or not (isinstance(value, str) or is_number(value)):
+        raise ChartError(
+            f"{role}: expected a color, a shape, a dash, or a number; received {shown(value)}"
+        )
     return value
 
 
@@ -540,43 +636,51 @@ def scales_spec(value: Any) -> Any:
     if value is None:
         return None
     if not isinstance(value, Mapping):
-        raise TypeError(
+        raise ChartError(
             f'Chart scales: expected a dict such as {{"y": hg.Scale(...)}}; received {shown(value)}'
         )
     names = {"x": "x", "y": "y", "y_right": "yRight"}
     out = {}
     for name, scale in value.items():
-        role = f"Chart scales {name}"
-        if name in names:
-            if isinstance(scale, OrdinalScale):
-                raise ChartError(
-                    f"{role}: places values on an axis; give an hg.Scale, or name the "
-                    "OrdinalScale otherwise"
-                )
-            out[names[name]] = _built(scale, Scale, role)._spec()
-        elif isinstance(scale, IdentityScale) or (
-            isinstance(scale, Mapping) and scale.get("type") == "identity"
-        ):
-            if isinstance(scale, Mapping) and set(scale) != {"type"}:
-                raise ValueError(
-                    f"{role}: an identity scale has no settings; give hg.IdentityScale()"
-                )
-            out[name] = IdentityScale()._spec()
-        elif isinstance(scale, Scale) or (
-            isinstance(scale, Mapping) and scale.get("type") in ("linear", "log", "time")
-        ):
-            scale = _built(scale, Scale, role)
-            if scale.type is None:
-                raise ChartError(
-                    f"{role}: a position scale of the chart's own says its type; give "
-                    'type="linear", "log", or "time", or an hg.OrdinalScale for categories'
-                )
-            out[name] = scale._spec()
-        else:
-            out[name] = _built(scale, OrdinalScale, role)._spec()
+        if not isinstance(name, str) or not name:
+            raise ChartError(
+                f"Chart scales: expected scales' names; received the key {shown(name)}"
+            )
+        key = names.get(name, name)
+        out[key] = located(key_path(None, name), functools.partial(_scale_spec, name, scale))
     return out
 
 
+def _scale_spec(name: str, scale: Any) -> Any:
+    """One of a chart's ``scales`` as the spec takes it (see `scales_spec`)."""
+    role = f"Chart scales {name}"
+    if name in ("x", "y", "y_right"):
+        if isinstance(scale, OrdinalScale):
+            raise ChartError(
+                f"{role}: places values on an axis; give an hg.Scale, or name the "
+                "OrdinalScale otherwise"
+            )
+        return built_spec(scale, Scale, role)
+    if isinstance(scale, IdentityScale) or (
+        isinstance(scale, Mapping) and scale.get("type") == "identity"
+    ):
+        if isinstance(scale, Mapping) and set(scale) != {"type"}:
+            raise ChartError(f"{role}: an identity scale has no settings; give hg.IdentityScale()")
+        return IdentityScale()._spec()
+    if isinstance(scale, Scale) or (
+        isinstance(scale, Mapping) and scale.get("type") in ("linear", "log", "time")
+    ):
+        scale = _built(scale, Scale, role)
+        if scale.type is None:
+            raise ChartError(
+                f"{role}: a position scale of the chart's own says its type; give "
+                'type="linear", "log", or "time", or an hg.OrdinalScale for categories'
+            )
+        return scale._spec()
+    return built_spec(scale, OrdinalScale, role)
+
+
+@refuses
 @dataclass
 class ScaleRef:
     """A scale a guide shows: one a mark owns, by the mark's ``id``
@@ -593,19 +697,20 @@ class ScaleRef:
     def __post_init__(self) -> None:
         if self.scale is not None:
             if self.mark is not None or self.channel is not None:
-                raise ValueError(
+                raise ChartError(
                     "ScaleRef: a mark's scale (mark, channel) or a scale's name, not both"
                 )
             if not isinstance(self.scale, str) or not self.scale:
-                raise TypeError(
+                raise ChartError(
                     f"ScaleRef scale: expected a scale's name; received {shown(self.scale)}"
                 )
             return
         if not isinstance(self.mark, str) or not self.mark:
-            raise TypeError(f"ScaleRef mark: expected a mark's id; received {shown(self.mark)}")
+            raise ChartError(f"ScaleRef mark: expected a mark's id; received {shown(self.mark)}")
         _choice(self.channel, ("series", "color", "size", "symbol"), "ScaleRef channel")
 
 
+@refuses
 @dataclass(frozen=True)
 class MarkRef:
     """A mark a legend lists whole, by its ``id``: its series, or for an
@@ -615,7 +720,7 @@ class MarkRef:
 
     def __post_init__(self) -> None:
         if not isinstance(self.mark, str) or not self.mark:
-            raise TypeError(f"MarkRef mark: expected a mark's id; received {shown(self.mark)}")
+            raise ChartError(f"MarkRef mark: expected a mark's id; received {shown(self.mark)}")
 
 
 def include_spec(value: Any, role: str) -> Any:
@@ -625,19 +730,17 @@ def include_spec(value: Any, role: str) -> Any:
     if value is None:
         return None
     if isinstance(value, (str, Mapping)) or not isinstance(value, Sequence):
-        raise TypeError(
+        raise ChartError(
             f"{role}: expected a list of hg.ScaleRef and hg.MarkRef; received {shown(value)}"
         )
     out = []
-    for ref in value:
-        if isinstance(ref, Mapping) and set(ref) == {"mark"}:
-            ref = MarkRef(**ref)
-        if not isinstance(ref, MarkRef):
-            ref = _built(ref, ScaleRef, role)
-        out.append(_spec(ref))
+    for i, ref in enumerate(value):
+        marked = isinstance(ref, MarkRef) or (isinstance(ref, Mapping) and set(ref) == {"mark"})
+        out.append(_spec(_built(ref, MarkRef if marked else ScaleRef, f"{role}[{i}]")))
     return out
 
 
+@refuses
 @dataclass(frozen=True)
 class LegendTarget:
     """What a legend entry of your own hides and shows besides whole marks
@@ -657,17 +760,17 @@ class LegendTarget:
             or not isinstance(self.values, Sequence)
             or any(not isinstance(v, str) for v in self.values)
         ):
-            raise TypeError(
+            raise ChartError(
                 f"LegendTarget values: expected a list of values; received {shown(self.values)}"
             )
         for name in ("mark", "field", "scale"):
             value = getattr(self, name)
             if value is not None and not (isinstance(value, str) and value):
-                raise TypeError(f"LegendTarget {name}: expected a name; received {shown(value)}")
+                raise ChartError(f"LegendTarget {name}: expected a name; received {shown(value)}")
         if (self.scale is None) == (self.mark is None) or (self.mark is not None) != (
             self.field is not None
         ):
-            raise ValueError("LegendTarget: give mark and field, or scale, with values")
+            raise ChartError("LegendTarget: give mark and field, or scale, with values")
 
     def _spec(self) -> dict[str, Any]:
         spec: dict[str, Any] = (
@@ -679,6 +782,7 @@ class LegendTarget:
         return spec
 
 
+@refuses
 @dataclass
 class Swatch:
     """A legend entry's swatch: a ``"line"`` (``stroke``, ``stroke_width``,
@@ -708,7 +812,7 @@ class Swatch:
             self.type
         ]
         if getattr(self, needs) is None:
-            raise ValueError(f"Swatch {needs}: a {self.type} swatch needs {needs}; give it")
+            raise ChartError(f"Swatch {needs}: a {self.type} swatch needs {needs}; give it")
         takes = _SWATCH_FIELDS[self.type]
         for name in (
             "stroke",
@@ -721,11 +825,19 @@ class Swatch:
             "parts",
         ):
             if getattr(self, name) is not None and name not in takes:
-                raise ValueError(
+                raise ChartError(
                     f"Swatch {name}: a {self.type} swatch takes {listed(takes)}; drop {name}"
                 )
-        if self.parts is not None:
-            self.parts = [_built(part, Swatch, "Swatch parts") for part in self.parts]
+        for name in ("stroke_width", "size"):
+            if getattr(self, name) is not None:
+                _number(getattr(self, name), f"Swatch {name}")
+        if self.opacity is not None:
+            _fraction(self.opacity, "Swatch opacity")
+        if self.dash is not None:
+            from ._encoding import dash_spec
+
+            dash_spec(self.dash, "Swatch dash")
+        self.parts = built_list(self.parts, Swatch, "Swatch parts")
 
     def _spec(self) -> dict[str, Any]:
         spec = _fields(self)
@@ -743,6 +855,7 @@ _SWATCH_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
+@refuses
 @dataclass
 class LegendEntry:
     """A legend entry of your own: its ``key`` and ``label``, a ``swatch``
@@ -759,11 +872,11 @@ class LegendEntry:
     def __post_init__(self) -> None:
         for name in ("key", "label"):
             if not isinstance(getattr(self, name), str):
-                raise TypeError(
+                raise ChartError(
                     f"LegendEntry {name}: expected a string; received {shown(getattr(self, name))}"
                 )
         if self.swatch is not None and self.sample is not None:
-            raise ValueError("LegendEntry: a swatch or a sample, not both")
+            raise ChartError("LegendEntry: a swatch or a sample, not both")
         self.swatch = _built(self.swatch, Swatch, "LegendEntry swatch")
 
     def _spec(self) -> dict[str, Any]:
@@ -776,13 +889,25 @@ class LegendEntry:
             spec["targets"] = [
                 {"mark": target}
                 if isinstance(target, str)
-                else _built(target, LegendTarget, "LegendEntry targets")._spec()
-                for target in self.targets
+                else built_spec(target, LegendTarget, f"LegendEntry targets[{i}]")
+                for i, target in enumerate(self.targets)
             ]
         return spec
 
 
+class _TitleText(TypedDict):
+    text: str
+
+
+class LegendTitle(_TitleText, total=False):
+    """A legend's or a colorbar's title with a style of its own:
+    ``{"text": "Region", "style": hg.TextStyle(weight="bold")}``."""
+
+    style: TextStyle | Mapping[str, Any] | None
+
+
 def _title(value: Any, role: str) -> Any:
+    """A guide's title as the spec takes it, refused at paths within it."""
     if value is None or isinstance(value, str):
         return value
     if isinstance(value, Mapping):
@@ -790,22 +915,28 @@ def _title(value: Any, role: str) -> Any:
         text = value.pop("text", None)
         style = value.pop("style", None)
         if value or not isinstance(text, str):
-            raise ValueError(f"{role}: expected a string, or a dict with text and style")
-        return {"text": text, **({"style": _spec(_built(style, TextStyle, role))} if style else {})}
-    raise TypeError(f"{role}: expected a string; received {shown(value)}")
+            raise ChartError(f"{role}: expected a string, or a dict with text and style")
+        if style is None:
+            return {"text": text}
+        role = f"{role} style"
+        return {
+            "text": text,
+            "style": located("style", lambda: _spec(_built(style, TextStyle, role))),
+        }
+    raise ChartError(f"{role}: expected a string; received {shown(value)}")
 
 
 def legend_layout(builder: Any, role: str) -> dict[str, Any]:
     """The layout options of a legend (the chart's ``legend=``, or an
     ``hg.legend``), as the spec takes them."""
     if builder.columns is not None and builder.rows is not None:
-        raise ValueError(f"{role} rows: columns or rows, not both; drop one")
+        raise ChartError(f"{role} rows: columns or rows, not both; drop one")
     for name in ("columns", "rows"):
         value = getattr(builder, name)
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int) or value < 1
         ):
-            raise ValueError(
+            raise ChartError(
                 f"{role} {name}: expected a whole number of at least 1; received {shown(value)}"
             )
     if builder.order is not None:
@@ -813,8 +944,12 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
     if builder.swatches is not None:
         _choice(builder.swatches, ("mark",), f"{role} swatches")
     entries = builder.entries
+    if entries is not None and (not listlike(entries)):
+        raise ChartError(
+            f"{role} entries: expected a list of hg.LegendEntry; received {shown(entries)}"
+        )
     made = (
-        [_built(entry, LegendEntry, f"{role} entries")._spec() for entry in entries]
+        [built_spec(entry, LegendEntry, f"{role} entries[{i}]") for i, entry in enumerate(entries)]
         if entries is not None
         else None
     )
@@ -823,7 +958,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         "columns": builder.columns,
         "rows": builder.rows,
         "order": builder.order,
-        "title": _title(builder.title, f"{role} title"),
+        "title": located("title", lambda: _title(builder.title, f"{role} title")),
         "include": include_spec(builder.include, f"{role} include"),
         "entries": made,
         "swatches": builder.swatches,
@@ -832,9 +967,12 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
     return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass
 class AxisGuide:
     """An axis the chart's ``guides`` lists (see ``hg.axis``)."""
+
+    _spelled: ClassVar = ("axis",)
 
     scale: str
     id: str | None = None
@@ -853,34 +991,31 @@ class AxisGuide:
 
     def __post_init__(self) -> None:
         if not isinstance(self.scale, str) or not self.scale:
-            raise TypeError(
+            raise ChartError(
                 "axis scale: expected x, y, y_right, or a scale's name; "
                 f"received {shown(self.scale)}"
             )
         own = self.scale not in ("x", "y", "y_right")
         if own and self.place is None:
-            raise ValueError(
+            raise ChartError(
                 f"axis place: an axis of the chart's own scale {shown(self.scale)} has no side "
                 "of its own; give place=hg.Place(side=...)"
             )
         if self.repeat is not None:
             _choice(self.repeat, ("outer", "all"), "axis repeat")
+        _flags(self, "axis", ("line", "show"))
         self.place = _built(self.place, Place, "axis place")
         if isinstance(self.place, Place):
             sides = {"x": ("bottom", "top"), "y": ("left", "right"), "y_right": ("right",)}
             side = self.place.side
             if side is None:
-                raise ValueError("axis place: an axis goes on a side; give side")
+                raise ChartError("axis place: an axis goes on a side; give side")
             if not own and side not in sides[self.scale]:
-                raise ValueError(
+                raise ChartError(
                     f"axis place: {self.scale} axes go on the {listed(sides[self.scale])} "
                     f"side; received {shown(side)}"
                 )
-        self.layers = (
-            [_built(layer, TickLayer, "axis layers") for layer in self.layers]
-            if self.layers is not None
-            else None
-        )
+        self.layers = built_list(self.layers, TickLayer, "axis layers")
 
     def _spec(self) -> dict[str, Any]:
         spec = {
@@ -895,7 +1030,10 @@ class AxisGuide:
             "labels": _marks(self.labels, TickLabels, "axis labels"),
             "line": self.line,
             "grid": grid_spec(self.grid, "axis grid"),
-            "layers": [_built(layer, TickLayer, "axis layers")._spec() for layer in self.layers]
+            "layers": [
+                built_spec(layer, TickLayer, f"axis layers[{i}]")
+                for i, layer in enumerate(self.layers)
+            ]
             if self.layers is not None
             else None,
             "show": self.show,
@@ -905,6 +1043,7 @@ class AxisGuide:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+@refuses
 @dataclass(frozen=True)
 class GridLines:
     """Grid lines across the plot at an axis' major ticks: ``z_index``
@@ -919,8 +1058,8 @@ class GridLines:
 
 
 def _finite(value: Any, role: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value):
-        raise TypeError(f"{role}: expected a finite number; received {shown(value)}")
+    if isinstance(value, bool) or not is_number(value) or not math.isfinite(value):
+        raise ChartError(f"{role}: expected a finite number; received {shown(value)}")
 
 
 def grid_spec(value: Any, role: str) -> Any:
@@ -945,9 +1084,11 @@ def axis(scale: str, **options: Any) -> AxisGuide:
         hg.axis("x", layers=[hg.TickLayer(id="day", ticks=hg.Ticks(every="day"),
                                           labels=hg.TickLabels(row=1))])
     """
+    _known_options("axis", options, AxisGuide)
     return AxisGuide(scale=scale, **options)
 
 
+@refuses
 @dataclass
 class LegendOptions:
     """The chart's legend (``legend=``): where it goes (``place``, an
@@ -965,7 +1106,7 @@ class LegendOptions:
     columns: int | None = None
     rows: int | None = None
     order: Literal["row", "column"] | None = None
-    title: str | Mapping[str, Any] | None = None
+    title: str | LegendTitle | None = None
     include: Sequence[ScaleRef | MarkRef | Mapping[str, Any]] | None = None
     entries: Sequence[LegendEntry | Mapping[str, Any]] | None = None
     swatches: Literal["mark"] | None = None
@@ -979,12 +1120,15 @@ def legend_spec(legend: Any) -> Any:
     """A chart's legend as the spec takes it: a boolean, or an object."""
     if legend is None or isinstance(legend, bool):
         return legend
-    return _built(legend, LegendOptions, "Chart legend")._spec()
+    return built_spec(legend, LegendOptions, "Chart legend")
 
 
+@refuses
 @dataclass
 class LegendGuide:
     """A legend the chart's ``guides`` lists (see ``hg.legend``)."""
+
+    _spelled: ClassVar = ("legend",)
 
     include: Sequence[ScaleRef | MarkRef | Mapping[str, Any]] | None = None
     id: str | None = None
@@ -992,7 +1136,7 @@ class LegendGuide:
     columns: int | None = None
     rows: int | None = None
     order: Literal["row", "column"] | None = None
-    title: str | Mapping[str, Any] | None = None
+    title: str | LegendTitle | None = None
     entries: Sequence[LegendEntry | Mapping[str, Any]] | None = None
     swatches: Literal["mark"] | None = None
     show: bool | None = None
@@ -1000,12 +1144,13 @@ class LegendGuide:
     panel: str | None = None
 
     def _spec(self) -> dict[str, Any]:
+        _flags(self, "legend", ("show",))
         spec: dict[str, Any] = {"type": "legend", **legend_layout(self, "legend")}
         if self.id is not None:
             spec["id"] = self.id
         if self.panel is not None:
             if not isinstance(self.panel, str) or self.panel in ("", "*"):
-                raise ValueError(
+                raise ChartError(
                     f"legend panel: expected a panel's id; received {shown(self.panel)}"
                 )
             spec["panel"] = self.panel
@@ -1024,17 +1169,21 @@ def legend(**options: Any) -> LegendGuide:
     chart's series stand for, whichever marks and panels show it. With
     ``panel``, it lists what that panel draws (above the panel by default),
     and its entries hide and show it there."""
+    _known_options("legend", options, LegendGuide)
     return LegendGuide(**options)
 
 
+@refuses
 @dataclass
 class Colorbar:
     """A colorbar the chart's ``guides`` lists (see ``hg.colorbar``)."""
 
+    _spelled: ClassVar = ("colorbar",)
+
     scale: ScaleRef | Mapping[str, Any] | None = None
     id: str | None = None
     place: Place | Mapping[str, Any] | None = None
-    title: str | Mapping[str, Any] | None = None
+    title: str | LegendTitle | None = None
     ticks: int | Ticks | Mapping[str, Any] | None = None
     format: Format | Mapping[str, Any] | None = None
     tick: Tick | Literal[False] | Mapping[str, Any] | None = None
@@ -1049,8 +1198,8 @@ class Colorbar:
         for name in ("length", "thickness"):
             if getattr(self, name) is not None:
                 _number(getattr(self, name), f"colorbar {name}", positive=True)
-        if self.layers is not None:
-            self.layers = [_built(layer, TickLayer, "colorbar layers") for layer in self.layers]
+        _flags(self, "colorbar", ("show",))
+        self.layers = built_list(self.layers, TickLayer, "colorbar layers")
 
     def _spec(self) -> dict[str, Any]:
         spec = {
@@ -1058,12 +1207,15 @@ class Colorbar:
             "id": self.id,
             "scale": _spec(_built(self.scale, ScaleRef, "colorbar scale")),
             "place": _spec(_built(self.place, Place, "colorbar place")),
-            "title": _title(self.title, "colorbar title"),
+            "title": located("title", lambda: _title(self.title, "colorbar title")),
             "ticks": ticks_spec(self.ticks, "colorbar ticks"),
             "format": format_spec(self.format, "colorbar format"),
             "tick": _marks(self.tick, Tick, "colorbar tick"),
             "labels": _marks(self.labels, TickLabels, "colorbar labels"),
-            "layers": [layer._spec() for layer in self.layers]  # type: ignore[union-attr]
+            "layers": [
+                built_spec(layer, TickLayer, f"colorbar layers[{i}]")
+                for i, layer in enumerate(self.layers)
+            ]
             if self.layers is not None
             else None,
             "length": self.length,
@@ -1082,7 +1234,17 @@ def colorbar(**options: Any) -> Colorbar:
     channel="color")``) or the chart's only one; beside the plots by default
     (``place=hg.Place(side="right")``), with ``ticks``, a ``format``, a
     ``title``, and tick ``layers`` as axes take them."""
+    _known_options("colorbar", options, Colorbar)
     return Colorbar(**options)
+
+
+def _known_options(owner: str, options: Mapping[str, Any], kind: type) -> None:
+    known = {field.name for field in fields(kind) if field.init} - {"scale", "type"}
+    if owner == "colorbar":
+        known.add("scale")
+    for name in options:
+        if name not in known:
+            raise unknown_option(owner, name, known)
 
 
 #: A guide the chart's ``guides`` lists.
@@ -1101,24 +1263,31 @@ def guide_problem(guide: Any) -> tuple[str, str] | None:
 
     grid = get(guide, "grid")
     z = grid.get("z_index") if isinstance(grid, Mapping) else None
-    if z is not None and (
-        isinstance(z, bool) or not isinstance(z, numbers.Real) or not math.isfinite(z)
-    ):
+    if z is not None and (isinstance(z, bool) or not is_number(z) or not math.isfinite(z)):
         return "grid.z_index", f"expected a finite number; received {shown(z)}"
     labels = [("labels", get(guide, "labels"))]
-    for k, layer in enumerate(get(guide, "layers") or ()):
+    layers = get(guide, "layers")
+    if layers is not None and (not listlike(layers)):
+        return "layers", f"expected a list of tick layers; received {shown(layers)}"
+    for k, layer in enumerate(() if layers is None else layers):
         labels.append((f"layers[{k}].labels", get(layer, "labels")))
     for at, tick_labels in labels:
         if not isinstance(tick_labels, Mapping):
             continue
         gap, inside = tick_labels.get("gap"), tick_labels.get("inside")
-        number = isinstance(gap, numbers.Real) and not isinstance(gap, bool)
+        number = is_number(gap) and not isinstance(gap, bool)
         if gap is not None and not (number and 0 <= gap < math.inf):
             return f"{at}.gap", f"expected a number of at least 0; received {shown(gap)}"
         if inside is not None and not isinstance(inside, bool):
             return f"{at}.inside", f"expected True or False; received {shown(inside)}"
-    for k, entry in enumerate(get(guide, "entries") or ()):
-        for t, target in enumerate(get(entry, "targets") or ()):
+    entries = get(guide, "entries")
+    if entries is not None and (not listlike(entries)):
+        return "entries", f"expected a list of hg.LegendEntry; received {shown(entries)}"
+    for k, entry in enumerate(() if entries is None else entries):
+        targets = get(entry, "targets")
+        if targets is not None and (not listlike(targets)):
+            return f"entries[{k}].targets", f"expected a list of targets; received {shown(targets)}"
+        for t, target in enumerate(() if targets is None else targets):
             if not isinstance(target, Mapping):
                 continue
             at = f"entries[{k}].targets[{t}]"
@@ -1142,22 +1311,24 @@ def guide_problem(guide: Any) -> tuple[str, str] | None:
     return None
 
 
-def guides_spec(value: Any) -> Any:
-    """A chart's ``guides`` as the spec takes them."""
+def guides_spec(value: Any, start: int = 0) -> Any:
+    """A chart's ``guides`` as the spec takes them, refused at their index
+    in the list (the spec's, from ``start``, for panels' legends after the
+    chart's guides)."""
     if value is None:
         return None
     if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, Sequence):
-        raise TypeError(
+        raise ChartError(
             "Chart guides: expected a list of hg.axis, hg.legend, and hg.colorbar guides; "
             f"received {shown(value)}"
         )
     out = []
-    for i, guide in enumerate(value):
+    for i, guide in enumerate(value, start):
+        at = Role("Chart guides").index(i)
         if not isinstance(guide, (AxisGuide, LegendGuide, Colorbar)):
-            raise ChartError(
-                f"Chart guides[{i}]: expected hg.axis(...), hg.legend(...), or hg.colorbar(...); "
-                f"received {type(guide).__name__}",
-                path=f"guides[{i}]",
+            raise at.error(
+                "expected hg.axis(...), hg.legend(...), or hg.colorbar(...); "
+                f"received {type(guide).__name__}"
             )
-        out.append(located(f"guides[{i}]", guide._spec))
+        out.append(located(at, guide._spec))
     return out

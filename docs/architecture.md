@@ -1989,12 +1989,13 @@ across scales. Synced charts share cursors with such charts (each
 panel draws a cursor its scale holds) but neither send them nor take
 viewports and selections, which belong to some panels only; applications
 that link scales of the same quantity set them with `setViewport` and a
-panel. Python's live widgets keep a view per subplot with an x scale of its
-own (the browser reports a change once for each panel showing the scale,
-and restores each panel's view by key), and refuse facet panels with x
-scales of their own, whose keys come from the data; the Streamlit component
-reports each panel's view and the panels of the selection, and keeps each
-panel's zoom across reruns by panel key.
+panel. Python's live widgets take the same changes of view
+(`viewportEventPayload`) and keep the state `viewportStatePayload` reads,
+which every display restores (`restoreViewportState`) and Python sets by
+panel (`set_viewport(..., panel=)`), facets with scales of their own
+included; the Streamlit component reports each panel's view and the panels
+of the selection, and restores the views of a chart drawn again on a rerun
+the same way, with what its legends hid (`restoreVisibility`).
 
 ### Layouts of panels
 
@@ -3448,8 +3449,8 @@ English language override unless the final catalog language is English;
 its visible content uses a nested `/Span`
 with `/Lang` for that chart's locale. `specToPDF` accepts one spec or a list,
 including `{ spec, buffers }` entries whose binary indices are local to each
-page. Python's `hg.to_pdf(chart_or_charts, **settings)` returns bytes and
-`hg.save(chart_or_charts, path, **settings)` delegates a single chart to
+page. Python's `hg.to_pdf(charts, **settings)` returns bytes and
+`hg.save(charts, path, **settings)` delegates a single chart to
 `Chart.save(path)`, choosing its format by extension. Sequences require a
 `.pdf` path and use the same writer, transporting fonts once and chart
 buffers separately; other formats require saving each chart separately.
@@ -6708,10 +6709,8 @@ mouse input, through Playwright's mouse.
   highlighting of a node's links on hover. The whole layout is recomputed
   when the table changes, and the pointer lookup scans every node and link.
 - A chart has one selection at a time, which belongs to the instances its
-  brush ran along (`SelectionOwner`). Python's live widgets keep each
-  subplot's own view and the panels of a selection,
-  but refuse facets with x scales of their own, whose panels come from the
-  data; Streamlit reports each panel's view and the panels of a selection.
+  brush ran along (`SelectionOwner`). Python's live widgets and Streamlit
+  report each panel's view and the panels of a selection.
   Annotations repeated in panels whose x scales differ in type are
   described in the text alternative with their first panel's formats.
 - Selections report ranges and lasso outlines, not the rows inside them.

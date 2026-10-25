@@ -72,6 +72,7 @@ from ._data import Matrix
 from ._derive import Derived, Expr, col, derive, when
 from ._encoding import (
     BarLabels,
+    CalendarBreak,
     Channel,
     Continuity,
     DataPosition,
@@ -90,6 +91,7 @@ from ._encoding import (
     SeriesStyle,
     Stack,
     StyleMap,
+    SymbolName,
 )
 from ._errors import ChartError
 from ._events import (
@@ -98,9 +100,16 @@ from ._events import (
     InspectedPoint,
     Inspection,
     ItemPositions,
+    PanelVisibility,
+    ScaleInstance,
+    ScaleView,
+    SelectEvent,
     Selection,
+    SelectionOwner,
     ViewEdge,
     Viewport,
+    ViewportEvent,
+    VisibilityState,
 )
 from ._guides import (
     AxisGuide,
@@ -184,6 +193,7 @@ __all__ = [
     "SeriesStyle",
     "Stack",
     "StyleMap",
+    "SymbolName",
     "SCHEMES",
     "SYMBOLS",
     "Animation",
@@ -192,6 +202,7 @@ __all__ = [
     "BarStyle",
     "Break",
     "Colorbar",
+    "CalendarBreak",
     "Camera",
     "Chart",
     "ChartOptions",
@@ -236,7 +247,14 @@ __all__ = [
     "TooltipField",
     "TooltipStyle",
     "Viewport",
+    "ViewportEvent",
     "ViewEdge",
+    "ScaleInstance",
+    "ScaleView",
+    "SelectEvent",
+    "SelectionOwner",
+    "VisibilityState",
+    "PanelVisibility",
     "Binding",
     "BrushAction",
     "CursorAction",

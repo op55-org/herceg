@@ -50,7 +50,7 @@ def test_bindings_refuse_what_cannot_select_rows():
         match='SelectionBinding events: expected "brush", "lasso", or "click"; received "drag"',
     ):
         SelectionBinding("c", events=["drag"])  # type: ignore[list-item]
-    with pytest.raises(TypeError, match="SelectionBinding events: expected a list of gestures"):
+    with pytest.raises(hg.ChartError, match="SelectionBinding events: expected a list of gestures"):
         SelectionBinding("c", events="click")  # type: ignore[arg-type]
     with pytest.raises(
         ValueError,
@@ -58,7 +58,10 @@ def test_bindings_refuse_what_cannot_select_rows():
     ):
         SelectionBinding("c", effect="filter")  # type: ignore[arg-type]
     with pytest.raises(
-        TypeError, match="Chart row_selection: expected hg.SelectionBinding values; received str"
+        hg.ChartError,
+        match=(
+            "Chart row_selection: expected an hg.SelectionBinding or a list of them; received str"
+        ),
     ):
         hg.Chart(trips(), row_selection="focus")  # type: ignore[arg-type]
     binding = SelectionBinding("c")
@@ -164,7 +167,7 @@ def test_a_binding_starts_with_its_selection_which_static_output_draws():
         ValueError, match="SelectionBinding selection: no column 'cost' in the data it selects"
     ):
         chart(hg.col("cost") > 1).to_spec()
-    with pytest.raises(TypeError, match="SelectionBinding selection: expected a condition"):
+    with pytest.raises(hg.ChartError, match="SelectionBinding selection: expected a condition"):
         SelectionBinding("c", selection="kind")
     with pytest.raises(
         ValueError, match="SelectionBinding selection: expected positions of rows, 0 or more"
@@ -341,11 +344,13 @@ def test_conditions_set_from_python_test_columns_the_browser_has():
     sending = carried.widget()
     sending.row_selection = hg.col("kind") == "a"
     assert sending.row_selection.condition is not None
-    with pytest.raises(ValueError, match="SelectionBinding fields: no column 'cost'"):
+    with pytest.raises(ValueError, match=r"SelectionBinding fields\[0\]: no column 'cost'"):
         hg.Chart(trips(), row_selection=SelectionBinding("c", fields=["cost"])).point(
             x="km", y="fare"
         ).to_spec()
-    with pytest.raises(TypeError, match="SelectionBinding fields: expected a list of column names"):
+    with pytest.raises(
+        hg.ChartError, match="SelectionBinding fields: expected a list of column names"
+    ):
         SelectionBinding("c", fields="kind")
 
 

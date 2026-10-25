@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import numbers
 import sys
 import warnings
 from collections.abc import Mapping, Sequence
@@ -14,6 +13,7 @@ import numpy as np
 from .._chart import _POINT_CHANNELS, Chart, Jitter
 from .._data import Column
 from .._encoding import Encodings
+from .._errors import ChartError, is_integer, is_number
 from . import _numerics as numerics
 from . import _swarm
 from ._common import (
@@ -34,6 +34,7 @@ from ._common import (
     make_chart,
     number_column,
     readable,
+    real,
     record,
     rows_table,
     seed_of,
@@ -148,14 +149,12 @@ def swarmplot(
     pixels. ``z_index`` and ``encode`` go to the points, as ``Chart.point``
     takes them, reading any column of the data.
     """
-    if not (isinstance(radius, numbers.Real) and math.isfinite(radius) and radius > 0):
-        raise ValueError(
+    if not (is_number(radius) and math.isfinite(radius) and radius > 0):
+        raise ChartError(
             f"swarmplot radius: expected a positive number of pixels; received {shown(radius)}"
         )
-    if isinstance(warn_thresh, bool) or not (
-        isinstance(warn_thresh, numbers.Real) and 0 <= warn_thresh <= 1
-    ):
-        raise ValueError(
+    if isinstance(warn_thresh, bool) or not (is_number(warn_thresh) and 0 <= warn_thresh <= 1):
+        raise ChartError(
             f"swarmplot warn_thresh: expected a share from 0 to 1; received {shown(warn_thresh)}"
         )
     marks = mark_options("swarmplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
@@ -312,7 +311,7 @@ def _jitter(jitter: bool | float | Jitter, seed: int | None) -> Jitter | None:
     width takes ``seed`` (or one drawn now), a ``Jitter`` its own."""
     if isinstance(jitter, Jitter):
         if seed != 0:
-            raise ValueError(
+            raise ChartError(
                 "stripplot seed: the Jitter given as jitter has its own seed; "
                 "give the seed in one place"
             )
@@ -320,9 +319,9 @@ def _jitter(jitter: bool | float | Jitter, seed: int | None) -> Jitter | None:
     else:
         width = 0.5 if jitter is True else 0 if jitter is False else jitter
     if isinstance(width, bool) or not (
-        isinstance(width, numbers.Real) and math.isfinite(width) and 0 <= float(width) <= 1
+        is_number(width) and math.isfinite(width) and 0 <= float(width) <= 1
     ):
-        raise ValueError(
+        raise ChartError(
             "stripplot jitter: expected True, False, a width from 0 to 1, or an hg.Jitter; "
             f"received {shown(jitter)}"
         )
@@ -363,7 +362,7 @@ def boxplot(
     marks = mark_options("boxplot", z_index=z_index)
     reach = _whisker_reach(whiskers)
     if not isinstance(outliers, bool):
-        raise TypeError(f"boxplot outliers: expected True or False; received {shown(outliers)}")
+        raise ChartError(f"boxplot outliers: expected True or False; received {shown(outliers)}")
     layout = _Categories(data, x, y, series, order, series_order, orient, options, "boxplot")
     boxes, _ = _box_statistics(layout, reach)
     within = "the whole range" if math.isinf(reach) else f"{reach:g} IQR of the box"
@@ -429,21 +428,21 @@ def boxenplot(
     marks = mark_options("boxenplot", z_index=z_index)
     check_choice(width_method, "boxenplot width_method", ("exponential", "linear", "area"))
     if depth not in ("tukey", "proportion", "trustworthy", "full") and not (
-        isinstance(depth, numbers.Integral) and not isinstance(depth, bool) and depth >= 1
+        is_integer(depth) and not isinstance(depth, bool) and depth >= 1
     ):
-        raise ValueError(
+        raise ChartError(
             'boxenplot depth: expected "tukey", "proportion", "trustworthy", "full", or a '
             f"whole number of levels from 1; received {shown(depth)}"
         )
-    if isinstance(depth, numbers.Integral):
+    if is_integer(depth):
         depth = int(depth)
     for name, value in (("outlier_proportion", outlier_proportion), ("trust_alpha", trust_alpha)):
-        if isinstance(value, bool) or not (isinstance(value, numbers.Real) and 0 < value < 1):
-            raise ValueError(
+        if isinstance(value, bool) or not (is_number(value) and 0 < value < 1):
+            raise ChartError(
                 f"boxenplot {name}: expected a number between 0 and 1; received {shown(value)}"
             )
     if not isinstance(outliers, bool):
-        raise TypeError(f"boxenplot outliers: expected True or False; received {shown(outliers)}")
+        raise ChartError(f"boxenplot outliers: expected True or False; received {shown(outliers)}")
     layout = _Categories(data, x, y, series, order, series_order, orient, options, "boxenplot")
     letters = _letter_statistics(layout, depth, float(outlier_proportion), float(trust_alpha))
     rule = (
@@ -536,10 +535,10 @@ def _whisker_reach(whiskers: Whiskers) -> float:
         return math.inf
     if (
         isinstance(whiskers, bool)
-        or not isinstance(whiskers, numbers.Real)
+        or not is_number(whiskers)
         or not (math.isfinite(whiskers) and whiskers >= 0)
     ):
-        raise ValueError(
+        raise ChartError(
             'boxplot whiskers: expected "tukey", "range", or a finite nonnegative IQR multiple; '
             f"received {shown(whiskers)}"
         )
@@ -575,21 +574,25 @@ def violinplot(
     goes to the violins, as ``Chart.violin`` takes it."""
     marks = mark_options("violinplot", z_index=z_index)
     if not isinstance(split, bool):
-        raise TypeError(f"violinplot split: expected True or False; received {shown(split)}")
+        raise ChartError(f"violinplot split: expected True or False; received {shown(split)}")
     check_choice(inner, "violinplot inner", ("box", "quartiles", "none"))
     layout = _Categories(data, x, y, series, order, series_order, orient, options, "violinplot")
     if split:
         if series is None:
-            raise ValueError(
+            raise ChartError(
                 "violinplot split: needs a series of at most two levels to draw as the halves; "
                 "give series"
             )
         count = len(np.unique(layout.variables[series].codes[layout.rows]))
         if count > 2:
-            raise ValueError(
+            raise ChartError(
                 f"violinplot split: needs a series of at most two levels; {series!r} has "
                 f"{count}, so pass split=False or a series_order of two"
             )
+    if bandwidth is not None and not (real(bandwidth) and bandwidth > 0):
+        raise ChartError(
+            f"violinplot bandwidth: expected a positive number; received {shown(bandwidth)}"
+        )
     rule = f"bandwidth {bandwidth:g}" if bandwidth is not None else "Silverman's rule of thumb"
     inside = {
         "box": ", with a box of the quartiles inside",
@@ -657,19 +660,19 @@ class _Categories:
         value_column = xc if horizontal else yc
         if value_column.kind != "number":
             axis = "x" if horizontal else "y"
-            raise TypeError(
+            raise ChartError(
                 f"{function} {axis}: column {self.value!r} holds {value_column.kind} values; "
                 "expected number"
             )
         if series is not None and series == self.category:
-            raise ValueError(
+            raise ChartError(
                 f"{function} series: column {series!r} is the category axis; "
                 "split by another column"
             )
         variables = variables_of(
             source, function, facet_row, facet_column, series, series_order, axes=[x, y]
         )
-        categories = levels(source.column(self.category, function), order)
+        categories = levels(source.column(self.category, function), order, role=f"{function} order")
         rows = complete(
             len(value_column), value_column, levels_of=[*variables.values(), categories]
         )

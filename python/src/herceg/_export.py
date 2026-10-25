@@ -8,13 +8,11 @@ drawn 2400 by 1500 pixels."""
 from __future__ import annotations
 
 import math
-import numbers
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ._data import shown
-from ._errors import ChartError
+from ._errors import ChartError, is_number, shown
 
 ExportFormat = Literal["svg", "png", "jpeg", "webp"]
 LengthUnit = Literal["px", "in", "cm", "mm", "pt"]
@@ -52,7 +50,7 @@ def _refuse(path: str, message: str, code: str = "invalid-option") -> ChartError
 
 
 def _number(value: Any) -> bool:
-    return isinstance(value, numbers.Real) and not isinstance(value, bool) and math.isfinite(value)
+    return is_number(value) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _positive(value: Any, path: str) -> float:

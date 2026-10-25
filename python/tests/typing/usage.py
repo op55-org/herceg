@@ -47,15 +47,19 @@ hg.to_pdf(["not a chart"])  # type: ignore[list-item]
 
 
 def live(widget: ChartWidget, state: ChartState) -> None:
-    widget.viewport = (1.0, 2.0)
-    widget.viewport = hg.Viewport(x=(1.0, 2.0), y=(0.0, 5.0))
-    widget.viewport = None
+    widget.set_viewport((1.0, 2.0))
+    widget.set_viewport(hg.Viewport(x=(1.0, 2.0), y=(0.0, 5.0)))
+    widget.set_viewport(y=(0.0, 5.0), panel="latency")
+    widget.set_viewport(None)
     widget.selection = hg.Selection(y=("a", "b"), lasso=((0.0, 1.0), (1.0, 1.0), (1.0, 0.0)))
     widget.selection = ("a", "c")
-    widget.viewport = "x"  # type: ignore[assignment]
-    widget.viewport.x[0]  # type: ignore[index]
+    widget.set_viewport("x")  # type: ignore[arg-type]
+    widget.get_viewport().x  # type: ignore[union-attr]  # noqa: B018
     widget.on_select(lambda selection: selection and selection.lasso)
-    widget.on_viewport(lambda viewport: viewport.y_right)
+    widget.on_viewport(lambda event: event.views[""].y_right)
+    widget.on_visibility(lambda state: state.hidden_keys)
+    widget.on_error(lambda error: error.path)
+    widget.hidden_keys = ['["0","a"]']
     widget.drill_root = ('[0,"East"]',)
     widget.drill_root = None
     widget.item_positions = {'[0,"a"]': (1.0, 2.0)}

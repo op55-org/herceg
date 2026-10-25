@@ -140,7 +140,7 @@ def test_pairplot_keeps_the_columns_it_paired():
 
 
 def test_recompute_refuses_charts_express_did_not_make():
-    with pytest.raises(ValueError, match="hx.recompute: the chart was not made by"):
+    with pytest.raises(ValueError, match="hx.recompute chart: the chart was not made by"):
         hx.recompute(hg.Chart(DATA).bar(x="day", y="tip"), DATA)
 
 
@@ -323,10 +323,12 @@ def test_express_widgets_refuse_tables_by_data_and_change_nothing_on_failure():
     browser = Browser(live)
     with pytest.raises(ValueError, match="widget.append data: the regplot chart is computed from"):
         live.append(head(DATA, 5), data=DATA)
-    with pytest.raises(KeyError, match="widget.append rows: no column 'y'"):
+    with pytest.raises(hg.ChartError, match="widget.append rows: no column 'y'"):
         live.append({"x": [1.0]})
     before = live._snapshot()
-    with pytest.raises(TypeError, match="widget.replace rows: column 'x' holds category values"):
+    with pytest.raises(
+        hg.ChartError, match="widget.replace rows: column 'x' holds category values"
+    ):
         live.replace({"x": ["a"], "y": [1.0]})
     assert live._snapshot() == before and browser.messages == []
     # One row appended as a mapping of values.

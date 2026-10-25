@@ -52,7 +52,7 @@ def test_bindings_refuse_what_charts_refuse():
         hg.Chart(DATA, bindings=[twice, again])
     with pytest.raises(ValueError, match="moves the keyboard cursor"):
         hg.Chart(DATA, bindings=[hg.Binding(hg.KeyGesture("Home"), hg.ResetAction())])
-    with pytest.raises(TypeError, match=r"Chart bindings\[0\] action: a WheelGesture performs"):
+    with pytest.raises(hg.ChartError, match=r"Chart bindings\[0\] action: a WheelGesture performs"):
         hg.Chart(DATA, bindings=[hg.Binding(hg.WheelGesture(), hg.BrushAction())])
     # No keys held, said either way, is one gesture, as the browser reads it.
     bare = hg.Binding(hg.WheelGesture(axis="y"), hg.ZoomAction())
@@ -65,7 +65,7 @@ def test_bindings_refuse_what_charts_refuse():
     # True is not the button 1 it equals, nor a flag a number.
     with pytest.raises(ValueError, match=r"button: expected 0, 1, or 2; received True"):
         hg.Chart(DATA, bindings=[hg.Binding(hg.DragGesture(button=True), hg.PanAction())])
-    with pytest.raises(TypeError, match="focused: expected True or False; received 1"):
+    with pytest.raises(hg.ChartError, match="focused: expected True or False; received 1"):
         hg.Chart(DATA, bindings=[hg.Binding(hg.WheelGesture(focused=1), hg.ZoomAction())])
     rows = hg.SelectionBinding("focus")
     with pytest.raises(ValueError, match="brushes select rows for row_selection"):
@@ -135,7 +135,7 @@ def test_cursors_snap_and_show_tooltips_across_charts_and_panels():
     }
     with pytest.raises(ValueError, match="snap and tooltip are how a cursor shows"):
         hg.Chart(DATA, sync=hg.Sync(viewport=hg.SyncChannel("ops", snap="previous")))
-    with pytest.raises(ValueError, match="drop group and scale"):
+    with pytest.raises(ValueError, match="drop group, scale, and panel"):
         hg.Chart(DATA, sync=hg.Sync(panels=hg.SyncChannel("ops")))
     with pytest.raises(ValueError, match='snap: expected .*received "later"'):
         hg.Chart(DATA, sync=hg.Sync(cursor=hg.SyncChannel("ops", snap="later")))

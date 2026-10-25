@@ -350,6 +350,16 @@ describe.each(engines)("web pages in %s", (engine) => {
       scales: [{ scale: "x", instance: "", time: true, panels: [""], view: [start, end] }],
       views: [{ panel: "", x: [start, end], y: null, yRight: null, time: ["x"] }],
     });
+    // The detail as a page posts it, which the app reads with herceg.web.viewport_event.
+    const read = await fetch(`${origin}/test/read/viewport`, {
+      method: "POST",
+      body: JSON.stringify(event!.detail),
+    });
+    expect(await read.json()).toEqual({
+      cause: "sync",
+      scales: [["x", "", [""]]],
+      x: ["2026-01-01T00:30:00", "2026-01-01T01:30:00"],
+    });
     await context.close();
   });
 
@@ -378,6 +388,12 @@ describe.each(engines)("web pages in %s", (engine) => {
     expect(await summary.text()).toMatch(
       /^2026-01-01T\d\d:\d\d to 2026-01-01T\d\d:\d\d: median p50/,
     );
+    // And the whole detail, with what the selection belongs to, with herceg.web.select_event.
+    const read = await fetch(`${origin}/test/read/select`, {
+      method: "POST",
+      body: JSON.stringify(select!.detail),
+    });
+    expect(await read.json()).toMatchObject({ panels: [""], scales: [["x", "", [""]]] });
 
     await page.keyboard.press("Escape");
     await page.mouse.click(box.x + box.width * 0.8, y);

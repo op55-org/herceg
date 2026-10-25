@@ -62,7 +62,7 @@ def test_marks_take_a_matrix_of_values_with_optional_positions():
     assert sorted(len(b) for b in buffers) == [11 * 8, 11 * 8, 121 * 8]
     with pytest.raises(ValueError, match="contour x: expected 11 values, one per matrix column"):
         hg.contour(color=z, x=xs[:-1])
-    with pytest.raises(ValueError, match="contour value: expected a 2D matrix"):
+    with pytest.raises(ValueError, match="contour color: expected a 2D matrix"):
         hg.contour(color=z.ravel())
 
 
@@ -71,7 +71,7 @@ def test_matrices_check_their_shape():
         hg.matrix({"x": [0, 1, 2], "y": [0, 1], "z": np.zeros((3, 2))}, x="x", y="y")
     with pytest.raises(ValueError, match="matrix column 'z': expected 6 values, 3 x by 2 y"):
         hg.matrix({"x": [0, 1, 2], "y": [0, 1], "z": [1, 2, 3]}, x="x", y="y")
-    with pytest.raises(KeyError, match="matrix y: no column 'lat'"):
+    with pytest.raises(hg.ChartError, match="matrix y: no column 'lat'"):
         hg.matrix({"x": [0, 1], "z": [1, 2]}, x="x", y="lat")
     with pytest.raises(ValueError, match="matrix y: 'x' also holds x"):
         hg.matrix({"x": [0, 1], "z": [1, 2]}, x="x", y="x")

@@ -243,7 +243,7 @@ def test_scales_scope_the_chart_as_the_short_forms_do():
     assert axis_scope(settings, "x") == "panel"
     assert axis_scope({"scales": {"y": {"scope": "row"}}}, "y") == "row"
     assert axis_scope({"x": {"scope": "column"}}, "x") == "column"
-    with pytest.raises(ValueError, match="Chart navigator: needs one x scale shared by every"):
+    with pytest.raises(ValueError, match="Chart navigator: moves the x scale every panel shares"):
         hg.Chart(
             WEEK,
             panels=[hg.Panel(id="a"), hg.Panel(id="b")],

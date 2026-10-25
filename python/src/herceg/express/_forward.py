@@ -24,14 +24,13 @@ where a group has one value) takes its color channel and depth whole.
 from __future__ import annotations
 
 import math
-import numbers
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
-from .._data import Column, listed, shown
+from .._data import Column
 from .._encoding import (
     BarLabels,
     Encodings,
@@ -39,7 +38,7 @@ from .._encoding import (
     encodings_spec,
     label_dict_problem,
 )
-from .._errors import ChartError
+from .._errors import ChartError, is_number, listed, shown
 from .._style import _built
 from ._common import Grouping, Levels, Source, fresh
 
@@ -118,9 +117,7 @@ def mark_options(
     labels it draws (none without), which follow a band's edge where
     `edges` (an area's) and the line otherwise."""
     if z_index is not None and (
-        isinstance(z_index, bool)
-        or not isinstance(z_index, numbers.Real)
-        or not math.isfinite(z_index)
+        isinstance(z_index, bool) or not is_number(z_index) or not math.isfinite(z_index)
     ):
         raise ChartError(
             f"{function} z_index: expected a finite number, where the plot's mark is painted "

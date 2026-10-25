@@ -10,6 +10,7 @@ import type {
   Selection,
   SelectionOwner,
 } from "herceg";
+import type { VisibilityState } from "herceg/spec";
 import { type SelectionPayload, selectionPayload } from "../../packages/herceg/src/web/events.ts";
 
 export {
@@ -19,11 +20,29 @@ export {
   type InspectionPayload,
   inspectionPayload,
   namesCategories,
+  restoreViewportState,
   type SelectionPayload,
   selectionPayload,
+  type ViewportEventPayload,
   type ViewportPayload,
+  type ViewportStatePayload,
+  viewportEventPayload,
   viewportPayload,
+  viewportStatePayload,
 } from "../../packages/herceg/src/web/events.ts";
+
+/**
+ * What a chart hides, with what its subplots' legends set only of the
+ * subplots `panels` names (a chart's `visibilityState`): a chart still
+ * restoring another's state has not let go of those it lacks yet (see
+ * `restoreVisibility`), and a chart drawn in its place must not take them
+ * back.
+ */
+export function ownPanels(state: VisibilityState, panels: readonly string[]): VisibilityState {
+  if (!state.panels) return state;
+  const own = Object.entries(state.panels).filter(([panel]) => panels.includes(panel));
+  return { ...state, panels: Object.fromEntries(own) };
+}
 
 /**
  * A selection as Python reads it: naming its panels only where they are

@@ -33,6 +33,13 @@ it("keeps what the legends hid through charts drawn before the panels are known"
     } as Snapshot["spec"],
   });
   const model = new MockModel({ _chart: subplots(0, false), _listening: [] });
+  // Python drawing the chart again from other marks (an express chart computed again).
+  const redraw = (shot: Snapshot) =>
+    model.receive(
+      { type: "chart", revision: shot.revision, spec: shot.spec, rows: {} },
+      // Python's buffers, as the comm delivers them.
+      shot.buffers as DataView[],
+    );
   const widget = widgetModule();
   cleanups.push(widget.initialize({ model }));
   const host = document.createElement("div");
@@ -45,11 +52,11 @@ it("keeps what the legends hid through charts drawn before the panels are known"
   const [entry] = first.getLegend();
   first.setVisibility(entry!.key, false);
   // Drawn again with a panel's legend, it waits.
-  model.set("_chart", subplots(1, true));
+  redraw(subplots(1, true));
   const waiting = listener.mock.instances.at(-1) as MountedChart;
   expect(waiting.getPanels()).toEqual([]);
   // Drawn again before it is done, as one chart of no subplots.
-  model.set("_chart", {
+  redraw({
     ...base,
     revision: 2,
     spec: { ...base.spec, marks: [{ ...marked!, color: "host" }] } as Snapshot["spec"],

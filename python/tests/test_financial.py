@@ -87,10 +87,9 @@ def test_disabled_seams_are_written_as_given(seams):
 
 @pytest.mark.parametrize("spacing", [0, -1, float("nan"), float("inf"), True, "40", None])
 def test_seam_spacing_is_finite_and_positive(spacing):
-    with pytest.raises(
-        ValueError,
-        match="AxisOptions seams min_spacing: expected a finite, positive number of pixels",
-    ):
+    # None is no value at all, refused before the axis' own check.
+    expected = "a finite number" if spacing is None else "a finite, positive number of pixels"
+    with pytest.raises(ValueError, match=f"AxisOptions seams min_spacing: expected {expected}"):
         hg.AxisOptions(breaks=[], seams={"min_spacing": spacing})._spec()
 
 
@@ -135,7 +134,7 @@ def test_breaks_are_checked():
         hg.Chart(PRICES, y=hg.AxisOptions(breaks=[hg.Break(weekdays=["sat"])]))
     with pytest.raises(
         ValueError,
-        match=r"AxisOptions breaks: expected keys weekdays, .*; received \['weekend'\]",
+        match='AxisOptions breaks: expected keys weekdays, .*; received "weekend"',
     ):
         hg.AxisOptions(breaks=[{"weekend": True}])._spec()
     # The engine reads hours itself: a time it cannot read is refused when drawn.

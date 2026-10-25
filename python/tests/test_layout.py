@@ -204,6 +204,29 @@ def test_insets_go_over_insets():
     assert chart.to_svg().startswith("<svg")
 
 
+def test_insets_of_3d_marks_take_a_camera():
+    chart = hg.Chart(DATA)
+    [cell] = chart.columns([1])
+    main = cell.panel("main")
+    main.line(x="time", y="p99")
+    main.inset("cloud", camera=hg.Camera(azimuth=30)).point_3d(x="requests", y="p99", z="errors")
+    spec, _ = chart.to_spec()
+    assert spec["panels"][1] == {
+        "id": "cloud",
+        "camera": {"azimuth": 30.0, "elevation": 25.0, "zoom": 1.0},
+    }
+    assert chart.to_svg().startswith("<svg")
+    # A camera with nothing to see is refused at the inset's panel.
+    chart = hg.Chart(DATA)
+    [cell] = chart.columns([1])
+    main = cell.panel("main")
+    main.line(x="time", y="p99")
+    main.inset("flat", camera=hg.Camera(azimuth=30)).line(x="time", y="errors")
+    with pytest.raises(hg.ChartError, match='Panel camera: panel "flat" has no 3D marks') as raised:
+        chart.to_svg()
+    assert raised.value.path == "panels[1].camera"
+
+
 def test_panels_axes_take_neither_scope_nor_repeat():
     # Refused as the chart takes its panels, at the panel.
     for name, value in (("scope", "chart"), ("repeat", "all")):
@@ -211,7 +234,7 @@ def test_panels_axes_take_neither_scope_nor_repeat():
             hg.ChartError, match=f"Panel x {name}: only the chart's x, y, and y_right"
         ) as raised:
             hg.Chart(DATA, panels=[hg.Panel("a", x=hg.AxisOptions(**{name: value}))])
-        assert raised.value.path == "panels[0]"
+        assert raised.value.path == f"panels[0].x.{name}"
 
 
 def test_a_refused_layout_leaves_the_chart_to_lay_out_again():
@@ -228,9 +251,9 @@ def test_a_refused_layout_leaves_the_chart_to_lay_out_again():
 
 
 def test_a_refused_panel_leaves_its_cell_and_chart_as_they_were():
-    chart = hg.Chart(DATA, zoom="y")
+    chart = hg.Chart(DATA)
     left, _ = chart.columns(2)
     for _attempt in range(2):
         with pytest.raises(ValueError, match="zoom"):
-            left.panel("a")
+            left.panel("a", zoom="z")  # type: ignore[arg-type]
     assert chart._panels == [] and left._content is None

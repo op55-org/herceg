@@ -23,7 +23,6 @@ collide once converted to text.
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -32,6 +31,7 @@ from typing import Any
 import numpy as np
 
 from . import _geo
+from ._errors import ChartError, key_path, shown
 
 #: Largest integer magnitude float64 holds exactly.
 _EXACT_INTEGERS = 2**53
@@ -87,7 +87,14 @@ class Table:
             try:
                 column = convert(self._get(self._keys[name]))
             except (TypeError, ValueError) as error:
-                raise type(error)(f"Column {name!r}: {error}") from None
+                raise ChartError(f"Column {name!r}: {error}") from None
+            # A mapping's columns may differ in length, where a table's cannot.
+            other = next(iter(self._columns.items()), None)
+            if other is not None and len(other[1]) != len(column):
+                raise ChartError(
+                    f"Column {name!r}: expected a value per row, {len(other[1])} as column "
+                    f"{other[0]!r} has; received {len(column)}"
+                )
             self._columns[name] = column
         return column
 
@@ -99,22 +106,30 @@ class Matrix:
 
     def __init__(self, columns: Mapping[str, Any], x: str, y: str) -> None:
         if not isinstance(columns, Mapping):
-            raise TypeError(
+            raise ChartError(
                 "matrix columns: expected a mapping of column names to arrays; "
-                f"received {type(columns).__name__}"
+                f"received {type(columns).__name__}",
+                path="columns",
             )
         names = list(columns)
         if not all(isinstance(name, str) for name in names):
-            raise TypeError("matrix columns: expected column names as strings")
+            raise ChartError("matrix columns: expected column names as strings", path="columns")
         for axis, name in (("x", x), ("y", y)):
+            if not isinstance(name, str):
+                raise ChartError(
+                    f"matrix {axis}: expected a column's name; received {shown(name)}", path=axis
+                )
             if name not in names:
-                raise KeyError(
+                raise ChartError(
                     f"matrix {axis}: no column {name!r}; the columns are "
-                    + ", ".join(map(repr, names))
+                    + ", ".join(map(repr, names)),
+                    code="unknown-field",
+                    path=axis,
                 )
         if x == y:
-            raise ValueError(
-                f"matrix y: {y!r} also holds x; give the rows' coordinates a column of their own"
+            raise ChartError(
+                f"matrix y: {y!r} also holds x; give the rows' coordinates a column of their own",
+                path="y",
             )
         self.x = x
         self.y = y
@@ -123,17 +138,21 @@ class Matrix:
         coordinates = {}
         for axis, name in (("x", x), ("y", y)):
             values = columns[name]
+            at = key_path("columns", name)
             if isinstance(values, np.ndarray) and values.ndim != 1:
-                raise ValueError(
+                raise ChartError(
                     f"matrix {axis}: expected a 1-D array of coordinates; received shape "
-                    f"{values.shape}"
+                    f"{values.shape}",
+                    path=at,
                 )
             try:
                 column = convert(values)
             except (TypeError, ValueError) as error:
-                raise type(error)(f"matrix {axis}: column {name!r}: {error}") from None
+                raise ChartError(f"matrix {axis}: column {name!r}: {error}", path=at) from None
             if column.kind == "geometry":
-                raise TypeError(f"matrix {axis}: column {name!r} holds shapes; give coordinates")
+                raise ChartError(
+                    f"matrix {axis}: column {name!r} holds shapes; give coordinates", path=at
+                )
             coordinates[axis] = column
             self._columns[name] = column
         self.shape = (len(coordinates["y"]), len(coordinates["x"]))
@@ -141,25 +160,31 @@ class Matrix:
             if name in (x, y):
                 continue
             values = columns[name]
+            at = key_path("columns", name)
             array = values if isinstance(values, np.ndarray) else None
             if array is None and not isinstance(values, Column):
-                candidate = np.asarray(values)
+                try:
+                    candidate = np.asarray(values)
+                except (TypeError, ValueError) as error:
+                    raise ChartError(f"matrix column {name!r}: {error}", path=at) from None
                 array = candidate if candidate.ndim == 2 else None
             if array is not None and array.ndim == 2:
                 if array.shape != self.shape:
-                    raise ValueError(
+                    raise ChartError(
                         f"matrix column {name!r}: expected shape {self.shape}, a row per y and "
-                        f"a column per x; received {array.shape}"
+                        f"a column per x; received {array.shape}",
+                        path=at,
                     )
                 values = array.reshape(-1)
             try:
                 column = convert(values)
             except (TypeError, ValueError) as error:
-                raise type(error)(f"matrix column {name!r}: {error}") from None
+                raise ChartError(f"matrix column {name!r}: {error}", path=at) from None
             if len(column) != self.shape[0] * self.shape[1]:
-                raise ValueError(
+                raise ChartError(
                     f"matrix column {name!r}: expected {self.shape[0] * self.shape[1]} values, "
-                    f"{self.shape[1]} x by {self.shape[0]} y; received {len(column)}"
+                    f"{self.shape[1]} x by {self.shape[0]} y; received {len(column)}",
+                    path=at,
                 )
             self._columns[name] = column
 
@@ -210,23 +235,20 @@ def _accessor(data: Any) -> tuple[Callable[[Any], Any], list[Any], list[Any]]:
     ):
         keys = list(dict.fromkeys(key for record in data for key in record))
         return (lambda key: [record.get(key) for record in data]), keys, keys
-    raise TypeError(
+    raise ChartError(
         "data: expected a pandas, Polars, or PyArrow table, a GeoJSON FeatureCollection, "
         f"a mapping of column names to arrays, or a list of records; received {type(data).__name__}"
     )
 
 
-def shown(value: Any) -> str:
-    """A value as error messages quote it: text in double quotes, Python's repr otherwise."""
-    return json.dumps(value) if isinstance(value, str) else repr(value)
-
-
-def listed(choices: Sequence[Any]) -> str:
-    """Choices as error messages list them: "a", "b", or "c"."""
-    items = [shown(choice) for choice in choices]
-    if len(items) <= 2:
-        return " or ".join(items)
-    return f"{', '.join(items[:-1])}, or {items[-1]}"
+def listlike(value: Any) -> bool:
+    """Whether options take `value` as a list: a sequence other than text or
+    a mapping, or a one-dimensional array (NumPy's, a pandas or Polars Series)."""
+    if isinstance(value, (str, bytes, Mapping)):
+        return False
+    if isinstance(value, Sequence):
+        return True
+    return hasattr(value, "__array__") and np.ndim(value) == 1
 
 
 def _distinct_labels(values: Sequence[Any], what: str) -> list[str]:
@@ -413,8 +435,27 @@ def _categories(values: Sequence[Any]) -> Column:
     return Column("category", codes, tuple(lookup))
 
 
+#: Milliseconds in each of NumPy's duration units of a fixed length, and
+#: each unit below a millisecond in one (divided by, for rounding as written).
+_UNIT_MS = {"W": 604_800_000, "D": 86_400_000, "h": 3_600_000, "m": 60_000, "s": 1_000, "ms": 1}
+_PER_MS = {"us": 1e3, "ns": 1e6, "ps": 1e9, "fs": 1e12, "as": 1e15}
+
+
+def duration_ms(value: np.timedelta64) -> float | None:
+    """A NumPy duration as milliseconds, counted in floats (NumPy's own
+    conversion between units overflows for large counts); None for NaT and
+    for units of no fixed length (months, years, or none given)."""
+    unit, step = np.datetime_data(value.dtype)
+    if np.isnat(value) or not (unit in _UNIT_MS or unit in _PER_MS):
+        return None
+    count = float(value.astype(np.int64)) * step
+    return count * _UNIT_MS[unit] if unit in _UNIT_MS else count / _PER_MS[unit]
+
+
 def _time_ms(value: Any) -> float:
     if isinstance(value, np.datetime64):
+        if np.isnat(value):
+            return math.nan  # whatever its unit (a bare NaT has none to convert by)
         return float(_datetime64_ms(np.array([value]))[0])
     if isinstance(value, _dt.datetime):
         if value.tzinfo is None:

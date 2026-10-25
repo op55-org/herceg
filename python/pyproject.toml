@@ -49,6 +49,8 @@ dev = [
   # References herceg.express is checked against.
   "seaborn>=0.13",
   "statsmodels>=0.14",
+  # Draws PDF exports to compare them with SVG and PNG, independently of herceg.
+  "pypdfium2>=4.30",
 ]
 
 [build-system]
@@ -63,6 +65,8 @@ artifacts = ["src/herceg/static/*.js", "src/herceg/static/web/*"]
 
 [tool.hatch.build.targets.sdist]
 artifacts = ["src/herceg/static/*.js", "src/herceg/static/web/*"]
+# The tests and the web test pages need the repository's fixtures and browsers.
+exclude = ["/tests", "/web-test"]
 
 # hatch_build.py: fails the build when the bundles are missing.
 [tool.hatch.build.hooks.custom]

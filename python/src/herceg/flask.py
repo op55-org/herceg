@@ -23,6 +23,7 @@ except ImportError as error:  # pragma: no cover - depends on the environment
     raise ImportError("herceg.flask needs Flask: pip install 'herceg[flask]'") from error
 
 from . import web
+from ._errors import ChartError, shown
 
 if TYPE_CHECKING:
     from ._chart import Chart
@@ -37,6 +38,14 @@ def init_app(app: Flask, *, url_prefix: str = "/_herceg") -> None:
     """Serves herceg's web assets under ``url_prefix`` (a blueprint named
     ``"herceg"``) and adds the template globals ``herceg_assets`` and
     ``herceg_chart``."""
+    if not isinstance(app, Flask):
+        raise ChartError(f"init_app app: expected a Flask app; received {shown(app)}", path="app")
+    if not isinstance(url_prefix, str) or not url_prefix.startswith("/"):
+        raise ChartError(
+            'init_app url_prefix: expected a path from the site\'s root ("/_herceg"); '
+            f"received {shown(url_prefix)}",
+            path="url_prefix",
+        )
     blueprint = Blueprint("herceg", __name__, url_prefix=url_prefix)
 
     @blueprint.get("/<path:name>")

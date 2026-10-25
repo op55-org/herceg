@@ -81,6 +81,8 @@ with tarfile.open(sys.argv[2], "r:gz") as sdist:
     assert sdist.extractfile(prefix + "LICENSE").read() == license_text, "Sdist LICENSE differs from root LICENSE"
     metadata = sdist.extractfile(prefix + "PKG-INFO").read()
     assert BytesParser().parsebytes(metadata).get_all("License-File") == ["LICENSE"]
+    tests = [name for name in sdist.getnames() if name.startswith((prefix + "tests/", prefix + "web-test/"))]
+    assert not tests, "The sdist ships tests: " + ", ".join(tests[:3])
 `,
         wheel,
         join(consumer, sdists[0]),

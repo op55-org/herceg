@@ -24,12 +24,12 @@ iterate together, each resample stopping when its own fit converges.
 from __future__ import annotations
 
 import math
-import numbers
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 
+from .._errors import is_integer
 from ._numerics import Units, _per_chunk, flat_resamples, segment_medians
 
 Model = Literal["polynomial", "logistic", "robust"]
@@ -523,7 +523,7 @@ def bin_predictor(x: np.ndarray, bins: int | np.ndarray) -> tuple[np.ndarray, np
     """Seaborn's ``x_bins``: each x moved to the nearest of `bins` centers (a
     count, of centers at evenly spaced percentiles of x, or the centers),
     and the centers."""
-    if isinstance(bins, numbers.Integral):
+    if is_integer(bins):
         centers = np.percentile(x, np.linspace(0, 100, int(bins) + 2)[1:-1])
     else:
         centers = np.ravel(np.asarray(bins, dtype=float))

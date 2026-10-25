@@ -1,7 +1,7 @@
 // A stand-in for anywidget's model, and the snapshot Python sends of a
 // line chart, for the notebook widget's tests.
 
-import type { Model, Snapshot, Update } from "../widget.ts";
+import type { Model, Snapshot, Update, ViewsPayload } from "../widget.ts";
 
 type Handler = (...args: never[]) => void;
 
@@ -89,3 +89,68 @@ export function snapshot(options: Record<string, unknown> = {}): Snapshot {
     item_positions: {},
   };
 }
+
+type Ends = [number, number] | null;
+type Axis = "x" | "y" | "yRight";
+
+/**
+ * The views of a chart as a display reports them (`ViewsPayload`): each
+ * scale instance's view (`instances`, by axis and the panels drawing it;
+ * shared by every panel unless `own`), each panel's whole view, and the
+ * planes of subplots' maps and networks. A chart of one panel is panel "".
+ */
+export function views(
+  instances: { scale: Axis; panels: string[]; view: Ends; own?: boolean; type?: string }[],
+  planes: Record<string, { x: Ends; y: Ends }> = {},
+): ViewsPayload {
+  const scales = instances.map(({ scale, panels, view, own = false, type = "linear" }) => {
+    const instance = own ? JSON.stringify(panels) : "";
+    return {
+      scale,
+      instance,
+      time: type === "time",
+      panels,
+      view,
+      identity: JSON.stringify([scale, type, instance]),
+    };
+  });
+  const keys = [...new Set(scales.flatMap(({ panels }) => panels))];
+  const shown = (of: (axis: Axis) => (typeof scales)[number] | undefined) => {
+    const time = (["x", "y", "yRight"] as const).filter((axis) => of(axis)?.time);
+    return {
+      x: of("x")?.view ?? null,
+      y: of("y")?.view ?? null,
+      yRight: of("yRight")?.view ?? null,
+      time,
+    };
+  };
+  const along = (axis: Axis) => scales.filter(({ scale }) => scale === axis);
+  return {
+    axes: {
+      viewRevision: 1,
+      scales,
+      views: keys.map((panel) => ({
+        panel,
+        ...shown((axis) => along(axis).find(({ panels }) => panels.includes(panel))),
+      })),
+      ...(scales.length && {
+        view: shown((axis) => {
+          const of = along(axis);
+          return (
+            of.find(({ instance }) => instance === "") ?? (of.length === 1 ? of[0] : undefined)
+          );
+        }),
+      }),
+    },
+    planes: Object.fromEntries(
+      Object.entries(planes).map(([panel, view]) => [panel, { ...view, yRight: null, time: [] }]),
+    ),
+  };
+}
+
+/** The views of a chart of one panel, x and y shared, as a display reports them. */
+export const oneView = (x: Ends, y: Ends = null): ViewsPayload =>
+  views([
+    { scale: "x", panels: [""], view: x },
+    { scale: "y", panels: [""], view: y },
+  ]);

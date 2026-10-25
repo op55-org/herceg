@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import atexit
 import base64
-import difflib
 import html as _html
 import io
 import json
 import math
-import numbers
 import re
 import tempfile
 import uuid
@@ -21,8 +19,8 @@ from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
-from ._data import shown
-from ._errors import ChartError
+from ._data import listlike
+from ._errors import ChartError, Hint, check_hints, is_number, shown, unknown_option
 from ._export import ExportPlan, plan_export
 
 if TYPE_CHECKING:
@@ -45,6 +43,9 @@ SaveFormat = Literal["html", "svg", "png", "jpeg", "webp", "pdf"]
 PdfPageSize = Literal["A4", "Letter"]
 PdfOrientation = Literal["portrait", "landscape"]
 _FONT_LIMIT = 32 * 1024 * 1024
+
+# Text an output takes, or None.
+_TEXT = Hint(frozenset({str}), (), True)
 
 
 def asset_path(name: str) -> Path:
@@ -182,18 +183,18 @@ def svg(
     """Standalone SVG, rendered by herceg's DOM-free renderer in an embedded V8."""
     _plan(location, spec, format="svg", size=size, unit=unit, tooltip=tooltip)
     if sizing not in (None, "fixed", "fluid"):
-        raise ValueError(
+        raise ChartError(
             f'{location} sizing: expected "fixed" or "fluid"; received {shown(sizing)}'
         )
     if preserve_aspect_ratio is not None and not (
         isinstance(preserve_aspect_ratio, str) and _ASPECT.fullmatch(preserve_aspect_ratio)
     ):
-        raise ValueError(
+        raise ChartError(
             f'{location} preserve_aspect_ratio: expected "none" or an alignment such as '
             f'"xMidYMid meet"; received {shown(preserve_aspect_ratio)}'
         )
     if stroke_scaling not in (None, "scale", "fixed"):
-        raise ValueError(
+        raise ChartError(
             f'{location} stroke_scaling: expected "scale" or "fixed"; '
             f"received {shown(stroke_scaling)}"
         )
@@ -228,19 +229,24 @@ def snapshot(
     """A chart rendered for a page to show and a browser to hydrate (see
     ``Chart.to_snapshot``), by herceg's DOM-free renderer in an embedded V8."""
     if not isinstance(id_prefix, str) or not re.fullmatch(r"[A-Za-z][\w-]*", id_prefix):
-        raise ValueError(
+        raise ChartError(
             "to_snapshot id_prefix: expected a name that starts ids, unique in the page "
             f'("latency"); received {shown(id_prefix)}'
         )
+    texts = {"locale": locale, "time_zone": time_zone}
+    check_hints("to_snapshot", texts, dict.fromkeys(texts, _TEXT))
     for name, value in (("width", width), ("height", height)):
         if value is not None and not (
-            isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value > 0
         ):
-            raise ValueError(
+            raise ChartError(
                 f"to_snapshot {name}: expected a size in CSS pixels; received {shown(value)}"
             )
     if time_zone == "local":
-        raise ValueError(
+        raise ChartError(
             'to_snapshot time_zone: "local" is this machine\'s zone, which browsers may '
             'not share; give an IANA zone or "UTC"'
         )
@@ -299,23 +305,37 @@ def _located(message: str, location: str) -> str:
 
 def _font_faces(fonts: Fonts | None, location: str) -> list[dict[str, str]]:
     """Validate and read the same font mapping for every static export."""
+    if fonts is not None and not isinstance(fonts, Mapping):
+        raise ChartError(
+            f"{location} fonts: expected a dict of font files by family, such as "
+            f'{{"Brand": "Brand.ttf"}}; received {shown(fonts)}'
+        )
     sources = []
     for family, source in (fonts or {}).items():
+        if not isinstance(family, str) or not family:
+            raise ChartError(
+                f"{location} fonts: expected families' names as keys; received {shown(family)}"
+            )
         weights = source if isinstance(source, Mapping) else {"normal": source}
         for weight, data in weights.items():
             if weight not in ("normal", "bold"):
-                raise ValueError(
+                raise ChartError(
                     f'{location} fonts: expected weights "normal" or "bold"; '
                     f"received {shown(weight)}"
                 )
             sources.append((family, weight, data))
             if len(sources) > 64:
-                raise ValueError(
+                raise ChartError(
                     f"{location} fonts: export supports at most 64 font faces; give fewer"
                 )
     for family, weight, data in sources:
+        if not isinstance(data, (bytes, str, PathLike)):
+            raise ChartError(
+                f"{location} fonts: expected the {shown(family)} {weight} face as bytes or a "
+                f"file's path; received {shown(data)}"
+            )
         if isinstance(data, bytes) and len(data) > _FONT_LIMIT:
-            raise ValueError(
+            raise ChartError(
                 f"{location} fonts: the {shown(family)} {weight} face exceeds the 32 MiB limit"
             )
     faces = []
@@ -326,7 +346,7 @@ def _font_faces(fonts: Fonts | None, location: str) -> list[dict[str, str]]:
             with Path(data).open("rb") as font_file:
                 raw = font_file.read(_FONT_LIMIT + 1)
             if len(raw) > _FONT_LIMIT:
-                raise ValueError(
+                raise ChartError(
                     f"{location} fonts: the {shown(family)} {weight} face exceeds the 32 MiB limit"
                 )
         faces.append(
@@ -351,13 +371,13 @@ def pdf(
 ) -> bytes:
     """Vector PDF, with one chart per page, rendered in embedded V8."""
     if page_size is not None and page_size not in ("A4", "Letter"):
-        raise ValueError(
+        raise ChartError(
             'to_pdf page_size: expected "A4" or "Letter"; omit it for chart-sized pages'
         )
     if orientation is not None and (
         page_size is None or orientation not in ("portrait", "landscape")
     ):
-        raise ValueError(
+        raise ChartError(
             'to_pdf orientation: expected "portrait" or "landscape" with page_size; '
             "supply a named paper size"
         )
@@ -367,14 +387,21 @@ def pdf(
         or not math.isfinite(margin)
         or margin < 0
     ):
-        raise ValueError(
+        raise ChartError(
             "to_pdf margin: expected finite nonnegative points; supply zero or a positive margin"
         )
+    texts = {"title": title, "subject": subject, "language": language}
+    texts["missing_glyph"] = missing_glyph
+    check_hints("to_pdf", texts, dict.fromkeys(texts, _TEXT))
+    if not listlike(fallback) or not all(isinstance(family, str) for family in fallback):
+        raise ChartError(
+            f"to_pdf fallback: expected a list of font families' names; received {shown(fallback)}"
+        )
     faces = _font_faces(fonts, "to_pdf")
-    if not faces and (fallback or missing_glyph is not None):
-        raise ValueError(
-            "to_pdf fallback and missing_glyph: choose among embedded fonts; "
-            "supply fonts, or leave them out"
+    if not faces and (len(fallback) > 0 or missing_glyph is not None):
+        option = "fallback" if len(fallback) > 0 else "missing_glyph"
+        raise ChartError(
+            f"to_pdf {option}: chooses among embedded fonts; supply fonts, or leave {option} out"
         )
     options: dict[str, Any] = {"fonts": faces, "fallback": list(fallback)}
     if missing_glyph is not None:
@@ -402,9 +429,19 @@ def pdf(
         encoded = _call("hercegStatic.pdf", json.dumps(spec), encoded_buffers, json.dumps(options))
     except ChartError as error:
         message = str(error)
-        # Text the fonts do not cover is refused as SVG and PNG export refuse it.
+        # Text the fonts do not cover is refused as SVG and PNG export refuse it,
+        # and fonts and their policy at the options they come from.
         if message.startswith("fonts do not cover"):
             message = "to_pdf fonts: " + message.removeprefix("fonts ")
+        elif message.startswith("fonts: "):
+            message = "to_pdf " + message
+        elif message.startswith("font family "):
+            message = "to_pdf fonts: " + message
+        elif message.startswith("fallback family "):
+            message = "to_pdf fallback: " + message.removeprefix("fallback ")
+            message += "; name a family fonts gives"
+        elif message.startswith("missingGlyph "):
+            message = "to_pdf missing_glyph: " + message.removeprefix("missingGlyph ")
         raise _reworded(
             error,
             message.replace("renderToPDF", "to_pdf")
@@ -526,7 +563,7 @@ def _plain(value: Any) -> Any:
     size as a list of floats."""
     if value is None:
         return None
-    if isinstance(value, numbers.Real):
+    if is_number(value):
         return float(value)
     return [float(item) for item in value]
 
@@ -644,25 +681,35 @@ _PATHS = {
 }
 
 
+def file_path(path: Any) -> Path:
+    """The file ``save`` writes, given as text or a path."""
+    if not isinstance(path, (str, PathLike)):
+        raise ChartError(
+            f"save path: expected a file's path, text or a pathlib.Path; received {shown(path)}",
+            path="path",
+        )
+    return Path(path)
+
+
 def save_format(path: str | PathLike[str], format: str | None) -> str:
     """The format ``save`` writes to ``path``: its extension's, which an explicit
     ``format`` must agree with, or ``format`` for a path without one of them."""
-    suffix = Path(path).suffix.lower()
+    suffix = file_path(path).suffix.lower()
     by_extension = _EXTENSIONS.get(suffix)
     if format is not None:
         if format not in _PATHS:
-            raise ValueError(
+            raise ChartError(
                 'save format: expected "html", "svg", "png", "jpeg", "webp", or "pdf"; '
                 f"received {shown(format)}"
             )
         if by_extension is not None and by_extension != format:
-            raise ValueError(
+            raise ChartError(
                 f'save format: "{format}" contradicts the path\'s {suffix} extension; '
                 f"drop format, or save to a {_PATHS[format]} path"
             )
         return format
     if by_extension is None:
-        raise ValueError(
+        raise ChartError(
             'save path: expected a ".html", ".svg", ".png", ".jpg", ".jpeg", ".webp", or '
             f'".pdf" file, or give format; received {shown(path)}'
         )
@@ -674,18 +721,12 @@ def check_save_options(format: str, given: Sequence[str]) -> None:
     names it does not know."""
     for name in given:
         if name not in _SAVE_OPTIONS:
-            close = difflib.get_close_matches(name, sorted(_SAVE_OPTIONS), n=1, cutoff=0.7)
-            hint = (
-                f"did you mean {close[0]!r}?"
-                if close
-                else "see help(herceg.save) for the options it takes"
-            )
-            raise TypeError(f"save: no option {name!r}; {hint}")
+            raise unknown_option("save", name, _SAVE_OPTIONS)
         formats, owners = _SAVE_OPTIONS[name]
         if format not in formats:
             paths = sorted({_PATHS[taker] for taker in formats}, key=list(_PATHS.values()).index)
             listed = paths[0] if len(paths) == 1 else ", ".join(paths[:-1]) + f", or {paths[-1]}"
-            raise ValueError(
+            raise ChartError(
                 f"save {name}: an option of {owners} export; save to a {listed} path or drop {name}"
             )
 

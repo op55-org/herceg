@@ -13,19 +13,31 @@ import hashlib
 import inspect
 import math
 import numbers
+import typing
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
 
-from .._chart import AxisOptions, Chart, HelperOptions, Panel, _chart_of, helper
-from .._data import Column, Table, listed, shown
-from .._errors import ChartError
+from .._chart import AxisOptions, Chart, HelperOptions, Panel, _chart_of, _colors, helper
+from .._data import Column, Table, listlike
+from .._errors import (
+    ChartError,
+    Role,
+    check_hints,
+    hints_of,
+    is_integer,
+    is_number,
+    listed,
+    located,
+    refusing,
+    shown,
+)
 from .._rows import SelectionBinding
-from .._style import Theme, Tokens
+from .._style import Theme, Tokens, _built
 from ._numerics import ErrorFunction, Estimator
 
 ErrorMethod = Literal["ci", "pi", "se", "sd"]
@@ -41,7 +53,7 @@ class ExpressOptions(HelperOptions, total=False):
     ``chart.columns()``, ``rows()``, ``grid()``, or ``mosaic()``) to draw the
     plot in, which returns that chart."""
 
-    panel: Panel
+    panel: Panel | None
 
 
 @dataclass(frozen=True)
@@ -73,13 +85,22 @@ _PANEL_RECORDS: weakref.WeakKeyDictionary[Chart, dict[str, Statistics]] = (
 def statistics(chart: Chart, panel: Panel | str | None = None) -> Statistics:
     """The statistics an express function computed for ``chart``, or with
     ``panel`` (a panel or its id), for the plot it drew in that panel."""
+    _check_express_chart(chart, "hx.statistics")
     if panel is not None:
+        if not isinstance(panel, (Panel, str)):
+            raise ChartError(
+                f"hx.statistics panel: expected a panel or its id; received {shown(panel)}",
+                path="panel",
+            )
         id = panel.id if isinstance(panel, Panel) else panel
         drawn = _PANEL_RECORDS.get(chart, {})
         if id not in drawn:
             listed = ", ".join(repr(name) for name in drawn) or "none"
-            raise ValueError(
-                f"hx.statistics panel: no express plot in panel {id!r}; those with one are {listed}"
+            raise ChartError(
+                f"hx.statistics panel: no express plot in panel {id!r}; "
+                f"those with one are {listed}",
+                code="unknown-reference",
+                path="panel",
             )
         return drawn[id]
     try:
@@ -87,11 +108,16 @@ def statistics(chart: Chart, panel: Panel | str | None = None) -> Statistics:
     except KeyError:
         if chart in _PANEL_RECORDS:
             listed = ", ".join(repr(name) for name in _PANEL_RECORDS[chart])
-            raise ValueError(
-                "hx.statistics: the chart's express plots are in its panels; "
-                f"name one with panel= ({listed})"
+            raise ChartError(
+                "hx.statistics chart: the chart's express plots are in its panels; "
+                f"name one with panel= ({listed})",
+                path="chart",
             ) from None
-        raise ValueError("the chart was not made by a herceg.express function") from None
+        raise ChartError(
+            "hx.statistics chart: the chart was not made by a herceg.express function; "
+            "give one an express function made",
+            path="chart",
+        ) from None
 
 
 #: How express functions drawing in a panel (``panel=``) were called, by chart and panel id.
@@ -159,6 +185,9 @@ def express(function: _F) -> _F:
     ``helper``) and remembers each call with the chart it makes."""
     checked = helper(function)
     signature = inspect.signature(function)
+    hints = typing.get_type_hints(function)
+    # Orders of levels (regplot's ``order`` is a polynomial's degree).
+    levels = [name for name in ("order", "series_order") if hints.get(name, int) is not int]
     _PARAMETERS[function.__name__] = frozenset(
         name
         for name, parameter in signature.parameters.items()
@@ -171,6 +200,14 @@ def express(function: _F) -> _F:
         if panel is not None:
             return _draw_in(panel, function.__name__, lambda: make(*args, **kwargs), kwargs)
         bound = signature.bind(*args, **kwargs)
+        # Options checked by their type hints, NumPy's scalars taken as Python's.
+        given = {**bound.arguments, **bound.arguments.get("options", {})}
+        for name, value in check_hints(function.__name__, given, hints_of(function)).items():
+            (bound.arguments if name in bound.arguments else bound.arguments["options"])[name] = (
+                value
+            )
+        args, kwargs = bound.args, bound.kwargs
+        _check_shared(bound.arguments, function.__name__, levels)
         # A color column is the series' column, as for the chart's marks.
         color = bound.arguments.pop("color", None)
         if color is not None:
@@ -199,6 +236,53 @@ def express(function: _F) -> _F:
         return chart
 
     return make  # type: ignore[return-value]
+
+
+def real(value: Any) -> bool:
+    """A finite real number; booleans are not numbers here."""
+    return is_number(value) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _check_shared(arguments: Mapping[str, Any], function: str, levels: Sequence[str]) -> None:
+    """Refuses what express functions take alike of another shape: orders of
+    levels and palettes."""
+    with refusing((function,), arguments.keys()):
+        for name in levels:
+            value = arguments.get(name)
+            if value is not None and not listlike(value):
+                raise ChartError(
+                    f"{function} {name}: expected a list of levels; received {shown(value)}"
+                )
+        for name in ("x_axis", "y_axis", "z_axis"):
+            axis = arguments.get("options", {}).get(name, arguments.get(name))
+            if axis is not None and not isinstance(axis, (AxisOptions, Mapping)):
+                raise (
+                    Role(function)
+                    .field(name)
+                    .error(
+                        "expected an hg.AxisOptions or a dict of its options; "
+                        f"received {shown(axis)}"
+                    )
+                )
+        for name in ("columns", "vars", "x_vars", "y_vars"):
+            names = arguments.get(name)
+            if names is not None and (
+                not listlike(names) or not all(isinstance(item, str) for item in names)
+            ):
+                raise (
+                    Role(function)
+                    .field(name)
+                    .error(f"expected a list of columns' names; received {shown(names)}")
+                )
+        # A color ramp, as the marks drawing it take it.
+        _colors(arguments.get("colors"), f"{function} colors")
+        palette = arguments.get("palette")
+        if palette is not None and (
+            not listlike(palette) or not all(isinstance(color, str) for color in palette)
+        ):
+            raise ChartError(
+                f"{function} palette: expected a list of colors; received {shown(palette)}"
+            )
 
 
 #: Express functions that draw several panels, and so make charts of their own.
@@ -314,6 +398,15 @@ def _copied(value: Any) -> Any:
     return value
 
 
+def _check_express_chart(chart: Any, owner: str) -> None:
+    if not isinstance(chart, Chart):
+        raise ChartError(
+            f"{owner} chart: expected a chart a herceg.express function made; "
+            f"received {shown(chart)}",
+            path="chart",
+        )
+
+
 def call_of(chart: Chart) -> Call | None:
     """How an express chart was made; None for other charts."""
     return _CALLS.get(chart)
@@ -329,11 +422,13 @@ def recompute(chart: Chart, data: Any) -> Chart:
     Groups whose values are the same as in ``chart`` reuse their bootstrap
     results, which a seed makes the same, rather than resampling again.
     """
+    _check_express_chart(chart, "hx.recompute")
     call = _CALLS.get(chart)
     if call is None:
-        raise ValueError(
-            "hx.recompute: the chart was not made by a herceg.express function; "
-            "make the chart again from the new data"
+        raise ChartError(
+            "hx.recompute chart: the chart was not made by a herceg.express function; "
+            "make the chart again from the new data",
+            path="chart",
         )
     return remake(chart, call, data)
 
@@ -404,7 +499,10 @@ class Source:
 
     def __init__(self, data: Any) -> None:
         if data is None:
-            raise ValueError("express functions need data: a dataframe or a mapping of columns")
+            raise ChartError(
+                "data: express functions draw a dataframe or a mapping of columns; received None",
+                path="data",
+            )
         self._table = Table(data)
 
     @property
@@ -414,13 +512,19 @@ class Source:
     def column(self, name: str, role: str, kinds: Sequence[str] | None = None) -> Column:
         if not isinstance(name, str) or name not in self._table.names:
             available = ", ".join(repr(n) for n in self._table.names)
-            raise KeyError(f"{role}: no column {name!r}; the data has {available}")
+            raise ChartError(
+                f"{role}: no column {name!r}; the data has {available}", code="unknown-field"
+            )
         making = _MAKING.get()
         if making is not None:
             making.read.add(name)
-        column = self._table.column(name)
+        try:
+            column = self._table.column(name)
+        except ChartError as error:
+            problem = str(error).removeprefix(f"Column {name!r}: ")
+            raise ChartError(f"{role}: column {name!r}: {problem}") from None
         if kinds is not None and column.kind not in kinds:
-            raise TypeError(
+            raise ChartError(
                 f"{role}: column {name!r} holds {column.kind} values; expected {' or '.join(kinds)}"
             )
         return column
@@ -456,11 +560,18 @@ class Levels:
         )
 
 
-def levels(column: Column, order: Sequence[Any] | None = None, *, whole: bool = False) -> Levels:
+def levels(
+    column: Column,
+    order: Sequence[Any] | None = None,
+    *,
+    whole: bool = False,
+    role: str = "order",
+) -> Levels:
     """Categories from a column: category labels in the column's order
     (pandas' categories, or first appearance), or distinct numbers and
-    times ascending; with ``order``, those levels in that order. With
-    ``whole``, levels of a category column keep its dictionary."""
+    times ascending; with ``order``, those levels in that order, refused
+    at `role` (``"barplot order"``). With ``whole``, levels of a category
+    column keep its dictionary."""
     if column.kind == "category":
         codes = column.values.astype(np.int64)
         labels = list(column.dictionary)
@@ -473,9 +584,11 @@ def levels(column: Column, order: Sequence[Any] | None = None, *, whole: bool = 
     else:
         raise TypeError(f"{column.kind} columns cannot be read as categories")
     if order is not None:
-        wanted = [_order_label(level, column.kind) for level in order]
+        wanted = [_order_label(level, column.kind, f"{role}[{i}]") for i, level in enumerate(order)]
         if len(set(wanted)) != len(wanted):
-            raise ValueError(f"an order lists a level twice: {list(order)!r}")
+            raise ChartError(
+                f"{role}: lists a level twice; give each once; received {list(order)!r}"
+            )
         position = {label: i for i, label in enumerate(wanted)}
         remap = np.array([position.get(label, -1) for label in labels] + [-1], dtype=np.int64)
         codes = remap[codes]
@@ -494,16 +607,22 @@ def levels(column: Column, order: Sequence[Any] | None = None, *, whole: bool = 
     return Levels(codes, tuple(labels))
 
 
-def _order_label(level: Any, kind: str) -> str:
+def _order_label(level: Any, kind: str, role: str) -> str:
     """A level of an order as the column's levels are labeled: numbers and
-    times of a number or time column as their labels, anything else as text."""
+    times of a number or time column as their labels, anything else as text;
+    a missing value (NaN, NaT, pandas' NA) is refused at `role`."""
+    from .._data import _is_missing, _time_ms
+
+    if _is_missing(level):
+        raise ChartError(f"{role}: expected a level; received {shown(level)}, a missing value")
     if isinstance(level, str) or kind not in ("number", "time"):
         return str(level)
-    if kind == "number" and isinstance(level, numbers.Real) and not isinstance(level, bool):
+    if kind == "number" and is_number(level) and not isinstance(level, bool):
         return level_label(float(level), kind)
-    from .._data import _time_ms
-
-    return level_label(_time_ms(level), kind)
+    try:
+        return level_label(_time_ms(level), kind)
+    except TypeError:
+        raise ChartError(f"{role}: expected a time; received {shown(level)}") from None
 
 
 def level_label(value: float, kind: str) -> str:
@@ -559,8 +678,8 @@ def facets(options: Mapping[str, Any], function: str) -> tuple[str | None, str |
     (wrapped panels) and ``panels`` (subplots) are refused: the computed
     tables hold no other columns to split, and the marks name no panel."""
     for name in ("facet", "panels"):
-        if options.get(name):
-            raise ValueError(
+        if _given(options.get(name)):
+            raise ChartError(
                 f"{function} {name}: express computes statistics per panel of facet_row "
                 "and facet_column; facet by those instead"
             )
@@ -584,8 +703,13 @@ def refuse_facets(options: Mapping[str, Any], function: str, reason: str) -> Non
     """Refuses facets and panels in a function whose chart cannot take
     them, for `reason`."""
     for name in ("facet", "facet_row", "facet_column", "panels"):
-        if options.get(name):
-            raise ValueError(f"{function} {name}: {reason}; draw a chart per subset of the rows")
+        if _given(options.get(name)):
+            raise ChartError(f"{function} {name}: {reason}; draw a chart per subset of the rows")
+
+
+def _given(option: Any) -> bool:
+    """Whether a facet or panels option is given (an empty list is none)."""
+    return option is not None and not (listlike(option) and len(option) == 0)
 
 
 def variables_of(
@@ -610,26 +734,26 @@ def variables_of(
         if name is None:
             continue
         if name in out:
-            raise ValueError(
+            raise ChartError(
                 f"{function} {role}: column {name!r} already facets or splits the chart; "
                 "give facet_row, facet_column, and series different columns"
             )
         if name in axes:
-            raise ValueError(
+            raise ChartError(
                 f"{function} {role}: column {name!r} is also plotted on an axis; to group by "
                 "it, pass a copy of the column under another name"
             )
         # Series keep their column's dictionary, whose order gives their colors.
         column = source.column(name, f"{function} {role}")
-        out[name] = levels(column, given, whole=role == "series")
+        out[name] = levels(column, given, whole=role == "series", role=f"{function} series_order")
     return out
 
 
 def check_axes_differ(x: str, y: str, function: str) -> None:
     """Refuses one column on both axes: the chart's table holds a column once."""
     if x == y:
-        raise ValueError(
-            f"{function} x and y name the same column {x!r}; pass a copy of it under another name"
+        raise ChartError(
+            f"{function} y: names x's column {x!r} too; pass a copy of it under another name"
         )
 
 
@@ -656,7 +780,7 @@ def weight_column(
     if weight is None:
         return None
     if weight in taken:
-        raise ValueError(
+        raise ChartError(
             f"{function} weight: column {weight!r} is plotted or groups the chart too; "
             "weigh rows by another column"
         )
@@ -672,7 +796,7 @@ def weights_of(
         return None
     w = values(column)
     if np.any(w[rows] < 0):
-        raise ValueError(
+        raise ChartError(
             f"{function} weight: column {weight!r} holds negative values; "
             "weights count rows, from 0 up"
         )
@@ -688,7 +812,7 @@ def unit_ranks(
     if units is None:
         return None
     if units in taken:
-        raise ValueError(
+        raise ChartError(
             f"{function} units: column {units!r} is plotted or groups the chart too; "
             "give the sampling units' own column"
         )
@@ -784,8 +908,8 @@ def seed_of(seed: int | None, function: str) -> int:
         if making is not None:
             making.resolved["seed"] = drawn
         return drawn
-    if isinstance(seed, bool) or not isinstance(seed, numbers.Integral) or seed < 0:
-        raise ValueError(
+    if isinstance(seed, bool) or not is_integer(seed) or seed < 0:
+        raise ChartError(
             f"{function} seed: expected a whole number of at least 0; received {shown(seed)}"
         )
     return int(seed)
@@ -804,20 +928,20 @@ def error_method(
         try:
             method, level = errorbar
         except (TypeError, ValueError):
-            raise ValueError(
+            raise ChartError(
                 f'{function} errorbar: expected ("ci", 95), ("pi", 50), ("se", 1), ("sd", 1), '
                 f"a method name, a function of the values, or None; received {shown(errorbar)}"
             ) from None
-    if method not in _LEVELS:
-        raise ValueError(
+    if not isinstance(method, str) or method not in _LEVELS:
+        raise ChartError(
             f"{function} errorbar: expected the method {listed(list(_LEVELS))}; "
             f"received {shown(method)}"
         )
-    if isinstance(level, bool) or not isinstance(level, numbers.Real) or not math.isfinite(level):
-        raise ValueError(f"{function} errorbar: expected a finite level; received {shown(level)}")
+    if isinstance(level, bool) or not is_number(level) or not math.isfinite(level):
+        raise ChartError(f"{function} errorbar: expected a finite level; received {shown(level)}")
     if level <= 0 or (method in ("ci", "pi") and level > 100):
         bound = "from above 0 to 100" if method in ("ci", "pi") else "above 0"
-        raise ValueError(
+        raise ChartError(
             f"{function} errorbar: expected a {method} level {bound}; received {shown(level)}"
         )
     return method, float(level)
@@ -830,12 +954,15 @@ ESTIMATORS = ("mean", "median", "sum", "min", "max")
 def check_estimator(estimator: Any, role: str, *, none: bool = False) -> Estimator | None:
     """Refuses, at `role` (the function and option), an estimator other than
     a named one or a function (or, with `none`, None)."""
-    if (none and estimator is None) or estimator in ESTIMATORS:
+    if none and estimator is None:
         return estimator
+    # A function first, whatever else it is (a callable Series compares as no name).
     if callable(estimator) and not isinstance(estimator, str):
         return estimator
+    if isinstance(estimator, str) and estimator in ESTIMATORS:
+        return cast("Estimator", estimator)
     named = ", ".join(f'"{name}"' for name in ESTIMATORS)
-    raise ValueError(
+    raise ChartError(
         f"{role}: expected {named}, a function of the values"
         + (", or None" if none else "")
         + f"; received {shown(estimator)}"
@@ -846,14 +973,14 @@ def checked_estimate(value: Any, role: str, where: str) -> float:
     """What an estimator function returned for a group (`where`), refused at
     `role` unless it is one finite number."""
     number = math.nan
-    if isinstance(value, numbers.Real) and not isinstance(value, bool | np.bool_ | np.timedelta64):
+    if is_number(value) and not isinstance(value, bool | np.bool_ | np.timedelta64):
         try:
             number = float(value)
         except (TypeError, ValueError, OverflowError):
             number = math.nan
     if math.isfinite(number):
         return number
-    raise ValueError(f"{role}: returned {shown(value)} for {where}; return one finite number")
+    raise ChartError(f"{role}: returned {shown(value)} for {where}; return one finite number")
 
 
 def checking(
@@ -881,7 +1008,7 @@ def checked_ends(value: Any, role: str, where: str) -> tuple[float, float]:
     except (TypeError, ValueError):
         low = high = math.nan
     if not low <= high:
-        raise ValueError(
+        raise ChartError(
             f"{role}: returned {shown(value)} for {where}; return the interval's two finite "
             "ends, low first"
         )
@@ -938,8 +1065,8 @@ def dropped_sentence(dropped: int, roles: Sequence[str | None], ordered: bool = 
 
 
 def check_n_boot(n_boot: int, function: str) -> int:
-    if isinstance(n_boot, bool) or not isinstance(n_boot, numbers.Integral) or n_boot < 1:
-        raise ValueError(
+    if isinstance(n_boot, bool) or not is_integer(n_boot) or n_boot < 1:
+        raise ChartError(
             f"{function} n_boot: expected a whole number of at least 1; received {shown(n_boot)}"
         )
     return int(n_boot)
@@ -947,8 +1074,8 @@ def check_n_boot(n_boot: int, function: str) -> int:
 
 def check_grid_size(grid_size: int, role: str) -> int:
     """Refuses a density or fit grid of fewer than two points, at ``role``."""
-    if isinstance(grid_size, bool) or not isinstance(grid_size, numbers.Integral) or grid_size < 2:
-        raise ValueError(
+    if isinstance(grid_size, bool) or not is_integer(grid_size) or grid_size < 2:
+        raise ChartError(
             f"{role}: expected a whole number of at least 2; received {shown(grid_size)}"
         )
     return int(grid_size)
@@ -956,8 +1083,9 @@ def check_grid_size(grid_size: int, role: str) -> int:
 
 def check_choice(value: Any, name: str, choices: Sequence[Any]) -> Any:
     """Refuses a value not among `choices`, at `name` (the function and option)."""
-    if value not in choices:
-        raise ValueError(f"{name}: expected {listed(choices)}; received {shown(value)}")
+    # Only words and numbers are compared: pandas' NA, or an array, has no truth.
+    if not (value is None or isinstance(value, (str, numbers.Number))) or value not in choices:
+        raise ChartError(f"{name}: expected {listed(choices)}; received {shown(value)}")
     return value
 
 
@@ -1000,14 +1128,14 @@ def make_chart(
     settings: dict[str, Any] = dict(options)
     if palette is not None:
         if isinstance(palette, str) or not all(isinstance(c, str) for c in palette):
-            raise ValueError(f"palette: expected a list of colors; received {shown(palette)}")
+            raise ChartError(f"palette: expected a list of colors; received {shown(palette)}")
         given = settings.get("theme")
         theme = (
             Theme(extends=given)  # type: ignore[arg-type]
             if given is None or isinstance(given, str)
             else given
             if isinstance(given, Theme)
-            else Theme(**given)
+            else located("theme", lambda: _built(given, Theme, "theme"))
         )
         tokens = theme.tokens if isinstance(theme.tokens, Tokens) else Tokens()
         settings["theme"] = dataclasses.replace(

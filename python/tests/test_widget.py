@@ -117,7 +117,7 @@ def test_point_keys_travel_through_live_replacements_and_appends():
     content, buffers = browser.last
     assert columns(content, buffers)["host"] == ["c"]
     assert snapshot(widget)[1]["host"] == ["b", "a", "c"]
-    with pytest.raises(KeyError, match="widget.replace rows: no column 'host'"):
+    with pytest.raises(hg.ChartError, match="widget.replace rows: no column 'host'"):
         widget.replace({"t": [T0], "v": [1.0]})
 
 
@@ -179,15 +179,20 @@ def test_append_takes_one_row_as_a_mapping_of_values():
 def test_appended_rows_are_checked_against_the_table():
     widget, browser = live()
     with pytest.raises(
-        KeyError, match="widget.append rows: no column 'host'; the chart reads 'host', 't', 'v'"
+        hg.ChartError,
+        match="widget.append rows: no column 'host'; the chart reads 'host', 't', 'v'",
     ):
         widget.append({"t": [T0], "v": [1.0]})
     with pytest.raises(
-        TypeError, match="widget.append rows: column 't' holds number values; expected time values"
+        hg.ChartError,
+        match="widget.append rows: column 't' holds number values; expected time values",
     ):
         widget.append({"t": [1.0], "v": [1.0], "host": ["a"]})
-    with pytest.raises(ValueError, match="widget.append rows: expected columns of one length"):
+    with pytest.raises(
+        hg.ChartError, match="widget.append rows: column 'v': expected a value per row, 1 as column"
+    ) as raised:
         widget.append({"t": [T0], "v": [1.0, 2.0], "host": ["a"]})
+    assert raised.value.path == "rows.v"
     with pytest.raises(
         ValueError,
         match="widget.append max_rows: expected a whole number of at least 1; received 0",
@@ -297,25 +302,15 @@ def test_none_resets_every_option_without_sending_nested_nones():
         assert not any(nested_none(value) for value in sent.values()), (option, sent)
 
 
-def test_live_facet_panels_share_x():
-    chart = hg.Chart(data(), facet="host", x=hg.AxisOptions(scope="panel")).line(x="t", y="v")
-    with pytest.raises(
-        ValueError,
-        match='Chart x scope: expected "chart" in a live faceted chart',
-    ):
-        chart.widget()
-    widget = hg.Chart(data(), facet="host", zoom=True).line(x="t", y="v").widget()
+def test_live_facet_panels_take_scales_of_their_own():
+    chart = hg.Chart(data(), facet="host", x=hg.AxisOptions(scope="panel"), zoom="xy")
+    widget = chart.line(x="t", y="v").widget()
     browser = Browser(widget)
-    count = len(browser.messages)
-    with pytest.raises(
-        ValueError,
-        match='Chart x scope: expected "chart" in a live faceted chart',
-    ):
-        widget.update(x=hg.AxisOptions(scope="row"))
-    # The refused change changed nothing.
-    widget.update(x=hg.AxisOptions(scope="chart"))
-    assert browser.last[0]["options"] == {"x": {"scope": "chart"}}
-    assert len(browser.messages) == count + 1
+    widget.update(y=hg.AxisOptions(scope="row"), brush="y")
+    assert browser.last[0]["options"] == {
+        "y": {"scope": "row"},
+        "interaction": {"zoom": "xy", "brush": "y"},
+    }
 
 
 def test_a_browser_behind_gets_the_whole_chart():
@@ -407,41 +402,153 @@ def test_selections_from_the_browser_become_properties_and_callbacks():
     assert widget.get_state()["_chart"]["selection"] == payload
 
 
-def test_setting_a_viewport_sends_it_whole_and_reports_it_once():
+def views(x=None, y=None, y_right=None, *, time=("x",), revision=1):
+    """The views of a one-panel chart as a browser reports them (``ViewsPayload``)."""
+    shown = {"x": x, "y": y, "yRight": y_right, "time": [a for a in time if a in ("x", "y")]}
+    scales = [
+        {"scale": axis, "instance": "", "time": axis in time, "panels": [""], "view": ends}
+        | {"identity": f'["{axis}","linear",""]'}
+        for axis, ends in (("x", x), ("y", y))
+    ]
+    axes = {"viewRevision": revision, "scales": scales, "views": [{"panel": "", **shown}]}
+    return {"axes": axes | {"view": shown}, "planes": {}}
+
+
+def change(views, cause="pointer"):
+    """The change of view that made `views`, as the browser reports it."""
+    axes = views["axes"]
+    return {
+        "viewRevision": axes["viewRevision"],
+        "cause": cause,
+        "scales": [{k: v for k, v in s.items() if k != "identity"} for s in axes["scales"]],
+        "views": axes["views"],
+    }
+
+
+def report(browser, views, origin="A", revision=1, **event):
+    browser.reply(
+        {
+            "type": "viewport",
+            "views": views,
+            "event": change(views, **event),
+            "origin": origin,
+            "revision": revision,
+        }
+    )
+
+
+def test_set_viewport_asks_the_browsers_and_reads_what_they_report():
     widget, browser = live(zoom="xy")
-    viewports = []
-    widget.on_viewport(viewports.append)
+    events = []
+    widget.on_viewport(events.append)
     end = T0 + dt.timedelta(minutes=1)
-    assert widget.viewport == hg.Viewport()
-    widget.viewport = (end, T0)
-    whole = {"x": [MS0, MS0 + 60_000], "y": None, "yRight": None, "time": ["x"]}
-    assert browser.last[0] == {"type": "viewport", "viewport": whole, "revision": 1}
-    assert widget.viewport == hg.Viewport(x=(T0, end))
-    # The browser confirms the same view, numbers flagged as times: no second callback.
-    browser.reply({"type": "viewport", "viewport": whole, "origin": "A", "revision": 1})
-    assert viewports == [hg.Viewport(x=(T0, end))]
-    # A viewport replaces every axis' view.
-    widget.viewport = hg.Viewport(y=(0, 5))
+    # Nothing is known before a browser reports.
+    assert widget.get_viewport() is None and widget.panel_viewports == {}
+    widget.set_viewport((end, T0))
+    x = [MS0, MS0 + 60_000]
+    assert browser.last[0] == {
+        "type": "setViewport",
+        "request": 1,
+        "viewport": {"x": x, "time": ["x"]},
+        "revision": 1,
+    }
+    # The browser's report of the change it made is the view.
+    reported = views(x)
+    report(browser, reported, cause="api")
+    assert widget.get_viewport() == hg.Viewport(x=(T0, end))
+    assert widget.panel_viewports == {"": hg.Viewport(x=(T0, end))}
+    assert [event.cause for event in events] == ["api"]
+    assert events[0].scales[0] == hg.ScaleView("x", "", ("",), (T0, end))
+    # Other browsers follow it; the same views again call back no more.
+    assert browser.last[0] == {"type": "viewport", "views": reported, "origin": "A", "revision": 2}
+    report(browser, views(x, revision=2), origin="B", revision=2)
+    assert len(events) == 1
+    # A Viewport sets every axis, axes given alone set those, and None fits every one.
+    widget.set_viewport(hg.Viewport(y=(0, 5)))
     assert browser.last[0]["viewport"] == {"x": None, "y": [0, 5], "yRight": None, "time": []}
-    assert viewports[-1] == hg.Viewport(y=(0.0, 5.0))
-    widget.viewport = None
-    assert browser.last[0]["viewport"]["y"] is None and viewports[-1] == hg.Viewport()
-    # Zooming both y axes in the browser reports both.
-    both = {"x": None, "y": [1.0, 2.0], "yRight": [10.0, 20.0], "time": []}
-    browser.reply({"type": "viewport", "viewport": both, "origin": "A", "revision": 4})
-    assert widget.viewport == hg.Viewport(y=(1.0, 2.0), y_right=(10.0, 20.0))
+    widget.set_viewport(y=(0, 5), y_right=None)
+    assert browser.last[0]["viewport"] == {"y": [0, 5], "yRight": None, "time": []}
+    widget.set_viewport(None)
+    assert browser.last[0]["viewport"] is None
+    with pytest.raises(hg.ChartError, match="widget.set_viewport x: give a view, or the axes"):
+        widget.set_viewport((0, 1), x=(0, 1))
+    with pytest.raises(hg.ChartError, match="widget.set_viewport view: expected a view") as raised:
+        widget.set_viewport()
+    assert raised.value.path == "view"
+    # A browser connecting meanwhile makes the changes no browser made yet.
+    assert [r["request"] for r in widget.get_state()["_chart"]["viewportRequests"]] == [1, 2, 3, 4]
+    browser.reply({"type": "applied", "request": 3, "origin": "A"})
+    assert [r["request"] for r in widget.get_state()["_chart"]["viewportRequests"]] == [4]
 
 
-def test_equal_values_keep_the_newer_form_and_call_back_once():
-    widget, browser = live(zoom=True)
-    viewports = []
-    widget.on_viewport(viewports.append)
-    widget.viewport = (0, 60_000)
-    end = dt.datetime(1970, 1, 1, 0, 1)
-    widget.viewport = (dt.datetime(1970, 1, 1), end)
-    # The same range, now known to be times: nothing more is sent or called.
-    assert len(browser.messages) == 1 and len(viewports) == 1
-    assert widget.viewport.x == (dt.datetime(1970, 1, 1), end)
+@pytest.mark.contract("errors.widget.browser.python")
+def test_what_a_browser_refuses_comes_back_as_an_error():
+    widget, browser = live(zoom="xy")
+    errors = []
+    widget.on_error(errors.append)
+    assert widget.error is None
+    widget.set_viewport(y_right=(0, 1))
+    info = {
+        "code": "unknown-reference",
+        "message": "setViewport yRight: the chart has no right y axis; drop yRight",
+        "phase": "compile",
+        "path": "yRight",
+    }
+    browser.reply({"type": "error", "request": 1, "error": info, "origin": "A"})
+    [error] = errors
+    assert error is widget.error
+    assert (str(error), error.code, error.path) == (
+        "widget.set_viewport y_right: the chart has no right y axis; drop yRight",
+        "unknown-reference",
+        "y_right",
+    )
+    # Refused, it is asked of no browser again; a report of another shape is none.
+    assert widget.get_state()["_chart"]["viewportRequests"] == []
+    browser.reply({"type": "error", "error": "?"})
+    assert len(errors) == 1
+
+
+def test_views_name_each_panel_and_filter_callbacks_by_panel():
+    widget = hg.Chart(data(), facet="host", zoom="xy").line(x="t", y="v").widget()
+    browser = Browser(widget)
+    heard, all_heard = [], []
+    widget.on_viewport(heard.append, panel="b")
+    widget.on_viewport(all_heard.append)
+    # Panels a and b each draw a y instance of their own beside the x they share.
+    view_a = {"panel": "a", "x": [0, 1], "y": [0, 2], "yRight": None, "time": []}
+    view_b = {"panel": "b", "x": [0, 1], "y": None, "yRight": None, "time": []}
+    scales = [
+        {"scale": "x", "instance": "", "time": False, "panels": ["a", "b"], "view": [0, 1]},
+        {"scale": "y", "instance": '["a"]', "time": False, "panels": ["a"], "view": [0, 2]},
+        {"scale": "y", "instance": '["b"]', "time": False, "panels": ["b"], "view": None},
+    ]
+    axes = {
+        "viewRevision": 3,
+        "scales": [
+            s | {"identity": f'["{s["scale"]}","linear",{s["instance"]!r}]'} for s in scales
+        ],
+        "views": [view_a, view_b],
+        "view": {"x": [0, 1], "y": None, "yRight": None, "time": []},
+    }
+    event = {
+        "viewRevision": 3,
+        "cause": "wheel",
+        "panel": "a",
+        "scales": scales[1:2],
+        "views": [view_a],
+    }
+    content = {"type": "viewport", "views": {"axes": axes, "planes": {}}, "event": event}
+    browser.reply(content | {"origin": "A", "revision": 0})
+    assert widget.get_viewport(panel="a") == hg.Viewport(x=(0.0, 1.0), y=(0.0, 2.0))
+    assert widget.get_viewport() == hg.Viewport(x=(0.0, 1.0))
+    assert len(all_heard) == 1 and heard == []
+    assert all_heard[0].panel == "a" and list(all_heard[0].views) == ["a"]
+    with pytest.raises(
+        hg.ChartError, match="the chart shows no panel 'c'; the panels are 'a', 'b'"
+    ):
+        widget.get_viewport(panel="c")
+    widget.set_viewport(y=(1, 2), panel="b")
+    assert browser.last[0]["panel"] == "b" and browser.last[0]["viewport"]["y"] == [1, 2]
 
 
 def test_a_lassos_categories_stay_known():
@@ -486,103 +593,35 @@ def test_malformed_reports_from_the_browser_change_nothing():
     assert widget.selection is None
 
 
-def test_giving_panels_y_scales_of_their_own_lets_go_of_the_y_viewport():
-    widget = hg.Chart(data(), zoom="x", facet="host").line(x="t", y="v").widget()
-    browser = Browser(widget)
-    viewports = []
-    widget.on_viewport(viewports.append)
-    widget.viewport = hg.Viewport(y=(0, 10))
-    widget.update(y=hg.AxisOptions(scope="panel"))
-    assert widget.viewport == hg.Viewport() and viewports[-1] == hg.Viewport()
-    assert browser.last[0]["viewport"]["y"] is None
-    widget.update(y=hg.AxisOptions(scope="chart"))
-    # The same zoom again is a change.
-    widget.viewport = hg.Viewport(y=(0, 10))
-    assert len(viewports) == 3 and browser.last[0]["viewport"]["y"] == [0, 10]
-
-
-def test_charts_without_one_y_scale_refuse_a_y_viewport():
-    widget = (
-        hg.Chart(data(), zoom="x", facet="host", y=hg.AxisOptions(scope="panel"))
-        .line(x="t", y="v")
-        .widget()
-    )
-    widget.viewport = (T0, T0 + dt.timedelta(seconds=30))
-    with pytest.raises(
-        ValueError, match="widget.viewport: charts whose panels have y scales of their own"
-    ):
-        widget.viewport = hg.Viewport(y=(0, 1))
-
-
-def test_right_y_scales_of_their_own_refuse_only_a_right_y_viewport():
-    chart = hg.Chart(data(), zoom="x", facet="host").line(x="t", y="v")
-    widget = chart.line(x="t", y="v", axis="right").widget()
-    browser = Browser(widget)
-    widget.viewport = hg.Viewport(y=(0, 10), y_right=(0, 100))
-    widget.update(y_right=hg.AxisOptions(scope="panel"))
-    # The left zoom stays; the right one goes, as in the browser.
-    assert widget.viewport == hg.Viewport(y=(0, 10))
-    assert browser.last[0]["viewport"]["yRight"] is None
-    with pytest.raises(
-        ValueError, match="widget.viewport: charts whose panels have y scales of their own"
-    ):
-        widget.viewport = hg.Viewport(y_right=(0, 1))
-
-
-def test_live_updates_refuse_a_y_zoom_over_right_y_scales_of_their_own():
-    chart = hg.Chart(data(), zoom="xy", facet="host").line(x="t", y="v")
-    widget = chart.line(x="t", y="v", axis="right").widget()
-    browser = Browser(widget)
-    sent = len(browser.sent)
-    with pytest.raises(
-        ValueError,
-        match=r"Chart zoom: .* right y scales of their own \(y_right scope\) zoom along x only",
-    ):
-        widget.update(y_right=hg.AxisOptions(scope="panel"))
-    # Nothing changed or went to the browser; zooming along x only is fine.
-    assert widget._live._settings["y_right"] is None
-    assert len(browser.sent) == sent
-    widget.update(zoom="x", y_right=hg.AxisOptions(scope="panel"))
-    with pytest.raises(
-        ValueError,
-        match=r"Chart zoom: .* y scales of their own \(y scope\) zoom along x",
-    ):
-        widget.update(zoom="xy", y=hg.AxisOptions(scope="panel"))
-    # Rules at an x on the right place no values there.
-    ruled = hg.Chart(data(), zoom="xy", facet="host").line(x="t", y="v")
-    ruled.rule(x=T0, axis="right").widget().update(y_right=hg.AxisOptions(scope="panel"))
-
-
 def zoom(browser, seconds, origin, revision):
     """A browser reports zooming to the first `seconds` of the data."""
-    payload = {"x": [MS0, MS0 + seconds * 1000], "y": None, "yRight": None, "time": ["x"]}
-    browser.reply({"type": "viewport", "viewport": payload, "origin": origin, "revision": revision})
+    report(browser, views([MS0, MS0 + seconds * 1000]), origin=origin, revision=revision)
 
 
 def test_browser_viewports_made_before_another_change_are_dropped():
     widget, browser = live(zoom=True)
-    viewports = []
-    widget.on_viewport(viewports.append)
-    widget.viewport = (T0, T0 + dt.timedelta(minutes=1))  # revision 1
-    # Browser A zoomed before it drew Python's viewport: out of date.
+    events = []
+    widget.on_viewport(events.append)
+    widget.set_viewport((T0, T0 + dt.timedelta(minutes=1)))  # revision 1
+    # Browser A zoomed before it made Python's change: out of date.
     zoom(browser, 30, "A", 0)
-    assert widget.viewport.x == (T0, T0 + dt.timedelta(minutes=1)) and len(viewports) == 1
+    assert widget.get_viewport() is None and events == []
     # After: it counts, and goes to the other browsers marked as A's.
     zoom(browser, 30, "A", 1)
-    assert widget.viewport.x == (T0, T0 + dt.timedelta(seconds=30))
-    assert browser.last[0] == {
+    assert widget.get_viewport().x == (T0, T0 + dt.timedelta(seconds=30))
+    assert browser.last[0] | {"views": None} == {
         "type": "viewport",
-        "viewport": {"x": [MS0, MS0 + 30_000], "y": None, "yRight": None, "time": ["x"]},
+        "views": None,
         "origin": "A",
         "revision": 2,
     }
     # A's next zoom, made before its own view came back, counts too.
     zoom(browser, 20, "A", 1)
-    assert widget.viewport.x == (T0, T0 + dt.timedelta(seconds=20))
+    assert widget.get_viewport().x == (T0, T0 + dt.timedelta(seconds=20))
     # Browser B's zoom, made before A's, does not.
     zoom(browser, 10, "B", 2)
-    assert widget.viewport.x == (T0, T0 + dt.timedelta(seconds=20))
-    assert len(viewports) == 3
+    assert widget.get_viewport().x == (T0, T0 + dt.timedelta(seconds=20))
+    assert len(events) == 2
     # New browsers start from the current view.
     assert widget.get_state()["_chart"]["revision"] == 3
 
@@ -630,6 +669,8 @@ def test_edges_reach_python_with_datetimes_and_cursors_reach_browsers():
             "type": "edge",
             "edge": {
                 "scale": "x",
+                "instance": "",
+                "panels": [""],
                 "side": "start",
                 "domain": [MS0, MS0 + 60_000],
                 "bound": MS0,
@@ -641,10 +682,12 @@ def test_edges_reach_python_with_datetimes_and_cursors_reach_browsers():
     assert edges == [
         hg.ViewEdge(
             scale="x",
+            instance="",
             side="start",
             domain=(T0, T0 + dt.timedelta(minutes=1)),
             bound=T0,
             cause="pointer",
+            panels=("",),
         )
     ]
     widget.show_cursor(x=T0)
@@ -661,8 +704,11 @@ def test_edges_reach_python_with_datetimes_and_cursors_reach_browsers():
     }
     widget.hide_cursor()
     assert browser.last[0] == {"type": "cursor", "position": None, "broadcast": True}
-    with pytest.raises(ValueError, match="widget.show_cursor: expected x or y, one of them"):
+    with pytest.raises(hg.ChartError, match="widget.show_cursor x: expected x or y, one of them"):
         widget.show_cursor()
+    with pytest.raises(hg.ChartError, match="widget.show_cursor y: expected x or y") as raised:
+        widget.show_cursor(x=T0, y=1)
+    assert raised.value.path == "y"
     with pytest.raises(ValueError, match="widget.show_cursor snap: expected"):
         widget.show_cursor(x=T0, snap="later")
 

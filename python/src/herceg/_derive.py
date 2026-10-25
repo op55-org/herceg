@@ -8,14 +8,29 @@ rows the chart computes in the browser, where they follow streamed updates.
 from __future__ import annotations
 
 import datetime as _dt
+import functools
+import inspect
 import math
-import numbers
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, TypedDict, TypeVar
 
 import numpy as np
 
-from ._data import Table, listed, shown
+from ._data import Table, listlike
+from ._errors import (
+    ChartError,
+    ChartErrorCode,
+    Role,
+    check_hints,
+    hints_of,
+    is_number,
+    keys_shown,
+    listed,
+    located,
+    python_values,
+    refusing,
+    shown,
+)
 
 #: Kinds of columns whose values steps can compare and group: all but shapes.
 _VALUES = ("number", "time", "category")
@@ -29,6 +44,15 @@ ROLLING = ("count", "sum", "mean", "min", "max", "stdev")
 _KEEPS_KIND = {"mean", "median", "min", "max", "q1", "q3", "first", "last"}
 
 
+def _operand(value: Any, role: str) -> Any:
+    """`_literal(value)`, its refusals said at `role` ("filter condition")."""
+    try:
+        return _literal(value)
+    except (TypeError, ValueError) as error:
+        code = error.code if isinstance(error, ChartError) else "invalid-option"
+        raise ChartError(str(error).replace("expression", role, 1), code=code) from None
+
+
 def _literal(value: Any) -> Any:
     """The JSON form of an expression operand."""
     if isinstance(value, Expr):
@@ -40,12 +64,12 @@ def _literal(value: Any) -> Any:
     if isinstance(value, _dt.datetime):
         moment = value if value.tzinfo else value.replace(tzinfo=_dt.timezone.utc)
         return moment.timestamp() * 1000
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+    if is_number(value) and not isinstance(value, bool):
         number = float(value)
         if not np.isfinite(number):
-            raise ValueError(f"expression: expected finite numbers; received {value!r}")
+            raise ChartError(f"expression: expected finite numbers; received {value!r}")
         return int(number) if number.is_integer() and abs(number) < 2**53 else number
-    raise TypeError(
+    raise ChartError(
         "expression: expected numbers, text, True, False, None, datetimes, or expressions; "
         f"received {type(value).__name__}"
     )
@@ -175,7 +199,11 @@ class Expr:
 
     def is_in(self, *values: Any) -> Expr:
         """True where the value is one of ``values``."""
-        return self._op("in", *values)
+        given = [
+            located(f"values[{i}]", functools.partial(_literal, value))
+            for i, value in enumerate(values)
+        ]
+        return Expr(["in", self._json, *given])
 
     def is_missing(self) -> Expr:
         """True where the value is missing (NaN, or a missing category)."""
@@ -185,13 +213,23 @@ class Expr:
 def col(name: str) -> Expr:
     """A column of the table an expression is evaluated against."""
     if not isinstance(name, str):
-        raise TypeError(f"col: expected a column name; received {shown(name)}")
+        raise ChartError(f"col name: expected a column's name; received {shown(name)}", path="name")
     return Expr(["field", name])
 
 
 def when(condition: Expr, then: Any, otherwise: Any) -> Expr:
     """``then`` where ``condition`` holds, else ``otherwise``."""
-    return Expr(["if", _literal(condition), _literal(then), _literal(otherwise)])
+    if not isinstance(condition, Expr):
+        raise ChartError(
+            "when condition: expected an expression that holds or not, such as "
+            f'hg.col("v") > 1; received {shown(condition)}',
+            path="condition",
+        )
+    branches = [
+        located(name, functools.partial(_literal, value))
+        for name, value in (("then", then), ("otherwise", otherwise))
+    ]
+    return Expr(["if", _literal(condition), *branches])
 
 
 class _Kinds:
@@ -332,12 +370,22 @@ def _value_kind(json: Any, kinds: _Kinds) -> str:
 
 
 #: A bin definition as functions take it: a count, a step/start dict, or edges.
-BinSpec = int | dict[str, float] | Sequence[float] | np.ndarray[Any, Any]
+class _Step(TypedDict):
+    step: float
+
+
+class BinStep(_Step, total=False):
+    """Bins ``step`` wide, from ``start`` (a round number by default)."""
+
+    start: float | None
+
+
+BinSpec = int | BinStep | Sequence[float] | np.ndarray[Any, Any]
 
 
 def _finite(value: Any) -> bool:
     """Whether a value is a finite real number (NumPy's included), not a bool."""
-    if not isinstance(value, numbers.Real) or isinstance(value, (bool, np.bool_)):
+    if not is_number(value) or isinstance(value, (bool, np.bool_)):
         return False
     try:
         return math.isfinite(float(value))
@@ -353,42 +401,74 @@ def bin_spec(bins: Any, role: str) -> int | dict[str, float] | list[float]:
     if isinstance(bins, Mapping):
         unknown = set(bins) - {"step", "start"}
         if unknown:
-            given = ", ".join(map(repr, sorted(unknown)))
-            raise ValueError(f"{role}: a step/start dict takes step and start; received {given}")
+            given = keys_shown(unknown)
+            raise ChartError(f"{role}: a step/start dict takes step and start; received {given}")
         step = bins.get("step")
         if step is None or not _finite(step) or step <= 0:
-            raise ValueError(f"{role} step: expected a positive number; received {shown(step)}")
+            raise ChartError(f"{role} step: expected a positive number; received {shown(step)}")
         start = bins.get("start")
         if start is not None and not _finite(start):
-            raise ValueError(f"{role} start: expected a finite number; received {shown(start)}")
+            raise ChartError(f"{role} start: expected a finite number; received {shown(start)}")
         return {"step": float(step), **({"start": float(start)} if start is not None else {})}
-    if isinstance(bins, numbers.Real) and not isinstance(bins, (bool, np.bool_)):
+    if is_number(bins) and not isinstance(bins, (bool, np.bool_)):
         if not _finite(bins) or float(bins) < 1 or not float(bins).is_integer():
-            raise ValueError(
+            raise ChartError(
                 f"{role}: expected a whole number of at least 1; received {shown(bins)}"
             )
         return int(float(bins))
     if isinstance(bins, np.ndarray) and bins.ndim != 1:
-        raise ValueError(f"{role}: expected a 1-D array of edges; received shape {bins.shape}")
-    if not isinstance(bins, (Sequence, np.ndarray)) or isinstance(bins, (str, bytes)):
-        raise ValueError(
+        raise ChartError(f"{role}: expected a 1-D array of edges; received shape {bins.shape}")
+    if not (listlike(bins) or isinstance(bins, np.ndarray)):
+        raise ChartError(
             f"{role}: expected a whole number, a step/start dict, or a sequence of edges; "
             f"received {shown(bins)}"
         )
     if len(bins) < 2 or len(bins) > 1001:
-        raise ValueError(f"{role}: expected 2 to 1001 edges; received {len(bins)}")
+        raise ChartError(f"{role}: expected 2 to 1001 edges; received {len(bins)}")
     edges: list[float] = []
     for i, edge in enumerate(bins):
         if not _finite(edge):
-            raise ValueError(f"{role}[{i}]: expected a finite number; received {shown(edge)}")
+            raise ChartError(f"{role}[{i}]: expected a finite number; received {shown(edge)}")
         value = float(edge)
         if edges and not value > edges[-1]:
-            raise ValueError(
+            raise ChartError(
                 f"{role}[{i}]: expected an edge above the one before; "
                 f"received {value:g} after {edges[-1]:g}"
             )
         edges.append(value)
     return edges
+
+
+_M = TypeVar("_M", bound=Callable[..., Any])
+
+
+def _made(name: Any, role: str) -> None:
+    """Refuses a name for a column a step makes unless it is text."""
+    if not isinstance(name, str) or not name:
+        raise ChartError(f"{role}: expected a column's name; received {shown(name)}")
+
+
+def _step(method: _M) -> _M:
+    """Makes a transform's refusals (``bin: column 'site' holds categories``)
+    ChartErrors, at the option they name; a column the rows lack is an
+    unknown field."""
+    name = method.__name__
+    signature = inspect.signature(method)
+
+    @functools.wraps(method)
+    def step(self: Derived, *args: Any, **kwargs: Any) -> Derived:
+        bound = signature.bind_partial(self, *args, **kwargs)
+        # Operations are named by keyword (aggregate's and rolling's).
+        with refusing((name,), {*signature.parameters, *kwargs}):
+            given, hints = dict(bound.arguments), hints_of(method)
+            changed, later = python_values(name, given, hints)
+            bound.arguments.update(changed)
+            derived = method(*bound.args, **bound.kwargs)
+            # Last, for what the step's own checks let through: theirs say more.
+            check_hints(name, given, later)
+            return derived
+
+    return step  # type: ignore[return-value]
 
 
 class Derived:
@@ -419,36 +499,68 @@ class Derived:
     def _then(self, step: dict[str, Any], kinds: _Kinds) -> Derived:
         return Derived(self.source, [*self.steps, step], kinds, self._table)
 
-    def _require(self, names: Any, role: str, kinds: tuple[str, ...] | None = None) -> None:
-        for name in [names] if isinstance(names, str) else names:
+    def _require(
+        self,
+        names: Any,
+        role: str,
+        kinds: tuple[str, ...] | None = None,
+        *,
+        at: str,
+        one: bool = False,
+        given: bool = False,
+    ) -> None:
+        """Refuses at the argument `at` columns the rows do not have, or of
+        other `kinds`; with `one`, anything but a column's name; a list the
+        caller `given`, at each name's index."""
+        if not isinstance(names, str) and (one or not listlike(names)):
+            raise ChartError(f"{role}: expected a column name; received {shown(names)}", path=at)
+        for i, name in enumerate([names] if isinstance(names, str) else names):
+            # Names the caller listed are refused at their index.
+            listed_at = given and not isinstance(names, str)
+            where, path = (f"{role}[{i}]", f"{at}[{i}]") if listed_at else (role, at)
+            if not isinstance(name, str):
+                raise ChartError(
+                    f"{where}: expected column names; received {shown(name)}", path=path
+                )
             if name not in self._kinds:
                 available = ", ".join(repr(known) for known in self._kinds)
-                raise KeyError(f"{role}: no column {name!r}; the rows have {available}")
+                raise ChartError(
+                    f"{where}: no column {name!r}; the rows have {available}",
+                    code="unknown-field",
+                    path=path,
+                )
             if kinds is not None and self._kinds[name] not in kinds:
-                raise TypeError(
-                    f"{role}: column {name!r} holds {self._kinds[name]} values; "
-                    f"expected {' or '.join(kinds)}"
+                raise ChartError(
+                    f"{where}: column {name!r} holds {self._kinds[name]} values; "
+                    f"expected {' or '.join(kinds)}",
+                    code="field-type",
+                    path=path,
                 )
 
+    @_step
     def filter(self, condition: Expr) -> Derived:
         """Keeps rows where ``condition`` is true."""
-        json = _literal(condition)
-        self._require(sorted(_fields_of(json)), "filter")
-        kind = _checked(json, self._kinds, "filter")
+        json = _operand(condition, "filter condition")
+        self._require(sorted(_fields_of(json)), "filter", at="condition")
+        kind = _checked(json, self._kinds, "filter condition")
         if kind != "boolean":
-            raise TypeError(
-                f"filter: expected a true or false condition; received a {kind} expression"
+            raise ChartError(
+                f"filter condition: expected a true or false condition; received a {kind} "
+                "expression"
             )
         return self._then({"filter": json}, self._kinds)
 
+    @_step
     def calculate(self, name: str, value: Any) -> Derived:
         """Adds (or replaces) the column ``name`` with the value of an expression."""
-        json = _literal(value)
-        self._require(sorted(_fields_of(json)), "calculate")
-        _checked(json, self._kinds, "calculate")
+        _made(name, "calculate name")
+        json = _operand(value, "calculate value")
+        self._require(sorted(_fields_of(json)), "calculate", at="value")
+        _checked(json, self._kinds, "calculate value")
         kind = _value_kind(json, self._kinds)
         return self._then({"calculate": json, "as": name}, self._kinds.adding({name: kind}))
 
+    @_step
     def bin(
         self,
         column: str,
@@ -462,10 +574,13 @@ class Derived:
         bins as ``Chart.histogram`` does: about how many round bins (10 by
         default), ``{"step": ..., "start": ...}``, or edges. Values in no bin
         (missing, below a start, or outside the edges) have none."""
-        self._require(column, "bin", ("number", "time"))
+        self._require(column, "bin", ("number", "time"), at="column", one=True)
+        for given, option in ((name, "name"), (end, "end")):
+            if given is not None:
+                _made(given, f"bin {option}")
         spec_bins = None if bins is None else bin_spec(bins, "bin bins")
         if end is not None and end == (name or column):
-            raise ValueError(
+            raise ChartError(
                 f"bin end: {end!r} also names the bins' starts; give the ends another name"
             )
         spec = {"bin": column, "bins": spec_bins, "as": name, "end": end}
@@ -473,65 +588,81 @@ class Derived:
         kinds = self._kinds.adding({name or column: kind, **({end: kind} if end else {})})
         return self._then({k: v for k, v in spec.items() if v is not None}, kinds)
 
+    @_step
     def aggregate(self, by: str | Sequence[str] | None = None, **operations: Any) -> Derived:
         """One row per group of ``by`` columns, with each named operation, as in
         pandas' named aggregation: ``n="count"`` or ``mean=("temp", "mean")``."""
-        keys = [by] if isinstance(by, str) else list(by or [])
-        self._require(keys, "aggregate by", _VALUES)
+        self._require([] if by is None else by, "aggregate by", _VALUES, at="by", given=True)
+        keys = [by] if isinstance(by, str) else [] if by is None else list(by)
         if not operations:
-            raise ValueError('aggregate: needs at least one operation, such as n="count"')
+            raise ChartError('aggregate: needs at least one operation, such as n="count"')
         specs = []
         kinds = {name: self._kinds[name] for name in keys}
         for name, operation in operations.items():
+            # Each operation is at the keyword naming its output.
+            at = Role("aggregate").key(name)
+            if not isinstance(operation, str) and not (listlike(operation) and len(operation) == 2):
+                raise at.error(
+                    'expected an operation, such as "count", or a (column, '
+                    f"operation) pair; received {shown(operation)}"
+                )
             column, op = (None, operation) if isinstance(operation, str) else tuple(operation)
-            if op not in AGGREGATES:
-                raise ValueError(
-                    f"aggregate {name}: unknown operation {shown(op)}; "
-                    f"name one of {listed(AGGREGATES)}"
-                )
+            if not isinstance(op, str) or op not in AGGREGATES:
+                raise at.error(f"unknown operation {shown(op)}; name one of {listed(AGGREGATES)}")
             if column is None and op != "count":
-                raise ValueError(
-                    f'aggregate {name}: {shown(op)} needs a column; give ("column", {shown(op)})'
-                )
+                raise at.error(f'{shown(op)} needs a column; give ("column", {shown(op)})')
             if column is not None:
-                self._require(column, f"aggregate {name}", ("number", "time"))
-            specs.append({"op": op, **({"field": column} if column else {}), "as": name})
+                self._require(column, at.label, ("number", "time"), at=str(at.path), one=True)
+            specs.append(
+                {"op": op, **({"field": column} if column is not None else {}), "as": name}
+            )
             keeps = column is not None and op in _KEEPS_KIND and self._kinds[column] == "time"
             kinds[name] = "time" if keeps else "number"
         step = {"aggregate": specs, **({"by": keys} if keys else {})}
         return self._then(step, _Kinds(list(kinds), kinds))
 
+    @_step
     def rolling(
         self, size: int, *, by: str | Sequence[str] | None = None, **operations: Any
     ) -> Derived:
         """Adds each named operation over the trailing ``size`` rows, within each
         group of ``by`` columns: ``avg=("temp", "mean")``."""
         if not (isinstance(size, int) and not isinstance(size, bool) and size >= 1):
-            raise ValueError(
+            raise ChartError(
                 f"rolling size: expected a whole number of at least 1; received {shown(size)}"
             )
-        keys = [by] if isinstance(by, str) else list(by or [])
-        self._require(keys, "rolling by", _VALUES)
+        self._require([] if by is None else by, "rolling by", _VALUES, at="by", given=True)
+        keys = [by] if isinstance(by, str) else [] if by is None else list(by)
         if not operations:
-            raise ValueError('rolling: needs at least one operation, such as avg=("temp", "mean")')
+            raise ChartError('rolling: needs at least one operation, such as avg=("temp", "mean")')
         specs = []
         kinds: dict[str, str] = {}
         for name, operation in operations.items():
-            column, op = tuple(operation)
-            if op not in ROLLING:
-                raise ValueError(
-                    f"rolling {name}: unknown operation {shown(op)}; name one of {listed(ROLLING)}"
+            # Each operation is at the keyword naming its output.
+            at = Role("rolling").key(name)
+            if isinstance(operation, str) or not (listlike(operation) and len(operation) == 2):
+                raise at.error(
+                    'expected a (column, operation) pair, such as ("temp", '
+                    f'"mean"); received {shown(operation)}'
                 )
-            self._require(column, f"rolling {name}", ("number", "time"))
+            column, op = tuple(operation)
+            if not isinstance(op, str) or op not in ROLLING:
+                raise at.error(f"unknown operation {shown(op)}; name one of {listed(ROLLING)}")
+            self._require(column, at.label, ("number", "time"), at=str(at.path), one=True)
             specs.append({"op": op, "field": column, "as": name})
             keeps = op in _KEEPS_KIND and self._kinds[column] == "time"
             kinds[name] = "time" if keeps else "number"
         step = {"rolling": specs, "size": size, **({"by": keys} if keys else {})}
         return self._then(step, self._kinds.adding(kinds))
 
+    @_step
     def sort(self, column: str, *, descending: bool = False) -> Derived:
         """Orders rows by a column, stably, missing values last."""
-        self._require(column, "sort", _VALUES)
+        self._require(column, "sort", _VALUES, at="column", one=True)
+        if not isinstance(descending, bool):
+            raise ChartError(
+                f"sort descending: expected True or False; received {shown(descending)}"
+            )
         return self._then(
             {"sort": column, "order": "descending" if descending else "ascending"}, self._kinds
         )
@@ -540,6 +671,22 @@ class Derived:
         """Columns of the source the steps read, and those of ``used`` (columns read
         from the derived rows) that come from the source unchanged. A column read
         after a step made or replaced it is not the source's."""
+        if (
+            isinstance(used, (str, bytes, Mapping))
+            or not isinstance(used, Iterable)
+            or (isinstance(used, np.ndarray) and used.ndim != 1)
+        ):
+            raise ChartError(
+                f"source_columns used: expected column names; received {shown(used)}",
+                path="used",
+            )
+        used = list(used)
+        for i, name in enumerate(used):
+            if not isinstance(name, str):
+                raise ChartError(
+                    f"source_columns used[{i}]: expected a column's name; received {shown(name)}",
+                    path=f"used[{i}]",
+                )
         needs: set[str] = set()
         made: set[str] = set()
         for step in self.steps:
@@ -581,12 +728,13 @@ def _checked(json: Any, kinds: _Kinds, role: str) -> str:
         return _type(json, kinds)
     except (KeyError, TypeError) as error:
         message = error.args[0] if error.args else str(error)
-        raise type(error)(f"{role}: {message}") from None
+        code: ChartErrorCode = "unknown-field" if isinstance(error, KeyError) else "invalid-option"
+        raise ChartError(f"{role}: {message}", code=code) from None
 
 
 def derive(data: Any) -> Derived:
     """Starts transforms of a data source (or of another derived table)."""
     if isinstance(data, Derived):
         return Derived(data, [], data._kinds)
-    table = Table(data)
+    table = located("data", lambda: Table(data))
     return Derived(data, [], _Kinds(table.names, {}, lambda name: table.column(name).kind), table)

@@ -26,8 +26,8 @@ except ImportError as error:  # pragma: no cover - depends on the environment
 
 from . import _render
 from ._chart import Camera
-from ._data import shown
 from ._derive import Expr
+from ._errors import ChartError, shown
 from ._events import (
     DrillRoot,
     Inspection,
@@ -62,7 +62,9 @@ class ChartState:
     #: What is brushed (x and y ranges, a lasso's outline), or None; it stays
     #: until the user changes it.
     selection: Selection | None = None
-    #: Visible ranges, in layout units for networks or projected plane units for maps.
+    #: Visible ranges: along each axis, of the scale every panel shares (None
+    #: where panels have scales of their own; see ``panel_viewports``), or a
+    #: map's or network's plane, in projected or layout units.
     viewport: Viewport | None = None
     #: The data under a click, in the run the click started; None otherwise.
     click: Inspection | None = None
@@ -81,14 +83,17 @@ class ChartState:
     panel_drill_roots: dict[str, DrillRoot | None] = field(default_factory=dict)
     #: Each network subplot's manual node positions, by panel id.
     panel_item_positions: dict[str, ItemPositions] = field(default_factory=dict)
-    #: The views panels have of their own, by panel key: each map or network
-    #: subplot's, in its plane's units, and the x range of each panel with an x
-    #: scale of its own (subplots whose x's scope is not "chart", insets, facet
-    #: panels with x scales of their own). ``viewport`` is the chart's.
+    #: Every panel's view, by panel key: the ranges of each panel with axes,
+    #: whichever scales it shares, and each map or network subplot's, in its
+    #: plane's units.
     panel_viewports: dict[str, Viewport] = field(default_factory=dict)
     #: Current standalone 3D camera, or each subplot's by panel id.
     camera: Camera | None = None
     panel_cameras: dict[str, Camera] = field(default_factory=dict)
+
+
+#: What a chart's reaction may be named: none, or running the script again.
+_REACTIONS = ("ignore", "rerun")
 
 
 def chart(
@@ -115,12 +120,14 @@ def chart(
     ``viewport`` in layout coordinates for networks or projected units for maps.
     ``drill_root`` and ``item_positions`` in the result
     hold their state. Inside ``st.form``, a selection reaches the script when the
-    form is submitted, and clicks cannot react. In charts whose panels have
-    x scales of their own, ``panel_viewports`` holds each panel's view, and a
-    selection names the panels it is in (``panels``). Give the chart a ``key`` to
-    keep its selection when its data changes, and to show several charts
-    with the same content. Charts without a ``theme`` follow the app's light
-    or dark theme.
+    form is submitted, and clicks cannot react. In charts with panels,
+    ``panel_viewports`` holds each panel's view, and a selection names the
+    panels it is in (``panels``). A rerun that draws the chart again keeps
+    the views of the scales it still draws, what the legends hid of what it
+    still draws, and the brush where its values still are. Give the chart a
+    ``key`` to keep its selection when its data changes, and to show several
+    charts with the same content. Charts without a ``theme`` follow the app's
+    light or dark theme.
     """
     reactions = {
         "select": on_select,
@@ -140,23 +147,37 @@ def chart(
         "viewport": "on_viewport",
         "camera": "on_camera",
     }
+    from ._chart import Chart
+
+    if not isinstance(chart, Chart):
+        raise ChartError(
+            f"streamlit.chart chart: expected an hg.Chart; received {shown(chart)}", path="chart"
+        )
+    if key is not None and not isinstance(key, str):
+        raise ChartError(
+            f"streamlit.chart key: expected a string naming the chart; received {shown(key)}",
+            path="key",
+        )
     for name, reaction in reactions.items():
-        if not (callable(reaction) or reaction in ("ignore", "rerun")):
-            raise ValueError(
+        if not (callable(reaction) or (isinstance(reaction, str) and reaction in _REACTIONS)):
+            raise ChartError(
                 f'streamlit.chart {options[name]}: expected "ignore", "rerun", or a function; '
-                f"received {shown(reaction)}"
+                f"received {shown(reaction)}",
+                path=options[name],
             )
     if on_row_selection != "ignore":
         if len(chart._row_selection) != 1:
-            raise ValueError(
+            raise ChartError(
                 "streamlit.chart on_row_selection: reports one row selection, and the chart "
-                f"binds {len(chart._row_selection)}; give the chart one binding"
+                f"binds {len(chart._row_selection)}; give the chart one binding",
+                path="on_row_selection",
             )
         check_live_rows(chart)
     if on_click != "ignore" and _in_form():
-        raise ValueError(
+        raise ChartError(
             "streamlit.chart on_click: cannot react inside st.form, as Streamlit sends no "
-            "clicks from forms; use on_select, which reaches the script when the form is submitted"
+            "clicks from forms; use on_select, which reaches the script when the form is submitted",
+            path="on_click",
         )
     spec, buffers = chart.to_spec()
     events = [name for name, reaction in reactions.items() if reaction != "ignore"]

@@ -13,8 +13,10 @@ for good). A fragment holds its chart's data, or with ``data_url`` names a
 route that returns ``payload(chart)``. The script mounts every fragment, also
 those inserted later (HTMX), and tells the page what the user does with DOM
 events (``herceg:click``, ``herceg:select``, ``herceg:viewport``,
-``herceg:ready``, ``herceg:error``); ``selection``, ``inspection``, and
-``viewport`` read what a page posts back of them. Fragments work under a
+``herceg:edge``, ``herceg:visibility``, ``herceg:rowselection``,
+``herceg:ready``, ``herceg:error``); ``selection``, ``inspection``,
+``viewport``, ``select_event``, ``viewport_event``, ``edge``, and
+``visibility`` read what a page posts back of them. Fragments work under a
 strict Content Security Policy: they hold no script, and the nonce goes on
 the script and on the style element that reserves each chart's size.
 ``herceg.flask`` wires this into a Flask app.
@@ -26,38 +28,52 @@ import html
 import json
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from ._data import shown
+from ._errors import ChartError, shown
 from ._events import (
     Inspection,
+    SelectEvent,
     Selection,
+    ViewEdge,
     Viewport,
+    ViewportEvent,
+    VisibilityState,
     checked,
+    decode_edge,
     decode_inspection,
+    decode_select_event,
     decode_selection,
     decode_viewport,
+    decode_viewport_event,
+    decode_visibility,
 )
 from ._payload import encode, inline
 
 if TYPE_CHECKING:
     from ._chart import Chart
 
+_T = TypeVar("_T")
+
 __all__ = [
     "AssetManifest",
     "asset_path",
     "assets",
+    "edge",
     "fragment",
     "inspection",
     "manifest",
     "payload",
+    "select_event",
     "selection",
     "viewport",
+    "viewport_event",
+    "visibility",
 ]
 
 #: The height in CSS pixels of a chart without one, as in HTML output.
@@ -115,6 +131,12 @@ def manifest() -> AssetManifest:
 def asset_path(name: str) -> Path:
     """The file of a web asset, by the name ``manifest()`` lists: for a route that
     serves them. Other names raise ``FileNotFoundError``, so a route can answer 404."""
+    if not isinstance(name, str):
+        raise ChartError(
+            f"web.asset_path name: expected a file's name from manifest().files; "
+            f"received {shown(name)}",
+            path="name",
+        )
     found = manifest()
     if name not in found.files:
         raise FileNotFoundError(
@@ -128,9 +150,10 @@ def assets(base_url: str, *, nonce: str | None = None) -> str:
     ``base_url`` is where the application serves the files of ``manifest()``,
     and ``nonce`` the page's Content Security Policy nonce."""
     if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError(
+        raise ChartError(
             "web.assets base_url: expected the URL the files of web.manifest() are served "
-            f'from ("/static/herceg"); received {shown(base_url)}'
+            f'from ("/static/herceg"); received {shown(base_url)}',
+            path="base_url",
         )
     found = manifest()
     base = base_url.rstrip("/") + "/"
@@ -158,14 +181,16 @@ def fragment(
     the page's Content Security Policy nonce, for the style element that
     reserves the chart's size. Without JavaScript or ``assets()``, the
     fragment says so in the chart's place."""
+    _check_chart(chart, "web.fragment")
     if id is None:
         element = f"herceg-{uuid.uuid4().hex[:12]}"
     elif isinstance(id, str) and _ID.fullmatch(id):
         element = id
     else:
-        raise ValueError(
+        raise ChartError(
             "web.fragment id: expected a name that starts with a letter, then letters, "
-            f'digits, "-" or "_" ("latency"); received {shown(id)}'
+            f'digits, "-" or "_" ("latency"); received {shown(id)}',
+            path="id",
         )
     attributes = ""
     content = ""
@@ -178,9 +203,10 @@ def fragment(
         options = chart._options
         attributes = f' data-herceg-src="{html.escape(data_url)}"'
     else:
-        raise ValueError(
+        raise ChartError(
             "web.fragment data_url: expected the URL of a route returning web.payload(chart) "
-            f'("/charts/latency.bin"); received {shown(data_url)}'
+            f'("/charts/latency.bin"); received {shown(data_url)}',
+            path="data_url",
         )
     width = options.get("width")
     height = options.get("height") or _HEIGHT
@@ -212,42 +238,80 @@ def payload(chart: Chart) -> bytes:
     """The chart as one binary payload, for a route a fragment's ``data_url``
     names (``application/octet-stream``): the spec and its columns, which the
     browser views without parsing or copying."""
+    _check_chart(chart, "web.payload")
     return encode(*chart.to_spec())
+
+
+def _check_chart(chart: Any, location: str) -> None:
+    from ._chart import Chart
+
+    if not isinstance(chart, Chart):
+        raise ChartError(
+            f"{location} chart: expected an hg.Chart; received {shown(chart)}", path="chart"
+        )
 
 
 def selection(value: str | Mapping[str, Any] | None) -> Selection | None:
     """A selection a page posts back: a ``herceg:select`` event's
     ``detail.selection``, as JSON text or parsed; None for none."""
-    return decode_selection(_read("web.selection", "select", value))
+    return _read("web.selection", lambda value: decode_selection(checked("select", value)), value)
 
 
 def inspection(value: str | Mapping[str, Any] | None) -> Inspection | None:
     """The data clicked, as a page posts it back: a ``herceg:click`` event's
     ``detail.inspection``, as JSON text or parsed; None off the data."""
-    return decode_inspection(_read("web.inspection", "click", value))
+    return _read("web.inspection", lambda value: decode_inspection(checked("click", value)), value)
 
 
 def viewport(value: str | Mapping[str, Any] | None) -> Viewport:
     """A view a page posts back: a panel's, an entry of a ``herceg:viewport``
     event's ``detail.views``, as JSON text or parsed."""
-    return decode_viewport(_read("web.viewport", "viewport", value))
+    return _read("web.viewport", lambda value: decode_viewport(checked("viewport", value)), value)
 
 
-def _read(location: str, event: str, value: Any) -> dict[str, Any] | None:
+def select_event(value: str | Mapping[str, Any]) -> SelectEvent:
+    """A ``herceg:select`` event's ``detail`` as a page posts it back, JSON
+    text or parsed: the selection, None once cleared, and what it belongs to."""
+    return _read("web.select_event", decode_select_event, value)
+
+
+def viewport_event(value: str | Mapping[str, Any]) -> ViewportEvent:
+    """A ``herceg:viewport`` event's ``detail`` as a page posts it back, JSON
+    text or parsed: one change of view, as ``widget.on_viewport`` hears it."""
+    return _read("web.viewport_event", decode_viewport_event, value)
+
+
+def edge(value: str | Mapping[str, Any]) -> ViewEdge:
+    """A ``herceg:edge`` event's ``detail`` as a page posts it back, JSON text
+    or parsed: the view came near an end of what the chart's limits let a
+    scale show, as ``widget.on_edge`` hears it."""
+    return _read("web.edge", decode_edge, value)
+
+
+def visibility(value: str | Mapping[str, Any]) -> VisibilityState:
+    """A ``herceg:visibility`` event's ``detail`` as a page posts it back, JSON
+    text or parsed: what the chart's legends hide, as ``widget.visibility``
+    holds it."""
+    return _read("web.visibility", decode_visibility, value)
+
+
+def _read(location: str, decode: Callable[[Any], _T], value: Any) -> _T:
     """An event's JSON as posted, checked as live charts check their states."""
     if isinstance(value, (str, bytes)):
         try:
             value = json.loads(value)
         except ValueError:
-            raise ValueError(
-                f"{location}: expected JSON; received {shown(value)}; post the event's "
-                "detail as JSON.stringify writes it"
+            raise ChartError(
+                f"{location} value: expected JSON; received {shown(value)}; post the event's "
+                "detail as JSON.stringify writes it",
+                path="value",
             ) from None
     try:
-        return checked(event, value)
+        return decode(value)
     except ValueError as error:
-        raise ValueError(
-            f"{location}: {error}; post the event's detail as herceg's script gives it"
+        raise ChartError(
+            f"{location} value: {error}; post the event's detail as herceg's script gives it",
+            path="value",
         ) from None
 
 
@@ -256,8 +320,9 @@ def _nonce(nonce: str | None, location: str) -> str:
     if nonce is None:
         return ""
     if not isinstance(nonce, str) or not _NONCE.fullmatch(nonce):
-        raise ValueError(
+        raise ChartError(
             f"{location} nonce: expected the page's Content Security Policy nonce, "
-            f"base64 text; received {shown(nonce)}"
+            f"base64 text; received {shown(nonce)}",
+            path="nonce",
         )
     return f' nonce="{nonce}"'

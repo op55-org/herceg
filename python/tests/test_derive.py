@@ -54,9 +54,9 @@ def test_derivations_check_columns_and_track_kinds():
     assert daily.columns["label"] == "category"
     summary = daily.aggregate(by="site", n="count", mean=("temp", "mean"))
     assert summary.columns == {"site": "category", "n": "number", "mean": "number"}
-    with pytest.raises(KeyError, match="filter: no column 'wind'"):
+    with pytest.raises(hg.ChartError, match="filter: no column 'wind'"):
         hg.derive(READINGS).filter(hg.col("wind") > 0)
-    with pytest.raises(TypeError, match="bin: column 'site' holds category"):
+    with pytest.raises(hg.ChartError, match="bin: column 'site' holds category"):
         hg.derive(READINGS).bin("site", bins={"step": 1})
     with pytest.raises(
         ValueError, match='aggregate m: unknown operation "avg"; name one of "count"'
@@ -66,7 +66,7 @@ def test_derivations_check_columns_and_track_kinds():
         hg.derive(READINGS).aggregate(m="mean")
     with pytest.raises(ValueError, match="rolling size"):
         hg.derive(READINGS).rolling(0, m=("temp", "mean"))
-    with pytest.raises(KeyError, match="sort: no column 'temp'"):
+    with pytest.raises(hg.ChartError, match="sort: no column 'temp'"):
         summary.sort("temp")
 
 
@@ -122,12 +122,15 @@ def test_review_fixes_hold():
     assert "<path" in hg.Chart(counted, width=200, height=100).bar(x="n", y="n").to_svg()
     # Expressions are typed as the chart's compiler types them.
     with pytest.raises(
-        TypeError, match="filter: expected a true or false condition; received a number expression"
+        hg.ChartError,
+        match="filter condition: expected a true or false condition; received a number expression",
     ):
         hg.derive(READINGS).filter(hg.col("temp"))
-    with pytest.raises(TypeError, match='calculate: "if" branches give string and number'):
+    with pytest.raises(
+        hg.ChartError, match='calculate value: "if" branches give string and number'
+    ):
         hg.derive(READINGS).calculate("x", hg.when(hg.col("temp") > 1, "a", 1))
-    with pytest.raises(TypeError, match='filter: ">" compares string with number'):
+    with pytest.raises(hg.ChartError, match='filter condition: ">" compares string with number'):
         hg.derive(READINGS).filter(hg.col("site") > 1)
     labels = hg.derive(READINGS).calculate("hot", hg.when(hg.col("temp") > 15, "hot", None))
     assert labels.columns["hot"] == "category"
@@ -224,9 +227,13 @@ def test_calculated_time_copies_are_numbers_as_in_the_chart():
 
 
 def test_membership_needs_literal_candidates():
-    with pytest.raises(TypeError, match='filter: "in" needs a value and at least one candidate'):
+    with pytest.raises(
+        hg.ChartError, match='filter condition: "in" needs a value and at least one candidate'
+    ):
         hg.derive(READINGS).filter(hg.col("temp").is_in())
-    with pytest.raises(TypeError, match='calculate: expected number literals as "in" candidates'):
+    with pytest.raises(
+        hg.ChartError, match='calculate value: expected number literals as "in" candidates'
+    ):
         hg.derive(READINGS).calculate("same", hg.col("temp").is_in(hg.col("hour")))
     # None is a candidate: it matches missing values.
     hg.derive(READINGS).filter(hg.col("site").is_in("n", None))
