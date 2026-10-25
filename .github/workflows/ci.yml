@@ -24,7 +24,6 @@ jobs:
           xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0
       - run: npm run lint
       - run: npm run test:release
-      - run: npm run test:contracts
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
@@ -114,6 +113,8 @@ jobs:
       - run: npm ci
       # The inventory imports the Python package, widget included.
       - run: npm run build:python
+      # The tooling's own tests, which read that inventory too.
+      - run: npm run test:contracts
       - uses: actions/download-artifact@v8
         with:
           pattern: contracts-*

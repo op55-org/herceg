@@ -59,7 +59,7 @@ npm run test:python      # build:python, then pytest (uv environment in python/)
 npm run test:python-package # build, inspect, install, and smoke-test the Python wheel
 npm run test:python-web  # web pages through a Flask app, in Chrome, Firefox, and WebKit
 npm run test:release     # release version, registry recovery, and publish guard tests (offline)
-npm run test:contracts   # tests of the contract tooling (offline)
+npm run test:contracts   # tests of the contract tooling (offline; reads Python's names through the uv environment in python/)
 npm run contracts        # check test/contracts/ against the code and the last runs of every suite (-- --suite NAME, --declarations, --browsers chromium)
 npm run contracts:docs   # write docs/capabilities.md and .json from a complete passing check (-- --check: fail if stale)
 npm run lint:python      # ruff check, format check, and mypy type check of the Python package
