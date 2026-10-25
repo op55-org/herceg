@@ -3107,7 +3107,7 @@ cells would overlap). Anything else draws the whole chart on the CPU, as
 does a painter that declines it (sprites larger than the device allows,
 axes without a finite mapping). The threshold was measured: turning a 50
 by 50 surface (2,401 cells) costs 2.7 ms on the CPU and 0.5 ms through the
-GPU, 200 by 200 (39,601 cells) 28 ms against 0.4 ms; below 10,000 cells the
+GPU, 200 by 200 (39,601 cells) 27 ms against 0.3 ms; below 10,000 cells the
 CPU's frame is under about 7 ms, and small surfaces stay vector and
 antialiased and need no painter loaded.
 
@@ -5070,16 +5070,16 @@ labels apart.
 
 ## What a chart's bundle carries for styles and layout
 
-Styles, guides, and layout are in every chart's bundle: a line chart
-(`createChart`, `line`, `table`) measured 53,890 bytes gzip, 7,185 bytes
-more than before role styles and positioned guides (`npm run bench:size`
-measures every entry). That code is the role styles and their cascade
-(`theme.ts`, `style/style.ts`, `model/styles.ts`), the guides as positioned
-items and the writer every renderer shares (`model/axis-guide.ts`,
-`model/legend.ts`, `render/svg.ts`), the chart's tracks and places for its
-title and legend (sides, inside a plot, alignment, padding), text boxes
-and halos, multi-line titles, clip modes, fluid SVG, the page's colors in
-guides' styles, and scale instances. Each of these is an option a chart
+Styles, guides, and layout are in every chart's bundle: role styles and
+positioned guides added 7,185 bytes gzip to a line chart (`createChart`,
+`line`, `table`; 62,201 bytes before its first frame, as
+`npm run bench:size` measures every entry). That code is the role styles
+and their cascade (`theme.ts`, `style/style.ts`, `model/styles.ts`), the
+guides as positioned items and the writer every renderer shares
+(`model/axis-guide.ts`, `model/legend.ts`, `render/svg.ts`), the chart's
+tracks and places for its title and legend (sides, inside a plot,
+alignment, padding), text boxes and halos, multi-line titles, clip modes,
+fluid SVG, the page's colors in guides' styles, and scale instances. Each of these is an option a chart
 sets as a plain value, in TypeScript as in specs and Python, and a chart
 that sets one draws it synchronously; making them prepared objects that
 bring their code (as `timeBreaks` does) would make TypeScript differ from
@@ -5308,29 +5308,34 @@ it into a chunk as npm builds do (see Web pages).
 The controller's chunk holds the gesture bindings (`model/bindings.ts`) and
 the keyboard's stepping (`model/keyboard.ts`); layout controls get the
 bindings' class from it rather than through a chunk of their own, which
-would be one more round trip before the first input. The line entry's
-initial chunks went from 56,275 to 53,875 B gzip with the controller
-deferred (-2,400 B), after adding bindings, limits, sync channels with
-snapping and the page-wide registry and the frame relay's loader, the
-cursor API, and the hydration seams (about 290 B), 600 B short of the 3 KB
-reduction aimed for; the controller's chunk is 10,704 B gzip (26,806 B
+would be one more round trip before the first input. Deferring the
+controller saved 2,400 B gzip of the line entry's initial chunks when
+measured against the commit before it, with bindings, limits, sync
+channels with snapping and the page-wide registry and the frame relay's
+loader, the cursor API, and the hydration seams (about 290 B) added, 600 B
+short of the 3 KB reduction aimed for, and 2.2 KB of the React, Vue, and
+Svelte line entries; the controller's chunk is 12,529 B gzip (31,353 B
 minified), loaded after the first frame (`npm run bench:size` reports it
 apart), and the frame relay 0.9 KB, loaded only by charts that sync in a
-sandboxed frame. The React, Vue, and Svelte line entries fell 2.2 KB (to
-55,473, 55,746, and 56,000 B).
+sandboxed frame.
 
 `npm run bench:first-hover` measures what this costs a first hover
 (`benchmarks/results/first-hover.json`; Chrome, headless, Apple M6, 15
 fresh page loads a case, p50, from `createChart` returning): a pointer move
-at once shows its tooltip 4.4 ms later (2.1 ms with the chunk cached; 2.0
-to 2.9 ms before deferral), one 10 ms later 10.5 ms later (7.6 cached; the
-chunk is then loading, and the tooltip waits for it and the next frame),
-and from 25 ms on 1.5 to 1.6 ms, as before; a dashboard of ten charts the
-same. With 100 ms of network latency per request, a hover at once waits
-about 105 ms for the chunk (2.8 ms before), 80 ms at 25 ms, 54 ms at 50 ms,
-and 4 ms at 100 ms. Once attached, the controller handles input as the
-chart did before (`npm run bench` pointer and tooltip scenarios), and moving
-the cursor measures no text: crosshair labels are placed by CSS (below).
+at once shows its tooltip 5.0 ms later (2.6 ms with the chunk cached), one
+10 ms later 10.2 ms later (8.6 cached; the chunk is then loading, and the
+tooltip waits for it and the next frame), and from 25 ms on 1.8 to 1.9 ms.
+A dashboard of ten charts, timed from the last `createChart`, takes up to
+2 ms longer, except that with the chunk cached a hover 10 ms later shows
+in 2.0 ms (8.6 ms for one chart). With 100 ms of network latency per
+request, a hover at once waits about 105 ms for the chunk, 80 ms at 25 ms,
+54 ms at 50 ms, and 4.5 ms at 100 ms. A run on 2026-10-15 that also built
+the commit before the deferral (`--baseline`) measured 2.0 to 2.9 ms for
+that chart's hover at once (2.8 ms with the latency), and the same as the
+deferred chart from 25 ms on without it. Once attached, the controller
+handles input as the chart did before (`npm run bench` pointer and tooltip
+scenarios), and moving the cursor measures no text: crosshair labels are
+placed by CSS (below).
 
 ### Bindings
 
@@ -5558,16 +5563,15 @@ small bridges for loading, drawing, and events. Esbuild metafiles attribute
 the initial growth from layout interaction to 355 minified bytes in
 `dom/chart.ts` and 81 in `model/model.ts`; the family implementations were
 already outside the line entry's initial chunks. With the lifecycle and
-notifications moved, the line entry is 50 B gzip above `4fe2634^`, before
-layout interaction (43,811 to 43,861 B), measured with unchanged
-`npm run bench:size` settings. Buttons retain their own presses, and a click
+notifications moved, layout interaction added 50 B gzip to the line entry,
+measured against `4fe2634^` with unchanged `npm run bench:size` settings. Buttons retain their own presses, and a click
 on an item representing none of the bound rows retains the brush. Controls
 remain lazy chunks loaded one family at a time, with a shared router and
-toolbar; map controls also load the brush that draws their lasso. The line
-entry's reachable lazy chunks total 31,946 B gzip, 17 B more than before
-the trim. Making item state available before drawing adds 14 B gzip to
-each PDF entry through the shared model, preserving immediate controls
-loading when charts change family.
+toolbar; map controls also load the brush that draws their lasso. The
+trim added 17 B gzip to the line entry's reachable lazy chunks. Making item
+state available before drawing adds 14 B gzip to each PDF entry through
+the shared model, preserving immediate controls loading when charts change
+family.
 
 An inspected point carries its identity: the mark's index in the chart's
 marks (each panel's inspector is given the index of every mark it inspects,
@@ -6137,7 +6141,7 @@ modules added to the engine's graph join it without changes to the build.
 page's nonce: a nonce'd module script's static and dynamic imports carry its
 nonce, so `script-src 'nonce-...'` alone admits them, and with
 `'strict-dynamic'` too. The entry's static closure is the spec loader, which
-imports every mark a spec can name (845 KiB minified, 320 KiB gzip); the
+imports every mark a spec can name (870 KiB minified, 329 KiB gzip); the
 interaction controller and other chunks load as charts need them.
 
 `Chart.to_html` stays self-contained, a page or `<div>` with the single-file
@@ -6888,7 +6892,7 @@ mouse input, through Playwright's mouse.
   their cells' depth, and lines by their segments', which can draw them
   wrongly where they come close or cross; the GPU's depth test does not. A
   surface's grid has at most 1,048,576 points and is never reduced; the CPU
-  draws at most 250,000 and costs their size every frame (about 28 ms for
+  draws at most 250,000 and costs their size every frame (about 27 ms for
   200 by 200 on the benchmark machine). Translucent points and lines, and
   translucent or wireframed surfaces, keep the whole chart on the CPU
   however large it is (refused past the CPU's budget). On the CPU points are

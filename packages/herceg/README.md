@@ -2744,7 +2744,7 @@ depth, which can be wrong where they come close or cross. On the benchmark
 machine (see `docs/comparison.md`) turning a 1001 by 1001 surface (a million
 cells) takes under half a millisecond of JavaScript a frame and keeps 60
 frames a second when it turns every frame; on the CPU a 317 by 317 surface
-(100,000 cells) takes about 90 ms a turn.
+(100,000 cells) takes about 95 ms a turn.
 
 ### A second y axis
 
@@ -4780,8 +4780,8 @@ PDF export is a separate entry point, `herceg/pdf`. Fonts from
 `herceg/fonts` bring the optional font parser, TrueType subsetter, and
 embedded-font writer; plain PDF exports bundle none of them. The `herceg-pdf` and
 `herceg-pdf-fonts` size benchmarks include scene compilation and a line
-mark, without and with embedded-font support respectively (about 46 and
-53 KiB gzip, excluding supplied font bytes). The page is the chart's size
+mark, without and with embedded-font support respectively (about 122 and
+131 KiB gzip, excluding supplied font bytes). The page is the chart's size
 at 0.75 points per CSS pixel. Marks (contours included), axes, and legends are vectors, heatmaps and 2D histograms are compressed images,
 and text is selectable. For a single chart, title and description default to document metadata.
 Both font paths also emit one `Document` containing a `Figure` per chart, with each

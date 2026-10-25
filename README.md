@@ -204,8 +204,9 @@ Next, in order:
    and later bidirectional ordering/shaping and CFF fonts.
 7. Images in Node: a raster backend, so `renderToImage` runs on servers as
    Python's `to_image` does (browsers draw images through their canvas).
-8. Screen-reader verification, benchmarks in Firefox and on other machines
-   (WebKit and Chrome are measured), and an API review before a first release.
+8. Screen-reader verification, benchmarks on other machines (Chrome,
+   WebKit, and Firefox are measured on one), and an API review before a
+   first release.
 9. Heatmaps, contours, and 2D histograms on log axes; hexagonal bins;
    labels along contour lines; and calendar month labels aligned to week
    columns.
@@ -214,10 +215,11 @@ Next, in order:
 
 Requires Node.js 22.12 or newer (TypeScript scripts run with
 `--experimental-strip-types`), Google Chrome for browser tests and
-benchmarks, Playwright's Firefox and WebKit builds for browser tests
-(`npx playwright install firefox webkit`; on Linux, Firefox's WebGL needs a
-display and Mesa's GL, so run them under `xvfb-run` with the packages
-`xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0` installed, as CI does), and
+benchmarks, Playwright's Firefox and WebKit builds for browser tests and
+their benchmarks (`npx playwright install firefox webkit`; on Linux,
+Firefox's WebGL needs a display and Mesa's GL, so run them under
+`xvfb-run` with the packages `xvfb libgl1-mesa-dri libglx-mesa0
+libegl-mesa0` installed, as CI does), and
 [uv](https://docs.astral.sh/uv/) for the Python package.
 
 ```sh

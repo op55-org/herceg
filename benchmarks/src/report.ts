@@ -367,6 +367,10 @@ const webkitResults = join(RESULTS, "browser-webkit.json");
 if (existsSync(webkitResults)) {
   sections.webkit = browserSection(JSON.parse(readFileSync(webkitResults, "utf8")));
 }
+const firefoxResults = join(RESULTS, "browser-firefox.json");
+if (existsSync(firefoxResults)) {
+  sections.firefox = browserSection(JSON.parse(readFileSync(firefoxResults, "utf8")));
+}
 const threeResults = join(RESULTS, "three.json");
 if (existsSync(threeResults)) {
   sections.three = threeSection(JSON.parse(readFileSync(threeResults, "utf8")));

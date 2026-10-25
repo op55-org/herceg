@@ -10,7 +10,7 @@ npm run bench -- --lib echarts,uplot --filter line- --sample-scale 0.5
 npm run bench -- --out results/browser.json   # refresh the committed results
 npm run bench:size -- --out results/size.json # bundle sizes
 npm run bench -- --browser webkit --headless --out results/browser-webkit.json   # the suite in WebKit
-npm run bench -- --browser firefox   # the suite in Firefox -> tmp/benchmarks/bench-<time>.json
+npm run bench -- --browser firefox --out results/browser-firefox.json   # the suite in Firefox
 npm run bench:react                  # herceg vs herceg through @herceg/react -> results/react.json
 npm run bench:grid                   # grid suite (see "Grids") -> tmp/benchmarks/grid-<time>.json
 npm run bench:grid-remote            # remote grids (see "Remote grids") -> tmp/benchmarks/grid-remote-<time>.json
@@ -94,8 +94,9 @@ timings are unsuitable for comparisons. To record results, leave the machine
 otherwise idle, use the catalog's full sample and warmup counts (omit
 `--sample-scale`), and run `npm run bench -- --browser firefox --out
 results/browser-firefox.json`. Check `complete`, every row's `supported` and
-`reason`, and the recorded environment before publishing. No Firefox timings
-are committed yet; the startup verification ran while the machine was busy.
+`reason`, and the recorded environment before publishing. The committed
+`results/browser-firefox.json` is such a run, in Playwright's Firefox 155.0
+(build 1543).
 
 ### Timing
 
@@ -257,9 +258,9 @@ frame after it. Caches are `cold` (the HTTP cache off), `warm` (the chunks
 cached by an earlier visit), and `slow` (cold, with 100 ms of added network
 latency per request). `--baseline DIR` builds a second herceg source tree
 (`packages/herceg/src` of an earlier commit) into the same page, for
-comparison; the committed `results/first-hover.json` compares with the
-commit before the controller was deferred, whose charts load nothing
-before their first input. Results report the median, p95, and p99 of 15
+comparison, such as the commit before the controller was deferred, whose
+charts load nothing before their first input; the committed
+`results/first-hover.json` measures the current commit alone. Results report the median, p95, and p99 of 15
 samples by default (`--samples`).
 
 ## Grids
