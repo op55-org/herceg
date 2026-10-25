@@ -1445,7 +1445,9 @@ describe("networks", () => {
     // The clock stands still, so the layout ends in the first frame however
     // slow it is: a layout spread over frames would still move Ana.
     vi.useFakeTimers({ toFake: ["performance"] });
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const chart = createChart(host, { locale: "en-US", marks: [network()] });
     chart.root.focus();
     const key = (k: string) =>
