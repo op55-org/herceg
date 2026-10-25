@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { hydrateChart } from "../../src/dom/hydrate.ts";
+import { prepareFonts } from "../../src/fonts.ts";
 import { area } from "../../src/marks/area.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
@@ -29,6 +30,13 @@ beforeEach(() => {
 afterEach(() => {
   page.remove();
 });
+
+const fixture = async (name: string) =>
+  new Uint8Array(
+    await (
+      await fetch(new URL(`../fixtures/pdf-fonts/${name}.ttf`, import.meta.url))
+    ).arrayBuffer(),
+  );
 
 const LONG = "A longer series label which does not fit";
 const level = table({ x: [0, 1], y: [1, 1], low: [0.2, 0.2] });
@@ -111,14 +119,24 @@ describe("charts on right-to-left pages", () => {
   });
 
   it("paint the text of server markup where it is placed, before and after hydrating", async () => {
-    const options = { legend: false, theme: { style: { plot: { fill: "#eeeeee" } } }, marks };
-    const initial = renderToSnapshot(options, { width: 200, height: 150, idPrefix: "rtl" });
+    // The markup measures with the font the page draws in, loaded as the
+    // page's own @font-face would be: Helvetica estimates fit the long label
+    // for another font than Linux draws it in.
+    const data = await fixture("sans");
+    const face = new FontFace("Fixture", data.slice());
+    document.fonts.add(face);
+    await face.load();
+    const fonts = prepareFonts([{ family: "Fixture", data }]);
+    const theme = { style: { plot: { fill: "#eeeeee" }, text: { font: "Fixture, sans-serif" } } };
+    const options = { legend: false, theme, marks, fonts };
+    const initial = renderToSnapshot(options, { width: 200, height: 150, idPrefix: "rtl", fonts });
     host.innerHTML = initial.html;
     checkText(host, host.querySelector<SVGRectElement>('rect[fill="#eeeeee"]')!.getBBox());
     const chart = hydrateChart(host, options, initial);
     await new Promise((resolve) => requestAnimationFrame(resolve));
     checkText(host, chart.getPanels()[0]!.plot);
     chart.destroy();
+    document.fonts.delete(face);
   });
 
   it("write a legend's mixed-direction labels in the order its export does", async () => {

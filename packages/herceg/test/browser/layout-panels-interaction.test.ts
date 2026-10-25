@@ -444,8 +444,20 @@ describe("planes following their subplot's settings", () => {
     expect(toolbars.map((toolbar) => toolbar.style.display)).toEqual(["flex", "none"]);
     const lassoToggle = toolbars[0]!.querySelector<HTMLElement>('[aria-label="Lasso"]')!;
     expect(lassoToggle.hidden || lassoToggle.style.display === "none").toBe(true);
-    await mouse(chart, "move", ...middle(b));
-    await mouse(chart, "wheel", ...middle(b), -300);
+    // The map that does not zoom leaves Control and the wheel to the page,
+    // which zooms itself: a dispatched event, which the browser does not act on.
+    const rect = chart.root.getBoundingClientRect();
+    const [clientX, clientY] = [rect.left + middle(b)[0], rect.top + middle(b)[1]];
+    const wheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      deltaY: -300,
+      ctrlKey: true,
+    });
+    document.elementFromPoint(clientX, clientY)!.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
     expect(chart.getViewport({ panel: "b" }).x).toBeNull();
     await mouse(chart, "move", ...middle(a));
     await mouse(chart, "wheel", ...middle(a), -300);
