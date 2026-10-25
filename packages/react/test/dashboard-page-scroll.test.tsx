@@ -14,6 +14,16 @@ async function until(done: () => boolean): Promise<void> {
   for (let frames = 0; frames < 60 && !done(); frames++) await frame();
 }
 
+/** Waits up to two seconds of frames for `page` to stay put for five: WebKit on Linux scrolls smoothly, over frames. */
+async function scrollEnded(page: Element): Promise<void> {
+  let at = page.scrollTop;
+  for (let frames = 0, still = 0; frames < 120 && still < 5; frames++) {
+    await frame();
+    still = page.scrollTop === at ? still + 1 : 0;
+    at = page.scrollTop;
+  }
+}
+
 contractTest("dashboard.page-scroll.react", async () => {
   // Text to select above the dashboard, and room below it to scroll into.
   const intro = document.createElement("p");
@@ -46,6 +56,7 @@ contractTest("dashboard.page-scroll.react", async () => {
 
   await realMouse({ type: "wheel", ...pointer(), deltaY: 120 });
   await until(() => page.scrollTop !== top);
+  await scrollEnded(page);
   expect(page.scrollTop, "the vertical wheel scrolls the page").toBeGreaterThan(top);
   expect(view(), "and leaves the view").toBeNull();
 
