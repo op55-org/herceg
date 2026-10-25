@@ -26,11 +26,20 @@ import type { LayoutClock, NodePositions } from "../marks/node-positions.ts";
 import type { FieldReader } from "../marks/tooltip-fields.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
 import type { Guide, Panel, Rect, Scene } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import type { Camera } from "../three/camera.ts";
 import type { ItemInspection } from "./inspect.ts";
 import type { LegendPart } from "./legend.ts";
-import type { ChartConfig, ChartModel, Viewport } from "./model.ts";
+import type {
+  ChartConfig,
+  ChartModel,
+  ScaleInstance,
+  ScaleView,
+  ViewCause,
+  Viewport,
+  ViewportEvent,
+} from "./model.ts";
 import type { LayoutConfig, LayoutOptions, PanelItem } from "./panel-layout.ts";
 import type { SelectionOwner } from "./selected-rows.ts";
 
@@ -47,12 +56,15 @@ export interface ItemChanges {
     position: { x: number; y: number } | null;
     panels?: readonly string[];
   };
-  viewport: Viewport & { panels?: readonly string[] };
 }
+
+/** A change of a plane's view, as the chart reports it (`ViewportEvent`) but for its revision. */
+export type PlaneViewChange = Omit<ViewportEvent, "viewRevision">;
 
 /** Optional navigation attached to layout items by an interactive runtime. */
 export interface Controls {
-  update(config: ChartConfig): void;
+  /** Follows the chart's options, as its model has them now. */
+  update(): void;
   draw(scene: Scene): void;
   readonly busy: boolean;
   dispose(): void;
@@ -161,7 +173,7 @@ export class ItemViews {
           | [type: "camera", change: ItemChanges["camera"]]
           | [type: "drill", change: ItemChanges["drill"]]
           | [type: "itemMove", change: ItemChanges["itemMove"]]
-          | [type: "viewport", change: ItemChanges["viewport"]]
+          | [type: "viewport", change: PlaneViewChange]
       ) => void)
     | undefined;
 
@@ -227,49 +239,74 @@ export class ItemViews {
   /**
    * Refuses `interaction` options none of `drawn` (layout marks in panels
    * without axes, or a chart's one) takes (see `LayoutMark.interactions`),
-   * naming the marks `type`; with `axes`, panels with axes take zoom,
-   * brushes, and sync too.
+   * naming the marks `type` and the options `at` (a subplot's are
+   * `panels[i].interaction`); with `axes`, panels with axes take zoom,
+   * brushes, and sync too, and tooltips along an axis.
    */
   static interactions(
     drawn: readonly LayoutMark[],
     config: LayoutOptions,
     axes: boolean,
     type: string,
+    at = "interaction",
   ): void {
     const takes = new Set(drawn.flatMap((mark) => mark.interactions ?? []));
     const { zoom, pan, brush, drag, sync, limits } = config.interaction ?? {};
     const plane = takes.has("plane");
+    const refuse = (path: string, message: string) =>
+      new ChartError({ code: "unsupported", path, message: `${type} ${message}` });
+    // Items are read under the pointer; leaving the mode out reads them so too.
+    const mode = typeof config.tooltip === "object" ? config.tooltip.mode : undefined;
+    if (!axes && (mode === "nearest-x" || mode === "nearest-y"))
+      throw new ChartError({
+        code: "unsupported",
+        path: "tooltip.mode",
+        message: `tooltip.mode: ${type} reads the item under the pointer, not every series at ${mode === "nearest-x" ? "an x" : "a y"}; give mode: "nearest"`,
+      });
     if (pan && !axes && !(plane && (pan === true || pan === "xy")))
-      throw new Error(
+      throw refuse(
+        `${at}.pan`,
         plane
-          ? `${type} pan: expected interaction.pan true or "xy"; received ${JSON.stringify(pan)}`
-          : `${type} pan: no axes to pan; drop interaction.pan`,
+          ? `pan: expected ${at}.pan true or "xy"; received ${JSON.stringify(pan)}`
+          : `pan: no axes to pan; drop ${at}.pan`,
       );
     if (zoom && !axes && !(zoom === true ? plane || takes.has("zoom") : plane && zoom === "xy"))
-      throw new Error(
+      throw refuse(
+        `${at}.zoom`,
         plane
-          ? `${type} zoom: expected interaction.zoom true or "xy"; received ${JSON.stringify(zoom)}`
+          ? `zoom: expected ${at}.zoom true or "xy"; received ${JSON.stringify(zoom)}`
           : takes.has("zoom")
-            ? `${type} zoom: expected interaction.zoom true; received ${JSON.stringify(zoom)}`
-            : `${type} zoom: no axes to zoom; drop interaction.zoom`,
+            ? `zoom: expected ${at}.zoom true; received ${JSON.stringify(zoom)}`
+            : `zoom: no axes to zoom; drop ${at}.zoom`,
       );
     if (brush && !axes && !(brush === "lasso" && takes.has("lasso")))
-      throw new Error(
+      throw refuse(
+        `${at}.brush`,
         takes.has("lasso")
-          ? `${type} brush: expected interaction.brush "lasso"; received ${JSON.stringify(brush)}`
-          : `${type} brush: no axes to brush; drop interaction.brush`,
+          ? `brush: expected ${at}.brush "lasso"; received ${JSON.stringify(brush)}`
+          : // 3D charts and radars have axes, though none a brush can span.
+            `brush: ${
+              drawn.some((mark) => mark.camera)
+                ? "its axes turn with the camera, which a brush cannot span"
+                : drawn.some((mark) => mark.spec.type === "radar")
+                  ? "its axes radiate from the center, which a brush cannot span"
+                  : "no axes to brush"
+            }; drop ${at}.brush`,
       );
     if (drag && !takes.has("drag"))
-      throw new Error(`${type} drag: no nodes to drag; drop interaction.drag`);
+      throw refuse(`${at}.drag`, `drag: no nodes to drag; drop ${at}.drag`);
     if (axes) return;
-    if (sync) throw new Error(`${type} sync: no axes to sync; drop interaction.sync`);
-    if (limits) throw new Error(`${type} limits: no axes to limit; drop interaction.limits`);
-    if (config.x?.seams) throw new Error(`${type} seams: no x axis to mark seams on; drop x.seams`);
+    if (sync) throw refuse(`${at}.sync`, `sync: no axes to sync; drop ${at}.sync`);
+    if (limits) throw refuse(`${at}.limits`, `limits: no axes to limit; drop ${at}.limits`);
+    if (config.x?.seams) throw refuse("x.seams", "seams: no x axis to mark seams on; drop x.seams");
     // Shared, as panels' scales would be, is no change.
     for (const axis of ["x", "y", "yRight"] as const) {
       const scope = config[axis]?.scope;
       if (scope !== undefined && scope !== "chart")
-        throw new Error(`${type} ${axis}.scope: its panels have no scales to share; drop scope`);
+        throw refuse(
+          `${axis}.scope`,
+          `${axis}.scope: its panels have no scales to share; drop scope`,
+        );
     }
   }
 
@@ -282,6 +319,13 @@ export class ItemViews {
   #named = true;
   /** What the user changed, by state (see `ItemView.state`). */
   readonly #states = new Map<string, ItemState>();
+  /** The panels of each plane the last frame drew, by state (see `takeRetired`). */
+  #shown = new Map<string, readonly string[]>();
+  /**
+   * Views of planes a change of view passes through, by state, which frames
+   * draw instead of theirs while dom/transition.ts plays one.
+   */
+  transitionViews: ReadonlyMap<string, PlaneViewport> | undefined;
 
   /** Controls attached by the DOM runtime, by family; absent for model-only consumers. */
   readonly #controls = new Map<
@@ -399,7 +443,6 @@ export class ItemViews {
       this.#reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
       if (this.#model.layouts.some((mark) => mark.spec.type === "graph")) this.#unsettle();
     }
-    const model = this.#model;
     const kinds = new Set(this.asked().map(({ kind }) => kind));
     for (const [kind, slot] of this.#controls) {
       if (kinds.has(kind)) continue;
@@ -409,7 +452,7 @@ export class ItemViews {
     for (const kind of kinds) {
       const kept = this.#controls.get(kind);
       if (kept) {
-        kept.controls?.update(model.config);
+        kept.controls?.update();
         continue;
       }
       const slot: { controls: Controls | null | undefined; loading: Promise<void> | undefined } = {
@@ -425,7 +468,7 @@ export class ItemViews {
           }
           slot.loading = undefined;
           slot.controls = controls;
-          controls?.update(model.config);
+          controls?.update();
           if (this.#controlsScene) controls?.draw(this.#controlsScene);
         });
       slot.loading = loading;
@@ -498,7 +541,14 @@ export class ItemViews {
     this.#controls.clear();
     this.#controlsScene = undefined;
     this.changed = undefined;
-    // Whoever waits for a layout the chart will not finish hears it is over.
+    this.stopWaiting();
+  }
+
+  /**
+   * Whoever waits for a layout the chart will not finish (it is disposed,
+   * or a frame failed) hears it is over; a frame drawing one starts again.
+   */
+  stopWaiting(): void {
     this.#settled?.resolve();
     this.#settled = undefined;
   }
@@ -506,6 +556,26 @@ export class ItemViews {
   /** Whether the last scene was of one layout mark, without facets or panels. */
   get alone(): boolean {
     return !this.#named;
+  }
+
+  /**
+   * The instances of the planes shown in part that the frame just drawn no
+   * longer drew, fitted now, with the panels they had; asked once a frame.
+   */
+  takeRetired(): (ScaleInstance & { view: null })[] {
+    const retired: (ScaleInstance & { view: null })[] = [];
+    // A pie in a network's place keeps its state, not its plane.
+    const used = new Set(this.#views.filter(planar).map(({ state }) => state));
+    for (const [key, state] of this.#states) {
+      if (used.has(key) || !(state.view.x || state.view.y)) continue;
+      const panels = this.#shown.get(key) ?? [];
+      for (const scale of ["x", "y"] as const)
+        if (state.view[scale])
+          retired.push({ scale, instance: key, type: "linear", panels, view: null });
+      state.view = { x: null, y: null };
+    }
+    this.#shown = new Map([...used].map((key) => [key, this.#plane(key)[0].panels]));
+    return retired;
   }
 
   /** Starts a scene of facet panels or subplots. */
@@ -558,14 +628,16 @@ export class ItemViews {
    * state the facet's panels share, or a subplot's own.
    */
   panel(panel: ItemPanel, item: PanelItem, frame: ItemFrame): Panel {
-    const { marks, panels } = this.#model.config;
+    const { marks, panels, animation } = this.#model.config;
     const state = panels ? panel.key : "";
+    // Charts that animate changed values learn what moves in panels too.
+    const keyed = typeof animation === "object" && animation.values === true;
     return this.#draw(
       panel,
       item.mark,
       item.index,
       marks,
-      { ...frame, inPanel: true },
+      { ...frame, inPanel: true, keyed },
       item,
       state,
     );
@@ -600,7 +672,7 @@ export class ItemViews {
       moved: movedNow(state),
       nodePositions: state.positions,
       clock: this.#clock,
-      viewport: state.view,
+      viewport: this.transitionViews?.get(key) ?? state.view,
       camera,
     });
     const { indices } = mark;
@@ -653,7 +725,11 @@ export class ItemViews {
     const views = this.#views.filter((view) => (has === "plane" ? planar(view) : view.result[has]));
     const what = WHAT[has];
     const names = () => views.map(({ key }) => JSON.stringify(key)).join(", ");
-    if (views.length === 0) throw new Error(`${method}: the chart has no ${what}`);
+    if (views.length === 0)
+      throw new ChartError({
+        code: "unsupported",
+        message: `${method}: the chart has no ${what}`,
+      });
     const view =
       panel === undefined
         ? views.find(({ state }) => state !== views[0]!.state)
@@ -661,11 +737,15 @@ export class ItemViews {
           : views[0]
         : views.find(({ key }) => key === panel);
     if (view) return view;
-    throw new Error(
-      panel === undefined
-        ? `${method}: panel is required; the ${what} panels are ${names()}`
-        : `${method}: panel ${JSON.stringify(panel)} has no ${what}; name one of ${names()}`,
-    );
+    throw new ChartError({
+      code: panel === undefined ? "invalid-option" : "unknown-reference",
+      path: "panel",
+      panel,
+      message:
+        panel === undefined
+          ? `${method}: panel is required; the ${what} panels are ${names()}`
+          : `${method}: panel ${JSON.stringify(panel)} has no ${what}; name one of ${names()}`,
+    });
   }
 
   /** The panels a change of a state belongs to, when they are a subplot's. */
@@ -815,10 +895,21 @@ export class ItemViews {
     return out;
   }
 
-  /** The controls the chart's layout marks ask for with its options (see `LayoutMark.controls`). */
+  /**
+   * The controls the chart's layout marks ask for with its settings and
+   * each subplot's own (see `LayoutMark.controls`), which may turn on what
+   * the chart's leave off.
+   */
   asked(): LayoutControls[] {
-    const { layouts, config } = this.#model;
-    return layouts.flatMap((mark) => mark.controls?.(config) ?? []);
+    const model = this.#model;
+    const ids = model.config.panels?.list.map(({ id }) => id);
+    // Each mark, by the settings of the panels it draws in.
+    return model.layouts.flatMap((mark) => {
+      const { panel } = mark.spec as { panel?: string };
+      return (ids && panel === "*" ? ids : [panel]).flatMap(
+        (key) => mark.controls?.(model.interactionOf(key)) ?? [],
+      );
+    });
   }
 
   /** What the chart's description adds about the keys of its layout marks' controls. */
@@ -875,16 +966,17 @@ export class ItemViews {
   }
 
   /**
-   * The panels a lasso drawn on the plane of `panel` (or the chart's one,
-   * without panels with axes) belongs to: those of its state, as they are
-   * drawn; undefined where the view is not a plane's (see `ownsView`).
+   * What a lasso drawn on the plane of `panel` (or the chart's one, without
+   * panels with axes) belongs to: the plane's x and y (see `#plane`) and
+   * the panels of its state, as they are drawn; undefined where the view
+   * is not a plane's (see `ownsView`).
    */
   select(panel: string | undefined): SelectionOwner | undefined {
     if (!this.ownsView(panel)) return undefined;
     const { state } = this.#owner("plane", panel, "select");
     const views = () => this.#views;
     return {
-      x: state,
+      scales: this.#plane(state),
       plane: true,
       get panels() {
         return views().flatMap(({ key, result, ...view }) =>
@@ -892,6 +984,23 @@ export class ItemViews {
         );
       },
     };
+  }
+
+  /**
+   * The instances of x and y a plane is, keyed by its state, with the
+   * panels drawing it: its axes are "linear", in its units.
+   */
+  #plane(state: string): [ScaleInstance, ScaleInstance] {
+    const panels = this.#views.flatMap((view) =>
+      view.state === state && planar(view) ? [view.key] : [],
+    );
+    const of = (scale: "x" | "y"): ScaleInstance => ({
+      scale,
+      instance: state,
+      type: "linear",
+      panels,
+    });
+    return [of("x"), of("y")];
   }
 
   /**
@@ -909,18 +1018,17 @@ export class ItemViews {
    * Shows a part of the plane of `panel` (or the chart's one, or with null
    * and no panel every plane's whole), as `Chart.setViewport` does: x and
    * y ranges in its units, a pair an x range, null the whole plane; ranges
-   * left out keep their view. Reports each change as a `viewport` event.
-   * When `checked`, only where the chart's view is a plane's (see
-   * `ownsView`); whether it was, so the chart's axes have nothing to show.
+   * left out keep their view. Reports the change, of `cause`, as one
+   * `viewport` event; `joined`, returns it instead, for the chart to report
+   * with the change of its axes' views it makes.
    */
   setView(
     view: Partial<Viewport> | readonly [number, number] | null,
     panel: string | undefined,
-    checked = false,
-  ): boolean {
+    cause: ViewCause = "api",
+    joined = false,
+  ): PlaneViewChange | undefined {
     const all = view === null && panel === undefined;
-    const owns = !checked || this.ownsView(panel);
-    if (!owns && !all) return false;
     const owners = all
       ? this.#views.filter(
           (view, i) =>
@@ -931,18 +1039,35 @@ export class ItemViews {
       ? { x: view as readonly [number, number] }
       : ((view as Partial<Viewport> | null) ?? { x: null, y: null });
     if (change.yRight)
-      throw new Error("setViewport yRight: a map or network has no right axis; drop yRight");
+      throw new ChartError({
+        code: "unsupported",
+        path: "yRight",
+        panel,
+        message: "setViewport yRight: a map or network has no right axis; drop yRight",
+      });
+    const xs: ScaleView[] = [];
+    const ys: ScaleView[] = [];
+    const views: ViewportEvent["views"][number][] = [];
     for (const owner of owners) {
       const state = this.#state(owner.state);
+      const was = state.view;
       const next = {
-        x: change.x === undefined ? state.view.x : ascending(change.x),
-        y: change.y === undefined ? state.view.y : ascending(change.y),
+        x: change.x === undefined ? was.x : ascending(change.x),
+        y: change.y === undefined ? was.y : ascending(change.y),
       };
-      if (same(next.x, state.view.x) && same(next.y, state.view.y)) continue;
+      if (same(next.x, was.x) && same(next.y, was.y)) continue;
       state.view = next;
-      this.changed?.("viewport", { ...next, yRight: null, ...this.#scope(owner) });
+      const [x, y] = this.#plane(owner.state);
+      if (!same(next.x, was.x)) xs.push({ ...x, view: next.x });
+      if (!same(next.y, was.y)) ys.push({ ...y, view: next.y });
+      for (const key of x.panels)
+        views.push({ panel: key, ...next, yRight: null, types: { x: "linear", y: "linear" } });
     }
-    return owns;
+    if (!views.length) return undefined;
+    const made = { cause, ...(panel !== undefined && { panel }), scales: [...xs, ...ys], views };
+    if (joined) return made;
+    this.changed?.("viewport", made);
+    return undefined;
   }
 
   /** The panels drawn, in order, with what was drawn there and the key of their state. */
@@ -1051,8 +1176,12 @@ export class ItemViews {
     // A map's or a 3D box's items name their layer among its layers.
     const mark = item.layer === undefined ? view.index : (view.indices?.[item.layer] ?? item.layer);
     const owner = view.marks[mark] as (ChartMark & { table?: Table }) | undefined;
+    // An item summing rows (a slice, a tree's node, a link) has fields where it is one row.
+    const one =
+      row ??
+      (owner?.spec.tooltip && owner.table ? view.result.soleRow?.(key, owner.table) : undefined);
     const fields =
-      row === undefined ? undefined : this.fields?.(owner?.table, owner?.spec.tooltip, row);
+      one === undefined ? undefined : this.fields?.(owner?.table, owner?.spec.tooltip, one);
     return {
       axis: "item",
       key,

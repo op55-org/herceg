@@ -20,6 +20,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -362,7 +363,7 @@ describe("lines and areas along y", () => {
       timeZone: "UTC",
     });
     zoomed.setSize(600, 300, 1);
-    zoomed.setViewport([4, 6]);
+    setViewport(zoomed, [4, 6]);
     zoomed.scene(estimateText);
     expect(zoomed.yScale()!.domain).toEqual([0, 100]);
     // Interpolated gaps of a stack along y reach past any row's own top.

@@ -10,7 +10,7 @@ import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
@@ -55,7 +55,7 @@ const summary = table(
   { name: "summary" },
 );
 const bars = () => bar(summary, { x: "day", y: "mean", series: "sex" });
-const intervals = () => errorBar(summary, { x: "day", y1: "low", y2: "high", series: "sex" });
+const intervals = () => errorbar(summary, { x: "day", y1: "low", y2: "high", series: "sex" });
 const sex = (value: string) => identityKey({ field: "sex" }, value);
 
 describe("identity", () => {
@@ -87,7 +87,7 @@ describe("identity", () => {
       high: [3, 4, 5, 6],
     });
     const joined = build({
-      marks: [bars(), errorBar(other, { x: "day", y1: "low", y2: "high", series: "sex" })],
+      marks: [bars(), errorbar(other, { x: "day", y1: "low", y2: "high", series: "sex" })],
     });
     const scene = joined.scene(estimateText);
     expect(joined.legendEntries().map(({ key }) => key)).toEqual([sex("f"), sex("m")]);
@@ -244,7 +244,7 @@ describe("identity", () => {
     const model = build({
       marks: [
         bars(),
-        errorBar(summary, {
+        errorbar(summary, {
           x: "day",
           y1: "low",
           y2: "high",

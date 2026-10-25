@@ -8,10 +8,14 @@ import { guideCompiler } from "../../src/guides/compile.ts";
 import { colorbar } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { contour } from "../../src/marks/contour.ts";
+import { geopoint } from "../../src/marks/geopoint.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { point } from "../../src/marks/point.ts";
+import { point3d } from "../../src/marks/point3d.ts";
+import { surface } from "../../src/marks/surface.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import {
   type ColorbarGuide,
@@ -38,6 +42,8 @@ const cells = table({
   temp: [-8.55, -3, 0, 2, 4, 6, 7, 8.5, 9, 10, 11, 12.3],
 });
 const map = heatmap(cells, { x: "hour", y: "host", color: "temp", id: "heat" });
+/** A grid of four points, valued along x and y. */
+const spots = table({ x: [0, 1, 0, 1], y: [0, 0, 1, 1], v: [1, 2, 3, 4] });
 const barOf = (scene: Scene) => guidesOf(scene, "colorbar")[0]!;
 const labels = (bar: ColorbarGuide) =>
   bar.items.filter((item): item is TextItem => item.type === "text").map((item) => item.text);
@@ -182,6 +188,27 @@ describe("colorbars", () => {
     ).toThrow(
       'chart guides[0].scale.channel: a colorbar shows a color scale; give channel: "color"',
     );
+  });
+
+  it.each([
+    ["geopoint", () => geopoint(spots, { longitude: "x", latitude: "y", color: "v", id: "m" })],
+    ["point3d", () => point3d(spots, { x: "x", y: "y", z: "v", color: "v", id: "m" })],
+    ["surface", () => surface(spots, { x: "x", y: "y", z: "v", id: "m" })],
+  ])("show the color ramp of a %s, which draws its own layout, named by its id", (_, make) => {
+    const model = new ChartModel(
+      {
+        locale: "en-US",
+        marks: [make()],
+        guides: [colorbar({ scale: { mark: "m", channel: "color" } })],
+      },
+      undefined,
+      ...staticCompilers(),
+    );
+    model.setSize(640, 360, 1);
+    const scene = model.scene(estimateText);
+    // The colorbar, in place of the automatic legend's ramp.
+    expect(guidesOf(scene, "colorbar")).toHaveLength(1);
+    expect(guidesOf(scene, "ramp")).toHaveLength(0);
   });
 
   it("show the scale marks share, named by any of them", () => {

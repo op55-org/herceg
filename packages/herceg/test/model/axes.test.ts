@@ -17,6 +17,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -154,7 +155,7 @@ describe("right y axis", () => {
     // Types refuse this too; untyped callers and specs get an error.
     const sideways = { x: "v", y: "region", axis: "right" } as never;
     expect(() => build({ marks: [bar(sales, sideways)] })).toThrow(
-      /bar axis: marks along y cannot use the right axis/,
+      "bar axis: marks along y cannot use the right axis; drop axis",
     );
   });
 
@@ -301,7 +302,7 @@ describe("right y axis", () => {
       y: { domain: [0, 50], format: { style: "currency", currency: "USD" } },
       yRight: { domain: [0, 1000], format: { style: "unit", unit: "meter" } },
     });
-    model.setViewport([1.5, 2]);
+    setViewport(model, [1.5, 2]);
     const extents = vi.spyOn(note as TextMark, "yExtent");
     const scene = model.scene(estimateText);
     // The note is out of view, but still the right axis' mark.

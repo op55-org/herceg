@@ -9,15 +9,27 @@ export type {
   PanelViewportPayload,
   RowSelectionPayload,
   ScaleInstancePayload,
+  ScaleStatePayload,
   ScaleViewPayload,
   SelectEventPayload,
   SelectionOwnerPayload,
   SelectionPayload,
   ViewportEventPayload,
   ViewportPayload,
+  ViewportStatePayload,
   VisibilityPayload,
 } from "./web/events.ts";
-export { inspectionPayload, selectionPayload, viewportPayload } from "./web/events.ts";
+export {
+  edgePayload,
+  inspectionPayload,
+  restoreViewportState,
+  rowSelectionPayload,
+  selectEventPayload,
+  selectionPayload,
+  viewportEventPayload,
+  viewportPayload,
+  viewportStatePayload,
+} from "./web/events.ts";
 export { loadPayload, type PayloadSource } from "./web/load.ts";
 export { getChart, type HercegEventMap, mount, unmount } from "./web/mount.ts";
 export { observe } from "./web/observe.ts";

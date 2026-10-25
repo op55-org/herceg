@@ -32,6 +32,7 @@ import {
   valueKind,
 } from "./mark.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
+import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
@@ -347,6 +348,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   }
 
   geometry(series: readonly Series[], frame: Frame, key: MarkKey): ShapesGeometry[] {
+    refuseValues(frame.keyed, this.spec.type);
     const { theme, paint } = frame;
     const shapes: (PathShape | TextShape)[] = [];
     // Shapes' colors are read as the chart's other colors are: each distinct one once.

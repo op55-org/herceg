@@ -5,7 +5,6 @@
 // mark (see controls.ts), so other charts never download it; it listens on
 // the chart's root itself, its keys ahead of the chart's own.
 
-import type { ChartConfig } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import { type Camera, MAX_ZOOM, MIN_ZOOM } from "../three/camera.ts";
@@ -77,11 +76,12 @@ export class Controls implements ChartControls {
     return this.#press?.moved ?? false;
   }
 
-  /** Follows the chart's options: whether dragging turns it and the wheel zooms it. */
-  update(config: ChartConfig): void {
-    const rotate = config.interaction?.rotate !== false;
-    if (this.#press && (!rotate || !this.#panels().some(({ key }) => key === this.#press!.panel)))
-      this.#press = null;
+  /** Follows the chart's options: whether dragging turns a panel's camera, and the wheel zooms it. */
+  update(): void {
+    const press = this.#press;
+    if (!press) return;
+    const rotates = this.#host.model.interactionOf(press.panel)?.rotate !== false;
+    if (!rotates || !this.#panels().some(({ key }) => key === press.panel)) this.#press = null;
   }
 
   #panels() {
@@ -189,7 +189,7 @@ export class Controls implements ChartControls {
       // A second finger neither turns nor takes over the first one's drag.
       if (this.#press || !from || !this.#onPlot(event.target)) return;
       const action = this.#host
-        .bindings()
+        .bindings(panel)
         .match("drag", event, ({ type }) => type === "orbit" || type === "pageScroll")?.action;
       if (action?.type !== "orbit") return;
       event.preventDefault();
@@ -231,7 +231,7 @@ export class Controls implements ChartControls {
         const action =
           camera &&
           this.#host
-            .bindings()
+            .bindings(panel)
             .match(
               "wheel",
               event,
@@ -252,7 +252,7 @@ export class Controls implements ChartControls {
       const panel = this.#at(event);
       const camera = panel === undefined ? undefined : this.#host.chart.getCamera({ panel });
       if (!camera) return;
-      const action = this.#host.bindings().match("doubleClick", event)?.action;
+      const action = this.#host.bindings(panel).match("doubleClick", event)?.action;
       if (action?.type === "zoom")
         this.#turn({ zoom: magnify(camera, action.factor ?? 2) }, false, panel!);
       else this.#turn(null, false, panel!);
@@ -270,7 +270,7 @@ export class Controls implements ChartControls {
         : this.#host.chart.getCamera({ panel });
     if (!camera || event.target !== this.#root) return;
     const shift = event.shiftKey;
-    const action = this.#host.bindings().match("key", event)?.action;
+    const action = this.#host.bindings(panel).match("key", event)?.action;
     let next: CameraSpec | null | undefined;
     if (action?.type === "zoom") next = { zoom: magnify(camera, action.factor ?? ZOOM) };
     else if (action?.type === "reset") next = null;

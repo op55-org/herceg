@@ -18,6 +18,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { keysOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -372,7 +373,7 @@ describe("contours", () => {
     };
     const { model } = build(config);
     const rings = vi.spyOn(GridTracer.prototype, "rings");
-    model.setViewport([-0.5, 0.5]);
+    setViewport(model, [-0.5, 0.5]);
     const zoomed = model.scene(estimateText);
     model.update({ ...config, locale: "en-US", timeZone: "UTC", theme: "dark" });
     model.scene(estimateText);
@@ -476,6 +477,10 @@ describe("contours", () => {
         /marks\[0\]: contour thresholds: expected a whole number from 1 to 1000/,
       ],
       [{ strokeWidth: 2, variant: "bands" }, /marks\[0\]: contour strokeWidth: draws lines/],
+      [
+        { axis: "right" },
+        /marks\[0\]: contour axis: contours draw on the left y axis only; drop axis$/,
+      ],
     ] as const)
       expect(() => validateSpec(spec(mark))).toThrow(message);
     const log = new ChartModel({

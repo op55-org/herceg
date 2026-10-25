@@ -25,10 +25,9 @@ import {
 import { zoomedTransform } from "../geo/shapes.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry, LegendPart } from "../model/legend.ts";
-import type { ChartConfig } from "../model/model.ts";
 import { LinearScale } from "../scale/scale.ts";
 import type { Rect } from "../scene/scene.ts";
-import type { ProjectionName, ProjectionSpec } from "../spec/spec.ts";
+import type { InteractionSpec, ProjectionName, ProjectionSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type {
   LayoutControls,
@@ -40,6 +39,7 @@ import type {
 } from "./layout-mark.ts";
 import { legendParts } from "./legend-parts.ts";
 import type { ColorRamp, GlyphKey, MARK } from "./mark.ts";
+import { refuseValues } from "./still.ts";
 
 /** Plane units a map of a single point spans: about two degrees. */
 const POINT_SPAN = (2 * Math.PI) / 180;
@@ -152,8 +152,8 @@ export class GeoMap implements LayoutMark {
   readonly interactions = ["plane", "lasso"] as const;
   readonly selects = true;
 
-  controls(config: ChartConfig): LayoutControls | undefined {
-    const { zoom, pan, brush, bindings } = config.interaction ?? {};
+  controls(interaction: InteractionSpec | undefined): LayoutControls | undefined {
+    const { zoom, pan, brush, bindings } = interaction ?? {};
     return zoom ? PAN_ZOOM : pan ? PAN : brush || bindings?.length ? LASSO : undefined;
   }
 
@@ -187,6 +187,7 @@ export class GeoMap implements LayoutMark {
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.layers[0]!.spec.type);
     const { fitRows, layerRows } = frame;
     const plan = this.plan(fitRows);
     const { fit } = this.projection;

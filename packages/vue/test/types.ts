@@ -72,7 +72,7 @@ export const options: ChartProps = {
   interaction: { zoom: true },
   legend: true,
   onSelect: ({ x }) => x?.[0].toFixed(),
-  onViewport: ({ x, y, yRight }) => [x, y, yRight],
+  onViewport: ({ scales, views }) => [scales[0]?.view, views[0]?.yRight],
   onHover: ({ inspection }) => inspection?.points.map(({ mark, row }) => [mark, row]),
 };
 // @ts-expect-error chart options keep herceg's types

@@ -60,8 +60,16 @@ import {
   type Scene,
   tickLabelGap,
 } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { InsidePlace, Place, Side, SidePlace } from "../spec/place.ts";
-import type { AnimationSpec, CameraSpec, ChartSpec, ScaleScope } from "../spec/spec.ts";
+import type {
+  AnimationSpec,
+  CameraSpec,
+  ChartSpec,
+  InteractionSpec,
+  ScaleLimitsSpec,
+  ScaleScope,
+} from "../spec/spec.ts";
 import { insets, type TextPaint } from "../style/style.ts";
 import {
   type PaintReader,
@@ -112,7 +120,7 @@ import {
   type MeasuredLegend,
   measureLegends,
 } from "./legend.ts";
-import type { Navigator } from "./navigator.ts";
+import type { Navigator, XPlan } from "./navigator.ts";
 import type { PanelGrid, PanelLayout, PanelPlacement, PanelSplit } from "./panel-layout.ts";
 import type { Panels } from "./panels.ts";
 import type { RowSelection } from "./row-selection.ts";
@@ -189,6 +197,7 @@ interface PanelView {
   xGroup: string;
   yGroup: string;
   yRightGroup: string;
+  drawsY: boolean;
   inspector: Inspector;
   plans: PanelPlans;
 }
@@ -236,7 +245,10 @@ export interface DrawnPanel {
   x: PositionScale;
   /** Names the x scale the panel shares with others, and its viewport: "" when every panel does. */
   xGroup: string;
-  /** The left y axis' scale, and the right's when the chart has one. */
+  /**
+   * The left y axis' scale; in a panel without one (see `drawsY`), the
+   * right axis', which its brush's and its selection's y ranges are of.
+   */
   y: PositionScale;
   /** Names the left y scale the panel shares with others: "" when every panel does. */
   yGroup: string;
@@ -244,6 +256,8 @@ export interface DrawnPanel {
   yRight?: PositionScale | undefined;
   /** Names the right y scale the panel shares with others: "" when every panel does, or without one. */
   yRightGroup: string;
+  /** Whether the panel has a left y axis: a mark it draws is on it, or none is on the right. */
+  drawsY: boolean;
   plans: PanelPlans;
 }
 
@@ -259,10 +273,97 @@ export interface Viewport {
   yRight: readonly [number, number] | null;
 }
 
-/** The y ranges of a viewport, which every panel shares. */
-export type YViewport = Pick<Viewport, "y" | "yRight">;
+/** What `setViewport` takes: ranges of some scales, an x range alone as a pair, or null for none. */
+export type ViewChange = Partial<Viewport> | readonly [number, number] | null;
 
-const NO_Y_VIEW: YViewport = { y: null, yRight: null };
+/**
+ * One instance of a position scale: the panels sharing one domain, and one
+ * view, along it (see the `scope` of the chart's `x`, `y`, and `yRight`).
+ * A map's or network's plane is an instance of x and one of y, which the
+ * panels drawing it share.
+ */
+export interface ScaleInstance {
+  /** The scale: "x", or the left or right y axis'. */
+  readonly scale: ScaleName;
+  /**
+   * Names the instance among the scale's: the same in each of its panels
+   * (`AxisInfo.instance`), and another for each other instance of the scale
+   * (another scale's may be the same: an instance is its scale and its
+   * name). The instance every panel shares stays one as panels come and
+   * go; one of panels sharing a scale by row, column, or panel is another
+   * once its panels change, or its categories do. Opaque: compare it,
+   * never read it; not kept across mounts.
+   */
+  readonly instance: string;
+  /** Its type as last drawn: a plane's axes are "linear". */
+  readonly type: AxisType;
+  /** On a category axis, its categories in band index order (as `AxisInfo.categories`). */
+  readonly categories?: readonly string[] | undefined;
+  /** The keys of the panels drawing with it, in reading order; panels without the axis are not among them. */
+  readonly panels: readonly string[];
+}
+
+/** A scale instance's view after a change: ascending, or null where it is fitted (its domain or its data). */
+export interface ScaleView extends ScaleInstance {
+  readonly view: readonly [number, number] | null;
+}
+
+/** A panel's whole view after a change, and the type of each axis it has then. */
+export interface PanelViewport extends Readonly<Viewport> {
+  readonly panel: string;
+  readonly types: Readonly<Partial<Record<ScaleName, AxisType>>>;
+}
+
+/**
+ * One change of view, committed whole before any listener hears of it:
+ * the scale instances it changed and every panel drawing one of them. A
+ * change a listener makes is the next one, reported once this one has
+ * reached every listener, so listeners hear each change, in order. An
+ * instance with a view that is no longer drawn (its panels gone, or
+ * sharing scales otherwise) is reported fitted (`view` null) with the
+ * panels it had, of which those no longer drawn have no view in `views`.
+ */
+export interface ViewportEvent {
+  /** Counts the chart's changes of view from 0: one per change, none for calls refused or changing nothing. */
+  readonly viewRevision: number;
+  readonly cause: ViewCause;
+  /**
+   * The panel the change was made in: a gesture's, a call's `panel`, or
+   * that of the sync channel it came on; absent for changes naming none
+   * (`setViewport` without a panel, data, options).
+   */
+  readonly panel?: string;
+  /** Each instance whose view changed, once: by scale (x, y, yRight), then by its first panel. */
+  readonly scales: readonly ScaleView[];
+  /** Each panel still drawing one of them, once, in reading order, with its whole view now. */
+  readonly views: readonly PanelViewport[];
+}
+
+/**
+ * What changed a view: a drag or pinch ("pointer"), the wheel, a key, the
+ * application (`setViewport`), a synced chart, the chart's data, or its options.
+ */
+export type ViewCause = "pointer" | "wheel" | "keyboard" | "api" | "sync" | "data" | "options";
+
+/** The position scales, in the order events list their instances. */
+export const SCALES = ["x", "y", "yRight"] as const;
+
+/** A view to set on an instance of a scale (see `ChartModel.viewChanges`). */
+export type ViewSet = readonly [ScaleName, string, readonly [number, number] | null];
+
+/** The key of an instance of a scale among the views and instances a model keeps. */
+export function viewKey(scale: ScaleName, instance: string): string {
+  return `${scale} ${instance}`;
+}
+
+/** A scale as messages name it. */
+const axisName = (scale: ScaleName) => (scale === "yRight" ? "right y" : scale);
+
+/** The scale and instance a `viewKey` names. */
+function splitKey(key: string): [ScaleName, string] {
+  const at = key.indexOf(" ");
+  return [key.slice(0, at) as ScaleName, key.slice(at + 1)];
+}
 
 /**
  * Ascending x and y ranges drawn while a change of view plays; null for an
@@ -347,9 +448,12 @@ export class ChartModel {
    * inspections: set by a chart once it has loaded what reads them.
    */
   declare fields: FieldReaders | undefined;
-  /** Visible x ranges by x scale (see `xGroupOf`). */
-  readonly #viewports = new Map<string, [number, number]>();
-  #yViewport: YViewport = NO_Y_VIEW;
+  /** What instances of the position scales show when zoomed, by scale and instance (`viewKey`). */
+  readonly #viewports = new Map<string, readonly [number, number]>();
+  /** The instances of the position scales the last scene drew, by `viewKey`. */
+  #instances = new Map<string, ScaleInstance>();
+  /** Instances with a view that a scene no longer drew, fitted since (see `takeRetired`). */
+  #retired: (ScaleInstance & { view: null })[] = [];
   #transition: ViewDomains | null = null;
   #polylines = new Map<string, Polyline>();
   #floats = new Map<string, Float32Array>();
@@ -604,17 +708,12 @@ export class ChartModel {
     this.#configure(config, page);
     // Series join their legend groups again as they are resolved.
     this.hidden.groups.clear();
-    // Sides whose panels have scales of their own let go of their y viewport.
-    const { y, yRight } = this.#yViewport;
-    const kept = {
-      y: this.#limit(this.#shares("y") ? y : null, "y"),
-      yRight: this.#limit(this.#shares("yRight") ? yRight : null, "yRight"),
-    };
-    if (kept.y !== y || kept.yRight !== yRight) this.#yViewport = kept;
-    // Views stay inside limits that changed too.
-    for (const [group, view] of this.#viewports) {
-      const shown = this.#limit(view, "x");
-      if (shown !== view) this.#viewports.set(group, shown!);
+    // Views stay inside limits that changed; those of instances no longer
+    // drawn go with the next scene (see `takeRetired`).
+    for (const [key, view] of this.#viewports) {
+      const [scale, instance] = splitKey(key);
+      const shown = this.#limit(view, scale, instance);
+      if (shown !== view) this.#viewports.set(key, shown!);
     }
   }
 
@@ -646,72 +745,193 @@ export class ChartModel {
     this.rasterRatio = rasterRatio;
   }
 
-  /**
-   * The visible x range, ascending, or null to fit the data. Axes with a
-   * reversed domain show it reversed; band x axes ignore it. Charts whose
-   * panels have x scales of their own have one per scale, which
-   * `viewportOf` reads; for them this throws.
-   */
-  get viewport(): readonly [number, number] | null {
-    return this.viewportOf();
-  }
-
-  /** The visible x range of the x scale panel `panel` draws with (see `xGroupOf`). */
-  viewportOf(panel?: string): readonly [number, number] | null {
-    return this.#viewports.get(this.xGroupOf(panel)) ?? null;
-  }
-
-  /** Whether every panel shares one left y scale, so the chart has one y view. */
-  get sharesY(): boolean {
-    return this.#shares("y");
-  }
-
-  /** Whether every panel shares one x scale: unless the chart's `x.scope` says otherwise. */
-  get sharesX(): boolean {
-    return this.#scope("x") === "chart";
+  /** The view of instance `instance` of scale `scale` (see `ScaleInstance`): ascending, or null when fitted. */
+  viewOf(scale: ScaleName, instance: string): readonly [number, number] | null {
+    return this.#viewports.get(viewKey(scale, instance)) ?? null;
   }
 
   /**
-   * Names the x scale panel `panel` of the last scene draws with: "" for one
-   * every panel shares, which is the one without a panel. Throws for a
-   * panel the chart does not have, and without one when panels have x
-   * scales of their own.
+   * Shows a range on an instance of a scale, kept inside its limits (see
+   * `#limit`), or with null fits it to its data or its domain.
    */
-  xGroupOf(panel?: string): string {
-    if (panel === undefined) {
-      if (this.sharesX) return "";
-      throw new Error("panel: required when panels have x scales of their own");
+  setView(scale: ScaleName, instance: string, view: readonly [number, number] | null): void {
+    const shown = this.#limit(range(view), scale, instance);
+    if (shown) this.#viewports.set(viewKey(scale, instance), shown);
+    else this.#viewports.delete(viewKey(scale, instance));
+  }
+
+  /** Every view set, by scale and instance (`viewKey`): what a change of view is compared with. */
+  views(): Map<string, readonly [number, number]> {
+    return new Map(this.#viewports);
+  }
+
+  /** The instances of the position scales the last scene drew, by scale and instance (`viewKey`). */
+  get instances(): ReadonlyMap<string, ScaleInstance> {
+    return this.#instances;
+  }
+
+  /**
+   * The instance `key` names (see `viewKey`) as the last scene drew it;
+   * before one drew it, as the chart's options give it, in no panels.
+   */
+  instance(key: string): ScaleInstance {
+    const [scale, instance] = splitKey(key);
+    return (
+      this.#instances.get(key) ?? {
+        scale,
+        instance,
+        type: this.#config[scale]?.type ?? "linear",
+        panels: [],
+      }
+    );
+  }
+
+  /** The instances with a view that the last scene no longer drew, fitted since, planes' too; asked once. */
+  takeRetired(): (ScaleInstance & { view: null })[] {
+    const retired = [...this.#retired, ...(this.#items?.takeRetired() ?? [])];
+    this.#retired = [];
+    return retired;
+  }
+
+  /**
+   * The views `Chart.setViewport` sets, checked whole before any is set:
+   * each scale given (`x`, `y`, `yRight`; a pair is x) on its instance in
+   * panel `panel`, which panels sharing it follow, or without a panel on
+   * the one instance it has, or the one every panel shares; null fits it
+   * (without a panel, every instance of it), and null alone every
+   * instance. Throws as `instanceOf` does, and for ranges on categories.
+   */
+  viewChanges(view: ViewChange, panel?: string): ViewSet[] {
+    const change = Array.isArray(view) ? { x: view } : (view ?? { x: null, y: null, yRight: null });
+    const changes: ViewSet[] = [];
+    for (const scale of SCALES) {
+      const range = (change as Partial<Viewport>)[scale];
+      if (range === undefined) continue;
+      if (range === null && panel === undefined) {
+        for (const key of this.#viewports.keys()) {
+          const [of, instance] = splitKey(key);
+          if (of === scale) changes.push([scale, instance, null]);
+        }
+        continue;
+      }
+      const instance = this.instanceOf(scale, panel, "setViewport", range !== null);
+      if (instance === undefined) continue;
+      if (range && this.#instances.get(viewKey(scale, instance))?.type === "band")
+        throw new ChartError({
+          code: "unsupported",
+          path: scale,
+          panel,
+          message: `setViewport ${scale}: the ${axisName(scale)} axis shows categories, which do not zoom; drop ${scale}`,
+        });
+      changes.push([scale, instance, range]);
     }
-    const view = this.#views.find(({ key }) => key === panel);
-    if (!view) throw new RangeError(`panel: no panel "${panel}"`);
-    return view.xGroup;
+    return changes;
+  }
+
+  /** Sets views `viewChanges` checked. */
+  applyViews(changes: readonly ViewSet[]): void {
+    for (const [scale, instance, range] of changes) this.setView(scale, instance, range);
   }
 
   /**
-   * Shows an x range, or fits the data with null, on the x scale of `panel`
-   * (see `xGroupOf`); null without a panel fits every scale.
+   * What panel `panel` shows along each scale (see `setViewport`); without
+   * a panel, along each scale it has one instance of, or one every panel
+   * shares, and null along the others.
    */
-  setViewport(domain: readonly [number, number] | null, panel?: string): void {
-    const group = domain ? this.xGroupOf(panel) : "";
-    const shown = this.#limit(range(domain), "x");
-    if (panel === undefined && !shown) this.#viewports.clear();
-    else if (shown) this.#viewports.set(group, shown);
-    else this.#viewports.delete(this.xGroupOf(panel));
+  getViewport(panel?: string): Viewport {
+    const view = (scale: ScaleName) => {
+      const instance = this.instanceOf(scale, panel, "getViewport", false);
+      return instance === undefined ? null : this.viewOf(scale, instance);
+    };
+    return { x: view("x"), y: view("y"), yRight: view("yRight") };
   }
 
   /**
-   * A view of scale `name`, ascending, kept inside its extent
-   * (`interaction.limits`): moved inside, keeping its span, where it fits,
-   * and the extent where it does not; on log axes by ratios, where ends
-   * that are not positive bound nothing.
+   * The instance of scale `scale` that panel `panel` of the last scene
+   * draws with (see `instanceIn`), undefined when it has no such axis.
+   * Throws, naming `where`, for a panel the chart does not have, and where
+   * an instance is `needed`, for none. A chart of one panel, "", has the
+   * one instance of each scale it has an axis of.
+   */
+  instanceOf(
+    scale: ScaleName,
+    panel: string | undefined,
+    where: string,
+    needed = true,
+  ): string | undefined {
+    const layout = this.#panels;
+    if (layout)
+      return layout.instanceOf(
+        this.#views,
+        this.#all,
+        this.#instances.values(),
+        scale,
+        panel,
+        where,
+        needed,
+      );
+    if (panel !== undefined && panel !== "")
+      throw new ChartError({
+        code: "unknown-reference",
+        path: "panel",
+        panel,
+        message: `${where}: no panel ${JSON.stringify(panel)} in a chart without panels; drop panel`,
+      });
+    const [view] = this.#views;
+    // Before a first scene, the axes the options give; a chart of a layout
+    // mark (a pie, a 3D chart) has none.
+    if (
+      !this.#layouts.length &&
+      (!view || scale === "x" || (scale === "y" ? view.drawsY : view.plans.yRight))
+    )
+      return "";
+    if (needed)
+      throw new ChartError({
+        code: "unknown-reference",
+        path: scale,
+        message: `${where} ${scale}: the chart has no ${axisName(scale)} axis; drop ${scale}`,
+      });
+    return undefined;
+  }
+
+  /**
+   * The interaction settings of panel `key`: a subplot's own
+   * (`PanelSpec.interaction`) over the chart's, one by one, but its limits
+   * per scale; the chart's for other panels and without a key.
+   */
+  interactionOf(key: string | undefined): InteractionSpec | undefined {
+    const { interaction, panels } = this.#config;
+    return key === undefined || !panels ? interaction : panels.interactionOf(interaction, key);
+  }
+
+  /**
+   * How far the views of an instance of a scale may go, and when they near
+   * their ends (`interaction.limits`): as its first panel sets them (panels
+   * sharing an instance agree, see `Panels.check`).
+   */
+  limitsOf(scale: ScaleName, instance: string): ScaleLimitsSpec | undefined {
+    const first = this.#instances.get(viewKey(scale, instance))?.panels[0];
+    return this.interactionOf(first)?.limits?.[scale];
+  }
+
+  /**
+   * A view of instance `instance` of scale `name`, ascending, kept inside
+   * its extent (see `limitsOf`): moved inside, keeping its span, where it
+   * fits, and the extent where it does not; on log axes by ratios, where
+   * ends that are not positive bound nothing.
    */
   #limit<View extends readonly [number, number]>(
     view: View | null,
     name: ScaleName,
+    instance: string,
   ): View | [number, number] | null {
-    const extent = this.#config.interaction?.limits?.[name]?.extent;
+    const extent = this.limitsOf(name, instance)?.extent;
     if (!view || !extent) return view;
-    const log = this.#config[name]?.type === "log";
+    // The type the options give (its first panel's own, else the chart's),
+    // else as last drawn.
+    const drawn = this.#instances.get(viewKey(name, instance));
+    const type = this.#config.panels?.typeOf(drawn?.panels[0], name) ?? this.#config[name]?.type;
+    const log = (type ?? drawn?.type) === "log";
     const to = log ? Math.log : Number;
     const from = log ? Math.exp : Number;
     const [lo, hi] = extent;
@@ -725,29 +945,6 @@ export class ChartModel {
     return view;
   }
 
-  /** The visible y ranges, each null when not zoomed. Band y axes ignore them. */
-  get yViewport(): YViewport {
-    return this.#yViewport;
-  }
-
-  /** Shows y ranges; throws for ranges the chart cannot show (see `checkYViewport`). */
-  setYViewport(viewport: YViewport): void {
-    this.checkYViewport(viewport);
-    this.#yViewport = {
-      y: this.#limit(range(viewport.y), "y"),
-      yRight: this.#limit(range(viewport.yRight), "yRight"),
-    };
-  }
-
-  /**
-   * Throws for a y range in a chart whose panels have scales of their own
-   * on that side: they have no one viewport there.
-   */
-  checkYViewport(viewport: Partial<YViewport>): void {
-    if ((viewport.y && !this.#shares("y")) || (viewport.yRight && !this.#shares("yRight")))
-      throw new Error("setViewport y: panels with y scales of their own have no one y range");
-  }
-
   /**
    * Draws these ranges in place of the viewports and fitted domains while a
    * change of view plays: as they are, not rounded, and not reported as the
@@ -755,15 +952,6 @@ export class ChartModel {
    */
   setTransitionDomains(domains: ViewDomains | null): void {
     this.#transition = domains;
-  }
-
-  /**
-   * Whether every panel shares a y axis' scale, so the chart has one
-   * viewport of it: without facets or with that axis' `scope` "chart";
-   * subplots never do.
-   */
-  #shares(axis: "y" | "yRight"): boolean {
-    return !this.#config.panels && this.#scope(axis) === "chart";
   }
 
   /** Which of the chart's panels share a scale (see `PanelLayout.scopes`): all of them without panels. */
@@ -1347,8 +1535,6 @@ export class ChartModel {
     // consider positive values. Band axes take their categories instead.
     // A playing change of view draws its own ranges.
     const shown = this.#transition;
-    const yView = shown?.y ?? this.#yViewport.y ?? undefined;
-    const yRightView = shown?.yRight ?? this.#yViewport.yRight ?? undefined;
     // Whether each group has data to label, and its domain before rounding.
     const xHas: boolean[] = [];
     const xDomains: [number, number][] = [];
@@ -1373,15 +1559,14 @@ export class ChartModel {
       );
       if ((spec?.zero ?? xMeasures[h]) && !log) dataX = unionExtent([dataX, [0, 0]]);
       xHas[h] = dataX !== undefined;
-      const view = shown?.x ?? this.#viewports.get(xKeys[h]!);
+      const view = shown?.x ?? this.#viewAs("x", xKeys[h]!, type);
       xDomains[h] = usableDomain(
-        view ? oriented(view, spec?.domain) : (spec?.domain ?? dataX),
+        view ? oriented(view, spec?.domain, xMarks[h]!, "x") : (spec?.domain ?? dataX),
         type,
       );
       if (breaks) xDomains[h] = breaks.showing(xDomains[h]!, !view && spec?.domain !== undefined);
       xSources[h] = shown?.x ? "drawn" : view || spec?.domain ? "set" : "fit";
     });
-    for (const key of this.#viewports.keys()) if (!xKeys.includes(key)) this.#viewports.delete(key);
     // What y extents read: marks' series within an x scale's domain or view.
     const part = (among: readonly MarkSeries[], h: number): YPart => {
       const [x0, x1] = xDomains[h]!;
@@ -1625,9 +1810,9 @@ export class ChartModel {
      * `source` says, with `count` ticks. Domains and views set are shown as
      * they are, unless padding is given; fitted ones are rounded (`nice`),
      * their ticks on the rounded values, then widened by the padding given
-     * or by `clear`, for what marks draw past their values. Ranges drawn
-     * already have their padding, and say what their ticks were chosen in
-     * (`within`).
+     * or by `clear`, for what marks draw past their values, and run from
+     * high to low where `marks` ask (`Mark.descends`). Ranges drawn already
+     * have their padding, and say what their ticks were chosen in (`within`).
      */
     const planRange = (
       context: AxisContext,
@@ -1638,7 +1823,9 @@ export class ChartModel {
       count: number,
       nice: boolean,
       clear: (rounded: [number, number]) => [number, number],
-      within?: readonly [number, number] | null,
+      within: readonly [number, number] | null | undefined,
+      marks: readonly MarkSeries[],
+      axis: "x" | "y",
     ): AxisPlan => {
       const { padding } = context;
       const rounded = source === "fit" ? niceAxisDomain(base, context, count, nice) : base;
@@ -1656,7 +1843,9 @@ export class ChartModel {
         : source === "drawn"
           ? (within ?? padding.unpad(base, pixels))
           : rounded;
-      const plan = planAxis(context, domain, range, count, ticksIn);
+      const down = source === "fit" && descends(marks, axis);
+      const turn = (d: readonly [number, number]) => (down ? ([d[1], d[0]] as const) : d);
+      const plan = planAxis(context, turn(domain), range, count, turn(ticksIn));
       if (padding) plan.padded = pixels;
       return plan;
     };
@@ -1681,6 +1870,8 @@ export class ChartModel {
         source === "fit" && (spec?.nice ?? !sideDrawn.some(({ mark }) => mark.tight)),
         (rounded) => padDomain("y", rounded, size, axisContext.type, sideDrawn),
         within,
+        sideMarks,
+        "y",
       );
     };
 
@@ -1709,7 +1900,6 @@ export class ChartModel {
      */
     const planY = (right: boolean) => {
       const axis = right ? "yRight" : "y";
-      const view = right ? yRightView : yView;
       const scope = this.#scope(axis);
       const drawsAxis = right ? rightIn : leftIn;
       // A scale every panel shares has one type, from all their marks;
@@ -1728,6 +1918,10 @@ export class ChartModel {
           ? layout!.groups(scope, split, columns, axis, config[axis])
           : undefined;
       const groupOf = groups?.groupOf ?? new Array<number>(panelCount).fill(0);
+      // Each instance's name: "" for the one every panel shares (insets aside).
+      const keys = groups
+        ? groups.keys.map((key, g) => (scope === "chart" && !g ? "" : key))
+        : [""];
       // What each group draws on this side, and its axis.
       const drawnOn = groups?.drawn ?? [onSide(marks, right)];
       const contexts = (groups?.axes ?? [{ type: shared!, spec: config[axis] }]).map((scale) =>
@@ -1761,10 +1955,11 @@ export class ChartModel {
           : [part(among, 0)];
         // A group's own type: a subplot's log or time axis.
         const { type: own, spec } = contexts[g]!;
-        const zoomed = !groups && view !== undefined;
-        const fixed = zoomed ? oriented(view, spec?.domain) : spec?.domain;
-        const source =
-          zoomed && (right ? shown?.yRight : shown?.y) ? "drawn" : fixed ? "set" : "fit";
+        // A change of view playing draws its own range (only in charts of one panel).
+        const playing = (!groups && shown?.[axis]) || undefined;
+        const view = playing ?? this.#viewAs(axis, keys[g]!, own);
+        const fixed = view ? oriented(view, spec?.domain, among, "y") : spec?.domain;
+        const source = playing ? "drawn" : fixed ? "set" : "fit";
         // A group shows something when its marks place a value along y,
         // annotations included; the extent of a fixed shared domain is not read.
         const extent = groups || !fixed ? this.#yData(parts, own, spec) : undefined;
@@ -1793,7 +1988,7 @@ export class ChartModel {
       const own = config.panels !== undefined || scope === "panel" || scope === "column";
       // Whether a group shows categories, which may be none.
       const banded = (i: number) => contexts[groupOf[i]!]!.type === "band";
-      return { axis, groups, groupOf, contexts, plans: byPanel, empty, own, banded };
+      return { axis, groups, groupOf, keys, contexts, plans: byPanel, empty, own, banded };
     };
     const leftY = planY(false);
     const rightY = rightUsed ? planY(true) : undefined;
@@ -1809,7 +2004,7 @@ export class ChartModel {
     );
     const hasData = xHas.includes(true) || ((leftData || rightUsed) && offX);
     /** Names the scale panel `i` shares on a side: "" when every panel does. */
-    const groupKey = (side: typeof leftY, i: number) => side.groups?.keys[side.groupOf[i]!] ?? "";
+    const groupKey = (side: typeof leftY, i: number) => side.keys[side.groupOf[i]!]!;
     // Subplots show, title, and grid each panel's y axes as its own settings
     // say; other charts title the chart's once.
     const panelAxis = (i: number, axis: "y" | "yRight" = "y") =>
@@ -1909,10 +2104,11 @@ export class ChartModel {
       shown = xDomains[h]!,
       source = xSources[h]!,
       within?: readonly [number, number],
+      start = left,
     ): AxisPlan => {
       const context = xContexts[h]!;
       const { type, spec, breaks } = context;
-      if (type === "band") return planCategoriesX(h, [left, left + plotWidth]);
+      if (type === "band") return planCategoriesX(h, [start, start + plotWidth]);
       // Room at the ends is time shown: on axes with breaks, positions.
       const room = (d: [number, number], as: AxisType) =>
         padDomain("x", d, plotWidth, as, xDrawn[h]);
@@ -1921,12 +2117,14 @@ export class ChartModel {
         shown,
         source,
         plotWidth,
-        [left, left + plotWidth],
+        [start, start + plotWidth],
         xTicks(context, plotWidth),
         source === "fit" && (spec?.nice ?? xMeasures[h]!),
         (rounded) =>
           breaks ? breaks.inPositions(rounded, (d) => room(d, "linear")) : room(rounded, type),
         within,
+        xMarks[h]!,
+        "x",
       );
     };
     let xPlans: AxisPlan[] = [];
@@ -2456,6 +2654,7 @@ export class ChartModel {
         xGroup: xKeys[h]!,
         yGroup: groupKey(leftY, i),
         yRightGroup: rightAt ? groupKey(rightY!, i) : "",
+        drawsY: leftIn[i]!,
         inspector,
         plans: { x: xAt, y: yAt, yRight: rightAt, grid: gridAt },
       });
@@ -2518,6 +2717,7 @@ export class ChartModel {
     }
     this.#views = views;
     this.#all = all;
+    this.#keepInstances();
     this.#namesPanels = layout !== undefined;
     this.#drawn = marks;
     this.#base = base;
@@ -2528,7 +2728,20 @@ export class ChartModel {
       const { x, y } = placement!.beside!(k, panels[split.keys.indexOf(panel)]!.plot);
       inside.push(...measured.place(x, y));
     });
-    if (strip) panels.push(navigator!.panel(this, views, planX, xContexts[0]!, strip, head.lift));
+    const stripPanel =
+      strip &&
+      navigator!.panel(
+        this,
+        views,
+        xKeys,
+        (h): XPlan =>
+          (start, width, domain, source, within) =>
+            planX(width, h, domain, source, within, start),
+        xContexts,
+        strip,
+        head.lift,
+      );
+    if (stripPanel) panels.push(stripPanel);
     // What insets make of the panels: their boxes, borders, and indicators.
     const painted = placement?.finish?.(
       panels,
@@ -2877,8 +3090,10 @@ export class ChartModel {
       measure,
       false,
     );
-    // Nothing is drawn along axes: let go of what the last such scene kept.
+    // Nothing is drawn along axes: let go of what the last such scene kept,
+    // its views going fitted.
     this.#views = [];
+    this.#keepInstances();
     this.#drawn = [];
     this.#base = undefined;
     this.#splitter = undefined;
@@ -2947,35 +3162,74 @@ export class ChartModel {
   }
 
   /**
-   * The panel whose scales the chart's own view, selection, and syncing
-   * read: the first drawing with the x scale panels share (an inset with
-   * one of its own may come before it), else the first.
+   * Notes the instances of the position scales the last scene drew; the
+   * views of those it no longer drew go, each noted with the panels it had.
    */
-  chartPanel(): DrawnPanel | undefined {
-    const panels = this.panels();
-    return panels.find(({ xGroup }) => xGroup === "") ?? panels[0];
+  /**
+   * The view of an instance a scene plans as of `type`: none when the last
+   * scene drew the instance as of another type, whose view then goes (see
+   * `#keepInstances`).
+   */
+  #viewAs(
+    scale: ScaleName,
+    instance: string,
+    type: AxisType,
+  ): readonly [number, number] | undefined {
+    const key = viewKey(scale, instance);
+    const was = this.#instances.get(key);
+    return was && was.type !== type ? undefined : this.#viewports.get(key);
+  }
+
+  #keepInstances(): void {
+    const before = this.#instances;
+    const instances = new Map<string, ScaleInstance>();
+    // The views, not `panels()`: the scene may give them more (insets' boxes) after this.
+    for (const { key, inspector, drawsY, ...view } of this.#views)
+      for (const scale of SCALES) {
+        const axis = scale === "yRight" ? inspector.rightFrame?.y : inspector.frame[scale];
+        if (!axis || (scale === "y" && !drawsY)) continue;
+        const instance = view[`${scale}Group`];
+        const found = instances.get(viewKey(scale, instance));
+        if (found) (found.panels as string[]).push(key);
+        else
+          instances.set(viewKey(scale, instance), {
+            scale,
+            instance,
+            type: axis.type,
+            categories: axis.categories,
+            panels: [key],
+          });
+      }
+    this.#instances = instances;
+    // Views of instances no longer drawn go: those drawn before are noted,
+    // by scale and then by first panel, with the panels they had.
+    for (const scale of SCALES)
+      for (const [key, was] of before)
+        if (
+          was.scale === scale &&
+          instances.get(key)?.type !== was.type &&
+          this.#viewports.delete(key)
+        )
+          this.#retired.push({ ...was, view: null });
+    // A view asked for before the first scene, of an instance it did not draw, was never shown.
+    for (const key of this.#viewports.keys()) if (!instances.has(key)) this.#viewports.delete(key);
   }
 
   /** The last scene's panels: each one's key, plot, and scales. */
   panels(): readonly DrawnPanel[] {
     const views = this.#views;
     if (this.#panelList?.views !== views) {
-      const panels = views.map(
-        ({ key, label, plot, cover, visible, xGroup, yGroup, yRightGroup, inspector, plans }) => ({
-          key,
-          label,
-          plot,
-          cover,
-          visible,
-          x: inspector.frame.x,
-          xGroup,
-          y: inspector.frame.y,
-          yGroup,
-          yRight: inspector.rightFrame?.y,
-          yRightGroup,
-          plans,
-        }),
-      );
+      const panels = views.map(({ key, label, plot, cover, visible, inspector, ...view }) => ({
+        ...view,
+        key,
+        label,
+        plot,
+        cover,
+        visible,
+        x: inspector.frame.x,
+        y: view.drawsY ? inspector.frame.y : (inspector.rightFrame?.y ?? inspector.frame.y),
+        yRight: inspector.rightFrame?.y,
+      }));
       this.#panelList = { views, panels };
     }
     return this.#panelList.panels;
@@ -3276,22 +3530,29 @@ function validate(config: ChartConfig): [Mark[], LayoutMark[], number[]] {
     }
   });
   for (const mark of marks) {
-    // The right axis measures values; marks placed along y belong on the left.
-    if (sideOf(mark) === "right" && (mark.tooltip === "y" || mark.tooltip === "cell"))
-      throw new Error(`${mark.spec.type} axis: marks along y cannot use the right axis`);
+    // The right axis measures values; marks placed along y belong on the left
+    // (marks of cells refuse it themselves).
+    if (sideOf(mark) === "right" && mark.tooltip === "y")
+      throw new Error(`${mark.spec.type} axis: marks along y cannot use the right axis; drop axis`);
     // Facet panels come from whole tables; a view's rows would split by them wrongly.
     if (config.facet && mark.view && mark.spec.facet !== "repeat")
       throw new Error(
         `${mark.spec.type} facet: a row view cannot split into facets yet; give it facet: "repeat"`,
       );
   }
-  if (config.facet && config.panels) throw new Error("chart: facet or panels, not both");
   const duration = typeof config.animation === "object" ? config.animation.duration : undefined;
   if (duration !== undefined && !(Number.isFinite(duration) && duration >= 0))
     throw new RangeError(`chart animation.duration: expected 0 or more ms; received ${duration}`);
   if (!config.panels) {
-    const named = config.marks.find((mark) => mark.spec.panel !== undefined);
-    if (named) throw new Error(`${named.spec.type} panel: the chart has no panels; drop it`);
+    const index = config.marks.findIndex((mark) => mark.spec.panel !== undefined);
+    const named = config.marks[index];
+    if (named)
+      throw new ChartError({
+        code: "unknown-reference",
+        path: `marks[${index}].panel`,
+        mark: named.spec.id ?? index,
+        message: `${named.spec.type} panel: the chart has no panels; drop it`,
+      });
   }
   // Facets and panels check their marks, layout marks too; without them,
   // layout marks have the chart to themselves.
@@ -3325,13 +3586,23 @@ function range(domain: readonly [number, number] | null): [number, number] | nul
   return domain && domain[0] !== domain[1] ? [Math.min(...domain), Math.max(...domain)] : null;
 }
 
-/** An ascending viewport the way the axis' configured domain runs, so reversed axes stay reversed. */
+/**
+ * An ascending viewport the way the axis runs, so reversed axes stay
+ * reversed: as its configured domain, or without one, as its marks ask.
+ */
 function oriented(
   viewport: readonly [number, number],
   domain: readonly [number, number] | undefined,
+  marks: readonly MarkSeries[],
+  axis: "x" | "y",
 ): [number, number] {
   const [lo, hi] = viewport;
-  return domain && domain[0] > domain[1] ? [hi, lo] : [lo, hi];
+  return (domain ? domain[0] > domain[1] : descends(marks, axis)) ? [hi, lo] : [lo, hi];
+}
+
+/** Whether `axis`' automatic domain runs from high to low (`Mark.descends`). */
+function descends(marks: readonly MarkSeries[], axis: "x" | "y"): boolean {
+  return marks.some(({ mark }) => mark.descends === axis);
 }
 
 /** A table's category field whose values take palette slots in its dictionary's order (see `ChartModel#slot`). */

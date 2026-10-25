@@ -15,6 +15,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { cellOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -161,7 +162,7 @@ describe("calendar heatmaps by week", () => {
       interaction: { zoom: "x" },
       marks: [heatmap(days(january, 14), { date: "day", color: "n" })],
     });
-    model.setViewport([Date.UTC(2026, 0, 5), Date.UTC(2026, 0, 12)]);
+    setViewport(model, [Date.UTC(2026, 0, 5), Date.UTC(2026, 0, 12)]);
     model.scene(estimateText);
     expect(model.xScale()!.domain).toEqual([Date.UTC(2026, 0, 5), Date.UTC(2026, 0, 12)]);
     const series = model.panelSeries("")[0]!;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { domainsAt, durationOf, type Transition, ViewAnimation } from "../../src/dom/transition.ts";
-import type { ChartModel, DrawnPanel } from "../../src/model/model.ts";
+import type { ChartModel, DrawnPanel, ViewDomains } from "../../src/model/model.ts";
 
 // Frames are counted by the scheduler, which runs none in Node.
 const clock = vi.hoisted(() => ({ frames: 0 }));
@@ -9,11 +9,11 @@ vi.mock("../../src/dom/scheduler.ts", () => ({
   lastFrameTime: () => 0,
 }));
 
-const transition = (domains: Transition["domains"], log = false): Transition => ({
+const transition = (domains: ViewDomains, log = false): Transition => ({
   batch: { frame: 0, costs: new Map() },
-  domains,
+  axes: { domains, log: { x: false, y: log, yRight: false } },
+  planes: undefined,
   to: undefined,
-  log: { x: false, y: log, yRight: false },
   start: 0,
   duration: 200,
 });

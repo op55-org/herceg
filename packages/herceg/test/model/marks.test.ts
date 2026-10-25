@@ -19,6 +19,7 @@ import type {
 import { gridAt } from "../helpers/grid.ts";
 import { legendOf, rampsOf } from "../helpers/guides.ts";
 import { axisOf, positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -555,7 +556,7 @@ describe("horizontal bar", () => {
   it("reports only bars drawn in view", () => {
     const lengths = table({ name: ["a", "b"], v: [1, 10] });
     const { model } = build({ marks: [bar(lengths, { x: "v", y: "name" })] });
-    model.setViewport([5, 8]);
+    setViewport(model, [5, 8]);
     const scene = model.scene(estimateText);
     const y = model.yScale()!;
     // Bar a ends at 1, left of the view; bar b crosses the whole view.
@@ -706,7 +707,7 @@ describe("point", () => {
   it("does not pick points clipped out of view", () => {
     const pts = table({ x: [-1, 1], y: [5, 5] });
     const { model } = build({ marks: [point(pts, { x: "x", y: "y" })] });
-    model.setViewport([0, 10]);
+    setViewport(model, [0, 10]);
     const scene = model.scene(estimateText);
     expect((scene.panels[0]!.marks[0] as PointGeometry).count).toBe(1);
     const inspection = model.inspect(scene.panels[0]!.plot.x, model.yScale()!.map(5))!;
@@ -719,13 +720,13 @@ describe("point", () => {
       tooltip: { mode: "nearest-x" },
       marks: [point(pts, { x: "x", y: "y" })],
     });
-    model.setViewport([0, 10]);
+    setViewport(model, [0, 10]);
     const scene = model.scene(estimateText);
     expect(model.inspect(scene.panels[0]!.plot.x, scene.panels[0]!.plot.y + 5)!.value).toBe(1);
     // Sorted series too: the nearest x inside [2.5, 5] to 2.5 is 3, not 2.
     const steps = table({ x: [0, 1, 2, 3, 4, 5, 6], v: [0, 1, 2, 3, 4, 5, 6] });
     const lines = build({ marks: [line(steps, { x: "x", y: "v" })] }).model;
-    lines.setViewport([2.5, 5]);
+    setViewport(lines, [2.5, 5]);
     const plot = lines.scene(estimateText).panels[0]!.plot;
     expect(lines.inspect(plot.x, plot.y + 5)!.value).toBe(3);
   });

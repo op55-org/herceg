@@ -726,7 +726,15 @@ describe("<Chart>", () => {
       () => ({ metrics, view, record: (event: unknown) => seen.push(event) }),
     );
     chart().setViewport({ x: [1, 2], y: [0, 5] });
-    expect(seen).toEqual([{ x: [1, 2], y: [0, 5], yRight: null }]);
+    expect(seen).toMatchObject([
+      {
+        cause: "api",
+        scales: [
+          { scale: "x", view: [1, 2] },
+          { scale: "y", view: [0, 5] },
+        ],
+      },
+    ]);
   });
 
   it("supports event modifiers and keeps native events off chart listeners", () => {
@@ -742,7 +750,8 @@ describe("<Chart>", () => {
     chart().select([1, 2]);
     // `click` is the chart's event, not the element's.
     host.firstElementChild!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(seen).toEqual([{ x: [0, 1], y: null, lasso: null }]);
+    expect(seen).toMatchObject([{ x: [0, 1], y: null, lasso: null }]);
+    expect(seen).toHaveLength(1);
   });
 
   it("reports invalid marks and keeps the chart for when they are fixed", async () => {

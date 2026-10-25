@@ -18,6 +18,8 @@ export type Channel = "cursor" | "viewport" | "selection";
 export interface ChannelOf {
   group: string;
   scale: "x" | "y" | "xy";
+  /** The panel whose scales it carries; by default, those every panel shares. */
+  panel?: string | undefined;
   snap?: CursorSnap | undefined;
   tooltip?: boolean | undefined;
 }

@@ -8,7 +8,7 @@ declare const element: HTMLElement;
 // wherever they bubble to.
 element.addEventListener("herceg:select", (event) => {
   const range: [number, number] | [string, string] | null | undefined = event.detail.selection?.x;
-  const panels: string[] | undefined = event.detail.panels;
+  const panels: string[] = event.detail.owner.panels;
   return [range, panels];
 });
 document.addEventListener("herceg:click", (event) => event.detail.inspection?.points[0]?.row);
@@ -17,7 +17,10 @@ document.addEventListener("herceg:error", (event) => {
   event.preventDefault();
   return code;
 });
-window.addEventListener("herceg:viewport", (event) => event.detail.viewport.time);
+window.addEventListener("herceg:viewport", (event) => event.detail.views[0]?.time);
+document.addEventListener("herceg:edge", (event) => event.detail.side === "start");
+document.addEventListener("herceg:rowselection", (event) => event.detail.selection?.kind);
+document.addEventListener("herceg:visibility", (event) => event.detail.hiddenKeys.length);
 // @ts-expect-error a ready event says which host, and nothing else
 element.addEventListener("herceg:ready", (event) => event.detail.chart);
 

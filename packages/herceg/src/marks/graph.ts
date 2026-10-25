@@ -12,7 +12,6 @@ import { HitGrid } from "../layout/hit-grid.ts";
 import { labelFor } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
-import type { ChartConfig } from "../model/model.ts";
 import { isLightColor } from "../scale/color.ts";
 import type {
   Geometry,
@@ -23,7 +22,7 @@ import type {
   ShapesGeometry,
   TextGeometry,
 } from "../scene/scene.ts";
-import type { Frozen, GraphLayout, GraphSpec } from "../spec/spec.ts";
+import type { Frozen, GraphLayout, GraphSpec, InteractionSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { surface } from "../theme.ts";
 import {
@@ -43,6 +42,7 @@ import {
   NodePositions,
   pairKey,
 } from "./node-positions.ts";
+import { refuseValues } from "./still.ts";
 
 export type GraphOptions<S extends Schema, N extends Schema = Schema> = {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
@@ -180,6 +180,12 @@ interface Network extends LayoutNetwork {
   source: Int32Array;
   target: Int32Array;
   value: Float64Array;
+  /**
+   * In a facet panel, per undirected link, 1 where the panel's first row
+   * of it names its ends the other way round, as the panel reads it; its
+   * geometry keeps the whole network's order.
+   */
+  turned?: Uint8Array | undefined;
   /** The link of a pair: `linkOf.get(pairKey(s, t))`, either way round unless directed. */
   linkOf: Map<number, number>;
   stride: number;
@@ -319,8 +325,8 @@ export class GraphMark implements LayoutMark {
         : undefined;
   }
 
-  controls(config: ChartConfig): LayoutControls {
-    const { zoom, pan, brush, drag, bindings } = config.interaction ?? {};
+  controls(interaction: InteractionSpec | undefined): LayoutControls {
+    const { zoom, pan, brush, drag, bindings } = interaction ?? {};
     // Without interaction, the chart still draws the frames a layout takes.
     if (!zoom && !pan && !brush && !drag && !bindings?.length) return { kind: "layout", hint: "" };
     const pans = pan ?? zoom;
@@ -599,7 +605,9 @@ export class GraphMark implements LayoutMark {
   /**
    * The part of the network a facet panel's rows of the links table give:
    * the same nodes and links, each link's total over those rows (0 for
-   * links without), and the label they name it by; kept per rows.
+   * links without), the label they name it by, and which undirected links
+   * the first of those rows names the other way round (`turned`); kept per
+   * rows.
    */
   #part(network: Network, rows: Uint32Array): Network {
     const kept = this.#parts.get(rows);
@@ -611,15 +619,25 @@ export class GraphMark implements LayoutMark {
     const value = new Float64Array(network.value.length);
     // -3 for links none of the rows names yet.
     const label = named && new Int32Array(network.value.length).fill(-3);
+    const from = spec.directed ? undefined : links.categories(spec.source);
+    let turned: Uint8Array | undefined;
     for (const row of rows) {
       const link = network.linkOfRow[row]!;
       if (link < 0) continue;
+      // The panel's first row of an undirected link names its ends, as alone it would.
+      if (from && value[link] === 0) {
+        const s = network.nodeOf.get(from.dictionary[from.codes[row]!]!);
+        if (s !== network.source[link]) {
+          turned ??= new Uint8Array(value.length);
+          turned[link] = 1;
+        }
+      }
       value[link]! += values ? values[row]! : 1;
       if (!label) continue;
       const code = named!.codes[row]!;
       label[link] = label[link] === -3 || label[link] === code ? code : -2;
     }
-    const part = { ...network, value, label };
+    const part = { ...network, value, label, turned };
     this.#parts.set(rows, part);
     return part;
   }
@@ -639,6 +657,7 @@ export class GraphMark implements LayoutMark {
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.spec.type);
     const whole = this.#build();
     // The chart's state of the panel keeps where nodes are; a lone mark keeps its own.
     const slot = frame.nodePositions ?? this.#positions;
@@ -689,8 +708,9 @@ export class GraphMark implements LayoutMark {
     const groupColors = groups.map((name) => frame.color(groupKey(frame.id, name)));
     const plain = groups.length > 0 ? theme.muted : frame.color(groupKey(frame.id, undefined));
     const colorOf = (node: number) => (group[node]! >= 0 ? groupColors[group[node]!]! : plain);
+    // Nodes of no group go with the mark's own key (`{"mark":...}`), which hides it whole.
     const shown = (node: number) =>
-      group[node]! < 0 || !hidden.has(groupKey(frame.id, groups[group[node]!]!));
+      !hidden.has(groupKey(frame.id, group[node]! < 0 ? undefined : groups[group[node]!]));
     const joined = rows && new Uint8Array(count);
     for (let link = 0; joined && link < source.length; link++)
       if (value[link]! > 0) joined[source[link]!] = joined[target[link]!] = 1;
@@ -962,8 +982,7 @@ export class GraphMark implements LayoutMark {
     };
     const linkItem = (i: number): LayoutItem => {
       const link = links[i]!;
-      const s = source[link]!;
-      const t = target[link]!;
+      const [s, t] = endsOf(network, link);
       const r = route(link);
       const code = network.label?.[link] ?? -1;
       const named = code >= 0 ? `${network.labels[code]}: ` : "";
@@ -1598,10 +1617,17 @@ export class GraphMark implements LayoutMark {
       for (const link of links)
         if (network.value[link]! > network.value[strongest]!) strongest = link;
       const arrow = this.spec.directed ? "→" : "—";
-      text += ` Strongest link: ${names[network.source[strongest]!]} ${arrow} ${names[network.target[strongest]!]}, ${this.spec.value} ${formatNumber(network.value[strongest]!, locale)}.`;
+      const [s, t] = endsOf(network, strongest);
+      text += ` Strongest link: ${names[s]} ${arrow} ${names[t]}, ${this.spec.value} ${formatNumber(network.value[strongest]!, locale)}.`;
     }
     return text + left;
   }
+}
+
+/** A link's ends in the order its rows name them (see `Network.turned`). */
+function endsOf(network: Network, link: number): [source: number, target: number] {
+  const ends: [number, number] = [network.source[link]!, network.target[link]!];
+  return network.turned?.[link] ? [ends[1], ends[0]] : ends;
 }
 
 /** The node a node's item key names, -1 for none. */

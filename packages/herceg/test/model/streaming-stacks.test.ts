@@ -6,6 +6,7 @@ import { estimateText } from "../../src/layout/text.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function rows(from: number, count: number) {
   const t = Array.from({ length: count }, (_, i) => from + i);
@@ -110,7 +111,7 @@ describe("stacks over streaming tables", () => {
     geometry(streaming);
     data.append(make(20_000, length));
     for (const range of [null, [100_000, 101_000]] as const) {
-      streaming.setViewport(range);
+      setViewport(streaming, range);
       const fresh = new ChartModel({
         marks: [
           mark(
@@ -123,7 +124,7 @@ describe("stacks over streaming tables", () => {
         ],
       });
       fresh.setSize(600, 300, 1);
-      fresh.setViewport(range);
+      setViewport(fresh, range);
       expect(geometry(streaming)).toEqual(geometry(fresh));
     }
   });

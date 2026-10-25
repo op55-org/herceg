@@ -7,18 +7,31 @@ import { type Table, table as typed } from "../../src/data/table.ts";
 
 import { estimateText } from "../../src/layout/text.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
+import { candlestick } from "../../src/marks/candlestick.ts";
+import { contour } from "../../src/marks/contour.ts";
+import { custom } from "../../src/marks/custom.ts";
+import { dendrogram } from "../../src/marks/dendrogram.ts";
 import { gauge } from "../../src/marks/gauge.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { histogram } from "../../src/marks/histogram.ts";
 import { point } from "../../src/marks/point.ts";
+import { point3d } from "../../src/marks/point3d.ts";
 import { rug } from "../../src/marks/rug.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { panels } from "../../src/model/panels.ts";
 import {
   type RowSelectionChange,
   rowSelection,
   type SelectionBinding,
 } from "../../src/model/row-selection.ts";
-import type { Brushed as Selection } from "../../src/model/selected-rows.ts";
+import {
+  brushedRows,
+  clickedRows,
+  type Brushed as Selection,
+} from "../../src/model/selected-rows.ts";
+import { ChartError } from "../../src/spec/errors.ts";
+import type { BrushSpec, PanelInteractionSpec } from "../../src/spec/spec.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>): Table => typed(columns) as unknown as Table;
@@ -75,6 +88,18 @@ function mounted(binding: Partial<SelectionBinding> = {}) {
 }
 
 const brush = (x: readonly [number, number]): Selection => ({ x, y: null, lasso: null });
+
+/** What `make` refuses: a chart error's code, path, and message. */
+function refusal(make: () => unknown) {
+  try {
+    make();
+  } catch (error) {
+    expect(error).toBeInstanceOf(ChartError);
+    const { code, path, message } = error as ChartError;
+    return { code, path, message };
+  }
+  throw new Error("expected a refusal");
+}
 const noKeys = { shiftKey: false, ctrlKey: false, metaKey: false };
 
 describe("row selection bindings", () => {
@@ -144,6 +169,147 @@ describe("row selection bindings", () => {
     ).not.toThrow();
   });
 
+  it("refuse as chart errors at the option they refuse", () => {
+    const store = selectionStore(trips);
+    const bound = rowSelection({ store, channel: "c" });
+    expect(refusal(() => rowSelection({ store, channel: "c" }, { store, channel: "" }))).toEqual({
+      code: "invalid-option",
+      path: "rowSelection[1].channel",
+      message: 'rowSelection channel: expected a name; received ""',
+    });
+    expect(
+      refusal(() => drawn({ marks: [gauge(trips, { value: "km" })], rowSelection: bound })),
+    ).toEqual({
+      code: "unsupported",
+      path: "rowSelection",
+      message:
+        "gauge rowSelection: cannot select rows yet; select them in a chart of the same table along x and y, linked by the store",
+    });
+    // A 3D chart's layers draw as one: named by their type.
+    const cloud = point3d(trips, { x: "km", y: "fare", z: "km" });
+    expect(refusal(() => drawn({ marks: [cloud], rowSelection: bound })).message).toMatch(
+      /^point3d rowSelection: cannot select rows yet;/,
+    );
+    const counted = { marks: [histogram(trips, { x: "km" })], rowSelection: bound };
+    expect(refusal(() => drawn({ ...counted, interaction: { brush: "y" } }))).toEqual({
+      code: "unsupported",
+      path: "interaction.brush",
+      message: "histogram brush: its y axis holds statistics; brush along x only",
+    });
+    const other = table({ x: [1] });
+    expect(
+      refusal(() => drawn({ marks: [point(other, { x: "x", y: "x" })], rowSelection: bound })),
+    ).toMatchObject({ code: "invalid-option", path: "rowSelection" });
+  });
+
+  it("judge the brush of each panel a mark draws in, refused where it is set", () => {
+    const store = selectionStore(trips);
+    const bound = rowSelection({ store, channel: "c" });
+    const scatter = point(trips, { x: "km", y: "fare", panel: "a" });
+    const inPanels = (
+      counts: ChartConfig["marks"][number],
+      own: PanelInteractionSpec,
+      chartBrush?: BrushSpec,
+    ) =>
+      drawn({
+        marks: [scatter, counts],
+        panels: panels([{ id: "a" }, { id: "b", interaction: own }]),
+        ...(chartBrush && { interaction: { brush: chartBrush } }),
+        rowSelection: bound,
+      });
+    const counts = histogram(trips, { x: "km", panel: "b" });
+    // A subplot's own brush takes the place of the chart's over what it draws...
+    expect(() => inPanels(counts, { brush: "x" }, "y")).not.toThrow();
+    // ...and is refused at the subplot that sets it.
+    expect(refusal(() => inPanels(counts, { brush: "y" }))).toEqual({
+      code: "unsupported",
+      path: "panels[1].interaction.brush",
+      message: "histogram brush: its y axis holds statistics; brush along x only",
+    });
+    expect(refusal(() => inPanels(counts, { zoom: true }, "y")).path).toBe("interaction.brush");
+    // A mark in every panel, under each panel's brush.
+    const everywhere = histogram(trips, { x: "km", panel: "*" });
+    expect(refusal(() => inPanels(everywhere, { brush: "x" }, "y")).path).toBe("interaction.brush");
+    // Whether a panel's brush writes rows, and so never zooms, is its own too.
+    const model = inPanels(counts, { brush: "x" });
+    const link = bound.mount(
+      undefined,
+      model,
+      chart(),
+      { emit() {} },
+      () => {},
+      () => null,
+      {
+        textContent: "",
+      },
+    );
+    expect([link.brushes("a"), link.brushes("b")]).toEqual([false, true]);
+    link.dispose();
+  });
+
+  it("refuse tables only marks whose rows gestures do not select read, and what they cannot do", () => {
+    const store = selectionStore(trips);
+    const bind = (binding: Partial<SelectionBinding> = {}) =>
+      rowSelection({ store, channel: "c", ...binding });
+    // Annotations of a table, beside points of it, leave the points' rows selected.
+    const rules = rule(trips, { x: "km" });
+    expect(refusal(() => drawn({ marks: [rules], rowSelection: bind() }))).toEqual({
+      code: "unsupported",
+      path: "rowSelection",
+      message:
+        "rule rowSelection: annotations do not select their rows yet; bind the table of a mark that draws its rows as data, such as points",
+    });
+    expect(() =>
+      drawn({ marks: [point(trips, { x: "km", y: "fare" }), rules], rowSelection: bind() }),
+    ).not.toThrow();
+    const merges = table({ first: [0, 3], second: [1, 2], height: [1, 2] });
+    const tree = dendrogram(merges, {
+      first: "first",
+      second: "second",
+      height: "height",
+      leaves: ["a", "b", "c"],
+    });
+    expect(
+      refusal(() =>
+        drawn({
+          marks: [tree],
+          rowSelection: rowSelection({ store: selectionStore(merges), channel: "c" }),
+        }),
+      ).message,
+    ).toBe(
+      "dendrogram rowSelection: its rows are merges of clusters, which gestures do not select; bind the table of the heatmap it orders",
+    );
+    // A contour's bands summarize its grid: brushes select the grid's rows, clicks none.
+    const grid = table({ x: [0, 1, 0, 1], y: [0, 0, 1, 1], z: [0, 1, 2, 3] });
+    const bands = contour(grid, { x: "x", y: "y", color: "z", thresholds: [1.5] });
+    const ofGrid = (binding: Partial<SelectionBinding>) =>
+      rowSelection({ store: selectionStore(grid), channel: "c", ...binding });
+    expect(
+      refusal(() => drawn({ marks: [bands], rowSelection: ofGrid({ effect: "none" }) })),
+    ).toEqual({
+      code: "unsupported",
+      path: "rowSelection.events",
+      message:
+        'contour rowSelection events: its bands summarize the grid, whose rows a click does not select; give events: ["brush"], and brush a range of x or y',
+    });
+    expect(
+      refusal(() => drawn({ marks: [bands], rowSelection: ofGrid({ events: ["brush"] }) })),
+    ).toEqual({
+      code: "unsupported",
+      path: "rowSelection.effect",
+      message:
+        'contour rowSelection effect: its bands draw no highlight of the rows selected; give effect: "none"',
+    });
+    const brushed = drawn({
+      marks: [bands],
+      interaction: { brush: "x" },
+      rowSelection: ofGrid({ events: ["brush"], effect: "none" }),
+    });
+    expect(brushedRows(brushed, grid, brush([0.5, 1.5]), null)).toEqual(
+      selectWhere(col("x").ge(0.5).and(col("x").le(1.5))),
+    );
+  });
+
   it("compare as JSON by their stores' identities", () => {
     const store = selectionStore(trips);
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -162,6 +328,57 @@ describe("row selection bindings", () => {
         rowSelection({ store, channel: "c", effect: "none" }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("the rows gestures select", () => {
+  it("of custom marks of x and y fields, as of points", () => {
+    const circles = custom(trips, {
+      x: "km",
+      y: "fare",
+      draw({ series, x, y, circle }) {
+        for (const s of series)
+          for (let i = 0; i < s.length; i++) circle(x(s.x[i]!), y(s.y[i]!), 3, { fill: s.color });
+      },
+    });
+    const model = drawn({
+      marks: [circles],
+      interaction: { brush: "x" },
+      rowSelection: rowSelection({ store: selectionStore(trips), channel: "c", effect: "none" }),
+    });
+    expect(brushedRows(model, trips, brush([1.5, 3.5]), null)).toEqual(
+      selectWhere(col("km").ge(1.5).and(col("km").le(3.5))),
+    );
+    const [px, py] = [model.xScale()!.map(3), model.yScale()!.map(12)];
+    expect(Array.from(clickedRows(model, new Set([trips]), px, py)?.rows ?? [])).toEqual([2]);
+  });
+
+  it("of a candlestick clicked anywhere on its candle", () => {
+    const prices = table({
+      day: [1, 2, 3],
+      open: [10, 20, 15],
+      high: [30, 40, 35],
+      low: [5, 15, 10],
+      close: [20, 15, 30],
+    });
+    const candles = candlestick(prices, {
+      x: "day",
+      open: "open",
+      high: "high",
+      low: "low",
+      close: "close",
+    });
+    const model = drawn({ marks: [candles] });
+    const tables = new Set([prices]);
+    const x = model.xScale()!.map(2);
+    const y = model.yScale()!;
+    // Its wick above the body, and the body's edge away from its middle.
+    for (const [px, py] of [
+      [x, y.map(38)],
+      [x + 4, y.map(17)],
+    ] as const)
+      expect(Array.from(clickedRows(model, tables, px, py)?.rows ?? [])).toEqual([1]);
+    expect(clickedRows(model, tables, x, y.map(45))).toBeUndefined();
   });
 });
 
@@ -245,12 +462,12 @@ describe("a mounted chart's row selection", () => {
 
   it("writes only the gestures in its events", () => {
     const { store, link } = mounted({ events: ["click"] });
-    expect(link.brushes).toBe(false);
+    expect(link.brushes(undefined)).toBe(false);
     expect(link.brushed(brush([1, 2]), null, true)).toBeUndefined();
     expect(store.get("focus")).toBeNull();
     const reading = mounted({ events: [] });
     expect(reading.link.clicked(5, 5, noKeys)).toBeUndefined();
-    expect(mounted().link.brushes).toBe(true);
+    expect(mounted().link.brushes(undefined)).toBe(true);
   });
 
   it("highlights only with effect highlight, and lets go of the model when disposed", () => {

@@ -861,12 +861,14 @@ describe("a navigator's sliders", () => {
     const target = sliders(chart)[1]!;
     pointer(chart, target, "pointerdown", at(300), y);
     pointer(chart, target, "pointermove", at(350), y);
-    const held = chart.getViewport().x;
+    expect(chart.getViewport().x).not.toBeNull();
+    // A view of another type goes with it, and the drag sets none of the new one.
     chart.update({ x: { show: false, domain: [1, 1000], type: "log" } });
     chart.render();
+    expect(chart.getViewport().x).toBeNull();
     pointer(chart, target, "pointermove", at(400), y);
     pointer(chart, target, "pointerup", at(400), y);
-    expect(chart.getViewport().x).toEqual(held);
+    expect(chart.getViewport().x).toBeNull();
   });
 
   it("survive a viewport listener that destroys the chart mid-drag", async () => {

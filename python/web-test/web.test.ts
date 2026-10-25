@@ -343,9 +343,12 @@ describe.each(engines)("web pages in %s", (engine) => {
     );
     expect(view).toEqual([start, end]);
     const [event] = await events(page, "herceg:viewport", 1, "synced-1");
-    expect(event!.detail).toEqual({
+    // The synced chart's change, of the x every panel shares.
+    expect(event!.detail).toMatchObject({
       id: "synced-1",
-      viewport: { x: [start, end], y: null, yRight: null, time: ["x"] },
+      cause: "sync",
+      scales: [{ scale: "x", instance: "", time: true, panels: [""], view: [start, end] }],
+      views: [{ panel: "", x: [start, end], y: null, yRight: null, time: ["x"] }],
     });
     await context.close();
   });

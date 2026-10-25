@@ -85,10 +85,11 @@ export class Bindings {
    * The bindings of a chart's `interaction`: its own, in order, then the
    * presets'. Throws for a gesture bound twice, for keys the keyboard
    * cursor answers to, for a brush that zooms in a chart whose brushes
-   * select rows (`brushesRows`), and for limits that run backwards.
+   * select rows (`brushesRows`), and for limits that run backwards,
+   * naming them under `path` (a subplot's `panels[0].interaction`).
    */
-  constructor(interaction: InteractionSpec = {}, brushesRows = false) {
-    this.list = compile(interaction, brushesRows);
+  constructor(interaction: InteractionSpec = {}, brushesRows = false, path = "interaction") {
+    this.list = compile(interaction, brushesRows, path);
   }
 
   /**
@@ -123,10 +124,10 @@ export class Bindings {
  * numbers (or null), or that run backwards; edges' fractions below zero.
  * Specs are checked as they load; charts made in code, here.
  */
-function checkLimits({ limits }: InteractionSpec): void {
+function checkLimits({ limits }: InteractionSpec, path: string): void {
   for (const name of ["x", "y", "yRight"] as const) {
     const { extent, edge } = limits?.[name] ?? {};
-    const at = `interaction.limits.${name}`;
+    const at = `${path}.limits.${name}`;
     const end = (value: unknown) =>
       value === null || (typeof value === "number" && Number.isFinite(value));
     if (
@@ -148,14 +149,14 @@ function checkLimits({ limits }: InteractionSpec): void {
   }
 }
 
-function compile(interaction: InteractionSpec, brushesRows: boolean): Binding[] {
-  checkLimits(interaction);
+function compile(interaction: InteractionSpec, brushesRows: boolean, path: string): Binding[] {
+  checkLimits(interaction, path);
   const { pan, zoom, brush, rotate = true, drag } = interaction;
   const list: Binding[] = [];
   const add = (binding: BindingSpec) =>
     list.push({ ...binding, mods: mask(binding.gesture) } as Binding);
   for (const [i, binding] of (interaction.bindings ?? []).entries()) {
-    const at = `interaction.bindings[${i}]`;
+    const at = `${path}.bindings[${i}]`;
     const { gesture, action } = binding;
     const mods = mask(gesture);
     const twin = list.findIndex(

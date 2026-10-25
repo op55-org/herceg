@@ -1318,8 +1318,9 @@ few, and so far no index serves y), and the keyboard steps through each
 series' rows in order. Such marks use the left y axis, as horizontal bars
 do, and span their positions along y whatever x shows, as marks along x
 span their positions whatever y shows; zooming along y does not rescale
-x. They show new values at once instead of animating them, since value
-transitions move points along y.
+x. Value transitions move a line's points along x (curving them with the
+coordinates swapped, as the mark does); areas along y show their new
+values at once.
 
 ## Heatmap cells
 
@@ -1610,9 +1611,11 @@ refused. Animated view changes interpolate positions.
 ## Range navigator
 
 A chart's `navigator` (`rangeNavigator(options)`, a `Navigator`; in specs,
-`true` or `{ height?, marks? }`) adds a strip under the
+`true` or `{ height?, marks?, panel? }`) adds a strip under the
 plot, or under all the panels of facets and subplots, with one window over
-the x range they share (`model/navigator.ts`). The native option is a prepared object, as
+an x range: the one every panel shares, or with `panel` that of a facet
+panel or subplot, which the panels sharing its x scale follow
+(`model/navigator.ts`). The native option is a prepared object, as
 breaks, facets, and panels are, so the model reaches the strip only through
 it: a line chart without one bundles a few hooks (room under the axis, the
 strip's panel, the check, and mounting the sliders), about 110 bytes gzip.
@@ -1620,7 +1623,7 @@ strip's panel, the check, and mounting the sliders), about 110 bytes gzip.
 drawing is the model's, and only the browser's sliders load on demand.
 `Navigator.describe` writes the text alternative's sentence from the last
 drawn window, using its first panel's x tooltip formatter, and says that
-the navigator controls every panel's x when there are several. The DOM
+which panels' x the navigator controls when there are several. The DOM
 description's refresh key includes this sentence, so viewport and layout
 changes refresh the summary at most once a second, outside the live
 regions. The wording stays in the optional navigator module.
@@ -1647,9 +1650,13 @@ PNG) draw it like any panel, while inspection, the keyboard, viewports,
 `~` added until no panel has that key (a facet value or subplot of that
 name), as the live SVG renderer keeps each panel's nodes by key. The
 navigator's check runs after the layout's own: it refuses layout marks,
-category x axes, marks placed along y, and with facets or panels an
-`x.scope` other than `"chart"`, also while every panel's data shares
-one x scale, as one window shows one x range.
+category x axes, and marks placed along y among the marks it draws, and
+without a `panel`, with facets or panels, an `x.scope` other than
+`"chart"`, also while every panel's data shares one x scale, as one window
+shows one x range. With a `panel`, it refuses a subplot the chart lacks and
+draws the marks of the panels sharing that panel's x scale (and marks of
+every panel); a facet panel comes from the data, so a strip whose panel is
+not drawn has no window until it is.
 
 **Overview.** The strip's x axis (the rail) is the unzoomed x domain of
 every panel's marks, planned by the model's own x planning (rounding, room
@@ -1925,9 +1932,12 @@ own (and in subplots), the gaps between columns holding the right labels of
 the panel before and the left ones of the panel after; a grid's row
 headers go beyond the right labels, and the right title beyond them. Each
 panel's frame, inspector, formatter, and `DrawnPanel.yRightGroup` read its
-own right plan. A y zoom moves both axes through the same pixels, so facets
-refuse it when right marks have scales of their own, and `setViewport`
-checks each side's range against that side's resolution. Fifty panels of two lines over
+own right plan. A y zoom moves both of the panel's y axes through the same
+pixels, each on its own instance, which the panels sharing it follow; a
+panel drawing only on the right zooms its right axis alone, and its y
+brushes and selections are of it (`DrawnPanel.y` is then the right scale,
+and `getPanels()` gives it no left `y`). `setViewport` resolves each side's
+range to that side's instance in the panel named. Fifty panels of two lines over
 100,000 rows take about 1.6 ms a scene with both on the left or a shared
 right axis, and 1.8 ms with right axes of their own. Where panels go is the
 layout's `placement` (a `PanelPlacement`): a facet's uniform grid
@@ -1954,19 +1964,25 @@ its lowest labels, centered under its panel, its row, or the grid; rows
 leave room between them for both. Widening the margins and the gaps between
 columns checks the first and last labels of every labeled panel's scale.
 
-Viewports are kept per x scale, keyed by its panels' keys: a scale whose
+Views are kept per scale instance (see Interaction): an instance whose
 panels change (a new facet value wraps the panels anew, or a row gains a
-column) is a new scale and fits its data, rather than handing one
-category's zoom to another, and the keys of scales no longer drawn are
-dropped. The browser runtime acts on the scale of the panel a gesture is in:
+column) is a new one and fits its data, rather than handing one
+category's zoom to another, and views of instances no longer drawn, or
+drawn as another type, are dropped and reported fitted. The browser
+runtime acts on the instances of the panel a gesture is in:
 the wheel (not over the gaps between panels, where the page scrolls), drag
 pans (with the scales the press started on; a press whose panel leaves the
 scene mid-drag stops), brush-to-zoom, double-click on a panel (elsewhere,
 every scale; never on the legend), and Enter after a keyboard selection. A
-chart keeps one selection, owned by the panels sharing the x scale of the
-panel it was made in: drawn only there, reported with their keys, and
-cleared (with an event naming them) once no panel of that scale is drawn.
-Up and Down carry the keyboard cursor's value along the axis it follows (x,
+chart keeps one selection, owned by the instances its brush ran along (a
+y range of the right y in a panel without a left one): drawn in the panels
+drawing them all, reported with them, and cleared (with an event naming
+them) once they are not drawn.
+Left and Right step through a stop's points in order along the axis it
+follows (`stepPoint` in `model/keyboard.ts`): a series' positions, or on a
+category axis band by band, whatever the rows' order, and through every
+series of a mark whose series are that axis' categories, which stand side
+by side. Up and Down carry the keyboard cursor's value along the axis it follows (x,
 or y for marks inspected along y) between panels sharing that axis' scale,
 and its place across the plot otherwise, and a keyboard range never reaches
 across scales. Synced charts share cursors with such charts (each
@@ -3203,15 +3219,22 @@ second (half of it the grid, the rest the batch's arrays and the upload).
 A dendrogram reads a SciPy-layout linkage table: number fields `first`,
 `second`, and `height`, with `leaves` labels indexed by leaf id. Its module
 validates the tree and caches its first-child-before-second-child band order
-until the table changes. It has no series, extents, legend, or inspection;
+until the table changes. It has no series, legend, or inspection;
 `describe` supplies leaf and merge counts and the height range. Facets must
 repeat it whole. `side` contributes categories on x (bottom/top) or y
 (left/right), leaving the height direction untyped so it can coexist with
-a heatmap's band axes. Heights normalize by the largest merge height in
-plot pixels, independent of continuous axis scales; missing leaves suppress
-ancestral links. Geometry uses three packed segments per merge, drawn by
-the existing SVG, Canvas, static SVG, and PDF paths. Linkage traversal and
-placement are iterative, with work and storage linear in merge count.
+a heatmap's band axes. Heights are the mark's extent on that axis, zero to
+the largest, placed through its scale when it is linear, so views and
+value-axis domains move them as they move other marks. Links grow away
+from the leaves' edge because, with `side` top or right, the mark asks
+for that axis' automatic domain to descend (`Mark.descends`): the model
+turns the fitted domain and its ticks after rounding and padding, and
+orients views the same way, while a domain the axis sets runs as given.
+Over a band or log axis, heights normalize by the largest in plot pixels
+instead. Missing leaves suppress ancestral links. Geometry uses three
+packed segments per merge, drawn by the existing SVG, Canvas, static SVG,
+and PDF paths. Linkage traversal and placement are iterative, with work
+and storage linear in merge count.
 
 ## Annotations
 
@@ -3650,7 +3673,8 @@ viewport (IntersectionObserver) stay dirty and render when they become
 visible. A chart's first frame renders synchronously when it is created.
 
 With `animation`, a view asked for (`setViewport`, zooming to a brush,
-double-click reset) is shown gradually, by `dom/transition.ts`,
+double-click reset), a map's or network's plane's included, is shown
+gradually, by `dom/transition.ts`,
 which a chart loads the first time its options ask for animation (until
 then, views change at once). The model's viewports
 take the new view at once, and the `viewport` event reports it once. The
@@ -3660,6 +3684,13 @@ scene of the new view, which is never painted, so they include nice rounding
 and room for glyphs. Each frame then sets the model's transition domains,
 eased and in log space on log axes. The model draws these as given, and every
 frame is an ordinary scene, so tooltips and brushes read what is on screen.
+A plane moves the same way: from the ranges across its room the last frame
+drew (read from the layout results' `plane` in dom/transition.ts, which
+loads only with animation) to those the planned scene draws, evenly, each
+frame drawing the planes at the ranges between (`ItemViews.transitionViews`,
+which the layout frame's `viewport` takes in place of the plane's own);
+maps and networks fit ranges uniformly, so ranges drawn are ranges asked
+for. Drilling into a tree lays it out anew and shows at once.
 Anything that must show at once ends the transition at the new view: table
 changes, resizes, option updates, legend toggles, wheel zoom and panning,
 presses, `render()`, and export. Charts with several panels, linked charts,
@@ -3676,7 +3707,8 @@ frame, takes over 10 ms. Intermediate frames keep the margins planned for
 the new view, so passing tick labels never move the plot.
 
 With `animation: { values: true }`, `dom/value-transition.ts` (with
-`value-motion.ts`, `value-points.ts`, and `value-traces.ts`), which a chart
+`value-motion.ts`, `value-points.ts`, `value-traces.ts`, and
+`value-items.ts`), which a chart
 loads separately the first time its options ask for it, also moves marks to
 changed values, and the axes with them. The data is current at once; what
 moves is a picture of the change, made from the geometry of the scene on
@@ -3684,11 +3716,14 @@ screen and of the next. Scenes of such charts carry what identifies each
 item: bar geometry carries `BarItems` (each bar's position along its axis, a
 band index or the value, and its root and tip in pixels), point geometry
 `PointItems` (the table, its generation, and each point's row identity,
-`rowOffset + row`, or an explicit `animationKey` field and its values), and a
+`rowOffset + row`, or an explicit `animationKey` field and its values), a
 pie's sectors `PieSlices` (its slices in order,
 where each ends as a fraction of the turn, its size, and a function that
-draws other slices as the pie draws its own, leaders and labels included).
-Marks of other charts emit none of them. Every traced polyline says whether
+draws other slices as the pie draws its own, leaders and labels included),
+and a gauge's dial `GaugeDial` (its value, and a function that draws the
+gauge at another). Bars of stacks, of labels, and of histograms (by their
+bins' starts) carry `BarItems` too. Marks of other charts emit none of
+them. Every traced polyline says whether
 it is `whole`, a point for every row traced, none left out by level of
 detail, a missing value, or a break; and each panel the model reports keeps
 the plans of its axes (`PanelPlans`), whose continuous plans carry the
@@ -3699,8 +3734,10 @@ esbuild would otherwise move the modules both import into chunks of their
 own, which compress worse than the bundle they come from.
 
 When a table reports a change of values in place or a reset, the chart copies
-the bars, slices, points, lines and areas traced whole, and rules of the
-frame on screen, in pixels, with the panel whose scales drew them, because
+the bars, slices, points, lines and areas traced whole, rules, lists drawn
+in row order (segments, rectangles other than bars, text, and labels:
+error bars, candles, regions, annotations), and rasters of the frame on
+screen, in pixels, with each panel's scales that drew them, because
 the model reuses geometry buffers for its next scene (and the table has
 already changed, so old values can no longer be read from it). The next
 frame builds the new scene once and matches the copy to it: bars by series
@@ -3721,8 +3758,15 @@ row identity. The per-frame point bound includes retained points, entrants,
 and exits across the whole chart.
 
 Lines and areas match by series key when both scenes trace them through the
-same x pixels in the same runs (rows at one x are one point of a line,
-whichever rows of the table they are, so a reset that keeps x moves too).
+same position pixels (x, or y for lines along y) in the same runs (rows at
+one position are one point of a line, whichever rows of the table they
+are, so a reset that keeps positions moves too). Lists match by geometry
+key when both scenes draw as many items at the same places along x, or
+all along y (their items have no identity but their order), and each
+point of them moves on both axes' scales between (a point at one place
+in both stays there, however its scale moves); rasters match when both
+draw the same grid in the same place, and each cell's color moves in RGB,
+a cell coming or going keeping its color as its opacity moves.
 Horizontal and vertical rules match by key, and slices by key, in one order
 merging both pies'. Each scale that both scenes
 draw with the same type and range, and with continuous domains in the same
@@ -3765,24 +3809,29 @@ that cannot move shows the series' new values at once, all of it. Items that app
 drawn as geometry only: the model, tooltips, the keyboard, events, and
 summaries have the new data from the start.
 
-A change moves only when both scenes have one panel with the same key, plot,
-and theme, scales that can move between them, the same series of bars,
-points, lines, areas, and rules, and retained slices in the same order. When
+A change moves only when both scenes have the same panels, each with the
+same key and plot, the same theme, scales that can move between them, the
+same series of bars, points, lines, areas, rules, lists, and rasters, and
+retained slices in the same order; every panel moves (each on its own
+scales, shared ones alike), or the whole change shows at once. Frames
+replace each panel, and the panels insets paint in their order. When
 any scale moves, every geometry in the panel must move with it (marks that
-cannot, such as stacked or labeled bars, lines and areas labels follow,
-text, heatmaps, custom marks, or a line whose x positions changed, would
-stand apart from the axes), and lines
-and areas need x to stay; otherwise the change shows at once. With scales
+cannot, such as lines and areas labels follow, a list whose items changed
+in number or moved along both axes, or a line whose positions changed,
+would stand apart from the axes), and lines
+and areas need their positions' scale to stay; otherwise the change shows
+at once. With scales
 that stay, marks that cannot move show their new values while the others
 move: a series labels follow (`followedOf`) shows them with its labels,
-which stand where it is drawn. Margins grow at once but shrink only on resizes and option changes, so
+which stand where it is drawn (so does text `from` it). Margins grow at once but shrink only on resizes and option changes, so
 a change whose labels need more room shows at once and the next moves.
 Appended and dropped rows, row views' changes, changes under options or
 hidden keys other than those the scene on screen was drawn with, changes
 while values move and until the data has been still for a change's duration
 (so streaming charts do not animate forever; a derived aggregate, recomputed
 on each change of its source, moves only on changes that far apart), and
-charts that are inspected, off screen, linked, slow (as for views, counting
+charts that are inspected, off screen, linked, with a navigator (whose
+strip draws the whole x domain), slow (as for views, counting
 the copy), or whose endpoint scenes draw more than 2,000 bars, slices, and
 rules, 10,000 points, or 10,000 points of lines and areas, or any point cloud,
 show at once too. Snapshots check these endpoint counts before copying.
@@ -3800,6 +3849,18 @@ scene's throughout. After a settle that dropped anything, what is on screen
 may be a frame between two scenes, so changes show at once until the next
 scene is built; `render()`, export, and static output always draw the new
 values, and destroying a chart lets go of what it was moving.
+
+Marks whose drawing does not move to changed values (box plots, boxen
+marks, violins, rugs, contours, dendrograms, custom marks, and layout marks
+other than pies and gauges) refuse `animation.values` from their own
+modules (`marks/still.ts`): every frame of a chart animating values tells
+marks so (`Frame.keyed`, `LayoutFrame.keyed`, which item views also give
+layout marks in panels), and such a mark throws a `ChartError` (code
+`unsupported`, path `animation.values`, phase `validate`) as it draws.
+The chart's first frame draws as it is made, so `ready` rejects with the
+refusal (or, with `errorMode: "throw"`, the chart is not made); a check
+in the model would put code in every chart's first chunk, which charts
+without such marks never run.
 
 Preparing a change copies and matches the items: about 0.03 ms for 100 bars
 and 0.2 to 0.3 ms for 2,000 in Node, 0.1 ms for 1,000 points and 0.9 ms for
@@ -4803,6 +4864,15 @@ since their room is kept before they are planned (listed axes plan rows),
 and layout marks write the names they fit to a room of one line on one
 (`oneLineText`), shortened rather than broken.
 
+Text is placed by its left or right end, on any page: the SVG layer (and
+the snapshots written with it), static SVG, and the Canvas layer's canvas
+are left to right (`direction: ltr`), since an SVG or a canvas otherwise
+takes the page's direction, under which `text-anchor` and `textAlign`'s
+start and end swap sides; the HTML legend is too, so it reads as its
+export does. Right-to-left text keeps its own order within a label; a
+label mixing directions orders its runs from the left, as on a
+left-to-right page.
+
 Text placed at a point is a block: `anchorBlock` (`layout/block.ts`) puts
 the block of its lines, padded as its box is, by its start, middle, or end
 along its lines (`align`) and its top, middle, or bottom across them
@@ -4818,12 +4888,34 @@ does not move them. Labels attached to another mark's series
 by `placeAttached` (`layout/attached.ts`): inside the plot as blocks
 beside their point (after it for `align: "start"`, before it for "end",
 over it for "center", where `verticalAlign` moves them below or above),
-4 pixels and their offset away; outside it in the side tracks
+4 pixels and their offset away, and within the plot's width: a block that
+would cross the plot's left or right edge, into an axis' tick labels, the
+chart's margin, or a neighboring panel, moves along its row until it is
+inside, over its series, and a block wider than the plot (a narrow inset
+or facet panel) has each line shortened with an ellipsis to fit
+(`fitText`, as headers and slices' names are), or is left out where
+nothing but the ellipsis would fit; outside it in the side tracks
 (`Frame.outside`, before their series' start on the left, else on the
-right), reserving room there unless `reserve` is false; labels of one
-column spread apart along y within the plot, in the order of their points,
-as painted (halos included). A column taller than the plot keeps the
-labels that fit from its top and leaves the rest out.
+right), reserving room there unless `reserve` is false. Labels whose
+extents along x meet (in one side's track, or inside, whichever points
+they stand by, so that labels moved in from one edge are kept apart too)
+are spread apart along y within the plot, earlier points first (`spread`
+in `layout/attached.ts`): a label is left out only when it cannot fit,
+packed from the plot's top, below the earlier labels kept that it meets;
+then each is placed as near its own top as the earlier labels it meets
+(already placed) and the room the later ones it meets need above the
+plot's bottom allow. Labels already apart stay where they are, labels
+that meet none of each other share rows however they chain (A meeting B
+and B meeting C leaves A and C free to share a row), and tops move
+continuously with their points while the same labels meet, in the same
+order of their points (ties in the order of the series), and the same
+labels fit. Two labels coming to meet is a new constraint, which can move
+the labels after them even where another placement would have left some
+of those in place, and two that meet trading places in that order trade
+their priority: earlier labels keep their places first. Extents are as painted:
+a halo's reach past the glyphs, or a box's outline, half its width
+outside the box, counts in what is kept in the plot, spread, and
+reserved.
 
 **Labels following series.** Lines and areas take `labels` (`{ at,
 content, edge, place, style }`), and a text mark takes `from: { mark, at,
@@ -4859,7 +4951,8 @@ placed once the mark has drawn in each panel, and their room outside the
 plot is kept as other `roomPlaced` marks' is. A band follows the edge its
 `edge` names (`"y1"` or `"y2"`); other marks refuse `edge`. Labels take
 their series' color unless their style gives one, go before a series'
-start and after its end, take a halo against what they are drawn on, and
+start and after its end, take a halo against what they are drawn on (the
+plot's fill inside it, the chart's background outside), and
 hidden series draw none. Content is a list of parts (`writeContent`,
 `marks/features/content.ts`): text, `{ field }` read at the owning row
 (times in the chart's zone), `{ series: true }`, and `{ value: true }`,
@@ -5003,11 +5096,11 @@ which always report the cell under the pointer, and contours, which report
 the band region under it or the line nearest it, at the pointer; when cells
 overlap, the mark drawn last wins.
 Pans and zooms (see Bindings) work in pixel space through the scales, so
-they behave the same on log axes. Category axes do not zoom. Viewports are
+they behave the same on log axes. Category axes do not zoom. Views are
 kept ascending and shown the way the axis' configured domain runs, so
-reversed axes stay reversed. The y viewport is kept as domains for the left
-axis and, in charts with one, the right axis, each what the same pixels show
-on it. Keyboard navigation keeps a position within a series, so repeated x
+reversed axes stay reversed. Each scale instance keeps its own view (see
+below): a panel's left and right y are two, which a y gesture moves through
+the same pixels. Keyboard navigation keeps a position within a series, so repeated x
 values are each reachable. The other series are read at the first point
 each draws at the cursor's x, except where a mark pairs rows of its series
 (`Mark.alongside`): at an x where a layer of a series field's area stack
@@ -5059,7 +5152,11 @@ Tooltips write values with their axis' `tooltipFormat`, else its
 them against their tables when they are made (`marks/tooltip-fields.ts`),
 and inspections carry them, read from each point's row, as `fields` on the
 point, which the tooltip draws under the point's row and the live region
-reads after its value. Reading and writing them (`dom/tooltip-content.ts`)
+reads after its value. A layout mark's item is read at its `row`, or where
+it sums rows (a slice, a tree's node, a link), at the one row its
+`rowsOf` gives, if it gives one; marks summarizing rows along axes
+(histograms, box plots, boxen marks, violins, contours) refuse fields as
+specs load. Reading and writing them (`dom/tooltip-content.ts`)
 loads the first time a chart has fields or `renderTooltip`: the chart sets
 the model's `fields`, which makes a reader per panel for its inspector (and
 the layout marks' item views) in the chart's locale and zone, with the x
@@ -5083,20 +5180,59 @@ others or the chart. Hover listeners
 receive inspections even with the built-in tooltip off, which is how an
 application draws its own.
 
+Views live in one store, keyed by scale instance (`ChartModel`'s views by
+`viewKey(scale, instance)`). Each position scale (x, y, and the right y)
+has an instance per group of panels sharing it (`ScaleInstance`): `""` for
+the one every panel shares (insets keep their own beside it), else one
+named by its panels' keys, so a group whose panels change is another
+instance; the model records the instances each scene draws. Every panel,
+facet panel, layout cell, and inset inherits the chart's interactions
+through it: a gesture acts on the instances of the panel it starts in (a
+pan keeps its panel while it lasts), every panel drawing those instances
+follows, and others are left alone. Only what has no meaning is refused:
+ranges on category axes, and axes a panel lacks.
+
 Every change of view (a public `setViewport`, a wheel step, a pan move, a
 brush zoomed to, a double-click reset, a synced chart's range) runs in one
-`#changeView` call: it snapshots each x scale's viewport and the y viewport,
-makes the change, then emits one `viewport` event per x scale whose view
-changed, with all three ranges, after the change is complete. Listeners may
-change the view again; their change reports itself, and the outer call skips
-x scales whose view a listener's change already reported. An `update` that
-gives panels y scales of their own reports the y viewport it lets go of.
-Changes share the final range of the scale the chart's viewport channel
-carries (x, or y with `scale: "y"`) with synced charts, which apply it as a
-change caused by sync and share it no further.
-`setViewport` checks a whole change (an x range without a panel where
-panels have x scales of their own, y ranges where panels have y scales of
-their own) before it changes anything.
+`#changeView` call: it snapshots the views, makes the change, then emits one
+`viewport` event, a transaction (`ViewportEvent`): the chart's
+`viewRevision`, the cause, the panel the change was made in, each instance
+whose view changed (by scale, then first panel), and every panel drawing one
+of them with its whole view. A listener's change of view is the next
+transaction, delivered once this one has reached every listener, so every
+listener hears every change, in order. A map's or network's plane is an
+instance of x and one of y (named by its state), whose changes join the
+transaction they are made in: `setViewport(null)` resets planes and axes
+as one. An instance with a view that a scene no longer draws (its panels
+gone, or sharing scales otherwise, a plane's subplot gone) or draws as
+another type is reported fitted, with the panels it had, as a change of
+what changed the panels since the last frame (data, or options), whatever
+call came between; views moved inside limits an `update` changed are
+reported at once. A gesture whose panel's settings no longer bind it when
+the options change ends. `setViewport` resolves each scale given to the instance of the panel
+named, or without one to the one every panel shares, or the scale's only
+one (`instanceOf`; the panel layouts hold the panel cases' code), and checks
+the whole change before it changes anything; its refusals are
+`ChartError`s whose `path` is the scale or `"panel"`, and whose `panel` is
+the one named, so other runtimes can word them. Changes share the final
+range of the scale the chart's viewport channel carries (x, or y with
+`scale: "y"`) at its endpoint (see Sync channels) with synced charts, which
+apply it as a change caused by sync and share it no further.
+
+A chart mounted in place of another (a Streamlit rerun, a notebook widget
+drawn again) takes its state back through two functions. `viewportStatePayload`
+lists every instance's view with an opaque `identity` (scale, type, and
+name), of one scene: it draws pending changes once, then reads the last
+scene's panels and the views of their instances, which draws nothing
+again, though a listener of that frame changes the chart. `restoreViewportState` (`herceg/web`) gives a new chart the views
+of instances it draws again: the shared one as panels come and go, another
+only with the same panels, none across a change of type; the others, and
+those the state has fitted, it fits. It waits for what the chart loads
+(a restore started meanwhile takes its place), applies limits, and reports
+one transaction of cause `"options"`. `visibilityState` and `restoreVisibility` (`herceg/spec`) do
+the same for what legends hid, pruned as `update` prunes, except that keys
+of marks known by their index go, in one change through
+`setHiddenKeys(keys, { panels })`.
 
 ### The interaction controller
 
@@ -5201,7 +5337,11 @@ both ways (a map, a network), whose touches are all its own unless a
 `pageScroll` binding gives pinches back. The axis charts'
 controller, the maps', 3D charts', and networks' controls, and the input
 gate all match the same list, so `interaction.zoom` means the same in every
-chart.
+chart. A subplot with settings of its own (`panels[i].interaction`) has
+bindings of its own, compiled with the chart's: input over it matches its
+list, over other panels the chart's, so one subplot can pan while another
+brushes, and a map, network, or 3D subplot zooms, lassos, drags nodes, or
+turns as its panel says.
 
 Accepted drag starts cancel the native pointerdown default to prevent page
 text selection, and explicitly focus the chart (the navigator focuses its
@@ -5220,16 +5360,20 @@ distances and moves what was under their middle to where it is now.
 
 ### View limits and edges
 
-`interaction.limits` keeps each scale's view inside its `extent`
-(`ChartModel.#limit`, in the model's `setViewport` and `setYViewport`, and
-for views kept by `update`), so every way of asking for a view (the
+`interaction.limits` keeps each scale instance's view inside its `extent`
+(`ChartModel.#limit`, in the model's `setView`, and for views kept by
+`update`), so every way of asking for a view (the
 pointer, keys, the API, brushes, synced charts) is limited the same: a view
 past an end moves inside with its span, and a view wider than the extent
 shows the extent; log axes compare ratios, where ends that are not
 positive bound nothing. A fitted view (no viewport) shows the data or the
 configured domain: limiting it would need the fitted domain, which only
-planning the scene finds. Charts made in code have their limits checked
-where bindings compile, so specs and code refuse the same. Edges are reported by the controller after each frame drawn
+planning the scene finds. A subplot's own settings (`panels[i].interaction`)
+take the chart's one by one, and its `limits` scale by scale
+(`panelInteraction`); an instance takes its first panel's limits, and the
+panels sharing one must agree (`Panels.check` refuses them otherwise).
+Charts made in code have their limits checked where bindings compile, so
+specs and code refuse the same. Edges are reported by the controller after each frame drawn
 (`#reportEdges`): per scale instance and side, a latch set on coming within
 `threshold` of the span from the end (the extent's, or the data's while the
 view is zoomed, since a fitted view is at the data's ends) and cleared once
@@ -5248,7 +5392,22 @@ chart records the cause of the latest change of view or data (`ViewCause`).
 `interaction.sync` names a group per channel (`dom/sync.ts`): the cursor's
 position, the view's range, and the selection, each carried on one of the
 chart's scales (x by default; selections whole, "xy"). A group's name alone
-is every channel on x. Members of a channel's group receive what one shares
+is every channel on x. A channel's endpoint is a scale instance
+(`#endpoint`): that of the panel the channel names (`panel`), else the one
+every panel shares along its scale (for "xy" selections, the y every panel
+shares too where there is one); a chart without one shares and receives
+no views or selections on that channel. What it receives changes its
+endpoint's view, or selects there. Pending changes that may change the
+panels, how they share scales, or their axes' categories (`#shapeChanged`,
+below) draw first, and what their frame reports is heard after
+the received change applies, so a change a listener of that frame makes
+comes after it; other changes of data stay batched into the next frame.
+Along y, the endpoint is a panel drawing the left y every panel shares,
+else the right y every panel without a left one shares. A cursor is a value
+along the axis, not a view of an instance: with `panel`, it goes from that
+panel's instance and shows in the panels drawing it as they are drawn when
+it shows; without, from the panel hovered, showing in every panel. Delivery is synchronous within a
+page's realm: a member hears a broadcast before `setViewport` returns. Members of a channel's group receive what one shares
 (`SyncMember.receive`) and apply it without sharing it again (a change of
 view caused by sync broadcasts nothing, along x or y); a broadcast
 that a receiver's listener supersedes with a newer one stops, so no member
@@ -5260,7 +5419,17 @@ the first to the last of the names a chart has, which takes in categories
 between them it did not receive: selections are ranges). `showCursor` and `hideCursor` set the shown cursor
 as a received one is set, and share it unless told not to; the controller
 draws it in every panel whose scale holds the value, while the pointer's
-own cursor takes precedence on the chart it is over. A shown cursor carries
+own cursor takes precedence on the chart it is over. A chart shares and
+shows cursors along the axis its data is placed on (`cursorAxis`), so a
+horizontal bar chart's values never move a time series' cursor: the points
+there, or where no point is (a heatmap's gap, rules, text) the crosshair
+alone (an `AxisInspection` without points, which tooltips and hover events
+skip). The pointer shares its value wherever it is over a panel, and where
+it reads nothing shows that crosshair on its own chart too, carried to the
+chart's other panels as its cursor is (below); hover events then report
+nothing, since the pointer reads only what is under it. Without the
+built-in tooltip (`tooltip: false`) the pointer's own cursor is not drawn,
+whether or not hover listeners read it; received and shown cursors are. A shown cursor carries
 how it shows (`ShownCursor`: the receiving channel's `snap` and `tooltip`,
 or `showCursor`'s): "nearest" inspects each panel's nearest x as the pointer
 does; "previous" and "next" read each series' last point at or before the
@@ -5275,10 +5444,12 @@ Within a chart, the pointer's or keyboard's cursor shows in the other
 panels too (`sync.panels`, `#across`): at the hovered panel's x in panels
 sharing its x scale by default, and with `panels` on, in panels with x
 scales of their own, the value read on each one's scale with the same
-snapping; out of a panel's view, or in its break, it shows nothing there.
+snapping; out of a panel's view, or in its break, it shows nothing there,
+and where that panel reads nothing, the crosshair alone.
 The hovered panel keeps the one tooltip; with `panels.tooltip`, each other
 panel shows one too (tooltips made as needed, with the built-in content).
-Crosshair labels on the axes stay the hovered panel's.
+Crosshair labels on the axes stay the hovered panel's; a crosshair alone
+labels its value as the axis formats values for tooltips.
 
 Groups are the page's, not a module's: the registry (`dom/sync.ts`: each
 group's members and its broadcasts' revisions) lives on the global object
@@ -5388,9 +5559,13 @@ only with charts that import it: a line chart that binds no store carries
 the hooks that call it (about 180 B gzip, the text alternative's sentence
 of what the channels it highlights hold among them, "42 of 120 rows
 selected.", which `description` writes). The model calls the binding's
-`check` as it validates (gauges, radars, and 3D marks refuse one, alone or
-in panels; so do stores of tables no mark reads, and brushes or lassos
-over summaries' statistics), and the mounted chart calls `mount`, which gives it a
+`check` as it validates, refusing with chart errors at `rowSelection` or the
+option at fault (gauges, radars, and 3D marks refuse one, alone or in
+panels; so do stores of tables no mark reads or only marks whose rows
+gestures do not select read, annotations and dendrograms; clicks on a
+table only contours read, and a highlight no mark reading the table draws;
+and, at `interaction.brush`, brushes or lassos over summaries' statistics),
+and the mounted chart calls `mount`, which gives it a
 `RowLink`: the store subscriptions, what the chart's gestures wrote, and the
 model's `highlight` hook (and `layoutHighlight`, which gives layout marks a
 table's membership). The chart calls the link where its gestures end: a
@@ -5440,9 +5615,12 @@ statistics, whichever way the selection was set. Lassos test each row's anchor (
 placement, `BarMark.placement` and `ends`, so grouped bars are found where
 they are drawn) against the outline in pixels, after its bounding box.
 Clicks find the topmost mark's point under the pointer: a bar or histogram
-bin containing it, a box, violin, or cell picked at distance 0, or the
+bin containing it, a box, violin, candle (`CandlestickMark.pick`, its box
+from low to high as wide as its body), or cell picked at distance 0, or the
 nearest anchor within the mark's reach plus a few pixels (a binary search
-window on sorted series). Points summarizing rows give their rows through
+window on sorted series); contours' bands summarize their grid and take no
+clicks or keys. A contour's brush is a condition on its grid's x and y
+fields, and custom marks of x and y fields are read as points are. Points summarizing rows give their rows through
 `Mark.summarized`, a test of a table row (a bin's exact edges and its series,
 a group's category and series value with a value), evaluated over the
 table's rows (or the view's) of the clicked panel; a summary's index is
@@ -5725,8 +5903,12 @@ and identity keys of scopes no mark draws.
 Changes of view (`setViewport`, wheel and pan, synced ranges, transitions)
 mark the chart dirty without marking its panels changed, so a later call
 naming a panel does not draw first to find it: setting several panels' views
-and a selection draws once, on the next frame. Changes that may change the
-panels (options, data, size, hidden series) still draw before such a call.
+and a selection draws once, on the next frame. Changes that may change
+which panels there are, how they share scales, or the categories of their
+axes (options, hidden series, and data where the chart has facets or a
+category axis: `#shapeChanged`) still draw before such a call, and before a
+synced view or selection is received; other changes of data, and of size,
+wait for the next frame.
 
 Marks are opaque: the mark functions return `ChartMark`, whose `spec` is
 public, and a type-only brand keeps charts to marks those functions made.
@@ -6366,11 +6548,13 @@ mouse input, through Playwright's mouse.
   its `TimeBreaks` lives (24 bytes per interval).
 - Row selections cover marks along axes and maps, pies, funnels, treemaps,
   sunbursts, Sankey diagrams, and networks, alone or in facet panels and
-  subplots: gauges, radars, and 3D marks refuse a binding, and custom marks
-  and annotations neither write nor dim. A map's lasso selects a region by
-  its anchor, not by overlap; a network's lasso selects node centers and
-  requires a nodes table. Contours select no rows and draw as they are (a
-  region is of the field, not of rows). Lassos and brushes along a
+  subplots: gauges, radars, and 3D marks refuse a binding, as do tables
+  only annotations or dendrograms read (their rows are neither selected nor
+  dimmed); custom marks select rows but draw them as they are. A map's
+  lasso selects a region by its anchor, not by overlap; a network's lasso
+  selects node centers and requires a nodes table. Contours' brushes select
+  their grid's rows, but clicks and lassos none, and they draw as they are
+  (a region is of the field, not of rows). Lassos and brushes along a
   summary's statistics select none of its rows. A brush selects whole rows
   of every mark of its table drawn in its panels; marks over several tables
   never join them, and a table derived by aggregating another
@@ -6406,8 +6590,9 @@ mouse input, through Playwright's mouse.
   a box plot following, about 10 ms a step in Node; a step over a million
   candles merged into pixel columns takes about 32 ms (19 ms to draw them
   without a selection), and over a 1000 by 1000 heatmap about 9 ms.
-- Range navigators need a number or time x axis that every panel shares:
-  no x scales per panel, layout marks, or horizontal bars. The strip draws lines, areas,
+- Range navigators move one x scale along a number or time axis (the one
+  every panel shares, or a panel's with `panel`): no layout marks or
+  horizontal bars. The strip draws lines, areas,
   points (a sample of one per pixel, in one size and shape), vertical bars,
   and candlesticks, not heatmaps, contours, error bars, histograms, box plots,
   violins, annotations, or custom marks. Dense bars use column envelopes
@@ -6415,21 +6600,20 @@ mouse input, through Playwright's mouse.
   their source rows whenever data changes, and unsorted lines are drawn
   whole. The strip reuses its overview while dragging. It has no y axis,
   its y scales differing under panels with scales of their own. Charts
-  with a navigator show changed values at once (`animation.values` moves
-  marks only in scenes of one panel), and charts too short
+  with a navigator show changed values at once (the strip draws the
+  marks over the whole x domain, which does not move), and charts too short
   to leave their plots 30 pixels (and each row of several panels 20) beside
   a 16-pixel strip have none.
   The sliders' announcements are in English.
-- Subplots route whole marks; they have x-only zoom and brushing, and no
-  facets inside a panel.
+- Subplots route whole marks and have no facets inside a panel (a chart with
+  panels refuses `facet`).
   Rows and columns may be weighted; a scale shared across sizes is planned
   over its smallest panel, so what marks draw past their values fits in
   every one, and the others keep its domain with ticks for their size.
 - Facets wrap one category field into rows of panels, or lay out a grid by
   two; x, y, and the right y are shared or resolved per panel, row, or
-  column. No y zoom with y scales of their own on either side, no sync of
-  charts with categories per panel, and custom marks over a table without
-  series can only repeat in every panel. Panel splits are recomputed whenever their
+  column. Custom marks over a table without series can only repeat in
+  every panel. Panel splits are recomputed whenever their
   table changes, and rows of a faceted large line do not use its min/max
   index. A category whose rows all lack a facet value still gets an (empty)
   band. Panels smaller than 20 pixels a side are refused with an error
@@ -6461,15 +6645,22 @@ mouse input, through Playwright's mouse.
   2D histogram first) are not traced. Contours and 2D histograms refuse log
   axes and time breaks, and 2D histograms count every row again when their
   table changes, at most 1,000 bins per axis. There are no hexagonal bins.
-- Animation moves the axes of single-panel charts between views and, with
-  `values`, bars, pie slices, points, and lines and areas traced whole to
-  changed values, with the axes their domains move, when the plot and
-  categories stay put. Points with `animationKey` match across resets by
-  finite numeric values or category labels. Stacked or labeled bars, lines
-  and areas labels follow, unkeyed points across a reset, points crossing the edge of a fixed domain (they
-  shrink instead), lines whose x positions or level of detail change,
-  panels, categories that come or go, and the first appearance of a chart
-  show at once.
+- Animation moves the axes of single-panel charts between views, and a
+  map's or network's plane; drilling into a treemap or sunburst shows the
+  new layout at once (moving it would need each node's geometry matched
+  between two layouts). With `values`, bars, pie slices, gauges, points,
+  lines and areas traced whole, lists drawn in row order (error bars,
+  candles, regions, text), and heatmaps' and 2D histograms' cells move to
+  changed values in every panel, with the axes their domains move, when
+  the plots and categories stay put. Points with `animationKey` match
+  across resets by finite numeric values or category labels; lists match
+  by order only, when one axis keeps their places, and cells fade in RGB
+  rather than along their color ramp. Lines and areas labels follow,
+  areas along y, unkeyed points across a reset, points crossing the edge
+  of a fixed domain (they shrink instead), lines whose positions or level
+  of detail change, panels and categories that come or go, and the first
+  appearance of a chart show at once; marks that do not move refuse
+  `values`.
 - Box plots, boxen marks, and violins recompute every group's statistics (and violins
   their densities) when their table changes, in every panel of charts with
   facets. On a log axis, a box or violin
@@ -6516,16 +6707,17 @@ mouse input, through Playwright's mouse.
   nodes between. Nodes cannot be dragged or placed by hand, and there is no
   highlighting of a node's links on hover. The whole layout is recomputed
   when the table changes, and the pointer lookup scans every node and link.
-- In charts whose panels have x scales of their own, one scale at a time
-  has a selection, and synced charts share only cursors with them. Python's
-  live widgets keep each subplot's own view and the panels of a selection,
+- A chart has one selection at a time, which belongs to the instances its
+  brush ran along (`SelectionOwner`). Python's live widgets keep each
+  subplot's own view and the panels of a selection,
   but refuse facets with x scales of their own, whose panels come from the
   data; Streamlit reports each panel's view and the panels of a selection.
   Annotations repeated in panels whose x scales differ in type are
   described in the text alternative with their first panel's formats.
 - Selections report ranges and lasso outlines, not the rows inside them.
-  Synced selections are data values, so charts with differently ordered
-  categories select different categories. The keyboard selects ranges only;
+  Synced selections carry categories by name: a chart ordering them
+  otherwise selects the span from the first to the last it has, with the
+  categories between. The keyboard selects ranges only;
   rectangles and lassos need a pointer.
 - Maps have no base maps, globes or other spherical rotation (only the
   central meridian moves; panning moves the plane), great-circle edges,
@@ -6582,7 +6774,6 @@ mouse input, through Playwright's mouse.
   there. On a log y axis, a stack's edges at zero are drawn at the axis'
   low end, which costs a copy of each edge per frame.
 - Renderer thresholds are not tuned.
-- Rules and text are always drawn above other marks, regardless of mark order.
 - The GPU draws only large point series; lines, areas, bars, heatmaps, and
   contours use Canvas or SVG. Streaming uploads only new points for whole columns and
   for series split by a field on linear or log axes; series of a row view

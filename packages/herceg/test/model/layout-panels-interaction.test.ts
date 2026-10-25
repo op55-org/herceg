@@ -22,7 +22,7 @@ import { point3d } from "../../src/marks/point3d.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { facet } from "../../src/model/facet.ts";
-import type { ItemChanges } from "../../src/model/item-views.ts";
+import type { PlaneViewChange } from "../../src/model/item-views.ts";
 import { type ChartConfig, ChartModel, type ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
@@ -235,6 +235,8 @@ const countries = (): FeatureCollection => ({
 const projection = "equirectangular" as const;
 const half = (d: readonly [number, number]) =>
   [d[0] + (d[1] - d[0]) / 4, d[1] - (d[1] - d[0]) / 4] as const;
+/** A range ascending, as views are kept. */
+const up = ([a, b]: readonly [number, number]) => [Math.min(a, b), Math.max(a, b)];
 
 describe("maps in facet panels", () => {
   it("split each layer's rows, fit every panel to all of them, and share one view", () => {
@@ -389,31 +391,31 @@ describe("maps in subplots", () => {
     model.scene(estimateText);
     expect(model.items!.result("a")!.plane!.zoom).toBe(1);
     expect(model.items!.result("b")!.plane!.zoom).toBeCloseTo(2, 6);
-    expect(changes.map(([, change]) => (change as ItemChanges["viewport"]).panels)).toEqual([
-      ["b"],
+    expect(changes.map(([, change]) => (change as PlaneViewChange).scales)).toEqual([
+      [
+        { scale: "x", instance: "b", type: "linear", panels: ["b"], view: up(half(b.x.domain)) },
+        { scale: "y", instance: "b", type: "linear", panels: ["b"], view: up(half(b.y.domain)) },
+      ],
     ]);
     // Without a panel, the view is the axes'; null resets every view.
     expect(model.items!.ownsView(undefined)).toBe(false);
     expect(model.items!.ownsView("b")).toBe(true);
-    expect(model.items!.setView(null, undefined, true)).toBe(false);
+    model.items!.setView(null, undefined);
     model.scene(estimateText);
     expect(model.items!.result("b")!.plane!.zoom).toBe(1);
   });
 
-  it("refuse a lasso beside panels with axes, and take one when every panel is a map", () => {
+  it("take a lasso beside panels with axes, and when every panel is a map", () => {
     const regions = fromGeoJSON(countries());
-    expect(() =>
-      build({
-        marks: [
-          line(table({ x: [0, 1], y: [0, 1] }), { x: "x", y: "y", panel: "a" }),
-          geoshape(regions, { panel: "b" }),
-        ],
-        panels: panels([{ id: "a" }, { id: "b" }]),
-        interaction: { brush: "lasso" },
-      }),
-    ).toThrow(
-      'chart interaction.brush: charts with panels zoom, pan, and brush along x only; use "x"',
-    );
+    const beside = build({
+      marks: [
+        line(table({ x: [0, 1], y: [0, 1] }), { x: "x", y: "y", panel: "a" }),
+        geoshape(regions, { panel: "b" }),
+      ],
+      panels: panels([{ id: "a" }, { id: "b" }]),
+      interaction: { brush: "lasso" },
+    });
+    expect(beside.model.items!.select("b")!.panels).toEqual(["b"]);
     const { model } = build({
       marks: [geoshape(regions, { panel: "a" }), geoshape(regions, { panel: "b" })],
       panels: panels([{ id: "a" }, { id: "b" }]),
@@ -457,6 +459,35 @@ describe("networks in facet panels", () => {
     expect(model.inspectItem('[0,"a","b"]', "2023")!.points[0]!.text).toBe("1");
     expect(model.inspectItem('[0,"a","b"]', "2024")!.points[0]!.text).toBe("5");
     expect(model.layoutSummary("2024")).toMatch(/^Network of 3 nodes and 2 links/);
+  });
+
+  it("name each panel's links as its own rows run, as the panel drawn alone does", () => {
+    const runs = table({
+      group: ["N", "N", "S", "S"],
+      from: ["a", "b", "a", "c"],
+      to: ["b", "c", "c", "b"],
+    });
+    const { model } = build({
+      marks: [graph(runs, { source: "from", target: "to" })],
+      facet: facet("group"),
+    });
+    const linksIn = (panel: string) =>
+      items(model, panel)
+        .filter((item) => (JSON.parse(item.key) as unknown[]).length === 3)
+        .map((item) => [item.key, item.points[0]!.label]);
+    expect(linksIn("N")).toEqual(
+      expect.arrayContaining([
+        ['[0,"a","b"]', "a — b"],
+        ['[0,"b","c"]', "b — c"],
+      ]),
+    );
+    expect(linksIn("S")).toEqual(
+      expect.arrayContaining([
+        ['[0,"a","c"]', "a — c"],
+        ['[0,"c","b"]', "c — b"],
+      ]),
+    );
+    expect(model.inspectItem('[0,"c","b"]', "S")!.points[0]!.label).toBe("c — b");
   });
 
   it("share moved nodes and the view, and select a link's rows in its panel", () => {
@@ -533,7 +564,7 @@ describe("networks too large to lay out in subplots", () => {
     model.scene(estimateText);
     expect(model.items!.result("a")!.plane).toBeUndefined();
     expect(model.items!.ownsView("a")).toBe(true);
-    expect(model.items!.setView({ x: [0, 1], y: [2, 3] }, "a", true)).toBe(true);
+    model.items!.setView({ x: [0, 1], y: [2, 3] }, "a");
     expect(model.items!.view("a")).toEqual({ x: [0, 1], y: [2, 3], yRight: null });
   });
 });
@@ -543,7 +574,9 @@ describe("layout marks in panels refuse", () => {
     const spatial = table({ x: [0, 1], y: [0, 1], z: [0, 1], year: ["a", "b"] });
     expect(() =>
       build({ marks: [point3d(spatial, { x: "x", y: "y", z: "z" })], facet: facet("year") }),
-    ).toThrow("point3d facet: 3D marks cannot split into facets; use separate marks in subplots");
+    ).toThrow(
+      "facet: point3d cannot split into facets; draw each group's marks in a panel of their own",
+    );
     const shares = pie(sales, { category: "region", value: "revenue" });
     expect(() =>
       build({ marks: [shares], facet: facet("year"), interaction: { drag: true } }),

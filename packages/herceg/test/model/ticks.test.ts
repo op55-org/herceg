@@ -12,6 +12,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { AxisGuide, Scene } from "../../src/scene/scene.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
 const HOUR = 3_600_000;
@@ -78,7 +79,7 @@ describe("ticks every so often", () => {
       marks: [line(week, { x: "t", y: "v" })],
       x: { ticks: { every: "2 days" } },
     });
-    model.setViewport([start + 26 * HOUR, start + 48 * HOUR]);
+    setViewport(model, [start + 26 * HOUR, start + 48 * HOUR]);
     model.scene(estimateText);
     const later = xTicks(model);
     // Days 1, 3, 5, ... of the month, wherever the view starts.

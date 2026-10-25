@@ -290,7 +290,9 @@ export function renderSvg(scene: Scene, options: SvgOptions = {}): string {
   const size = options.sizing === "fluid" ? "" : ` width="${width}" height="${height}"`;
   const aspect = options.preserveAspectRatio;
   const fixed = options.strokeScaling === "fixed";
-  let out = `<svg xmlns="http://www.w3.org/2000/svg"${fixed ? ` id="${escapeXml(id)}"` : ""}${size} viewBox="0 0 ${width} ${height}"${aspect ? ` preserveAspectRatio="${aspect}"` : ""} role="img"${labelled ? ` aria-labelledby="${labelled}"` : ""} font-family="${escapeXml(theme.font)}" font-size="${theme.fontSize}" fill="${escapeXml(theme.muted)}"${options.unkerned ? ' style="font-kerning:none;font-variant-ligatures:none"' : ""}>`;
+  // Left to right wherever it is shown: text is placed by its left or right
+  // end (text-anchor's start and end), as the chart lays it out.
+  let out = `<svg xmlns="http://www.w3.org/2000/svg"${fixed ? ` id="${escapeXml(id)}"` : ""}${size} viewBox="0 0 ${width} ${height}"${aspect ? ` preserveAspectRatio="${aspect}"` : ""} role="img"${labelled ? ` aria-labelledby="${labelled}"` : ""} font-family="${escapeXml(theme.font)}" font-size="${theme.fontSize}" fill="${escapeXml(theme.muted)}" style="direction:ltr${options.unkerned ? ";font-kerning:none;font-variant-ligatures:none" : ""}">`;
   if (title) out += `<title id="${id}-title">${escapeXml(title)}</title>`;
   if (options.description) out += `<desc id="${id}-desc">${escapeXml(options.description)}</desc>`;
   // vector-effect is not inherited, so every element of this document gets

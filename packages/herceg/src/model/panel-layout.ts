@@ -25,14 +25,15 @@ import {
 import { type BandPlaces, rowOf, type Series } from "../marks/series.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { HeaderGuide, Panel, Rect } from "../scene/scene.ts";
-import { ChartError } from "../spec/errors.ts";
+import { ChartError, type ChartErrorCode } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
-import type { ChartSpec, InteractionSpec, ScaleScope, XAxisSpec } from "../spec/spec.ts";
+import type { ChartSpec, ScaleScope, XAxisSpec } from "../spec/spec.ts";
 import type { TextPaint } from "../style/style.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { AxisType } from "./axis.ts";
 import type { AxesState } from "./guides.ts";
 import type { MarkSeries } from "./inspect.ts";
+import type { ScaleInstance } from "./model.ts";
 import type { Navigator } from "./navigator.ts";
 import {
   instanceType,
@@ -292,7 +293,7 @@ export function trackSizes(
 }
 
 /** The chart options a layout checks; the x axis as panels read it, breaks aside. */
-export type LayoutOptions = Pick<ChartSpec, "interaction"> & {
+export type LayoutOptions = Pick<ChartSpec, "interaction" | "tooltip"> & {
   x?: (ChartAxisOptions & Pick<XAxisSpec, "seams">) | undefined;
   y?: ChartAxisOptions | undefined;
   yRight?: ChartAxisOptions | undefined;
@@ -300,7 +301,11 @@ export type LayoutOptions = Pick<ChartSpec, "interaction"> & {
 
 /** The chart options a layout checks, and those its layout marks are drawn with (a map's projection). */
 export type LayoutConfig = LayoutOptions &
-  Pick<ChartSpec, "projection"> & { readonly marks: readonly ChartMark[] };
+  Pick<ChartSpec, "projection"> & {
+    readonly marks: readonly ChartMark[];
+    /** The chart's subplots, which facets refuse. */
+    readonly panels?: object | undefined;
+  };
 
 /**
  * Splits a chart's series into panels, keeping what it can from one scene
@@ -562,7 +567,72 @@ export interface AxisTitlePlace {
   anchor: "start" | "middle" | "end";
 }
 
+/** What `instanceIn` reads of a panel drawn: its key, the instances it draws with, and its y axes. */
+export interface PanelInstances {
+  readonly key: string;
+  readonly xGroup: string;
+  readonly yGroup: string;
+  readonly yRightGroup: string;
+  /** Whether it has a left y axis. */
+  readonly drawsY: boolean;
+  readonly plans: { readonly yRight?: unknown };
+}
+
+/**
+ * The instance of scale `scale` that panel `panel` of the last scene
+ * (`views`, the panels with axes among `all`, drawing `instances`) draws
+ * with, undefined when it has no such axis; without a panel, the one every
+ * panel shares (insets aside), or the only one, and undefined where panels
+ * have instances of their own.
+ * Throws, naming `where`, for a panel the chart does not have, and where
+ * an instance is `needed`, for none: an unknown panel, or an axis the
+ * panel or chart lacks, as an unknown reference (path "panel", or the
+ * scale), and several instances to choose from as an invalid option, so
+ * other runtimes can tell them apart.
+ */
+export function instanceIn(
+  views: readonly PanelInstances[],
+  all: readonly { readonly key: string }[],
+  instances: Iterable<ScaleInstance>,
+  scale: ScaleName,
+  panel: string | undefined,
+  where: string,
+  needed: boolean,
+): string | undefined {
+  const name = scale === "yRight" ? "right y" : scale;
+  let missing: string;
+  let code: ChartErrorCode = "unknown-reference";
+  if (panel !== undefined) {
+    const view = views.find(({ key }) => key === panel);
+    // A panel a layout mark draws in (a pie's) has no axes.
+    if (!view && !all.some(({ key }) => key === panel))
+      throw new ChartError({
+        code: "unknown-reference",
+        path: "panel",
+        message: `${where}: no panel ${JSON.stringify(panel)}; name one of ${all.map(({ key }) => JSON.stringify(key)).join(", ")}`,
+        panel,
+      });
+    if (view && (scale === "x" || (scale === "y" ? view.drawsY : view.plans.yRight)))
+      return view[`${scale}Group`];
+    missing = `panel ${JSON.stringify(panel)} has no ${scale === "y" && view ? "left y" : name} axis; drop ${scale}`;
+  } else {
+    const found = [...instances].filter((instance) => instance.scale === scale);
+    // Before a scene, the one the chart will have every panel share.
+    if (all.length === 0 || found.some(({ instance }) => instance === "")) return "";
+    if (found.length === 1) return found[0]!.instance;
+    if (found.length) code = "invalid-option";
+    missing = found.length
+      ? `the panels have ${name} scales of their own; name one with { panel }`
+      : `the chart has no ${name} axis; drop ${scale}`;
+  }
+  if (needed)
+    throw new ChartError({ code, path: scale, panel, message: `${where} ${scale}: ${missing}` });
+  return undefined;
+}
+
 export interface PanelLayout {
+  /** The scale instance a panel draws with (see `instanceIn`, which the layouts' code holds). */
+  instanceOf(...args: Parameters<typeof instanceIn>): string | undefined;
   /** Where the panels of a scene go (a facet's uniform grid, or subplots' layout of cells). */
   placement(split: PanelSplit, grid: PanelGrid): PanelPlacement;
   /** The layout as one chart draws it, keeping what that chart's scenes placed apart from others'. */
@@ -943,57 +1013,11 @@ export function checkLayouts(layouts: readonly LayoutMark[], subplots = false): 
       !IN_PANELS.has(spec.type) &&
       !(subplots && ["point3d", "line3d", "surface"].includes(spec.type))
     )
-      throw new Error(
-        `${spec.type} facet: 3D marks cannot split into facets; use separate marks in subplots`,
-      );
-}
-
-/**
- * What of `interaction` moves the view along y (and, with `brushes`,
- * brushes along it), which panels of some layouts cannot do yet: its path
- * under `interaction` and what it does there, or undefined for nothing.
- * Presets and the chart's own bindings alike.
- */
-export function alongY(
-  interaction: InteractionSpec = {},
-  brushes = false,
-): [path: string, does: string] | undefined {
-  const y = (axes: unknown) => typeof axes === "string" && axes.includes("y");
-  const { zoom, pan, brush, bindings = [] } = interaction;
-  if (y(zoom)) return ["zoom", "zoom"];
-  if (y(pan)) return ["pan", "pan"];
-  if (brushes && brush && brush !== "x") return ["brush", "brush"];
-  for (const [i, { action }] of bindings.entries()) {
-    const moves = (action.type === "pan" || action.type === "zoom") && y(action.axes);
-    // A brush that zooms moves the view along what it brushes.
-    const brushesY = action.type === "brush" && (action.shape ?? "x") !== "x";
-    if (moves || (brushesY && (brushes || (action.zoom && action.shape !== "lasso"))))
-      return [`bindings[${i}].action`, action.type];
-  }
-  return undefined;
-}
-
-/**
- * Refuses what panels with categories of their own (a scope other than
- * "chart" on a category axis) cannot do yet: sync (a band index means
- * another category in each panel), and brush along a y axis of such
- * categories. Every mark banding an axis reads its positions through the
- * panels' places (see PanelBands).
- */
-export function checkBands(marks: readonly Mark[], options: LayoutOptions, scopes: Scopes): void {
-  for (const axis of ["x", "y"] as const) {
-    if (scopes[axis] === "chart" || !marks.some((mark) => mark.channelKind(axis) === "category"))
-      continue;
-    const { brush, sync } = options.interaction ?? {};
-    if (sync)
-      throw new Error(
-        `chart interaction.sync: panels with categories of their own (${axis}.scope "${scopes[axis]}") cannot sync yet; drop sync`,
-      );
-    if (axis === "y" && brush !== undefined && brush !== "x")
-      throw new Error(
-        'chart interaction.brush: panels with y categories of their own brush along x only; use "x"',
-      );
-  }
+      throw new ChartError({
+        code: "unsupported",
+        path: "facet",
+        message: `facet: ${spec.type} cannot split into facets; draw each group's marks in a panel of their own`,
+      });
 }
 
 /** Band lists of groups of panels, numbered: a list of other keys has another number. */

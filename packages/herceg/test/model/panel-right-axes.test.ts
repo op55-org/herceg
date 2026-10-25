@@ -19,6 +19,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -144,15 +145,19 @@ describe("right axes in facets", () => {
     expect(columns[0]!.yRight!.domain).not.toEqual(columns[1]!.yRight!.domain);
   });
 
-  it("refuse a y zoom over right scales of their own, and y viewports of either side apart", () => {
-    expect(() =>
-      build({
-        marks: both(),
-        facet: facet("region"),
-        yRight: { scope: "panel" },
-        interaction: { zoom: "xy" },
-      }),
-    ).toThrow('right y scales of their own (yRight.scope "panel") cannot zoom along y');
+  it("zoom right scales of their own, each panel's, apart from the left", () => {
+    const own = build({
+      marks: both(),
+      facet: facet("region"),
+      yRight: { scope: "panel" },
+      interaction: { zoom: "xy" },
+    }).model;
+    const [first, second] = own.panels();
+    const kept = second!.yRight!.domain;
+    setViewport(own, { yRight: [0, 1000] }, first!.key);
+    own.scene(estimateText);
+    expect(own.panels()[0]!.yRight!.domain).toEqual([0, 1000]);
+    expect(own.panels()[1]!.yRight!.domain).toEqual(kept);
     // Without marks placing values on the right, there is no right scale to zoom.
     for (const extra of [[], [rule({ x: 0.5, axis: "right" })]]) {
       const { scene } = build({
@@ -164,7 +169,7 @@ describe("right axes in facets", () => {
       for (const panel of scene.panels) expect(axis(panel, "right")).toBeUndefined();
     }
     const { model } = build({ marks: both(), facet: facet("region") });
-    model.setYViewport({ y: [0, 20], yRight: [0, 5000] });
+    setViewport(model, { y: [0, 20], yRight: [0, 5000] });
     model.scene(estimateText);
     expect(model.panels().map((p) => p.yRight!.domain)).toEqual([
       [0, 5000],
@@ -172,10 +177,13 @@ describe("right axes in facets", () => {
     ]);
     // Giving the right side scales of its own lets go of its viewport only.
     model.update({ marks: both(), facet: facet("region"), yRight: { scope: "panel" } });
-    expect(model.yViewport).toEqual({ y: [0, 20], yRight: null });
-    expect(() => model.setYViewport({ y: null, yRight: [0, 1] })).toThrow("no one y range");
-    model.setYViewport({ y: [0, 10], yRight: null });
-    expect(model.yViewport.y).toEqual([0, 10]);
+    model.scene(estimateText);
+    expect(model.getViewport()).toEqual({ x: null, y: [0, 20], yRight: null });
+    expect(() => setViewport(model, { y: null, yRight: [0, 1] })).toThrow(
+      "setViewport yRight: the panels have right y scales of their own; name one with { panel }",
+    );
+    setViewport(model, { y: [0, 10], yRight: null });
+    expect(model.getViewport().y).toEqual([0, 10]);
   });
 
   it("read right values in each panel's tooltips by its own right axis", () => {

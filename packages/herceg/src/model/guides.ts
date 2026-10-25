@@ -19,6 +19,7 @@ import { fromWall, toWall } from "../format/zone.ts";
 import { aligned } from "../layout/place.ts";
 import {
   centeredLines,
+  fitText,
   type MeasureText,
   textHalo,
   textHeight,
@@ -87,6 +88,7 @@ export const GUIDE_KIT = {
   planAxis,
   textItem,
   textLines,
+  fitText,
   centeredLines,
   textWidth,
   textHeight,

@@ -3,7 +3,15 @@
 // come out as read-only snapshots of the last frame drawn.
 
 import type { DrillRoot } from "../marks/tree-data.ts";
-import type { DrawnPanel, Inspection, TooltipMode, Viewport } from "../model/model.ts";
+import type {
+  DrawnPanel,
+  Inspection,
+  ScaleInstance,
+  TooltipMode,
+  ViewChange,
+  Viewport,
+} from "../model/model.ts";
+import type { SelectionOwner } from "../model/selected-rows.ts";
 import type { SvgSizing } from "../render/svg.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { PlotRect } from "../scene/scene.ts";
@@ -11,10 +19,12 @@ import type { CameraSpec, CursorShowSpec } from "../spec/spec.ts";
 import type { Camera } from "../three/camera.ts";
 import type { Selection } from "./brushed.ts";
 import type { ChartUpdate } from "./chart.ts";
-import type { ChartEvents, ChartListener, PanelTarget } from "./events.ts";
+import type { ChartEvents, ChartListener, PanelTarget, PanelVisibility } from "./events.ts";
 
 /** A panel's axis: x, the left y axis, or the right one. */
 export type Axis = "x" | "y" | "yRight";
+
+export type { ScaleInstance, SelectionOwner };
 
 /** An axis of a panel; `panel` is needed in charts of several panels. */
 export interface AxisTarget extends PanelTarget {
@@ -42,48 +52,8 @@ export interface AxisInfo {
    * its viewport), though each maps it to pixels of its own. Opaque.
    */
   readonly instance: string;
-  /**
-   * Whether `setViewport` zooms the axis: not on category axes, nor on y
-   * axes of panels that have y scales of their own.
-   */
+  /** Whether `setViewport` zooms the axis: not on category axes. */
   readonly canSetViewport: boolean;
-}
-
-/**
- * One instance of a position scale: the panels sharing one domain, and one
- * view, along it (see the `scope` of the chart's `x`, `y`, and `yRight`).
- * A map's or network's plane is an instance of x and one of y, which the
- * panels drawing it share.
- */
-export interface ScaleInstance {
-  /** The scale: "x", or the left or right y axis'. */
-  readonly scale: Axis;
-  /**
-   * Names the instance among the scale's: the same in each of its panels
-   * (`AxisInfo.instance`), and another for each other instance of the scale
-   * (another scale's may be the same: an instance is its scale and its
-   * name). The instance every panel shares stays one as panels come and
-   * go; one of panels sharing a scale by row, column, or panel is another
-   * once its panels change, or its categories do. Opaque: compare it,
-   * never read it; not kept across mounts.
-   */
-  readonly instance: string;
-  /** Its type as last drawn: a plane's axes are "linear". */
-  readonly type: AxisInfo["type"];
-  /** On a category axis, its categories in band index order (as `AxisInfo.categories`). */
-  readonly categories?: readonly string[] | undefined;
-  /** The keys of the panels drawing with it, in reading order; panels without the axis are not among them. */
-  readonly panels: readonly string[];
-}
-
-/**
- * What a selection belongs to: the scale instances it has ranges on (an x
- * brush's x, a y brush's y, a rectangle's or a lasso's both), and the
- * panels drawing all of them, which show it.
- */
-export interface SelectionOwner {
-  readonly scales: readonly ScaleInstance[];
-  readonly panels: readonly string[];
 }
 
 /** A panel as the last frame drew it. */
@@ -150,39 +120,44 @@ export interface Chart {
    * Zooms: each axis given (`x`, `y`, `yRight`) shows a range (epoch ms on
    * time axes), or with null its configured domain or its data; axes left
    * out keep their view. A pair is an x range, and null resets every axis.
-   * Maps use projected plane units, networks layout units (y increases downwards);
-   * node radii stay in pixels.
-   * In charts whose panels have x scales of their own, an x range needs the
-   * `panel` whose scale shows it, and null without one resets every scale;
-   * y ranges are the chart's, whatever the panel. Facet panels of maps or
-   * networks share one view; a map or network subplot has its own, which
-   * needs its `panel` (unless the chart has no other view).
+   * A range is set on the scale instance of `panel` (see `ScaleInstance`),
+   * which every panel sharing it follows; without a panel, on the instance
+   * every panel shares, or the only one, and a range is refused where
+   * panels have instances of their own. Null without a panel resets every
+   * instance of the axis. Category axes, and axes `panel` does not have,
+   * refuse ranges; the whole change is checked before any of it is made,
+   * and reported as one `viewport` event. Maps use projected plane units,
+   * networks layout units (y increases downwards); node radii stay in
+   * pixels. Facet panels of maps or networks share one view; a map or
+   * network subplot has its own, which needs its `panel` (unless the chart
+   * has no other view).
    */
-  setViewport(
-    view: Partial<Viewport> | readonly [number, number] | null,
-    target?: PanelTarget,
-  ): void;
+  setViewport(view: ViewChange, target?: PanelTarget): void;
   /**
-   * What the chart shows: the x range of the x scale every panel shares
-   * (or, in charts whose panels have x scales of their own, of `panel`'s),
-   * and the y ranges, each null when that axis is not zoomed; for a map or
+   * What `panel` shows along each axis, null where it is not zoomed or it
+   * has no such axis; without a panel, along each axis every panel shares
+   * (or the only instance of), and null along the others. For a map or
    * network subplot, with its `panel`, its plane's.
    */
   getViewport(target?: PanelTarget): Viewport;
+  /** Counts the chart's changes of view: the `viewRevision` of the last `viewport` event, 0 before any. */
+  readonly viewRevision: number;
   /** What is brushed (x and y ranges, epoch ms for time axes, and a lasso's outline), or null. */
   readonly selection: Selection | null;
   /**
-   * The keys of the panels the selection belongs to, or null without one:
-   * every panel's, unless panels have x scales of their own (see `select`).
+   * What the selection belongs to, or null without one: the scale
+   * instances it has ranges on, and the panels drawing them all, which
+   * show it (see `SelectionOwner`).
    */
-  readonly selectionPanels: readonly string[] | null;
+  readonly selectionOwner: SelectionOwner | null;
   /**
    * Sets or clears (null) the selection, as if the user had brushed it in
-   * `panel`; an x range alone may be given as a pair. In charts whose panels
-   * have x scales of their own, a selection needs the panel it is in, and
-   * belongs to the panels sharing its x scale. With `rowSelection`, it
-   * writes the rows it covers, unless `rows` is false: a selection another
-   * view made and wrote, shown here too.
+   * `panel`; an x range alone may be given as a pair. It belongs to the
+   * instances it has ranges on in that panel (an x range's x, a y range's
+   * y, a lasso's both), or without a panel to those every panel shares,
+   * or the only panel's. With `rowSelection`, it writes the rows it
+   * covers, unless `rows` is false: a selection another view made and
+   * wrote, shown here too.
    */
   select(
     selection: Selection | readonly [number, number] | null,
@@ -281,8 +256,11 @@ export interface Chart {
    * series not drawn now stay hidden for when they are. A mark's keys go
    * with its identity, its `id` or else its index in `marks`: an update
    * without the mark drops them, and a mark that takes its index keeps them.
+   * With `panels`, what each subplot's own legend hid and showed there, as
+   * a `visibility` event reports them (so its state sets again in one
+   * change); without, what panels' legends set goes.
    */
-  setHiddenKeys(keys: readonly string[]): void;
+  setHiddenKeys(keys: readonly string[], options?: { panels?: PanelVisibility | undefined }): void;
   /**
    * Shows or hides series or items by key, as their legend entries do: in
    * every panel, letting go of what panels' legends set of them; or with
@@ -362,15 +340,15 @@ export interface Chart {
 
 /** A snapshot of a panel of the last scene. */
 export function panelInfo(panel: DrawnPanel): PanelInfo {
-  const { key, label, plot, x, y, yGroup, yRight, yRightGroup } = panel;
+  const { key, label, plot, x, y, yGroup, yRight, yRightGroup, drawsY } = panel;
   return {
     key,
     label,
     plot: { ...plot },
     x: axisInfo(x, panel.xGroup, x.type !== "band"),
-    // The chart has one viewport of each y axis when every panel shares its scale.
-    y: axisInfo(y, yGroup, yGroup === "" && y.type !== "band"),
-    yRight: yRight && axisInfo(yRight, yRightGroup, yRightGroup === ""),
+    // A panel drawing nothing along the left y axis has no instance of it.
+    y: drawsY ? axisInfo(y, yGroup, y.type !== "band") : undefined,
+    yRight: yRight && axisInfo(yRight, yRightGroup, yRight.type !== "band"),
   };
 }
 

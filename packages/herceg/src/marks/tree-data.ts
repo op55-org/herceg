@@ -19,8 +19,8 @@ import { textDrawing } from "../draw/labels.ts";
 import { formatNumber } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import type { LegendEntry } from "../model/legend.ts";
-import type { ChartConfig } from "../model/model.ts";
 import type { Rect, TextGeometry } from "../scene/scene.ts";
+import type { InteractionSpec } from "../spec/spec.ts";
 import {
   heldText,
   type LayoutControls,
@@ -29,6 +29,7 @@ import {
   type LayoutResult,
   RowsCache,
   SelectionCache,
+  SoleRows,
 } from "./layout-mark.ts";
 import { CATEGORY, requireField } from "./mark.ts";
 
@@ -138,8 +139,10 @@ const DRILL: LayoutControls = {
 };
 
 /** A tree's controls: drilling, when `interaction.zoom` is on. */
-export function drillControls(config: ChartConfig): LayoutControls | undefined {
-  return config.interaction?.zoom ? DRILL : undefined;
+export function drillControls(
+  interaction: InteractionSpec | undefined,
+): LayoutControls | undefined {
+  return interaction?.zoom ? DRILL : undefined;
 }
 
 /**
@@ -158,6 +161,8 @@ export class TreeData {
   readonly #value: string | undefined;
   /** What highlighted selections hold of each view's nodes, by membership and view. */
   readonly #held = new SelectionCache<Held>();
+  /** The one row each node of the whole tree stands for, of each view's rows. */
+  readonly #soles = new WeakMap<TreeView, SoleRows>();
   /** The whole table's tree, and the table version it is for. */
   #whole: { version: number; view: TreeView } | undefined;
   /** The part of the tree each facet panel's rows give a value. */
@@ -489,6 +494,33 @@ export class TreeData {
       if (nodeOfRow[row]! >= 0 && under[nodeOfRow[row]!]) rows.push(row);
     });
     return rows;
+  }
+
+  /**
+   * The one row the node of `view` keyed `key` stands for, of its own and
+   * every node's under it, of the view's rows; undefined for none, several,
+   * or a key of no node.
+   */
+  soleRow(id: string | number, view: TreeView, key: string): number | undefined {
+    const node = this.nodeOf(id, view, key);
+    if (node < 0) return undefined;
+    let soles = this.#soles.get(view);
+    if (!soles) {
+      const { tree } = this.view();
+      const { nodeOfRow } = tree;
+      const found = new SoleRows(tree.size);
+      eachRow(view, nodeOfRow.length, (row) => {
+        if (nodeOfRow[row]! >= 0) found.add(nodeOfRow[row]!, row);
+      });
+      // Children come after their parents in `order`: each passes its rows up once complete.
+      for (let at = tree.size - 1; at > 0; at--) {
+        const child = tree.order[at]!;
+        found.addFrom(tree.parent[child]!, child);
+      }
+      soles = found;
+      this.#soles.set(view, soles);
+    }
+    return soles.of(view.nodes?.[node] ?? node);
   }
 
   /**

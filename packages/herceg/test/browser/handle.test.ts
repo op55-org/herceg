@@ -6,7 +6,7 @@ import { time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, createChart } from "../../src/dom/chart.ts";
 import { bar } from "../../src/marks/bar.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point3d } from "../../src/marks/point3d.ts";
@@ -116,7 +116,8 @@ describe("panels", () => {
     const [a, b] = own.getPanels();
     expect(a!.x!.instance).not.toBe(b!.x!.instance);
     expect(a!.y!.instance).not.toBe(b!.y!.instance);
-    expect([a!.x!.canSetViewport, a!.y!.canSetViewport]).toEqual([true, false]);
+    // Each panel's own y zooms too, named by its panel.
+    expect([a!.x!.canSetViewport, a!.y!.canSetViewport]).toEqual([true, true]);
     expect(b!.plot.x).toBeGreaterThan(a!.plot.x + a!.plot.width);
   });
 
@@ -339,7 +340,7 @@ describe("visibility", () => {
     });
     const marks = [
       bar(stats, { x: "day", y: "mean", series: "sex" }),
-      errorBar(stats, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true }),
+      errorbar(stats, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true }),
     ];
     const chart = mount({ renderer: "svg", marks });
     expect(chart.getLegend().map(({ label }) => label)).toEqual(["f", "m"]);
@@ -569,7 +570,7 @@ describe("render events", () => {
     await frame();
     expect(renders).toBe(1);
     expect(chart.getViewport({ panel: "b" }).x).toEqual([0.5, 1]);
-    expect(chart.selectionPanels).toEqual(["a"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["a"]);
   });
 });
 

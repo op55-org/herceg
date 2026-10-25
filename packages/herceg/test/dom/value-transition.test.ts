@@ -12,6 +12,7 @@ import {
   MOVING_ITEMS,
   MOVING_POINTS,
   plan,
+  positionsOf,
   type Shown,
   sidesOf,
   snapshot,
@@ -21,13 +22,20 @@ import {
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { axis } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
+import { inset, panel } from "../../src/layout.ts";
 import { Polyline } from "../../src/lod/polyline.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { candlestick } from "../../src/marks/candlestick.ts";
 import { monotonePolyline } from "../../src/marks/curve.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
+import { gauge } from "../../src/marks/gauge.ts";
+import { heatmap } from "../../src/marks/heatmap.ts";
+import { histogram } from "../../src/marks/histogram.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { PointMark, point } from "../../src/marks/point.ts";
+import { region } from "../../src/marks/region.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { text } from "../../src/marks/text.ts";
 import { planAxis } from "../../src/model/axis.ts";
@@ -36,6 +44,7 @@ import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { Highlighter } from "../../src/model/highlight.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
@@ -45,13 +54,17 @@ import {
   type AreaGeometry,
   type AxisGuide,
   CLOUD_POINTS,
+  type Geometry,
+  type LabelsGeometry,
   type LineGeometry,
   type PointGeometry,
   type PointItems,
+  type RasterGeometry,
   type RectGeometry,
   type RuleGeometry,
   type Scene,
   type SegmentGeometry,
+  type ShapesGeometry,
   type TextGeometry,
 } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
@@ -80,7 +93,7 @@ function chart(config: Partial<ChartConfig> & Pick<ChartConfig, "marks">) {
 
 /** What `model` showed, and how it moves to its next scene after `change`. */
 function change(model: ChartModel, edit: () => void): { shown: Shown; tween: Tween | undefined } {
-  const shown = snapshot(model.scene(estimateText), model.panels()[0], 0);
+  const shown = snapshot(model.scene(estimateText), model.panels(), 0);
   expect(shown).toBeDefined();
   edit();
   const scene = model.scene(estimateText);
@@ -89,11 +102,12 @@ function change(model: ChartModel, edit: () => void): { shown: Shown; tween: Twe
     tween: plan(
       shown!,
       scene,
-      model.panels()[0],
+      model.panels(),
       200,
       BUILDERS,
       sidesOf(model.config),
       followedOf(model.config),
+      positionsOf(model.config),
     ),
   };
 }
@@ -218,7 +232,7 @@ describe("bars changing values", () => {
     });
     const before = bars(model.scene(estimateText)).map(rects);
     const { tween } = change(model, () => data.setColumn("b", [25, 15]));
-    expect(tween!.bars).toHaveLength(2);
+    expect(tween!.panels[0]!.bars).toHaveLength(2);
     const [, b] = bars(frameAt(tween!, 100)).map(rects);
     // Lengths along x grow from the left; positions along y stay.
     expect(b![0]![0]).toBe(Math.fround(before[1]![0]![0]!));
@@ -271,16 +285,37 @@ describe("bars changing values", () => {
     expect(tween).toBeUndefined();
   });
 
-  it("leave out stacks, labeled bars, log axes, and bars sharing a position", () => {
-    const data = table({ region: ["N", "S"], a: [10, 20], b: [5, 15] });
-    for (const config of [
-      { marks: [bar(data, { x: "region", y: ["a", "b"], stack: true })] },
-      { marks: [bar(data, { x: "region", y: "a", labels: true })] },
-      { marks: [bar(data, { x: "region", y: "a" })], y: { type: "log" as const } },
-    ]) {
-      const model = chart(config);
-      expect(snapshot(model.scene(estimateText), model.panels()[0], 0)).toBeUndefined();
-    }
+  it("move stacks and labeled bars by position, bars on log axes in order, and not bars sharing a position", () => {
+    const data = () => table({ region: ["N", "S"], a: [10, 20], b: [5, 15] });
+    // A stack's layers move their roots and tips, so they stay on one another.
+    const stacked = data();
+    const stack = chart({
+      marks: [bar(stacked, { x: "region", y: ["a", "b"], stack: true })],
+      y: { domain: [0, 40] },
+    });
+    const { tween } = change(stack, () => stacked.setColumn("a", [20, 10]));
+    expect(tween!.panels[0]!.bars).toHaveLength(2);
+    const [lower, upper] = bars(frameAt(tween!, 100)).map(rects);
+    lower!.forEach(([, top], i) => {
+      const [, y, , height] = upper![i]!;
+      expect(y! + height!).toBeCloseTo(top!, 3);
+    });
+    // Labels move with the bars they stand by.
+    const labeled = data();
+    const withLabels = chart({
+      marks: [bar(labeled, { x: "region", y: "a", labels: true })],
+      y: { domain: [0, 40] },
+    });
+    const moved = change(withLabels, () => labeled.setColumn("a", [20, 10])).tween!;
+    expect(moved.panels[0]!.bars).toHaveLength(1);
+    expect(moved.panels[0]!.lists.map(({ mark }) => mark.kind)).toEqual([
+      expect.stringMatching(/text|labels/),
+    ]);
+    // On a log axis bars move as rectangles in their order.
+    const logged = data();
+    const log = chart({ marks: [bar(logged, { x: "region", y: "a" })], y: { type: "log" } });
+    const ordered = change(log, () => logged.setColumn("a", [20, 10])).tween!;
+    expect([ordered.panels[0]!.bars.length, ordered.panels[0]!.lists.length]).toEqual([0, 1]);
     // Two bars at one position have no identity: their series shows its new values.
     const twice = table({ region: ["N", "N", "S"], a: [10, 12, 20] });
     const model = chart({ marks: [bar(twice, { x: "region", y: "a" })], y: { domain: [0, 40] } });
@@ -402,7 +437,7 @@ describe("bars changing values", () => {
           name,
         ).toBe(true);
         // Bars move beside it.
-        expect(tween!.bars, name).toHaveLength(1);
+        expect(tween!.panels[0]!.bars, name).toHaveLength(1);
       }
   });
 
@@ -454,12 +489,12 @@ describe("bars changing values", () => {
     });
     const scene = model.scene(estimateText);
     const drawn = rects(bars(scene)[0]!);
-    const shown = snapshot(scene, model.panels()[0], 0)!;
+    const shown = snapshot(scene, model.panels(), 0)!;
     // Scenes reuse their geometry buffers.
     data.setColumn("sales", [1, 2, 3]);
     model.scene(estimateText);
     data.setColumn("sales", [30, 20, 10]);
-    const tween = plan(shown, model.scene(estimateText), model.panels()[0], 200, BUILDERS)!;
+    const tween = plan(shown, model.scene(estimateText), model.panels(), 200, BUILDERS)!;
     expectRects(rects(bars(frameAt(tween, 0))[0]!), drawn);
   });
 
@@ -711,15 +746,18 @@ describe("axes moving with values", () => {
   it("show at once what cannot move with its axes", () => {
     const data = table({ region: ["N", "S"], a: [10, 20], b: [5, 15] });
     const marks = () => [
-      bar(data, { x: "region", y: ["a", "b"], stack: true }),
+      errorbar(data, { x: "region", y1: "b", y2: "a" }),
       point(data, { x: "region", y: "a" }),
     ];
-    // Stacked bars do not move: points can, but not with an axis moving past the stacks.
+    // An error bar that goes leaves its list another length, which cannot
+    // move: points can, but not with an axis moving past the error bars.
     const free = chart({ marks: marks() });
-    expect(change(free, () => data.setColumn("a", [10, 30])).tween).toBeUndefined();
+    expect(change(free, () => data.setColumn("a", [Number.NaN, 30])).tween).toBeUndefined();
+    data.setColumn("a", [10, 20]);
     const fixed = chart({ marks: marks(), y: { domain: [0, 60] } });
-    const { tween } = change(fixed, () => data.setColumn("a", [20, 30]));
-    expect(tween!.points).toHaveLength(1);
+    const { tween } = change(fixed, () => data.setColumn("a", [Number.NaN, 30]));
+    expect(tween!.panels[0]!.points).toHaveLength(1);
+    expect(tween!.panels[0]!.lists).toHaveLength(0);
   });
 });
 
@@ -812,7 +850,7 @@ describe("points changing values", () => {
       change(model, () => data.reset({ x: [1, 2, 3], y: [30, 20, 10] })).tween,
     ).toBeUndefined();
     const sampled = scatter({ x: [1, 2, 3], y: [10, 20, 30] }, { sampling: "pixel" }).model;
-    expect(snapshot(sampled.scene(estimateText), sampled.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(sampled.scene(estimateText), sampled.panels(), 0)).toBeUndefined();
   });
 
   it("match numeric keys across reordered resets, entering and exiting in destination order", () => {
@@ -849,8 +887,8 @@ describe("points changing values", () => {
     const scene = model.scene(estimateText);
     const geometry = pointsOf(scene)[0]!;
     const before = centers(geometry);
-    const shown = snapshot(scene, model.panels()[0], 0)!;
-    const copy = [...shown.items.values()][0]!;
+    const shown = snapshot(scene, model.panels(), 0)!;
+    const copy = [...shown.panels[0]!.items.values()][0]!;
     expect(copy.kind).toBe("points");
     if (copy.kind !== "points") throw new Error("expected points");
     const ids = geometry.items!.ids as (string | undefined)[];
@@ -862,7 +900,7 @@ describe("points changing values", () => {
       y: [50, 60, 70],
       id: encodedCategory(Int32Array.from([0, 1, 2]), ["c", "a", "b"]),
     });
-    const tween = plan(shown, model.scene(estimateText), model.panels()[0], 200, BUILDERS);
+    const tween = plan(shown, model.scene(estimateText), model.panels(), 200, BUILDERS);
     expectRects(centers(pointsOf(frameAt(tween!, 0))[0]!), [before[2]!, before[0]!, before[1]!]);
     data.setColumn("id", ["new", "new", "new"]);
     model.scene(estimateText);
@@ -922,7 +960,7 @@ describe("points changing values", () => {
     const marks = [point(data, { x: "x", y: "y", series: "group", animationKey: "id" })];
     const fixed = chart({ marks, x: { domain: [0, 4] }, y: { domain: [0, 100] } });
     const automatic = chart({ marks });
-    const old = snapshot(automatic.scene(estimateText), automatic.panels()[0], 0)!;
+    const old = snapshot(automatic.scene(estimateText), automatic.panels(), 0)!;
     const { tween } = change(fixed, () =>
       data.reset({
         x: [1, 2, 1, 2],
@@ -931,11 +969,11 @@ describe("points changing values", () => {
         group: ["a", "a", "b", "b"],
       }),
     );
-    expect(tween!.points).toHaveLength(1);
-    expect(tween!.points[0]!.mark.key).toContain('"b"');
+    expect(tween!.panels[0]!.points).toHaveLength(1);
+    expect(tween!.panels[0]!.points[0]!.mark.key).toContain('"b"');
     expect(centers(pointsOf(frameAt(tween!, 0))[0]!)).toEqual(centers(pointsOf(tween!.scene)[0]!));
     expect(
-      plan(old, automatic.scene(estimateText), automatic.panels()[0], 200, BUILDERS),
+      plan(old, automatic.scene(estimateText), automatic.panels(), 200, BUILDERS),
     ).toBeUndefined();
   });
 
@@ -974,7 +1012,7 @@ describe("points changing values", () => {
     ];
     for (const identity of variants) {
       const changed = { ...scene, panels: [{ ...panel, marks: [{ ...mark, items: identity }] }] };
-      expect(plan(shown, changed, model.panels()[0], 200, BUILDERS)).toBeUndefined();
+      expect(plan(shown, changed, model.panels(), 200, BUILDERS)).toBeUndefined();
     }
   });
 
@@ -995,7 +1033,7 @@ describe("points changing values", () => {
       ];
       const fixed = chart({ marks, x: { domain: [0, 4] }, y: { domain: [0, 100] } });
       const automatic = chart({ marks });
-      const old = snapshot(automatic.scene(estimateText), automatic.panels()[0], 0)!;
+      const old = snapshot(automatic.scene(estimateText), automatic.panels(), 0)!;
       const before = centers(pointsOf(fixed.scene(estimateText))[0]!);
       // Each series retains 2,000 keys, loses 1,000, and gains 2,000 (or 2,001).
       // Their unions total 10,000 or 10,001, though both endpoint scenes fit.
@@ -1006,8 +1044,8 @@ describe("points changing values", () => {
       expect(tween).toBeDefined();
       const target = pointsOf(tween!.scene);
       expect(target.map((mark) => mark.count)).toEqual([4000, 4000 + extra]);
-      expect(tween!.axes).toBeUndefined();
-      expect(tween!.points.map(({ mark }) => mark.key)).toEqual(
+      expect(tween!.panels[0]!.axes).toBeUndefined();
+      expect(tween!.panels[0]!.points.map(({ mark }) => mark.key)).toEqual(
         target.slice(0, extra === 0 ? 2 : 1).map((mark) => mark.key),
       );
       const expectedCounts = extra === 0 ? [5000, 5000] : [5000, 4001];
@@ -1027,12 +1065,12 @@ describe("points changing values", () => {
       expect(end.radii![4000]).toBe(0);
 
       const scene = automatic.scene(estimateText);
-      expect(scene.panels[0]!.plot).toEqual(old.plot);
-      expect(automatic.panels()[0]!.y.domain).not.toEqual(old.panel!.y.domain);
-      const movingAxes = plan(old, scene, automatic.panels()[0], 200, BUILDERS);
+      expect(scene.panels[0]!.plot).toEqual(old.panels[0]!.plot);
+      expect(automatic.panels()[0]!.y.domain).not.toEqual(old.panels[0]!.panel!.y.domain);
+      const movingAxes = plan(old, scene, automatic.panels(), 200, BUILDERS);
       if (extra === 0) {
-        expect(movingAxes!.axes).toBeDefined();
-        expect(movingAxes!.points).toHaveLength(2);
+        expect(movingAxes!.panels[0]!.axes).toBeDefined();
+        expect(movingAxes!.panels[0]!.points).toHaveLength(2);
       } else {
         expect(movingAxes).toBeUndefined();
       }
@@ -1049,7 +1087,7 @@ describe("points changing values", () => {
     const long = chart({ marks: [point(table(rows(n)), { x: "x", y: "y" })] });
     const scene = long.scene(estimateText);
     expect(pointsOf(scene)[0]!.items).toBeUndefined();
-    expect(snapshot(scene, long.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(scene, long.panels(), 0)).toBeUndefined();
     // Series that are short enough, but too many together.
     const half = table(rows(Math.ceil(n / 2)));
     const model = chart({
@@ -1057,14 +1095,14 @@ describe("points changing values", () => {
     });
     const shown = model.scene(estimateText);
     const copies = vi.spyOn(pointsOf(shown)[0]!.items!.ids, "slice");
-    expect(snapshot(shown, model.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(shown, model.panels(), 0)).toBeUndefined();
     expect(copies).not.toHaveBeenCalled();
     // Nor do other marks beside more points than that.
     const thresholds = table({ y: [10, 20, 30] });
     const crowded = chart({
       marks: [point(table(rows(n)), { x: "x", y: "y" }), rule(thresholds, { y: "y" })],
     });
-    expect(snapshot(crowded.scene(estimateText), crowded.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(crowded.scene(estimateText), crowded.panels(), 0)).toBeUndefined();
     // Bars beside a cloud stay still too.
     const cloud = table({
       x: Float64Array.from({ length: CLOUD_POINTS }, (_, i) => i),
@@ -1078,7 +1116,7 @@ describe("points changing values", () => {
     });
     const drawn = beside.scene(estimateText, true);
     expect(pointsOf(drawn)[0]!.cloud).toBeDefined();
-    expect(snapshot(drawn, beside.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(drawn, beside.panels(), 0)).toBeUndefined();
   });
 });
 
@@ -1108,6 +1146,33 @@ describe("lines and areas changing values", () => {
     expect(change(model, () => data.reset({ x, y: [10, 30, 20, 40, 30] })).tween).toBeDefined();
   });
 
+  it("move a line along y along x, its positions staying, the x axis with it", () => {
+    for (const curve of [undefined, "monotone"] as const) {
+      const data = table({ y: x, v: [10, 30, 20, 40, 30] });
+      const model = chart({
+        marks: [line(data, { x: "v", y: "y", orient: "y", ...(curve && { curve }) })],
+      });
+      const before = xs(pathOf(model.scene(estimateText)));
+      const { tween } = change(model, () => data.setColumn("v", [10, 30, 20, 80, 30]));
+      expect(tween!.panels[0]!.traces, String(curve)).toHaveLength(1);
+      // The x axis moves to the new largest value.
+      expect(tween!.panels[0]!.motions.x.moves).toBe(true);
+      const after = pathOf(tween!.scene);
+      const middle = pathOf(frameAt(tween!, 100));
+      if (!curve) {
+        expect(ys(middle)).toEqual(ys(after));
+        // A value that stays moves as far as its axis does.
+        expect(xs(middle)[1]).toBeGreaterThan(Math.min(before[1]!, xs(after)[1]!));
+        expect(xs(middle)[1]).toBeLessThan(Math.max(before[1]!, xs(after)[1]!));
+      } else expect(middle.curved).toBe(true);
+      expectRects([xs(pathOf(frameAt(tween!, 200)))], [xs(after)]);
+    }
+    // Rows whose positions move show at once.
+    const data = table({ y: x, v: [10, 30, 20, 40, 30] });
+    const model = chart({ marks: [line(data, { x: "v", y: "y", orient: "y" })] });
+    expect(change(model, () => data.setColumn("y", [0, 1, 2, 3, 5])).tween).toBeUndefined();
+  });
+
   it("show at once lines whose x positions, gaps, or level of detail change", () => {
     const moved = lines();
     expect(
@@ -1124,7 +1189,7 @@ describe("lines and areas changing values", () => {
       y: Float64Array.from({ length: 4000 }, (_, i) => Math.sin(i)),
     });
     const model = chart({ marks: [line(dense, { x: "x", y: "y" })] });
-    expect(snapshot(model.scene(estimateText), model.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(model.scene(estimateText), model.panels(), 0)).toBeUndefined();
   });
 
   it("move steps through their points, and curve frames through the values between", () => {
@@ -1177,7 +1242,7 @@ describe("lines and areas changing values", () => {
       const model = chart({ marks: [area(data, { x: "x", y: ["a", "b"], stack: true, curve })] });
       const { tween } = change(model, () => data.setColumn("a", [40, 10, 50, 20, 60]));
       // Curved layers are curved together.
-      expect(tween!.stacks).toHaveLength(curve === "monotone" ? 1 : 0);
+      expect(tween!.panels[0]!.stacks).toHaveLength(curve === "monotone" ? 1 : 0);
       for (const elapsed of [0, 30, 100, 170, 200]) {
         const [below, above] = marksOf<AreaGeometry>(frameAt(tween!, elapsed), "area");
         expect(ys(above!.lower!)).toEqual(ys(below!.upper));
@@ -1254,7 +1319,7 @@ describe("lines and areas changing values", () => {
           for (const [field, values] of Object.entries(next)) data.setColumn(field, values);
         });
         const label = `${name}, highlighted: ${highlighted}`;
-        expect(tween!.stacks.length, label).toBeGreaterThan(0);
+        expect(tween!.panels[0]!.stacks.length, label).toBeGreaterThan(0);
         // The frames begin and end as the scenes draw them.
         expectAreas(areas(frameAt(tween!, 0)), before, label);
         expectAreas(areas(frameAt(tween!, 200)), areas(tween!.scene), label);
@@ -1262,6 +1327,203 @@ describe("lines and areas changing values", () => {
         for (const { upper, lower } of marksOf<AreaGeometry>(frameAt(tween!, 100), "area"))
           expect(ys(upper), label).not.toEqual(ys(lower!));
       }
+  });
+});
+
+describe("lists, rasters, and gauges changing values", () => {
+  const samples = () =>
+    table({
+      x: [0, 1, 2, 3],
+      low: [1, 3, 2, 10],
+      high: [3, 5, 4, 30],
+      y: [2, 4, 3, 20],
+      category: ["a", "b", "a", "b"],
+      note: ["one", "two", "three", "four"],
+    });
+  const corners = (points: Float32Array) => Array.from(points);
+
+  it("move error bars, candles, regions, and text by their order, along the axis that changed", () => {
+    const makes = [
+      (data: Table) => errorbar(data as never, { x: "x", y1: "low", y2: "high" }),
+      (data: Table) =>
+        candlestick(data as never, { x: "x", open: "low", high: "high", low: "low", close: "y" }),
+      (data: Table) => region(data as never, { y1: "low", y2: "high" }),
+      (data: Table) => text(data as never, { x: "x", y: "high", label: { field: "note" } }),
+      (data: Table) =>
+        text(data as never, {
+          x: "x",
+          y: "high",
+          label: { field: "note", style: { background: { fill: "#eee" } } },
+        }),
+    ];
+    for (const [i, make] of makes.entries()) {
+      const data = samples() as unknown as Table;
+      const model = chart({ marks: [make(data)], y: { domain: [0, 60] } });
+      const { tween } = change(model, () => data.set("high", 3, 50));
+      expect(tween, `mark ${i}`).toBeDefined();
+      expect(tween!.panels[0]!.lists.length, `mark ${i}`).toBeGreaterThan(0);
+      for (const list of tween!.panels[0]!.lists) {
+        // Halfway, each point is between its two, on the scales between.
+        const middle = frameAt(tween!, 100).panels[0]!.marks[list.index]!;
+        const points = list.to.map((to, k) => list.from[k]! + (to - list.from[k]!) * HALF);
+        expect(middle.kind).toBe(list.mark.kind);
+        const shown =
+          middle.kind === "labels"
+            ? (middle as LabelsGeometry).items.flatMap(({ x, y }) => [x, y])
+            : middle.kind === "rect"
+              ? corners(
+                  Float32Array.from(
+                    Array.from({ length: (middle as RectGeometry).count }, (_, r) => {
+                      const [rx, ry, w, h] = (middle as RectGeometry).rects.subarray(
+                        r * 4,
+                        r * 4 + 4,
+                      );
+                      return [rx!, ry!, rx! + w!, ry! + h!];
+                    }).flat(),
+                  ),
+                )
+              : Array.from((middle as SegmentGeometry | TextGeometry).coords);
+        shown.forEach((value, k) => {
+          expect(value, `mark ${i}, point ${k}`).toBeCloseTo(points[k]!, 3);
+        });
+      }
+    }
+  });
+
+  it("move a list only when its items keep their places along one axis", () => {
+    const data = samples() as unknown as Table;
+    const model = chart({
+      marks: [text(data as never, { x: "x", y: "high", label: { field: "note" } })],
+      x: { domain: [0, 4] },
+      y: { domain: [0, 60] },
+    });
+    // A row moving along both axes has no place to tell it by.
+    expect(
+      change(model, () => {
+        data.set("x", 1, 1.5);
+        data.set("high", 1, 20);
+      }).tween,
+    ).toBeUndefined();
+  });
+
+  it("fade heatmap cells to their new colors, and cells coming or going in and out", () => {
+    const data = table({ x: ["a", "b", "a", "b"], y: ["p", "p", "q", "q"], v: [1, 2, 3, 4] });
+    const model = chart({ marks: [heatmap(data, { x: "x", y: "y", color: "v" })] });
+    const raster = (scene: Scene) => marksOf<RasterGeometry>(scene, "raster")[0]!;
+    const before = raster(model.scene(estimateText)).pixels.slice();
+    const { tween } = change(model, () => data.set("v", 0, 2.5));
+    expect(tween!.panels[0]!.rasters).toHaveLength(1);
+    const after = raster(tween!.scene).pixels;
+    const middle = raster(frameAt(tween!, 100)).pixels;
+    middle.forEach((value, k) => {
+      expect(value).toBeCloseTo(before[k]! + (after[k]! - before[k]!) * HALF, -0.5);
+    });
+    // A cell that goes keeps its color as it fades out.
+    const gone = change(model, () => data.set("v", 1, Number.NaN)).tween!;
+    const [from, to, mid] = [
+      gone.panels[0]!.rasters[0]!.from,
+      raster(gone.scene).pixels,
+      raster(frameAt(gone, 100)).pixels,
+    ];
+    const cell = [...Array(from.length / 4).keys()].find((c) => to[c * 4 + 3] === 0)!;
+    expect(Array.from(mid.subarray(cell * 4, cell * 4 + 3))).toEqual(
+      Array.from(from.subarray(cell * 4, cell * 4 + 3)),
+    );
+    expect(mid[cell * 4 + 3]).toBeCloseTo(255 * (1 - HALF), -0.5);
+  });
+
+  it("turn a gauge's dial through the values between, writing them", () => {
+    const data = table({ y: [30] });
+    const model = chart({ marks: [gauge(data, { value: "y" })] });
+    const dial = (marks: readonly Geometry[]) =>
+      (marks.find((mark) => mark.key === "gauge-dial") as ArcGeometry).arcs[11]!;
+    const start = dial(model.scene(estimateText).panels[0]!.marks);
+    const { tween } = change(model, () => data.set("y", 0, 50));
+    expect(tween!.panels[0]!.dial).toMatchObject({ from: 30, to: 50 });
+    const middle = frameAt(tween!, 100).panels[0]!.marks;
+    const value = middle.find((mark) => mark.key === "gauge-value") as ShapesGeometry;
+    expect((value.shapes[0] as { text: string }).text).toBe(String(30 + 20 * HALF));
+    const end = dial(tween!.scene.panels[0]!.marks);
+    expect(dial(middle)).toBeGreaterThan(start);
+    expect(dial(middle)).toBeLessThan(end);
+    // A gauge whose value goes shows it at once.
+    expect(change(model, () => data.set("y", 0, Number.NaN)).tween).toBeUndefined();
+  });
+
+  it("move histograms' bars by their bins", () => {
+    const data = table({ v: [1, 2, 12, 22] });
+    const model = chart({
+      marks: [histogram(data, { x: "v", bins: [0, 10, 20, 30] })],
+      y: { domain: [0, 4] },
+    });
+    const { tween } = change(model, () => data.set("v", 3, 3));
+    expect(tween!.panels[0]!.bars).toHaveLength(1);
+    // The bin a row left shrinks to the base, the one it joined grows.
+    const middle = bars(frameAt(tween!, 100));
+    expect(middle[0]!.count).toBe(3);
+  });
+});
+
+describe("panels changing values", () => {
+  const sales = () => table({ x: [0, 1, 2, 3], y: [10, 20, 30, 40], group: ["N", "N", "S", "S"] });
+
+  it("move every subplot's marks, each on its own scales, or none", () => {
+    const data = sales();
+    const model = chart({
+      panels: panels([{ id: "a" }, { id: "b" }]),
+      marks: [
+        bar(data, { x: "x", y: "y", panel: "a" }),
+        line(data, { x: "x", y: "y", panel: "b" }),
+      ],
+    });
+    const { tween } = change(model, () => data.set("y", 3, 60));
+    expect(tween!.panels.map((panel) => [panel.bars.length, panel.traces.length])).toEqual([
+      [1, 0],
+      [0, 1],
+    ]);
+    // Each panel's own y axis moves to its new domain.
+    expect(tween!.panels.every((panel) => panel.motions.y.moves)).toBe(true);
+    const middle = frameAt(tween!, 100);
+    const final = tween!.scene;
+    middle.panels.forEach((panel, i) => {
+      expect(panel.key).toBe(final.panels[i]!.key);
+      expect(panel.marks).not.toEqual(final.panels[i]!.marks);
+    });
+    // A panel whose change cannot move leaves the whole change to show at once.
+    const other = sales();
+    const blocked = chart({
+      panels: panels([{ id: "a" }, { id: "b" }]),
+      marks: [
+        bar(other, { x: "x", y: "y", panel: "a" }),
+        errorbar(other, { x: "x", y1: "y", y2: "y", panel: "b" }),
+      ],
+    });
+    expect(change(blocked, () => other.set("y", 3, Number.NaN)).tween).toBeUndefined();
+  });
+
+  it("move facet panels, and panels that come or go show the change at once", () => {
+    const data = sales();
+    const model = chart({ marks: [bar(data, { x: "x", y: "y" })], facet: facet("group") });
+    const { tween } = change(model, () => data.set("y", 0, 15));
+    expect(tween!.panels.map((panel) => panel.bars.length)).toEqual([1, 1]);
+    expect(change(model, () => data.set("group", 0, "E" as never)).tween).toBeUndefined();
+  });
+
+  it("move an inset's marks, painted over its parent's as the scene paints them", () => {
+    const data = sales();
+    const model = chart({
+      panels: panels(
+        panel("a", [inset("b", { width: { fraction: 0.5 }, height: { fraction: 0.5 } })]),
+      ),
+      marks: [
+        line(data, { x: "x", y: "y", panel: "a" }),
+        bar(data, { x: "x", y: "y", panel: "b" }),
+      ],
+    });
+    const { tween } = change(model, () => data.set("y", 1, 25));
+    const middle = frameAt(tween!, 100);
+    expect(middle.painted).toHaveLength(tween!.scene.painted!.length);
+    for (const panel of middle.painted!) expect(middle.panels).toContain(panel);
   });
 });
 
@@ -1370,7 +1632,7 @@ describe("value animation", () => {
     const long = chart({ marks: [bar(table(rows(MOVING_ITEMS + 1)), { x: "x", y: "y" })] });
     const scene = long.scene(estimateText);
     expect(bars(scene)[0]!.bars).toBeUndefined();
-    expect(snapshot(scene, long.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(scene, long.panels(), 0)).toBeUndefined();
     // Two short enough, but too many together.
     const half = table(rows(MOVING_ITEMS / 2 + 1));
     const model = chart({
@@ -1378,7 +1640,7 @@ describe("value animation", () => {
     });
     const shown = model.scene(estimateText);
     const copies = vi.spyOn(bars(shown)[0]!.bars!.at, "slice");
-    expect(snapshot(shown, model.panels()[0], 0)).toBeUndefined();
+    expect(snapshot(shown, model.panels(), 0)).toBeUndefined();
     expect(copies).not.toHaveBeenCalled();
     // Bars growing past the limit show at once beside marks that could move.
     const growing = table(rows(10));

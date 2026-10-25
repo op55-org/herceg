@@ -10,6 +10,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { AreaGeometry, TextGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", ...config });
@@ -199,7 +200,7 @@ describe("normalized and stream stacks", () => {
           expect(edges(model)).toEqual(edges(build({ marks: [mark(fresh)] }).model));
         }
         const before = edges(model);
-        model.setViewport([5, 6]);
+        setViewport(model, [5, 6]);
         model.scene(estimateText);
         expect(edges(model)).toEqual(before);
         model.hidden.add(model.series()[0]!.key);

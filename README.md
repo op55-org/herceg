@@ -160,8 +160,10 @@ per panel for every mark on a category axis), points on category axes,
 subplots placed by a layout of nested columns, rows, and spanning grid cells
 (weights, pixels, and least sizes per track; scales of their own per panel
 or shared by chart, row, column, grid, or list), insets drawn over a panel
-with an indicator of their ranges, panels' own legends that hide and show
-series there, pies, treemaps, sunbursts, gauges, funnels, radars, Sankey
+with an indicator of their ranges, the chart's zoom, pan, brushes, tooltips,
+keyboard, limits, sync, and row selections in every panel, cell, and inset
+(on its own scales, or with settings of its own), panels' own legends that
+hide and show series there, pies, treemaps, sunbursts, gauges, funnels, radars, Sankey
 diagrams, maps, and networks in each facet panel or in a subplot of their own (facet panels drilled,
 panned, and zoomed together, each subplot alone), live notebook charts (a widget that streams updates from Python
 and reports interaction, tree drill roots, and network node positions back,

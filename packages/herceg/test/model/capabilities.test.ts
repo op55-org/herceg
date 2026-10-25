@@ -24,7 +24,7 @@ import { contour } from "../../src/marks/contour.ts";
 import { monotonePolyline } from "../../src/marks/curve.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { dendrogram } from "../../src/marks/dendrogram.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { funnel } from "../../src/marks/funnel.ts";
 import { gauge } from "../../src/marks/gauge.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
@@ -57,7 +57,7 @@ import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { rangeNavigator } from "../../src/model/navigator.ts";
 import { panels } from "../../src/model/panels.ts";
-import { rowSelection } from "../../src/model/row-selection.ts";
+import { rowSelection, type SelectionBinding } from "../../src/model/row-selection.ts";
 import { brushedRows } from "../../src/model/selected-rows.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -72,6 +72,7 @@ import {
   type SegmentGeometry,
   type TextGeometry,
 } from "../../src/scene/scene.ts";
+import { ChartError } from "../../src/spec/errors.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
@@ -80,6 +81,7 @@ import { loadPayload } from "../../src/web/load.ts";
 import { encodePayload } from "../../src/web/payload.ts";
 import { legendOf, rampsOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -94,7 +96,7 @@ it("capabilities: a navigator describes the shared x window of facet panels", ()
     facet: facet("group"),
     navigator: rangeNavigator(),
   });
-  model.setViewport([1, 2]);
+  setViewport(model, [1, 2]);
   model.scene(estimateText);
   expect(describeChart(model)).toContain(
     "A range navigator shows the whole x range, with 1 to 2 in view; it controls every panel's x range.",
@@ -133,6 +135,8 @@ type MarkCase = {
   noLegend?: true;
   turns?: true;
   animates?: true;
+  /** Marks that do not move to changed values, which refuse `animation.values`. */
+  still?: true;
   /** Layout marks `interaction.zoom` navigates: a map's plane, or drilling into a tree. */
   navigates?: "plane" | "drill";
   /** Layout marks whose charts select their rows, and draw them highlighted. */
@@ -145,6 +149,14 @@ type MarkCase = {
 
 /** The type a case's mark has: its name, unless it names one. */
 const typeOf = (c: MarkCase) => c.type ?? c.name;
+
+/** Why a brush selects nothing on a layout mark without a plane: no axes, or axes no brush spans. */
+const unbrushed = (c: MarkCase) =>
+  c.turns
+    ? "its axes turn with the camera, which a brush cannot span"
+    : c.name === "radar"
+      ? "its axes radiate from the center, which a brush cannot span"
+      : "no axes to brush";
 
 // These cases have axes; annotations of constants repeat in every panel.
 const cartesian: MarkCase[] = [
@@ -165,6 +177,7 @@ const cartesian: MarkCase[] = [
     // Placements may ask for the right axis, which lines along y refuse.
     make: (p) => line(samples, { x: "y", y: "x", series: "group", orient: "y", ...(p as object) }),
     kind: "line",
+    animates: true,
   },
   {
     name: "area over categories",
@@ -184,6 +197,7 @@ const cartesian: MarkCase[] = [
     name: "bar fill",
     make: (p) => bar(samples, { x: "x", y: "y", series: "group", stack: "fill", ...p }),
     kind: "rect",
+    animates: true,
   },
   {
     name: "bar",
@@ -207,48 +221,57 @@ const cartesian: MarkCase[] = [
     name: "histogram",
     make: (p) => histogram(samples, { x: "y", bins: 3, series: "group", ...p }),
     kind: "rect",
+    animates: true,
   },
   {
     name: "boxplot",
     make: (p) => boxplot(samples, { x: "category", y: "y", series: "group", ...p }),
     kind: "rect",
+    still: true,
   },
   {
     name: "boxen",
     make: (p) => boxen(samples, { x: "category", y: "y", series: "group", ...p }),
     kind: "rect",
+    still: true,
   },
   {
     name: "violin",
     make: (p) => violin(samples, { x: "group", y: "y", series: "group", ...p }),
     kind: "area",
+    still: true,
   },
   {
     name: "rug",
     make: (p) => rug(samples, { x: "x", series: "group", ...p }),
     kind: "segments",
+    still: true,
   },
   {
     name: "errorbar",
-    make: (p) => errorBar(samples, { x: "x", y1: "low", y2: "high", series: "group", ...p }),
+    make: (p) => errorbar(samples, { x: "x", y1: "low", y2: "high", series: "group", ...p }),
     kind: "segments",
+    animates: true,
   },
   {
     name: "candlestick",
     make: (p) =>
       candlestick(samples, { x: "x", open: "low", high: "high", low: "low", close: "y", ...p }),
     kind: "segments",
+    animates: true,
   },
   {
     name: "heatmap",
     make: (p) => heatmap(samples, { x: "x", y: "category", color: "y", ...p }),
     kind: "raster",
+    animates: true,
     noLegend: true,
   },
   {
     name: "histogram 2d",
     make: (p) => histogram(samples, { x: "x", y: "y", bins: 2, ...(p as object) }),
     kind: "raster",
+    animates: true,
     noLegend: true,
   },
   {
@@ -263,6 +286,7 @@ const cartesian: MarkCase[] = [
         ...(p as object),
       }),
     kind: "polygons",
+    still: true,
     noLegend: true,
     table: field as unknown as Table,
   },
@@ -288,6 +312,7 @@ const cartesian: MarkCase[] = [
         ...p,
       }),
     kind: "rect",
+    animates: true,
     repeats: true,
     reading: "summary",
     noLegend: true,
@@ -296,6 +321,7 @@ const cartesian: MarkCase[] = [
     name: "text",
     make: (p) => text({ x: 1, y: 2, label: "Contract text", contributeDomain: true, ...p }),
     kind: "text",
+    animates: true,
     repeats: true,
     reading: "summary",
     noLegend: true,
@@ -318,6 +344,7 @@ const cartesian: MarkCase[] = [
         },
       }),
     kind: "shapes",
+    still: true,
   },
 ];
 
@@ -373,6 +400,7 @@ const layouts: MarkCase[] = [
     name: "treemap",
     make: (p) => treemap(samples, { path: ["group", "category"], value: "y", ...p }),
     kind: "rect",
+    still: true,
     facets: true,
     navigates: "drill",
     selects: true,
@@ -381,15 +409,23 @@ const layouts: MarkCase[] = [
     name: "sunburst",
     make: (p) => sunburst(samples, { path: ["group", "category"], value: "y", ...p }),
     kind: "arc",
+    still: true,
     facets: true,
     navigates: "drill",
     selects: true,
   },
-  { name: "gauge", make: (p) => gauge(samples, { value: "y", ...p }), kind: "arc", facets: true },
+  {
+    name: "gauge",
+    make: (p) => gauge(samples, { value: "y", ...p }),
+    kind: "arc",
+    facets: true,
+    animates: true,
+  },
   {
     name: "funnel",
     make: (p) => funnel(samples, { category: "category", value: "y", ...p }),
     kind: "shapes",
+    still: true,
     facets: true,
     selects: true,
   },
@@ -397,12 +433,14 @@ const layouts: MarkCase[] = [
     name: "radar",
     make: (p) => radar(samples, { category: "category", value: "y", series: "group", ...p }),
     kind: "shapes",
+    still: true,
     facets: true,
   },
   {
     name: "sankey",
     make: (p) => sankey(links, { source: "source", target: "target", value: "value", ...p }),
     kind: "rect",
+    still: true,
     facets: true,
     selects: true,
   },
@@ -424,6 +462,7 @@ const layouts: MarkCase[] = [
       facets: true,
       selects: true,
       drags: true,
+      still: true,
       navigates: "plane",
     }),
   ),
@@ -431,6 +470,7 @@ const layouts: MarkCase[] = [
     name: "geoshape",
     make: (p) => geoshape(world, { color: "group", ...p }),
     kind: "polygons",
+    still: true,
     facets: true,
     navigates: "plane",
     selects: true,
@@ -440,6 +480,7 @@ const layouts: MarkCase[] = [
     name: "geopoint",
     make: (p) => geopoint(samples, { longitude: "x", latitude: "y", series: "group", ...p }),
     kind: "point",
+    still: true,
     facets: true,
     navigates: "plane",
     selects: true,
@@ -449,18 +490,21 @@ const layouts: MarkCase[] = [
     name: "point3d",
     make: (p) => point3d(spatial, { ...p, x: "x", y: "y", z: "z", series: "group" }),
     kind: "faces",
+    still: true,
     turns: true,
   },
   {
     name: "line3d",
     make: (p) => line3d(spatial, { ...p, x: "x", y: "y", z: "z", series: "group" }),
     kind: "faces",
+    still: true,
     turns: true,
   },
   {
     name: "surface",
     make: (p) => surface(grid, { ...p, x: "x", y: "y", z: "z" }),
     kind: "faces",
+    still: true,
     turns: true,
   },
 ];
@@ -542,7 +586,11 @@ describe("capabilities: facets", () => {
 
   it.each(three)("$name refuses facets", (c) => {
     expect(() => build({ marks: [c.make()], facet: facet("group") })).toThrow(
-      " facet: 3D marks cannot split into facets; use separate marks in subplots",
+      expect.objectContaining({
+        code: "unsupported",
+        path: "facet",
+        message: `facet: ${c.name} cannot split into facets; draw each group's marks in a panel of their own`,
+      }),
     );
   });
 
@@ -819,7 +867,7 @@ describe("capabilities: per-panel scales", () => {
   const financial = [
     {
       name: "errorbar",
-      make: (p?: Placement) => errorBar(samples, { x: "category", y1: "low", y2: "high", ...p }),
+      make: (p?: Placement) => errorbar(samples, { x: "category", y1: "low", y2: "high", ...p }),
     },
     {
       name: "candlestick",
@@ -900,8 +948,8 @@ describe("capabilities: zoom and pan", () => {
     const alongY = model.xScale()!.type === "band";
     const orient = alongY ? "left" : "bottom";
     const before = scene.panels[0]!.axes.find((a) => a.side === orient)!.ticks;
-    if (alongY) model.setYViewport({ y: [2, 6], yRight: null });
-    else model.setViewport([0.5, 1.5]);
+    if (alongY) setViewport(model, { y: [2, 6], yRight: null });
+    else setViewport(model, [0.5, 1.5]);
     const next = model.scene(estimateText);
     const scale = alongY ? model.yScale()! : model.xScale()!;
     expect(scale.domain).toEqual(alongY ? [2, 6] : [0.5, 1.5]);
@@ -915,8 +963,8 @@ describe("capabilities: zoom and pan", () => {
     });
     const alongY = model.xScale()!.type === "band";
     // Past an end, the view moves inside with its span.
-    if (alongY) model.setYViewport({ y: [-4, 2], yRight: null });
-    else model.setViewport([-1, 0.5]);
+    if (alongY) setViewport(model, { y: [-4, 2], yRight: null });
+    else setViewport(model, [-1, 0.5]);
     model.scene(estimateText);
     expect(alongY ? model.yScale()!.domain : model.xScale()!.domain).toEqual(
       alongY ? [0, 6] : [0, 1.5],
@@ -935,13 +983,16 @@ describe("capabilities: zoom and pan", () => {
   it.each([
     { name: "bar", make: bar },
     { name: "point", make: point },
-  ])("$name ignores a viewport on its categorical axis", (c) => {
+  ])("$name refuses a viewport on its categorical axis, and resets it as nothing", (c) => {
     const { model, scene } = build({
       marks: [c.make(samples, { x: "category", y: "y" })],
       interaction: { zoom: "x" },
     });
     expect(model.xScale()!.type).toBe("band");
-    model.setViewport([0.5, 1.5]);
+    expect(() => setViewport(model, [0.5, 1.5])).toThrow(
+      "setViewport x: the x axis shows categories, which do not zoom; drop x",
+    );
+    setViewport(model, { x: null });
     expect(model.scene(estimateText).panels[0]!.axes).toEqual(scene.panels[0]!.axes);
   });
 
@@ -954,8 +1005,8 @@ describe("capabilities: zoom and pan", () => {
       });
       const type = Array.isArray(x) ? "linear" : "time";
       expect([zoomed.model.xScale()!.type, zoomed.model.yScale()!.type]).toEqual([type, "linear"]);
-      zoomed.model.setViewport([0.5, 1.5]);
-      zoomed.model.setYViewport({ y: [0.5, 1.5], yRight: null });
+      setViewport(zoomed.model, [0.5, 1.5]);
+      setViewport(zoomed.model, { y: [0.5, 1.5], yRight: null });
       zoomed.model.scene(estimateText);
       expect(zoomed.model.xScale()!.domain).toEqual([0.5, 1.5]);
       expect(zoomed.model.yScale()!.domain).toEqual([0.5, 1.5]);
@@ -964,8 +1015,8 @@ describe("capabilities: zoom and pan", () => {
         interaction: { zoom: "xy" },
       });
       expect([model.xScale()!.type, model.yScale()!.type]).toEqual(["band", "band"]);
-      model.setViewport([0.5, 1.5]);
-      model.setYViewport({ y: [0.5, 1.5], yRight: null });
+      expect(() => setViewport(model, [0.5, 1.5])).toThrow("shows categories");
+      expect(() => setViewport(model, { y: [0.5, 1.5] })).toThrow("shows categories");
       expect(model.scene(estimateText).panels[0]!.axes).toEqual(scene.panels[0]!.axes);
     }
   });
@@ -1076,7 +1127,7 @@ describe("capabilities: zoom and pan", () => {
         build({ marks: [c.make({ panel: "a" })], panels: panels([{ id: "a" }]), interaction }),
       ).toThrow(`${typeOf(c)} zoom: no axes to zoom`);
       const { model } = build(besideLine(c, { interaction }));
-      model.setViewport([1, 2], "a");
+      setViewport(model, [1, 2], "a");
       model.scene(estimateText);
       expect(model.panels()[0]!.x.domain).toEqual([1, 2]);
     },
@@ -1094,39 +1145,44 @@ describe("capabilities: zoom and pan", () => {
     expect(model.scene(estimateText).panels[0]!.marks).not.toEqual(scene.panels[0]!.marks);
   });
 
-  it.each(cartesian)("$name subplots accept x navigation and refuse y navigation", (c) => {
-    const config = {
-      marks: [c.make({ panel: "*" })],
-      panels: subplot,
-      y: { scope: "chart" },
-    } satisfies ChartConfig;
-    const { scene } = build({ ...config, interaction: { zoom: "x" } });
+  /**
+   * Zooms the first panel of `model` along its axis of values (y, or x for
+   * marks along y), and checks that the panels sharing that scale follow
+   * and the others keep theirs.
+   */
+  const zoomsApart = (model: ChartModel) => {
+    const [first, ...others] = model.panels();
+    const axis = first!.y.type === "band" ? "x" : "y";
+    const group = `${axis}Group` as const;
+    const before = others.map((panel) => panel[axis].domain);
+    setViewport(model, { [axis]: [1, 2] }, first!.key);
+    model.scene(estimateText);
+    const [zoomed, ...rest] = model.panels();
+    const ends = (domain: readonly number[]) => [Math.min(...domain), Math.max(...domain)];
+    expect(ends(zoomed![axis].domain)).toEqual([1, 2]);
+    rest.forEach((panel, i) => {
+      if (panel[group] === zoomed![group]) expect(ends(panel[axis].domain)).toEqual([1, 2]);
+      else expect(panel[axis].domain).toEqual(before[i]);
+    });
+  };
+
+  it.each(cartesian)("$name subplots zoom along x and y, each panel's scales apart", (c) => {
+    const config = { marks: [c.make({ panel: "*" })], panels: subplot } satisfies ChartConfig;
+    const { model, scene } = build({ ...config, interaction: { zoom: "xy", brush: "lasso" } });
     for (const panel of scene.panels) expectGeometry(panel, c.kind);
-    expect(() => build({ ...config, interaction: { zoom: "xy" } })).toThrow(
-      "zoom, pan, and brush along x only",
-    );
+    zoomsApart(model);
   });
 
-  it.each(cartesian)("$name facets cannot zoom y when y scales differ", (c) => {
-    expect(() =>
-      build(facetConfig(c, { y: { scope: "panel" }, interaction: { zoom: "y" } })),
-    ).toThrow("cannot zoom along y yet");
+  it.each(cartesian)("$name facets zoom y when y scales differ, each panel apart", (c) => {
     const brush = { type: "brush", shape: "xy", zoom: true } as const;
-    expect(() =>
-      build(
-        facetConfig(c, {
-          y: { scope: "panel" },
-          interaction: { bindings: [{ gesture: { type: "drag" }, action: brush }] },
-        }),
-      ),
-    ).toThrow(
-      "chart interaction.bindings[0].action: panels with y scales of their own cannot brush",
+    const bindings = [{ gesture: { type: "drag" }, action: brush }] as const;
+    build(facetConfig(c, { y: { scope: "panel" }, interaction: { bindings: [...bindings] } }));
+    build(facetConfig(c, { y: { scope: "panel" }, interaction: { pan: "xy" } }));
+    const { model, scene } = build(
+      facetConfig(c, { y: { scope: "panel" }, interaction: { zoom: "xy" } }),
     );
-    expect(() =>
-      build(facetConfig(c, { y: { scope: "panel" }, interaction: { pan: "xy" } })),
-    ).toThrow("cannot pan along y yet");
-    const { scene } = build(facetConfig(c, { y: { scope: "panel" }, interaction: { zoom: "x" } }));
     for (const panel of scene.panels) expectGeometry(panel, c.kind);
+    zoomsApart(model);
   });
 });
 
@@ -1143,9 +1199,21 @@ describe("capabilities: brushes", () => {
     expect(() => build({ marks: [c.make()], interaction: { brush: "x" } })).toThrow(
       c.navigates === "plane"
         ? `${typeOf(c)} brush: expected interaction.brush "lasso"; received "x"`
-        : `${typeOf(c)} brush: no axes to brush; drop interaction.brush`,
+        : `${typeOf(c)} brush: ${unbrushed(c)}; drop interaction.brush`,
     );
     if (c.navigates === "plane") build({ marks: [c.make()], interaction: { brush: "lasso" } });
+  });
+
+  it.each(layouts)("$name refuses tooltips along an axis, but beside a line's panel", (c) => {
+    for (const [mode, at] of [
+      ["nearest-x", "an x"],
+      ["nearest-y", "a y"],
+    ] as const)
+      expect(() => build({ marks: [c.make()], tooltip: { mode } })).toThrow(
+        `tooltip.mode: ${typeOf(c)} reads the item under the pointer, not every series at ${at}; give mode: "nearest"`,
+      );
+    build({ marks: [c.make()], tooltip: { mode: "nearest" } });
+    if (c.facets) build(besideLine(c, { tooltip: { mode: "nearest-x" } }));
   });
 
   it.each(layouts)("$name takes interaction.drag only if it moves items", (c) => {
@@ -1162,12 +1230,12 @@ describe("capabilities: brushes", () => {
     ).toThrow(
       c.navigates === "plane"
         ? `${typeOf(c)} brush: expected interaction.brush "lasso"`
-        : `${typeOf(c)} brush: no axes to brush`,
+        : `${typeOf(c)} brush: ${unbrushed(c)}`,
     );
   });
 
   it.each(paneled.filter((c) => c.navigates === "plane"))(
-    "$name takes a lasso in facet panels and in subplots without axes",
+    "$name takes a lasso in facet panels, in subplots without axes, and beside panels with them",
     (c) => {
       const interaction = { brush: "lasso" } as const;
       build({ marks: [c.make()], facet: facet("group"), interaction });
@@ -1176,39 +1244,27 @@ describe("capabilities: brushes", () => {
         panels: subplot,
         interaction,
       });
-      expect(() => build(besideLine(c, { interaction }))).toThrow(
-        "zoom, pan, and brush along x only",
-      );
+      // Beside panels with axes, the lasso is theirs too.
+      build(besideLine(c, { interaction }));
     },
   );
 
-  it.each(cartesian)("$name subplots accept x brushes and refuse other brushes", (c) => {
-    const config = {
-      marks: [c.make({ panel: "*" })],
-      panels: subplot,
-      y: { scope: "chart" },
-    } satisfies ChartConfig;
-    const { scene } = build({ ...config, interaction: { brush: "x" } });
-    for (const panel of scene.panels) expectGeometry(panel, c.kind);
-    for (const brush of ["y", "xy", "lasso"] as const) {
-      expect(() => build({ ...config, interaction: { brush } })).toThrow(
-        "zoom, pan, and brush along x only",
-      );
+  it.each(cartesian)("$name subplots take every brush", (c) => {
+    const config = { marks: [c.make({ panel: "*" })], panels: subplot } satisfies ChartConfig;
+    for (const brush of ["x", "y", "xy", "lasso"] as const) {
+      const { scene } = build({ ...config, interaction: { brush } });
+      for (const panel of scene.panels) expectGeometry(panel, c.kind);
     }
   });
 
-  it("independent categorical y facets allow only x brushes", () => {
+  it("independent categorical y facets take every brush", () => {
     const config = {
       marks: [point(samples, { x: "x", y: "category" })],
       facet: facet("group"),
       y: { scope: "panel" },
     } satisfies ChartConfig;
-    expectGeometry(build({ ...config, interaction: { brush: "x" } }).scene.panels[0]!, "point");
-    for (const brush of ["y", "xy", "lasso"] as const) {
-      expect(() => build({ ...config, interaction: { brush } })).toThrow(
-        "panels with y categories of their own brush along x only",
-      );
-    }
+    for (const brush of ["x", "y", "xy", "lasso"] as const)
+      expectGeometry(build({ ...config, interaction: { brush } }).scene.panels[0]!, "point");
   });
 });
 
@@ -1250,7 +1306,7 @@ describe("capabilities: synced selection", () => {
     cartesian.filter((c) =>
       ["bar", "point", "boxplot", "boxen", "violin", "heatmap"].includes(c.name),
     ),
-  )("$name refuses sync when panel categories are independent", (c) => {
+  )("$name syncs when panel categories are independent", (c) => {
     const mark =
       c.name === "bar"
         ? bar(samples, { x: "category", y: "y" })
@@ -1258,14 +1314,14 @@ describe("capabilities: synced selection", () => {
           ? point(samples, { x: "category", y: "y" })
           : c.make();
     const axis = c.name === "heatmap" ? "y" : "x";
-    expect(() =>
-      build({
-        marks: [mark],
-        facet: facet("group"),
-        [axis]: { scope: "panel" },
-        interaction: { sync: "capability-contract" },
-      }),
-    ).toThrow("categories of their own");
+    // Categories travel by name, read on the scale of the channel's panel.
+    const { scene } = build({
+      marks: [mark],
+      facet: facet("group"),
+      [axis]: { scope: "panel" },
+      interaction: { sync: "capability-contract" },
+    });
+    for (const panel of scene.panels) expectGeometry(panel, c.kind);
   });
 });
 
@@ -1287,6 +1343,8 @@ describe("capabilities: row selection", () => {
       "boxen",
       "violin",
       "rug",
+      "contour",
+      "custom",
     ]),
   );
   const highlights = new Set([
@@ -1316,7 +1374,14 @@ describe("capabilities: row selection", () => {
   function bound(c: MarkCase) {
     const store = selectionStore(c.table ?? (samples as unknown as Table));
     const marks = c.repeats ? [line(samples, { x: "x", y: "y" }), c.make()] : [c.make()];
-    const selection = rowSelection({ store, channel: "c" });
+    // Contours select by brushes alone, and neither they nor custom marks highlight.
+    const options: Partial<SelectionBinding> =
+      typeOf(c) === "contour"
+        ? { events: ["brush"], effect: "none" }
+        : typeOf(c) === "custom"
+          ? { effect: "none" }
+          : {};
+    const selection = rowSelection({ store, channel: "c", ...options });
     const { model } = build({ marks, rowSelection: selection });
     const chart = { selection: null, select() {}, render() {}, root: new EventTarget() as never };
     const live = { textContent: null };
@@ -1706,7 +1771,7 @@ describe("capabilities: tooltip fields", () => {
     { name: "rug", make: () => rug(samples, { x: "x", tooltip: fields }) },
     {
       name: "errorbar",
-      make: () => errorBar(samples, { x: "x", y1: "low", y2: "high", tooltip: fields }),
+      make: () => errorbar(samples, { x: "x", y1: "low", y2: "high", tooltip: fields }),
     },
     {
       name: "candlestick",
@@ -1748,6 +1813,17 @@ describe("capabilities: tooltip fields", () => {
       make: () => line3d(spatial, { x: "x", y: "y", z: "z", tooltip: { fields: ["group"] } }),
       items: true,
     },
+    {
+      name: "radar",
+      make: () =>
+        radar(samples, { category: "category", value: "y", tooltip: { fields: ["group"] } }),
+      items: true,
+    },
+    {
+      name: "gauge",
+      make: () => gauge(samples, { value: "y", tooltip: { fields: ["group"] } }),
+      items: true,
+    },
   ];
 
   it.each(rows)("$name shows fields of the row its point is", (c) => {
@@ -1763,16 +1839,77 @@ describe("capabilities: tooltip fields", () => {
     expect(field!.text.length).toBeGreaterThan(0);
     expect(field!.field).toBe(c.items && c.name !== "geopoint" ? "group" : "note");
   });
+
+  // Items summing rows, which show fields where they are one row.
+  const flows = table({ from: ["a", "b"], to: ["b", "c"], n: [2, 3], note: ["ab", "bc"] });
+  const tip = { fields: ["note"] } as const;
+  const sums = [
+    { name: "pie", make: () => pie(flows, { category: "from", value: "n", tooltip: tip }) },
+    { name: "funnel", make: () => funnel(flows, { category: "from", value: "n", tooltip: tip }) },
+    { name: "treemap", make: () => treemap(flows, { path: ["from"], value: "n", tooltip: tip }) },
+    {
+      name: "sunburst",
+      make: () => sunburst(flows, { path: ["from"], value: "n", tooltip: tip }),
+    },
+    {
+      name: "sankey",
+      make: () => sankey(flows, { source: "from", target: "to", value: "n", tooltip: tip }),
+    },
+  ];
+  it.each(sums)("$name shows fields of an item that is one row", (c) => {
+    const model = new ChartModel({ locale: "en-US", timeZone: "UTC", marks: [c.make()] });
+    model.fields = fieldReader;
+    model.setSize(600, 400, 1);
+    model.scene(estimateText);
+    // Every item here but a Sankey node is one row.
+    const result = model.items!.result()!;
+    const shown: string[] = [];
+    for (let i = 0; i < result.count; i++) {
+      const texts = model.inspectItem(result.item(i).key)!.points[0]!.fields?.map((f) => f.text);
+      if (texts) shown.push(...texts);
+    }
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.every((text) => text === "ab" || text === "bc")).toBe(true);
+  });
 });
 
 describe("capabilities: value animation preconditions", () => {
   // Pure snapshots/plans, as in test/dom/value-transition.test.ts; no frame
   // scheduler, timers, reduced-motion media queries, or browser gestures.
   const builders = { planAxis, axisGuide, Polyline, monotonePolyline, measure: estimateText };
-  it.each(all)("$name provides only its documented movable geometry", (c) => {
-    const { scene, model } = build({ marks: [c.make()], animation: { values: true } });
-    expectGeometry(scene.panels[0]!, c.kind);
-    expect(snapshot(scene, model.panels()[0], 0) !== undefined).toBe(c.animates === true);
+  it.each(all.filter((c) => !c.still))(
+    "$name provides only its documented movable geometry",
+    (c) => {
+      const { scene, model } = build({ marks: [c.make()], animation: { values: true } });
+      expectGeometry(scene.panels[0]!, c.kind);
+      expect(snapshot(scene, model.panels(), 0) !== undefined).toBe(c.animates === true);
+    },
+  );
+
+  it.each(all.filter((c) => c.still))("$name refuses animation.values as it draws", (c) => {
+    const subject = c.name === "custom" ? "custom marks do" : `${typeOf(c)} does`;
+    let error: unknown;
+    try {
+      build({ marks: [c.make()], animation: { values: true } });
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(ChartError);
+    expect(error).toMatchObject({
+      code: "unsupported",
+      path: "animation.values",
+      phase: "validate",
+      message: `animation.values: ${subject} not move to new values; leave values out, and new values show at once`,
+    });
+    // In a subplot too.
+    expect(() =>
+      build({ marks: [c.make({ panel: "a" })], panels: subplot, animation: { values: true } }),
+    ).toThrow(`animation.values: ${subject}`);
+    // Without values, it draws, its changed values showing at once.
+    expectGeometry(
+      build({ marks: [c.make()], animation: { duration: 200 } }).scene.panels[0]!,
+      c.kind,
+    );
   });
 
   const traces = [
@@ -1787,51 +1924,38 @@ describe("capabilities: value animation preconditions", () => {
       y: { domain: [0, 10] },
       animation: { values: true },
     });
-    const shown = snapshot(scene, model.panels()[0], 0)!;
+    const shown = snapshot(scene, model.panels(), 0)!;
     values.setColumn("y", [4, 5, 6]);
     expect(
-      plan(
-        shown,
-        model.scene(estimateText),
-        model.panels()[0],
-        200,
-        builders,
-        sidesOf(model.config),
-      ),
+      plan(shown, model.scene(estimateText), model.panels(), 200, builders, sidesOf(model.config)),
     ).toBeDefined();
     values.setColumn("x", [0, 1.5, 2]);
     expect(
-      plan(
-        shown,
-        model.scene(estimateText),
-        model.panels()[0],
-        200,
-        builders,
-        sidesOf(model.config),
-      ),
+      plan(shown, model.scene(estimateText), model.panels(), 200, builders, sidesOf(model.config)),
     ).toBeUndefined();
   });
 
-  it("bars animate plain values, but stacked and labeled bars do not", () => {
+  const bars = (scene: { panels: readonly Panel[] }) =>
+    scene.panels[0]!.marks.filter((mark): mark is RectGeometry => mark.kind === "rect");
+  it("bars animate plain, stacked, and labeled values, and bars on log axes in order", () => {
     for (const options of [{}, { stack: true }, { labels: true }]) {
       const { model, scene } = build({
         marks: [bar(samples, { x: "category", y: "y", series: "group", ...options })],
         animation: { values: true },
       });
-      expect(snapshot(scene, model.panels()[0], 0) !== undefined).toBe(
-        !("stack" in options || "labels" in options),
-      );
+      expect(snapshot(scene, model.panels(), 0)).toBeDefined();
+      expect(bars(scene).every((mark) => mark.bars !== undefined)).toBe(true);
     }
-  });
-
-  it("bars on a log value axis draw without an animation snapshot", () => {
     const { model, scene } = build({
       marks: [bar(samples, { x: "category", y: "y" })],
       y: { type: "log" },
       animation: { values: true },
     });
     expectGeometry(scene.panels[0]!, "rect");
-    expect(snapshot(scene, model.panels()[0], 0)).toBeUndefined();
+    expect(bars(scene).map((mark) => mark.bars)).toEqual([undefined]);
+    expect(
+      snapshot(scene, model.panels(), 0)?.panels[0]?.items.get(bars(scene)[0]!.key)?.kind,
+    ).toBe("list");
   });
 
   it.each(["input", "value"] as const)(
@@ -1842,18 +1966,18 @@ describe("capabilities: value animation preconditions", () => {
         marks: [pie(values, { category: "category", value: "value", labels: false, sort })],
         animation: { values: true },
       });
-      const shown = snapshot(scene, model.panels()[0], 0)!;
-      expect(shown.pie).toBeDefined();
+      const shown = snapshot(scene, model.panels(), 0)!;
+      expect(shown.panels[0]!.pie).toBeDefined();
       values.setColumn("value", [1, 3]);
       const tween = plan(
         shown,
         model.scene(estimateText),
-        model.panels()[0],
+        model.panels(),
         200,
         builders,
         sidesOf(model.config),
       );
-      expect(tween?.pie !== undefined).toBe(sort === "input");
+      expect(tween?.panels[0]?.pie !== undefined).toBe(sort === "input");
     },
   );
 
@@ -1865,41 +1989,60 @@ describe("capabilities: value animation preconditions", () => {
       y: { domain: [0, 10] },
       animation: { values: true },
     });
-    const shown = snapshot(scene, model.panels()[0], 0)!;
+    const shown = snapshot(scene, model.panels(), 0)!;
     values.reset({ x: [0, 1], y: [4, 5], id: ["a", "b"] });
     const tween = plan(
       shown,
       model.scene(estimateText),
-      model.panels()[0],
+      model.panels(),
       200,
       builders,
       sidesOf(model.config),
     );
-    expect((tween?.points.length ?? 0) > 0).toBe(keyed);
+    expect((tween?.panels[0]?.points.length ?? 0) > 0).toBe(keyed);
   });
 
   it.each(cartesian.filter((c) => c.animates))(
-    "$name does not provide a multi-panel animation snapshot",
+    "$name provides an animation snapshot of every facet panel",
     (c) => {
       const { scene, model } = build(facetConfig(c, { animation: { values: true } }));
       expect(scene.panels).toHaveLength(2);
-      expect(snapshot(scene, model.panels()[0], 0)).toBeUndefined();
+      expect(snapshot(scene, model.panels(), 0)?.panels.map(({ key }) => key)).toEqual(["N", "S"]);
     },
   );
 
-  it("pies in panels show changed values at once, even in a facet of one panel", () => {
-    const one = table({ category: ["a", "b"], value: [3, 1], group: ["N", "N"] });
-    const { scene, model } = build({
-      marks: [pie(one, { category: "category", value: "value", labels: false })],
-      facet: facet("group"),
-      animation: { values: true },
-    });
-    expect(scene.panels).toHaveLength(1);
-    expect(snapshot(scene, model.panels()[0], 0)?.pie).toBeUndefined();
-  });
+  it.each(layouts.filter((c) => c.animates))(
+    "$name moves to new values in facet panels and subplots",
+    (c) => {
+      for (const layout of [{ facet: facet("group") }, { panels: subplot }]) {
+        const data = table({
+          category: ["a", "b", "a", "b"],
+          y: [3, 1, 2, 4],
+          group: ["N", "N", "S", "S"],
+        });
+        const mark =
+          c.name === "pie"
+            ? pie(data, {
+                category: "category",
+                value: "y",
+                labels: false,
+                sort: "input",
+                ...("panels" in layout && { panel: "a" }),
+              })
+            : gauge(data, { value: "y", ...("panels" in layout && { panel: "a" }) });
+        const { scene, model } = build({ marks: [mark], animation: { values: true }, ...layout });
+        const shown = snapshot(scene, model.panels(), 0)!;
+        data.set("y", 1, 5);
+        data.set("y", 3, 6);
+        const tween = plan(shown, model.scene(estimateText), model.panels(), 200, builders);
+        const moving = tween?.panels.filter((panel) => panel.pie ?? panel.dial);
+        expect(moving?.length, JSON.stringify(Object.keys(layout))).toBeGreaterThan(0);
+      }
+    },
+  );
 });
 
-// Dendrograms band their leaves, with heights fixed to plot pixels. Their
+// Dendrograms band their leaves, with heights on the other axis. Their
 // facet repetition requires a categorical companion to supply facet values.
 describe("capabilities: dendrogram", () => {
   const tree = table({ first: [0, 2], second: [1, 3], height: [1, 2] });
@@ -1933,38 +2076,38 @@ describe("capabilities: dendrogram", () => {
     expectGeometry(subplots.scene.panels[0]!, "segments");
     expect(subplots.scene.panels[1]!.marks).toEqual([]);
   });
-  it("keeps heights during zoom, accepts range selections, and has summary-only reading", () => {
+  it("moves heights with zoom, accepts range selections, and has summary-only reading", () => {
     const { model, scene } = build({
       marks: [make()],
       legend: true,
       interaction: { zoom: "xy", brush: "x", sync: "dendrogram-contract" },
-      animation: { values: true },
-      x: { show: false },
-      y: { show: false },
     });
     const geometry = scene.panels[0]!.marks[0] as SegmentGeometry;
-    const before = Array.from(geometry.coords.subarray(0, geometry.count * 4));
-    model.setViewport([10, 20]);
-    model.setYViewport({ y: [10, 20], yRight: null });
+    // The root's link, at height 2, is at the top of the axis' domain.
+    expect(geometry.coords[15]).toBeCloseTo(model.panels()[0]!.y.map(2), 3);
+    expect(() => setViewport(model, [10, 20])).toThrow("shows categories");
+    setViewport(model, { y: [0, 1] });
     const next = model.scene(estimateText).panels[0]!.marks[0] as typeof geometry;
-    expect(Array.from(next.coords.subarray(0, next.count * 4))).toEqual(before);
+    expect(next.coords[15]).toBeCloseTo(model.panels()[0]!.y.map(2), 3);
+    expect(next.coords[15]).toBeLessThan(scene.panels[0]!.plot.y);
     expect(legendOf(scene)).toEqual([]);
     expect(stopsOf(model, "")).toEqual([]);
     expect(model.inspect(100, 100)).toBeUndefined();
     expect(describeChart(model)).toContain(
       "Contract dendrogram: 3 leaves, 2 merges. Merge heights 1 to 2.",
     );
-    expect(snapshot(scene, model.panels()[0], 0)).toBeUndefined();
+    expect(() => build({ marks: [make()], animation: { values: true } })).toThrow(
+      "animation.values: dendrogram does not move to new values; leave values out, and new values show at once",
+    );
   });
-  it("refuses synced selection on panel categories resolved apart", () => {
-    expect(() =>
-      build({
-        marks: [make({ panel: "a" })],
-        panels: subplot,
-        x: { scope: "panel" },
-        interaction: { sync: "dendrogram-contract" },
-      }),
-    ).toThrow("categories of their own");
+  it("syncs on panel categories resolved apart", () => {
+    const { scene } = build({
+      marks: [make({ panel: "a" })],
+      panels: subplot,
+      x: { scope: "panel" },
+      interaction: { sync: "dendrogram-contract" },
+    });
+    expectGeometry(scene.panels[0]!, "segments");
   });
 });
 
@@ -2087,7 +2230,7 @@ describe("capabilities: color identity in every family", () => {
     ["violin", (d) => violin(d, { x: "day", y: "v", color: "region", panel: "other" })],
     [
       "errorbar",
-      (d) => errorBar(d, { x: "day", y1: "v", y2: "v", color: "region", panel: "other" }),
+      (d) => errorbar(d, { x: "day", y1: "v", y2: "v", color: "region", panel: "other" }),
     ],
     ["rug", (d) => rug(d, { x: "v", color: "region", panel: "other" })],
     ["pie", (d) => pie(d, { category: "region", value: "v", panel: "other" })],
@@ -2275,7 +2418,7 @@ it("capabilities: marks on the chart's scales paint at their zIndex", () => {
     bar(rows, { x: "x", y: "y", zIndex: 1 }),
     point(rows, { x: "x", y: "y", zIndex: 1 }),
     area(rows, { x: "x", y: "y", zIndex: 1 }),
-    errorBar(rows, { x: "x", y1: "lo", y2: "hi", zIndex: 1 }),
+    errorbar(rows, { x: "x", y1: "lo", y2: "hi", zIndex: 1 }),
     histogram(rows, { x: "y", zIndex: 1 }),
     rule({ y: 2, zIndex: 1 }),
     region({ y1: 1, y2: 2, zIndex: 1 }),
@@ -2309,7 +2452,7 @@ it("capabilities: marks of rows take coordinates for their places, others field 
     area(rows, { x: "x", y: lane }),
     bar(rows, { x: "x", y: { field: "y", offset: 4 } }),
     point(rows, { x: { px: { field: "x" } }, y: lane }),
-    errorBar(rows, { x: { field: "x", offset: 2 }, y1: "lo", y2: "hi" }),
+    errorbar(rows, { x: { field: "x", offset: 2 }, y1: "lo", y2: "hi" }),
   ])
     expect((mark as unknown as Mark).bound, mark.spec.type).toBeDefined();
   expect(() => histogram(rows, { x: lane } as never)).toThrow();

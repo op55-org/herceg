@@ -45,7 +45,6 @@ const axis = (panel: Panel, orient: string) => panel.axes.find((a) => a.side ===
 describe("panels", () => {
   it("draw each mark in the panel it names, each with x and y scales of its own", () => {
     const own = build({ marks, panels: stacked });
-    expect(own.model.sharesX).toBe(false);
     const [first, second] = own.model.panels();
     expect(first!.xGroup).not.toBe(second!.xGroup);
     // Each panel labels its own x.
@@ -162,16 +161,31 @@ describe("panels", () => {
         message: 'line panel: no panel "errors"; name one of "latency", "traffic"',
       }),
     );
-    expect(() => build({ marks, panels: stacked, interaction: { zoom: "xy" } })).toThrow(
-      "along x only",
+    // Panels zoom along y too; those sharing a scale agree on its limits.
+    expect(() => build({ marks, panels: stacked, interaction: { zoom: "xy" } })).not.toThrow();
+    const limited = { id: "traffic", interaction: { limits: { x: { extent: [0, 5] } } } } as const;
+    expect(() =>
+      build({ marks, panels: panels([{ id: "latency" }, limited]), x: { scope: "chart" } }),
+    ).toThrow(
+      "panels[1].interaction.limits.x: shares an x scale with others but limits its views otherwise; give the panels sharing it the same limits",
     );
+    expect(() =>
+      build({ marks, panels: panels([{ id: "latency" }, limited]), interaction: { zoom: "xy" } }),
+    ).not.toThrow();
     expect(() =>
       build({
         marks: [line(table({ t: [0], v: [1], g: ["a"] }), { x: "t", y: "v", panel: "latency" })],
         panels: stacked,
         facet: facet("g"),
       }),
-    ).toThrow("chart: facet or panels, not both");
+    ).toThrow(
+      expect.objectContaining({
+        code: "unsupported",
+        path: "facet",
+        message:
+          "facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
+      }),
+    );
     const slices = pie(table({ k: ["a"], v: [1] }), { category: "k", value: "v" });
     expect(() => build({ marks: [slices], panels: stacked })).toThrow(
       "pie panel: expected the id of the panel it draws in; received none",
@@ -288,7 +302,14 @@ describe("panels", () => {
 
   it("refuse panels named without panels, in charts and specs", () => {
     const named = line(metrics, { x: "t", y: "latency", panel: "latency" });
-    expect(() => build({ marks: [named] })).toThrow("line panel: the chart has no panels; drop it");
+    expect(() => build({ marks: [line(metrics, { x: "t", y: "latency" }), named] })).toThrow(
+      expect.objectContaining({
+        code: "unknown-reference",
+        path: "marks[1].panel",
+        mark: 1,
+        message: "line panel: the chart has no panels; drop it",
+      }),
+    );
     const spec = (extra: object) => () =>
       loadSpec(
         {
@@ -302,6 +323,20 @@ describe("panels", () => {
       "spec.layout: expected a spec with panels",
     );
     expect(spec({ panels: [{ id: "top" }] })).toThrow("marks[0].panel");
+    expect(
+      spec({
+        panels: [{ id: "top" }],
+        facet: { field: "a" },
+        marks: [{ type: "line", x: "t", y: "a", panel: "top" }],
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "unsupported",
+        path: "facet",
+        message:
+          "spec.facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
+      }),
+    );
   });
 
   it("size rows by their relative heights, planning each row's axis over its own height", () => {
@@ -561,7 +596,7 @@ describe("panels with x scales of their own", () => {
       ]),
       x: { scope: "chart" },
     });
-    expect(model.sharesX).toBe(true);
+    expect(model.panels().map(({ xGroup }) => xGroup)).toEqual(["", ""]);
     const [top, bottom] = scene.panels as [Panel, Panel];
     expect(axis(top, "bottom")).toBeUndefined();
     expect(axis(bottom, "bottom")!.title!.text).toBe("t");

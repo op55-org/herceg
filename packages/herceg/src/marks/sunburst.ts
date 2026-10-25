@@ -14,10 +14,9 @@ import { layoutPartition } from "../layout/partition.ts";
 import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
-import type { ChartConfig } from "../model/model.ts";
 import { contrastingText } from "../scale/color.ts";
 import type { ArcGeometry, Geometry, TextGeometry } from "../scene/scene.ts";
-import type { Frozen, SunburstSpec } from "../spec/spec.ts";
+import type { Frozen, InteractionSpec, SunburstSpec } from "../spec/spec.ts";
 import { surface } from "../theme.ts";
 import { refuseColor } from "./colored.ts";
 import {
@@ -31,6 +30,8 @@ import {
 } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { type ChartMark, DIM, frozen, type MARK } from "./mark.ts";
+import { refuseValues } from "./still.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { type Branch, count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
 
 export type SunburstOptions<S extends Schema> = (
@@ -51,6 +52,8 @@ export type SunburstOptions<S extends Schema> = (
   value?: NumberField<S>;
   /** Names inside the sectors that have room for them; true by default. */
   labels?: boolean;
+  /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the sunburst has to itself. */
   panel?: string;
@@ -95,6 +98,7 @@ export class SunburstMark implements LayoutMark {
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.#data = new TreeData(table, spec, "sunburst");
+    checkTooltip(table, spec.tooltip, "sunburst");
     this.table = table;
     this.measure = spec.value ?? "Count";
     // Branches stand for their top-level nodes' values, as series of that field do.
@@ -109,11 +113,12 @@ export class SunburstMark implements LayoutMark {
     return this.#data.legend(id, color);
   }
 
-  controls(config: ChartConfig): LayoutControls | undefined {
-    return drillControls(config);
+  controls(interaction: InteractionSpec | undefined): LayoutControls | undefined {
+    return drillControls(interaction);
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.spec.type);
     const { theme, measure, hidden, locale } = frame;
     // A facet panel draws the part of the tree its rows give a value; a
     // chart drilled into a node, the subtree under it, the node in the middle.
@@ -377,6 +382,8 @@ export class SunburstMark implements LayoutMark {
       },
       summary: () => this.#summary(view, shown, branches, locale, percent),
       rowsOf: (key, of) => (of === this.table ? this.#data.rowsOf(frame.id, view, key) : undefined),
+      soleRow: (key, of) =>
+        of === this.table ? this.#data.soleRow(frame.id, view, key) : undefined,
       drill: this.#data.drill(frame.id, root, view, path?.crumbs ?? []),
     };
   }
@@ -420,7 +427,7 @@ export function sunburst<S extends Schema>(
   // Every option is kept, so the mark refuses a tree named both ways.
   const spec = {
     type: "sunburst",
-    ...definedFields(options, ["node", "parent", "value", "labels", "id", "panel"]),
+    ...definedFields(options, ["node", "parent", "value", "labels", "tooltip", "id", "panel"]),
     ...(path !== undefined && { path: [...path] }),
   } as unknown as SunburstSpec;
   if (table.name !== undefined) spec.data = table.name;

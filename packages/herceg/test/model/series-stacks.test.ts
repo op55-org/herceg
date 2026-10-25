@@ -395,3 +395,20 @@ describe("stacks of series over streaming tables", () => {
     });
   }
 });
+
+describe("bars stacked by a series field, hovered", () => {
+  it("read the segment under the pointer, and nearest a segment's top outside them", () => {
+    const { model } = sceneOf({
+      tooltip: { mode: "nearest" },
+      marks: [bar(requests(), { x: "minute", y: "count", series: "status", stack: true })],
+    });
+    const [x, y] = [model.xScale()!, model.yScale()!];
+    const read = (minute: number, count: number) =>
+      model.inspect(x.map(minute), y.map(count))?.points.map((p) => [p.label, p.row]);
+    // At minute 0, 500's segment runs from 1 to 11: inside it, nearer 200's top.
+    expect(read(0, 2)).toEqual([["500", 3]]);
+    expect(read(0, 0.5)).toEqual([["200", 0]]);
+    // Above the stack, its top segment.
+    expect(read(0, 14)).toEqual([["500", 3]]);
+  });
+});

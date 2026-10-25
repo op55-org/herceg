@@ -25,7 +25,7 @@ import type {
   ShapesGeometry,
   TextGeometry,
 } from "../scene/scene.ts";
-import type { Frozen, SankeySpec } from "../spec/spec.ts";
+import type { Frozen, MarkTooltipSpec, SankeySpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { surface } from "../theme.ts";
 import { refuseColor } from "./colored.ts";
@@ -37,8 +37,11 @@ import {
   type LayoutResult,
   RowsCache,
   SelectionCache,
+  SoleRows,
 } from "./layout-mark.ts";
 import { CATEGORY, type ChartMark, DIM, frozen, type MARK, requireField } from "./mark.ts";
+import { refuseValues } from "./still.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
 export interface SankeyOptions<S extends Schema> {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
@@ -59,6 +62,8 @@ export interface SankeyOptions<S extends Schema> {
    * first appear in the table, "value" puts the largest first.
    */
   sort?: "input" | "value";
+  /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the Sankey diagram has to itself. */
   panel?: string;
@@ -133,6 +138,7 @@ export class SankeyMark implements LayoutMark {
     requireField(table, spec.source, CATEGORY, "sankey source");
     requireField(table, spec.target, CATEGORY, "sankey target");
     if (spec.value !== undefined) requireField(table, spec.value, ["number"], "sankey value");
+    checkTooltip(table, spec.tooltip, "sankey");
     const width = spec.nodeWidth ?? NODE_WIDTH;
     if (!(width > 0 && width < Number.POSITIVE_INFINITY)) {
       throw new RangeError(
@@ -247,6 +253,23 @@ export class SankeyMark implements LayoutMark {
     }
   }
 
+  /** The one row each node and link of `flows` stands for, of the links drawn (by `status`). */
+  #solesOf(
+    flows: Flows,
+    rows: Uint32Array | undefined,
+    status: ArrayLike<number>,
+  ): { nodes: SoleRows; links: SoleRows } {
+    const { source, target } = flows.graph;
+    const soles = { nodes: new SoleRows(flows.graph.nodes), links: new SoleRows(status.length) };
+    this.#eachFlow(flows, rows, (row, link) => {
+      if (status[link] !== DRAWN) return;
+      soles.links.add(link, row);
+      soles.nodes.add(source[link]!, row);
+      soles.nodes.add(target[link]!, row);
+    });
+    return soles;
+  }
+
   /** What `selected` holds of the links of `flows`, made of `rows` (all rows by default). */
   #heldOf(selected: Uint8Array, rows: Uint32Array | undefined, flows: Flows): Held {
     return this.#held.get(selected, rows, () => {
@@ -285,6 +308,7 @@ export class SankeyMark implements LayoutMark {
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.spec.type);
     const { bounds, theme, locale } = frame;
     const flows = this.#graph(frame.rows);
     const { names, graph } = flows;
@@ -454,6 +478,8 @@ export class SankeyMark implements LayoutMark {
       };
     };
     const nodeCount = order.length;
+    // The one row each node and link stands for, worked out when first asked.
+    let soles: { nodes: SoleRows; links: SoleRows } | undefined;
     // The node or link an item key names: the mark's id and a node's name, or a link's two names.
     const find = (key: string): { node: number; link?: number } | undefined => {
       let parts: unknown;
@@ -518,6 +544,12 @@ export class SankeyMark implements LayoutMark {
             rows.push(row);
         });
         return rows;
+      },
+      soleRow: (key, table) => {
+        const found = table === this.table ? find(key) : undefined;
+        if (!found) return undefined;
+        soles ??= this.#solesOf(flows, frame.rows, status);
+        return found.link === undefined ? soles.nodes.of(found.node) : soles.links.of(found.link);
       },
       summary: () => this.#summary(layout, names, graph, links, locale),
     };
@@ -726,6 +758,7 @@ export function sankey<S extends Schema>(
   if (options.nodeWidth !== undefined) spec.nodeWidth = options.nodeWidth;
   if (options.sort !== undefined) spec.sort = options.sort;
   if (options.halo !== undefined) spec.halo = options.halo;
+  if (options.tooltip !== undefined) spec.tooltip = options.tooltip as MarkTooltipSpec;
   if (options.id !== undefined) spec.id = options.id;
   if (options.panel !== undefined) spec.panel = options.panel;
   if (table.name !== undefined) spec.data = table.name;

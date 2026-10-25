@@ -408,6 +408,12 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    */
   readonly tight?: boolean;
   /**
+   * The axis whose automatic domain runs from high to low, so the mark's
+   * values grow away from the edge it starts at (a dendrogram's heights,
+   * from leaves at the top or right). A domain the axis sets runs as given.
+   */
+  readonly descends?: "x" | "y" | undefined;
+  /**
    * How tooltips find this mark's data. "x", "y", and "point" choose the
    * chart's default mode (along x, along y, or nearest point) when the chart
    * does not set one; "cell" marks always report the cell under the pointer,

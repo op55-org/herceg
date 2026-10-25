@@ -6,7 +6,7 @@ import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { candlestick } from "../../src/marks/candlestick.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -696,7 +696,7 @@ describe("categories resolved per panel", () => {
 
   it("place error bars on each panel's own categories, vertical and horizontal", () => {
     const { model, scene } = build({
-      marks: [errorBar(intervals(), { x: "product", y1: "low", y2: "high" })],
+      marks: [errorbar(intervals(), { x: "product", y1: "low", y2: "high" })],
       facet: facet("region"),
       x: { scope: "panel" },
     });
@@ -729,8 +729,8 @@ describe("categories resolved per panel", () => {
     // Horizontal ones, in subplots, whose y categories are their own by default.
     const two = build({
       marks: [
-        errorBar(intervals(), { y: "product", x1: "low", x2: "high", panel: "a" }),
-        errorBar(table({ product: ["d"], low: [0], high: [9] }), {
+        errorbar(intervals(), { y: "product", x1: "low", x2: "high", panel: "a" }),
+        errorbar(table({ product: ["d"], low: [0], high: [9] }), {
           y: "product",
           x1: "low",
           x2: "high",
@@ -794,8 +794,9 @@ describe("categories resolved per panel", () => {
     expect([read.label, read.points[0]!.text]).toEqual(["wed", "open 2, high 3, low 1, close 2.5"]);
   });
 
-  it("refuse what panels cannot do with categories of their own yet", () => {
+  it("sync and brush either axis with categories of their own", () => {
     const data = sales();
+    // Synced charts name categories, which each panel reads on its own.
     expect(() =>
       build({
         marks: [bar(data, { x: "product", y: "units" })],
@@ -803,9 +804,7 @@ describe("categories resolved per panel", () => {
         x: { scope: "panel" },
         interaction: { sync: "dashboard" },
       }),
-    ).toThrow(
-      'chart interaction.sync: panels with categories of their own (x.scope "panel") cannot sync yet',
-    );
+    ).not.toThrow();
     expect(() =>
       build({
         marks: [bar(data, { x: "units", y: "product" })],
@@ -813,8 +812,7 @@ describe("categories resolved per panel", () => {
         y: { scope: "column" },
         interaction: { brush: "xy" },
       }),
-    ).toThrow("brush along x only");
-    // Shared, as before, these are fine; brushing x categories per panel too.
+    ).not.toThrow();
     expect(() =>
       build({
         marks: [bar(data, { x: "product", y: "units" })],

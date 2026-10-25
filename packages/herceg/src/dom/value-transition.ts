@@ -1,12 +1,14 @@
 // Moving marks from the values a chart showed to changed ones (`animation:
-// { values: true }`): bars, pie slices, points, and small lines and areas,
-// with the axes when the change moves their domains. Charts load this module
-// only when they ask for it. The data is current at once; what moves is a
-// picture of the change. When a table's values change, the chart keeps a
-// copy of what is on screen, matched by identity to the next scene's; frames
-// between draw that scene with its marks, axes, and grid lines between the
-// two. A change that moves the plot, the bands, or anything that cannot
-// move with the axes, or that adds or drops rows, shows at once.
+// { values: true }`): bars, pie slices, a gauge's value, points, small
+// lines and areas, lists drawn in row order (error bars, candles, regions,
+// text), and heatmaps' cells, in every panel, with the axes when the change
+// moves their domains. Charts load this module only when they ask for it.
+// The data is current at once; what moves is a picture of the change. When
+// a table's values change, the chart keeps a copy of what is on screen,
+// matched by identity to the next scene's; frames between draw that scene
+// with its marks, axes, and grid lines between the two. A change that moves
+// a plot, the bands, or anything that cannot move with the axes, or that
+// adds or drops rows, shows at once.
 
 import type { TableChange } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
@@ -18,19 +20,36 @@ import type {
   ArcGeometry,
   AreaGeometry,
   AxisGuide,
+  GaugeDial,
   Geometry,
+  LabelsGeometry,
   LineGeometry,
   Panel,
   PieSlice,
   PieSlices,
   PointGeometry,
+  RasterGeometry,
   Rect,
   RectGeometry,
   RuleGeometry,
   Scene,
+  TextGeometry,
 } from "../scene/scene.ts";
 import type { AnimationSpec } from "../spec/spec.ts";
 import { lastFrameTime } from "./scheduler.ts";
+import {
+  copyList,
+  copyRaster,
+  listAt,
+  listed,
+  type MovingList,
+  type MovingRaster,
+  moveList,
+  moveRaster,
+  rasterAt,
+  type ShownList,
+  type ShownRaster,
+} from "./value-items.ts";
 import {
   type AxesMotion,
   type Axis,
@@ -128,8 +147,11 @@ interface ShownPie {
   labeled: boolean;
 }
 
-/** What can move of one geometry as drawn: a series' bars, points, line, or area, or a rule. */
-type ShownItem = ShownBars | ShownPoints | ShownTrace | ShownRule;
+/**
+ * What can move of one geometry as drawn: a series' bars, points, line, or
+ * area, a rule, a list drawn in row order, or a raster.
+ */
+type ShownItem = ShownBars | ShownPoints | ShownTrace | ShownRule | ShownList | ShownRaster;
 
 /** What a chart showed when its data changed: where a change of values starts. */
 export interface Shown {
@@ -137,22 +159,31 @@ export interface Shown {
   time: number;
   /** Milliseconds copying it took, which count toward the first frame. */
   cost: number;
-  /** The panel's key, plot, and theme: a change moving any of them shows at once. */
+  /** The theme: a change of it shows at once. */
+  theme: Scene["theme"];
+  /** What each panel showed, in the scene's order: a change bringing or taking away panels shows at once. */
+  panels: ShownPanel[];
+}
+
+/** What one panel showed when its chart's data changed. */
+interface ShownPanel {
+  /** The panel's key and plot: a change moving either shows at once. */
   key: string;
   plot: Rect;
-  theme: Scene["theme"];
-  /** The scales and axes the marks were drawn with; undefined for a pie. */
+  /** The scales and axes the marks were drawn with; undefined for a layout mark's. */
   panel: DrawnPanel | undefined;
   /** The axes drawn: one that moves keeps its labels or its lack of them. */
   axes: readonly AxisGuide[];
   /** Copies of what can move, by geometry key. */
   items: Map<string, ShownItem>;
   /**
-   * Keys of the bars', points', lines', areas', and rules' geometry, copied
-   * or not: a change that brings or takes away any shows at once.
+   * Keys of the geometry that can move, copied or not: a change that brings
+   * or takes away any shows at once.
    */
   keys: Set<string>;
   pie: ShownPie | undefined;
+  /** A gauge's value as drawn. */
+  dial: number | undefined;
 }
 
 /**
@@ -186,12 +217,25 @@ interface MovingPie {
   draw: PieSlices["draw"];
 }
 
+/** A gauge moving: its value at each end, and how it draws one. */
+interface MovingDial {
+  from: number;
+  to: number;
+  draw: GaugeDial["draw"];
+}
+
 /** A change of values playing. */
 export interface Tween {
   start: number;
   duration: number;
   /** The scene of the new values, which the last frame shows as it is. */
   scene: Scene;
+  /** How each panel's marks and axes move, in the scene's order. */
+  panels: PanelTween[];
+}
+
+/** One panel's marks and axes moving. */
+export interface PanelTween {
   /** How the panel's scales move: frames place marks and plan axes with them. */
   motions: Record<Axis, ScaleMotion>;
   /** The axes moving, when any scale does. */
@@ -202,7 +246,10 @@ export interface Tween {
   /** Layers of monotone bands and stacks, which frames curve together. */
   stacks: MovingStack[];
   rules: MovingRule[];
+  lists: MovingList[];
+  rasters: MovingRaster[];
   pie: MovingPie | undefined;
+  dial: MovingDial | undefined;
 }
 
 /**
@@ -269,6 +316,8 @@ export class ValueAnimation {
       config !== this.#drawn?.config ||
       current.hidden !== this.#drawn.hidden ||
       config.interaction?.sync ||
+      // A navigator's strip draws the marks over the whole x domain, which does not move.
+      config.navigator ||
       this.#reducedMotion?.matches ||
       frameTime > SLOW_FRAME ||
       lastFrameTime() > SLOW_FRAME
@@ -278,7 +327,7 @@ export class ValueAnimation {
       return;
     }
     if (this.#blocked || this.#shown) return;
-    this.#shown = snapshot(scene, this.#model.panels()[0], now);
+    this.#shown = snapshot(scene, this.#model.panels(), now);
     if (this.#shown) this.#shown.cost = performance.now() - now;
     else this.#blocked = true;
   }
@@ -306,15 +355,15 @@ export class ValueAnimation {
     if (!shown || frameTime + shown.cost > SLOW_FRAME) return scene;
     const { config } = this.#model;
     const duration = durationOf(config.animation);
-    const panel = this.#model.panels()[0];
     this.#tween = plan(
       shown,
       scene,
-      panel,
+      this.#model.panels(),
       duration,
       this.#builders,
       sidesOf(config),
       followedOf(config),
+      positionsOf(config),
     );
     return this.step(frameTime) ?? scene;
   }
@@ -406,8 +455,9 @@ export function sidesOf(config: Pick<ChartConfig, "marks">): Sides {
 
 /**
  * Whether a geometry, by its key, is of a mark labels follow (its own
- * `labels`, or text `from` it): such marks show their new values at once,
- * with the labels, which stand where a series is drawn, not where it moves.
+ * `labels`, or text `from` it), or of such text: such marks show their new
+ * values at once, with the labels, which stand where a series is drawn,
+ * not where it moves.
  */
 export function followedOf(config: Pick<ChartConfig, "marks">): (key: string) => boolean {
   const followed = new Set<unknown>();
@@ -418,20 +468,35 @@ export function followedOf(config: Pick<ChartConfig, "marks">): (key: string) =>
     };
     if ((spec.type === "line" || spec.type === "area") && spec.labels !== undefined)
       followed.add(spec.id ?? i);
-    if (spec.from) followed.add(spec.from.mark);
+    if (spec.from) followed.add(spec.from.mark).add(spec.id ?? i);
   });
   return (key) => followed.size > 0 && followed.has(ownerOf(key));
 }
 
 /**
+ * The axis a line's positions are on, by its geometry's key: y for lines
+ * along y (`orient: "y"`, or over a category y), whose values move along x.
+ */
+export function positionsOf(config: Pick<ChartConfig, "marks">): (key: string) => "x" | "y" {
+  const alongY = new Set<unknown>();
+  config.marks.forEach((mark, i) => {
+    if (mark.spec.type === "line" && (mark as Mark).tooltip === "y") alongY.add(mark.spec.id ?? i);
+  });
+  return (key) => (alongY.size > 0 && alongY.has(ownerOf(key)) ? "y" : "x");
+}
+
+/**
  * The identity of the mark a geometry key belongs to: series keys are JSON
- * arrays starting with it (marks/mark.ts), and rules' keys its JSON before a
- * colon and the rule's row; a highlight's pieces add "\u0001" and the piece
- * (model/highlight.ts).
+ * arrays starting with it (marks/mark.ts), which a series' parts follow
+ * with "|" and the part (a look's bars, text's leaders), and rules' keys
+ * its JSON before a colon and the rule's row; a highlight's pieces add
+ * "\u0001" and the piece (model/highlight.ts).
  */
 function ownerOf(geometryKey: string): unknown {
   const key = seriesOf(geometryKey);
-  const json = key.startsWith("[") ? key : `[${key.slice(0, key.lastIndexOf(":"))}]`;
+  const json = key.startsWith("[")
+    ? key.slice(0, key.lastIndexOf("]") + 1)
+    : `[${key.slice(0, key.lastIndexOf(":"))}]`;
   try {
     return (JSON.parse(json) as unknown[])[0];
   } catch {
@@ -447,19 +512,24 @@ function seriesOf(geometryKey: string): string {
 /** Whether a change that brings or takes away this geometry shows at once. */
 function tracked(mark: Geometry): boolean {
   return (
-    (mark.kind === "rect" && (mark as RectGeometry).bars !== undefined) ||
+    mark.kind === "rect" ||
     mark.kind === "point" ||
     mark.kind === "line" ||
     mark.kind === "area" ||
-    mark.kind === "rule"
+    mark.kind === "rule" ||
+    mark.kind === "raster" ||
+    listed(mark)
   );
 }
 
 /** A copy of what can move of a geometry, if any can. */
 function copyOf(mark: Geometry): ShownItem | undefined {
+  if (listed(mark)) return copyList(mark);
   switch (mark.kind) {
     case "rect":
-      return (mark as RectGeometry).bars && barsOf(mark as RectGeometry);
+      return barsOf(mark as RectGeometry);
+    case "raster":
+      return copyRaster(mark as RasterGeometry);
     case "point":
       return copyPoints(mark as PointGeometry);
     case "line":
@@ -473,45 +543,70 @@ function copyOf(mark: Geometry): ShownItem | undefined {
 }
 
 /**
- * Copies of what `scene` shows that can move, with the panel whose scales
- * placed them; undefined when nothing can, or too much would.
+ * Copies of what `scene` shows that can move, with the panels whose scales
+ * placed them (`panels`, by key); undefined when nothing can, or too much would.
  */
 export function snapshot(
   scene: Scene,
-  panel: DrawnPanel | undefined,
+  panels: readonly DrawnPanel[],
   time: number,
 ): Shown | undefined {
-  const [drawn, ...others] = scene.panels;
-  if (!drawn || others.length > 0 || !movable(drawn)) return undefined;
+  if (!movable(scene.panels)) return undefined;
+  const shown = scene.panels.map((drawn) => shownOf(drawn, panelOf(panels, drawn)));
+  return { time, cost: 0, theme: scene.theme, panels: shown };
+}
+
+/** The panel of `panels` that placed what `drawn` draws. */
+function panelOf(panels: readonly DrawnPanel[], drawn: Panel): DrawnPanel | undefined {
+  return panels.find(({ key }) => key === drawn.key);
+}
+
+function shownOf(drawn: Panel, panel: DrawnPanel | undefined): ShownPanel {
   const items = new Map<string, ShownItem>();
   const keys = new Set<string>();
-  let pie: ShownPie | undefined;
-  for (const mark of drawn.marks) {
+  // A pie or a gauge is kept as its slices or its value, from which frames draw it all.
+  const drawer = drawerOf(drawn);
+  for (const mark of drawer ? [] : drawn.marks) {
     if (tracked(mark)) keys.add(mark.key);
     const item = copyOf(mark);
     if (item) items.set(mark.key, item);
-    const slices = mark.kind === "arc" ? (mark as ArcGeometry).slices : undefined;
-    if (slices)
-      pie = { items: slices.items, ends: slices.ends, r: slices.r, labeled: slices.labeled };
   }
+  const slices = drawer?.slices;
+  const pie = slices && {
+    items: slices.items,
+    ends: slices.ends,
+    r: slices.r,
+    labeled: slices.labeled,
+  };
+  const dial = drawer?.dial?.value;
   const { key, plot, axes } = drawn;
-  return { time, cost: 0, key, plot, theme: scene.theme, panel, axes, items, keys, pie };
+  return { key, plot, panel, axes, items, keys, pie, dial };
+}
+
+/** The sectors of a pie or of a gauge in its panel, which draw all of it again for each frame. */
+function drawerOf(panel: Panel): ArcGeometry | undefined {
+  return panel.marks.find(draws);
+}
+
+function draws(mark: Geometry): mark is ArcGeometry {
+  const { slices, dial } = mark as ArcGeometry;
+  return mark.kind === "arc" && (slices !== undefined || dial !== undefined);
 }
 
 /**
- * Whether a panel has something that can move (bars, slices, rules, points
- * that say which rows they show, or lines and areas traced whole), and not
- * too much to draw every frame: all its bars, slices, and rules, all its
- * points, and all else it draws, whether or not it moves. Clouds never move,
- * and nothing moves beside them.
+ * Whether panels have something that can move (bars, slices, rules, points
+ * that say which rows they show, lines and areas traced whole, lists, or
+ * rasters), and not too much to draw every frame: all their bars, slices,
+ * rules, rectangles, and labels, all their points, and all else they draw,
+ * whether or not it moves. Clouds never move, and nothing moves beside them.
  */
-function movable(panel: Panel): boolean {
+function movable(panels: readonly Panel[]): boolean {
   let items = 0;
   let points = 0;
   let vertices = 0;
   // A pie with no slices yet can fill.
   let any = false;
-  for (const mark of panel.marks) {
+  for (const mark of panels.flatMap((panel) => panel.marks)) {
     if (mark.kind === "point") {
       const { cloud, items: rows, count } = mark as PointGeometry;
       if (cloud) return false;
@@ -519,15 +614,20 @@ function movable(panel: Panel): boolean {
       any ||= rows !== undefined;
     } else if (mark.kind === "rect") {
       items += (mark as RectGeometry).count;
-      any ||= (mark as RectGeometry).bars !== undefined;
+      any = true;
+    } else if (mark.kind === "text" || mark.kind === "labels") {
+      items +=
+        mark.kind === "text" ? (mark as TextGeometry).count : (mark as LabelsGeometry).items.length;
+      any = true;
     } else if (mark.kind === "rule") {
       items++;
       any = true;
-    } else if (mark.kind === "arc" && (mark as ArcGeometry).slices) {
-      items += (mark as ArcGeometry).slices!.items.length;
+    } else if (draws(mark)) {
+      items += mark.slices?.items.length ?? 1;
       any = true;
     } else {
       vertices += mark.draw.size(mark);
+      any ||= mark.kind === "segments" || mark.kind === "raster";
       const edges =
         mark.kind === "line"
           ? [(mark as LineGeometry).path]
@@ -568,27 +668,77 @@ function motionsOf(
   return x && y && yRight && { x, y, yRight };
 }
 
+/** What says how each geometry moves: its y scale, whether labels follow it, and a line's positions' axis. */
+interface Roles {
+  sides: Sides;
+  followed: (key: string) => boolean;
+  positions: (key: string) => "x" | "y";
+}
+
 /**
- * How what was shown moves to `scene`, whose panel `panel` placed its
- * marks, over `duration` ms, with `sides` saying which y scale places each
- * geometry, and `followed` which show their new values at once; undefined
- * when it cannot (the plot or the bands changed, a series came or went, a
- * scale moved that something drawn cannot move with, or retained slices
- * changed order) or nothing moves.
+ * How what was shown moves to `scene`, whose panels `panels` placed its
+ * marks (by key), over `duration` ms, with `sides` saying which y scale
+ * places each geometry, `followed` which show their new values at once, and
+ * `positions` which axis each line's positions are on; undefined when it
+ * cannot (panels, plots, or bands changed, a series came or went, a scale
+ * moved that something drawn cannot move with, or retained slices changed
+ * order) or nothing moves. Every panel moves, or none does.
  */
 export function plan(
   shown: Shown,
   scene: Scene,
-  panel: DrawnPanel | undefined,
+  panels: readonly DrawnPanel[],
   duration: number,
   builders: Builders,
   sides: Sides = () => "y",
   followed: (key: string) => boolean = () => false,
+  positions: (key: string) => "x" | "y" = () => "x",
 ): Tween | undefined {
-  const [drawn, ...others] = scene.panels;
-  if (!drawn || others.length > 0 || duration === 0 || !movable(drawn)) return undefined;
+  if (
+    duration === 0 ||
+    scene.theme !== shown.theme ||
+    scene.panels.length !== shown.panels.length ||
+    !movable(scene.panels)
+  )
+    return undefined;
+  const roles = { sides, followed, positions };
+  // Points at most in a frame across the chart, with those still and going.
+  const budget = {
+    points: scene.panels.reduce(
+      (count, { marks }) =>
+        marks.reduce(
+          (n, mark) => n + (mark.kind === "point" ? (mark as PointGeometry).count : 0),
+          count,
+        ),
+      0,
+    ),
+  };
+  const tweens: PanelTween[] = [];
+  let moves = false;
+  for (const [i, drawn] of scene.panels.entries()) {
+    const panel = panelOf(panels, drawn);
+    const planned = planPanel(shown.panels[i]!, drawn, panel, builders, roles, budget);
+    if (!planned) return undefined;
+    tweens.push(planned.tween);
+    moves ||= planned.moves;
+  }
+  return moves ? { start: shown.time, duration, scene, panels: tweens } : undefined;
+}
+
+/**
+ * How what a panel showed moves to `drawn`, which `panel` placed: whether
+ * anything does; undefined when it cannot.
+ */
+function planPanel(
+  shown: ShownPanel,
+  drawn: Panel,
+  panel: DrawnPanel | undefined,
+  builders: Builders,
+  { sides, followed, positions }: Roles,
+  budget: { points: number },
+): { tween: PanelTween; moves: boolean } | undefined {
   // A panel of another facet value, or drawn elsewhere or otherwise, is another picture.
-  const same = drawn.key === shown.key && scene.theme === shown.theme;
+  const same = drawn.key === shown.key;
   const motions = motionsOf(shown.panel, panel);
   if (!same || !sameRect(drawn.plot, shown.plot) || !motions) return undefined;
   const scales = motions.x.moves || motions.y.moves || motions.yRight.moves;
@@ -608,10 +758,7 @@ export function plan(
   // a moving scale, nor one of the chart's own, which moves on its own.
   if (drawn.axes.some((guide) => guide.layers && (motions[guide.scale as Axis]?.moves ?? true)))
     return undefined;
-  const tween: Tween = {
-    start: shown.time,
-    duration,
-    scene,
+  const tween: PanelTween = {
     motions,
     axes: axes || undefined,
     bars: [],
@@ -619,10 +766,27 @@ export function plan(
     traces: [],
     stacks: [],
     rules: [],
+    lists: [],
+    rasters: [],
     pie: undefined,
+    dial: undefined,
   };
-  const zero = (side: "y" | "yRight") =>
-    [shown.panel?.[side]?.map(0) ?? Number.NaN, panel?.[side]?.map(0) ?? Number.NaN] as const;
+  // A pie or a gauge draws its panel again for each frame, from its slices or its value.
+  const drawer = drawerOf(drawn);
+  if (drawer?.slices) {
+    const moving = shown.pie && movePie(shown.pie, drawer.slices);
+    if (!moving) return undefined;
+    tween.pie = moving.pie;
+    return { tween, moves: moving.moves };
+  }
+  if (drawer?.dial) {
+    const moving = shown.dial !== undefined ? moveDial(shown.dial, drawer.dial) : undefined;
+    if (!moving) return undefined;
+    tween.dial = moving.dial;
+    return { tween, moves: moving.moves };
+  }
+  const zero = (axis: Axis) =>
+    [shown.panel?.[axis]?.map(0) ?? Number.NaN, panel?.[axis]?.map(0) ?? Number.NaN] as const;
   // A mark's areas move together or not at all: a stack's layers share edges.
   const areas = new Map<unknown, { moving: MovingTrace; moves: boolean }[]>();
   const still = new Set<unknown>();
@@ -632,11 +796,6 @@ export function plan(
   const pieceMoves = new Map<MovingPoints | MovingTrace, boolean>();
   // Moving scales move the axes and grid lines, whatever marks do.
   let moves = scales;
-  // Include still points and exits in the per-frame budget across the chart.
-  let pointsDrawn = drawn.marks.reduce(
-    (count, mark) => count + (mark.kind === "point" ? (mark as PointGeometry).count : 0),
-    0,
-  );
   for (const [index, mark] of drawn.marks.entries()) {
     // Seams of time breaks (scale/breaks.ts names them) follow x alone: they
     // stay put while only y moves.
@@ -664,19 +823,25 @@ export function plan(
         side,
         motions.x,
         motions[side],
-        MOVING_POINTS - pointsDrawn + target.count,
+        MOVING_POINTS - budget.points + target.count,
       );
       if (points) {
-        pointsDrawn += points.moving.count - target.count;
+        // Still points and exits count toward the budget across the chart.
+        budget.points += points.moving.count - target.count;
         tween.points.push(points.moving);
         pieceMoves.set(points.moving, points.moves);
         continue;
       }
     } else if (item?.kind === "trace" && (mark.kind === "line" || mark.kind === "area")) {
-      // Lines move along y only: points along x would need other rows.
+      // Lines move along their values' axis only: points along their
+      // positions' would need other rows.
       const trace = mark as LineGeometry | AreaGeometry;
-      const scale = { side, motion: motions[side], zero: zero(side) };
-      const moving = !motions.x.moves && moveTrace(index, item, trace, scale, builders);
+      const along = positions(of);
+      const values: Axis = along === "x" ? side : "x";
+      const scale = { side: values, motion: motions[values], zero: zero(values) };
+      const moving =
+        !motions[along === "x" ? "x" : side].moves &&
+        moveTrace(index, item, trace, scale, builders, along);
       if (moving && mark.kind === "area") {
         const owner = ownerOf(of);
         areas.set(owner, [...(areas.get(owner) ?? []), moving]);
@@ -691,6 +856,14 @@ export function plan(
       const rule = moveRule(index, item, mark as RuleGeometry, side);
       if (rule) tween.rules.push(rule.moving);
       moved = rule;
+    } else if (item?.kind === "list" && listed(mark)) {
+      const list = moveList(index, item, mark, side);
+      if (list) tween.lists.push(list.moving);
+      moved = list;
+    } else if (item?.kind === "raster" && mark.kind === "raster") {
+      const raster = moveRaster(index, item, mark as RasterGeometry);
+      if (raster) tween.rasters.push(raster.moving);
+      moved = raster;
     }
     if (moved) {
       moves ||= moved.moves;
@@ -701,13 +874,6 @@ export function plan(
     if (scales || (tracked(mark) && !shown.keys.has(mark.key))) return undefined;
     atOnce.add(seriesOf(of));
     if (mark.kind === "area") still.add(ownerOf(of));
-    const slices = mark.kind === "arc" ? (mark as ArcGeometry).slices : undefined;
-    if (slices && shown.pie) {
-      const moving = movePie(shown.pie, slices);
-      if (!moving) return undefined;
-      moves ||= moving.moves;
-      tween.pie = moving.pie;
-    }
   }
   const pieceOf = ({ of, key }: Geometry) => seriesOf(of ?? key);
   for (const [owner, layers] of areas) {
@@ -738,7 +904,7 @@ export function plan(
   // Series that went have nothing to move to.
   const keys = new Set(drawn.marks.map(({ key }) => key));
   for (const key of shown.keys) if (!keys.has(key)) return undefined;
-  return moves ? tween : undefined;
+  return { tween, moves };
 }
 
 /**
@@ -808,6 +974,16 @@ function moveBars(
   return { moving: { index, mark, along, count, from, to, rounded, rects, ends }, moves };
 }
 
+/** How a gauge moves from the value `shown` to its dial's; undefined when it gains or loses one. */
+function moveDial(
+  shown: number,
+  { value, draw }: GaugeDial,
+): { dial: MovingDial | undefined; moves: boolean } | undefined {
+  if (Object.is(shown, value)) return { dial: undefined, moves: false };
+  if (!(Number.isFinite(shown) && Number.isFinite(value))) return undefined;
+  return { dial: { from: shown, to: value, draw }, moves: true };
+}
+
 function movePie(shown: ShownPie, next: PieSlices): { pie: MovingPie; moves: boolean } | undefined {
   const nextKeys = new Set(next.items.map(({ key }) => key));
   const shownKeys = new Set(shown.items.map(({ key }) => key));
@@ -871,10 +1047,24 @@ function movePie(shown: ShownPie, next: PieSlices): { pie: MovingPie; moves: boo
  */
 export function frameAt(tween: Tween, elapsed: number): Scene {
   const t = ease(Math.min(1, Math.max(0, elapsed / tween.duration)));
-  const panel = tween.scene.panels[0]!;
+  const { scene } = tween;
+  const panels = scene.panels.map((panel, i) => panelAt(panel, tween.panels[i]!, t));
+  // Insets paint panels in an order of their own.
+  const moved = new Map(scene.panels.map((panel, i) => [panel, panels[i]!]));
+  const painted = scene.painted?.map((panel) => moved.get(panel) ?? panel);
+  return { ...scene, panels, ...(painted && { painted }) };
+}
+
+/** A panel at eased progress `t` of its tween. */
+function panelAt(panel: Panel, tween: PanelTween, t: number): Panel {
   const { x, y, yRight } = tween.motions;
   const blends = { x: blendAt(x, t), y: blendAt(y, t), yRight: blendAt(yRight, t) };
-  const marks = tween.pie ? pieAt(tween.pie, t) : panel.marks.slice();
+  const { pie, dial } = tween;
+  const marks = pie
+    ? pieAt(pie, t)
+    : dial
+      ? dial.draw(dial.from + (dial.to - dial.from) * t)
+      : panel.marks.slice();
   for (const bars of tween.bars) marks[bars.index] = barsAt(bars, t, blends[bars.along]);
   for (const points of tween.points)
     marks[points.index] = pointsAt(points, t, blends.x, blends[points.side]);
@@ -887,8 +1077,10 @@ export function frameAt(tween: Tween, elapsed: number): Scene {
     });
   }
   for (const rule of tween.rules) marks[rule.index] = ruleAt(rule, blends[rule.along]);
+  for (const list of tween.lists) marks[list.index] = listAt(list, blends.x, blends[list.side]);
+  for (const raster of tween.rasters) marks[raster.index] = rasterAt(raster, t);
   const guides = tween.axes && axesAt(panel, tween.axes, t);
-  return { ...tween.scene, panels: [{ ...panel, ...guides, marks }] };
+  return { ...panel, ...guides, marks };
 }
 
 /** Starts quickly and settles without overshooting (cubic ease-out), as views move. */

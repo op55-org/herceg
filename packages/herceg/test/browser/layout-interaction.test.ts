@@ -178,7 +178,8 @@ describe("maps", () => {
     await mouse(chart, "mouseWheel", px, py, { deltaY: -300, ctrl: true });
     await frame();
     expect(views).toHaveLength(1);
-    const zoomed = views[0]!;
+    const zoomed = views[0]!.views[0]!;
+    expect(views[0]!.cause).toBe("wheel");
     expect(span(zoomed.x)!).toBeLessThan(span(x.domain)! / 1.5);
     expect(zoomed.yRight).toBeNull();
     // What was under the pointer still is.
@@ -187,7 +188,7 @@ describe("maps", () => {
 
     await drag(chart, [px, py], [px + 60, py]);
     await frame();
-    const panned = views.at(-1)!;
+    const panned = views.at(-1)!.views[0]!;
     const k = plane(chart).x.range[1] - plane(chart).x.range[0];
     expect(panned.x![0]).toBeCloseTo(zoomed.x![0] - (60 * span(zoomed.x)!) / k, 6);
     expect(span(panned.x)).toBeCloseTo(span(zoomed.x)!, 9);
@@ -199,7 +200,7 @@ describe("maps", () => {
     await mouse(chart, "mousePressed", px, py, { clickCount: 2 });
     await mouse(chart, "mouseReleased", px, py, { clickCount: 2 });
     await frame();
-    expect(views.at(-1)).toEqual({ x: null, y: null, yRight: null });
+    expect(views.at(-1)!.views[0]).toMatchObject({ x: null, y: null, yRight: null });
     expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: null });
     expect(plane(chart).zoom).toBe(1);
   });
@@ -211,10 +212,11 @@ describe("maps", () => {
     chart.root.focus();
     await userEvent.keyboard("{+}");
     expect(live.textContent).toBe("Zoom 1.3 times the whole map.");
-    const zoomed = views.at(-1)!;
+    const zoomed = views.at(-1)!.views[0]!;
     await userEvent.keyboard("{Shift>}{ArrowRight}{/Shift}");
     expect(live.textContent).toBe("Moved right.");
-    const right = views.at(-1)!;
+    expect(views.at(-1)!.cause).toBe("keyboard");
+    const right = views.at(-1)!.views[0]!;
     expect(right.x![0]).toBeCloseTo(zoomed.x![0] + span(zoomed.x)! / 8, 9);
     await userEvent.keyboard("{ArrowRight}");
     await frame();
@@ -920,7 +922,7 @@ describe("networks", () => {
       await mouse(chart, "mousePressed", px, py, { clickCount: 2 });
       await mouse(chart, "mouseReleased", px, py, { clickCount: 2 });
       await frame();
-      expect(views.at(-1)).toEqual({ x: null, y: null, yRight: null });
+      expect(views.at(-1)!.views[0]).toMatchObject({ x: null, y: null, yRight: null });
       expect(plane(chart).zoom).toBe(1);
       const [x, y] = where(chart, "a");
       expect(chart.inspect(x, y)?.points[0]?.label).toBe("a");

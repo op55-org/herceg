@@ -10,10 +10,11 @@ import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { ArcGeometry, Geometry, ShapesGeometry, TextGeometry } from "../scene/scene.ts";
-import type { Frozen, GaugeBand, GaugeSpec } from "../spec/spec.ts";
+import type { Frozen, GaugeBand, GaugeSpec, MarkTooltipSpec } from "../spec/spec.ts";
 import { refuseColor } from "./colored.ts";
 import type { LayoutFrame, LayoutItem, LayoutMark, LayoutResult } from "./layout-mark.ts";
 import { type ChartMark, frozen, type MARK, requireField } from "./mark.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
 export interface GaugeOptions<S extends Schema> {
   /** Number field whose last finite value the gauge shows. */
@@ -30,6 +31,8 @@ export interface GaugeOptions<S extends Schema> {
   label?: string;
   /** Intl.NumberFormat options for the value and the dial's ends. */
   format?: Intl.NumberFormatOptions;
+  /** Fields of the row the gauge shows, which its tooltip shows besides the value. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the gauge has to itself. */
   panel?: string;
@@ -71,6 +74,7 @@ export class GaugeMark implements LayoutMark {
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     requireField(table, spec.value, ["number"], "gauge value");
+    checkTooltip(table, spec.tooltip, "gauge");
     const min = spec.min ?? 0;
     const max = spec.max ?? 100;
     if (!(Number.isFinite(min) && Number.isFinite(max) && min < max))
@@ -157,101 +161,116 @@ export class GaugeMark implements LayoutMark {
       return START + SWEEP * ((clamped / 2 - min / 2) / (max / 2 - min / 2));
     };
 
-    // The band of the value as drawn: values past an end are drawn at it.
-    const shown = Math.min(max, Math.max(min, value));
-    const band = bands.find(({ to }) => shown <= to);
-    const color = band?.color ?? theme.palette[0] ?? theme.text;
-    const end = Number.isNaN(value) ? START : angle(value);
-    const geometry: Geometry[] = [
-      {
-        kind: "arc",
-        draw: arcDrawing,
-        key: "gauge-dial",
-        // The track beyond the value, and the value's arc. The track is not
-        // drawn under the value, where its antialiased edges would show.
-        arcs: Float32Array.of(cx, cy, r0, r, end, START + SWEEP, cx, cy, r0, r, START, end),
-        count: 2,
-        colors: [theme.grid, color],
-        colorIndex: Uint32Array.of(0, 1),
-        fillOpacity: 1,
-        gap: 0,
-      } as ArcGeometry,
-    ];
-    if (bands.length > 0) {
-      const colors = [...new Set(bands.map((b) => b.color))];
-      const [b0, b1] = [r * (1 + BAND_GAP), outer];
-      geometry.push({
-        kind: "arc",
-        draw: arcDrawing,
-        key: "gauge-bands",
-        arcs: Float32Array.from(
-          bands.flatMap(({ from, to }) => [cx, cy, b0, b1, angle(from), angle(to)]),
-        ),
-        count: bands.length,
-        colors,
-        colorIndex: Uint32Array.from(bands, (b) => colors.indexOf(b.color)),
-        fillOpacity: 1,
-        gap: GAP,
-      } as ArcGeometry);
-    }
-
-    // The value as large as the dial allows, within the track's inside, and
-    // the label under it.
-    const text = Number.isNaN(value) ? "–" : format(value);
-    const perPixel = measure(text, `600 100px ${theme.font}`) / 100;
-    const size = Math.round(
-      Math.min(
-        MAX_VALUE_SIZE,
-        Math.max(theme.fontSize, r * VALUE_SIZE),
-        perPixel > 0 ? (1.5 * r0) / perPixel : Infinity,
-      ),
-    );
-    const valueY = cy - lineHeight * 0.3;
-    const label = fitText(oneLineText(this.spec.label ?? this.spec.value), 1.7 * r0, measure, font);
-    const labels: { text: string; x: number; y: number }[] = [];
-    if (label !== "…") labels.push({ text: label, x: cx, y: valueY + size / 2 + lineHeight / 2 });
-    geometry.push({
-      kind: "shapes",
-      draw: shapesDrawing,
-      key: "gauge-value",
-      shapes: [
-        {
-          text,
-          x: cx,
-          y: valueY,
-          fill: Number.isNaN(value) ? theme.muted : theme.text,
-          anchor: "middle",
-        },
-      ],
-      font: `600 ${size}px ${theme.font}`,
-      fontSize: size,
-      bold: true,
-    } as ShapesGeometry);
-
-    // `min` and `max` under the track's ends, unless they would overlap.
+    // The band of a value as drawn: values past an end are drawn at it.
+    const bandOf = (v: number) => bands.find(({ to }) => Math.min(max, Math.max(min, v)) <= to);
+    const colorOf = (v: number) => bandOf(v)?.color ?? theme.palette[0] ?? theme.text;
+    const endOf = (v: number) => (Number.isNaN(v) ? START : angle(v));
     const extremes = [format(min), format(max)];
     const widths = extremes.map((extreme) => measure(extreme, font));
-    const reach = ((r0 + r) / 2) * Math.cos(START);
-    if (widths[0]! / 2 + widths[1]! / 2 + 8 < -2 * reach) {
-      const y = cy + outer * Math.sin(START) + END_GAP + lineHeight / 2;
-      extremes.forEach((extreme, i) => {
-        const half = widths[i]! / 2;
-        const x = cx + (i === 0 ? reach : -reach);
-        const inside = Math.min(bounds.x + bounds.width - half, Math.max(bounds.x + half, x));
-        labels.push({ text: extreme, x: inside, y });
-      });
-    }
-    geometry.push({
-      kind: "text",
-      draw: textDrawing,
-      key: "gauge-labels",
-      fill: theme.muted,
-      anchor: "middle",
-      halo: undefined,
-      coords: Float32Array.from(labels.flatMap(({ x, y }) => [x, y])),
-      labels: labels.map((l) => l.text),
-      count: labels.length,
-    } as TextGeometry);
+    // The dial, the value, and the labels, as drawn at value `v`.
+    const dial = (v: number): Geometry[] => {
+      const end = endOf(v);
+      const geometry: Geometry[] = [
+        {
+          kind: "arc",
+          draw: arcDrawing,
+          key: "gauge-dial",
+          // The track beyond the value, and the value's arc. The track is not
+          // drawn under the value, where its antialiased edges would show.
+          arcs: Float32Array.of(cx, cy, r0, r, end, START + SWEEP, cx, cy, r0, r, START, end),
+          count: 2,
+          colors: [theme.grid, colorOf(v)],
+          colorIndex: Uint32Array.of(0, 1),
+          fillOpacity: 1,
+          gap: 0,
+        } as ArcGeometry,
+      ];
+      if (bands.length > 0) {
+        const colors = [...new Set(bands.map((b) => b.color))];
+        const [b0, b1] = [r * (1 + BAND_GAP), outer];
+        geometry.push({
+          kind: "arc",
+          draw: arcDrawing,
+          key: "gauge-bands",
+          arcs: Float32Array.from(
+            bands.flatMap(({ from, to }) => [cx, cy, b0, b1, angle(from), angle(to)]),
+          ),
+          count: bands.length,
+          colors,
+          colorIndex: Uint32Array.from(bands, (b) => colors.indexOf(b.color)),
+          fillOpacity: 1,
+          gap: GAP,
+        } as ArcGeometry);
+      }
+
+      // The value as large as the dial allows, within the track's inside, and
+      // the label under it.
+      const text = Number.isNaN(v) ? "–" : format(v);
+      const perPixel = measure(text, `600 100px ${theme.font}`) / 100;
+      const size = Math.round(
+        Math.min(
+          MAX_VALUE_SIZE,
+          Math.max(theme.fontSize, r * VALUE_SIZE),
+          perPixel > 0 ? (1.5 * r0) / perPixel : Infinity,
+        ),
+      );
+      const valueY = cy - lineHeight * 0.3;
+      const label = fitText(
+        oneLineText(this.spec.label ?? this.spec.value),
+        1.7 * r0,
+        measure,
+        font,
+      );
+      const labels: { text: string; x: number; y: number }[] = [];
+      if (label !== "…") labels.push({ text: label, x: cx, y: valueY + size / 2 + lineHeight / 2 });
+      geometry.push({
+        kind: "shapes",
+        draw: shapesDrawing,
+        key: "gauge-value",
+        shapes: [
+          {
+            text,
+            x: cx,
+            y: valueY,
+            fill: Number.isNaN(v) ? theme.muted : theme.text,
+            anchor: "middle",
+          },
+        ],
+        font: `600 ${size}px ${theme.font}`,
+        fontSize: size,
+        bold: true,
+      } as ShapesGeometry);
+
+      // `min` and `max` under the track's ends, unless they would overlap.
+      const reach = ((r0 + r) / 2) * Math.cos(START);
+      if (widths[0]! / 2 + widths[1]! / 2 + 8 < -2 * reach) {
+        const y = cy + outer * Math.sin(START) + END_GAP + lineHeight / 2;
+        extremes.forEach((extreme, i) => {
+          const half = widths[i]! / 2;
+          const x = cx + (i === 0 ? reach : -reach);
+          const inside = Math.min(bounds.x + bounds.width - half, Math.max(bounds.x + half, x));
+          labels.push({ text: extreme, x: inside, y });
+        });
+      }
+      geometry.push({
+        kind: "text",
+        draw: textDrawing,
+        key: "gauge-labels",
+        fill: theme.muted,
+        anchor: "middle",
+        halo: undefined,
+        coords: Float32Array.from(labels.flatMap(({ x, y }) => [x, y])),
+        labels: labels.map((l) => l.text),
+        count: labels.length,
+      } as TextGeometry);
+      return geometry;
+    };
+    const geometry = dial(value);
+    // Charts that animate changed values draw the dial at the values between.
+    if (frame.keyed) (geometry[0] as ArcGeometry).dial = { value, draw: dial };
+    const band = bandOf(value);
+    const color = colorOf(value);
+    const end = endOf(value);
 
     const key = JSON.stringify([frame.id, this.spec.value]);
     const outline = new ArcPath();
@@ -310,6 +329,7 @@ export function gauge<S extends Schema>(
   if (options.bands !== undefined) spec.bands = options.bands.map((band) => ({ ...band }));
   if (options.label !== undefined) spec.label = options.label;
   if (options.format !== undefined) spec.format = { ...options.format };
+  if (options.tooltip !== undefined) spec.tooltip = options.tooltip as MarkTooltipSpec;
   if (options.id !== undefined) spec.id = options.id;
   if (options.panel !== undefined) spec.panel = options.panel;
   if (table.name !== undefined) spec.data = table.name;

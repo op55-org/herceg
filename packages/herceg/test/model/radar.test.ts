@@ -373,7 +373,7 @@ describe("radar", () => {
       "has its chart to itself",
     );
     expect(() => build({ marks: [mark], interaction: { brush: "x" } })).toThrow(
-      "radar brush: no axes to brush",
+      "radar brush: its axes radiate from the center, which a brush cannot span; drop interaction.brush",
     );
   });
 

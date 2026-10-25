@@ -12,7 +12,7 @@ import type { NumberField, PositionField, Schema, Table } from "../data/table.ts
 import { symbolPath } from "../draw/symbols.ts";
 import { formatNumber } from "../format/format.ts";
 import { ItemViews } from "../model/item-views.ts";
-import type { LegendEntry } from "../model/legend.ts";
+import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { TriangleBatch3D } from "../scene/scene.ts";
@@ -22,6 +22,7 @@ import { clipToBox } from "../three/clip.ts";
 import { monotone, rayInBox, walkGrid } from "../three/hit.ts";
 import { crossing, Traversal } from "../three/traversal.ts";
 import type { LayoutFrame, LayoutItem, LayoutMark, LayoutResult } from "./layout-mark.ts";
+import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type ChartMark,
@@ -49,6 +50,7 @@ import {
   positiveExtent,
   type Ranker,
 } from "./plot3d.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
 export interface SurfaceOptions<S extends Schema> {
   /** Number, time, or category fields: each row's grid column and row. */
@@ -70,6 +72,8 @@ export interface SurfaceOptions<S extends Schema> {
   wireframe?: boolean;
   /** What the surface is, in tooltips; "Surface" by default. */
   label?: string;
+  /** Fields of a grid point's row, which tooltips show besides its values. */
+  tooltip?: MarkTooltip<S>;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   id?: string;
@@ -182,6 +186,7 @@ export class SurfaceMark implements Layer3D {
     requireField(table, spec.y, ["number", "time", "category"], "surface y");
     requireField(table, spec.z, ["number"], "surface z");
     if (spec.color !== undefined) requireField(table, spec.color, ["number"], "surface color");
+    checkTooltip(table, spec.tooltip, "surface");
     if (Array.isArray(spec.colors)) checkRamp(spec.colors, "surface colors", true);
     checkColorScale(spec.colorDomain, spec.colorMidpoint, "surface");
     if (spec.fillOpacity !== undefined && !(spec.fillOpacity >= 0 && spec.fillOpacity <= 1))
@@ -308,6 +313,14 @@ export class SurfaceMark implements Layer3D {
   /** Surfaces have no legend entries; their colors have a color legend. */
   legend(): LegendEntry[] {
     return [];
+  }
+
+  /** Its color ramp (of `color`, or z), which guides name: a colorbar shows it once it has values. */
+  readonly legendScales = ["ramp"] as const;
+
+  /** Its color ramp's legend, which guides naming the mark show. */
+  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
+    return legendParts(...this.scales(theme, locale, paint));
   }
 
   scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
@@ -1128,6 +1141,7 @@ export function surface<S extends Schema>(
       "shading",
       "wireframe",
       "label",
+      "tooltip",
       "panel",
       "id",
     ]),

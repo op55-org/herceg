@@ -467,7 +467,9 @@ describe("insets", () => {
     });
     // The inset, with an x of its own, comes first of the panels with axes.
     expect(model.panels().map(({ key }) => key)).toEqual(["detail", "bars"]);
-    expect(model.chartPanel()?.key).toBe("bars");
+    expect(model.instanceOf("x", undefined, "test")).toBe("");
+    expect(model.instances.get('x ""')).toBeUndefined();
+    expect(model.instance("x ").panels).toEqual(["bars"]);
   });
 
   it("leave out of a lasso's rows what they cover of their parent", () => {
@@ -494,7 +496,7 @@ describe("insets", () => {
       [10, 10],
       [-1, 10],
     ] as const;
-    const owner = { x: main.xGroup, panels: ["main"] };
+    const owner = { scales: [model.instance(`x ${main.xGroup}`)], panels: ["main"] };
     const rows = brushedRows(
       model,
       spread as unknown as Table,
@@ -533,7 +535,7 @@ describe("insets", () => {
       model,
       nodes as unknown as Table,
       { x: null, y: null, lasso: all },
-      { x: "", panels: ["net"], plane: true },
+      { scales: [], panels: ["net"], plane: true },
     );
     const rows = selection?.kind === "rows" ? Array.from(selection.rows.positions()) : [];
     // Nodes under the box are not drawn, and not selected.
@@ -692,7 +694,6 @@ describe("insets", () => {
     }
     // The chart's x keeps its name, so a view without a panel zooms it and not the inset.
     const { model } = build({ marks, panels: zoomed(), x: { scope: "chart" } });
-    expect(model.sharesX).toBe(true);
     const [main, zoom] = model.panels();
     expect(main!.xGroup).toBe("");
     expect(zoom!.xGroup).not.toBe("");

@@ -14,7 +14,7 @@ import type {
   SegmentGeometry,
   TextGeometry,
 } from "../scene/scene.ts";
-import type { Frozen, PieSpec } from "../spec/spec.ts";
+import type { Frozen, MarkTooltipSpec, PieSpec } from "../spec/spec.ts";
 import { refuseColor } from "./colored.ts";
 import {
   heldText,
@@ -25,9 +25,11 @@ import {
   type LayoutResult,
   RowsCache,
   SelectionCache,
+  SoleRows,
   secondOf,
 } from "./layout-mark.ts";
 import { CATEGORY, type ChartMark, DIM, frozen, type MARK, requireField } from "./mark.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
 export interface PieOptions<S extends Schema> {
   /** Category field: a slice per value. */
@@ -40,6 +42,8 @@ export interface PieOptions<S extends Schema> {
   sort?: "value" | "input";
   /** Labels beside the slices, joined to them by lines; true by default. */
   labels?: boolean;
+  /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the pie has to itself. */
   panel?: string;
@@ -72,6 +76,8 @@ export class PieMark implements LayoutMark {
   readonly #totals = new RowsCache<Float64Array>();
   /** What highlighted selections hold of each category. */
   readonly #held = new SelectionCache<Held>();
+  /** The one row each category's slice stands for, of all rows and of each facet panel's. */
+  readonly #soles = new RowsCache<SoleRows>();
 
   constructor(input: PieSpec, table: Table) {
     this.spec = frozen(input);
@@ -79,6 +85,7 @@ export class PieMark implements LayoutMark {
     const spec = this.spec;
     requireField(table, spec.category, CATEGORY, "pie category");
     if (spec.value !== undefined) requireField(table, spec.value, ["number"], "pie value");
+    checkTooltip(table, spec.tooltip, "pie");
     const inner = spec.innerRadius ?? 0;
     if (!(inner >= 0 && inner < 1)) {
       throw new RangeError(`pie innerRadius: expected at least 0 and below 1; received ${inner}`);
@@ -156,6 +163,16 @@ export class PieMark implements LayoutMark {
       const value = values ? values[row]! : 1;
       if (value > 0 && value < Number.POSITIVE_INFINITY) each(row, code, value);
     }
+  }
+
+  /** The one row each category's slice stands for among `rows` (all rows by default), of those it sums. */
+  #solesOf(rows: Uint32Array | undefined): SoleRows {
+    return this.#soles.get(this.table, rows, () => {
+      const { codes, dictionary } = this.table.categories(this.spec.category);
+      const soles = new SoleRows(dictionary.length);
+      this.#eachRow(rows, (row, code) => soles.add(code, row), codes);
+      return soles;
+    });
   }
 
   /** Every category with rows among `rows` (all rows by default), in slice order. */
@@ -327,6 +344,10 @@ export class PieMark implements LayoutMark {
         });
         return rows;
       },
+      soleRow: (key, table) => {
+        const slice = table === this.table ? slices.find((s) => s.key === key) : undefined;
+        return slice && this.#solesOf(frame.rows).of(codeOf.get(slice.label)!);
+      },
       summary: () => this.#summary(slices, largest * relative, share, locale, percent),
     };
   }
@@ -473,6 +494,7 @@ export function pie<S extends Schema>(
   if (options.innerRadius !== undefined) spec.innerRadius = options.innerRadius;
   if (options.sort !== undefined) spec.sort = options.sort;
   if (options.labels !== undefined) spec.labels = options.labels;
+  if (options.tooltip !== undefined) spec.tooltip = options.tooltip as MarkTooltipSpec;
   if (options.id !== undefined) spec.id = options.id;
   if (options.panel !== undefined) spec.panel = options.panel;
   if (table.name !== undefined) spec.data = table.name;

@@ -14,22 +14,22 @@ import type { LayoutMark } from "../marks/layout-mark.ts";
 import type { BandContext, Bands, Mark } from "../marks/mark.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { LayoutSpec, ScaleScope } from "../spec/spec.ts";
+import type { InteractionSpec, LayoutSpec, ScaleScope } from "../spec/spec.ts";
 import type { TextPaint } from "../style/style.ts";
 import type { AxisType } from "./axis.ts";
 import { Cells } from "./cells.ts";
 import type { MarkSeries } from "./inspect.ts";
-import { HiddenKeys } from "./legend.ts";
+import { HiddenKeys, type PanelVisibility } from "./legend.ts";
+import { panelInteraction } from "./panel-interaction.ts";
 import {
   type AnnotatedPanel,
   across,
-  alongY,
   annotations,
-  checkBands,
   checkLayouts,
   type DescribeAnnotation,
   groups,
   headerGuides,
+  instanceIn,
   type LayoutConfig,
   lowestWithAxes,
   onAxis,
@@ -237,6 +237,54 @@ export class Panels implements PanelLayout {
     return changed ? out : undefined;
   }
 
+  /**
+   * The interaction settings of panel `key`: its own (`PanelSpec.interaction`)
+   * over the chart's, `chart` (see `panelInteraction`); the chart's for a
+   * panel without its own.
+   */
+  interactionOf(chart: InteractionSpec | undefined, key: string): InteractionSpec | undefined {
+    return panelInteraction(chart, this.list.find(({ id }) => id === key)?.interaction);
+  }
+
+  /**
+   * What `panels` (as a visibility event gives them) says panels' legends
+   * hid and showed, as `setHiddenKeys` sets it: `was`, what they hide now,
+   * when it says the same. Throws for a panel the chart has not.
+   */
+  own(
+    panels: PanelVisibility,
+    was: Map<string, Map<string, boolean>>,
+  ): Map<string, Map<string, boolean>> {
+    const own = new Map<string, Map<string, boolean>>();
+    for (const [panel, { hidden, shown }] of Object.entries(panels)) {
+      if (!this.list.some(({ id }) => id === panel))
+        throw new ChartError({
+          code: "unknown-reference",
+          path: "panels",
+          panel,
+          message: `setHiddenKeys panels: no panel ${JSON.stringify(panel)}; name one of ${this.list.map(({ id }) => JSON.stringify(id)).join(", ")}`,
+        });
+      const set = new Map<string, boolean>();
+      for (const key of hidden) set.set(key, true);
+      for (const key of shown) set.set(key, false);
+      if (set.size) own.set(panel, set);
+    }
+    const same =
+      own.size === was.size &&
+      [...own].every(([panel, set]) => {
+        const before = was.get(panel);
+        return (
+          before?.size === set.size && [...set].every(([key, hide]) => before.get(key) === hide)
+        );
+      });
+    return same ? was : own;
+  }
+
+  /** The type subplot `key`'s own settings give its `axis`, if any. */
+  typeOf(key: string | undefined, axis: PanelAxis): AxisType | undefined {
+    return this.list.find(({ id }) => id === key)?.[axis]?.type;
+  }
+
   /** The `panels` of a visibility event: by panel, the keys its legend hid and showed there. */
   overrides(panels: ReadonlyMap<string, ReadonlyMap<string, boolean>>): {
     panels?: Record<string, { hidden: string[]; shown: string[] }>;
@@ -293,11 +341,15 @@ export class Panels implements PanelLayout {
     return "change the layout";
   }
 
+  instanceOf(...args: Parameters<typeof instanceIn>): string | undefined {
+    return instanceIn(...args);
+  }
+
   /**
    * Rejects marks that name no panel or an unknown one, marks sharing a
    * panel with a layout mark, which has it to itself (a map's layers are
-   * one mark), and what panels with axes of their own cannot do yet:
-   * zooming or brushing along y. Returns the layout marks drawn.
+   * one mark), and panels sharing a scale but setting it up, or limiting
+   * its views, otherwise. Returns the layout marks drawn.
    */
   check(
     marks: readonly Mark[],
@@ -344,15 +396,27 @@ export class Panels implements PanelLayout {
         held.size < this.list.length,
         given[0]!.spec.type,
       );
+    // A subplot's own settings, by what it draws.
+    for (const [i, { id, interaction }] of this.list.entries()) {
+      const mark = layouts.find(({ spec }) => spec.panel === id);
+      if (mark && interaction)
+        mark.views.interactions(
+          [mark],
+          { interaction },
+          false,
+          mark.spec.type,
+          `${this.path(i)}.interaction`,
+        );
+    }
     for (const [i, { id, x, y, yRight }] of this.list.entries())
       if (held.has(id) && (x || y || yRight))
         throw new Error(
-          `panels[${i}]: the ${held.get(id)} mark it draws has no axes; drop its x, y, and yRight`,
+          `${this.path(i)}: the ${held.get(id)} mark it draws has no axes; drop its x, y, and yRight`,
         );
     for (const [i, panel] of this.list.entries())
       if (panel.camera && !layouts.some((mark) => mark.spec.panel === panel.id && mark.camera))
         throw new Error(
-          `panels[${i}].camera: panel "${panel.id}" has no 3D marks; drop camera or add a 3D mark`,
+          `${this.path(i)}.camera: panel "${panel.id}" has no 3D marks; drop camera or add a 3D mark`,
         );
     const [first] = held;
     for (const mark of marks) {
@@ -369,18 +433,16 @@ export class Panels implements PanelLayout {
           `${type} panel: a ${held.get(panel)} mark has panel "${panel}" to itself; name another`,
         );
     }
-    // Panels with axes zoom, pan, and brush along x; maps and networks with panels to themselves, their plane.
-    const along = held.size < this.list.length && alongY(options.interaction, true);
-    if (along)
-      throw new Error(
-        `chart interaction.${along[0]}: charts with panels zoom, pan, and brush along x only; use "x"`,
-      );
     const scopes = this.scopes(options);
-    this.#agree("x", marks, scopes.x, options.x, held);
-    this.#agree("y", marks, scopes.y, options.y, held);
-    this.#agree("yRight", marks, scopes.yRight, options.yRight, held);
-    checkBands(marks, options, scopes);
+    this.#agree("x", marks, scopes.x, options, held);
+    this.#agree("y", marks, scopes.y, options, held);
+    this.#agree("yRight", marks, scopes.yRight, options, held);
     return layouts;
+  }
+
+  /** How messages name panel `i` of `list`: by where the configuration lists it. */
+  path(i: number): string {
+    return `panels[${this.declared.indexOf(this.list[i]!)}]`;
   }
 
   /** Panels draw their marks whole. */
@@ -391,23 +453,27 @@ export class Panels implements PanelLayout {
   /**
    * Panels sharing a scale must agree on how it is set up: as the chart's
    * settings with their own, and for y with the type their marks on that
-   * side give. An x scale takes the chart's type unless they set one.
-   * Titles, `show`, and grid lines are each panel's own. Panels a layout
-   * mark has (`held`) have no axes, and panels without marks on the right
-   * axis none there, and so nothing to agree on.
+   * side give. An x scale takes the chart's type unless they set one. They
+   * share its views, and so must agree on its limits too. Titles, `show`,
+   * and grid lines are each panel's own. Panels a layout mark has (`held`)
+   * have no axes, and panels without marks on the right axis none there,
+   * and so nothing to agree on.
    */
   #agree(
     axis: PanelAxis,
     marks: readonly Mark[],
     scope: ScaleScope,
-    chart: AxisOptions | undefined,
+    options: LayoutConfig,
     held: ReadonlyMap<string, string>,
   ): void {
     if (scope === "panel") return;
+    const chart = options[axis];
     const groupOf = this.groupsOf(scope, axis);
     const first = new Map<number, string>();
+    const bounds = new Map<number, [limits: string, at: number]>();
     const x = axis === "x";
-    this.list.forEach(({ id }, i) => {
+    const name = x ? "an x" : axis === "y" ? "a y" : "a right y";
+    this.list.forEach(({ id, interaction }, i) => {
       if (held.has(id)) return;
       const spec = this.panelAxis(axis, i, chart);
       const inPanel = marks.filter(({ spec }) => spec.panel === id || spec.panel === EVERY_PANEL);
@@ -425,8 +491,20 @@ export class Panels implements PanelLayout {
       if (seen === undefined) first.set(groupOf[i]!, policy);
       else if (seen !== policy)
         throw new Error(
-          `panels[${i}].${axis}: shares ${x ? "an x" : axis === "y" ? "a y" : "a right y"} scale with others but differs in type, domain, zero, nice, ticks, format, or tooltipFormat; match them`,
+          `${this.path(i)}.${axis}: shares ${name} scale with others but differs in type, domain, zero, nice, ticks, format, or tooltipFormat; match them`,
         );
+      const limits = JSON.stringify(
+        panelInteraction(options.interaction, interaction)?.limits?.[axis] ?? null,
+      );
+      const bounded = bounds.get(groupOf[i]!);
+      if (!bounded) bounds.set(groupOf[i]!, [limits, i]);
+      else if (bounded[0] !== limits) {
+        // Named at the panel that limits it otherwise: this one, or the first.
+        const at = interaction?.limits && axis in interaction.limits ? i : bounded[1];
+        throw new Error(
+          `${this.path(at)}.interaction.limits.${axis}: shares ${name} scale with others but limits its views otherwise; give the panels sharing it the same limits`,
+        );
+      }
     });
   }
 

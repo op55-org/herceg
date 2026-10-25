@@ -214,9 +214,12 @@ export type HeatmapOptions<S extends Schema> = HeatmapCommon<S> &
 
 /**
  * Why a heatmap spec has neither or both of its forms (`x` and `y`, or a
- * `date` laid out as a calendar), if it does.
+ * `date` laid out as a calendar), or asks for the right axis (which specs
+ * written by hand may), if it does.
  */
 export function heatmapFormError(spec: Record<string, unknown>): string | undefined {
+  if (spec.axis === "right")
+    return "heatmap axis: heatmaps draw on the left y axis only; drop axis";
   if (spec.date === undefined) {
     for (const axis of ["x", "y"] as const) {
       const [one, low, high] = [spec[axis], spec[`${axis}1`], spec[`${axis}2`]];

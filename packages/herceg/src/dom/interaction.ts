@@ -11,15 +11,21 @@ import type { AxisFormat } from "../marks/mark.ts";
 import type { lowerPosition, placeAt, rowOf, Series, samePositions, xAt } from "../marks/series.ts";
 import type { AxisPlan } from "../model/axis.ts";
 import { type Binding, Bindings } from "../model/bindings.ts";
-import { cursorAxis, inspectPosition, keyboardStops, stepCell } from "../model/keyboard.ts";
-import type { ChartModel, DrawnPanel, Inspection, YViewport } from "../model/model.ts";
+import {
+  cursorAxis,
+  inspectPosition,
+  keyboardStops,
+  stepCell,
+  stepPoint,
+} from "../model/keyboard.ts";
+import type { ChartModel, DrawnPanel, Inspection, Viewport } from "../model/model.ts";
 import type { RowLink } from "../model/row-selection.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
 import { inspectSnapped } from "../model/snap.ts";
 import { padded, unpadded } from "../model/view-padding.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { PlotRect, Scene, tickLabelGap } from "../scene/scene.ts";
-import type { CursorShowSpec, CursorSnap, ZoomSpec } from "../spec/spec.ts";
+import type { BrushSpec, CursorShowSpec, CursorSnap, ZoomSpec } from "../spec/spec.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
@@ -87,8 +93,8 @@ export interface InteractionHost {
   /** Ends a change of view or values playing and draws where it was going. */
   settle(): void;
   animated(change: () => void): void;
-  /** One change of view, reported once; with `shareX`, shared with synced charts. */
-  changeView(change: () => void, shareX: boolean, cause: ViewCause): void;
+  /** One change of view, made in `panel` (by default, in none), reported once and shared with synced charts. */
+  changeView(change: () => void, cause: ViewCause, panel?: string): void;
   /** Sets the selection in panel `at`, as one of the chart's own, sharing it with synced charts. */
   select(selection: Selection | null, at?: DrawnPanel): void;
   selection(): Selection | null;
@@ -98,8 +104,11 @@ export interface InteractionHost {
   brush(): Brush | undefined;
   /** The scale the chart's cursor channel carries, when it syncs its cursor. */
   cursorScale(): "x" | "y" | "xy" | undefined;
-  /** Shares the value under the pointer (a category by name) with synced charts; null for none. */
-  shareCursor(value: number | string | null): void;
+  /**
+   * Shares the value under the pointer in `panel` (a category by name)
+   * with synced charts; null for none.
+   */
+  shareCursor(value: number | string | null, panel?: DrawnPanel): void;
   /** The cursor a synced chart shares or `showCursor` shows, or null. */
   cursor(): ShownCursor | null;
   /** What last changed the view or what bounds it. */
@@ -113,6 +122,12 @@ export interface InteractionHost {
 export interface ShownCursor {
   at: CursorPosition;
   shown?: CursorShowSpec;
+  /**
+   * Its sync channel's panel: it shows on the panels sharing that panel's
+   * instance of its axis, as drawn now (none while that panel is not);
+   * by default, on every panel.
+   */
+  panel?: string | undefined;
 }
 
 /** Where the keyboard cursor is: a panel, a series, and a position in the series' part in the panel. */
@@ -141,15 +156,16 @@ interface Press {
   last?: View;
 }
 
-/** The view of a panel's x scale and the y axes', as a press saw it. */
-type View = readonly [x: readonly [number, number] | null, y: YViewport];
+/** What a panel showed along each axis, as a press or a frame saw it. */
+type View = Viewport;
 
 /** A two-finger pinch: the fingers' distance and middle when last moved, and the panel and axes it zooms. */
 interface Pinch {
   distance: number;
   middle: { x: number; y: number };
   panel: DrawnPanel;
-  axes: ZoomSpec | undefined;
+  /** The zoom its binding does. */
+  action: Binding["action"] & { type: "zoom" };
 }
 
 /**
@@ -182,11 +198,31 @@ function inverter(
   return (pixel) => scale.invert(p0 + ((pixel - r0) * (p1 - p0)) / (r1 - r0));
 }
 
-/** The bindings of a chart's options, compiled; throws for those it refuses. */
-function bindingsOf({ interaction, rowSelection }: ChartOptions): Bindings {
+/**
+ * The bindings of a chart's options, compiled, and those of subplots with
+ * settings of their own, by id; throws for those it refuses.
+ */
+function bindingsOf({ interaction, rowSelection, panels }: ChartOptions): Compiled {
   const brushesRows = rowSelection?.bindings.some(({ events }) => events.includes("brush"));
-  return new Bindings(interaction, brushesRows);
+  const own = new Map<string, Bindings>();
+  for (const [i, { id, interaction: settings }] of (panels?.declared ?? []).entries())
+    if (settings)
+      own.set(
+        id,
+        new Bindings(
+          panels!.interactionOf(interaction, id),
+          brushesRows,
+          `panels[${i}].interaction`,
+        ),
+      );
+  return [new Bindings(interaction, brushesRows), own];
 }
+
+type Compiled = [chart: Bindings, own: ReadonlyMap<string, Bindings>];
+
+/** The scales a brush of `shape` has ranges on: a rectangle's and a lasso's, both. */
+const shapeScales = (shape: BrushSpec): readonly ("x" | "y")[] =>
+  shape === "x" ? ["x"] : shape === "y" ? ["y"] : ["x", "y"];
 
 /** What the controller acts on along axes; layout marks' controls take the rest. */
 const OWN = ({ type }: Binding["action"]) => type !== "orbit" && type !== "moveItem";
@@ -196,11 +232,13 @@ export class Interaction {
   readonly #kit: InteractionKit;
   /** The gestures the chart's `interaction` binds. */
   #bindings: Bindings;
+  /** Those subplots with settings of their own bind, by id (see `#bindingsIn`). */
+  #own: ReadonlyMap<string, Bindings> = new Map();
   readonly #tooltip: Tooltip;
   /** Tooltips of other panels showing the cursor (`sync.panels.tooltip`), made as needed. */
   readonly #tips: Tooltip[] = [];
   /** What the keyboard's cursor shared with the cursor channel and the charts there show, or null. */
-  #keyShared: number | string | null = null;
+  #keyShared: string | null = null;
   /** A crosshair per panel shown; the first stays, hidden, when none is. */
   readonly #crosshairs: SVGLineElement[];
   /** Clip paths keeping a panel's crosshair off the insets over it, by panel key; and how many were made. */
@@ -246,7 +284,8 @@ export class Interaction {
     this.#host = host;
     this.#kit = kit;
     // Bindings it refuses throw before anything is installed.
-    this.#bindings = bindingsOf(host.options());
+    const compiled = bindingsOf(host.options());
+    [this.#bindings] = compiled;
     const { svgElement } = kit;
     const document = host.root.ownerDocument;
     this.#tooltip = new Tooltip(document);
@@ -263,7 +302,7 @@ export class Interaction {
     });
     host.overlay.append(...this.#crosshairs, this.#dots, this.#outline);
     this.#listen();
-    this.configure(this.#bindings);
+    this.configure(compiled);
   }
 
   /** Whether the pointer or keyboard is on the chart, or a press is in progress. */
@@ -275,9 +314,38 @@ export class Interaction {
     return this.#keyboard;
   }
 
-  /** The x scale of the panel a press drags in, while it does. */
-  get dragged(): string | undefined {
-    return this.#press?.panel.xGroup;
+  /** The panels a brush being dragged would select in: those drawing its instances. */
+  get dragged(): readonly string[] | undefined {
+    const press = this.#press;
+    if (press?.mode !== "brush") return undefined;
+    // The panels drawing its instances: y is the right one's in a panel without a left.
+    const scales = shapeScales(this.#shape(press)).map((scale) =>
+      scale === "y" && !press.panel.drawsY ? "yRight" : scale,
+    );
+    return this.#host.model
+      .panels()
+      .filter((panel) =>
+        scales.every(
+          (scale) =>
+            panel[`${scale}Group`] === press.panel[`${scale}Group`] &&
+            (scale === "x" || (scale === "y" ? panel.drawsY : panel.yRight)),
+        ),
+      )
+      .map(({ key }) => key);
+  }
+
+  /** The shape a press brushes: its binding's, else its panel's `interaction.brush`. */
+  #shape({ action, panel }: Press): BrushSpec {
+    const shape = action?.type === "brush" ? action.shape : undefined;
+    return shape ?? this.#host.model.interactionOf(panel.key)?.brush ?? "x";
+  }
+
+  /**
+   * The bindings of `panel`: a subplot's own settings' (`PanelSpec.interaction`),
+   * else the chart's.
+   */
+  #bindingsIn(panel: DrawnPanel | undefined): Bindings {
+    return (panel && this.#own.get(panel.key)) ?? this.#bindings;
   }
 
   /** Pending while the crosshair labels or the tooltip's content load. */
@@ -295,10 +363,20 @@ export class Interaction {
    * changing anything, for bindings it refuses (a gesture bound twice, a key
    * the cursor takes).
    */
-  configure(bindings = bindingsOf(this.#host.options())): void {
+  configure([bindings, own]: Compiled = bindingsOf(this.#host.options())): void {
     const host = this.#host;
     const options = host.options();
     this.#bindings = bindings;
+    this.#own = own;
+    // A drag or a pinch its panel's settings no longer bind ends.
+    const bound = (panel: DrawnPanel, action: Binding["action"]) =>
+      this.#bindingsIn(panel).list.some(
+        (binding) => JSON.stringify(binding.action) === JSON.stringify(action),
+      );
+    const press = this.#press;
+    if (press?.action && !bound(press.panel, press.action)) this.#cancelPress();
+    const pinch = this.#pinch;
+    if (pinch && !bound(pinch.panel, pinch.action)) this.#pinch = null;
     host.root.style.touchAction = this.#touchPolicy();
     // Labels that failed to load are tried again.
     if (this.#crosshair === null) this.#crosshair = undefined;
@@ -364,36 +442,47 @@ export class Interaction {
     // Hover listeners get the inspection even without the built-in tooltip,
     // which is how applications draw their own.
     const hovering = host.events.has("hover");
-    const active = showTooltip || hovering ? this.#inspection() : undefined;
+    const inspects = showTooltip || hovering;
+    const active = inspects ? this.#inspection() : undefined;
     this.#shareKeyboard(active);
+    // Over a plot where it reads nothing, the pointer's cursor is a line alone.
+    const bare = inspects && !active ? this.#sharing() : undefined;
+    const own = active ?? bare;
     // The cursor shows in the chart's other panels too (`sync.panels`). A
     // cursor another chart shares, or `showCursor` shows, shows in every
     // panel, with one tooltip when it asks for it.
-    const across = this.#across(active);
-    const shown = active ? [active, ...across] : this.#synced();
+    const across = this.#across(own);
+    const shown = own ? [own, ...across] : this.#synced();
     const sync = options.interaction?.sync;
     const acrossTips =
       typeof sync === "object" && typeof sync.panels === "object" && sync.panels.tooltip;
+    const reads = ({ points }: Inspection) => points.length > 0;
     const tips = new Set<Inspection>(
       showTooltip
-        ? active
-          ? [active, ...(acrossTips ? across : [])]
+        ? own
+          ? [active, ...(acrossTips ? across : [])].filter(
+              (tip): tip is Inspection => !!tip && reads(tip),
+            )
           : this.#showing(host.cursor()).tooltip
-            ? shown.filter(({ points }) => points.length > 0).slice(0, 1)
+            ? shown.filter(reads).slice(0, 1)
             : []
         : [],
     );
     if (hovering) {
-      const key = inspectionKey(shown[0]);
+      // A cursor crossing a plot where no point is reads nothing, and the
+      // pointer's reads only what is under it.
+      const read = own ? active : shown.find(reads);
+      const key = inspectionKey(read);
       if (key !== this.#hovered) {
         this.#hovered = key;
-        host.events.emit("hover", { inspection: shown[0] });
+        host.events.emit("hover", { inspection: read });
       }
     }
     const { svgElement, tickLabelGap, surface } = this.#kit;
     const document = host.root.ownerDocument;
     const lines = this.#crosshairs;
-    const drawn = showTooltip || !active ? shown : [];
+    // Without the tooltip, the pointer's cursor is the application's to draw.
+    const drawn = showTooltip || !own ? shown : [];
     while (lines.length < drawn.length) {
       const line = svgElement(document, "line", { "stroke-width": "1" });
       this.#dots.before(line);
@@ -475,7 +564,7 @@ export class Interaction {
     const crosshair = this.#crosshair;
     if (crosshair && typeof tooltip === "object" && tooltip.axisLabels) {
       // The pointer's or keyboard's cursor labels its own panel's axes alone.
-      crosshair.draw(active ? [active] : drawn, active, this.#pointer, {
+      crosshair.draw(own ? [own] : drawn, own, this.#pointer, {
         model: host.model,
         scene,
         labelGap: tickLabelGap(theme.fontSize),
@@ -520,9 +609,11 @@ export class Interaction {
           ? (scale.categories[active.value] ?? null)
           : active.value
         : null;
-    if (value === this.#keyShared) return;
-    this.#keyShared = value;
-    host.shareCursor(value);
+    // In another panel, the same value may be another instance's.
+    const shared = value === null ? null : JSON.stringify([value, panel?.key]);
+    if (shared === this.#keyShared) return;
+    this.#keyShared = shared;
+    host.shareCursor(value, panel);
   }
 
   /**
@@ -533,33 +624,36 @@ export class Interaction {
     const kinds = new Set(this.#host.model.items?.asked().map(({ kind }) => kind));
     const plane = kinds.has("map") || kinds.has("drag");
     const touch = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
-    // Pans and brushes take axes or a map's or network's plane; orbits a 3D chart.
+    // Pans and brushes take axes or a map's or network's plane; orbits a 3D
+    // chart. Subplots with bindings of their own take what any panel takes.
     const axes = this.#host.model.panels().length > 0;
-    const action = this.#bindings.match(
-      "drag",
-      { ...touch, button: 0, pointerType: "touch" },
-      (a) =>
+    let along = "";
+    let pinch: string | undefined;
+    for (const bindings of [this.#bindings, ...this.#own.values()]) {
+      const action = bindings.match("drag", { ...touch, button: 0, pointerType: "touch" }, (a) =>
         a.type === "orbit"
           ? kinds.has("orbit")
           : a.type === "moveItem"
             ? kinds.has("drag")
             : a.type === "pageScroll" || axes || plane,
-    )?.action;
-    const along =
-      action?.type === "pan"
-        ? (action.axes ?? (plane ? "xy" : "x"))
-        : action?.type === "brush"
-          ? action.shape === "lasso"
-            ? "xy"
-            : (action.shape ?? "x")
-          : action?.type === "orbit" || action?.type === "cursor"
-            ? "x"
-            : action?.type === "moveItem"
+      )?.action;
+      along +=
+        action?.type === "pan"
+          ? (action.axes ?? (plane ? "xy" : "x"))
+          : action?.type === "brush"
+            ? action.shape === "lasso"
               ? "xy"
-              : "";
-    // Pinches zoom along axes. Charts that drag both ways (maps, networks)
-    // take them too, doing nothing, unless a binding leaves them to the page.
-    const pinch = this.#bindings.match("pinch", touch)?.action.type;
+              : (action.shape ?? "x")
+            : action?.type === "orbit" || action?.type === "cursor"
+              ? "x"
+              : action?.type === "moveItem"
+                ? "xy"
+                : "";
+      // Pinches zoom along axes. Charts that drag both ways (maps, networks)
+      // take them too, doing nothing, unless a binding leaves them to the page.
+      const type = bindings.match("pinch", touch)?.action.type;
+      if (pinch !== "zoom") pinch = type ?? pinch;
+    }
     const pinches = axes && pinch === "zoom";
     const [x, y] = [along.includes("x"), along.includes("y")];
     return x && y
@@ -581,69 +675,55 @@ export class Interaction {
    * farther away than the threshold and hysteresis again.
    */
   #reportEdges(): void {
-    const limits = this.#host.options().interaction?.limits;
-    const edges = this.#edges;
-    if (!limits) {
-      edges.clear();
-      return;
-    }
     const { model, events } = this.#host;
+    const edges = this.#edges;
     const panels = model.panels();
     const seen = new Set<string>();
-    for (const name of ["x", "y", "yRight"] as const) {
-      const { edge, extent } = limits[name] ?? {};
-      if (!edge) continue;
+    for (const instance of model.instances.values()) {
+      const { scale: name, instance: group, type } = instance;
+      const { edge, extent } = model.limitsOf(name, group) ?? {};
+      if (!edge || type === "band") continue;
       const { threshold = 0.1, hysteresis = 0.05 } = edge === true ? {} : edge;
-      const groupOf = (panel: DrawnPanel) => panel[`${name}Group`];
-      for (const panel of panels) {
-        const scale = panel[name];
-        const group = groupOf(panel);
-        if (!scale || scale.type === "band" || panels.find((p) => groupOf(p) === group) !== panel)
+      const panel = panels.find(({ key }) => key === instance.panels[0]);
+      const scale = panel?.[name];
+      if (!scale) continue;
+      // A view fitted to the data is at the data's ends: only the extent
+      // bounds it then. The data bounds a zoomed x scale every panel shares.
+      const zoomed = name === "x" && group === "" && model.viewOf("x", "");
+      const data = zoomed ? model.dataXExtent() : undefined;
+      // The view shown, without the padding drawn around it.
+      const [a, b] = unpadded(panel.plans[name], scale.domain as [number, number]);
+      const domain = [Math.min(a, b), Math.max(a, b)] as const;
+      // Log axes measure by ratios, where ends that are not positive bound nothing (as limits do).
+      const to = scale.type === "log" ? Math.log : Number;
+      const span = to(domain[1]) - to(domain[0]);
+      for (const end of [0, 1] as const) {
+        const bound = extent?.[end] ?? data?.[end];
+        const distance =
+          bound == null ? Number.NaN : end ? to(bound) - to(domain[1]) : to(domain[0]) - to(bound);
+        if (!Number.isFinite(distance)) continue;
+        const key = `${name} ${group} ${end}`;
+        seen.add(key);
+        // Near the same bound, the view reports again once it has moved away.
+        // A listener's own frame may have reported it already: the latch is shared.
+        if (edges.get(key) === bound) {
+          if (distance > (threshold + hysteresis) * span) edges.delete(key);
           continue;
-        // A view fitted to the data is at the data's ends: only the extent bounds it then.
-        // The data bounds a zoomed x scale every panel shares (not an inset's own).
-        const zoomed = name === "x" && model.sharesX && !group && model.viewportOf(panel.key);
-        const data = zoomed ? model.dataXExtent() : undefined;
-        // The view shown, without the padding drawn around it.
-        const [a, b] = unpadded(panel.plans[name], scale.domain as [number, number]);
-        const domain = [Math.min(a, b), Math.max(a, b)] as const;
-        // Log axes measure by ratios, where ends that are not positive bound nothing (as limits do).
-        const to = scale.type === "log" ? Math.log : Number;
-        const span = to(domain[1]) - to(domain[0]);
-        for (const end of [0, 1] as const) {
-          const bound = extent?.[end] ?? data?.[end];
-          const distance =
-            bound == null
-              ? Number.NaN
-              : end
-                ? to(bound) - to(domain[1])
-                : to(domain[0]) - to(bound);
-          if (!Number.isFinite(distance)) continue;
-          const key = `${name} ${group} ${end}`;
-          seen.add(key);
-          // Near the same bound, the view reports again once it has moved away.
-          // A listener's own frame may have reported it already: the latch is shared.
-          if (edges.get(key) === bound) {
-            if (distance > (threshold + hysteresis) * span) edges.delete(key);
-            continue;
-          }
-          edges.delete(key);
-          if (distance > threshold * span) continue;
-          // Latched before listeners run, which may load and draw at once.
-          edges.set(key, bound!);
-          const keys = panels.filter((p) => groupOf(p) === group).map(({ key }) => key);
-          events.emit("edge", {
-            scale: name,
-            side: end ? "end" : "start",
-            domain,
-            bound: bound!,
-            ...(group && { panels: keys }),
-            cause: this.#host.cause(),
-          });
         }
+        edges.delete(key);
+        if (distance > threshold * span) continue;
+        // Latched before listeners run, which may load and draw at once.
+        edges.set(key, bound!);
+        events.emit("edge", {
+          ...instance,
+          side: end ? "end" : "start",
+          domain,
+          bound: bound!,
+          cause: this.#host.cause(),
+        });
       }
     }
-    // Ends no longer limited, or of scales no longer drawn, are let go.
+    // Ends no longer limited, or of instances no longer drawn, are let go.
     for (const key of edges.keys()) if (!seen.has(key)) edges.delete(key);
   }
 
@@ -665,17 +745,39 @@ export class Interaction {
   }
 
   /**
-   * Each panel's points at the cursor another chart shares or `showCursor`
-   * shows: along the axis the chart's data is placed on, at a value on it
-   * (a category by name on category axes).
+   * The pointer's cursor over a panel where it reads nothing, when other
+   * charts or the chart's other panels show it: a line alone at its value
+   * along the axis the chart's data is placed on.
+   */
+  #sharing(): Inspection | undefined {
+    const pointer = this.#pointer;
+    const axis = this.#cursorAxis();
+    const panel = pointer && this.#panelAt(pointer.x, pointer.y);
+    const value = panel ? this.#valueAt(panel, axis, pointer.x, pointer.y) : null;
+    if (!panel || value === null) return undefined;
+    const [line] = this.#cursorAt(value, axis, "nearest", [panel], true);
+    return line && (this.#host.cursorScale() === axis || this.#across(line).length > 0)
+      ? line
+      : undefined;
+  }
+
+  /**
+   * Each panel's cursor that another chart shares or `showCursor` shows,
+   * along the axis the chart's data is placed on, at a value on it (a
+   * category by name on category axes): the points there, or a line alone
+   * where no point is.
    */
   #synced(): Inspection[] {
     const { model } = this.#host;
     const cursor = this.#host.cursor();
     const axis = this.#cursorAxis();
-    if (!cursor || !(axis in cursor.at) || model.series().length === 0) return [];
+    if (!cursor || !(axis in cursor.at)) return [];
     const value = (cursor.at as Record<string, number | string>)[axis]!;
-    return this.#cursorAt(value, axis, this.#showing(cursor).snap ?? "nearest", model.panels());
+    const group = `${axis}Group` as const;
+    const all = model.panels();
+    const of = all.find(({ key }) => key === cursor.panel)?.[group];
+    const panels = all.filter((panel) => cursor.panel === undefined || panel[group] === of);
+    return this.#cursorAt(value, axis, this.#showing(cursor).snap ?? "nearest", panels, true);
   }
 
   /** How a cursor the chart did not make shows: as `showCursor` said, else as its cursor channel says. */
@@ -696,8 +798,10 @@ export class Interaction {
     axis: "x" | "y",
     snap: CursorSnap,
     panels: readonly DrawnPanel[],
+    bare = false,
   ): Inspection[] {
     const { model } = this.#host;
+    const reads = model.series().length > 0;
     return panels.flatMap((panel) => {
       const scale = panel[axis];
       const { plot } = panel;
@@ -710,36 +814,46 @@ export class Interaction {
       // Outside a panel's range, the pixel would land in a neighboring panel.
       const [from, length] = axis === "x" ? [plot.x, plot.width] : [plot.y, plot.height];
       if (!(px >= from && px <= from + length)) return [];
-      const inspection =
-        (snap === "previous" || snap === "next") && axis === "x" && !scale.categories
+      const inspection = !reads
+        ? undefined
+        : (snap === "previous" || snap === "next") && axis === "x" && !scale.categories
           ? inspectSnapped(model, panel.key, at, snap, this.#kit)
           : axis === "x"
             ? model.inspect(px, plot.y + plot.height / 2, "nearest-x", panel.key)
             : model.inspect(plot.x + plot.width / 2, px, "nearest-y", panel.key);
-      return inspection ? [inspection] : [];
+      if (inspection) return [inspection];
+      // A cursor shown, with no point under it, crosses the plot alone.
+      const label = named ? value : model.formatsOf(undefined, panel.key)[axis](at);
+      const line: Inspection = { axis, value: at, position: px, label, points: [] };
+      return bare ? [panel.key ? { ...line, panel: panel.key } : line] : [];
     });
   }
 
   /**
    * The cursor in the other panels of the chart, where `active` (the
    * pointer's or keyboard's) is in one (`interaction.sync.panels`): at its
-   * x in those sharing its x scale, by default, and with `panels` on in
-   * those with x scales of their own too, read on each one's scale.
+   * value in those sharing the scale it is on, by default, and with
+   * `panels` on in those with scales of their own too, read on each one's,
+   * or a line alone where nothing is.
    */
   #across(active: Inspection | undefined): Inspection[] {
     const option = this.#host.options().interaction?.sync;
     const panels = typeof option === "object" ? option.panels : undefined;
-    if (active?.axis !== "x" || panels === false) return [];
+    const axis = active?.axis;
+    if (!axis || axis === "item" || panels === false) return [];
     const all = this.#host.model.panels();
     const from = all.find(({ key }) => key === (active.panel ?? ""));
     if (!from || all.length < 2) return [];
     const show: CursorShowSpec = typeof panels === "object" ? panels : {};
+    const group = `${axis}Group` as const;
     const others = all.filter(
-      (panel) => panel !== from && (panels !== undefined || panel.xGroup === from.xGroup),
+      (panel) => panel !== from && (panels !== undefined || panel[group] === from[group]),
     );
-    const { categories } = from.x;
+    const { categories } = from[axis];
     const value = categories ? categories[active.value] : active.value;
-    return value === undefined ? [] : this.#cursorAt(value, "x", show.snap ?? "nearest", others);
+    return value === undefined
+      ? []
+      : this.#cursorAt(value, axis, show.snap ?? "nearest", others, true);
   }
 
   /** The axis the chart's data is placed along, which its cursor follows (see `cursorAxis`). */
@@ -822,9 +936,7 @@ export class Interaction {
         const brush = host.brush();
         if (press.moved && press.mode === "brush" && brush) {
           if (!brush.dragging) {
-            const { action } = press;
-            const shape = action?.type === "brush" ? action.shape : undefined;
-            brush.mode = shape ?? host.options().interaction?.brush ?? "x";
+            brush.mode = this.#shape(press);
             brush.start(press.x, press.y, press.panel);
           }
           brush.move(x, y);
@@ -836,7 +948,7 @@ export class Interaction {
       const axis = this.#cursorAxis();
       if (host.cursorScale() === axis) {
         const panel = this.#panelAt(x, y);
-        host.shareCursor(panel ? this.#valueAt(panel, axis, x, y) : null);
+        host.shareCursor(panel ? this.#valueAt(panel, axis, x, y) : null, panel);
         // The charts there show the pointer's now: the keyboard shares again where it is.
         this.#keyShared = null;
       }
@@ -857,13 +969,13 @@ export class Interaction {
         if (!host.scene()) return;
         const point = local(event);
         if (this.#onItems(point.x, point.y)) return;
-        // Outside the plots, the wheel acts on the one x scale every panel
-        // shares; with several, on none, and the page scrolls.
+        // Outside the plots, the wheel acts on the x scale every panel
+        // shares; without one, on none, and the page scrolls.
         const panel =
           this.#panelAt(point.x, point.y) ??
-          (host.model.sharesX ? host.model.chartPanel() : undefined);
+          host.model.panels().find(({ xGroup }) => xGroup === "");
         const focused = root.ownerDocument.activeElement === root;
-        const action = panel && this.#bindings.match("wheel", event, OWN, focused)?.action;
+        const action = panel && this.#bindingsIn(panel).match("wheel", event, OWN, focused)?.action;
         if (!action || (action.type !== "pan" && action.type !== "zoom")) return;
         event.preventDefault();
         // Steps faster than frames add up, each from the view the last asked for.
@@ -901,7 +1013,7 @@ export class Interaction {
       // Presses on the axes, titles, gaps, or legend are not on the data.
       const panel = this.#panelAt(x, y);
       if (!panel) return;
-      const action = this.#bindings.match("drag", event, OWN)?.action;
+      const action = this.#bindingsIn(panel).match("drag", event, OWN)?.action;
       const type = action?.type;
       const mode = type === "pan" || type === "brush" || type === "cursor" ? type : "click";
       // Other buttons click nothing.
@@ -986,14 +1098,14 @@ export class Interaction {
     on("lostpointercapture", (event) => {
       if (this.#press || this.#tap?.pointer === event.pointerId) cancel(event);
     });
-    // Double click resets: on a plot, its x scale; elsewhere, every one. The
+    // Double click resets: on a plot, its scales; elsewhere, every one. The
     // legend's buttons keep their clicks.
     on("dblclick", (event) => {
       if (host.legend.contains(event.target as Node)) return;
       const { x, y } = local(event);
       if (this.#onItems(x, y)) return;
       const panel = this.#panelAt(x, y);
-      const action = this.#bindings.match("doubleClick", event, OWN)?.action;
+      const action = this.#bindingsIn(panel).match("doubleClick", event, OWN)?.action;
       if (action?.type === "reset") this.#reset(panel);
       else if (action?.type === "zoom" && panel)
         this.#zoomAt(this.#shown(panel), { x, y }, 1 / (action.factor ?? 2), action.axes);
@@ -1028,11 +1140,10 @@ export class Interaction {
     const { panel } = shown;
     const { plot } = panel;
     const along = this.#axes(axes, panel);
-    // Along y first: a y range the chart refuses changes nothing.
     this.#change(() => {
       if (along.y) this.#zoomY(shown, plot.y + plot.height + dy, plot.y + dy, true);
       if (along.x) this.#zoomX(shown, plot.x + dx, plot.x + plot.width + dx);
-    }, along.x);
+    }, panel);
   }
 
   /**
@@ -1061,23 +1172,19 @@ export class Interaction {
       if (along.y)
         this.#zoomY(shown, edge(plot.y + plot.height, py, qy), edge(plot.y, py, qy), true);
       if (along.x) this.#zoomX(shown, edge(plot.x, px, qx), edge(plot.x + plot.width, px, qx));
-    }, along.x);
+    }, panel);
   }
 
-  /** Back to the configured view: of `panel`'s x scale, or of every one, and of the y axes. */
+  /** Back to the configured view: of `panel`'s scales, or of every one. */
   #reset(panel: DrawnPanel | undefined) {
-    const host = this.#host;
-    host.animated(() =>
-      this.#change(() => {
-        host.model.setViewport(null, panel?.key);
-        host.model.setYViewport({ y: null, yRight: null });
-      }, true),
-    );
+    const { model } = this.#host;
+    const changes = model.viewChanges(null, panel?.key);
+    this.#host.animated(() => this.#change(() => model.applyViews(changes), panel));
   }
 
-  /** One change of view, reported as caused by the input being handled. */
-  #change(change: () => void, shareX: boolean): void {
-    this.#host.changeView(change, shareX, this.#cause);
+  /** One change of view, made in `panel`, reported as caused by the input being handled. */
+  #change(change: () => void, panel: DrawnPanel | undefined): void {
+    this.#host.changeView(change, this.#cause, panel?.key);
   }
 
   /** A panel's pixels as values of the view drawn in it. */
@@ -1099,10 +1206,10 @@ export class Interaction {
   #shown(drawn: DrawnPanel): Shown {
     const host = this.#host;
     host.settle();
-    const [x, { y, yRight }] = this.#view(drawn);
-    const [wasX, was] = this.#framed.get(drawn.key) ?? [x, { y, yRight }];
+    const { x, y, yRight } = this.#view(drawn);
+    const was = this.#framed.get(drawn.key) ?? { x, y, yRight };
     // Options, data, or a size changed since may give the panel other scales.
-    if (host.stale() || (!x && wasX) || (!y && was.y) || (!yRight && was.yRight)) {
+    if (host.stale() || (!x && was.x) || (!y && was.y) || (!yRight && was.yRight)) {
       host.current();
       return this.#drawn(this.#find(drawn) ?? drawn);
     }
@@ -1119,31 +1226,42 @@ export class Interaction {
     };
   }
 
-  /** Which of `panel`'s axes an action along `axes` (x by default) moves: not category axes. */
+  /**
+   * Which of `panel`'s axes an action along `axes` (x by default) moves:
+   * not category axes, nor a y axis it draws nothing along.
+   */
   #axes(axes: ZoomSpec | undefined, panel: DrawnPanel): { x: boolean; y: boolean } {
     const along = axes ?? "x";
     return {
       x: along.includes("x") && panel.x.type !== "band",
-      y: along.includes("y") && panel.y.type !== "band",
+      y:
+        along.includes("y") &&
+        ((panel.drawsY && panel.y.type !== "band") ||
+          (panel.yRight !== undefined && panel.yRight.type !== "band")),
     };
   }
 
-  /**
-   * `panel` as it is drawn now, with what is pending (a wheel step, a key)
-   * drawn first, so that steps faster than frames add up; undefined if it
-   * went, or shares its scales otherwise now.
-   */
-  /** `panel` in the scene drawn last, if it is still there with its scales. */
+  /** `panel` in the scene drawn last, if it is still there with its scales' instances. */
   #find(panel: DrawnPanel): DrawnPanel | undefined {
     return this.#host.model
       .panels()
-      .find(({ key, xGroup }) => key === panel.key && xGroup === panel.xGroup);
+      .find(
+        (other) =>
+          other.key === panel.key &&
+          other.xGroup === panel.xGroup &&
+          other.yGroup === panel.yGroup &&
+          other.yRightGroup === panel.yRightGroup,
+      );
   }
 
-  /** What `panel` shows: its x scale's view and the y axes'. */
+  /** What `panel` shows along each axis: its instances' views. */
   #view(panel: DrawnPanel): View {
     const { model } = this.#host;
-    return [model.viewportOf(panel.key), model.yViewport];
+    return {
+      x: model.viewOf("x", panel.xGroup),
+      y: panel.drawsY ? model.viewOf("y", panel.yGroup) : null,
+      yRight: panel.yRight ? model.viewOf("yRight", panel.yRightGroup) : null,
+    };
   }
 
   /**
@@ -1151,7 +1269,7 @@ export class Interaction {
    * axes that zoom, in a chart whose brushes do not select rows.
    */
   #zoomable(selection: Selection, panel: DrawnPanel): boolean {
-    if (selection.lasso || !(selection.x || selection.y) || this.#host.rows()?.brushes)
+    if (selection.lasso || !(selection.x || selection.y) || this.#host.rows()?.brushes(panel.key))
       return false;
     return (!selection.x || panel.x.type !== "band") && (!selection.y || panel.y.type !== "band");
   }
@@ -1162,8 +1280,8 @@ export class Interaction {
    * range on, and it can be zoomed to.
    */
   #zooms(selection: Selection, panel: DrawnPanel): boolean {
-    const axes = this.#bindings.list
-      .map(({ action }) => (action.type === "zoom" ? (action.axes ?? "x") : ""))
+    const axes = this.#bindingsIn(panel)
+      .list.map(({ action }) => (action.type === "zoom" ? (action.axes ?? "x") : ""))
       .join("");
     return (
       (!selection.x || axes.includes("x")) &&
@@ -1174,16 +1292,16 @@ export class Interaction {
 
   /** Starts a pinch with a second touch, if a binding zooms with pinches. */
   #startPinch(event: PointerEvent): boolean {
-    const action = this.#bindings.match("pinch", event, OWN)?.action;
     const [a, b] = [...this.#touches.values()];
     const panel = this.#panelAt((a!.x + b!.x) / 2, (a!.y + b!.y) / 2);
+    const action = panel && this.#bindingsIn(panel).match("pinch", event, OWN)?.action;
     if (action?.type !== "zoom" || !panel) return false;
     this.#cancelPress();
     this.#pinch = {
       distance: Math.hypot(a!.x - b!.x, a!.y - b!.y),
       middle: { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 },
       panel,
-      axes: action.axes,
+      action,
     };
     return true;
   }
@@ -1200,7 +1318,13 @@ export class Interaction {
     if (!(distance > 0 && pinch.distance > 0)) return;
     const panel = this.#find(pinch.panel);
     if (!panel) return;
-    this.#zoomAt(this.#shown(panel), pinch.middle, pinch.distance / distance, pinch.axes, middle);
+    this.#zoomAt(
+      this.#shown(panel),
+      pinch.middle,
+      pinch.distance / distance,
+      pinch.action.axes,
+      middle,
+    );
     pinch.distance = distance;
     pinch.middle = middle;
   }
@@ -1216,14 +1340,15 @@ export class Interaction {
     this.#host.brush()?.cancel();
     this.#host.schedule();
     if (!back || !press?.last || !this.#still(press.panel)) return;
-    const [x, y] = this.#view(press.panel);
-    const [lastX, lastY] = press.last;
-    if (x !== lastX || y !== lastY) return;
-    const [fromX, fromY] = press.from;
+    const { panel, from, last } = press;
+    const now = this.#view(panel);
+    if (now.x !== last.x || now.y !== last.y || now.yRight !== last.yRight) return;
+    const { model } = this.#host;
     this.#change(() => {
-      this.#host.model.setViewport(fromX, press.panel.key);
-      this.#host.model.setYViewport(fromY);
-    }, true);
+      model.setView("x", panel.xGroup, from.x);
+      if (panel.drawsY) model.setView("y", panel.yGroup, from.y);
+      if (panel.yRight) model.setView("yRight", panel.yRightGroup, from.yRight);
+    }, panel);
   }
 
   /**
@@ -1231,9 +1356,7 @@ export class Interaction {
    * scales to share: what a drag that started in it may go on acting on.
    */
   #still(panel: DrawnPanel): boolean {
-    return this.#host.model
-      .panels()
-      .some(({ key, xGroup }) => key === panel.key && xGroup === panel.xGroup);
+    return this.#find(panel) !== undefined;
   }
 
   /** Zooms to a brushed selection. */
@@ -1243,8 +1366,8 @@ export class Interaction {
     host.animated(() =>
       this.#change(() => {
         if (y) this.#zoomY(this.#drawn(panel), panel.y.map(y[0]), panel.y.map(y[1]));
-        if (x) host.model.setViewport(x, panel.key);
-      }, x !== null),
+        if (x) host.model.setView("x", panel.xGroup, x);
+      }, panel),
     );
   }
 
@@ -1255,7 +1378,7 @@ export class Interaction {
   #zoomX(shown: Shown, left: number, right: number) {
     const { panel } = shown;
     const view = unpadded(panel.plans.x, [shown.x(left), shown.x(right)]);
-    this.#host.model.setViewport(view, panel.key);
+    this.#host.model.setView("x", panel.xGroup, view);
   }
 
   /**
@@ -1270,10 +1393,11 @@ export class Interaction {
       const values: [number, number] = [y(bottom), y(top)];
       return edges ? unpadded(plan, values) : values;
     };
-    this.#host.model.setYViewport({
-      y: view(plans.y, shown.y),
-      yRight: yRight ? view(plans.yRight, yRight) : null,
-    });
+    const { model } = this.#host;
+    if (panel.drawsY && panel.y.type !== "band")
+      model.setView("y", panel.yGroup, view(plans.y, shown.y));
+    if (yRight && panel.yRight!.type !== "band")
+      model.setView("yRight", panel.yRightGroup, view(plans.yRight, yRight));
   }
 
   /**
@@ -1325,7 +1449,8 @@ export class Interaction {
     const host = this.#host;
     const written = host.rows()?.clicked(point.x, point.y, event);
     // A click on an item standing for none of the bound rows keeps the brush too.
-    if (host.options().interaction?.brush && written !== null) host.select(null);
+    const panel = this.#panelAt(point.x, point.y);
+    if (host.model.interactionOf(panel?.key)?.brush && written !== null) host.select(null);
     if (host.events.has("click"))
       host.events.emit("click", { inspection: host.model.inspect(point.x, point.y), ...written });
   }
@@ -1358,21 +1483,19 @@ export class Interaction {
     host.current();
     const panels = model.panels();
     const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
-    const brush = host.options().interaction?.brush;
     // Enter and Escape act on the selection, whichever panel the cursor is in.
     if (event.key === "Enter") {
       const selection = host.selection();
-      const at = panels.find(({ xGroup }) => xGroup === host.owner()?.x);
+      const owner = host.owner();
+      const at = owner?.plane ? undefined : panels.find(({ key }) => owner?.panels.includes(key));
       if (!selection || !at || !this.#zooms(selection, at)) return;
       event.preventDefault();
       this.#brushAnchor = null;
       host.select(null);
-      // A select listener may have taken the panel away, or given it another
-      // scale: zoom only where the selection still is.
+      // A select listener may have taken the panel away, or given it other
+      // scales: zoom only where the selection still is.
       host.current();
-      const still = model
-        .panels()
-        .find(({ key, xGroup }) => key === at.key && xGroup === at.xGroup);
+      const still = this.#find(at);
       if (still) this.#zoomTo(selection, still);
       return;
     }
@@ -1430,7 +1553,8 @@ export class Interaction {
       across ||= next !== at;
       at = next;
     }
-    const { panel, series } = stops[at]!;
+    const { panel } = stops[at]!;
+    let { series } = stops[at]!;
     if (!series) {
       this.#itemKey(event, panel, true);
       return;
@@ -1442,7 +1566,6 @@ export class Interaction {
     const to = panels.find(({ key }) => key === panel);
     event.preventDefault();
     const before = keyboard ? (this.#inspection() ?? keyboard.last) : undefined;
-    const page = Math.max(1, Math.round(series.length / 10));
     // Up and Down carry the cursor's place along the axis it follows (x, or
     // y for marks along y) to the next stop: its value on a shared scale,
     // else its place across the plot.
@@ -1461,13 +1584,14 @@ export class Interaction {
         to![along],
         along,
       );
-    else if (event.key === "ArrowLeft") position -= 1;
-    else if (event.key === "ArrowRight") position = current < 0 ? 0 : current + 1;
-    else if (event.key === "PageUp") position -= page;
-    else if (event.key === "PageDown") position += page;
-    else if (event.key === "Home") position = 0;
-    else if (event.key === "End") position = series.length - 1;
-    position = Math.min(series.length - 1, Math.max(0, position));
+    else
+      ({ series, position } = stepPoint(
+        model.inspectorOf(panel)!,
+        series,
+        current,
+        event.key,
+        this.#kit,
+      ));
     // Reading series already exclude hidden points; other series step over
     // axis breaks in the direction of travel.
     const breaks = model.markOf(series)?.readSeries ? undefined : to?.x.breaks;
@@ -1501,8 +1625,9 @@ export class Interaction {
     // keyboard cannot draw. A range does not go on into a panel with
     // another scale along that axis.
     const axis = inspection.axis;
+    const brush = model.interactionOf(panel)?.brush;
     // Nor does it go on along another axis.
-    const crossed = from?.xGroup !== to?.xGroup;
+    const crossed = axis !== "item" && from?.[`${axis}Group`] !== to?.[`${axis}Group`];
     if (crossed || (this.#brushAnchor && this.#brushAnchor.axis !== axis)) this.#brushAnchor = null;
     if (
       event.shiftKey &&
@@ -1533,9 +1658,9 @@ export class Interaction {
    */
   #boundKey(event: KeyboardEvent): boolean {
     const host = this.#host;
-    const action = this.#bindings.match("key", event, OWN)?.action;
     const panels = host.model.panels();
     const at = panels.find(({ key }) => key === this.#keyboard?.panel) ?? panels[0];
+    const action = this.#bindingsIn(at).match("key", event, OWN)?.action;
     if (!action || !at) return false;
     event.preventDefault();
     const shown = this.#shown(at);

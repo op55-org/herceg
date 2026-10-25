@@ -13,7 +13,7 @@ import { columns, panel } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { histogram } from "../../src/marks/histogram.ts";
 import { line } from "../../src/marks/line.ts";
@@ -264,7 +264,7 @@ describe("brushes as conditions", () => {
 
   it("test spans for overlap", () => {
     const spans = table({ x: [1, 2, 3], low: [0, 10, 20], high: [30, 12, 25] });
-    const model = drawn({ marks: [errorBar(spans, { x: "x", y1: "low", y2: "high" })] });
+    const model = drawn({ marks: [errorbar(spans, { x: "x", y1: "low", y2: "high" })] });
     // The first span crosses the range with both ends outside it.
     expect(rowsOf(brushedRows(model, spans, yRange([14, 18]), null), spans)).toEqual([0]);
     const banded = drawn({ marks: [area(spans, { x: "x", y1: "low", y2: "high" })] });
@@ -341,7 +341,8 @@ describe("brushes as conditions", () => {
       facet: facet("host"),
       x: { scope: "panel" },
     });
-    const owner = { x: model.panels().find(({ key }) => key === "q")!.xGroup, panels: ["q"] };
+    const q = model.panels().find(({ key }) => key === "q")!;
+    const owner = { scales: [model.instance(`x ${q.xGroup}`)], panels: ["q"] };
     const selection = brushedRows(model, readings, xRange([0, 10]), owner);
     expect(rowsOf(selection, readings)).toEqual([1, 3]);
     // Panels sharing x: a brush covers every panel, without a condition on them.
@@ -451,10 +452,9 @@ describe("lassos and clicks as rows", () => {
     const clicked = (model: ChartModel) =>
       clickedRows(model, new Set([points]), ...at(model, 1, 1))?.rows;
     const brushed = (model: ChartModel) => {
-      const owner = {
-        x: model.panels().find(({ key }) => key === "left")!.xGroup,
-        panels: ["left"],
-      };
+      const left = model.panels().find(({ key }) => key === "left")!;
+      const scales = [model.instance(`x ${left.xGroup}`), model.instance(`y ${left.yGroup}`)];
+      const owner = { scales, panels: ["left"] };
       return rowsOf(
         brushedRows(model, points, { x: [0, 6], y: [0, 6], lasso: null }, owner),
         points,
@@ -782,7 +782,7 @@ describe("lassos and clicks as rows", () => {
     // A range with an end a log axis cannot place is not drawn: neither clicked nor reached by keys.
     const ranges = table({ x: [0, 1], low: [-1, 1], high: [3, 3] });
     const bars = drawn({
-      marks: [errorBar(ranges, { x: "x", y1: "low", y2: "high" })],
+      marks: [errorbar(ranges, { x: "x", y1: "low", y2: "high" })],
       y: { type: "log" },
     });
     const [bp] = bars.panels();

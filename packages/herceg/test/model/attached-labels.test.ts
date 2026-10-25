@@ -7,13 +7,14 @@ import { describe, expect, it } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
 import { table } from "../../src/data/table.ts";
-import { estimateText } from "../../src/layout/text.ts";
-import { columns, panel } from "../../src/layout.ts";
+import { estimateText, textLines } from "../../src/layout/text.ts";
+import { columns, inset, panel } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { text } from "../../src/marks/text.ts";
 import { describeChart } from "../../src/model/describe.ts";
+import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -42,6 +43,34 @@ const labelsOf = (scene: Scene, panelAt = 0): TextItem[] =>
   scene.panels[panelAt]!.marks.filter((g): g is LabelsGeometry => g.kind === "labels").flatMap(
     (g) => [...g.items],
   );
+
+/** Where a label is painted along x: its box and the box's outline, or its text and halo. */
+function extent(label: TextItem): [number, number] {
+  const { box, paint } = label;
+  if (box) {
+    const outline = paint.background?.stroke ? (paint.background.strokeWidth ?? 1) / 2 : 0;
+    return [box.x - outline, box.x + box.width + outline];
+  }
+  const { width } = textLines(label.text, paint, estimateText);
+  const reach = (label.halo?.width ?? 0) / 2;
+  const start =
+    label.x - width * (label.anchor === "end" ? 1 : label.anchor === "middle" ? 0.5 : 0);
+  return [start - reach, start + width + reach];
+}
+
+/** Each panel's labels, checked to be painted within its plot. */
+function within(scene: Scene): TextItem[][] {
+  return scene.panels.map(({ plot }, k) => {
+    const labels = labelsOf(scene, k);
+    for (const label of labels) {
+      const [from, to] = extent(label);
+      expect(from).toBeGreaterThanOrEqual(plot.x - 1e-9);
+      expect(to).toBeLessThanOrEqual(plot.x + plot.width + 1e-9);
+    }
+    return labels;
+  });
+}
+
 /** Labels' text, in the order of their series' keys (columns of labels go by height). */
 const texts = (scene: Scene) =>
   labelsOf(scene)
@@ -78,15 +107,23 @@ describe("labels following series", () => {
     expect([a!.paint.color, b!.paint.color]).toEqual(colors);
     expect(a!.anchor).toBe("start");
     const { plot } = scene.panels[0]!;
-    expect(a!.x).toBeGreaterThan(plot.x + plot.width);
+    // The lines end at the plot's right edge: their labels stand inside it, at that edge.
+    expect(extent(a!)[1]).toBeCloseTo(plot.x + plot.width, 6);
     // At their points' heights: "a" ends at 4, the top of the domain, above "b".
     expect(a!.y).toBeLessThan(b!.y);
-    // Before the first, set before it.
+    // Before the first, set before it, and inside the plot too, off the y axis' tick labels.
     const first = model({
       marks: [line(rows, { x: "t", y: "v", series: "g", labels: { at: "first" } })],
     }).scene(estimateText);
     expect(labelsOf(first).map(({ anchor }) => anchor)).toEqual(["end", "end"]);
-    expect(labelsOf(first)[0]!.x).toBeLessThan(plot.x);
+    expect(extent(labelsOf(first)[0]!)[0]).toBeCloseTo(plot.x, 6);
+    // A point inside the plot keeps its label beside it.
+    const inner = model({
+      x: { domain: [-1, 3] },
+      marks: [line(rows, { x: "t", y: "v", series: "g", labels: { at: "first" } })],
+    }).scene(estimateText);
+    const [start] = labelsOf(inner);
+    expect(start!.x).toBeCloseTo(inner.panels[0]!.plot.x + inner.panels[0]!.plot.width / 4 - 4, 6);
   });
 
   contractTest("labels.attach.not-drawn", () => {
@@ -131,7 +168,8 @@ describe("labels following series", () => {
     const [a] = labelsOf(scene);
     // The segment's end owns the point, and the value is the line's there.
     expect(a!.text).toBe("a3 3.5");
-    expect(a!.x).toBeCloseTo(plot.x + plot.width + 4, 6);
+    // It stands inside the plot, at the edge.
+    expect(extent(a!)[1]).toBeCloseTo(plot.x + plot.width, 6);
     // Entering the view: "a" from t = 0 to 1, owned by t = 1.
     const start = model({
       x: { domain: [0.5, 2.5] },
@@ -217,6 +255,160 @@ describe("labels following series", () => {
     // The chart keeps room for them on the right, where they go.
     expect(plot.width).toBeLessThan(plain.scene(estimateText).panels[0]!.plot.width);
     for (const label of labelsOf(scene)) expect(label.x).toBeGreaterThan(plot.x + plot.width);
+  });
+
+  contractTest("labels.attach.surface", () => {
+    // Halos take the color of what the labels are drawn on: the plot's fill, or the chart's outside it.
+    const halo = (place?: { outside: true }) => {
+      const labels = { at: "first", ...(place && { place }) } as const;
+      const chart = model({
+        theme: { style: { plot: { fill: "#eeeeee" } } },
+        marks: [line(rows, { x: "t", y: "v", labels })],
+      });
+      return labelsOf(chart.scene(estimateText))[0]!.halo?.color;
+    };
+    expect(halo()).toBe("#eeeeee");
+    expect(halo({ outside: true })).toBe("#ffffff");
+  });
+
+  contractTest("labels.attach.edge-spread", () => {
+    // Labels of different widths moved in from one edge stand apart, as labels at one point do.
+    const level = table({
+      x: [0, 1, 0, 1],
+      y: [5, 5, 5, 5],
+      g: ["A", "A", "Long one", "Long one"],
+    });
+    for (const at of ["first", "last"] as const) {
+      const scene = model({
+        marks: [line(level, { x: "x", y: "y", series: "g", labels: { at } })],
+      }).scene(estimateText);
+      const [a, b] = within(scene)[0]!;
+      expect(Math.abs(a!.y - b!.y)).toBeGreaterThanOrEqual(a!.paint.lineHeight);
+    }
+  });
+
+  contractTest("labels.attach.shared-rows", () => {
+    // Labels keep apart only from those they overlap: A meets B and B meets C along x,
+    // so A and C share a row at their points, in a short plot as in a tall one.
+    const steps = table({ x: [0, 3, 6], y: [3, 7, 3], g: ["AAAAAA", "BBBBBB", "CCCCCC"] });
+    const style = { fontSize: 16, lineHeight: 1.25, halo: false } as const;
+    for (const height of [90, 300]) {
+      const scene = model(
+        {
+          x: { domain: [0, 10] },
+          y: { domain: [0, 10] },
+          marks: [line(steps, { x: "x", y: "y", series: "g", labels: { at: "last", style } })],
+        },
+        240,
+        height,
+      ).scene(estimateText);
+      const { plot } = scene.panels[0]!;
+      const labels = within(scene)[0]!;
+      expect(labels.map(({ text }) => text).sort()).toEqual(["AAAAAA", "BBBBBB", "CCCCCC"]);
+      for (const label of labels) {
+        const value = label.text === "BBBBBB" ? 7 : 3;
+        expect(label.y).toBeCloseTo(plot.y + plot.height * (1 - value / 10), 6);
+      }
+    }
+  });
+
+  contractTest("labels.attach.stable", () => {
+    // Five labels whose extents along x meet as A-B, B-C, B-D, and D-E: C, which
+    // meets only B, keeps its row at its point while A comes to meet B or leaves it.
+    const names = ["A", "BBBBBBBB", "C", "DDD", "EE"];
+    const style = { fontSize: 16, lineHeight: 1.25, halo: false } as const;
+    const points = (x: number[], y: number[]) => table({ x, y, g: names });
+    const config = (data: ReturnType<typeof points>): ChartConfig => ({
+      x: { domain: [0, 300] },
+      y: { domain: [0, 100] },
+      marks: [line(data, { x: "x", y: "y", series: "g", labels: { at: "last", style } })],
+    });
+    const plot = model(config(points([0, 0, 0, 0, 0], [0, 0, 0, 0, 0])), 343, 136).scene(
+      estimateText,
+    ).panels[0]!.plot;
+    const wide = estimateText("A", "16px sans-serif");
+    const tops = (delta: number) => {
+      const from = [20 - wide + delta, 20, 45, 100, 120];
+      const centers = [40, 45, 70, 80, 90];
+      const data = points(
+        from.map((x) => ((x - 4) * 300) / plot.width),
+        centers.map((y) => (1 - y / plot.height) * 100),
+      );
+      const scene = model(config(data), 343, 136).scene(estimateText);
+      const at = scene.panels[0]!.plot;
+      return new Map(labelsOf(scene).map((label) => [label.text, label.y - at.y]));
+    };
+    const [apart, met] = [tops(-0.001), tops(0.001)];
+    expect(apart.get("C")).toBeCloseTo(70, 6);
+    expect(met.get("C")).toBeCloseTo(70, 6);
+    expect([...met.keys()].sort()).toEqual([...names].sort());
+  });
+
+  it("put labels at one point in the order of their series", () => {
+    const same = table({
+      x: [0, 1, 0, 1],
+      y: [5, 5, 5, 5],
+      g: ["first", "first", "second", "second"],
+    });
+    const scene = model({
+      y: { domain: [0, 10] },
+      marks: [line(same, { x: "x", y: "y", series: "g", labels: { at: "last" } })],
+    }).scene(estimateText);
+    const fromTop = labelsOf(scene)
+      .sort((a, b) => a.y - b.y)
+      .map(({ text }) => text);
+    expect(fromTop).toEqual(["first", "second"]);
+  });
+
+  contractTest("labels.attach.fit", () => {
+    // Labels wider than their plot are shortened to it, at both edges, in a narrow inset and in facet panels.
+    const long = "A longer series label which does not fit";
+    const level = table({ x: [0, 1, 0, 1], y: [1, 1, 1, 1], g: ["a", "a", "b", "b"] });
+    for (const at of ["first", "last"] as const) {
+      const labels = { at, content: [long] };
+      const [main, zoom] = within(
+        model(
+          {
+            panels: panels(panel({ id: "main" }, [inset({ id: "zoom" })])),
+            marks: [line(level, { x: "x", y: "y", panel: "*", labels })],
+          },
+          400,
+          300,
+        ).scene(estimateText),
+      );
+      expect(main!.map(({ text }) => text)).toEqual([long]);
+      expect(zoom![0]!.text).toMatch(/^A longer .*…$/);
+      const faceted = within(
+        model({ facet: facet("g"), marks: [line(level, { x: "x", y: "y", labels })] }).scene(
+          estimateText,
+        ),
+      );
+      for (const [label] of faceted) expect(label!.text).toMatch(/^A longer .*…$/);
+    }
+    // Where nothing but the ellipsis fits, the label is left out.
+    const rising = table({ x: [0, 1], y: [1, 2] });
+    const shown = (fontSize: number) => {
+      const labels = { at: "last", content: ["Wide"], style: { fontSize } } as const;
+      return texts(
+        model({ marks: [line(rising, { x: "x", y: "y", labels })] }, 120).scene(estimateText),
+      );
+    };
+    expect(shown(40)).toEqual(["W…"]);
+    expect(shown(60)).toEqual([]);
+  });
+
+  contractTest("labels.attach.box-outline", () => {
+    // A box's outline is painted within the plot too, and counts in the room kept outside it.
+    const level = table({ x: [0, 1], y: [1, 1] });
+    const boxed = (strokeWidth: number, at: "first" | "last", outside = false) => {
+      const background = { fill: "#ffffff", stroke: "#ff0000", strokeWidth };
+      const style = { background, padding: 4 };
+      const labels = { at, content: ["Label"], place: { outside }, style };
+      return model({ marks: [line(level, { x: "x", y: "y", labels })] }).scene(estimateText);
+    };
+    for (const at of ["first", "last"] as const) expect(within(boxed(12, at))[0]).toHaveLength(1);
+    const width = (strokeWidth: number) => boxed(strokeWidth, "last", true).panels[0]!.plot.width;
+    expect(width(0) - width(12)).toBe(6);
   });
 
   contractTest("labels.attach.streaming", () => {
@@ -333,6 +525,23 @@ describe("text following a mark", () => {
     expect(() => text({ from: { mark: "l", at: "last" }, label: "x", legend: true })).toThrow(
       /legend/,
     );
+  });
+
+  it("refuse label places text does not draw", () => {
+    expect(() => text({ x: 1, y: 1, label: { text: "x", place: { offset: 4 } } as never })).toThrow(
+      expect.objectContaining({
+        code: "invalid-option",
+        path: "label.place",
+        message:
+          "text label.place: text at a place is drawn there; drop place, or follow a series with from",
+      }),
+    );
+    expect(() =>
+      text({
+        from: { mark: "l", at: "last" },
+        label: { text: "x", place: { side: "top" } } as never,
+      }),
+    ).toThrow(expect.objectContaining({ code: "invalid-option", path: "label.place.side" }));
   });
 
   contractTest("text.from.panels", () => {

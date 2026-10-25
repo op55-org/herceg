@@ -9,13 +9,14 @@
 //
 // Facet panels share one view and one lasso, drawn in each, and one toolbar
 // in the chart's corner; a subplot's map or network has its own view and
-// toolbar, in its corner. The pointer acts in the panel it presses (a drag
-// stays there), the keys in the panel the keyboard reads.
+// toolbar, in its corner, and follows its own interaction settings. The
+// pointer acts in the panel it presses (a drag stays there), the keys in
+// the panel the keyboard reads.
 
 import type { LayoutResult, PlaneView } from "../marks/layout-mark.ts";
 import type { Binding } from "../model/bindings.ts";
 import type { ItemPanel } from "../model/item-views.ts";
-import type { ChartConfig } from "../model/model.ts";
+import type { ViewCause } from "../model/model.ts";
 import type { Rect, Scene } from "../scene/scene.ts";
 import type { Theme } from "../theme.ts";
 import { Brush, type BrushPanel } from "./brush.ts";
@@ -65,12 +66,10 @@ export class Controls implements ChartControls {
   readonly #stop: (() => void)[] = [];
   /** Draws a lasso being dragged, and the chart's lasso selection; made for charts that lasso. */
   #brush: Brush | undefined;
-  #zooms = false;
-  /** Whether Shift with the arrow keys pans (`pan`, or `zoom`, which pans too). */
-  #pans = false;
-  #lassos = false;
   /** With both a lasso and zoom, whether a plain drag lassos (the toolbars' toggle). */
   #lassoing = true;
+  /** What is changing the view: the input being handled. */
+  #cause: ViewCause = "pointer";
   #theme: Theme | undefined;
   /** The parts of panels' plots their insets leave visible, by panel, as last drawn. */
   #visible = new Map<string, readonly Rect[]>();
@@ -124,6 +123,8 @@ export class Controls implements ChartControls {
     let toolbar = this.#toolbars.get(state);
     if (toolbar) return toolbar;
     const panel = () => this.#planes().find((plane) => plane.state === state)!.key;
+    // A subplot's state is its id; facet panels and a chart's one plane take the chart's settings.
+    const can = () => this.#can(state || undefined);
     const pan = (dx: number, dy: number, way: string) => () => this.#pan(panel(), dx, dy, way);
     const name = this.#family === "map" ? "Map" : "Network";
     toolbar = new Toolbar(this.#root, state === "" ? name : `${name}, ${label}`, [
@@ -135,7 +136,7 @@ export class Controls implements ChartControls {
           for (const other of this.#toolbars.values()) other.refresh();
         },
         pressed: () => this.#lassoing,
-        hidden: () => !this.#lassos || !this.#zooms,
+        hidden: () => !can().lassos || !can().zooms,
       },
       ...[
         { label: "Zoom in", glyph: "M8 4v8M4 8h8", act: () => this.#zoomBy(panel(), ZOOM) },
@@ -149,7 +150,15 @@ export class Controls implements ChartControls {
           glyph: RESET_GLYPH,
           act: () => this.#reset(panel(), true),
         },
-      ].map((tool) => ({ ...tool, hidden: () => !this.#zooms })),
+      ].map((tool) => ({
+        ...tool,
+        // A button is pressed, with the pointer or a key, as a click.
+        act: () => {
+          this.#cause = "pointer";
+          tool.act();
+        },
+        hidden: () => !can().zooms,
+      })),
       ...this.#tools(panel),
     ]);
     this.#toolbars.set(state, toolbar);
@@ -166,9 +175,25 @@ export class Controls implements ChartControls {
     this.#drawLasso();
   }
 
-  /** A plain drag currently lassos rather than moving a node or the view. */
-  get lassoing(): boolean {
-    return this.#lassos && (!this.#zooms || this.#lassoing);
+  /** Whether a plain drag in panel `panel` lassos rather than moving a node or the view. */
+  #lassosIn(panel: string): boolean {
+    const { lassos, zooms } = this.#can(panel);
+    return lassos && (!zooms || this.#lassoing);
+  }
+
+  /**
+   * What panel `panel`'s interaction (a subplot's own settings over the
+   * chart's) lets its plane do: zoom, pan with Shift and the arrow keys
+   * (`pan`, or `zoom`, which pans too), and lasso.
+   */
+  #can(panel: string | undefined) {
+    const { zoom, pan, brush, bindings } = this.#host.model.interactionOf(panel) ?? {};
+    return {
+      zooms: !!zoom,
+      pans: pan === undefined ? !!zoom : pan !== false,
+      // A binding of its own may brush too, which on a plane lassos.
+      lassos: brush === "lasso" || !!bindings?.some(({ action }) => action.type === "brush"),
+    };
   }
 
   contains(target: EventTarget | null): boolean {
@@ -179,14 +204,16 @@ export class Controls implements ChartControls {
     return this.#press?.mode === "pan" && this.#press.moved;
   }
 
-  update(config: ChartConfig): void {
-    const { zoom, pan, brush, bindings } = config.interaction ?? {};
-    this.#zooms = !!zoom;
-    this.#pans = pan === undefined ? !!zoom : pan !== false;
-    // A binding of the chart's own may brush too, which on a plane lassos.
-    this.#lassos = brush === "lasso" || !!bindings?.some(({ action }) => action.type === "brush");
-    if (this.#press && (this.#press.mode === "pan" ? !this.#pans : !this.#lassos)) this.#cancel();
-    if (this.#lassos && !this.#brush) {
+  update(): void {
+    const press = this.#press;
+    if (press) {
+      const { pans, lassos } = this.#can(press.panel);
+      if (press.mode === "pan" ? !pans : !lassos) this.#cancel();
+    }
+    // A brush for a chart some panel of which lassos.
+    const ids = this.#host.model.config.panels?.list.map(({ id }) => id) ?? [];
+    const lasso = [undefined, ...ids].some((panel) => this.#can(panel).lassos);
+    if (lasso && !this.#brush) {
       const group = this.#root.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "g");
       this.#host.overlay.append(group);
       this.#brush = new Brush(
@@ -195,7 +222,7 @@ export class Controls implements ChartControls {
         this.#host.normalize,
       );
       this.#brush.mode = "lasso";
-    } else if (!this.#lassos && this.#brush) {
+    } else if (!lasso && this.#brush) {
       this.#brush.element.remove();
       this.#brush = undefined;
     }
@@ -236,9 +263,10 @@ export class Controls implements ChartControls {
 
   /** The toolbars pan and zoom; a lasso toggle is there when a drag could do either. */
   #showToolbars(): void {
-    for (const toolbar of this.#toolbars.values()) {
-      const panel = this.#planes().find(({ state }) => this.#toolbars.get(state) === toolbar)?.key;
-      toolbar.shown = this.#zooms || (panel !== undefined && this.#extraShown(panel));
+    for (const [state, toolbar] of this.#toolbars) {
+      const panel = this.#planes().find((plane) => plane.state === state)?.key;
+      toolbar.shown =
+        this.#can(state || undefined).zooms || (panel !== undefined && this.#extraShown(panel));
       toolbar.refresh();
     }
   }
@@ -280,7 +308,7 @@ export class Controls implements ChartControls {
   #drawLasso(): void {
     const { chart } = this.#host;
     const selection = chart.selection;
-    const owners = chart.selectionPanels ?? [];
+    const owners = chart.selectionOwner?.panels ?? [];
     if (!this.#brush || !this.#theme) return;
     const panels = selection?.lasso ? this.#planes().filter(({ key }) => owners.includes(key)) : [];
     this.#brush.draw(
@@ -306,7 +334,7 @@ export class Controls implements ChartControls {
    * away keeps it until the next frame, which ends the press.
    */
   #show(panel: string, x: readonly [number, number], y: readonly [number, number]): void {
-    this.#host.model.items?.setView({ x, y }, panel);
+    this.#host.model.items?.setView({ x, y }, panel, this.#cause);
   }
 
   /** Zooms panel `panel` by `by` around a pixel (the room's middle by default), within the zoom's range. */
@@ -357,10 +385,10 @@ export class Controls implements ChartControls {
    */
   dragAction(event: PointerEvent, panel: string): Binding["action"] | undefined {
     const action = this.#host
-      .bindings()
+      .bindings(panel)
       .match("drag", event, ({ type }) =>
         type === "brush"
-          ? this.lassoing
+          ? this.#lassosIn(panel)
           : type === "moveItem"
             ? !!this.#nodePress?.(event, panel)
             : type === "pan" || type === "pageScroll",
@@ -380,7 +408,7 @@ export class Controls implements ChartControls {
   }
 
   #reset(panel: string, announce: boolean): void {
-    this.#host.model.items?.setView(null, panel);
+    this.#host.model.items?.setView(null, panel, this.#cause);
     if (announce) this.#say(`Showing the whole ${this.#family}.`);
   }
 
@@ -412,12 +440,13 @@ export class Controls implements ChartControls {
     on(
       "wheel",
       (event) => {
+        this.#cause = "wheel";
         const at = this.#point(event);
         const panel = this.#onPlot(event) ? this.#planeAt(at.x, at.y) : undefined;
         const action =
           panel &&
           this.#host
-            .bindings()
+            .bindings(panel.key)
             .match("wheel", event, ({ type }) => type !== "orbit", this.#host.focused())?.action;
         if (action?.type !== "zoom" && action?.type !== "pan") return;
         event.preventDefault();
@@ -461,6 +490,7 @@ export class Controls implements ChartControls {
     on("pointermove", (event) => {
       const press = this.#press;
       if (!press || event.pointerId !== press.pointer) return;
+      this.#cause = "pointer";
       const { x, y } = this.#point(event);
       press.moved ||= Math.hypot(x - press.x, y - press.y) >= DRAG_THRESHOLD;
       if (!press.moved) return;
@@ -514,9 +544,10 @@ export class Controls implements ChartControls {
     on("pointercancel", cancel);
     on("lostpointercapture", cancel);
     on("dblclick", (event) => {
+      this.#cause = "pointer";
       const at = this.#point(event);
       const panel = this.#onPlot(event) ? this.#planeAt(at.x, at.y) : undefined;
-      const action = panel && this.#host.bindings().match("doubleClick", event)?.action;
+      const action = panel && this.#host.bindings(panel.key).match("doubleClick", event)?.action;
       if (action?.type === "reset") this.#reset(panel!.key, false);
       else if (action?.type === "zoom") this.#zoomBy(panel!.key, action.factor ?? 2, at, false);
     });
@@ -531,15 +562,17 @@ export class Controls implements ChartControls {
    */
   #key(event: KeyboardEvent): void {
     if (event.target !== this.#root) return;
+    this.#cause = "keyboard";
     // Escape clears a lasso, as it clears brushes, and goes on to the chart's keys.
     if (event.key === "Escape" && this.#host.chart.selection) this.#host.chart.select(null);
-    const action = this.#host.bindings().match("key", event)?.action;
-    if (!(action || ((this.#zooms || this.#pans) && !event.altKey))) return;
     const cursor = this.#host.cursor();
     const [first] = this.#planes();
     const panel = cursor ? cursor.panel : first?.state === "" ? first.key : undefined;
     const plane = panel === undefined ? undefined : this.#planeOf(panel);
     if (!plane) return;
+    const action = this.#host.bindings(panel).match("key", event)?.action;
+    const { zooms, pans } = this.#can(panel);
+    if (!(action || ((zooms || pans) && !event.altKey))) return;
     const steps: Record<string, [number, number, string]> = {
       ArrowLeft: [-1, 0, "left"],
       ArrowRight: [1, 0, "right"],
@@ -548,7 +581,7 @@ export class Controls implements ChartControls {
     };
     // Shift alone: with Ctrl, ⌘, or Alt, the arrows are the page's (or a node's, with Alt).
     const plain = !(event.altKey || event.ctrlKey || event.metaKey);
-    const step = event.shiftKey && plain && this.#pans ? steps[event.key] : undefined;
+    const step = event.shiftKey && plain && pans ? steps[event.key] : undefined;
     if (action?.type === "zoom") this.#zoomBy(panel!, action.factor ?? ZOOM);
     else if (action?.type === "reset") this.#reset(panel!, true);
     else if (action?.type === "pan") {

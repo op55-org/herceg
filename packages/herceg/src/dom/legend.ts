@@ -42,7 +42,8 @@ export class Legend {
     this.element = adopted?.element ?? document.createElement("div");
     this.element.setAttribute("role", "group");
     this.element.setAttribute("aria-label", "Legend");
-    this.element.style.cssText = "position:absolute;left:0;top:0;width:100%;height:0";
+    // Laid out left to right, as the chart's SVG and its exports are, whatever the page's direction.
+    this.element.style.cssText = "position:absolute;left:0;top:0;width:100%;height:0;direction:ltr";
     this.#entries = adopted?.entries ?? new Map();
     // One listener for every button, those adopted included.
     this.element.addEventListener("click", ({ target }) => {

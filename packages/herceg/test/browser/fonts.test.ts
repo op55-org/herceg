@@ -149,7 +149,9 @@ describe("fonts", () => {
       fonts,
     });
     expect(chart.root.style.fontKerning).toBe("none");
-    expect(chart.toSVG()).toContain('style="font-kerning:none;font-variant-ligatures:none"');
+    expect(chart.toSVG()).toContain(
+      'style="direction:ltr;font-kerning:none;font-variant-ligatures:none"',
+    );
     // The same file again is the same face; another file for the family is refused.
     const again = createChart(host.appendChild(document.createElement("div")), {
       theme,

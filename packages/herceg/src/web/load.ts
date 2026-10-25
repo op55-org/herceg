@@ -2,7 +2,7 @@
 
 import type { ChartOptions } from "../dom/chart.ts";
 import { ChartError, chartError } from "../spec/errors.ts";
-import { loadSpec } from "../spec/load.ts";
+import { type LoadedSpec, loadSpec } from "../spec/load.ts";
 import { decodePayload } from "./payload.ts";
 
 /** Where a payload comes from: a URL to fetch, or its bytes. */
@@ -19,6 +19,14 @@ export async function loadPayload(
   source: PayloadSource,
   options: { signal?: AbortSignal | undefined } = {},
 ): Promise<ChartOptions> {
+  return (await loadPayloadSpec(source, options)).config;
+}
+
+/** As `loadPayload`, with the spec's tables and selection stores by name. */
+export async function loadPayloadSpec(
+  source: PayloadSource,
+  options: { signal?: AbortSignal | undefined } = {},
+): Promise<LoadedSpec> {
   const { signal } = options;
   signal?.throwIfAborted();
   const bytes =
@@ -28,7 +36,7 @@ export async function loadPayload(
   signal?.throwIfAborted();
   const { header, buffers } = decodePayload(bytes);
   try {
-    return loadSpec(header.spec, buffers).config;
+    return loadSpec(header.spec, buffers);
   } catch (error) {
     throw chartError(error, "validate");
   }

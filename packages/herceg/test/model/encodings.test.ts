@@ -19,6 +19,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { LIGHT } from "../../src/theme.ts";
 import { keysOf, legendOf, rampsOf } from "../helpers/guides.ts";
+import { setViewport } from "../helpers/views.ts";
 
 /** A shape as legends draw it: at most 4.5 pixels in radius, reaching at most 6. */
 const legendShape = (symbol: SymbolName) =>
@@ -159,7 +160,7 @@ describe("point size by field", () => {
     const { model } = build({
       marks: [point(sorted, { x: "x", y: "y", size: "s", radiusRange: [2, 80] })],
     });
-    model.setViewport([1, 2]);
+    setViewport(model, [1, 2]);
     const scene = model.scene(estimateText);
     const { plot } = scene.panels[0]!;
     const g = scene.panels[0]!.marks[0] as PointGeometry;
@@ -186,7 +187,7 @@ describe("point size by field", () => {
     // Zoomed so the small bubble's center is 10 px left of the plot: its
     // radius (3 px) cannot reach in, though the largest (30 px) could.
     const width = scene.panels[0]!.plot.width;
-    model.setViewport([100 / (width + 10), 10]);
+    setViewport(model, [100 / (width + 10), 10]);
     const plot = model.scene(estimateText).panels[0]!.plot;
     expect(model.xScale()!.map(0)).toBeCloseTo(plot.x - 10, 0);
     expect(model.inspect(plot.x + 1, y)?.value).not.toBe(0);

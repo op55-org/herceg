@@ -67,6 +67,11 @@ export function wholeOf(key: string): string | undefined {
   return mark && `{"mark":${mark}}`;
 }
 
+/** By panel, the keys a subplot's own legend hid and showed there unlike in the rest of the chart. */
+export type PanelVisibility = Readonly<
+  Record<string, { hidden: readonly string[]; shown: readonly string[] }>
+>;
+
 /**
  * The keys of series, items, and identities hidden through the legend and
  * the visibility methods. A series or item is also hidden while what it

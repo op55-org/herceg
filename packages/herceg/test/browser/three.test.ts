@@ -107,6 +107,31 @@ describe("3D charts", () => {
     },
   );
 
+  it("turn only the subplots whose settings let a drag turn them", async () => {
+    const chart = await mount({
+      width: 600,
+      panels: panels(
+        [{ id: "a" }, { id: "b", interaction: { rotate: false } }],
+        grid({ columns: 2 }),
+      ),
+      marks: ["a", "b"].map((panel) => point3d(points, { x: "x", y: "y", z: "z", panel })),
+    });
+    try {
+      const turned: (readonly string[] | undefined)[] = [];
+      chart.on("camera", ({ panels }) => turned.push(panels));
+      for (const { plot } of chart.getPanels()) {
+        const [x, y] = [plot.x + plot.width / 2, plot.y + plot.height / 2];
+        at(chart, "pointerdown", x, y);
+        at(chart, "pointermove", x + 40, y + 10);
+        at(chart, "pointerup", x + 40, y + 10);
+        await frame();
+      }
+      expect(turned).toEqual([["a"]]);
+    } finally {
+      chart.destroy();
+    }
+  });
+
   it("turn when dragged, reporting the camera once a frame, and go back on double-click", async () => {
     const chart = await mount();
     const cameras: Camera[] = [];

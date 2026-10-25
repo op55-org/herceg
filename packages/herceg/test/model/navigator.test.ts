@@ -9,7 +9,7 @@ import { grid, inset, panel } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { candlestick } from "../../src/marks/candlestick.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
@@ -37,6 +37,7 @@ import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -217,7 +218,7 @@ describe("a navigator's strip", () => {
     const overview = stripOf(scene).marks[0] as LineGeometry;
     expect(overview.path).not.toBe(main.path);
     const drawn = Float32Array.from(overview.path.coords.subarray(0, overview.path.count * 2));
-    model.setViewport([1000, 2000]);
+    setViewport(model, [1000, 2000]);
     const zoomed = model.scene(estimateText);
     // The same overview, unchanged by the plot drawing its own line again.
     expect(stripOf(zoomed).marks[0]).toBe(overview);
@@ -237,7 +238,7 @@ describe("a navigator's strip", () => {
     const strip = stripOf(scene);
     // Unzoomed, the window is the whole strip: nothing is faded.
     expect(windowOf(strip).shapes.filter((s) => "d" in s && s.opacity < 1)).toHaveLength(0);
-    model.setViewport([250, 500]);
+    setViewport(model, [250, 500]);
     const zoomed = stripOf(model.scene(estimateText));
     const faded = windowOf(zoomed).shapes.filter((s) => "d" in s && s.opacity < 1);
     expect(faded).toHaveLength(2);
@@ -261,7 +262,7 @@ describe("a navigator's strip", () => {
     const unzoomed = model.panels()[0]!.x.domain;
     const labels = (strip: Panel) => (strip.marks.at(-1) as TextGeometry).labels;
     const before = labels(stripOf(scene));
-    model.setViewport([100, 200]);
+    setViewport(model, [100, 200]);
     const strip = stripOf(model.scene(estimateText));
     expect(labels(strip)).toEqual(before);
     expect(gridAt(strip, "x")).toEqual(gridAt(stripOf(scene), "x"));
@@ -274,7 +275,7 @@ describe("a navigator's strip", () => {
       marks: [line(data, { x: "t", y: "a" })],
       navigator: rangeNavigator(),
     });
-    model.setViewport([50, 400]);
+    setViewport(model, [50, 400]);
     const strip = stripOf(model.scene(estimateText));
     const { x, width } = strip.plot;
     const shapes = windowOf(strip).shapes.filter((s) => "d" in s && s.opacity < 1);
@@ -291,7 +292,7 @@ describe("a navigator's strip", () => {
       marks: [bar(data, { x: "t", y: "v" })],
       navigator: rangeNavigator(),
     });
-    model.setViewport([1.5, 3.5]);
+    setViewport(model, [1.5, 3.5]);
     const strip = stripOf(model.scene(estimateText));
     const bars = strip.marks.find(({ kind }) => kind === "rect")!;
     const rects = bars as unknown as { rects: Float32Array; count: number };
@@ -322,7 +323,7 @@ describe("a navigator's strip", () => {
     const steps = xs.slice(1).map((x, i) => x - xs[i]!);
     expect(Math.max(...steps) / Math.min(...steps.filter((s) => s > 0))).toBeLessThan(1.5);
     // A window over a week of trading spans a fifth of a four-week strip.
-    model.setViewport([start + 7 * DAY, start + 12 * DAY]);
+    setViewport(model, [start + 7 * DAY, start + 12 * DAY]);
     const faded = windowOf(stripOf(model.scene(estimateText))).shapes.filter(
       (s) => "d" in s && s.opacity < 1,
     ) as { d: string }[];
@@ -621,7 +622,7 @@ describe("a navigator's strip under panels", () => {
     });
     const before = stripOf(scene);
     expect(faded(before)).toHaveLength(0);
-    model.setViewport([50, 100], "volume");
+    setViewport(model, [50, 100], "volume");
     const zoomed = model.scene(estimateText);
     expect(model.panels().map(({ x }) => x.domain)).toEqual([
       [50, 100],
@@ -665,7 +666,7 @@ describe("a navigator's strip under panels", () => {
       expect(at).toBeLessThanOrEqual(strip.plot.x + strip.plot.width);
     }
     // And the window shows a view where the plots show it.
-    model.setViewport([25, 75]);
+    setViewport(model, [25, 75]);
     const zoomed = stripOf(model.scene(estimateText));
     const [left, right] = faded(zoomed).map(({ d }) => d.match(/-?[\d.]+/g)!.map(Number));
     const rail = (value: number) =>
@@ -1082,12 +1083,12 @@ describe("a navigator's text alternative", () => {
     });
     const whole = "A range navigator shows the whole x range, with 0 m to 9 m in view.";
     expect(describeChart(model)).toContain(whole);
-    model.setViewport([2, 5]);
+    setViewport(model, [2, 5]);
     model.scene(estimateText);
     expect(describeChart(model)).toContain(
       "A range navigator shows the whole x range, with 2 m to 5 m in view.",
     );
-    model.setViewport(null);
+    setViewport(model, null);
     model.scene(estimateText);
     expect(describeChart(model)).toContain(whole);
   });
@@ -1103,7 +1104,7 @@ describe("a navigator's text alternative", () => {
         x: { breaks: timeBreaks([{ hours: ["06:00", "12:00"] }]) },
         navigator: rangeNavigator(),
       });
-      model.setViewport([start + 3 * HOUR, start + 18 * HOUR]);
+      setViewport(model, [start + 3 * HOUR, start + 18 * HOUR]);
       model.scene(estimateText);
       const format = model.formatsOf().x;
       const from = format(start + 3 * HOUR);
@@ -1134,7 +1135,7 @@ describe("a navigator's text alternative", () => {
       600,
       400,
     );
-    model.setViewport([1, 2]);
+    setViewport(model, [1, 2]);
     model.scene(estimateText);
     expect(describeChart(model)).toContain(
       "A range navigator shows the whole x range, with 1 to 2 in view; it controls every panel's x range.",
@@ -1159,7 +1160,7 @@ describe("navigators refuse", () => {
   it("panels with x scales of their own, layout marks, category x axes, and marks along y", () => {
     const hosts = table({ t: [0, 1], v: [1, 2], host: ["a", "b"] });
     for (const x of ["panel", "row", "column"] as const) {
-      const message = `navigator: needs one x scale shared by every panel, and x.scope is "${x}"; set x.scope to "chart" or drop navigator`;
+      const message = `navigator: needs one x scale shared by every panel, and x.scope is "${x}"; set x.scope to "chart", name the panel whose x it moves with panel, or drop navigator`;
       expect(() =>
         build({
           marks: [line(hosts, { x: "t", y: "v" })],
@@ -1218,7 +1219,7 @@ describe("navigators refuse", () => {
     ).toThrow('navigator marks: no mark "x" in the chart');
     expect(() =>
       build({
-        marks: [errorBar(ranges, { x: "t", y1: "lo", y2: "hi", id: "e" })],
+        marks: [errorbar(ranges, { x: "t", y1: "lo", y2: "hi", id: "e" })],
         navigator: rangeNavigator({ marks: ["e"] }),
       }),
     ).toThrow(

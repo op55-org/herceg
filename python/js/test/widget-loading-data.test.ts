@@ -75,7 +75,7 @@ it("keeps node positions, a category selection, and data sent before the panels 
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(chart.getItemPositions({ panel: "g" })['[0,"East"]']).toEqual({ x: 10, y: 20 });
   expect(chart.selection?.x).toEqual([1, 2]);
-  expect(chart.selectionPanels).toEqual(["a"]);
+  expect(chart.selectionOwner?.panels ?? null).toEqual(["a"]);
   await new Promise((resolve) => setTimeout(resolve, 150));
   // Python heard nothing of the node moving back or the selection going.
   expect(

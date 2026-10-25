@@ -41,21 +41,24 @@ export async function mountControls(
   // Bindings come with the interaction controller, which the chart loads too.
   const [{ Controls }, { Bindings }] = await Promise.all([load(kind), import("./interaction.ts")]);
   const { live, legend, cursor, ...shared } = parts;
-  // The chart's bindings, compiled again when its configuration changes.
+  // Each panel's bindings, compiled again when the configuration changes.
   // Those it refuses are its controller's to report: here they bind nothing.
-  let compiled: [ChartConfig, Bindings] | undefined;
-  const bindings = () => {
-    const { config } = parts.model;
-    if (compiled?.[0] !== config) {
-      let bound: Bindings;
+  let config: ChartConfig | undefined;
+  const compiled = new Map<string | undefined, Bindings>();
+  const bindings = (panel?: string) => {
+    const { model } = parts;
+    if (config !== model.config) compiled.clear();
+    config = model.config;
+    let bound = compiled.get(panel);
+    if (!bound) {
       try {
-        bound = new Bindings(config.interaction);
+        bound = new Bindings(model.interactionOf(panel));
       } catch {
         bound = new Bindings();
       }
-      compiled = [config, bound];
+      compiled.set(panel, bound);
     }
-    return compiled[1];
+    return bound;
   };
   return new Controls({
     ...shared,

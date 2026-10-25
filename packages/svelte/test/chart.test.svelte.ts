@@ -426,7 +426,15 @@ describe("<Chart>", () => {
     const seen: unknown[] = [];
     const props = lines({ options: { onviewport: (view: unknown) => seen.push(view) } });
     props.chart.setViewport({ x: [1, 2], y: [0, 5] });
-    expect(seen).toEqual([{ x: [1, 2], y: [0, 5], yRight: null }]);
+    expect(seen).toMatchObject([
+      {
+        cause: "api",
+        scales: [
+          { scale: "x", view: [1, 2] },
+          { scale: "y", view: [0, 5] },
+        ],
+      },
+    ]);
   });
 
   it("listens only while a handler is given", () => {
@@ -439,7 +447,8 @@ describe("<Chart>", () => {
     props.onselect = undefined;
     flushSync();
     props.chart.select([2, 3]);
-    expect(seen).toEqual([{ x: [1, 2], y: null, lasso: null }]);
+    expect(seen).toMatchObject([{ x: [1, 2], y: null, lasso: null }]);
+    expect(seen).toHaveLength(1);
   });
 
   it("applies prop changes to the same chart", () => {

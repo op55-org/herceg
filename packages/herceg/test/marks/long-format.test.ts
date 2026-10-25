@@ -11,6 +11,7 @@ import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import type { AreaGeometry, LineGeometry } from "../../src/scene/scene.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function seeded(seed: number) {
   let state = seed;
@@ -117,7 +118,7 @@ function reference(
     locale: "en-US",
   });
   model.setSize(width, 300, 1);
-  model.setViewport(viewport);
+  setViewport(model, viewport);
   return drawn(model);
 }
 
@@ -163,7 +164,7 @@ describe("long-format indexes", () => {
       expectReference();
       for (const view of [[100_000, 200_000], [150_000, 150_500], null] as const) {
         viewport = view && [view[0], view[1]];
-        for (const model of models) model.setViewport(viewport);
+        for (const model of models) setViewport(model, viewport);
         expectReference();
       }
       // Appends past the window drop rows from the front of every series.

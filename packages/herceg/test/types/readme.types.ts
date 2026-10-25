@@ -2,13 +2,14 @@
 import {
   area,
   bar,
+  boxplot,
   candlestick,
   category,
   col,
   createChart,
   custom,
   encodedCategory,
-  errorBar,
+  errorbar,
   facet,
   fromRows,
   heatmap,
@@ -86,6 +87,12 @@ live.reset({ time: newTimes, cpu: newValues });
   sales.setColumn("revenue", [55, 45]);
   // @ts-expect-error values are animated or not
   createChart(element, { marks: [], animation: { values: "bars" } });
+  // Refused as the chart draws: box plots do not move to new values.
+  const data = table({ group: ["a", "b"], v: [1, 2] });
+  createChart(element, {
+    marks: [boxplot(data, { x: "group", y: "v" })],
+    animation: { values: true },
+  });
 }
 
 // Marks
@@ -339,8 +346,8 @@ bar(regionSales, { x: "region", y: ["q1", "q2"] });
 bar(requests, { x: "time", y: "latency" });
 point(cars, { x: "weight", y: "mpg", series: "origin", radius: 3 });
 const stats = table({ group: regions, low: q1Sales, high: q2Sales });
-errorBar(stats, { x: "group", y1: "low", y2: "high" });
-errorBar(stats, { x: "group", y: "low", yError: "high" });
+errorbar(stats, { x: "group", y1: "low", y2: "high" });
+errorbar(stats, { x: "group", y: "low", yError: "high" });
 const hostLoad = table({ hour: time(hours), host: hostNames, cpu: cpuValues });
 heatmap(hostLoad, { x: "hour", y: "host", color: "cpu" });
 const spectrum = table({ time: time(hours), frequency: cpuValues, power: cpuValues });
@@ -422,13 +429,13 @@ histogram(metrics, { x: "time", bins: { step: 3_600_000 }, normalize: "percent" 
 histogram(sales, { x: "region" });
 
 // Error bars
-errorBar(sales, { x: "region", y1: "q1", y2: "q2" });
-errorBar(sales, { y: "region", x1: "q1", x2: "q2", cap: 0 });
-errorBar(sales, { x: "region", y: "q1", yError: "q2" });
+errorbar(sales, { x: "region", y1: "q1", y2: "q2" });
+errorbar(sales, { y: "region", x1: "q1", x2: "q2", cap: 0 });
+errorbar(sales, { x: "region", y: "q1", yError: "q2" });
 // @ts-expect-error interval ends are number or time fields
-errorBar(sales, { x: "region", y1: "team", y2: "q2" });
+errorbar(sales, { x: "region", y1: "team", y2: "q2" });
 // @ts-expect-error horizontal error bars have no right axis
-errorBar(sales, { y: "region", x1: "q1", x2: "q2", axis: "right" });
+errorbar(sales, { y: "region", x1: "q1", x2: "q2", axis: "right" });
 
 // Events and selections
 chart.select({ x: [0, 1], y: [10, 20], lasso: null });

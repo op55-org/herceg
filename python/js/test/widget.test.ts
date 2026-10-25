@@ -1263,14 +1263,18 @@ describe("notebook widget", () => {
       },
       [new Int32Array([0, 1, 2]), new Float64Array([1, 2, 3])],
     );
-    // No frame between: the panel's view is of the categories just sent.
+    // No frame between: the panel's axis is of the categories just sent,
+    // which do not zoom; the view is let go, refusing nothing.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     model.receive({
       type: "viewport",
       revision: 2,
       viewport: { x: ["d", "e"], y: null, yRight: null },
       panel: "a",
     });
-    expect(chart.getViewport({ panel: "a" }).x).toEqual([1, 2]);
+    expect(chart.getViewport({ panel: "a" }).x).toBeNull();
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
   });
 
   it("keeps a category selection on its labels when the data changes", async () => {
@@ -1550,7 +1554,7 @@ describe("widget item interaction", () => {
       revision: 2,
       selection: { x: [0, 0.5], y: null, lasso: null, panels: ["latency"] },
     });
-    expect(chart.selectionPanels).toEqual(["latency"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["latency"]);
     expect(chart.selection?.x).toEqual([0, 0.5]);
   });
 
@@ -1604,7 +1608,8 @@ describe("widget item interaction", () => {
     mount(model);
     const chart = listener.mock.instances[0] as MountedChart;
     expect(chart.getPanels().filter(({ x }) => x)[0]!.key).toBe("detail");
-    expect(chart.getViewport().x).toEqual([0, 1]);
+    // The chart's x shows categories, which do not zoom: nothing is shown or refused.
+    expect(chart.getViewport().x).toBeNull();
   });
 
   it("lets a panel's view go once its x is the chart's, in outputs shown later", () => {
@@ -1696,7 +1701,7 @@ describe("widget item interaction", () => {
     chart.render();
     expect(chart.getViewport({ panel: "a" }).x).toBeNull();
     expect(chart.getViewport({ panel: "b" }).x).toEqual([0, 0.1]);
-    expect(chart.selectionPanels).toEqual(["b"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(model.messages("viewport").at(-1)).toMatchObject({
       viewport: null,
@@ -1742,7 +1747,7 @@ describe("widget item interaction", () => {
       selection: { panels: ["map"], x: [0.4, 0.5], y: null, lasso: null, time: [] },
     });
     expect(chart.selection).toEqual({ x: [0.4, 0.5], y: null, lasso: null });
-    expect(chart.selectionPanels).toEqual(["map"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["map"]);
   });
 
   it("keeps each network subplot's moves through the other's moves and data", async () => {

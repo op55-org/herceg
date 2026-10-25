@@ -21,7 +21,7 @@ import type {
   ShapesGeometry,
   TextGeometry,
 } from "../scene/scene.ts";
-import type { Frozen, RadarSpec } from "../spec/spec.ts";
+import type { Frozen, MarkTooltipSpec, RadarSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { refuseColor } from "./colored.ts";
 import {
@@ -34,6 +34,8 @@ import {
   secondOf,
 } from "./layout-mark.ts";
 import { CATEGORY, type ChartMark, frozen, type MARK, requireField } from "./mark.ts";
+import { refuseValues } from "./still.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
 export type RadarOptions<S extends Schema> = (
   | {
@@ -62,6 +64,8 @@ export type RadarOptions<S extends Schema> = (
   points?: boolean;
   /** Name of the polygon of a radar without `series`, and of its values in tooltips. */
   label?: string;
+  /** Fields of the row a value is, which tooltips show besides it, such as notes that are not plotted. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the radar has to itself. */
   panel?: string;
@@ -147,6 +151,7 @@ export class RadarMark implements LayoutMark {
       checkSpokes(fields.length, "fields");
     }
     if (spec.series !== undefined) requireField(table, spec.series, CATEGORY, "radar series");
+    checkTooltip(table, spec.tooltip, "radar");
     const [lo, hi] = spec.domain ?? [0, 1];
     if (!(Number.isFinite(lo) && Number.isFinite(hi) && lo < hi))
       throw new RangeError(
@@ -254,6 +259,7 @@ export class RadarMark implements LayoutMark {
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.spec.type);
     const { bounds, theme, measure, hidden, locale } = frame;
     const data = this.#values(frame.rows);
     const { spokes, series, spoke, value } = data;
@@ -708,6 +714,7 @@ export function radar<S extends Schema>(
   if (options.points !== undefined) spec.points = options.points;
   if (options.label !== undefined) spec.label = options.label;
   if (options.halo !== undefined) spec.halo = options.halo;
+  if (options.tooltip !== undefined) spec.tooltip = options.tooltip as MarkTooltipSpec;
   if (options.id !== undefined) spec.id = options.id;
   if (options.panel !== undefined) spec.panel = options.panel;
   if (table.name !== undefined) spec.data = table.name;

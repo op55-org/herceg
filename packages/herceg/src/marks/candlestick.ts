@@ -3,6 +3,7 @@ import type { NumericField, PositionField, Schema, Table } from "../data/table.t
 import { rectDrawing } from "../draw/rect.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
+import { type Nearest, settle } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RectGeometry, SegmentGeometry } from "../scene/scene.ts";
 import type { CandlestickSpec, Clip, Frozen } from "../spec/spec.ts";
@@ -20,6 +21,7 @@ import {
   type Frame,
   fieldBands,
   frozen,
+  type Hit,
   type MARK,
   type Mark,
   type MarkKey,
@@ -32,7 +34,7 @@ import {
   type SummaryContext,
   valueKind,
 } from "./mark.ts";
-import { rowOf, type Series, visibleRange, xExtent } from "./series.ts";
+import { lowerPosition, rowOf, type Series, visibleRange, xExtent } from "./series.ts";
 import { FILL, Slots } from "./slots.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -459,6 +461,52 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
       const left = plot.x + column;
       const right = Math.min(left + 1, plot.x + plot.width);
       draw((left + right) / 2, FILL * (right - left), open, highs[column]!, lows[column]!, close);
+    }
+  }
+
+  /** The candle under a pixel, else the nearest; of candles tying with it, the one on top (see `Nearest`). */
+  pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
+    return settle((found) => this.nearby(series, px, py, frame, found));
+  }
+
+  /**
+   * Hands `found` each candle within its limit of a pixel, highlighted
+   * candles marked: measured to the box from its low to its high, as wide
+   * as its body, so that the pointer anywhere on a candle finds it. Sorted
+   * positions are searched outward from the pointer until positions alone
+   * are farther than the limit.
+   */
+  nearby(series: readonly Series[], px: number, py: number, frame: Frame, found: Nearest): void {
+    const { x, y } = frame;
+    const prices = this.#prices();
+    const log = y.type === "log";
+    const candle = this.#candle;
+    const half = (this.#categorical ? Math.abs(x.bandwidth ?? 0) : this.#slots!.width(x)) / 2;
+    const lit = frame.highlighted?.(this.table);
+    for (const s of series) {
+      const places = s.places?.x;
+      /** Considers position k; returns how far from the pointer its candle's edge stands along x. */
+      const consider = (k: number): number => {
+        const row = rowOf(s, k);
+        const at = s.x[row]!;
+        if ((this.#categorical && at < 0) || x.breaks?.hides(at)) return 0;
+        const off = Math.max(0, Math.abs(x.map(places ? places.at(at) : at) - px) - half);
+        if (!Number.isFinite(off) || !candleOf(prices, row, log, candle)) return 0;
+        const [high, low] = [y.map(candle[1]!), y.map(candle[2]!)];
+        const distance = Math.hypot(
+          off,
+          Math.max(0, Math.min(high, low) - py, py - Math.max(high, low)),
+        );
+        found.take({ series: s, position: k, distance }, this, lit?.[row]);
+        return off;
+      };
+      if (!s.sorted || this.#categorical) {
+        for (let k = 0; k < s.length; k++) consider(k);
+        continue;
+      }
+      const after = lowerPosition(s, x.invert(px));
+      for (let k = after - 1; k >= 0 && consider(k) <= found.limit; k--);
+      for (let k = after; k < s.length && consider(k) <= found.limit; k++);
     }
   }
 

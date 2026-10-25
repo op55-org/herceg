@@ -285,8 +285,8 @@ with Shift still zoom and pan). Marks over tables without a binding neither writ
   holding when categories are renumbered. A mark's several y fields are its
   series: a row is in when any shown one is. Series hidden through the
   legend leave the condition, a point mark's row view adds its filter, and
-  facet panels with x scales of their own that the brush leaves out leave
-  their rows out. Each table gets its own condition; nothing joins tables.
+  panels the selection does not belong to (whose scales are not its
+  owner's) leave their rows out. Each table gets its own condition; nothing joins tables.
   A point mark over a view restricted to a row set selects the view's rows
   in the brush, as rows.
 - **Stacks** are drawn at their tops, not their values: a brush along a
@@ -298,7 +298,8 @@ with Shift still zoom and pan). Marks over tables without a binding neither writ
   it is drawn (dodged, jittered, or in a legend group's slot). Rows not
   drawn (a point missing a value it encodes, a time inside an axis break)
   are not selected.
-- **Clicks** select the row of the point, bar, or rug tick under the pointer
+- **Clicks** select the row of the point, bar, rug tick, or candle (anywhere
+  from its low to its high, as wide as its body) under the pointer
   (within a few pixels of a point's own glyph), the rows a histogram bin
   counts (inside its bar as drawn, dodged or horizontal; from its left edge,
   or a cumulative bin's first, up to its right one, the last bin's
@@ -319,7 +320,16 @@ chart's own brush go (what it wrote stays in the channel). Histograms are
 brushed along their bins and box plots and violins along their categories,
 and lassos select no rows of them yet: the chart refuses those gestures in
 its bindings (and a selection set through `select` selects none of their
-rows). Tables a derived table summarizes (`derive(...).aggregate(...)`) are
+rows). A contour's brushes select the rows of its grid in their ranges,
+along x, y, or both; clicks and lassos select none of them, and its bands
+draw no highlight, so a binding of a table only contours read takes
+`events: ["brush"]` and `effect: "none"` (the chart refuses the others,
+saying so). Custom marks of x and y fields select rows as points do, and
+draw them as they are (`effect: "none"` where they alone read the table).
+Annotations of a table and a dendrogram's merges select no rows yet: a
+binding of a table only they read is refused; bind the table of a mark that
+draws its rows as data, such as points, or of the heatmap a dendrogram
+orders. Tables a derived table summarizes (`derive(...).aggregate(...)`) are
 not linked to it: a chart of the aggregates binds the derived table's own
 store, whose rows are its groups.
 
@@ -365,7 +375,7 @@ its place, on the same scales, bins, slots, and stacks:
   20,000 holding selected rows, show instead each cell holding any selected
   row in its color.
 - **Contours** draw a field sampled on a grid, not rows: their lines and
-  bands stay as they are (and gestures over them select nothing).
+  bands stay as they are (brushes still select the grid's rows).
 
 Tooltips and the keyboard say how much of a point is selected: "10 – 20: 42;
 12 of 42 rows selected" for a bin (with a `weight`, ", weight 30 of 80"), "…;
@@ -415,7 +425,8 @@ link's along its middle, the rest of each dimmed (treemap groups and Sankey
 nodes are dimmed when none of their rows is selected). Their tooltips say how
 much: "40 (40%); 1 of 2 rows selected, revenue 30 of 40". Gauges, radars, and
 3D charts cannot select rows yet and refuse a binding, as charts with one of
-them in a panel of its own do.
+them in a panel of its own do: select the rows in a chart of the same table
+along x and y, linked by the store.
 
 ### Row groups
 
@@ -864,7 +875,9 @@ are found as the line is drawn there, between logs.
 
 `series` partitions rows, `color` styles them, `dodge` places series side
 by side, and `stack` piles them. They mean the same on every mark that takes
-them; only the default for `dodge` is the mark's own.
+them; only the default for `dodge` is the mark's own. The pointer reads the
+bar it is in (a stack's segment, not the one whose top is nearest), and off
+the bars, the bar whose end is nearest.
 
 | Option | Means | Default |
 | --- | --- | --- |
@@ -966,15 +979,20 @@ bar(sales, { x: "region", y: "q1", labels: { content: ["n = ", { value: true }] 
 Lines and areas label each series they draw with `labels`: at its
 `"first"` or `"last"` observation drawn, or where it enters or leaves the
 view (`"visible-start"`, `"visible-end"`), in the series' color, before
-its start or after its end; `place: { outside: true }` puts them beside
-the axis, in room the chart keeps (`reserve: false` keeps none). A band
+its start or after its end, inside the plot (a label that would cross its
+edge, as one where a line enters the view would, moves in over the line,
+and one wider than the plot is shortened with an ellipsis, or left out
+where nothing but the ellipsis fits); `place: { outside: true }` puts
+them beside the axis, in room the chart keeps (`reserve: false` keeps
+none). A band
 names the edge they follow (`edge: "y2"`). Fields are read at the
 observation the label stands at: where the line enters or leaves the view,
 the one it arrives at there as drawn (on a step's hold, the one whose
 value it holds). Where the view cuts a stack split by a `series` field,
 which row stands there is not known: labels at the view's edges write
 series and values, not fields. Text follows another
-mark's series with `from`, drawn where it is listed among the marks:
+mark's series with `from`, drawn where it is listed among the marks, its
+label placed as series' labels are (`place`: `outside`, `reserve`, `offset`):
 
 ```ts
 line(services, {
@@ -1195,8 +1213,8 @@ point(cars, { x: "weight", y: "mpg", symbol: "origin" }); // a shape per origin
 point(requests, { x: "region", y: "latency" }); // a category x places points in its bands
 point(tips, { x: "day", y: "tip", series: "sex", dodge: true, jitter: { width: 0.5 } }); // strips
 point(tips, { x: "day", y: "tip", swarm: true }); // a beeswarm: packed without overlap
-errorBar(stats, { x: "group", y1: "low", y2: "high" }); // y, x1, x2 for horizontal ones
-errorBar(stats, { x: "group", y: "mean", yError: "se" }); // mean ± se
+errorbar(stats, { x: "group", y1: "low", y2: "high" }); // y, x1, x2 for horizontal ones
+errorbar(stats, { x: "group", y: "mean", yError: "se" }); // mean ± se
 
 const load = table({ hour: time(hours), host: hostNames, cpu: cpuValues });
 heatmap(load, { x: "hour", y: "host", color: "cpu" }); // cells along a time axis, a row per host
@@ -1267,7 +1285,7 @@ takes about 2 ms, 100,000 about 21 ms (Node, Apple M6).
 
 ```ts
 bar(stats, { x: "day", y: "mean", series: "sex" });
-errorBar(stats, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true });
+errorbar(stats, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true });
 ```
 
 Marks whose series stand for the same values (see Colors and channels)
@@ -1689,7 +1707,7 @@ their density fallback line with every `inner` setting. If the density cannot
 be computed, `"box"` still draws its statistics, `"quartiles"` spans the
 available width at each statistic, and `"none"` draws no shape.
 
-Marks are drawn in array order; rules and text always draw above other marks.
+Marks are drawn in array order, `zIndex` over that (see Paint order).
 
 ### Dendrograms
 
@@ -1724,14 +1742,19 @@ unchanged. Leaves are placed at their categories' band centers; merges
 at the middle of their two children. A missing leaf omits its merge and
 all ancestors, while surviving branches stay in place.
 
-Heights run linearly from the leaves' edge to the opposite plot edge at
-the largest height, independently of axis domains and zoom. When every
-height is zero, links stay at the leaves' edge. Hide the height-direction
-axis (`show: false`), since its ticks do not describe these plot-relative
-heights. `stroke` defaults to the theme's muted text and `strokeWidth` to
-1 CSS pixel. `label` names the accessible summary, which reports leaves,
+Heights are values on the axis across the leaves' (y for leaves along
+x), which runs from zero to the largest height, so its ticks read them and
+views move the links as they move other marks. Links grow away from the
+leaves' edge: with `side: "top"` or `"right"`, that axis' automatic domain
+descends, from the largest height to zero, for every mark on it. A domain
+the axis sets runs as given (`y: { domain: [0, 4] }` with `side: "top"`
+grows links toward the leaves). When every height is zero, links stay at
+the leaves' edge. Across another mark's categories (a heatmap's, in the
+same panel), heights run from the leaves' edge to the opposite plot edge
+at the largest height instead. `stroke` defaults to the theme's muted
+text and `strokeWidth` to 1 CSS pixel. `label` names the accessible summary, which reports leaves,
 merges, and the merge-height range. Dendrograms have no series, legend
-entry, tooltip, keyboard stops, or value animation. With facets they
+entry, tooltip, or keyboard stops, and refuse value animation. With facets they
 require `facet: "repeat"`, since splitting linkage rows breaks cluster ids.
 
 For a clustered heatmap, use four subplots with shared column and row
@@ -1812,24 +1835,25 @@ the notes), — not yet (refused with an error), · not applicable.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | line, area, bar (including normalized stacks and area stream offsets) | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ |
 | point | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| histogram, boxplot, boxen, violin | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ◐ | · | — |
+| histogram | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ◐ | · | ✓ |
+| boxplot, boxen, violin | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ◐ | · | — |
 | rug | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| errorbar, candlestick | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✓ | ✓ | — |
-| dendrogram | ◐ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | · | · | · | · | · | · | · | — |
-| heatmap | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | ✓ | — |
-| 2D histogram | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | · | — |
-| contour | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | · | · | · | · | · | ✓ | · | — |
-| rule, region, text | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | · | · | · | ◐ | · | ◐ |
-| custom | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ◐ | · | ✓ | ◐ | ◐ | — |
-| pie | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | · | ✓ |
-| treemap, sunburst | ✓ | ✓ | ✓ | · | · | drilling | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | · | — |
-| radar | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | ✓ | · | ✓ | ✓ | · | — |
-| funnel, sankey | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | · | · | · | ✓ | · | — |
-| gauge | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | · | · | · | ✓ | · | — |
+| errorbar, candlestick | ✓ | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✓ | ✓ | ✓ |
+| dendrogram | ◐ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | — | · | · | · | · | · | · | — |
+| heatmap | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | ✓ | ✓ |
+| 2D histogram | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | ✓ | · | · | · | ✓ | · | ✓ |
+| contour | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ◐ | · | · | · | · | ✓ | · | — |
+| rule, region, text | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | · | · | · | · | ◐ | · | ✓ |
+| custom | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ◐ | · | ✓ | ◐ | ◐ | — |
+| pie | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | ✓ |
+| treemap, sunburst | ✓ | ✓ | ✓ | · | · | drilling | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | — |
+| radar | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | ✓ | · | ✓ | ✓ | ✓ | — |
+| funnel, sankey | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | · | · | · | ✓ | ◐ | — |
+| gauge | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | · | · | · | ✓ | ✓ | ✓ |
 | graph (force, circular, layered) | ✓ | ✓ | ✓ | · | · | ✓ | ◐ | — | ✓ | ✓ | ◐ | · | ✓ | ✓ | — | — |
 | geoshape, geopoint | ✓ | ✓ | ✓ | · | · | ✓ | ◐ | — | ✓ | ✓ | ✓ | ◐ | ✓ | ✓ | ✓ | — |
 | point3d, line3d | — | ✓ | ✓ | · | · | turning | — | — | — | — | ✓ | ◐ | ✓ | ✓ | ✓ | — |
-| surface | — | ✓ | ✓ | · | · | turning | — | — | — | — | · | · | · | ✓ | · | — |
+| surface | — | ✓ | ✓ | · | · | turning | — | — | — | — | · | · | · | ✓ | ✓ | — |
 
 - Insets: every mark draws in an inset (`inset(...)` in `herceg/layout`,
   `panel.inset(...)` in Python), over a parent drawing any mark. The
@@ -1843,7 +1867,9 @@ the notes), — not yet (refused with an error), · not applicable.
 - Web pages: every mark, facet, subplot, and inset travels in a payload and
   mounts as a page fragment (`herceg/web`, Python's `herceg.web`); its DOM
   events report what the Zoom and pan, Brushes, and Tooltip columns say each
-  mark does (`herceg:viewport`, `herceg:select`, `herceg:click`).
+  mark does (`herceg:viewport`, `herceg:select`, `herceg:click`), and edges,
+  row selections, and legend toggles (`herceg:edge`, `herceg:rowselection`,
+  `herceg:visibility`).
 - Lines, rules, and custom shapes support all four dash strings on SVG,
   Canvas (for data marks), and static SVG/PDF export.
 - Series from color: a category `color` names the series, as `series`
@@ -1900,8 +1926,13 @@ the notes), — not yet (refused with an error), · not applicable.
   marks highlight the selected rows against the whole: a bin's selected
   part of its bar, the selected values' own box or density over the whole
   one, a cell's selected share as a square in it. Contours' regions and
-  lines are not rows: gestures over them select nothing, and a selection
-  leaves them as they are. Maps, pies, funnels, treemaps, sunbursts, Sankey
+  lines are not rows: brushes select the grid's rows in their ranges, clicks
+  and lassos none, and a selection leaves them as they are. Custom marks of
+  x and y fields select rows as points do and draw them unchanged.
+  Annotations of a table and dendrograms select no rows yet, refusing a
+  binding of a table only they read; a binding that would do nothing
+  (clicks on contours alone, a highlight nothing draws) is refused,
+  naming what to give. Maps, pies, funnels, treemaps, sunbursts, Sankey
   diagrams, and networks take a binding too, in a chart of their own or in
   panels: clicks select a region's or point's row, a slice's or stage's
   rows, a tree node's rows (its own and those under it), a Sankey link's
@@ -1913,9 +1944,9 @@ the notes), — not yet (refused with an error), · not applicable.
   ranges and outlines in data values (a map's lasso, in its plane). Exports
   (`toSVG`, `toPNG`, `renderToSVG`, `renderToPDF`, specs) draw the
   highlight as the chart shows it.
-- Zoom, pan, and brushes work on number and time axes; subplots zoom and
-  brush along x only, and facets with y scales of their own, on either
-  side, do not zoom along y. `interaction.limits` bounds the views of
+- Zoom, pan, and brushes work on number and time axes, in every panel,
+  facet, layout cell, and inset, on the scales of the panel they start in.
+  `interaction.limits` bounds the views of
   axes (x, y, and yRight); charts without axes refuse it, and refuse `pan`
   too, except on maps' and networks' planes. Maps and networks zoom and pan their plane both ways
   (`interaction.zoom` true or "xy") and take a "lasso" brush; treemaps and
@@ -1938,8 +1969,9 @@ the notes), — not yet (refused with an error), · not applicable.
 - Points over a row view and custom marks without series repeat in every
   facet panel instead of splitting.
 - Dendrograms repeat in every facet panel (`facet: "repeat"`); they have
-  no inspection of their own, and their heights stay fixed within the plot
-  as it zooms.
+  no inspection of their own, and over another mark's categories (a
+  heatmap's in the same panel) their heights stay fixed within the plot as
+  it zooms.
 - Heatmaps zoom and pan their number and time axes; banded axes (category
   fields, or `xBanded` / `yBanded`) do not zoom, as for other marks. 2D
   histograms and contours place cells and regions on number and time axes,
@@ -1956,15 +1988,27 @@ the notes), — not yet (refused with an error), · not applicable.
 - Box plots, boxen plots, and violins on log axes have no keyboard stop for groups whose
   median is not positive; annotations are read in the chart's summary
   rather than one by one (a facet panel's own as the keyboard arrives
-  there); custom marks are read through their series.
+  there); custom marks are read through their series. On a category axis
+  the keys step through bars, boxes, and points band by band, whatever
+  their rows' order, and through every series of a mark whose series are
+  the axis' categories (`x: "kind", series: "kind"`) side by side. Charts
+  of items alone (pies, trees, maps, networks, 3D charts) refuse tooltips
+  along an axis (`mode: "nearest-x"` or `"nearest-y"`).
 - Tooltip fields (see [Tooltips](#tooltips)) show more of the row a point
-  or item is; marks whose points summarize rows (bins, groups, slices,
-  nodes, surface samples) have no one row to show, custom marks take them
-  with series, and network nodes do not yet.
-- Value animation moves unstacked, unlabeled bars, points, lines and areas
-  along x whose rows stay and that no labels follow, rules, and pie slices (see
-  [Animation](#animation)), in charts of one panel; lines and areas along
-  y show their new values at once.
+  or item is: a radar's value, a gauge's needle, a surface's grid point, and
+  slices, funnel stages, tree nodes, and Sankey links that are one row
+  (those summing several show none). Histograms, box plots, boxen marks,
+  violins, and contours summarize rows and refuse fields, custom marks take
+  them with series, and networks do not yet.
+- Value animation moves bars, histograms' bars, points, lines along x or y
+  and areas along x whose rows stay and that no labels follow, rules, error
+  bars, candlesticks, regions, text, heatmaps' and 2D histograms' cells,
+  pie slices, and gauges (see [Animation](#animation)), in every panel;
+  areas along y show their new values at once, and box plots, boxen plots,
+  violins, rugs, contours, dendrograms, custom marks, and layout marks
+  other than pies and gauges refuse it. Views move gradually in charts of
+  one panel, a map's or network's plane included; drilling into a treemap
+  or sunburst shows the new layout at once.
 - Every mark draws in SVG, Canvas, static SVG, and PDF; large point series
   and 3D charts also draw with WebGL. Server snapshots (`renderToSnapshot`)
   draw what static SVG draws, through the browser runtime's own SVG layer,
@@ -2743,12 +2787,12 @@ marks are on it, labels and titles it beside itself, and takes its own
 settings from its `yRight` over the chart's (panels sharing a right scale
 must agree on its type, domain, `zero`, `nice`, ticks, and format, as for
 y); a subplot whose marks are all on the right has no left axis, and its
-grid lines follow the right one. Zooming along y moves both axes through
-the pixels it zooms, so it needs every panel to share both scales: facets
-whose right scales are their own cannot zoom along y, and `setViewport` takes
-a `yRight` range only when the right scale is shared (subplots take no y
-ranges). Brushes report y ranges in the left axis' values. `getPanels()`
-gives each panel's right axis with its `group`.
+grid lines follow the right one. Zooming along y moves both axes of the
+panel it starts in through the pixels it zooms, and the panels sharing
+either scale follow; `setViewport({ yRight }, { panel })` names the panel
+whose right scale shows the range (without a panel, the right scale every
+panel shares). Brushes report y ranges in the left axis' values.
+`getPanels()` gives each panel's right axis with its `instance`.
 
 ### Financial charts
 
@@ -2892,13 +2936,15 @@ and over the y scale the panel has: panels that share y (a facet's default)
 stay comparable in the strip, while panels with y scales of their own (a
 price panel over a volume panel) each fill it on their own scale, the right
 axis apart from the left. A mark drawn whole in several panels sharing a y
-scale (`facet: "repeat"`, `panel: "*"`) is drawn once. The panels must
-share x: an `x.scope` other than `"chart"` is refused, as one window shows
-one x range. Wheel zoom and panning in any panel move the window, and its
-changes are one `viewport` event each (without `panels`, as for any change
-to a shared x), synced with other charts by x value whatever their panels.
-For assistive technology, the sliders say they move the x range of every
-panel.
+scale (`facet: "repeat"`, `panel: "*"`) is drawn once. One window shows
+one x range: the panels share x, or `panel` names the facet panel or
+subplot whose x it moves (`rangeNavigator({ panel: "price" })`), with the
+panels sharing that scale; then it draws their marks only, and an
+`x.scope` of panels' own is allowed. Without `panel`, an `x.scope` other
+than `"chart"` is refused. Wheel zoom and panning in those panels move the
+window, and its changes are one `viewport` event each, synced with other
+charts as any change of that scale is. For assistive technology, the
+sliders say they move the x range of the panels they move.
 
 Dense bars are reduced over every CSS pixel column their placed rectangles
 intersect, including wide bars and clipped edges. Each column draws the
@@ -2934,8 +2980,8 @@ Escape takes a drag back to where it started, or shows all of x.
 The sliders' values read as the x axis' tooltips write them, and where the
 window ends up is announced politely. The chart's text alternative says
 that the navigator shows the whole x range and gives the range in view,
-formatted as those tooltips are; with several panels, it says that the
-navigator controls every panel's x range. It refreshes at most once a
+formatted as those tooltips are; with several panels, it says which
+panels' x range the navigator controls. It refreshes at most once a
 second as the view changes, outside the live regions. Static SVG and PDF
 include that sentence in their description and alternative text. SVG,
 PDF, and PNG show the strip and the window, without the sliders. The
@@ -3014,12 +3060,12 @@ under the lowest panel of each column, or under every panel when a column's
 panels have different x scales, with the x title once under each scale's
 lowest labels; y labels go
 beside the first panel of each row, or beside every panel when a row's
-panels differ. Charts whose panels have
-y scales of their own cannot zoom along y or take y ranges in
-`setViewport` yet. Pointer, brush, and zoom work in any panel and act on
-its x scale; the arrow keys step through a panel and Up and Down move
-between its series and on to the next panel. A range navigator goes under
-all the panels when they share x (see [Range navigator](#range-navigator)). Stacked bars and areas stack within each
+panels differ. Pointer, brush, and zoom work in any panel and act on its
+scales, the x and y it draws with, which the panels sharing them follow;
+the arrow keys step through a panel and Up and Down move between its
+series and on to the next panel. A range navigator goes under all the
+panels and moves the x they share, or with `panel` a panel's own (see
+[Range navigator](#range-navigator)). Stacked bars and areas stack within each
 panel (areas of a series field on the x positions of that panel's rows), and each panel's heatmap cell shows the last of that panel's rows
 with a value there; a heatmap's colors follow one scale in every panel,
 over all its table's values. Histograms count, and box plots and violins
@@ -3035,24 +3081,27 @@ axis](#a-second-y-axis)). A chart too small for its
 panels (under 20 pixels a side) throws an error naming the grid; give it
 more room or fewer columns.
 
-With x scales of their own, each scale fits what its panels draw within its
-own range, and zooms, pans, and resets by itself: the wheel and dragging act
-on the panel under the pointer, double-clicking a panel resets its scale,
-and double-clicking outside the panels resets every one. A shared y scale
-still fits what every panel shows of its own x range, so zooming one panel
-can change the y of the others. `setViewport([from, to], { panel })` names
-the panel whose scale shows the range (null without a panel resets every
-scale), and `viewport` events carry `panels`, the keys of the panels whose
-range `x` is, one event per scale. A selection belongs to the panels
-sharing the x scale of the panel it was made in: it is drawn only there,
-`select(range, { panel })` needs that panel, and `select` events and
-`chart.selectionPanels` name them; a selection whose panels go (their facet
-values leave the data) is cleared. Synced charts share cursors with such a
-chart, drawn in every panel whose scale holds the value, but not viewports
-or selections, which belong to some of its panels; sync only charts whose x
-values mean the same thing. A scale's zoom is kept while its panels stay the
-same: when they change (a new facet value wraps the panels anew), it fits
-its data again.
+With scales of their own (x, y, or the right y), each fits what its panels
+draw within its own range, and zooms, pans, and resets by itself: the wheel
+and dragging act on the panel under the pointer, double-clicking a panel
+resets its scales, and double-clicking outside the panels resets every one.
+A shared y scale still fits what every panel shows of its own x range, so
+zooming one panel's x can change the y of the others.
+`setViewport(view, { panel })` names the panel whose scales show the
+ranges; without a panel it sets the scales every panel shares and refuses
+ranges along scales panels have of their own (null without a panel resets
+every scale). A `viewport` event lists the scale instances a change moved
+and every panel drawing them. A selection belongs to the scale instances
+its brush ran along (`select` events' `owner`, `chart.selectionOwner`): it
+is drawn in their panels, `select(range, { panel })` names the panel it is
+made in, and a selection whose panels go (their facet values leave the
+data) is cleared. Synced charts share cursors, views, and selections with
+such a chart at each channel's endpoint: the scale instance of the panel
+the channel names (`sync: { viewport: { group, panel } }`), else the one
+every panel shares (see Syncing charts); sync only charts whose values mean
+the same thing. A scale's zoom is kept while its panels stay the same: when
+they change (a new facet value wraps the panels anew), it fits its data
+again, and the `viewport` event reports it fitted.
 
 A category axis that panels do not share holds only the categories of the
 rows its panels draw (for box plots and violins, of the rows with a value),
@@ -3066,10 +3115,12 @@ empty axis. Bars, box plots, and violins grouped by series keep a slot per
 series of the mark in every category, whichever series a panel has, and
 stacks, split into panels first, never reach across them. A selection on such an axis is cleared when
 its panels' categories change, since its band indices would then name other
-categories (the axis' `group` changes with them), and the keyboard carries
+categories (the axis' `instance` changes with them), and the keyboard carries
 its cursor to another scale by its place across the plot (into a heatmap,
-at its top left cell). Charts with categories of their own cannot be synced
-or brushed along a y axis of categories.
+at its top left cell). Synced selections and cursors carry categories by
+name, read on the channel's panel (see Syncing charts), so panels with
+categories of their own sync too; category axes do not zoom, so their views
+never sync.
 
 ### Subplots
 
@@ -3105,7 +3156,7 @@ Each mark names the panel it draws in with `panel`, or `"*"` for all of
 them, which a chart whose layout marks (a pie) have panels to themselves
 refuses; in a chart with panels, a mark without one is an error rather
 than drawn everywhere by accident. A panel is placed with its settings
-(`panel({ id, title, x, y, yRight, style, camera })`), whose `id` may be
+(`panel({ id, title, x, y, yRight, style, camera, interaction })`), whose `id` may be
 left out (it is then `"panel-1"`, `"panel-2"`, ... by its place among the
 panels declared; give ids where something names the panel: marks, scopes,
 legends, events), or by its id among a list: `panels([{ id: "a" }, { id:
@@ -3172,11 +3223,18 @@ panel titles its own axes. In a spec, the layout is the chart's `layout`:
 Marks keep their place in the chart's list as their identity, so colors,
 the legend, and hidden series do not depend on the panel a mark draws in.
 Inspections report the `panel` id. A panel's `yRight` sets its right axis
-(see [A second y axis](#a-second-y-axis)), and zooming and brushing act on
-x only, each panel's x scale apart, or the panels sharing one together. A
-range navigator goes under all the panels and moves the x range they share
-(see [Range navigator](#range-navigator)); with one, x is the chart's by
-default.
+(see [A second y axis](#a-second-y-axis)). Zooming, panning, brushing,
+tooltips, and the keyboard act in the panel they start in, on its scales,
+and the panels sharing a scale follow. A panel's `interaction` takes the
+place of the chart's settings there, one by one, and its `limits` scale by
+scale: `panel({ id: "detail", interaction: { zoom: "xy", brush: false } })`
+zooms both ways in that subplot while the others brush (panels sharing a
+scale must agree on its limits); a map's, network's, or 3D subplot zooms,
+lassos, drags nodes, or turns as its own settings say. Sync channels stay
+the chart's. A range navigator goes under all the panels and moves the x
+range they share, or with `panel` that of one subplot and the panels
+sharing its x (see [Range navigator](#range-navigator)); with one, x is the
+chart's by default.
 
 ### Insets
 
@@ -3443,11 +3501,11 @@ is internal, and charts take only marks the mark functions make.
 | `yRight` | The scale "yRight" and its axis on the right, for marks with `axis: "right"`, with the same options as `y` (its `scope` as `y`'s unless given). |
 | `facet` | `facet(field, { columns? })`: a panel per value of a category field, wrapped; or `facet({ row?, column? })`: a grid by two fields (see Small multiples). |
 | `panels` | `panels([{ id, title?, x?, y?, style? }, ...], layout?)` or `panels(layout)`, with the layout helpers of `herceg/layout`: subplots whose marks name them in `panel` (see Subplots and Insets); a subplot's `title` is a string or `{ text, style? }`, and its `style` sets its own roles (`plot`, `panelTitle`, and the axes' roles). |
-| `navigator` | `rangeNavigator({ height?, marks? })`: a strip under the plot (under every panel, with facets or subplots) over the whole x axis, whose window shows and moves the x range in view (see Range navigator). |
+| `navigator` | `rangeNavigator({ height?, marks?, panel? })`: a strip under the plot (under every panel, with facets or subplots) over the whole x axis, whose window shows and moves the x range in view: the one every panel shares, or `panel`'s (see Range navigator). |
 | `legend` | Shown by default for two or more series; `true` or an object shows it for one, `false` hides it. Entries toggle series. `place` puts it on a side or inside a plot (see Titles, legends, and padding); `columns`, `rows`, `order`, `title`, `entries`, and `swatches` lay it out (see Legends); `style` sets its `legendLabel`, `legendTitle`, and `tickLabel` styles. |
 | `scales` | `{ x?, y?, yRight? }`: the position scales' settings (`type`, `domain`, `nice`, `zero`, `scope`, `tooltipFormat`) over the short forms' (see Scales and guides). |
 | `guides` | `[axis(...), legend(...), colorbar(...)]`: axes beyond or in place of the automatic ones, legends of the scales they name, and colorbars (see Scales and guides). |
-| `tooltip` | `true` (default), `false`, or `{ mode?: "nearest-x" \| "nearest-y" \| "nearest", axisLabels?: true }`; `axisLabels` labels the crosshair on the axes. Marks take `tooltip: { fields }` for data of their rows (see Tooltips). |
+| `tooltip` | `true` (default), `false`, or `{ mode?: "nearest-x" \| "nearest-y" \| "nearest", axisLabels?: true }`; `axisLabels` labels the crosshair on the axes. Charts whose every panel reads the item under the pointer (pies, trees, maps, networks, 3D charts, ...) refuse `"nearest-x"` and `"nearest-y"`; left out, the mode suits the marks. Marks take `tooltip: { fields }` for data of their rows (see Tooltips). |
 | `renderTooltip` | JavaScript only: the tooltip's content of your own, text or a node, in the built-in box (see Tooltips). |
 | `interaction` | What dragging, the wheel, touch, and keys do: the presets `pan`, `zoom`, and `brush` (`"x"`, `"y"`, `"xy"`, and for brushes `"lasso"`), `rotate` and `drag` for 3D charts and networks, `bindings` of gestures to actions, `limits` on the views, and `sync` with other charts (see Panning, zooming, and brushing). Without a modifier, the vertical wheel scrolls the page; Ctrl or ⌘ with it, or a pinch, zooms. |
 | `rowSelection` | `rowSelection({ store, channel, events?, effect? }, ...)`: channels of selection stores, one per table, that brushes, lassos, and clicks write rows to and the chart highlights (see Selected rows). |
@@ -3474,14 +3532,14 @@ those values should use the same precision.
 The returned `Chart` has `root` (its element), `update(options)`,
 `setViewport(view | [from, to] | null, { panel? })` and `getViewport({ panel?
 })`, `select(selection | [from, to] | null, { panel? })` (a pair is shorthand
-for an x range), `selection` and `selectionPanels` (see Small multiples for
+for an x range), `selection` and `selectionOwner` (see Small multiples for
 `panel`), `getCamera({ panel? })` and `setCamera(camera | null, { panel? })`
 (3D charts and subplots),
 `getDrillRoot({ panel? })` and `setDrillRoot(node | null, { panel? })`
 (treemaps and sunbursts), `getItemPositions({ panel? })` and
 `setItemPosition(key, position | null, { panel? })` (networks), `getPanels()`,
 `toPixel`, `fromPixel`, `formatValue`, and `inspect` (see Panels and pixels),
-`getLegend()`, `getHiddenKeys({ panel? })`, `setHiddenKeys(keys)`, and
+`getLegend()`, `getHiddenKeys({ panel? })`, `setHiddenKeys(keys, { panels? })`, and
 `setVisibility(keys, visible, { panel? })` (see Hiding series and Panels'
 legends), `on(event, listener)`,
 `render()`, `toSVG(sizing?)` and `toPNG({ dpi }?)` (see Export), `destroy()`, `showCursor(position)` and `hideCursor()` (see Syncing charts), `ready`
@@ -3504,10 +3562,14 @@ zooms y alone; `{ x: null }` resets x) and keeps the others; a pair is an x
 range, and null resets every axis. Its changes are one change of view: one
 animation and one `viewport` event. `getViewport()` returns all three, so a
 saved view restores with `chart.setViewport(saved)`. In charts whose panels
-have x scales of their own, x ranges need the `panel` whose scale shows them;
-y ranges are the chart's. Code written for the earlier API reads the event's
-`x` for its `domain`, and calls `setViewport({ y })` for `setYViewport(y)`,
-giving `yRight` too where the right axis should move with it.
+have scales of their own, ranges along them need the `panel` whose scales
+show them; `getViewport({ panel })` returns that panel's whole view, and
+`getViewport()` the views of the scales every panel shares (null along the
+others). What it refuses is a `ChartError` whose `path` is the scale (`"x"`,
+`"y"`, `"yRight"`) or `"panel"`, with the `panel` named: an unknown panel or
+an axis a panel or the chart lacks (`"unknown-reference"`), a scale panels
+have of their own without a panel (`"invalid-option"`), and a range on a
+category axis (`"unsupported"`).
 
 `update` takes a `ChartUpdate`: each option given replaces the chart's,
 nested options (an axis, `interaction`, `tooltip`) whole, so pass every
@@ -3517,8 +3579,10 @@ whole configuration: a prop left out, or `undefined`, takes its default.
 
 `selection` is a `Selection`, `{ x, y, lasso }`, or null, all in data values:
 the selected x and y ranges (null along an axis the brush leaves alone; a
-lasso's extent) and a lasso's outline as `[x, y]` pairs. Code written when
-`selection` was the x range reads `chart.selection?.x`.
+lasso's extent) and a lasso's outline as `[x, y]` pairs. `selectionOwner`
+is what it belongs to: the scale instances it is on (an x brush's x, a y
+brush's y, a rectangle's or lasso's both) and their panels, or a lasso's
+plane.
 
 ### When a chart cannot draw
 
@@ -3740,9 +3804,9 @@ createChart(d, { marks: byHour, interaction: { sync: { cursor: { group: "hosts",
 
 | Channel | Values | What it shares |
 | --- | --- | --- |
-| `cursor` | a group's name, or `{ group, scale?: "x" \| "y", snap?, tooltip? }` | The pointer's or keyboard cursor's position along `scale` (x by default), shown in the other charts as a crosshair and the points there. `snap` and `tooltip` say how this chart shows the cursors it receives (below). |
-| `viewport` | a group's name, or `{ group, scale?: "x" \| "y" }` | The range in view along `scale` |
-| `selection` | a group's name, or `{ group, scale?: "x" \| "y" \| "xy" }` | Brushed ranges: along x or y alone, or (`"xy"`, the default) the whole selection, rectangles and lassos too |
+| `cursor` | a group's name, or `{ group, scale?: "x" \| "y", panel?, snap?, tooltip? }` | The pointer's or keyboard cursor's position along `scale` (x by default), shown in the other charts as a crosshair and the points there. A chart takes part along the axis its data is placed on (y for horizontal bars, x otherwise), whatever it draws: where no point is under the cursor (a heatmap's gap, rules, text), the crosshair crosses the plot alone. `snap` and `tooltip` say how this chart shows the cursors it receives (below). |
+| `viewport` | a group's name, or `{ group, scale?: "x" \| "y", panel? }` | The range in view along `scale` |
+| `selection` | a group's name, or `{ group, scale?: "x" \| "y" \| "xy", panel? }` | Brushed ranges: along x or y alone, or (`"xy"`, the default) the whole selection, rectangles and lassos too |
 | `panels` | `true`, `false`, or `{ snap?, tooltip? }` | The cursor across the chart's own panels (facets, subplots): where the pointer or keyboard is in one, the others show a crosshair and their points at the same x. On by default for panels sharing an x scale; `true` or an object also for panels with x scales of their own (the value read on each one's scale); `false` turns it off. |
 
 How a chart shows a cursor that is not its pointer's (one it receives, one
@@ -3766,6 +3830,22 @@ createChart(month, { marks: [line(hours, { x: "at", y: "load" })], interaction: 
 Hovering 10:37 in the first chart shows the second's 10:00 reading, with
 its tooltip; zooming either leaves the other's view as it is. A time out of
 a chart's view, or in a break its axis leaves out, shows nothing there.
+
+In a chart of several panels, a channel shares the scale every panel shares
+along its `scale`, or with `panel` that panel's (a facet value or a subplot
+id): what the chart shares is that scale's, what it receives moves or
+selects there, and a cursor it receives shows in the panels drawing that
+scale. A chart whose panels have scales of their own along a channel, and
+which names no panel, shares no views or selections on it; a cursor, a value
+along the axis rather than a view, goes from whichever panel the pointer is
+in and shows in every panel (name a panel to keep it to that panel's scale).
+Charts on one page receive what another shares before its call
+(`setViewport`, `select`) returns.
+
+```ts
+// The overview's x follows the detail subplot's.
+createChart(a, { marks, panels, interaction: { sync: { viewport: { group: "ops", panel: "detail" } } } });
+```
 
 Values travel as data: numbers, times as epoch ms, and categories by name,
 so charts with different categories, or the same ones in another order,
@@ -3815,8 +3895,12 @@ row in order. Fields are checked against the mark's table at compile time
 and when the mark is made; without a format, numbers are written as the
 chart's other numbers, times as the x axis writes them when it is a time
 axis (else as dates and times), and categories as they are; missing values
-show as "–". Marks whose points summarize rows (histogram bins, box plots,
-violins, pie slices, tree nodes, networks, Sankey diagrams) take no fields.
+show as "–". Pies, funnels, treemaps, sunbursts, and Sankey diagrams take
+fields too, shown for an item that is one row (a slice of one row, a leaf,
+a link) and left out of those summing several; radars show those of the row
+each value is, gauges of the row the needle shows, and surfaces of a grid
+point's row. Marks whose points summarize rows (histograms, box plots,
+boxen marks, violins, contours) refuse fields, and networks take none yet.
 
 ```ts
 createChart(element, {
@@ -3861,7 +3945,8 @@ createChart(element, {
 
 `animation: true`, or `{ duration }` in milliseconds (250 by default), moves
 the axes gradually to a view asked for: `setViewport` (both axes of one call
-together), zooming to a brush, and double-click reset. With `values: true`
+together, or a map's or network's plane), zooming to a brush, and
+double-click reset. With `values: true`
 too, marks move to new values when a table's values change in place or are
 replaced (`set`, `replace`, `setColumn`, `reset`), and axes whose automatic
 domains change move with them:
@@ -3881,13 +3966,17 @@ scales, so a bar or point whose value stays moves only as far as its axis
 does, and a rule moves with its axis. Log axes move, and values on them, in
 log space.
 
-- **Bars** are matched by series and position (their category, or their x
-  value), so rows may arrive in another order. Bars that appear grow from
-  their base and bars that go shrink to it; a bar whose value changes sign
-  shrinks to the baseline and grows on its other side.
+- **Bars** (stacked and labeled ones too, and histograms' by their bins)
+  are matched by series and position (their category, or their x value),
+  so rows may arrive in another order. Bars that appear grow from their
+  base and bars that go shrink to it; a bar whose value changes sign
+  shrinks to the baseline and grows on its other side; a stack's layers
+  stay on one another, and labels move with their bars, showing the new
+  values.
 - **Pie slices** are matched by category and turn to their new sizes,
   sharing their boundaries, so they always make a whole pie; slices that
-  appear open from nothing and slices that go close.
+  appear open from nothing and slices that go close. A **gauge** turns its
+  dial through the values between, writing each.
 - **Points** are matched by the row they show, so `set`, `replace`, and
   `setColumn` move each point from its row's old values to its new ones,
   with sizes, colors, and opacities they encode. A row whose point appears
@@ -3905,14 +3994,33 @@ log space.
   (`sampling: "pixel"`) and GPU points do not move.
   A point that moves outside a fixed or zoomed axis' domain shrinks rather
   than leaving the plot.
-- **Lines and areas** move when both scenes draw them through the same x
-  positions, every row a point: no level of detail (a line with more rows
-  than the plot's device pixels across reduces), missing values, or axis
-  breaks. Their points move along y, monotone curves curved through the
-  values between as the mark curves its own, and an area's edges, baseline,
-  and a stack's shared edges move together; a stack's layers move together
-  or, when one cannot, not at all. Rows at the same x after a `reset` count
-  as the same points.
+- **Lines and areas** move when both scenes draw them through the same
+  positions (x, or y for a line along y), every row a point: no level of
+  detail (a line with more rows than the plot's device pixels across
+  reduces), missing values, or axis breaks. Their points move along their
+  values' axis, monotone curves curved through the values between as the
+  mark curves its own, and an area's edges, baseline, and a stack's shared
+  edges move together; a stack's layers move together or, when one cannot,
+  not at all. Rows at the same positions after a `reset` count as the same
+  points. Areas along y show their new values at once.
+- **Error bars, candlesticks, regions, and text** (annotations' labels
+  too) move in the order they are drawn, when both scenes draw as many at
+  the same places along one axis: each moves along both axes as they do.
+- **Heatmaps' and 2D histograms' cells** fade to their new colors when
+  both scenes draw the same grid in the same place; a cell that comes or
+  goes fades in or out in its color.
+
+Box plots, boxen plots, violins, rugs, contours, dendrograms, custom marks,
+treemaps, sunbursts, funnels, radars, Sankey diagrams, networks, maps, and
+3D marks do not move to new values: a chart with one of them refuses
+`values` (a `ChartError` with code `"unsupported"` and path
+`"animation.values"`, as the chart draws its options; leave `values` out,
+and new values show at once).
+
+```ts
+// ChartError: animation.values: boxplot does not move to new values; leave values out, and new values show at once
+createChart(element, { marks: [boxplot(data, { x: "group", y: "v" })], animation: { values: true } });
+```
 
 Only the drawing moves: data, tooltips, events, and summaries have the new
 values at once. Animation keys do not preserve selections, row identities,
@@ -3921,13 +4029,16 @@ source changes, so marks of an aggregate over rows that keep arriving move with 
 that comes after the last has settled (every few seconds, say) and show more
 frequent ones at once.
 
-A change shows at once when the plot moves (labels wider than the margin had
-room for: margins only grow, so the next change moves), categories or series
-appear or go, a legend wraps differently, slices change order (with `sort:
-"value"`, the default, when values pass each other), a line's x positions
-change, or a mark that cannot move (stacked or labeled bars, lines and areas
-labels follow, text, heatmaps, custom marks, or a line or point that cannot)
-shares an axis that moves;
+Charts of several panels (subplots, facets, insets) move every panel's
+marks, each on its scales, or show the whole change at once.
+
+A change shows at once when a plot moves (labels wider than the margin had
+room for: margins only grow, so the next change moves), panels, categories,
+or series appear or go, a legend wraps differently, slices change order
+(with `sort: "value"`, the default, when values pass each other), a line's
+positions change, or a mark that cannot move (lines and areas labels
+follow, a list whose items move along both axes or change in number, or a
+line or point that cannot) shares an axis that moves;
 with axes that stay, such marks show their new values while the others move.
 So do appended and dropped rows, changes while values move and until the data
 has been still for a change's duration, changes of options and of hidden
@@ -3935,14 +4046,15 @@ series, bars on log axes, bars sharing a position in one series, x axes with
 breaks, scenes of more than 2,000 bars, slices, and rules, 10,000 points
 (including points shrinking on exit across all series), or
 10,000 points of lines and areas, point clouds, marks over row views, charts with
-several panels or `sync`, charts off screen, charts the pointer is over,
+a navigator or `sync`, charts off screen, charts the pointer is over,
 pressed, or read with the keyboard, pages preferring reduced motion, and
 charts whose frames seem to take over 10 ms (judged from earlier frames,
 alone or with the charts beside them). Moving the pointer, pressing, and keys
 show the new values and axes before they act, and `render()`, export, and a
 chart's first frame always draw them. Wheel zoom, panning, new data, resizes,
-and export show views at once too; charts with several panels or `sync` do
-not move their views. The code for views loads with the first chart that
+and export show views at once too, as does drilling into a treemap or
+sunburst; charts with several panels or `sync` do not move their views.
+The code for views loads with the first chart that
 asks for `animation`, and the code for values separately, with the first that
 asks for `values`.
 
@@ -4276,9 +4388,10 @@ const stop = chart.on("select", ({ x }) => {
   if (x) detail.setViewport(x); // show the brushed range in another chart
 });
 chart.on("select", ({ x, y, lasso }) => filterRows(x, y, lasso)); // ranges, and a lasso's outline
-chart.on("viewport", ({ x, y, yRight }) => saveView({ x, y, yRight })); // zoom, pan, reset, sync
-chart.on("viewport", ({ x, panels }) => saveView(x, panels)); // panels' own x scales
-chart.on("edge", ({ scale, side, bound }) => loadMore(scale, side, bound)); // near interaction.limits' ends
+chart.on("select", ({ owner }) => focusPanels(owner.panels)); // the panels whose scales the selection is on
+chart.on("viewport", ({ views }) => views.forEach(saveView)); // zoom, pan, reset, sync: each panel moved
+chart.on("viewport", ({ scales, cause }) => cause !== "sync" && share(scales)); // the scale instances changed
+chart.on("edge", ({ scale, panels, side, bound }) => loadMore(scale, panels, side, bound)); // near interaction.limits' ends
 chart.on("hover", ({ inspection }) => showOwnTooltip(inspection)); // with tooltip: false
 chart.on("click", ({ inspection }) => {
   const point = inspection?.points[0];
@@ -4298,19 +4411,30 @@ chart.on("error", ({ error }) => report(error)); // a ChartError, once per chang
 ```
 
 Events report changes only: a re-inspected point or an unchanged view does
-not repeat them. A `viewport` event reports a change of several axes (an xy
-wheel zoom, a brushed rectangle zoomed to) once, with every axis' range; a
-map's are its plane's x and y ranges. `panels` names the panels a change
-belongs to when they are only some: those of an x scale of their own, or a
-subplot's map, network, or tree (`viewport`, `select`, `drill`, and
-`itemMove` events). `drill` and `itemMove` events follow
-`setDrillRoot` and `setItemPosition` too, as `camera` events follow
-`setCamera`. `edge` events (see View limits) give the `scale`, the `side`
+not repeat them. A `viewport` event is one change of view, whole: its
+`viewRevision` (counting the chart's changes from 0), its `cause`
+(`"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, or
+`"options"`), the `panel` it was made in (a gesture's, a call's `panel`, a
+sync channel's), the scale instances it changed (`scales`: each `scale`,
+its `instance`, `type`, the `panels` drawing it, and the `view` it shows,
+null where fitted), and every panel drawing one of them with its whole view
+(`views`: `panel`, `x`, `y`, `yRight`, and the axes' `types`). A change of
+several axes (an xy wheel zoom, a brushed rectangle zoomed to) is one event;
+a listener's own change is the next one, heard once this one reached every
+listener. A map's or network's view is its plane's x and y ranges, in its
+panel's `views`. Zoomed scales whose panels a change of data or options
+took away are reported fitted, with the panels they had. A `select` event's
+`owner` says what the selection belongs to: the scale instances it is on
+and their panels (and a lasso's plane). `panels` names the panels a change
+belongs to when they are only some (a subplot's map, network, tree, or 3D
+chart: `drill`, `itemMove`, and `camera` events). `drill` and `itemMove`
+events follow `setDrillRoot` and `setItemPosition` too, as `camera` events
+follow `setCamera`. `edge` events (see View limits) give the scale
+instance (`scale`, `instance`, `type`, `panels`), the `side`
 (`"start"`, its low values, or `"end"`), the `domain` in view (the view,
 without the scale's padding), the `bound`
-it came near, and the `cause` that moved the view there or moved the end:
-`"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, or
-`"options"`. An
+it came near, and the `cause` that moved the view there or moved the end
+(as a `viewport` event's). An
 inspection's `axis` says what it is on: `"x"` or `"y"` for a position along
 that axis (with its `position` in pixels), `"item"` for an item of a layout
 mark (a pie slice, a tree's node, a gauge's dial, a funnel's stage), whose
@@ -4770,6 +4894,12 @@ incorrect checksums; generated subsets receive fresh checksums.
 - The layout measurer returns width only: unusually tall fallback faces may
   need extra margins or smaller text. Label shortening uses code-point cuts
   and may split grapheme clusters; no grapheme-aware shortening yet.
+- On right-to-left pages charts draw text left to right, as they place it
+  (their SVG, static SVG, snapshots, Canvas, and the legend are `direction:
+  ltr`), so labels, ticks, and legend entries stay where the chart lays them
+  out, alike live and exported. Right-to-left text
+  keeps its own order, but a label mixing directions orders its runs from
+  the left, as on a left-to-right page.
 - Colors must be hex, `rgb()`, `hsl()`, or CSS color names. Pages are white
   paper: a transparent theme with light text gets a dark surface.
 - Optional shipped fonts remain open work. Tagged PDFs provide a chart
@@ -4943,12 +5073,20 @@ bubble and cross shadow roots, typed for `addEventListener`
 (`HercegEventMap`): `herceg:ready` (`{ id }`), `herceg:error`
 (`{ id, error: ChartErrorInfo }`, cancelable: `preventDefault()` keeps it
 out of the console), `herceg:click` (`{ id, panel?, inspection }`),
-`herceg:select` (`{ id, panels?, selection }`), and `herceg:viewport`
-(`{ id, panels?, viewport }`). The details are JSON, the same that Python
-reads (`selectionPayload`, `viewportPayload`, and `inspectionPayload` make
-them of a chart's events): ranges are numbers, epoch milliseconds on the
-axes `time` lists, and labels on category axes; an inspection's points carry
-their rows' positions in the data the chart drew. Payloads carry charts;
+`herceg:select` (`{ id, owner, selection }`), `herceg:viewport` (`{ id,
+viewRevision, cause, panel?, scales, views }`: one change of view, as the
+chart's `viewport` event), `herceg:edge` (`{ id, scale, instance, time,
+panels, side, domain, bound, cause }`), `herceg:rowselection` (`{ id, data,
+channel, selection }`, the table named as in the spec's `data`), and
+`herceg:visibility` (`{ id, hiddenKeys, panels? }`). The details are JSON,
+the same that Python reads (`viewportEventPayload`, `selectEventPayload`,
+`edgePayload`, `rowSelectionPayload`, and `inspectionPayload` make them of a
+chart's events): ranges are numbers, epoch milliseconds on the axes and
+scales marked as times, and labels on category axes; an inspection's points
+carry their rows' positions in the data the chart drew.
+`viewportStatePayload(chart)` gives every view a chart shows, and
+`restoreViewportState(chart, state)` gives them to a chart mounted in its
+place (see Interaction in docs/architecture.md). Payloads carry charts;
 the grid has no spec (`kind: "grid"` is refused).
 
 ## Large data

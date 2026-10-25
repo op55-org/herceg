@@ -540,12 +540,12 @@ function swap(s: Series): Series {
  * xError`). Pair them with points or bars to show the center.
  *
  * ```ts
- * errorBar(stats, { x: "group", y1: "low", y2: "high" })
- * errorBar(stats, { x: "group", y: "mean", yError: "se" })
- * errorBar(fits, { y: "model", x1: "lower", x2: "upper", cap: 0 })
+ * errorbar(stats, { x: "group", y1: "low", y2: "high" })
+ * errorbar(stats, { x: "group", y: "mean", yError: "se" })
+ * errorbar(fits, { y: "model", x1: "lower", x2: "upper", cap: 0 })
  * ```
  */
-export function errorBar<S extends Schema>(
+export function errorbar<S extends Schema>(
   table: Table<S>,
   options: ErrorBarOptions<S>,
 ): ChartMark<Frozen<ErrorBarSpec>> {

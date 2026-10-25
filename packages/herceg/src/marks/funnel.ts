@@ -15,7 +15,7 @@ import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
 import type { Geometry, RectGeometry, ShapesGeometry, TextGeometry } from "../scene/scene.ts";
-import type { Frozen, FunnelSpec } from "../spec/spec.ts";
+import type { Frozen, FunnelSpec, MarkTooltipSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { refuseColor } from "./colored.ts";
 import {
@@ -26,8 +26,11 @@ import {
   type LayoutResult,
   RowsCache,
   SelectionCache,
+  SoleRows,
 } from "./layout-mark.ts";
 import { CATEGORY, type ChartMark, DIM, frozen, type MARK, requireField } from "./mark.ts";
+import { refuseValues } from "./still.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
 export interface FunnelOptions<S extends Schema> {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
@@ -40,6 +43,8 @@ export interface FunnelOptions<S extends Schema> {
   sort?: "input" | "value";
   /** Stage names beside the bars and values on them; true by default. */
   labels?: boolean;
+  /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the funnel has to itself. */
   panel?: string;
@@ -82,6 +87,8 @@ export class FunnelMark implements LayoutMark {
   readonly #totals = new RowsCache<{ sums: Float64Array; rows: Uint32Array }>();
   /** What highlighted selections hold of each stage. */
   readonly #held = new SelectionCache<Held>();
+  /** The one row each stage stands for, of all rows and of each facet panel's. */
+  readonly #soles = new RowsCache<SoleRows>();
 
   constructor(input: FunnelSpec, table: Table) {
     this.spec = frozen(input);
@@ -89,6 +96,7 @@ export class FunnelMark implements LayoutMark {
     const spec = this.spec;
     requireField(table, spec.category, CATEGORY, "funnel category");
     if (spec.value !== undefined) requireField(table, spec.value, ["number"], "funnel value");
+    checkTooltip(table, spec.tooltip, "funnel");
     this.table = table;
     this.measure = spec.value ?? "Count";
   }
@@ -135,6 +143,15 @@ export class FunnelMark implements LayoutMark {
     }
   }
 
+  /** The one row each stage stands for among `of` (all rows by default). */
+  #solesOf(of: Uint32Array | undefined): SoleRows {
+    return this.#soles.get(this.table, of, () => {
+      const soles = new SoleRows(this.table.categories(this.spec.category).dictionary.length);
+      this.#eachRow(of, (row, code) => soles.add(code, row));
+      return soles;
+    });
+  }
+
   /** What `selected` holds of each stage's rows among `of` (all rows by default). */
   #heldOf(selected: Uint8Array, of: Uint32Array | undefined): Held {
     return this.#held.get(selected, of, () => {
@@ -174,6 +191,7 @@ export class FunnelMark implements LayoutMark {
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.spec.type);
     const { bounds, theme, measure, locale } = frame;
     const stages = this.#stages(frame.id, frame.rows);
     const count = stages.length;
@@ -319,6 +337,10 @@ export class FunnelMark implements LayoutMark {
         });
         return rows;
       },
+      soleRow: (key, table) => {
+        const stage = table === this.table ? stages.find((s) => s.key === key) : undefined;
+        return stage && this.#solesOf(frame.rows).of(stage.code);
+      },
       summary: () => this.#summary(stages, locale, percent),
     };
   }
@@ -440,6 +462,7 @@ export function funnel<S extends Schema>(
   if (options.sort !== undefined) spec.sort = options.sort;
   if (options.labels !== undefined) spec.labels = options.labels;
   if (options.halo !== undefined) spec.halo = options.halo;
+  if (options.tooltip !== undefined) spec.tooltip = options.tooltip as MarkTooltipSpec;
   if (options.id !== undefined) spec.id = options.id;
   if (options.panel !== undefined) spec.panel = options.panel;
   if (table.name !== undefined) spec.data = table.name;

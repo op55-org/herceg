@@ -150,7 +150,9 @@ export function followingLabels(
   const style = following.style && frame.read(following.style, following.path);
   // Labels before their series' start go before their point; others after it.
   const align = at === "first" || at === "visible-start" ? "end" : "start";
-  const under = frame.surface ?? kit.surface(frame.theme);
+  // Inside, labels are drawn on the plot's fill; outside, on the chart's background.
+  const chart = kit.surface(frame.theme);
+  const under = place?.outside ? chart : (frame.surface ?? chart);
   const labels: AttachedLabel[] = [];
   for (const { series: s, frame: drawnIn, anchors } of drawn.values()) {
     const anchor = anchors.get(wanted);

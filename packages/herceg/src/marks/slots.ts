@@ -25,6 +25,8 @@ export class Slots {
   readonly #positions = new TableCache<Positions>();
   /** The smallest gap in time shown, per table version and breaks. */
   readonly #shownGap = new TableCache<{ breaks: Breaks; gap: number }>();
+  /** The last pixel gap measured, of the positions on the scale (scales do not change). */
+  #pixelGap: { values: Float64Array; scale: PositionScale; gap: number } | undefined;
 
   constructor(table: Table, field: string) {
     this.#table = table;
@@ -88,9 +90,15 @@ export class Slots {
     return cached.gap;
   }
 
-  /** Smallest pixel distance between neighboring positions in view (and shown). */
+  /**
+   * Smallest pixel distance between neighboring positions in view (and
+   * shown), measured once per scale: drawing and every pointer move over
+   * a scene read it alike.
+   */
   pixelGap(scale: PositionScale): number {
     const positions = this.positions().values;
+    const last = this.#pixelGap;
+    if (last?.scale === scale && last.values === positions) return last.gap;
     const lo = Math.min(scale.domain[0], scale.domain[1]);
     const hi = Math.max(scale.domain[0], scale.domain[1]);
     // One neighbor past each edge, so zooming onto one position keeps its width.
@@ -108,7 +116,9 @@ export class Slots {
       if (gap < best) best = gap;
       previous = pixel;
     }
-    return best > 0 && Number.isFinite(best) ? best : MAX_WIDTH / FILL;
+    const gap = best > 0 && Number.isFinite(best) ? best : MAX_WIDTH / FILL;
+    this.#pixelGap = { values: positions, scale, gap };
+    return gap;
   }
 
   /** Pixel width of a slot's mark: its share of the smallest gap, up to the maximum. */

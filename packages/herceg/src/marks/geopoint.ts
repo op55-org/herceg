@@ -9,7 +9,7 @@ import { symbolPath } from "../draw/symbols.ts";
 import { formatNumber } from "../format/format.ts";
 import { extendExtent, type GeoExtent, type ProjectionPlan } from "../geo/project.ts";
 import { ItemViews } from "../model/item-views.ts";
-import type { LegendEntry } from "../model/legend.ts";
+import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import {
   checkColorScale,
@@ -36,6 +36,7 @@ import {
   ownOr,
   withSeries,
 } from "./layout-mark.ts";
+import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type ChartMark,
@@ -43,6 +44,7 @@ import {
   DIM,
   frozen,
   type GlyphKey,
+  type LegendScale,
   type MARK,
   painted,
   requireField,
@@ -291,6 +293,16 @@ export class GeoPointMark implements GeoLayer {
       const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key), paint, "geopoint fill");
       return { key, label, color: fill, glyph };
     });
+  }
+
+  /** Its color ramp, of a number `color`, which guides name: a colorbar shows it once it has values. */
+  get legendScales(): readonly LegendScale[] {
+    return this.#toneField !== undefined ? ["ramp"] : [];
+  }
+
+  /** Its scales' legends, which guides naming the mark show. */
+  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
+    return legendParts(...this.scales(theme, locale, paint));
   }
 
   scales(theme: Theme, locale: string | undefined, paint: PaintReader): [ColorRamp[], GlyphKey[]] {

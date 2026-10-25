@@ -47,6 +47,7 @@ import {
   seriesKey,
 } from "./mark.ts";
 import type { Series } from "./series.ts";
+import { refuseValues } from "./still.ts";
 
 export interface ContourOptions<S extends Schema> {
   /** Number or time field: each grid point's x. */
@@ -547,6 +548,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   }
 
   geometry(series: readonly Series[], frame: Frame): (PolygonGeometry | LineGeometry)[] {
+    refuseValues(frame.keyed, this.spec.type);
     const out: (PolygonGeometry | LineGeometry)[] = [];
     const { x, y, plot } = frame;
     const view = {

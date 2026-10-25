@@ -36,7 +36,7 @@ import {
   PLANES,
   positionsValue,
   recordPosition,
-  selectionPayload,
+  selectionReport,
   showDrillRoot,
   showItemPositions,
   statePanels,
@@ -390,7 +390,8 @@ interface Kept {
   planes: Map<string, { key: string | undefined; view: Viewport }>;
   panels: (PanelInfo & { view: Viewport })[];
   selection: Chart["selection"];
-  selectionPanels: Chart["selectionPanels"];
+  /** The panels the selection belongs to. */
+  selectionPanels: readonly string[] | null;
   /** Current cameras by state, kept across reruns with unchanged configured defaults. */
   cameras: Map<string, Camera>;
   /** Each tree's drill root, by panel ("" for the chart's one). */
@@ -411,7 +412,7 @@ function keptView(chart: Chart, instance: Instance, keys: ReadonlyMap<string, st
       .filter((panel) => panel.x)
       .map((panel) => ({ ...panel, view: chart.getViewport({ panel: panel.key }) })),
     selection: chart.selection,
-    selectionPanels: chart.selectionPanels,
+    selectionPanels: chart.selectionOwner?.panels ?? null,
     drills: new Map(
       drills.map((panel) => [panel, drillPayload(chart.getDrillRoot(targetOf(panel)))]),
     ),
@@ -475,8 +476,9 @@ function restore(
   // scales of their own have none.
   const now = shared(panels);
   const y: Partial<Viewport> = {};
-  if (now?.y?.canSetViewport) y.y = carry(first?.view.y ?? null, first?.y, now.y);
-  if (now?.yRight?.canSetViewport)
+  if (now?.y?.canSetViewport && now.y.instance === "")
+    y.y = carry(first?.view.y ?? null, first?.y, now.y);
+  if (now?.yRight?.canSetViewport && now.yRight.instance === "")
     y.yRight = carry(first?.view.yRight ?? null, first?.yRight, now.yRight);
   // Without axes, a change names no plane of the subplots'.
   if (Object.keys(y).length > 0) chart.setViewport(y);
@@ -535,23 +537,11 @@ function sameCategories(from: AxisInfo | undefined, to: AxisInfo | undefined): b
 function reportSelection(instance: Instance) {
   if (!instance.events.includes("select")) return;
   const { chart } = instance;
-  const payload = selectionPayload(chart, chart.selection, selectionPanels(instance));
+  const payload = selectionReport(chart.selection, chart.selectionOwner);
   const sent = JSON.stringify(payload);
   if (sent === instance.sent) return;
   instance.sent = sent;
   instance.component.setStateValue("selection", payload);
-}
-
-/**
- * The panels a selection names, as its event does: a subplot's lasso's, or
- * those whose x scale it is on when other panels have others.
- */
-function selectionPanels({ chart, planes }: Instance): readonly string[] | undefined {
-  const panels = chart.selectionPanels ?? [];
-  const [first] = panels;
-  if (first === undefined) return undefined;
-  const x = chart.getPanels().find(({ key }) => key === first)?.x;
-  return (x ? x.instance !== "" : planes.includes(first)) ? panels : undefined;
 }
 
 /** The chart's one tree's drill root, and each subplot tree's, by panel. */

@@ -25,6 +25,7 @@ import {
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
+import { refuseValues } from "./still.ts";
 
 export type ViolinOptions<S extends Schema> = DistributionOptions<S> & {
   /**
@@ -202,6 +203,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
     series: readonly Series[],
     frame: Frame,
   ): (AreaGeometry | LineGeometry | SegmentGeometry | RectGeometry | PointGeometry)[] {
+    refuseValues(frame.keyed, this.spec.type);
     const out: (AreaGeometry | LineGeometry | SegmentGeometry | RectGeometry | PointGeometry)[] =
       [];
     const horizontal = this.horizontal;

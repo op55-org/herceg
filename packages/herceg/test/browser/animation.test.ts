@@ -5,10 +5,14 @@ import { ValueAnimation } from "../../src/dom/value-transition.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { custom } from "../../src/marks/custom.ts";
+import { geopoint } from "../../src/marks/geopoint.ts";
+import { graph } from "../../src/marks/graph.ts";
+import { heatmap } from "../../src/marks/heatmap.ts";
 import { tablesOf } from "../../src/marks/layout-mark.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
+import { panels } from "../../src/model/panels.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
 const charts: Chart[] = [];
@@ -79,7 +83,7 @@ describe("view transitions", () => {
     const chart = await mount({});
     await controlTime();
     const viewports: unknown[] = [];
-    chart.on("viewport", ({ x }) => viewports.push(x));
+    chart.on("viewport", ({ views }) => viewports.push(views[0]!.x));
     const [lo, hi] = x(chart) as [number, number];
     chart.setViewport([20_000, 40_000]);
     expect(chart.getViewport().x).toEqual([20_000, 40_000]);
@@ -126,9 +130,9 @@ describe("view transitions", () => {
     const chart = await mount({});
     await controlTime();
     const viewports: unknown[] = [];
-    chart.on("viewport", (view) => viewports.push(view));
+    chart.on("viewport", ({ views }) => viewports.push(views[0]));
     chart.setViewport({ x: [20_000, 40_000], y: [0, 5] });
-    expect(viewports).toEqual([{ x: [20_000, 40_000], y: [0, 5], yRight: null }]);
+    expect(viewports).toMatchObject([{ x: [20_000, 40_000], y: [0, 5], yRight: null }]);
     tick(50);
     // Both axes are on their way: the y change did not end the x one.
     expect(x(chart)).not.toEqual([20_000, 40_000]);
@@ -243,6 +247,50 @@ describe("view transitions", () => {
     expect(between(x(chart)[0]!, lo, from)).toBe(true);
     tick(400);
     expect(x(chart)).toEqual([lo, hi]);
+  });
+
+  it("move a map's and a network's plane to a view asked for, reported at once", async () => {
+    const links = table({ source: ["a", "b", "a"], target: ["b", "c", "c"] });
+    const nodes = table({ node: ["a", "b", "c"] });
+    const places = table({ lon: [0, 10, 20], lat: [0, 10, 5] });
+    for (const marks of [
+      [graph(links, { source: "source", target: "target", nodes, node: "node" })],
+      [geopoint(places, { longitude: "lon", latitude: "lat" })],
+    ]) {
+      const moving = await mount({ marks });
+      const still = await mount({ marks, animation: false });
+      await controlTime();
+      // What the chart draws, without the ids that tell charts apart.
+      const drawn = (chart: Chart) =>
+        [...chart.root.querySelectorAll("svg [data-kind]")]
+          .map((e) => e.outerHTML.replace(/herceg-\d+/g, ""))
+          .join("");
+      const before = drawn(moving);
+      const viewports: unknown[] = [];
+      moving.on("viewport", ({ views }) => viewports.push(views[0]));
+      const view = { x: [0.2, 0.6], y: [0.2, 0.6] } as const;
+      const [x0, y0] = [moving.getViewport().x, moving.getViewport().y];
+      for (const chart of [moving, still]) {
+        const { x, y } = chart.getViewport();
+        chart.setViewport({ x: x ?? view.x, y: y ?? view.y });
+      }
+      expect(viewports).toHaveLength(1);
+      expect([x0, y0]).toEqual([null, null]);
+      tick(66);
+      const end = drawn(still);
+      expect(drawn(moving)).not.toBe(before);
+      expect(drawn(moving)).not.toBe(end);
+      tick(400);
+      expect(drawn(moving)).toBe(drawn(still));
+      expect(moving.getViewport()).toEqual(still.getViewport());
+      for (const chart of charts.splice(0)) {
+        const host = chart.root.parentElement;
+        chart.destroy();
+        host?.remove();
+      }
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
   });
 
   it("load their code when a chart first asks for animation", async () => {
@@ -749,6 +797,95 @@ describe("value transitions", () => {
     change([moving], [10, 20, 30]);
     tick(50);
     expect(path(moving)).not.toBe(path(still));
+  });
+
+  it("move values in every subplot, ending as a chart without animation draws them", async () => {
+    const data = table({ x: [0, 1, 2, 3], y: [10, 20, 30, 40] });
+    const marks = () => [
+      bar(data, { x: "x", y: "y", panel: "a" }),
+      line(data, { x: "x", y: "y", panel: "b" }),
+    ];
+    const layout = panels([{ id: "a" }, { id: "b" }]);
+    const moving = await mount({ animation: VALUES, panels: layout, marks: marks() });
+    const still = await mount({ animation: false, panels: layout, marks: marks() });
+    await controlTime();
+    const before = [path(moving), path(moving, "line")];
+    data.set("y", 3, 60);
+    tick(66);
+    const passing = [path(moving), path(moving, "line")];
+    passing.forEach((drawn, i) => {
+      expect(drawn).not.toBe(before[i]);
+    });
+    expect(passing).not.toEqual([path(still), path(still, "line")]);
+    tick(400);
+    expect(chart(moving)).toEqual(chart(still));
+  });
+
+  it("fade heatmap cells to new colors in SVG and Canvas", async () => {
+    for (const renderer of ["svg", "canvas"] as const) {
+      const data = table({ x: ["a", "b", "a", "b"], y: ["p", "p", "q", "q"], v: [1, 2, 3, 4] });
+      const marks = () => [heatmap(data, { x: "x", y: "y", color: "v" })];
+      const moving = await mount({ animation: VALUES, renderer, marks: marks() });
+      const still = await mount({ animation: false, renderer, marks: marks() });
+      await controlTime();
+      const drawn = (chart: Chart) =>
+        renderer === "svg"
+          ? (chart.root.querySelector('[data-kind="raster"]')?.getAttribute("href") ?? "")
+          : chart.root.querySelector("canvas")!.toDataURL();
+      const before = drawn(moving);
+      data.set("v", 0, 4);
+      tick(16);
+      tick(66);
+      expect(drawn(moving), renderer).not.toBe(before);
+      expect(drawn(moving), renderer).not.toBe(drawn(still));
+      tick(400);
+      expect(drawn(moving), renderer).toBe(drawn(still));
+      // The next renderer's charts start afresh, on the real clock.
+      for (const chart of charts.splice(0)) {
+        const host = chart.root.parentElement;
+        chart.destroy();
+        host?.remove();
+      }
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("are refused by marks that do not move, when the chart draws its options", async () => {
+    const message =
+      "animation.values: custom marks do not move to new values; leave values out, and new values show at once";
+    const marks = () => [bar(sales(), { x: "region", y: "sales" }), custom({ draw() {} })];
+    const host = document.createElement("div");
+    document.body.append(host);
+    // Made to throw, the chart throws as it is made.
+    expect(() =>
+      createChart(host, { animation: VALUES, marks: marks(), errorMode: "throw" }),
+    ).toThrow(message);
+    host.remove();
+    // Otherwise its `ready` rejects with the refusal, which `onError` hears.
+    const heard: unknown[] = [];
+    const refused = await mount({
+      animation: VALUES,
+      marks: marks(),
+      onError: (error) => heard.push(error.message),
+    });
+    expect(heard).toEqual([message]);
+    await expect(refused.ready).rejects.toMatchObject({
+      code: "unsupported",
+      path: "animation.values",
+      message,
+    });
+    // Left out, the chart draws; asked for again, it is refused again.
+    const errors: unknown[] = [];
+    const drawn = await mount({ animation: { duration: 300 }, marks: marks() });
+    drawn.on("error", ({ error }) => errors.push(error.message));
+    expect(path(drawn)).not.toBe("");
+    drawn.update({ animation: VALUES });
+    drawn.render();
+    expect(errors).toEqual([message]);
+    drawn.update({ animation: { duration: 300 } });
+    drawn.render();
+    expect(path(drawn)).not.toBe("");
   });
 
   it("leave values alone with `animation: true`, and load their code only when asked", async () => {

@@ -5,9 +5,10 @@ import type { Formatter } from "../format/format.ts";
 import { LabelBoxes, segmentMeetsBox, segmentsMeet } from "../layout/label-boxes.ts";
 import { lineCount } from "../layout/text.ts";
 import type { Geometry, SegmentGeometry } from "../scene/scene.ts";
-import type { LabelPlaceSpec, MarkAnchorSpec } from "../spec/encoding.ts";
+import type { MarkAnchorSpec } from "../spec/encoding.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { FormatSpec } from "../spec/guides.ts";
-import type { AnnotationPosition, Clip, Frozen, TextSpec } from "../spec/spec.ts";
+import type { AnnotationPosition, Clip, Frozen, TextLabelSpec, TextSpec } from "../spec/spec.ts";
 import type { Halo, StrokeStyle, TextStyle as TextStyleSpec } from "../spec/style.ts";
 import { dashPattern } from "../style/style.ts";
 import {
@@ -100,11 +101,7 @@ type FollowingText = {
  * Following text's label: as text's, placed as series' labels are
  * (`place`: outside the plot, keeping room or not, and its offset).
  */
-type FollowingLabel =
-  | string
-  | (Exclude<TextLabel, string> & {
-      place?: Pick<LabelPlaceSpec, "outside" | "reserve" | "offset">;
-    });
+type FollowingLabel = string | (Exclude<TextLabel, string> & Pick<TextLabelSpec, "place">);
 
 /** Room kept around each label against others, in pixels, at least: a default halo reaches 1.5. */
 const LABEL_GAP = 2;
@@ -164,6 +161,13 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     if (x === undefined || y === undefined) throw new Error("text: needs a place: at, or x and y");
     if (spec.label === undefined)
       throw new Error("text label: required; give its text, or { field }");
+    if (typeof spec.label === "object" && spec.label.place !== undefined)
+      throw new ChartError({
+        code: "invalid-option",
+        path: "label.place",
+        message:
+          "text label.place: text at a place is drawn there; drop place, or follow a series with from",
+      });
     this.#x = x;
     this.#y = y;
     const label = labelOf(spec.label);

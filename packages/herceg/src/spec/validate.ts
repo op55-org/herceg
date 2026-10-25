@@ -23,6 +23,7 @@ import { ruleFormError } from "../marks/rule.ts";
 import { treeFormError } from "../marks/tree-data.ts";
 import { Bindings } from "../model/bindings.ts";
 import { GUIDE_KIT } from "../model/guides.ts";
+import { panelInteraction } from "../model/panel-interaction.ts";
 import { checkBreaks } from "../scale/breaks.ts";
 import { MARK_CHANNELS } from "./channels.ts";
 import type {
@@ -88,6 +89,7 @@ import {
   type StyleRoles,
   type SyncSpec,
   type TextBox,
+  type TextLabelSpec,
   type TextStyle,
   type ThemeSpec,
   type ThemeTokens,
@@ -456,7 +458,7 @@ function syncChannel(cursor: boolean, ...scales: readonly string[]): Check {
 }
 
 /** What a chart's `interaction` and a panel's own check alike: all but `sync`, the chart's. */
-const panelInteraction = {
+const interactionChecks = {
   pan: axesPreset,
   zoom: axesPreset,
   brush: oneOf("x", "y", "xy", "lasso"),
@@ -1526,11 +1528,12 @@ const ordinalScale: Check = (v, path) => {
 
 /** A tree's fields: a path of category fields, or node and parent fields. */
 function hierarchyChecks(): Record<
-  "path" | "node" | "parent" | "value" | "labels" | "panel",
+  "path" | "node" | "parent" | "value" | "labels" | "panel" | "tooltip",
   Check
 > {
   return {
     panel: string,
+    tooltip,
     path: (v, path) => {
       if (!Array.isArray(v) || v.length === 0) fail(path, "a list of at least one field", v);
       for (const [i, item] of (v as unknown[]).entries()) field(item, `${path}[${i}]`);
@@ -1552,7 +1555,17 @@ const repeat = oneOf("repeat");
 const clip: Check = (v, path) => {
   if (v !== "plot" && v !== "chart" && v !== false) fail(path, '"plot", "chart", or false', v);
 };
+/**
+ * Where a mark draws. Heatmaps, contours, and 2D histograms take `axis`
+ * here though their specs leave it out, so that their marks refuse the
+ * right axis with why.
+ */
 const placement = { axis: side, facet: repeat, panel: string, clip, zIndex: finite };
+/**
+ * A 3D mark's `zIndex`, which its spec leaves out: read, so that its mark
+ * refuses any but 0 with why (checkDepthOrder).
+ */
+const depthOrder = { zIndex: finite };
 /** A mark's `legend`: only `false`, which leaves it out of the legends. */
 const legended: Check = (v, path) => {
   if (v !== false) fail(path, "false, which leaves the mark out of the legends", v);
@@ -1660,23 +1673,44 @@ function contentAlone(l: Record<string, unknown>, path: string): void {
     fail(`${path}.format`, "no format beside content: give each part its own", l.format);
 }
 
-/** A label: its text, or a label object (text, field, or content; format, style, place). */
-const label: Check = (v, path) => {
-  if (typeof v === "string") return;
-  object(v, path);
-  const l = v as Record<string, unknown>;
-  if (["text", "field", "content"].filter((key) => key in l).length !== 1)
-    fail(path, "a label with one of text, field, and content", v);
-  contentAlone(l, path);
-  properties(l, path, {
-    text: string,
-    field,
-    content: labelContent,
-    format: axisFormat(undefined),
-    style: textStyle,
-    place: labelPlace,
-  } satisfies ChecksOf<LabelSpec>);
+/** Where text following a series puts its label: outside the plot or not, and its offset. */
+const textLabelPlace: Check = (p, at) => {
+  object(p, at);
+  const place = p as Record<string, unknown>;
+  for (const option of ["attachment", "side"])
+    if (place[option] !== undefined)
+      throw refusal(
+        `${at}.${option}`,
+        `text is drawn at its place, or at from.at on its series; drop ${option}`,
+      );
+  properties(place, at, {
+    outside: boolean,
+    reserve: boolean,
+    offset: finite,
+  } satisfies ChecksOf<NonNullable<TextLabelSpec["place"]>>);
 };
+
+/** A label: its text, or a label object (text, field, or content; format, style, place). */
+function labelOf(place: Check): Check {
+  return (v, path) => {
+    if (typeof v === "string") return;
+    object(v, path);
+    const l = v as Record<string, unknown>;
+    if (["text", "field", "content"].filter((key) => key in l).length !== 1)
+      fail(path, "a label with one of text, field, and content", v);
+    contentAlone(l, path);
+    properties(l, path, {
+      text: string,
+      field,
+      content: labelContent,
+      format: axisFormat(undefined),
+      style: textStyle,
+      place,
+    } satisfies ChecksOf<LabelSpec>);
+  };
+}
+
+const label = labelOf(labelPlace);
 
 /** Which point of a series a label follows. */
 const labelAt = oneOf("first", "last", "visible-start", "visible-end");
@@ -1848,10 +1882,15 @@ const seriesStyle: Check = (v, path) => {
   } satisfies ChecksOf<SeriesStyle>);
 };
 
-/** A mark's `style`, of the parts `parts` it has. */
-function markStyle(...parts: readonly Exclude<keyof MarkStyleSpec, "by">[]): Check {
+/**
+ * A mark's `style`, of the parts `parts` it has, and with `by` looks by
+ * value; marks of one look (text) refuse those.
+ */
+function markStyle(by: boolean, ...parts: readonly Exclude<keyof MarkStyleSpec, "by">[]): Check {
   const checks: Record<string, Check> = {
     by: (v, path) => {
+      if (!by)
+        throw refusal(path, "this mark draws one look, not looks by value; drop by", "unsupported");
       object(v, path);
       checkProperties(v as Record<string, unknown>, path, ["map"], {
         field,
@@ -1925,7 +1964,7 @@ const MARKS: MarkChecks = {
       labels: seriesLabels(false),
       color: string,
       encode: encodings(MARK_CHANNELS.line!.encode),
-      style: markStyle("marker"),
+      style: markStyle(true, "marker"),
       markers,
       continuity,
       where: expression,
@@ -1973,7 +2012,7 @@ const MARKS: MarkChecks = {
       labels: seriesLabels(true),
       color: string,
       encode: encodings(MARK_CHANNELS.area!.encode),
-      style: markStyle(),
+      style: markStyle(true),
       continuity,
       where: expression,
     },
@@ -2055,9 +2094,9 @@ const MARKS: MarkChecks = {
         });
       },
       from: markAnchor,
-      label,
+      label: labelOf(textLabelPlace),
       overlap: oneOf("show", "hide", "move"),
-      style: markStyle("leader"),
+      style: markStyle(false, "leader"),
       contributeDomain: boolean,
       legend: boolean,
     },
@@ -2091,7 +2130,7 @@ const MARKS: MarkChecks = {
       opacity: fraction,
       color: string,
       encode: encodings(MARK_CHANNELS.bar!.encode),
-      style: markStyle(),
+      style: markStyle(true),
       label: string,
       labels: (v, path) => {
         if (typeof v === "boolean") return;
@@ -2208,6 +2247,7 @@ const MARKS: MarkChecks = {
       labels: boolean,
       nodeWidth: positive,
       sort: oneOf("input", "value"),
+      tooltip,
     },
   },
   graph: {
@@ -2252,6 +2292,7 @@ const MARKS: MarkChecks = {
       },
       sort: oneOf("value", "input"),
       labels: boolean,
+      tooltip,
     },
   },
   gauge: {
@@ -2278,6 +2319,7 @@ const MARKS: MarkChecks = {
       },
       label: string,
       format: format("linear"),
+      tooltip,
     },
   },
   funnel: {
@@ -2289,6 +2331,7 @@ const MARKS: MarkChecks = {
       value: field,
       sort: oneOf("input", "value"),
       labels: boolean,
+      tooltip,
     },
   },
   radar: {
@@ -2307,6 +2350,7 @@ const MARKS: MarkChecks = {
       fillOpacity: fraction,
       points: boolean,
       label: string,
+      tooltip,
     },
   },
   boxplot: {
@@ -2537,7 +2581,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y", "z"],
     checks: {
       panel: string,
-      zIndex: finite,
+      ...depthOrder,
       tooltip,
       x: field,
       y: field,
@@ -2558,7 +2602,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y", "z"],
     checks: {
       panel: string,
-      zIndex: finite,
+      ...depthOrder,
       tooltip,
       x: field,
       y: field,
@@ -2573,7 +2617,7 @@ const MARKS: MarkChecks = {
     required: ["x", "y", "z"],
     checks: {
       panel: string,
-      zIndex: finite,
+      ...depthOrder,
       x: field,
       y: field,
       z: field,
@@ -2585,6 +2629,7 @@ const MARKS: MarkChecks = {
       shading: boolean,
       wireframe: boolean,
       label: string,
+      tooltip,
     },
   },
 };
@@ -2777,6 +2822,15 @@ const FORMS: Partial<
   sunburst: (spec) => treeFormError(spec, "sunburst"),
 };
 
+/** What the items of marks summarizing rows stand for, which tooltips cannot read fields of. */
+const SUMMARIES: Record<string, string> = {
+  histogram: "a histogram's bins count rows",
+  boxplot: "a boxplot's boxes summarize rows",
+  boxen: "a boxen's boxes summarize rows",
+  violin: "a violin's shapes summarize rows",
+  contour: "a contour's bands summarize its grid",
+};
+
 const mark: Check = (v, path) => {
   object(v, path);
   const spec = v as Record<string, unknown>;
@@ -2798,8 +2852,21 @@ const mark: Check = (v, path) => {
       `${path}.axis`,
       "a dendrogram's heights are plot-relative, on no y axis; drop axis",
     );
+  // A summary's items stand for many rows, which have no one value of a field.
+  const summary = SUMMARIES[spec.type as string];
+  if (summary && spec.tooltip !== undefined)
+    throw refusal(
+      `${path}.tooltip${(spec.tooltip as { fields?: unknown } | null)?.fields !== undefined ? ".fields" : ""}`,
+      `${summary}, so a field has no one value to read; brush them to select their rows, and read the rows' fields in a chart that draws them`,
+      "unsupported",
+    );
   const problem = FORMS[spec.type as MarkSpec["type"]]?.(spec);
   if (problem) throw refusal(path, problem);
+  if (spec.type === "text" && spec.from === undefined && (spec.label as TextLabelSpec).place)
+    throw refusal(
+      `${path}.label.place`,
+      "text at a place is drawn there; drop place, or follow a series with from",
+    );
 };
 
 /**
@@ -3035,7 +3102,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
             yRight: axis,
             interaction: (v, at) => {
               object(v, at);
-              properties(v as Record<string, unknown>, at, panelInteraction);
+              properties(v as Record<string, unknown>, at, interactionChecks);
             },
           } satisfies ChecksOf<PanelSpec>);
           const id = panel.id as string;
@@ -3091,7 +3158,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       interaction: (i, path) => {
         object(i, path);
         properties(i as Record<string, unknown>, path, {
-          ...panelInteraction,
+          ...interactionChecks,
           sync: (v, at) => {
             if (typeof v === "string") return;
             object(v, at);
@@ -3206,17 +3273,37 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
     !(chart.marks as Record<string, unknown>[]).some(({ type }) => type === "graph")
   )
     fail("spec.interaction.drag", "a spec with a graph mark, whose nodes dragging moves", true);
+  for (const [i, panel] of ((chart.panels ?? []) as PanelSpec[]).entries())
+    if (
+      panel.interaction?.drag === true &&
+      !(chart.marks as Record<string, unknown>[]).some(
+        (mark) => mark.type === "graph" && (mark.panel === panel.id || mark.panel === "*"),
+      )
+    )
+      fail(
+        `panels[${i}].interaction.drag`,
+        "a panel with a graph mark, whose nodes dragging moves",
+        true,
+      );
   // Gestures bound twice, keys the keyboard cursor takes, and brushes that
   // zoom where they select rows, as charts refuse them.
-  if (chart.interaction) {
-    const rows = [chart.rowSelection ?? []].flat() as RowSelectionSpec[];
-    const brushesRows = rows.some(({ events }) => !events || events.includes("brush"));
+  const rows = [chart.rowSelection ?? []].flat() as RowSelectionSpec[];
+  const brushesRows = rows.some(({ events }) => !events || events.includes("brush"));
+  const bind = (settings: InteractionSpec | undefined, path: string) => {
     try {
-      new Bindings(chart.interaction as InteractionSpec, brushesRows);
+      if (settings) new Bindings(settings, brushesRows, path);
     } catch (error) {
-      throw delegated("interaction", { message: `spec.${(error as Error).message}` });
+      throw delegated(path, { message: `spec.${(error as Error).message}` });
     }
-  }
+  };
+  bind(chart.interaction as InteractionSpec | undefined, "interaction");
+  // A subplot's own settings, over the chart's, as charts compile them.
+  for (const [i, panel] of ((chart.panels ?? []) as PanelSpec[]).entries())
+    bind(
+      panel.interaction &&
+        panelInteraction(chart.interaction as InteractionSpec, panel.interaction),
+      `panels[${i}].interaction`,
+    );
   // A projection places maps' marks; a chart of other marks has nothing to project.
   if (
     chart.projection !== undefined &&
@@ -3237,10 +3324,25 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
   for (const name of ["z", "camera", "boxAspect"])
     if (chart[name] !== undefined && !threeD)
       fail(`spec.${name}`, "a spec with point3d, line3d, or surface marks", chart[name]);
+  const solid = (chart.marks as Record<string, unknown>[]).find(
+    ({ type }) => type === "point3d" || type === "line3d" || type === "surface",
+  );
+  if (chart.facet !== undefined && solid)
+    throw refusal(
+      "spec.facet",
+      `${solid.type} cannot split into facets; draw each group's marks in a panel of their own`,
+      "unsupported",
+    );
   // Marks name panels the chart has; with panels, every mark names one.
   const panels = chart.panels as { id: string }[] | undefined;
   if (chart.layout !== undefined && !panels)
     fail("spec.layout", "a spec with panels", chart.layout);
+  if (chart.facet !== undefined && panels)
+    throw refusal(
+      "spec.facet",
+      "a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
+      "unsupported",
+    );
   const ids = new Set(panels?.map(({ id }) => id));
   for (const [i, item] of (chart.marks as Record<string, unknown>[]).entries()) {
     const panel = item.panel;

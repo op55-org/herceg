@@ -1,6 +1,6 @@
 // Inspected points name their mark, their series, and the row of the mark's
 // table they are, so applications can act on the record under the pointer.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { col } from "../../src/data/expr.ts";
 import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";
 import { rowView } from "../../src/data/row-view.ts";
@@ -24,6 +24,7 @@ import { treemap } from "../../src/marks/treemap.ts";
 import { violin } from "../../src/marks/violin.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel, type Inspection } from "../../src/model/model.ts";
+import { Nearest } from "../../src/model/nearest.ts";
 import { positionOf } from "../helpers/keyboard.ts";
 
 function build(config: ChartConfig) {
@@ -215,5 +216,79 @@ describe("inspected items", () => {
     // The pointer finds the same.
     const { px, py } = model.inspectItem(JSON.stringify(["cities", 1]))!.points[0]!;
     expect(identities(model.inspect(px, py))![0]!.mark).toBe(1);
+  });
+});
+
+describe("nearest bars", () => {
+  it("are those a scan of every bar finds, searched outward from the pointer", () => {
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    // Positions at uneven gaps: one row each, or two of the series' (which share it).
+    const tables = (shared: boolean) => {
+      const x = Array.from({ length: 300 }, (_, i) => {
+        const at = shared ? Math.floor(i / 2) : i;
+        return at + (at % 7 === 0 ? 0.5 : 0);
+      });
+      return table({
+        x,
+        y: x.map(() => 1 + random() * 9),
+        g: x.map((_, i) => (i % 2 ? "a" : "b")),
+      });
+    };
+    const kinds = [
+      [{}, false],
+      [{ series: "g" }, false],
+      [{ series: "g" }, true],
+      [{ series: "g", stack: true }, true],
+      // Wider than their slots: over their neighbors.
+      [{ width: { px: 9 } }, false],
+      [{ series: "g", dodge: false, width: { px: 9 } }, true],
+    ] as const;
+    for (const [kind, shared] of kinds) {
+      const model = build({ marks: [bar(tables(shared), { x: "x", y: "y", ...kind })] });
+      const { x, y, width, height } = model.panels()[0]!.plot;
+      const picks = () => {
+        const rows: (number | undefined)[] = [];
+        for (let px = x - 12; px < x + width + 12; px += 3.7)
+          for (const py of [y + 4, y + height * 0.4, y + height * 0.9, y + height + 6])
+            rows.push(model.inspect(px, py, "nearest")?.points[0]?.row);
+        return rows;
+      };
+      const searched = picks();
+      // Series out of order are scanned bar by bar.
+      for (const s of model.series()) {
+        expect(s.sorted).toBe(true);
+        s.sorted = false;
+      }
+      expect([kind, searched]).toEqual([kind, picks()]);
+    }
+  });
+
+  it("are found among the few bars beside the pointer, of however many", () => {
+    const n = 100_000;
+    const x = Float64Array.from({ length: n }, (_, i) => i);
+    const model = build({ marks: [bar(table({ x, y: x.map(() => 10) }), { x: "x", y: "y" })] });
+    const take = vi.spyOn(Nearest.prototype, "take");
+    // In a bar, and at its end.
+    for (const value of [2, 10]) {
+      take.mockClear();
+      const [px, py] = [model.xScale()!.map(n / 2), model.yScale()!.map(value)];
+      expect(model.inspect(px, py, "nearest")?.points[0]?.row).toBe(n / 2);
+      expect(take.mock.calls.length).toBeLessThan(10);
+    }
+    take.mockRestore();
+  });
+
+  it("are none, found at once, where no bar of a series is drawn", () => {
+    const model = build({
+      marks: [
+        bar(table({ x: [1, 2, 3], y: [Number.NaN, Number.NaN, Number.NaN] }), { x: "x", y: "y" }),
+      ],
+    });
+    const { x, y, width, height } = model.panels()[0]!.plot;
+    expect(model.inspect(x + width / 2, y + height / 2, "nearest")).toBeUndefined();
   });
 });
