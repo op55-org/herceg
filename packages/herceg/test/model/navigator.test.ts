@@ -1292,13 +1292,13 @@ describe("navigator specs", () => {
 
   it("are checked", () => {
     expect(() => validateSpec({ marks, navigator: { height: 10 } })).toThrow(
-      "spec.navigator.height: expected a height of at least 16 pixels; received 10",
+      "navigator.height: expected a height of at least 16 pixels; received 10",
     );
     expect(() => validateSpec({ marks, navigator: { marks: ["v", "v"] } })).toThrow(
-      'spec.navigator.marks[1]: expected a mark id not listed before; received "v"',
+      'navigator.marks[1]: expected a mark id not listed before; received "v"',
     );
     expect(() => validateSpec({ marks, navigator: "yes" })).toThrow(
-      "spec.navigator: expected an object",
+      "navigator: expected an object",
     );
   });
 });

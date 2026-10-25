@@ -3281,7 +3281,14 @@ Text with `overlap` places labels greedily in row order, measuring each
 with the chart's text measurer (`Frame.measure`) and filing placed boxes in
 a grid (`layout/label-boxes.ts`), so each label checks only its neighbors;
 boxes too large for the grid, or far outside it, are checked one by one.
-Each mark places its own labels. Moving labels keep their given place when
+Each mark places its own labels. Rules' and regions' labels in the plot keep
+their boxes inside it (`shiftInside`, layout/place.ts): a rule's moves to its
+mirror image across the rule where it would cross the plot's edge on its
+side, then any label moves in by what still crosses. A rule's plain label
+is placed by its renderers (`ruleLabel`) from its width and the plot the
+mark gives it (`RuleGeometry.labelIn`), so SVG, Canvas, static SVG, PNG,
+and PDF agree, and a rule moving in a value transition keeps it inside
+at every frame. Moving labels keep their given place when
 it is free and in the plot, else try eight spots touching their point,
 nearest sides first, off the other rows' points and inside the plot, with a
 leader line (`style.leader`) back to it. Annotations have no series, so
@@ -3699,7 +3706,11 @@ and pages preferring reduced motion skip it.
 
 Animation should not cost dashboards frames, so the chart estimates frame
 costs from the JavaScript time of earlier frames (paint and compositing are
-not counted, and earlier frames only suggest the next). Transitions whose
+not counted, and earlier frames only suggest the next). A chart's first
+frame counts as no time, for itself and in the scheduler's frame
+(`Scheduled.cold`): it measures text and compiles what the chart draws once,
+which says nothing of later frames, and a transition whose own frames are
+slow ends at its next one anyway. Transitions whose
 first frame falls on the same scheduler frame form a batch, which jumps
 before planning when twice its charts' last frame times add up to over 10 ms
 (the first frame builds two scenes); retargeting a chart replaces its share.
@@ -4637,8 +4648,10 @@ snapshot draws with); setting a mark whole there or chart-wide pins the
 series that panels show or hide through their identity to the mark's new
 state. Entries report what they name as drawn (`guides/visibility.ts`):
 the series, rows, and layout items their keys name in each scope (the
-chart, or each panel of subplots; a panel's legend its panel alone) are
-hidden whole, in part (rows by value), or not, and an entry is hidden
+chart, or each panel of subplots; a panel's legend its panel alone), and
+marks drawing neither (layout marks, and marks of no series, as
+dendrograms), are hidden whole, in part (rows by value, or a layout mark
+hidden whole whose panel shows some of its items), or not, and an entry is hidden
 where all of it is, whatever hides it, mixed where some is, and has no say
 where nothing drawn has it. Showing an entry shows all of it: its
 `LegendItem.shows` lists, beside its targets, what would still hide any of
@@ -4666,7 +4679,14 @@ are found once, in one pass, as many as the scene counted, and each
 reading counts only its value's rows; a value more than an eighth of the
 rows hold keeps none, and is read in a pass (at most eight are). The chart's series count the rows they lost as they were drawn. Layout marks' items outside panels
 (a pie's slices) are named by their own keys and what they stand for, so
-a pie hidden whole shows on its entries. Marks hidden whole or
+a pie hidden whole shows on its entries. A layout mark hidden whole draws
+nothing, whatever it draws besides items (a gauge's dial, a radar's spokes,
+a map's regions without data): `ItemViews` lays it out, keeping its view
+and state, and draws none of it (`hiddenWhole`, `drawnHidden`), unless its
+panel's legend shows some of its items there, which it then draws as it
+draws items; a map's or a 3D box's layers are hidden each by the mark
+drawing them, in a frame fitted to every layer, and the whole mark where
+all are. Marks hidden whole or
 rows by value load the guide compiler, which reports the default legend's
 entries too.
 
@@ -5375,15 +5395,18 @@ take the chart's one by one, and its `limits` scale by scale
 panels sharing one must agree (`Panels.check` refuses them otherwise).
 Charts made in code have their limits checked where bindings compile, so
 specs and code refuse the same. Edges are reported by the controller after each frame drawn
-(`#reportEdges`): per scale instance and side, a latch set on coming within
-`threshold` of the span from the end (the extent's, or the data's while the
-view is zoomed, since a fitted view is at the data's ends) and cleared once
+(`#reportEdges`): per scale instance with a view and side, a latch set on
+coming within `threshold` of the span from the end (the extent's, or the
+data's) and cleared once
 the view is `threshold + hysteresis` away, so a view held near an end
 reports once, and again after the end moves (as when history loads and the
 extent widens): the latch keeps the bound it was set at. Ends of the data
 bound only an x scale every panel shares; y scales and panels' own x scales
-are bounded by their extents alone. A chart reports the edges its views are
-near once its controller attaches, on its next frame, so listeners added
+are bounded by their extents alone. An instance without a view is fitted
+to its data and shows all of it, so it reports no edge, at mount or when its
+extent widens: otherwise a page loading history on edges would load, widen
+the extent, refit, and hear of the new end, without end. A chart reports
+the edges its views are near once its controller attaches, on its next frame, so listeners added
 after `createChart` returns hear them. The latch is set before listeners
 run, which may load data and draw at once. Each `edge` event says what moved the view there: the
 chart records the cause of the latest change of view or data (`ViewCause`).
@@ -5425,8 +5448,14 @@ shows cursors along the axis its data is placed on (`cursorAxis`), so a
 horizontal bar chart's values never move a time series' cursor: the points
 there, or where no point is (a heatmap's gap, rules, text) the crosshair
 alone (an `AxisInspection` without points, which tooltips and hover events
-skip). The pointer shares its value wherever it is over a panel, and where
-it reads nothing shows that crosshair on its own chart too, carried to the
+skip). The pointer shares a value wherever it is over a panel: where it
+reads something, the value its crosshair is drawn at (a line's nearest
+point's x, a heatmap's or calendar's cell's), so that peers show what its
+readout shows; elsewhere its own value. A frame drawing new data shares a
+pointer at rest again where what it reads moved. The pointer's inspection
+is read once per scene and place (`Interaction.#read`), for the value it
+shares and the frame drawing its cursor. Where
+it reads nothing it shows that crosshair on its own chart too, carried to the
 chart's other panels as its cursor is (below); hover events then report
 nothing, since the pointer reads only what is under it. Without the
 built-in tooltip (`tooltip: false`) the pointer's own cursor is not drawn,
@@ -5943,7 +5972,11 @@ fields or ids); the Python package raises the same codes and paths as marks
 are added, for what it can check without the engine. The spec loader's
 validator throws `ChartError`s too (`invalid-option`, at the option's
 path), and `unsupported` names a well-formed option a chart cannot draw,
-saying what to give instead (see Spec contracts).
+saying what to give instead (see Spec contracts). A message starts at the
+path it refuses, as `path` has it, whoever refuses it: `facet: ...` for a
+chart's option, from the validator or the model alike, `marks[1].color: ...`
+for a mark's; Python relocates those of its charts' specs in its own names
+(`Chart facet: ...`, `line stroke_width: ...`).
 
 A mounted chart reports through one path (`MountedChart.#fail`): options
 refused as the chart is made or updated, a compiler or other code that

@@ -466,13 +466,13 @@ describe("specs with time axis breaks", () => {
 
   it("refuse breaks on y, or that they cannot read", () => {
     expect(() => loadSpec({ ...spec({}), y: { breaks: [] } as never })).toThrow(
-      "spec.y.breaks: expected breaks on the chart's x axis only",
+      "y.breaks: expected breaks on the chart's x axis only",
     );
     // Breaks on a number axis load, and the chart refuses them.
     const numbers = loadSpec(spec({ type: "linear", breaks: [{ weekdays: ["sat"] }] }));
     expect(() => build(numbers.config)).toThrow("chart x.breaks: need a time x axis");
     expect(() => loadSpec(spec({ breaks: [{ hours: ["9:30"] }] as never }))).toThrow(
-      "spec.x.breaks[0].hours",
+      "x.breaks[0].hours",
     );
   });
 });

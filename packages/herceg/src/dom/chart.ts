@@ -340,13 +340,17 @@ export class MountedChart implements Chart, ExportsScene {
   /** Moves marks and axes to changed values, once loaded for `animation.values`; null if it failed to load. */
   #values: ValueAnimation | null | undefined;
   #valuesLoading: Promise<void> | undefined;
-  /** How long the last frame took to plan and paint, in milliseconds. */
+  /**
+   * How long the last frame took to plan and paint, in milliseconds; 0
+   * after the first, whose one-time work (measuring, compiling) says
+   * nothing of the frames to come, whether a change may move or not.
+   */
   #drawTime = 0;
   /**
    * The chart in the shared frame loop: it draws pending changes once a
    * frame while the chart is on screen.
    */
-  readonly #scheduled = { flush: () => this.#flush(), visible: true };
+  readonly #scheduled = { flush: () => this.#flush(), visible: true, cold: true };
   /**
    * How synced charts reach this one: what they share is shown here without
    * being shared again. Broadcasts name it as their sender.
@@ -1872,7 +1876,8 @@ export class MountedChart implements Chart, ExportsScene {
     this.#svg.render(scene, { marks: !this.#onCanvas });
     this.#legend.update(guidesOf(scene, "legend"), scene.theme);
     this.#model.items?.drawControls(scene);
-    this.#drawTime = performance.now() - started;
+    this.#drawTime = this.#scheduled.cold ? 0 : performance.now() - started;
+    this.#scheduled.cold = false;
     this.#describe();
   }
 

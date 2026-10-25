@@ -124,26 +124,32 @@ export interface UnknownProperty {
 let unknownPaths: UnknownProperty[] | undefined;
 
 /**
- * The error refusing what is at `path` (as messages name it: `marks[2].inner`,
- * or `spec.data` for the chart's own options), saying `problem`: its path
- * in the spec, without the "spec." that only messages start with.
+ * The error refusing what is at `path` (as checks walk the spec:
+ * `marks[2].inner`, or `spec.data` for the chart's own options), saying
+ * `problem`: at its path in the spec (`data`), in the message too, as the
+ * chart's options are refused wherever they are; the spec itself at "spec".
  */
 function refusal(
   path: string,
   problem: string,
   code: ChartErrorCode = "invalid-option",
 ): ChartError {
-  return new ChartError({
-    code,
-    path: path.replace(/^spec\.?/, "") || undefined,
-    message: `${path}: ${problem}`,
-  });
+  const at = inSpec(path);
+  return new ChartError({ code, path: at, message: `${at ?? "spec"}: ${problem}` });
 }
 
-/** An error a check at `path` delegated to, whose message names its place itself. */
+/** A path as checks walk the spec (`spec.title`), as the spec names it (`title`); undefined for the spec itself. */
+function inSpec(path: string): string | undefined {
+  return path.replace(/^spec(\.|$)/, "") || undefined;
+}
+
+/**
+ * An error a check at `path` delegated to, whose message names its place
+ * itself, given the path as checks walk the spec (see `refusal`).
+ */
 function delegated(path: string, error: unknown): ChartError {
   const refused = refusal(path, "");
-  refused.message = (error as Error).message;
+  refused.message = (error as Error).message.replace(/^spec\./, "");
   return refused;
 }
 
@@ -301,7 +307,10 @@ function properties(
 ) {
   for (const key of Object.keys(value)) {
     if (!Object.hasOwn(checks, key) && !others.includes(key))
-      unknownPaths?.push({ path: `${path}.${key}`, known: [...Object.keys(checks), ...others] });
+      unknownPaths?.push({
+        path: inSpec(`${path}.${key}`)!,
+        known: [...Object.keys(checks), ...others],
+      });
   }
   for (const [key, check] of Object.entries(checks)) {
     if (value[key] !== undefined) check(value[key], `${path}.${key}`);
@@ -598,7 +607,7 @@ function format(type: unknown): Check {
       ...(type !== "time" ? NUMBER_OPTIONS : []),
     ];
     for (const key of keys)
-      if (!known.includes(key)) unknownPaths?.push({ path: `${path}.${key}`, known });
+      if (!known.includes(key)) unknownPaths?.push({ path: inSpec(`${path}.${key}`)!, known });
   };
 }
 
@@ -2910,9 +2919,11 @@ export function describeUnknown({ path, known }: UnknownProperty): string {
 
 /** The error refusing a spec's unknown properties, at the first one's path. */
 export function unknownRefusal(unknown: readonly UnknownProperty[]): ChartError {
-  const refused = refusal(unknown[0]!.path, "");
-  refused.message = unknownError(unknown);
-  return refused;
+  return new ChartError({
+    code: "invalid-option",
+    path: unknown[0]!.path,
+    message: unknownError(unknown),
+  });
 }
 
 /** Why a spec with unknown properties is refused, and what to do instead. */
@@ -3028,8 +3039,8 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
   // Later versions may mean what this herceg cannot draw, so they are refused.
   const version = chart.version;
   if (version !== undefined && version !== SPEC_VERSION)
-    fail("spec.version", `${SPEC_VERSION}, the version this herceg reads`, version);
-  if (!Array.isArray(chart.marks)) fail("spec.marks", "an array of marks", chart.marks);
+    fail("version", `${SPEC_VERSION}, the version this herceg reads`, version);
+  if (!Array.isArray(chart.marks)) fail("marks", "an array of marks", chart.marks);
   for (const [i, item] of chart.marks.entries()) mark(item, `marks[${i}]`);
   properties(
     chart,
@@ -3058,7 +3069,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
               columns: () => {},
               origin: (v, where) => {
                 if (typeof v !== "string" || !Object.hasOwn(data as object, v) || v === name)
-                  fail(where, "the name of another table in spec.data", v);
+                  fail(where, "the name of another table in data", v);
               },
               matrix: (m, where) => {
                 object(m, where);
@@ -3272,7 +3283,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
     interaction?.drag === true &&
     !(chart.marks as Record<string, unknown>[]).some(({ type }) => type === "graph")
   )
-    fail("spec.interaction.drag", "a spec with a graph mark, whose nodes dragging moves", true);
+    fail("interaction.drag", "a spec with a graph mark, whose nodes dragging moves", true);
   for (const [i, panel] of ((chart.panels ?? []) as PanelSpec[]).entries())
     if (
       panel.interaction?.drag === true &&
@@ -3293,7 +3304,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
     try {
       if (settings) new Bindings(settings, brushesRows, path);
     } catch (error) {
-      throw delegated(path, { message: `spec.${(error as Error).message}` });
+      throw delegated(path, error);
     }
   };
   bind(chart.interaction as InteractionSpec | undefined, "interaction");
@@ -3312,7 +3323,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
     )
   )
     fail(
-      "spec.projection",
+      "projection",
       "a spec with geoshape or geopoint marks: a projection needs geoshape or geopoint marks",
       chart.projection,
     );
@@ -3323,23 +3334,22 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
   );
   for (const name of ["z", "camera", "boxAspect"])
     if (chart[name] !== undefined && !threeD)
-      fail(`spec.${name}`, "a spec with point3d, line3d, or surface marks", chart[name]);
+      fail(name, "a spec with point3d, line3d, or surface marks", chart[name]);
   const solid = (chart.marks as Record<string, unknown>[]).find(
     ({ type }) => type === "point3d" || type === "line3d" || type === "surface",
   );
   if (chart.facet !== undefined && solid)
     throw refusal(
-      "spec.facet",
+      "facet",
       `${solid.type} cannot split into facets; draw each group's marks in a panel of their own`,
       "unsupported",
     );
   // Marks name panels the chart has; with panels, every mark names one.
   const panels = chart.panels as { id: string }[] | undefined;
-  if (chart.layout !== undefined && !panels)
-    fail("spec.layout", "a spec with panels", chart.layout);
+  if (chart.layout !== undefined && !panels) fail("layout", "a spec with panels", chart.layout);
   if (chart.facet !== undefined && panels)
     throw refusal(
-      "spec.facet",
+      "facet",
       "a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
       "unsupported",
     );

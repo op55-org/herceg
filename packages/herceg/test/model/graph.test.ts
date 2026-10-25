@@ -513,7 +513,7 @@ describe("graph", () => {
     expect(bad({})).toThrow("marks[0].target: required");
     expect(bad({ target: "to", nodes: 3 })).toThrow("marks[0].nodes: expected a string");
     expect(bad({ target: "to", nodes: "staff", node: "name" })).toThrow(
-      'marks[0]: data: no table "staff" in spec.data',
+      'marks[0]: data: no table "staff" in data',
     );
     expect(bad({ target: "to", nodes: "people" })).toThrow(
       "graph node: required with a nodes table",

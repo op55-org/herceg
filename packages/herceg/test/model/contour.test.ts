@@ -441,7 +441,7 @@ describe("contours", () => {
         ...spec,
         data: { field: { ...spec.data.field, matrix: { x: "x", y: "w" } } },
       }),
-    ).toThrow(/spec\.data\.field\.matrix\.y: expected a column of the table/);
+    ).toThrow(/data\.field\.matrix\.y: expected a column of the table/);
     expect(() =>
       validateSpec({ ...spec, marks: [{ ...spec.marks[0], thresholds: [3, 2] }] }),
     ).toThrow(/marks\[0\]\.thresholds\[1\]: expected a value above 3/);

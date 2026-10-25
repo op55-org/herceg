@@ -8,6 +8,11 @@ export interface Scheduled {
   flush(): void;
   /** False while the chart is outside the viewport. */
   readonly visible: boolean;
+  /**
+   * True until the chart has drawn: its first frame's one-time work
+   * (measuring, compiling) is left out of the frame's time.
+   */
+  readonly cold?: boolean;
 }
 
 const pending = new Set<Scheduled>();
@@ -18,20 +23,23 @@ let lastFrame = 0;
 function run() {
   frame = 0;
   frames++;
-  const started = performance.now();
   const due = [...pending];
   pending.clear();
+  let took = 0;
   for (const item of due) {
     // Invisible charts stay dirty and render when they become visible.
     if (!item.visible) continue;
+    const { cold } = item;
+    const started = performance.now();
     // One failing chart must not stop the others from rendering.
     try {
       item.flush();
     } catch (error) {
       report(error);
     }
+    if (!cold) took += performance.now() - started;
   }
-  lastFrame = performance.now() - started;
+  lastFrame = took;
 }
 
 /** How many frames have run: work asked for between two frames shares the count. */
@@ -39,7 +47,7 @@ export function frameCount(): number {
   return frames;
 }
 
-/** How long every chart's rendering took in the last frame, in milliseconds. */
+/** How long every chart's rendering took in the last frame, in milliseconds, first frames left out. */
 export function lastFrameTime(): number {
   return lastFrame;
 }

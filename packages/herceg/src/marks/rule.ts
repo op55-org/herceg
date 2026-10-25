@@ -1,7 +1,8 @@
 import type { NumericField, Schema, Table } from "../data/table.ts";
-import { ruleDrawing } from "../draw/rule.ts";
+import { ruleDrawing, ruleLine } from "../draw/rule.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
+import { shiftInside } from "../layout/place.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import type { Geometry, RuleGeometry } from "../scene/scene.ts";
@@ -16,7 +17,7 @@ import type {
   RuleSpec,
 } from "../spec/spec.ts";
 import type { TextStyle } from "../spec/style.ts";
-import { dashPattern, type TextPaint } from "../style/style.ts";
+import { cssFont, dashPattern, type TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import {
   AnnotationData,
@@ -30,7 +31,7 @@ import {
   valueAt,
 } from "./annotation.ts";
 import type { LabelPartOf } from "./encoding.ts";
-import { labelPaint, labelsGeometry, type PlacedLabel } from "./labels.ts";
+import { labelBox, labelPaint, labelsGeometry, movedLabel, type PlacedLabel } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame, MARK, Mark, MarkKey, RowParts } from "./mark.ts";
 import { frozen, painted } from "./mark.ts";
@@ -326,8 +327,18 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         label: plain(text) ? text : undefined,
       };
       if (spec.strokeOpacity !== undefined) rule.opacity = spec.strokeOpacity;
+      if (rule.label)
+        rule.labelIn = {
+          width: frame.measure(rule.label, cssFont(frame.theme.font, frame.theme.fontSize)),
+          plot,
+        };
       out.push(rule);
-      if (text && !plain(text)) placed.push(this.#place(text, rule, frame, paint));
+      if (text && !plain(text)) {
+        const at = this.#place(text, rule, frame, paint);
+        // A label outside the plot goes beside the axis' labels; others stay inside.
+        const box = label?.place?.outside ? undefined : labelBox(at, paint, frame.measure);
+        placed.push(box ? movedLabel(at, shiftInside(box, plot, ruleLine(rule))) : at);
+      }
     });
     if (placed.length > 0)
       out.push(

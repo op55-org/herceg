@@ -190,7 +190,7 @@ describe("subplots mixing category and number axes", () => {
         [],
       ),
     ).toThrow(
-      'spec.panels[0].y.scope: expected scope on the chart\'s x, y, or yRight only; received "panel"',
+      'panels[0].y.scope: expected scope on the chart\'s x, y, or yRight only; received "panel"',
     );
   });
 });

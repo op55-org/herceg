@@ -13,13 +13,15 @@
 
 import type { Table } from "../data/table.ts";
 import type { MovedNodes } from "../marks/graph.ts";
-import type {
-  LayoutControls,
-  LayoutFrame,
-  LayoutItem,
-  LayoutMark,
-  LayoutResult,
-  Viewport as PlaneViewport,
+import {
+  drawnHidden,
+  hiddenWhole,
+  type LayoutControls,
+  type LayoutFrame,
+  type LayoutItem,
+  type LayoutMark,
+  type LayoutResult,
+  type Viewport as PlaneViewport,
 } from "../marks/layout-mark.ts";
 import type { ChartMark } from "../marks/mark.ts";
 import type { LayoutClock, NodePositions } from "../marks/node-positions.ts";
@@ -656,11 +658,12 @@ export class ItemViews {
     const state = this.#state(key);
     const model = this.#model;
     const camera = state.camera?.current;
-    const result = mark.draw({
+    const id = mark.spec.id ?? index;
+    const laid = mark.draw({
       ...frame,
       selected: model.layoutHighlight,
       drillable: !!model.config.interaction?.zoom,
-      id: mark.spec.id ?? index,
+      id,
       bounds: plot,
       rows,
       layerRows,
@@ -675,7 +678,14 @@ export class ItemViews {
       viewport: this.transitionViews?.get(key) ?? state.view,
       camera,
     });
-    const { indices } = mark;
+    // Hidden whole (a map or a 3D box with every layer), it draws nothing,
+    // laid out still so that its view and state stay; one of some layers
+    // hidden leaves them out itself.
+    const { layers, indices } = mark;
+    const hidden = layers
+      ? layers.every((layer, k) => hiddenWhole(layer, layer.spec.id ?? indices![k]!, frame))
+      : hiddenWhole(mark, id, frame);
+    const result = hidden ? drawnHidden(laid) : laid;
     this.#drew = true;
     this.#views.push({
       ...panel,

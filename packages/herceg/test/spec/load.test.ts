@@ -184,7 +184,7 @@ describe("loadSpec", () => {
     const load = (column: unknown) =>
       loadSpec({ data: { t: { columns: { c: column as never } } }, marks: [] });
     expect(() => load([1, true])).toThrow(
-      /spec\.data\.t\.columns\.c: row 1: expected a number, string, or null; received true/,
+      /data\.t\.columns\.c: row 1: expected a number, string, or null; received true/,
     );
     expect(() => load(["a", 1])).toThrow(/row 1: a number in a column of strings/);
     expect(() => load({ type: "category", codes: [0.5], dictionary: ["a"] })).toThrow(
@@ -206,7 +206,7 @@ describe("loadSpec", () => {
 
   it("checks options with the path of the bad property", () => {
     const check = (spec: unknown) => () => loadSpec(spec as ChartSpec);
-    expect(check({ width: "bad", marks: [] })).toThrow(/spec\.width: expected a positive number/);
+    expect(check({ width: "bad", marks: [] })).toThrow(/width: expected a positive number/);
     expect(check({ marks: [{ type: "rule", y: true }] })).toThrow(
       /marks\[0\]\.y: expected a finite number or a field name/,
     );
@@ -221,7 +221,7 @@ describe("loadSpec", () => {
       check({ marks: [{ type: "text", x: { fraction: 2, scale: "y" }, y: 2, label: "a" }] }),
     ).toThrow(/marks\[0\]\.x\.scale: expected absent for fractions and pixels/);
     expect(check({ marks: [null] })).toThrow(/marks\[0\]: expected an object; received null/);
-    expect(check({ x: { type: "polar" }, marks: [] })).toThrow(/spec\.x\.type: expected "linear"/);
+    expect(check({ x: { type: "polar" }, marks: [] })).toThrow(/x\.type: expected "linear"/);
     expect(
       check({
         data: { t: { columns: { v: [1] } } },
@@ -239,7 +239,7 @@ describe("loadSpec", () => {
     expect(check({ marks: [{ type: "chord" }] })).toThrow(/marks\[0\]\.type/);
     expect(check({ marks: [{ type: "constructor" }] })).toThrow(/marks\[0\]\.type/);
     expect(check({ y: { format: { maximumFractionDigits: -1 } }, marks: [] })).toThrow(
-      /spec\.y\.format: /,
+      /y\.format: /,
     );
     expect(
       check({
@@ -247,7 +247,7 @@ describe("loadSpec", () => {
         marks: [{ type: "bar", x: [], y: "name" }],
       }),
     ).toThrow(/marks\[0\]\.x: expected at least one field name/);
-    expect(check({ tooltip: { mode: "nearest-z" }, marks: [] })).toThrow(/spec\.tooltip\.mode/);
+    expect(check({ tooltip: { mode: "nearest-z" }, marks: [] })).toThrow(/tooltip\.mode/);
     expect(
       check({
         data: { t: { columns: { c: ["a"], v: [1] } } },
@@ -255,11 +255,11 @@ describe("loadSpec", () => {
       }),
     ).toThrow(/marks\[0\]\.labels\.format: /);
     expect(check({ interaction: { brush: "z" }, marks: [] })).toThrow(
-      /spec\.interaction\.brush: expected "x", "y", "xy", or "lasso"; received "z"/,
+      /interaction\.brush: expected "x", "y", "xy", or "lasso"; received "z"/,
     );
-    expect(check({ interaction: { zoom: "z" }, marks: [] })).toThrow(/spec\.interaction\.zoom/);
+    expect(check({ interaction: { zoom: "z" }, marks: [] })).toThrow(/interaction\.zoom/);
     expect(check({ animation: { values: "yes" }, marks: [] })).toThrow(
-      /spec\.animation\.values: expected true or false/,
+      /animation\.values: expected true or false/,
     );
     expect(check({ animation: { duration: 300, values: true }, marks: [] })).not.toThrow();
     // Valid edge cases the TypeScript API produces still load.
@@ -276,10 +276,10 @@ describe("loadSpec", () => {
       y: { title: "ms", lable: "ms" },
     };
     const spec = json as ChartSpec;
-    const paths = ["marks[0].strokeWidht", "spec.y.lable", "spec.theme.extend"];
+    const paths = ["marks[0].strokeWidht", "y.lable", "theme.extend"];
     // Refused by default, naming the property each likely meant.
     expect(() => loadSpec(spec)).toThrow(
-      'marks[0].strokeWidht: not a property of herceg\'s spec format; did you mean "strokeWidth"? (also unknown: spec.y.lable, spec.theme.extend (did you mean "extends"?))',
+      'marks[0].strokeWidht: not a property of herceg\'s spec format; did you mean "strokeWidth"? (also unknown: y.lable, theme.extend (did you mean "extends"?))',
     );
     expect(() => validateSpec(spec)).toThrow(/marks\[0\]\.strokeWidht: not a property/);
     expect(checkSpec(spec).sort()).toEqual([...paths].sort());
@@ -295,8 +295,18 @@ describe("loadSpec", () => {
       expect(warn).not.toHaveBeenCalled();
       // Without a close name, the error says how to load the spec anyway.
       expect(() => loadSpec({ marks: [], colour: "red" } as never)).toThrow(
-        'spec.colour: not a property of herceg\'s spec format; remove it, or load with { unknown: "warn" } or "ignore"',
+        'colour: not a property of herceg\'s spec format; remove it, or load with { unknown: "warn" } or "ignore"',
       );
+      // At its path, whatever its name begins with.
+      for (const name of ["special", "spec"]) {
+        let refused: unknown;
+        try {
+          loadSpec({ marks: [], [name]: true } as never);
+        } catch (error) {
+          refused = error;
+        }
+        expect(refused).toMatchObject({ path: name, message: expect.stringMatching(`^${name}: `) });
+      }
       // Known properties only: nothing to report.
       expect(loadSpec({ ...spec, marks: [], theme: "dark", y: {} }).unknown).toEqual([]);
       expect(warn).not.toHaveBeenCalled();
@@ -322,9 +332,9 @@ describe("loadSpec", () => {
       x: { format: { maximumFractionDigts: 2 } },
     };
     expect(loadSpec(json as ChartSpec, [buffer], quiet).unknown.sort()).toEqual([
-      "spec.data.sorted.transform[0].ordr",
-      "spec.data.t.columns.a.vaues",
-      "spec.x.format.maximumFractionDigts",
+      "data.sorted.transform[0].ordr",
+      "data.t.columns.a.vaues",
+      "x.format.maximumFractionDigts",
     ]);
     expect(() => loadSpec(json as ChartSpec, [buffer], { unknown: "error" })).toThrow(
       /not a property/,
@@ -339,7 +349,7 @@ describe("loadSpec", () => {
     expect(
       loadSpec({ marks: [], x: { type: "linear", format: { hour: "2-digit" } } }, [], quiet)
         .unknown,
-    ).toEqual(["spec.x.format.hour"]);
+    ).toEqual(["x.format.hour"]);
   });
 
   it("keeps the properties an outer check found when a check runs inside it", () => {
@@ -352,7 +362,7 @@ describe("loadSpec", () => {
       },
     };
     expect(loadSpec(spec as ChartSpec, [], { unknown: "ignore" }).unknown).toEqual([
-      "spec.theme.fontsize",
+      "theme.fontsize",
     ]);
   });
 
@@ -360,9 +370,9 @@ describe("loadSpec", () => {
     const parsed: unknown = JSON.parse('{"version": 1, "marks": []}');
     validateSpec(parsed);
     expect(loadSpec(parsed).config.marks).toEqual([]);
-    expect(() => validateSpec({ marks: 1 })).toThrow(/spec\.marks/);
+    expect(() => validateSpec({ marks: 1 })).toThrow(/marks/);
     expect(() => validateSpec({ version: "banana", marks: [] })).toThrow(
-      /spec\.version: expected 1, the version this herceg reads/,
+      /version: expected 1, the version this herceg reads/,
     );
     // The forms a mark's type allows, as the TypeScript types describe them.
     expect(() => validateSpec({ marks: [{ type: "area", x: "x" }] })).toThrow(
@@ -373,7 +383,7 @@ describe("loadSpec", () => {
     );
     expect(SPEC_VERSION).toBe(1);
     // Later versions are refused: their properties may mean what this herceg cannot draw.
-    expect(() => validateSpec({ version: 2, marks: [] })).toThrow(/spec\.version/);
+    expect(() => validateSpec({ version: 2, marks: [] })).toThrow(/version/);
   });
 
   it("knows only the keys of each break's kind", () => {
@@ -382,11 +392,11 @@ describe("loadSpec", () => {
       { from: 0, to: 1, form: 2 },
     ];
     expect(checkSpec({ x: { breaks }, marks: [] } as never)).toEqual([
-      "spec.x.breaks[0].weekdasy",
-      "spec.x.breaks[1].form",
+      "x.breaks[0].weekdasy",
+      "x.breaks[1].form",
     ]);
     expect(() => validateSpec({ x: { breaks }, marks: [] } as never)).toThrow(
-      'spec.x.breaks[0].weekdasy: not a property of herceg\'s spec format; did you mean "weekdays"?',
+      'x.breaks[0].weekdasy: not a property of herceg\'s spec format; did you mean "weekdays"?',
     );
   });
 
@@ -532,7 +542,7 @@ describe("loadSpec", () => {
         data: { t: { columns: { v: { type: "number", dtype: "float64", buffer: 2 } } } },
         marks: [],
       }),
-    ).toThrow(/spec\.data\.t\.columns\.v: buffer: buffer 2 is missing; 0 were delivered/);
+    ).toThrow(/data\.t\.columns\.v: buffer: buffer 2 is missing; 0 were delivered/);
     expect(() =>
       loadSpec({ data: { t: { columns: { v: [1] } } }, marks: [{ type: "line", x: "v", y: "w" }] }),
     ).toThrow(/marks\[0\]: line y: no field "w"/);
@@ -542,12 +552,12 @@ describe("loadSpec", () => {
         marks: [{ type: "line", x: "x", y: "y" }],
       }),
     ).toThrow(/data: missing; the spec has several tables, so name one of "a", "b"/);
-    expect(() => loadSpec({ version: 12 as 1, marks: [] })).toThrow(/spec\.version.* 12$/);
+    expect(() => loadSpec({ version: 12 as 1, marks: [] })).toThrow(/version.* 12$/);
     expect(() => table({ c: encodedCategory(new Int32Array([2]), ["a"]) })).toThrow(
       /Column "c": Category code 2 at row 0 is outside the dictionary/,
     );
     expect(() => loadSpec({ data: { t: { columns: { a: [1, 2], b: [1] } } }, marks: [] })).toThrow(
-      /spec\.data\.t: Column "b" has 1 rows, expected 2/,
+      /data\.t: Column "b" has 1 rows, expected 2/,
     );
   });
 });
@@ -585,7 +595,7 @@ describe("maps in specs", () => {
     const load = (column: object) => () =>
       loadSpec({ data: { regions: { columns: { shape: column as never } } }, marks: [] }, buffers);
     expect(load({ ...geometryColumn, ringOffsets: [0, 4.5, 8] })).toThrow(
-      /spec\.data\.regions\.columns\.shape: ringOffsets\[1\]: expected an int32; received 4.5/,
+      /data\.regions\.columns\.shape: ringOffsets\[1\]: expected an int32; received 4.5/,
     );
     expect(load({ ...geometryColumn, coordinates: 7 })).toThrow(/buffer 7 is missing/);
     expect(
@@ -619,9 +629,9 @@ describe("maps in specs", () => {
       data: { t: { columns: { x: [0], y: [0] } } },
     };
     const fails = (change: object) => () => loadSpec({ ...base, ...change } as ChartSpec);
-    expect(fails({ projection: "robinson" })).toThrow(/spec.projection: expected "equal-earth"/);
+    expect(fails({ projection: "robinson" })).toThrow(/projection: expected "equal-earth"/);
     expect(fails({ projection: { type: "conic-equal-area", parallels: [10, 100] } })).toThrow(
-      /spec.projection.parallels/,
+      /projection.parallels/,
     );
     expect(
       fails({
@@ -634,7 +644,7 @@ describe("maps in specs", () => {
         },
       }),
     ).toThrow(/a north above the south/);
-    expect(fails({ projection: { centralMeridian: 3 } })).toThrow(/spec.projection.type: required/);
+    expect(fails({ projection: { centralMeridian: 3 } })).toThrow(/projection.type: required/);
     expect(
       fails({
         projection: {
@@ -645,7 +655,7 @@ describe("maps in specs", () => {
           ],
         },
       }),
-    ).toThrow(/spec.projection.fit\[0\]: expected \[longitude, latitude\]/);
+    ).toThrow(/projection.fit\[0\]: expected \[longitude, latitude\]/);
     expect(
       fails({
         projection: {
@@ -717,20 +727,18 @@ describe("3D charts in specs", () => {
   it("check cameras, box aspects, and 3D marks", () => {
     const fails = (change: object) => () => loadSpec({ data, marks, ...change } as ChartSpec);
     expect(fails({ camera: { elevation: 120 } })).toThrow(
-      /spec.camera.elevation: expected degrees from -90 to 90/,
+      /camera.elevation: expected degrees from -90 to 90/,
     );
-    expect(fails({ camera: { zoom: 20 } })).toThrow(/spec.camera.zoom/);
-    expect(fails({ boxAspect: [1, 0, 1] })).toThrow(
-      /spec.boxAspect: expected three positive numbers/,
-    );
+    expect(fails({ camera: { zoom: 20 } })).toThrow(/camera.zoom/);
+    expect(fails({ boxAspect: [1, 0, 1] })).toThrow(/boxAspect: expected three positive numbers/);
     expect(fails({ marks: [{ type: "point3d", data: "points", x: "x", y: "y" }] })).toThrow(
       /marks\[0\].z: required/,
     );
     expect(
       fails({ marks: [{ type: "line", data: "points", x: "x", y: "y" }], camera: {} }),
-    ).toThrow(/spec.camera: expected a spec with point3d, line3d, or surface marks/);
+    ).toThrow(/camera: expected a spec with point3d, line3d, or surface marks/);
     expect(checkSpec({ data, marks, camera: { azimuth: 1, roll: 3 } } as ChartSpec)).toEqual([
-      "spec.camera.roll",
+      "camera.roll",
     ]);
   });
 });

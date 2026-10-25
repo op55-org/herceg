@@ -438,7 +438,7 @@ class Edge:
     within ``threshold`` (a fraction of its span) of the end (the extent's,
     or on an x scale every panel shares, the data's where the extent has
     none), and again only once it moved ``hysteresis`` farther away, or the
-    end moved."""
+    end moved. A scale fitted to its data, with no view set, reports none."""
 
     threshold: float = 0.1
     hysteresis: float = 0.05

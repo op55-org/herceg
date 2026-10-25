@@ -214,6 +214,8 @@ describe("edges", () => {
       marks: [line(table(minutes(start, 60)), { x: "t", y: "v" })],
       interaction: { limits: { x: { extent: [start, end], edge: true } } },
     });
+    // A view of all of it, near both ends.
+    chart.setViewport([start, end]);
     const sides: string[] = [];
     chart.on("edge", ({ side }) => {
       sides.push(side);
@@ -248,10 +250,46 @@ describe("edges", () => {
       marks: [line(table(minutes(start, 60)), { x: "t", y: "v" })],
       interaction: { limits: { x: { extent: [start, null], edge: true } } },
     });
+    chart.setViewport([start, start + 30 * 60_000]);
     const edges = heard(chart, "edge");
     await frame();
     expect(edges).toHaveLength(1);
     expect(edges[0]).toMatchObject({ side: "start", bound: start });
+    chart.destroy();
+  });
+
+  it("report no edge of a view fitted to the data, as the chart starts or as the extent widens", async () => {
+    const hour = 3_600_000;
+    let loaded = Date.UTC(2026, 0, 1, 12);
+    const data = table(minutes(loaded, 60));
+    const limits = () => ({ x: { extent: [loaded, null] as const, edge: true } });
+    const chart = createChart(host(), {
+      marks: [line(data, { x: "t", y: "v" })],
+      interaction: { pan: "x", limits: limits() },
+    });
+    // A page loading history at the start: fitted, it would load forever.
+    const edges = heard(chart, "edge");
+    const load = () => {
+      loaded -= hour;
+      data.reset(minutes(loaded, 60 + data.length));
+      chart.update({ interaction: { pan: "x", limits: limits() } });
+    };
+    chart.on("edge", ({ side }) => {
+      if (side === "start") load();
+    });
+    await frame();
+    await frame();
+    expect(edges).toEqual([]);
+    // Loaded by the page, the extent wider: still fitted, still no edge.
+    load();
+    await frame();
+    await frame();
+    expect(edges).toEqual([]);
+    // A view set near the start reports it, and loads once.
+    chart.setViewport([loaded, loaded + 20 * 60_000]);
+    await frame();
+    await frame();
+    expect(edges.map(({ side, cause }) => [side, cause])).toEqual([["start", "api"]]);
     chart.destroy();
   });
 

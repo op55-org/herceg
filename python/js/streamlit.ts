@@ -41,7 +41,6 @@ import {
   type ItemPositionsPayload,
   inspectionPayload,
   MOVES,
-  ownPanels,
   PLANES,
   positionsValue,
   recordPosition,
@@ -113,8 +112,6 @@ interface Instance {
   planes: string[];
   /** Each plane's key, by state, which a rerun's must match for it to keep its view. */
   planeKeys: Map<string, string>;
-  /** The ids of its chart's subplots. */
-  subplots: readonly string[];
   sentDrill: string;
   sentViewport: string;
   sentPositions: string;
@@ -285,7 +282,6 @@ function mount(component: Component, data: Uint8Array, previous: Instance | unde
     moves,
     planes,
     planeKeys,
-    subplots: config.panels?.list.map(({ id }) => id) ?? [],
     // As if nothing were drilled or moved: the script hears of the first change.
     sentDrill:
       previous?.sentDrill ??
@@ -439,7 +435,7 @@ function keptView(chart: Chart, instance: Instance, keys: ReadonlyMap<string, st
   const { plane, drills, planes } = instance;
   return {
     views: viewportStatePayload(chart),
-    visibility: ownPanels(visibilityState(chart), instance.subplots),
+    visibility: visibilityState(chart),
     cameras: new Map(instance.cameras.map((panel) => [panel, chart.getCamera(targetOf(panel))!])),
     plane: plane ? { key: plane, view: chart.getViewport() } : undefined,
     planes: new Map(

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
+import { SvgLayer } from "../../src/dom/svg-layer.ts";
 import { ValueAnimation } from "../../src/dom/value-transition.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
@@ -12,6 +13,7 @@ import { tablesOf } from "../../src/marks/layout-mark.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { panels } from "../../src/model/panels.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
@@ -371,10 +373,78 @@ describe("value transitions", () => {
     expect(chart(moving)).toEqual(chart(still));
   });
 
+  it("keep a moving rule's label inside the plot on its way", async () => {
+    const deploys = table({ at: [0.1] });
+    const moving = await mount({
+      animation: VALUES,
+      marks: [line(data(), { x: "t", y: "v" }), rule(deploys, { x: "at", label: "deploy" })],
+      x: { domain: [0, 100_000] },
+    });
+    await controlTime();
+    const label = () =>
+      [...moving.root.querySelectorAll("svg text")]
+        .find((t) => t.textContent === "deploy")!
+        .getBoundingClientRect();
+    const { x: from, width } = plot(moving);
+    const start = label().left;
+    deploys.setColumn("at", [99_900]);
+    const lefts: number[] = [];
+    for (const ms of [16, 50, 100, 400]) {
+      tick(ms);
+      const { left, right } = label();
+      lefts.push(left);
+      // Its glyphs as engines measure them may reach a pixel or so past its box.
+      expect(left).toBeGreaterThanOrEqual(from - 2);
+      expect(right).toBeLessThanOrEqual(from + width + 2);
+    }
+    // On its way at 66 ms: neither where it was nor where it goes.
+    expect(between(lefts[1]!, start, lefts[3]!)).toBe(true);
+  });
+
   const chart = (chart: Chart) => ({
     plot: plot(chart),
     y: y(chart),
     svg: chart.toSVG().replace(/herceg-\d+/g, ""),
+  });
+
+  it("move to the first change's values, however long the chart's first frame took", async () => {
+    // The first frame does one-time work (here, 15 ms more of it), which
+    // says nothing of how long the change's frames take.
+    let draws = 0;
+    const render = SvgLayer.prototype.render;
+    vi.spyOn(SvgLayer.prototype, "render").mockImplementation(function (this: SvgLayer, ...args) {
+      if (draws++ === 0) {
+        const until = performance.now() + 15;
+        while (performance.now() < until);
+      }
+      return render.apply(this, args);
+    });
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:0;top:0;width:600px;height:300px";
+    document.body.append(host);
+    const moving = createChart(host, {
+      animation: VALUES,
+      marks: [bar(sales(), { x: "region", y: "sales" })],
+      y: { domain: [0, 40] },
+    });
+    charts.push(moving);
+    await moving.ready;
+    for (let loading = moving.loading; loading; loading = moving.loading) await loading;
+    // Frames already asked for run first, on the real clock.
+    await frame();
+    await frame();
+    // Its last frame is its first, drawn by the page's frame loop.
+    expect(draws).toBe(1);
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    const before = path(moving);
+    change([moving], [30, 20, 10]);
+    tick(16);
+    tick(50);
+    // On its way.
+    expect(path(moving)).not.toBe(before);
+    const between = path(moving);
+    tick(400);
+    expect(path(moving)).not.toBe(between);
   });
 
   it("turn pie slices to new values", async () => {

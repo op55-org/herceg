@@ -376,7 +376,18 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
         : undefined;
     for (const plan of plans) if (plan.panel !== undefined) inPanels!.check(plan.panel, plan.path);
     // What entries name as drawn, and what showing them lets go of.
-    const drawn = new Visibility(content, drawnOf(content, marks, places, inPanels?.items()));
+    const drawn = new Visibility(
+      content,
+      drawnOf(
+        content,
+        marks,
+        places,
+        planned.drawsOwn,
+        (mark) =>
+          mark.legend(places.get(mark)!, content.color!, theme, paint).map(({ key }) => key),
+        inPanels?.items(),
+      ),
+    );
     const find = (id: string, path: string) => {
       const found = marks.find(({ mark }) => mark.spec.id === id);
       if (!found)

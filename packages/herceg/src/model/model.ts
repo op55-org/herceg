@@ -2872,12 +2872,9 @@ export class ChartModel {
       parts: this.#legendParts,
       hidden: this.hidden,
       also: this.#also,
+      color: this.#itemColor,
       // Subplots' legends list what their panels draw.
-      ...(config.panels && {
-        split,
-        color: this.#itemColor,
-        panelLegends: config.panels.panelLegends,
-      }),
+      ...(config.panels && { split, panelLegends: config.panels.panelLegends }),
     };
     const text: LegendText = {
       measure,

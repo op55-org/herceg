@@ -29,13 +29,15 @@ import { LinearScale } from "../scale/scale.ts";
 import type { Rect } from "../scene/scene.ts";
 import type { InteractionSpec, ProjectionName, ProjectionSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
-import type {
-  LayoutControls,
-  LayoutFrame,
-  LayoutItem,
-  LayoutMark,
-  LayoutResult,
-  Viewport,
+import {
+  drawnHidden,
+  hiddenWhole,
+  type LayoutControls,
+  type LayoutFrame,
+  type LayoutItem,
+  type LayoutMark,
+  type LayoutResult,
+  type Viewport,
 } from "./layout-mark.ts";
 import { legendParts } from "./legend-parts.ts";
 import type { ColorRamp, GlyphKey, MARK } from "./mark.ts";
@@ -219,8 +221,19 @@ export class GeoMap implements LayoutMark {
     // as do maps in panels, which so share what they project.
     const projected =
       transform === fitted && !frame.inPanel ? undefined : zoomedTransform(transform, bounds);
+    // A layer hidden whole draws nothing; the map stays fitted to every layer.
+    const hidden = this.layers.map((layer, i) => hiddenWhole(layer, this.#id(i), frame));
     const results = this.layers.map((layer, i) =>
-      layer.place({ ...frame, id: this.#id(i), rows: layerRows?.[i], plan, transform, projected }),
+      hidden[i]
+        ? drawnHidden()
+        : layer.place({
+            ...frame,
+            id: this.#id(i),
+            rows: layerRows?.[i],
+            plan,
+            transform,
+            projected,
+          }),
     );
     /** The plane's ranges across the room, drawn with `t`. */
     const across = (t: Transform) =>
@@ -269,7 +282,11 @@ export class GeoMap implements LayoutMark {
         }
         return -1;
       },
-      summary: () => results.map((result) => result.summary()).join(" "),
+      summary: () =>
+        results
+          .filter((_, l) => !hidden[l])
+          .map((result) => result.summary())
+          .join(" ") || "Hidden.",
       rowsOf(key, table) {
         for (const result of results) {
           if (result.indexOf(key) >= 0) return result.rowsOf?.(key, table);

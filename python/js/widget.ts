@@ -46,7 +46,6 @@ import {
   inspectionPayload,
   MOVES,
   namesCategories,
-  ownPanels,
   PLANES,
   positionsValue,
   recordPosition,
@@ -216,8 +215,6 @@ interface View {
   positions: Map<string, ItemPositionsPayload>;
   /** The last error shown above the chart. */
   error: HTMLElement | undefined;
-  /** The ids of its chart's subplots. */
-  panels?: readonly string[];
   /**
    * While its chart takes the views agreed on (see `#follow`): the changes
    * of view it made meanwhile, which go to no one, and Python's requests
@@ -485,9 +482,8 @@ class Widget {
     // Read before the chart goes: what it hides, is still to restore, or
     // was sent to show once it has.
     const before =
-      previous &&
-      (view.newer ? (view.newer.state ?? { hiddenKeys: [] }) : visibilityState(previous));
-    const carried = before && !snapshot ? ownPanels(before, view.panels ?? []) : undefined;
+      previous && visibilityState(previous, view.newer && (view.newer.state ?? { hiddenKeys: [] }));
+    const carried = before && !snapshot ? before : undefined;
     const focused = again && view.element.contains(view.element.ownerDocument.activeElement);
     view.chart?.destroy();
     view.chart = undefined;
@@ -509,7 +505,6 @@ class Widget {
       return;
     }
     view.chart = chart;
-    view.panels = this.#config.panels?.list.map(({ id }) => id) ?? [];
     view.positions = new Map();
     if (focused) view.element.querySelector<HTMLElement>("[tabindex]")?.focus();
     const config = this.#config;
