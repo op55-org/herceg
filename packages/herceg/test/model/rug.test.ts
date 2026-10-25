@@ -16,6 +16,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -65,8 +66,8 @@ describe("rug", () => {
         }
       };
       check(scene);
-      model.setViewport([0.5, 2.5]);
-      model.setYViewport({ y: [0.5, 2.5], yRight: null });
+      setViewport(model, [0.5, 2.5]);
+      setViewport(model, { y: [0.5, 2.5], yRight: null });
       const zoom = model.scene(estimateText);
       expect(ticks(zoom)[0]!.count).toBe(3);
       check(zoom);

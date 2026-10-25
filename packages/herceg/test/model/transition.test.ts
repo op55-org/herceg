@@ -22,8 +22,8 @@ describe("transition domains", () => {
     const [panel] = chart.panels();
     expect(panel!.x.domain).toEqual([0.5, 2.5]);
     expect(panel!.y.domain).toEqual([1.25, 3.75]);
-    expect(chart.viewport).toBeNull();
-    expect(chart.yViewport).toEqual({ y: null, yRight: null });
+    expect(chart.getViewport().x).toBeNull();
+    expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: null });
   });
 
   it("keep no margins from passing tick labels, even across a resize", () => {

@@ -1,12 +1,16 @@
 // Events a chart emits to the application.
 
 import type { ItemChanges } from "../model/item-views.ts";
-import type { Inspection, Viewport } from "../model/model.ts";
+import type { PanelVisibility } from "../model/legend.ts";
+import type { Inspection, ViewCause, ViewportEvent } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import type { ChartError } from "../spec/errors.ts";
 import type { Selection } from "./brushed.ts";
-import type { Axis, AxisInfo, ScaleInstance } from "./handle.ts";
+import type { ScaleInstance, SelectionOwner } from "./handle.ts";
 import { report } from "./scheduler.ts";
+
+export type { PanelVisibility } from "../model/legend.ts";
+export type { PanelViewport, ScaleView, ViewCause, ViewportEvent } from "../model/model.ts";
 
 /** The panel a view or selection is set in, for charts whose panels have scales of their own. */
 export interface PanelTarget {
@@ -14,67 +18,22 @@ export interface PanelTarget {
   panel?: string;
 }
 
-/** A scale instance's view after a change: ascending, or null where it is fitted (its domain or its data). */
-export interface ScaleView extends ScaleInstance {
-  readonly view: readonly [number, number] | null;
-}
-
-/** A panel's whole view after a change, and the type of each axis it has then. */
-export interface PanelViewport extends Readonly<Viewport> {
-  readonly panel: string;
-  readonly types: Readonly<Partial<Record<Axis, AxisInfo["type"]>>>;
-}
-
-/**
- * One change of view, committed whole before any listener hears of it:
- * the scale instances it changed and every panel drawing one of them. A
- * change a listener makes is the next one, reported once this one has
- * reached every listener, so listeners hear each change, in order. An
- * instance with a view that is no longer drawn (its panels gone, or
- * sharing scales otherwise) is reported fitted (`view` null) with the
- * panels it had, of which those no longer drawn have no view in `views`.
- */
-export interface ViewportEvent {
-  /** Counts the chart's changes of view from 0: one per change, none for calls refused or changing nothing. */
-  readonly viewRevision: number;
-  readonly cause: ViewCause;
-  /**
-   * The panel the change was made in: a gesture's, a call's `panel`, or
-   * that of the sync channel it came on; absent for changes naming none
-   * (`setViewport` without a panel, data, options).
-   */
-  readonly panel?: string;
-  /** Each instance whose view changed, once: by scale (x, y, yRight), then by its first panel. */
-  readonly scales: readonly ScaleView[];
-  /** Each panel still drawing one of them, once, in reading order, with its whole view now. */
-  readonly views: readonly PanelViewport[];
-}
-
 /** Chart events by name, with what their listeners receive. */
 export interface ChartEvents {
   /**
-   * The view changed (zoom, pan, reset, `setViewport`, or a synced chart):
-   * the x range and the left and right y axes' ranges, each null when that
-   * axis is not zoomed. One event reports a change of several axes.
+   * The view changed (zoom, pan, reset, `setViewport`, a synced chart, or
+   * panels gone with their zoomed scales): the scale instances it changed,
+   * with what each shows, and every panel drawing one of them, with its
+   * whole view (see `ViewportEvent`).
    */
-  viewport: Viewport & {
-    /**
-     * In charts whose panels have x scales of their own, the keys of the
-     * panels whose x range `x` is; a change for several reports each.
-     */
-    panels?: readonly string[];
-  };
+  viewport: ViewportEvent;
   /**
    * The selection changed: its x and y ranges and a lasso's outline, all
    * null when the selection was cleared.
    */
   select: Selection & {
-    /**
-     * In charts whose panels have x scales of their own, the keys of the
-     * panels sharing the selection's x scale; for a cleared selection, those
-     * it belonged to.
-     */
-    panels?: readonly string[];
+    /** What it belongs to: for a cleared selection, what it belonged to. */
+    owner: SelectionOwner;
     /**
      * With `rowSelection`, what the selection wrote to the channels it
      * binds: per table, the rows it covers (a condition for brushes, rows
@@ -91,16 +50,13 @@ export interface ChartEvents {
    * away again; what the application loads there (older history, say) it
    * adds to the chart's data, and widens the extent.
    */
-  edge: {
-    scale: "x" | "y" | "yRight";
+  edge: ScaleInstance & {
     /** The end: the scale's low values ("start") or high ones ("end"). */
     side: "start" | "end";
     /** What the view shows, ascending (epoch ms on time axes). */
     domain: readonly [number, number];
     /** The end it came near: the extent's, or the data's. */
     bound: number;
-    /** In charts whose panels have scales of their own, the keys of the panels showing the scale. */
-    panels?: readonly string[];
     /** What moved the view there, or moved the end. */
     cause: ViewCause;
   };
@@ -143,7 +99,7 @@ export interface ChartEvents {
    */
   visibility: {
     hiddenKeys: readonly string[];
-    panels?: Readonly<Record<string, { hidden: readonly string[]; shown: readonly string[] }>>;
+    panels?: PanelVisibility;
   };
   /**
    * The chart drew a frame of its data, axes, and legend (a cursor or
@@ -160,12 +116,6 @@ export interface ChartEvents {
 }
 
 export type ChartListener<K extends keyof ChartEvents> = (event: ChartEvents[K]) => void;
-
-/**
- * What changed a view: a drag or pinch ("pointer"), the wheel, a key, the
- * application (`setViewport`), a synced chart, the chart's data, or its options.
- */
-export type ViewCause = "pointer" | "wheel" | "keyboard" | "api" | "sync" | "data" | "options";
 
 /** Listeners by event. A listener that throws is reported; the others still run. */
 export class Emitter {

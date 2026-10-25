@@ -65,6 +65,18 @@ export function identityOf(prefix: string, value: string): string {
   return `${prefix}${JSON.stringify(value)}}`;
 }
 
+/**
+ * The place of the mark an identity key's scope is named by (a table
+ * without a name, by the first mark reading it): its id, or its index;
+ * undefined for other keys.
+ */
+export function keyPlace(key: string): string | number | undefined {
+  const prefix = keyPrefix(key);
+  if (prefix === undefined) return undefined;
+  const { table } = JSON.parse(`${prefix}null}`) as { table?: TableName };
+  return typeof table === "object" ? table.mark : undefined;
+}
+
 /** The scope prefix of an identity key; undefined for other keys (series and item keys). */
 export function keyPrefix(key: string): string | undefined {
   const at = key.lastIndexOf(',"value":');

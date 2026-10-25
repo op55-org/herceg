@@ -8,6 +8,7 @@ import type { ChartSpec } from "../../src/spec/spec.ts";
 import { getChart, mount, unmount } from "../../src/web/mount.ts";
 import { observe } from "../../src/web/observe.ts";
 import { encodePayload } from "../../src/web/payload.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 const spec: ChartSpec = {
   width: 400,
@@ -22,7 +23,16 @@ let page: HTMLDivElement;
 let heard: { type: string; detail: unknown; target: EventTarget | null }[];
 const listen = (event: Event) =>
   heard.push({ type: event.type, detail: (event as CustomEvent).detail, target: event.target });
-const TYPES = ["ready", "error", "click", "select", "viewport"].map((type) => `herceg:${type}`);
+const TYPES = [
+  "ready",
+  "error",
+  "click",
+  "select",
+  "viewport",
+  "edge",
+  "rowselection",
+  "visibility",
+].map((type) => `herceg:${type}`);
 
 beforeEach(() => {
   page = document.createElement("div");
@@ -70,19 +80,126 @@ describe("fragments", () => {
     expect(heard).toEqual([{ type: "herceg:ready", detail: { id: "a" }, target: element }]);
   });
 
-  it("tell the page of views and selections as JSON", async () => {
-    const element = host("b");
+  /** A fragment of `spec` with `extra` mounted, and what it told the page since its ready event. */
+  const told = async (id: string, extra: Partial<ChartSpec> = {}) => {
+    const element = host(id);
     page.append(element);
-    const chart = await mount(element, { src: encodePayload(spec) });
-    chart.setViewport({ x: [1, 2] });
-    chart.select({ x: [0.5, 1.5], y: null, lasso: null });
-    chart.select(null);
-    expect(heard.slice(1).map(({ type, detail }) => [type, detail])).toEqual([
-      ["herceg:viewport", { id: "b", viewport: { x: [1, 2], y: null, yRight: null, time: [] } }],
-      ["herceg:select", { id: "b", selection: { x: [0.5, 1.5], y: null, lasso: null, time: [] } }],
-      ["herceg:select", { id: "b", selection: null }],
-    ]);
-  });
+    const chart = await mount(element, { src: encodePayload({ ...spec, ...extra }) });
+    // Edges are the controller's, which loads after the first frame.
+    await chart.loading;
+    heard.length = 0;
+    const of = (type: string) =>
+      heard.filter((event) => event.type === `herceg:${type}`).map(({ detail }) => detail);
+    return { chart, of };
+  };
+  const x = { scale: "x", instance: "", time: false, panels: [""] };
+
+  contractTest(
+    "web.events.viewport",
+    async () => {
+      const { chart, of } = await told("b");
+      chart.setViewport({ x: [1, 2] });
+      expect(of("viewport")).toEqual([
+        {
+          id: "b",
+          viewRevision: 1,
+          cause: "api",
+          scales: [{ ...x, view: [1, 2] }],
+          views: [{ panel: "", x: [1, 2], y: null, yRight: null, time: [] }],
+        },
+      ]);
+      // In subplots, the panel a change was made in, and every panel it moved.
+      const two = await told("c", {
+        panels: [{ id: "a" }, { id: "b" }],
+        x: { scope: "chart" },
+        marks: ["a", "b"].map((panel) => ({ type: "line", x: "x", y: "y", data: "d", panel })),
+      });
+      two.chart.setViewport({ x: [1, 2] }, { panel: "b" });
+      expect(two.of("viewport")).toEqual([
+        {
+          id: "c",
+          viewRevision: 1,
+          cause: "api",
+          panel: "b",
+          scales: [{ ...x, panels: ["a", "b"], view: [1, 2] }],
+          views: ["a", "b"].map((panel) => ({ panel, x: [1, 2], y: null, yRight: null, time: [] })),
+        },
+      ]);
+    },
+    "tell the page of each change of view as one JSON transaction",
+  );
+
+  contractTest(
+    "web.events.select",
+    async () => {
+      const { chart, of } = await told("d");
+      chart.select({ x: [0.5, 1.5], y: null, lasso: null });
+      chart.select(null);
+      const owner = { scales: [x], panels: [""] };
+      expect(of("select")).toEqual([
+        {
+          id: "d",
+          owner,
+          selection: { panels: [""], x: [0.5, 1.5], y: null, lasso: null, time: [] },
+        },
+        // A cleared selection names what it belonged to.
+        { id: "d", owner, selection: null },
+      ]);
+    },
+    "tell the page of selections as JSON, with what they belong to",
+  );
+
+  const limited: Partial<ChartSpec> = {
+    legend: true,
+    data: { d: { columns: { x: [0, 1, 2, 3], y: [1, 3, 2, 4], g: ["a", "a", "b", "b"] } } },
+    marks: [{ type: "line", x: "x", y: "y", color: "g", data: "d" }],
+    interaction: { brush: "x", limits: { x: { extent: [0, 3], edge: true } } },
+    rowSelection: { data: "d", channel: "picked" },
+  };
+
+  contractTest(
+    "web.events.edge",
+    async () => {
+      const { chart, of } = await told("e", limited);
+      // From a view off both ends, as the data fits the extent at first.
+      chart.setViewport({ x: [1, 2] });
+      chart.render();
+      heard.length = 0;
+      chart.setViewport({ x: [0, 1] });
+      chart.render();
+      expect(of("edge")).toEqual([
+        { id: "e", ...x, side: "start", domain: [0, 1], bound: 0, cause: "api" },
+      ]);
+    },
+    "tell the page of a view nearing its limits, naming the scale instance",
+  );
+
+  contractTest(
+    "web.events.row-selection",
+    async () => {
+      const { chart, of } = await told("f", limited);
+      chart.select({ x: [0.5, 1.5], y: null, lasso: null });
+      expect(of("rowselection")).toEqual([
+        {
+          id: "f",
+          data: "d",
+          channel: "picked",
+          selection: { kind: "predicate", expression: expect.anything() },
+        },
+      ]);
+    },
+    "tell the page of rows selected, by the table's name in the spec",
+  );
+
+  contractTest(
+    "web.events.visibility",
+    async () => {
+      const { chart, of } = await told("g", limited);
+      chart.setHiddenKeys(["b"]);
+      expect(of("visibility")).toEqual([{ id: "g", hiddenKeys: ["b"] }]);
+    },
+    "tell the page of series hidden and shown",
+  );
 
   it("unmount at once, a fetch under way aborted, and mount again", async () => {
     const element = host("c");

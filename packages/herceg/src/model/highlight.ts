@@ -153,6 +153,12 @@ export function membership(table: Table, selection: DataSelection): Uint8Array {
 }
 
 /** Comparisons of a number field with a literal, which conditions test a column at a time. */
+/** Whether a mark draws the rows a channel selects highlighted; others draw every row as before. */
+export function highlights(mark: Mark): boolean {
+  const type = mark.spec.type;
+  return ROWS.has(type) || type === "line" || type === "area" || !!mark.selectedGeometry;
+}
+
 const COMPARE = new Set(["==", "!=", "<", "<=", ">", ">="]);
 const FLIP: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=" };
 
@@ -327,8 +333,7 @@ export class Highlighter {
     rows?: RowParts,
   ): Geometry[] | undefined {
     const type = mark.spec.type;
-    if (!ROWS.has(type) && type !== "line" && type !== "area" && !mark.selectedGeometry)
-      return undefined;
+    if (!highlights(mark)) return undefined;
     const table = mark.table;
     const selected = table && this.selected(table);
     if (!selected) return undefined;

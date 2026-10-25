@@ -125,7 +125,8 @@ describe("limits", () => {
     expect(peer.getViewport().x).toEqual([60, 80]);
     const views = heard(chart, "viewport");
     chart.update(options([0, 50]));
-    expect(views.map(({ x }) => x)).toEqual([[30, 50]]);
+    expect(views.map(({ views }) => views[0]!.x)).toEqual([[30, 50]]);
+    expect(views.map(({ cause }) => cause)).toEqual(["options"]);
     expect(peer.getViewport().x).toEqual([30, 50]);
     // Limits that run backwards are refused, changing nothing.
     expect(() => chart.update({ ...options([100, 0]), errorMode: "throw" })).toThrow(

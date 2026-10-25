@@ -10,7 +10,7 @@ import { estimateText } from "../../src/layout/text.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { candlestick } from "../../src/marks/candlestick.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { line } from "../../src/marks/line.ts";
 import type { ChartMark } from "../../src/marks/mark.ts";
 import { point } from "../../src/marks/point.ts";
@@ -20,6 +20,7 @@ import { facet } from "../../src/model/facet.ts";
 import { DIM, Highlighter, membership } from "../../src/model/highlight.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
+import { clickedRows } from "../../src/model/selected-rows.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import { renderSvg } from "../../src/render/svg.ts";
@@ -788,7 +789,7 @@ describe("marks drawing a glyph per row", () => {
     close: [3, 4, 2.5],
   });
   it.each([
-    ["error bars", () => errorBar(rows, { x: "x", y1: "low", y2: "high" })],
+    ["error bars", () => errorbar(rows, { x: "x", y1: "low", y2: "high" })],
     [
       "candlesticks",
       () => candlestick(rows, { x: "x", open: "open", high: "high", low: "low", close: "close" }),
@@ -877,6 +878,38 @@ describe("candlesticks and rugs with a selection", () => {
       }
     },
   );
+
+  it("find, of candles at one place, the selected one drawn over the others, hovered and clicked", () => {
+    const twice = table({
+      x: [1, 1],
+      open: [10, 10],
+      high: [20, 20],
+      low: [0, 0],
+      close: [15, 15],
+    });
+    const store = selectionStore(twice);
+    const bound = rowSelection({ store, channel: "focus" });
+    const prices = { x: "x", open: "open", high: "high", low: "low", close: "close" } as const;
+    const model = new ChartModel({
+      marks: [candlestick(twice, prices)],
+      tooltip: { mode: "nearest" },
+      rowSelection: bound,
+    });
+    bound.highlight(model);
+    model.setSize(600, 400, 1);
+    model.scene(estimateText);
+    const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(15)];
+    const picked = () => [
+      model.inspect(px, py)?.points.map(({ row }) => row),
+      clickedRows(model, new Set([twice]), px, py)?.rows,
+    ];
+    // The later row is drawn over the earlier one...
+    expect(picked()).toEqual([[1], Uint32Array.of(1)]);
+    // ...but under the selected rows, which the highlight draws again on top.
+    store.set("focus", selectRows(new RowSet(twice).add(0)));
+    model.scene(estimateText);
+    expect(picked()).toEqual([[0], Uint32Array.of(0)]);
+  });
 
   it("describe a log rug's values its scale can show, while drawn with a selection too", () => {
     const spread = table({ x: [-1, 0, 1, 10] });

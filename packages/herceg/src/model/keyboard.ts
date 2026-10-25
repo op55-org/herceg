@@ -70,6 +70,93 @@ export interface SeriesReaders {
 }
 
 /**
+ * The field a position reads, a name or a coordinate's (`{ field }`,
+ * `{ fraction: { field } }`, `{ px: { field } }`), as `rowField` reads it:
+ * a copy, so that this module shares no code with the chart (see the top).
+ */
+function placedBy(position: unknown): unknown {
+  if (typeof position !== "object" || position === null) return position;
+  const coordinate = position as {
+    field?: unknown;
+    fraction?: { field?: unknown };
+    px?: { field?: unknown };
+  };
+  return coordinate.field ?? (coordinate.fraction ?? coordinate.px)?.field;
+}
+
+/** Keys that step through a stop's points: by how many, or to its ends. */
+const POINT_STEPS: Record<string, number> = {
+  ArrowLeft: -1,
+  ArrowRight: 1,
+  Home: Number.NEGATIVE_INFINITY,
+  End: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * Where a key (Left, Right, Page Up and Down, Home, End) moves the
+ * keyboard cursor from position `current` of `series` (-1 arriving at it),
+ * stepping through the points in order along the axis the series follows:
+ * its positions' order, or on a category axis band by band (rows of one
+ * band in theirs), as bars, boxes, and points are drawn whatever their
+ * rows' order. A mark whose series are the axis' categories (box plots of
+ * `x: "kind", series: "kind"`, bars colored by their x) draws them side by
+ * side along it: the keys step through all of them, from series to series.
+ */
+export function stepPoint(
+  inspector: Inspector,
+  series: Series,
+  current: number,
+  key: string,
+  { placeAt, rowOf }: SeriesReaders,
+): { series: Series; position: number } {
+  const owner = inspector.marks.find(({ series: all }) => all.includes(series));
+  const axis = owner?.mark.tooltip === "y" ? "y" : "x";
+  const field = owner?.mark.identity?.field;
+  const spec = owner?.mark.spec as Record<string, unknown> | undefined;
+  const parts =
+    field !== undefined && placedBy(spec?.[axis]) === field && owner!.visible.includes(series)
+      ? owner!.visible
+      : [series];
+  // The parts' points numbered one after another, and sorted by place where they are not in order.
+  const starts: number[] = [];
+  let length = 0;
+  for (const part of parts) {
+    starts.push(length);
+    length += part.length;
+  }
+  let order: Uint32Array | undefined;
+  if (parts.length > 1 || (owner?.frame ?? inspector.frame)[axis].type === "band") {
+    const places = new Float64Array(length);
+    let sorted = true;
+    parts.forEach((part, i) => {
+      for (let k = 0; k < part.length; k++) {
+        const place = placeAt(part, axis, rowOf(part, k));
+        const at = starts[i]! + k;
+        places[at] = Number.isFinite(place) ? place : Number.POSITIVE_INFINITY;
+        if (at > 0 && places[at]! < places[at - 1]!) sorted = false;
+      }
+    });
+    if (!sorted) {
+      order = new Uint32Array(length);
+      for (let k = 0; k < length; k++) order[k] = k;
+      order.sort((a, b) => (places[a]! < places[b]! ? -1 : places[a]! > places[b]! ? 1 : a - b));
+    }
+  }
+  const own = starts[parts.indexOf(series)]!;
+  const page = Math.max(1, Math.round(length / 10));
+  const step = key === "PageUp" ? -page : key === "PageDown" ? page : (POINT_STEPS[key] ?? 0);
+  let rank = current < 0 ? 0 : order ? order.indexOf(own + current) : own + current;
+  // Right arrives at the first point; the other keys step from it.
+  if (current >= 0 || key !== "ArrowRight") rank += step;
+  rank = Math.min(length - 1, Math.max(0, rank));
+  const at = order ? order[rank]! : rank;
+  // The part holding point `at`: the last starting at or before it.
+  let i = parts.length - 1;
+  while (i > 0 && starts[i]! > at) i--;
+  return { series: parts[i]!, position: at - starts[i]! };
+}
+
+/**
  * Inspects one point of a series, identified by its position, plus the
  * other visible series at its x (or its y, for marks inspected along y),
  * in panel `panel` (the first by default). The keyboard reads so, as it

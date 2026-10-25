@@ -5,6 +5,7 @@
 // rows: its label's fields are the source mark's, read at the observation
 // each label is at, and it counts toward no domain.
 
+import type { LabelPlaceSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, TextSpec } from "../spec/spec.ts";
 import { frozen, type MARK, type Mark } from "./mark.ts";
@@ -40,7 +41,9 @@ export class FollowingTextMark implements Mark<Frozen<TextSpec>> {
       refuse("legend", "labels following series name what the legend lists already; drop legend");
     if (spec.label === undefined)
       refuse("label", "required; give its text, a field of the source mark, or content");
-    const place = typeof spec.label === "object" ? spec.label.place : undefined;
+    // Typed callers cannot give these; others are told why.
+    const place: Frozen<LabelPlaceSpec> | undefined =
+      typeof spec.label === "object" ? spec.label.place : undefined;
     for (const option of ["attachment", "side"] as const)
       if (place?.[option] !== undefined)
         refuse(`label.place.${option}`, `labels go at from.at on their series; drop ${option}`);

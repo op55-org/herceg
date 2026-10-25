@@ -21,7 +21,7 @@ import {
   type DendrogramOptions,
   dendrogram,
   type ErrorBarOptions,
-  errorBar,
+  errorbar,
   type FunnelOptions,
   funnel,
   type GaugeOptions,
@@ -219,7 +219,7 @@ export const Rug = /* @__PURE__ */ markComponent(
 /** Error bars: `x`, `y1`, `y2` (vertical) or `y`, `x1`, `x2` (horizontal). */
 export const ErrorBar = /* @__PURE__ */ markComponent(
   "ErrorBar",
-  ({ data, ...options }: WithData<ErrorBarOptions<Schema>, Schema>) => errorBar(data, options),
+  ({ data, ...options }: WithData<ErrorBarOptions<Schema>, Schema>) => errorbar(data, options),
   ["dodge"],
 ) as unknown as <S extends Schema>(props: WithData<ErrorBarOptions<S>, S>) => null;
 

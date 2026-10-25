@@ -302,6 +302,16 @@ describe("the accessibility tree", () => {
     expect(await accessibilityTree()).toContain('    button "a" (Show a) pressed=false');
   });
 
+  it("tells of the arrow keys only where they read something", async () => {
+    const described = (chart: Chart) =>
+      document.getElementById(chart.root.getAttribute("aria-describedby")!)!.textContent;
+    const rules = mount({ marks: [rule({ y: 250 })], locale: "en-US" });
+    const lines = mount({ marks: [line(metrics, { x: "t", y: "a" })], locale: "en-US" });
+    await Promise.all([rules.loading, lines.loading]);
+    expect(described(rules)).not.toContain("arrow keys");
+    expect(described(lines)).toContain("use the arrow keys to read values");
+  });
+
   it.each(["svg", "canvas"] as const)(
     "keeps the navigator's description current in %s without live pan announcements",
     async (renderer) => {
@@ -578,6 +588,19 @@ describe("the keyboard", () => {
     // Past the last series, Down does nothing; Up goes back.
     expect(await step(chart, "ArrowDown")).toContain("west: 25");
     expect(await step(chart, "ArrowUp")).toMatch(/east: (20|30)/);
+  });
+
+  it("steps across bars colored by their x, the x written as a name or a coordinate", async () => {
+    const sales = table({ k: ["a", "b", "c"], y: [1, 2, 3] });
+    for (const x of ["k", { field: "k" }] as const) {
+      const chart = mount({ marks: [bar(sales, { x, y: "y", color: "k" })], locale: "en-US" });
+      await chart.loading;
+      chart.root.focus();
+      expect(await step(chart, "ArrowRight")).toContain("a: 1");
+      expect(await step(chart, "ArrowRight")).toContain("b: 2");
+      expect(await step(chart, "ArrowRight")).toContain("c: 3");
+      expect(await step(chart, "ArrowLeft")).toContain("b: 2");
+    }
   });
 
   it("stops once at lines, which report every series at their x, and at each series of points", async () => {

@@ -816,7 +816,15 @@ describe("<Chart>", () => {
     act(() => root.render(<App />));
     act(() => root.render(<App />));
     act(() => (chart as unknown as HercegChart).setViewport({ x: [1, 2], y: [0, 5] }));
-    expect(views).toEqual([{ x: [1, 2], y: [0, 5], yRight: null }]);
+    expect(views).toMatchObject([
+      {
+        cause: "api",
+        scales: [
+          { scale: "x", view: [1, 2] },
+          { scale: "y", view: [0, 5] },
+        ],
+      },
+    ]);
   });
 
   it("keeps the committed handler while a transition is suspended", async () => {

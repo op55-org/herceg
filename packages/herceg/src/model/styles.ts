@@ -81,8 +81,8 @@ export function chartStyles(theme: Theme, config: ChartConfig, environment: Them
     const scale = axis as ScaleName;
     return [
       [config[scale]?.style?.[role], `${axis}.style.${role}`],
-      [own?.style?.[role], `panels[${panel}].style.${role}`],
-      [own?.[scale]?.style?.[role], `panels[${panel}].${axis}.style.${role}`],
+      [own?.style?.[role], `${config.panels?.path(panel)}.style.${role}`],
+      [own?.[scale]?.style?.[role], `${config.panels?.path(panel)}.${axis}.style.${role}`],
     ];
   };
   return {
@@ -102,7 +102,7 @@ export function chartStyles(theme: Theme, config: ChartConfig, environment: Them
       paint(
         `plot ${panel}`,
         plot,
-        () => [[panels[panel]?.style?.plot, `panels[${panel}].style.plot`]],
+        () => [[panels[panel]?.style?.plot, `${config.panels?.path(panel)}.style.plot`]],
         (own) => plotPaint([roles.plot, own]),
       ),
     /** How panel `panel`'s title, or a facet panel's header, is written. */
@@ -111,8 +111,11 @@ export function chartStyles(theme: Theme, config: ChartConfig, environment: Them
         const own = panels[panel];
         const heading = own?.title;
         return [
-          [own?.style?.panelTitle, `panels[${panel}].style.panelTitle`],
-          [typeof heading === "object" ? heading.style : undefined, `panels[${panel}].title.style`],
+          [own?.style?.panelTitle, `${config.panels?.path(panel)}.style.panelTitle`],
+          [
+            typeof heading === "object" ? heading.style : undefined,
+            `${config.panels?.path(panel)}.title.style`,
+          ],
         ];
       }),
     /** How the chart's title is written. */

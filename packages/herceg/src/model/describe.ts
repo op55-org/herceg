@@ -118,8 +118,15 @@ export function describeChart(model: ChartModel): string {
   return parts.filter(Boolean).join(" ");
 }
 
-/** A mounted chart's description: what it shows, and how keys read it. */
+/**
+ * A mounted chart's description: what it shows, and how keys read it,
+ * where they read anything (annotations and dendrograms alone they do not).
+ */
 export function chartDescription(model: ChartModel): string {
   const hint = model.items?.hint;
-  return `${describeChart(model)} Focus the chart and use the arrow keys to read values.${hint ? ` ${hint}` : ""}`;
+  const keys =
+    model.items || model.series().length
+      ? " Focus the chart and use the arrow keys to read values."
+      : "";
+  return `${describeChart(model)}${keys}${hint ? ` ${hint}` : ""}`;
 }

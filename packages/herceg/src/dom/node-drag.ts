@@ -12,7 +12,6 @@
 // also work on a network's layout between frames (see `layout-frames.ts`).
 
 import type { NodeMoves } from "../marks/graph.ts";
-import type { ChartConfig } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
 import { LayoutFrames } from "./layout-frames.ts";
@@ -36,7 +35,6 @@ export class Controls implements ChartControls {
   readonly #pointer = new PointerOwnership();
   readonly #frames: LayoutFrames;
   readonly #stop: (() => void)[] = [];
-  #drags = false;
   /** A press on a node: its pointer, panel, and key, where the press and the node started. */
   #press: {
     pointer: number;
@@ -53,7 +51,7 @@ export class Controls implements ChartControls {
     this.#frames = new LayoutFrames(host);
     const root = host.chart.root;
     this.#root = root;
-    const moved = (panel: string) => this.#drags && this.#moved(panel) > 0;
+    const moved = (panel: string) => this.#drags(panel) && this.#moved(panel) > 0;
     this.#navigation = new PlaneControls(
       host,
       "network",
@@ -71,10 +69,9 @@ export class Controls implements ChartControls {
     );
     // A drag maps the pointer through its plane's view: a change of that view ends it.
     this.#stop.push(
-      host.chart.on("viewport", ({ panels }) => {
+      host.chart.on("viewport", ({ views }) => {
         const press = this.#press;
-        const state = host.model.items?.panels.find(({ key }) => key === press?.panel)?.state;
-        if (state === (panels?.[0] ?? "")) this.#cancel();
+        if (views.some(({ panel }) => panel === press?.panel)) this.#cancel();
       }),
     );
     this.#listen();
@@ -84,10 +81,14 @@ export class Controls implements ChartControls {
     return this.#navigation.busy || (this.#press?.moved ?? false);
   }
 
-  update(config: ChartConfig): void {
-    this.#drags = !!config.interaction?.drag;
-    this.#navigation.update(config);
-    if (!this.#drags) this.#cancel();
+  update(): void {
+    this.#navigation.update();
+    if (this.#press && !this.#drags(this.#press.panel)) this.#cancel();
+  }
+
+  /** Whether dragging moves panel `panel`'s nodes (a subplot's own `drag`, or the chart's). */
+  #drags(panel: string): boolean {
+    return !!this.#host.model.interactionOf(panel)?.drag;
   }
 
   draw(scene: Scene): void {
@@ -261,10 +262,7 @@ export class Controls implements ChartControls {
       event.stopImmediatePropagation();
       return;
     }
-    if (!this.#drags || event.target !== this.#root) return;
-    // Shift with the arrow keys pans a network that pans (`pan`, or `zoom`): Alt moves the node then.
-    const { pan, zoom } = this.#host.model.config.interaction ?? {};
-    const pans = pan === undefined ? !!zoom : pan !== false;
+    if (event.target !== this.#root) return;
     const cursor = this.#host.cursor();
     const networks = this.#host.model.items?.panels.filter(({ result }) => result.moves) ?? [];
     const panel = cursor
@@ -272,8 +270,11 @@ export class Controls implements ChartControls {
       : networks.every(({ state }) => state === networks[0]?.state)
         ? networks[0]?.key
         : undefined;
-    const moves = panel === undefined ? undefined : this.#moves(panel);
+    const moves = panel === undefined || !this.#drags(panel) ? undefined : this.#moves(panel);
     if (!moves) return;
+    // Shift with the arrow keys pans a network that pans (`pan`, or `zoom`): Alt moves the node then.
+    const { pan, zoom } = this.#host.model.interactionOf(panel) ?? {};
+    const pans = pan === undefined ? !!zoom : pan !== false;
     const way = event.shiftKey && (!pans || event.altKey) ? WAYS[event.key] : undefined;
     if (way) {
       const key = cursor?.key;

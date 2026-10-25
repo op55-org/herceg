@@ -13,7 +13,7 @@ import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
-import type { CameraSpec } from "../spec/spec.ts";
+import type { CameraSpec, InteractionSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import type { MovedNodes, NodeMoves } from "./graph.ts";
@@ -211,6 +211,13 @@ export interface LayoutResult {
    */
   rowsOf?(key: string, table: Table): ArrayLike<number> | undefined;
   /**
+   * The one row of `table` the item keyed `key` stands for, for items that
+   * sum rows (a slice of one row), whose tooltips show its fields; undefined
+   * for none or several. Inspections read it on every pointer move, so it
+   * is worked out once for every item (see `SoleRows`), not per read.
+   */
+  soleRow?(key: string, table: Table): number | undefined;
+  /**
    * The rows of `table` whose items lie inside `polygon` (pixels), where
    * `shows` (pixels not under an inset) says the panel draws, as a lasso
    * selects them; undefined when the mark draws none of its rows.
@@ -306,10 +313,11 @@ export interface LayoutMark extends ChartMark {
    */
   readonly interactions?: readonly ("zoom" | "plane" | "lasso" | "drag")[];
   /**
-   * What a chart of the mark alone loads for its options to be navigated by
-   * pointer and keyboard (see dom/controls.ts); none when they turn nothing on.
+   * What a chart of the mark loads for `interaction` (the chart's, or a
+   * subplot's own over it) to navigate it by pointer and keyboard (see
+   * dom/controls.ts); none when the settings turn nothing on.
    */
-  controls?(config: ChartConfig): LayoutControls | undefined;
+  controls?(interaction: InteractionSpec | undefined): LayoutControls | undefined;
   /**
    * 3D charts, whose camera the pointer and keyboard turn: the camera `spec`
    * describes, its settings left out taken from `base` (by default the
@@ -367,6 +375,41 @@ export class RowsCache<T> {
     if (rows) this.#some.set(rows, entry);
     else this.#all = entry;
     return entry.value;
+  }
+}
+
+/** No row, and several rows, in `SoleRows`. */
+const NO_ROW = -1;
+const SEVERAL = -2;
+
+/**
+ * The one row each of a layout mark's items (a category, a link, a node)
+ * stands for, where it stands for one, noted as its rows are visited.
+ */
+export class SoleRows {
+  readonly #rows: Int32Array;
+
+  constructor(items: number) {
+    this.#rows = new Int32Array(items).fill(NO_ROW);
+  }
+
+  /** Notes that `item` stands for `row`. */
+  add(item: number, row: number): void {
+    const held = this.#rows[item]!;
+    this.#rows[item] = held === NO_ROW || held === row ? row : SEVERAL;
+  }
+
+  /** Notes that `item` stands for the rows `from` does too (a node for its children's). */
+  addFrom(item: number, from: number): void {
+    const row = this.#rows[from]!;
+    if (row === SEVERAL) this.#rows[item] = SEVERAL;
+    else if (row !== NO_ROW) this.add(item, row);
+  }
+
+  /** The one row `item` stands for; undefined for none or several. */
+  of(item: number): number | undefined {
+    const row = this.#rows[item];
+    return row !== undefined && row >= 0 ? row : undefined;
   }
 }
 

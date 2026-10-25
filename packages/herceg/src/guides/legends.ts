@@ -495,7 +495,10 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
             ...readers.map((key) => key(value)),
           ]);
         }
-        const { mark } = find(target.mark, `${where}.mark`);
+        // A mark of series, or one drawing its own layout, which hides whole too.
+        const layout = layouts.get(target.mark);
+        const series = layout ? undefined : find(target.mark, `${where}.mark`).mark;
+        const mark = layout ?? series!;
         const drawnIn = mark.spec.panel;
         if (panel !== undefined && drawnIn !== panel)
           throw refused(
@@ -511,12 +514,12 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
         // A series field's values are its series.
         if (field === by) return values.map((value) => seriesKey(place, value));
         const { type } = mark.spec;
-        if (!byRows(mark))
+        if (!series || !byRows(series))
           throw refused(
             `${where}.field`,
             `: ${type} "${target.mark}" ${type === "bar" ? "stacks its bars by series" : "draws its rows as one"}, which values of field "${field}" do not split; target ${by === undefined ? "the mark whole" : `its series by "${by}", or the mark whole`}`,
           );
-        if (!mark.table?.has(field))
+        if (!series.table?.has(field))
           throw refused(
             `${where}.field`,
             `: mark "${target.mark}" has no field "${field}"; name one its table has`,
@@ -667,10 +670,19 @@ function annotationLook(
   theme: Theme,
   paint: PaintReader,
 ): { color: string; sample: Sample | undefined } {
-  const { type, stroke, fill } = spec as { type: string; stroke?: string; fill?: string };
+  const { type, stroke, fill, label } = spec as {
+    type: string;
+    stroke?: string;
+    fill?: string;
+    label?: { style?: { color?: string } };
+  };
+  // Text in the color its label is drawn in.
+  const text = label?.style?.color;
   const color =
     type === "text"
-      ? theme.text
+      ? text === undefined
+        ? theme.text
+        : paint(text, "text label.style.color")
       : ((type === "rule" ? stroke : fill) ?? undefined) === undefined
         ? theme.muted
         : paint(

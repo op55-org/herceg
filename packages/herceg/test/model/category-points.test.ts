@@ -356,9 +356,7 @@ describe("points on categories of panels' own", () => {
     ]);
   });
 
-  it("refuse synced charts, as for bars", () => {
-    expect(() => build({ ...config(), interaction: { sync: "board" } })).toThrow(
-      'chart interaction.sync: panels with categories of their own (x.scope "panel") cannot sync yet',
-    );
+  it("sync, as bars do: categories travel by name, on the channel's panel's scale", () => {
+    expect(() => build({ ...config(), interaction: { sync: "board" } })).not.toThrow();
   });
 });

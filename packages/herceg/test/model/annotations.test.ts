@@ -23,6 +23,7 @@ import type {
   TextGeometry,
 } from "../../src/scene/scene.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -94,7 +95,7 @@ describe("rule", () => {
         rule(events, { x: "at", contributeDomain: true }),
       ],
     });
-    model.setViewport([start, start + hour]);
+    setViewport(model, [start, start + hour]);
     expect(of(model.scene(estimateText), "rule")).toHaveLength(0);
     expect(of(scene, "rule").length).toBe(2);
     expect(() => rule({ x: "at" } as never)).toThrow(
@@ -274,7 +275,7 @@ describe("text", () => {
         text(notes, { x: "at", y: "v", label: "!" }),
       ],
     });
-    model.setViewport([start, start + 23 * hour]);
+    setViewport(model, [start, start + 23 * hour]);
     model.scene(estimateText);
     expect(model.yScale()!.domain[1]).toBeLessThan(1000);
   });

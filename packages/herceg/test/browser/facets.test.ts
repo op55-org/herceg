@@ -16,6 +16,7 @@ import { point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { facet } from "../../src/model/facet.ts";
 import { panels } from "../../src/model/panels.ts";
+import { brief } from "../helpers/views.ts";
 import { bandBox, MOUSE, modelOf } from "./helpers.ts";
 
 /** Without a background, the canvas holds what marks paint alone. */
@@ -308,14 +309,18 @@ describe("facet panels with y scales of their own", () => {
     chart.destroy();
   });
 
-  it("refuse a y viewport, which no one scale could show", () => {
+  it("refuse a y viewport without a panel, which no one scale could show, and take one with", () => {
     const data = table({ x: [0, 1, 0, 1], y: [1, 2, 100, 200], f: ["A", "A", "B", "B"] });
     const chart = grouped(line(data, { x: "x", y: "y" }));
-    expect(() => chart.setViewport({ y: [500, 600] })).toThrow("no one y range");
+    const refusal = "setViewport y: the panels have y scales of their own; name one with { panel }";
+    expect(() => chart.setViewport({ y: [500, 600] })).toThrow(refusal);
     // A change refused in part changes nothing.
-    expect(() => chart.setViewport({ x: [0, 0.5], y: [500, 600] })).toThrow("no one y range");
+    expect(() => chart.setViewport({ x: [0, 0.5], y: [500, 600] })).toThrow(refusal);
     expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: null });
     chart.setViewport({ y: null });
+    chart.setViewport({ y: [500, 600] }, { panel: "B" });
+    expect(chart.getViewport({ panel: "B" }).y).toEqual([500, 600]);
+    expect(chart.getViewport({ panel: "A" }).y).toBeNull();
     chart.destroy();
   });
 });
@@ -401,7 +406,8 @@ describe("facet panels with x scales of their own", () => {
     expect(zoomed!.x.map(104)).toBeCloseTo(px, 0);
     expect(views(chart)[0]).toBeNull();
     expect(views(chart)[1]).not.toBeNull();
-    expect(events).toEqual([{ x: views(chart)[1], y: null, yRight: null, panels: ["b"] }]);
+    expect(events.map(brief)).toEqual([{ panel: "b", scales: [["x", views(chart)[1], ["b"]]] }]);
+    expect(events[0]!.cause).toBe("wheel");
     // Over the gap between panels, the wheel scrolls the page.
     expect(wheel(chart, a!.plot.x + a!.plot.width + 4, mid).defaultPrevented).toBe(false);
     // Dragging pans the panel pressed.
@@ -409,7 +415,8 @@ describe("facet panels with x scales of their own", () => {
     pointer(chart.root, "pointermove", a!.x.map(3), mid);
     pointer(chart.root, "pointerup", a!.x.map(3), mid);
     expect(views(chart)[0]![0]).toBeCloseTo(2, 6);
-    expect(events.at(-1)!.panels).toEqual(["a"]);
+    expect(events.at(-1)!.panel).toBe("a");
+    expect(events.at(-1)!.scales.map(({ panels }) => panels)).toEqual([["a"]]);
     // Double click on a panel resets its scale; elsewhere, every scale.
     events.length = 0;
     dblclick(chart, b!.x.map(104), mid);
@@ -417,9 +424,9 @@ describe("facet panels with x scales of their own", () => {
     expect(views(chart)[1]).toBeNull();
     dblclick(chart, 2, 2);
     expect(views(chart)).toEqual([null, null]);
-    expect(events.map((e) => [e.x, e.panels])).toEqual([
-      [null, ["b"]],
-      [null, ["a"]],
+    expect(events.map(brief)).toEqual([
+      { panel: "b", scales: [["x", null, ["b"]]] },
+      { scales: [["x", null, ["a"]]] },
     ]);
     chart.destroy();
   });
@@ -457,33 +464,43 @@ describe("facet panels with x scales of their own", () => {
 
   it("set views by panel, refusing ranges without one", () => {
     const chart = independent();
-    expect(() => chart.setViewport([1, 2])).toThrow("panel: required when panels");
-    expect(() => chart.setViewport([1, 2], { panel: "c" })).toThrow('no panel "c"');
+    expect(() => chart.setViewport([1, 2])).toThrow(
+      "setViewport x: the panels have x scales of their own; name one with { panel }",
+    );
+    expect(() => chart.setViewport([1, 2], { panel: "c" })).toThrow(
+      'setViewport: no panel "c"; name one of "a", "b"',
+    );
     chart.setViewport([101, 102], { panel: "b" });
     expect(views(chart)).toEqual([null, [101, 102]]);
-    // A y range applies to every panel: one event per x scale.
+    // A y range on the y every panel shares: one change, with each panel's whole view.
     const events: ChartEvents["viewport"][] = [];
     chart.on("viewport", (event) => events.push(event));
     chart.setViewport({ y: [0, 50] });
-    expect(events).toEqual([
-      { x: null, y: [0, 50], yRight: null, panels: ["a"] },
-      { x: [101, 102], y: [0, 50], yRight: null, panels: ["b"] },
+    expect(events.map(brief)).toEqual([{ scales: [["y", [0, 50], ["a", "b"]]] }]);
+    expect(events[0]!.views).toEqual([
+      { panel: "a", x: null, y: [0, 50], yRight: null, types: { x: "linear", y: "linear" } },
+      { panel: "b", x: [101, 102], y: [0, 50], yRight: null, types: { x: "linear", y: "linear" } },
     ]);
     expect(chart.getViewport({ panel: "b" })).toEqual({ x: [101, 102], y: [0, 50], yRight: null });
-    expect(() => chart.getViewport()).toThrow("panel: required when panels");
-    // A listener changing the view again while the first scale's event is
-    // reported: its change reports both scales, and the outer report does
-    // not report the second scale again.
+    // Without a panel: the y every panel shares, and no one x.
+    expect(chart.getViewport()).toEqual({ x: null, y: [0, 50], yRight: null });
+    // A listener changing the view again as it hears of a change: its
+    // change is the next, heard once this one reached every listener.
     events.length = 0;
-    const stop = chart.on("viewport", ({ y }) => {
-      if (y?.[1] === 60) chart.setViewport({ y: [0, 70] });
+    const heard: number[] = [];
+    const stop = chart.on("viewport", ({ scales, viewRevision }) => {
+      heard.push(viewRevision);
+      if (scales[0]!.view?.[1] === 60) chart.setViewport({ y: [0, 70] });
     });
+    const last = chart.on("viewport", ({ viewRevision }) => heard.push(viewRevision));
     chart.setViewport({ y: [0, 60] });
-    expect(events.map((e) => [e.y, e.panels])).toEqual([
-      [[0, 60], ["a"]],
-      [[0, 70], ["a"]],
-      [[0, 70], ["b"]],
+    expect(events.map(brief)).toEqual([
+      { scales: [["y", [0, 60], ["a", "b"]]] },
+      { scales: [["y", [0, 70], ["a", "b"]]] },
     ]);
+    const [first, second] = events.map(({ viewRevision }) => viewRevision);
+    expect(heard).toEqual([first, first, second, second]);
+    last();
     stop();
     chart.setViewport(null);
     expect(views(chart)).toEqual([null, null]);
@@ -500,16 +517,20 @@ describe("facet panels with x scales of their own", () => {
     chart.update({ y: { scope: "chart" }, x: { scope: "panel" } });
     // The same zoom again is a change, and is reported.
     chart.setViewport({ y: [0, 10] });
-    expect(events.map((e) => [e.y, e.panels])).toEqual([
-      [[0, 10], ["a"]],
-      [[0, 10], ["b"]],
-      [null, ["a"]],
-      [null, ["b"]],
-      [[0, 10], ["a"]],
-      [[0, 10], ["b"]],
+    expect(events.map(brief)).toEqual([
+      { scales: [["y", [0, 10], ["a", "b"]]] },
+      { scales: [["y", null, ["a", "b"]]] },
+      { scales: [["y", [0, 10], ["a", "b"]]] },
+    ]);
+    // The instance let go is reported fitted, as of what changed it, with
+    // the whole views of the panels still drawn.
+    expect(events[1]!.cause).toBe("options");
+    expect(events[1]!.views.map(({ panel, y }) => [panel, y])).toEqual([
+      ["a", null],
+      ["b", null],
     ]);
     // A listener the drawing calls (hover) changing the view: its change
-    // is reported once, within the report of the y zoom let go.
+    // is the next, after the y zoom let go.
     events.length = 0;
     const [a] = modelOf(chart).panels();
     let zoomed = false;
@@ -520,9 +541,10 @@ describe("facet panels with x scales of their own", () => {
     });
     pointer(chart.root, "pointermove", a!.plot.x + 10, a!.plot.y + 10);
     chart.update({ y: { scope: "panel" }, x: { scope: "panel" } });
-    expect(events.map((e) => [e.x, e.y, e.panels])).toEqual([
-      [[101, 102], null, ["a"]],
-      [null, null, ["b"]],
+    chart.render();
+    expect(events.map(brief)).toEqual([
+      { scales: [["y", null, ["a", "b"]]] },
+      { panel: "a", scales: [["x", [101, 102], ["a"]]] },
     ]);
     chart.destroy();
   });
@@ -545,22 +567,32 @@ describe("facet panels with x scales of their own", () => {
     pointer(chart.root, "pointermove", b!.x.map(104), y);
     pointer(chart.root, "pointerup", b!.x.map(104), y);
     expect(chart.selection!.x![0]).toBeCloseTo(102, 6);
-    expect(chart.selectionPanels).toEqual(["b"]);
-    expect(selections.at(-1)!.panels).toEqual(["b"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
+    expect(selections.at(-1)!.owner.panels).toEqual(["b"]);
+    expect(selections.at(-1)!.owner.scales.map(({ scale, panels }) => [scale, panels])).toEqual([
+      ["x", ["b"]],
+    ]);
     await frame();
     const bands = [...chart.root.querySelectorAll('svg path[fill-opacity="0.18"]')].filter(
       (r) => r.getAttribute("visibility") === "visible",
     );
     expect(bands.map((r) => bandBox(r).x)).toEqual([expect.closeTo(b!.x.map(102), 1)]);
     // Without a panel, a selection could be in either scale.
-    expect(() => chart.select([1, 2])).toThrow("panel: required when panels");
+    expect(() => chart.select([1, 2])).toThrow(
+      "select x: the panels have x scales of their own; name one with { panel }",
+    );
     chart.select([1, 2], { panel: "a" });
-    expect(chart.selectionPanels).toEqual(["a"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["a"]);
     // A selection whose panels go goes too.
     data.reset({ t: [0, 1], v: [1, 2], region: ["b", "b"] });
     chart.render();
     expect(chart.selection).toBeNull();
-    expect(selections.at(-1)).toEqual({ x: null, y: null, lasso: null, panels: ["a"] });
+    expect(selections.at(-1)).toMatchObject({
+      x: null,
+      y: null,
+      lasso: null,
+      owner: { panels: ["a"] },
+    });
     chart.destroy();
   });
 
@@ -626,7 +658,7 @@ describe("facet panels with x scales of their own", () => {
     chart.render();
     expect(chart.getViewport().x).toEqual([100, 101]);
     expect(chart.selection!.x).toEqual([100, 100.5]);
-    expect(chart.selectionPanels).toEqual(["a", "b"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["a", "b"]);
     chart.update({ x: { scope: "panel" } });
     chart.setViewport([1, 2], { panel: "a" });
     chart.render();
@@ -644,10 +676,10 @@ describe("facet panels with x scales of their own", () => {
       facet: facet("region"),
     });
     chart.select([1, 2]);
-    expect(chart.selectionPanels).toEqual(["a", "b"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["a", "b"]);
     data.reset({ t: [0, 1, 2], v: [1, 2, 3], region: ["b", "c", "d"] });
     chart.render();
-    expect(chart.selectionPanels).toEqual(["b", "c", "d"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["b", "c", "d"]);
     expect(chart.selection!.x).toEqual([1, 2]);
     chart.destroy();
   });
@@ -675,7 +707,7 @@ describe("facet panels with x scales of their own", () => {
       );
     key(chart, "End");
     shift("ArrowLeft");
-    expect(chart.selectionPanels).toEqual(["a"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["a"]);
     expect(chart.selection!.x).toEqual([8, 9]);
     // Down to b, at the same place across its plot: 8 of 0..9 is 108 of 100..109.
     key(chart, "ArrowDown");
@@ -683,7 +715,7 @@ describe("facet panels with x scales of their own", () => {
     // A range does not reach from a's values into b's.
     shift("ArrowLeft");
     expect(chart.selection!.x).toEqual([107, 108]);
-    expect(chart.selectionPanels).toEqual(["b"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
     key(chart, "Enter");
     expect(views(chart)).toEqual([null, [107, 108]]);
     chart.destroy();
@@ -748,7 +780,9 @@ describe("subplots with x scales of their own", () => {
     const [lo, hi] = chart.getViewport({ panel: "spread" }).x!;
     expect(lo).toBeGreaterThan(10);
     expect(hi).toBeLessThan(30);
-    expect(events.map((e) => e.panels)).toEqual([["spread"]]);
+    expect(events.map(brief)).toEqual([
+      { panel: "spread", scales: [["x", chart.getViewport({ panel: "spread" }).x, ["spread"]]] },
+    ]);
     chart.destroy();
   });
 });
@@ -780,7 +814,7 @@ describe("facet panels with categories of their own", () => {
     pointer(chart.root, "pointermove", s!.x.map(1), y);
     pointer(chart.root, "pointerup", s!.x.map(1), y);
     expect(chart.selection!.x).toEqual([0, 1]);
-    expect(chart.selectionPanels).toEqual(["S"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["S"]);
     await frame();
     const bands = [...chart.root.querySelectorAll('svg path[fill-opacity="0.18"]')].filter(
       (r) => r.getAttribute("visibility") === "visible",
@@ -797,14 +831,19 @@ describe("facet panels with categories of their own", () => {
         .map((p) => p.key),
     ).toEqual(["S", "E"]);
     expect(chart.selection!.x).toEqual([0, 1]);
-    expect(chart.selectionPanels).toEqual(["S"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["S"]);
     // Its own changing, band 1 would be another category (b keeps its place
     // in the table's dictionary, before a): it is cleared.
     data.append({ region: ["S"], product: ["b"], units: [7] });
     chart.render();
     expect(modelOf(chart).panels()[0]!.x.categories).toEqual(["b", "a", "c"]);
     expect(chart.selection).toBeNull();
-    expect(selections.at(-1)).toEqual({ x: null, y: null, lasso: null, panels: ["S"] });
+    expect(selections.at(-1)).toMatchObject({
+      x: null,
+      y: null,
+      lasso: null,
+      owner: { panels: ["S"] },
+    });
     chart.destroy();
   });
 
@@ -1082,7 +1121,11 @@ describe("right axes in panels", () => {
     expect(after!.yRight!.map(under[1]!)).toBeCloseTo(py, 4);
     // Both axes changed in one event, and every panel shows the same right range.
     expect(viewports).toHaveLength(1);
-    expect(viewports[0]!.y && viewports[0]!.yRight).not.toBeNull();
+    expect(viewports[0]!.scales.map(({ scale, panels }) => [scale, panels])).toEqual([
+      ["x", ["a", "b"]],
+      ["y", ["a", "b"]],
+      ["yRight", ["a", "b"]],
+    ]);
     expect(a!.yRight!.domain).toEqual(after!.yRight!.domain);
     const [info] = chart.getPanels();
     expect([info!.yRight!.instance, info!.yRight!.canSetViewport]).toEqual(["", true]);
@@ -1124,7 +1167,7 @@ describe("right axes in panels", () => {
     selecting.destroy();
   });
 
-  it("keep right scales of their own out of viewports, and place values on each panel's", () => {
+  it("zoom right scales of their own by panel, and place values on each panel's", () => {
     const chart = createChart(host, {
       marks,
       facet: facet("region"),
@@ -1132,25 +1175,22 @@ describe("right axes in panels", () => {
       interaction: { zoom: "x" },
     });
     const [a, b] = chart.getPanels();
-    expect(a!.yRight!.canSetViewport).toBe(false);
+    expect(a!.yRight!.canSetViewport).toBe(true);
     expect(a!.yRight!.instance).not.toBe(b!.yRight!.instance);
-    expect(() => chart.setViewport({ yRight: [0, 10] })).toThrow("no one y range");
+    expect(() => chart.setViewport({ yRight: [0, 10] })).toThrow(
+      "setViewport yRight: the panels have right y scales of their own; name one with { panel }",
+    );
     chart.setViewport({ y: [0, 20] });
     expect(chart.getViewport()).toEqual({ x: null, y: [0, 20], yRight: null });
+    chart.setViewport({ yRight: [0, 10] }, { panel: "a" });
+    expect(chart.getViewport({ panel: "a" }).yRight).toEqual([0, 10]);
+    expect(chart.getViewport({ panel: "b" }).yRight).toBeNull();
+    chart.setViewport({ yRight: null }, { panel: "a" });
     // The same value sits at another height in each panel.
     const at = (panel: string) => chart.toPixel(300, { panel, axis: "yRight" })!;
     expect(at("a")).not.toBeCloseTo(at("b"), 0);
     expect(chart.formatValue(2500, { panel: "b", axis: "yRight" })).toBe("2,500");
     chart.destroy();
-    expect(() =>
-      createChart(host, {
-        marks,
-        facet: facet("region"),
-        yRight: { scope: "panel" },
-        interaction: { zoom: "y" },
-        errorMode: "throw",
-      }),
-    ).toThrow("cannot zoom along y");
   });
 
   it("announce a panel's own annotations as the keyboard arrives there", () => {

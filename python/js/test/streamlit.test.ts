@@ -1148,7 +1148,7 @@ it("keeps a selection on the panels sharing x when an inset comes before them", 
     await next.loading;
     await frame();
     expect(next.selection?.x).toEqual([0, 1]);
-    expect(next.selectionPanels).toEqual(["bars"]);
+    expect(next.selectionOwner?.panels ?? null).toEqual(["bars"]);
   } finally {
     listener.mockRestore();
   }
@@ -1206,7 +1206,7 @@ it("keeps two map subplots' views and a lasso in one, naming its panel, across r
     expect(restored.getViewport({ panel: "b" }).x).toEqual([0, 0.1]);
     expect(restored.getViewport({ panel: "a" }).x).toBeNull();
     expect(restored.selection?.lasso).toEqual(lasso);
-    expect(restored.selectionPanels).toEqual(["b"]);
+    expect(restored.selectionOwner?.panels ?? null).toEqual(["b"]);
     expect(next.state).toEqual([]);
     next.cleanup();
   } finally {

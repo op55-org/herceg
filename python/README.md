@@ -1010,8 +1010,10 @@ chart = hg.Chart(linkage, y=hg.AxisOptions(show=False)).dendrogram(
 The tree contributes leaf categories in first-child-before-second-child
 order (c, d, a, b here) and places leaves at band centers. `side` names
 the leaves' plot edge: bottom (default) or top along x, left or right along
-y. Merge heights scale linearly within the panel to its opposite edge,
-independent of axis zoom. Hide that direction's axis with `hg.AxisOptions(show=False)`.
+y. Merge heights are values on the other axis, from zero to the largest,
+so its ticks read them and zooming moves the links; with `side="top"` or
+`"right"` that axis' automatic domain descends so links grow away from the
+leaves, and a `domain` the axis sets runs as given.
 Ties and decreasing heights are allowed; all-zero heights stay at the
 leaves' edge. A leaf missing from the axis omits links above it. The default
 stroke is muted theme text, with width 1 CSS pixel; `label` names a summary

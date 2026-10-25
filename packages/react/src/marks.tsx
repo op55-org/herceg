@@ -21,7 +21,7 @@ import {
   type DendrogramOptions,
   dendrogram,
   type ErrorBarOptions,
-  errorBar,
+  errorbar,
   type FunnelOptions,
   funnel,
   type GaugeOptions,
@@ -141,7 +141,7 @@ export const Rug = /* @__PURE__ */ markElement(
 /** Error bars: `x`, `y1`, `y2` (vertical) or `y`, `x1`, `x2` (horizontal). */
 export const ErrorBar = /* @__PURE__ */ markElement(
   "ErrorBar",
-  ({ data, ...options }: WithData<ErrorBarOptions<Schema>, Schema>) => errorBar(data, options),
+  ({ data, ...options }: WithData<ErrorBarOptions<Schema>, Schema>) => errorbar(data, options),
 ) as unknown as <S extends Schema>(props: WithData<ErrorBarOptions<S>, S>) => null;
 
 /** A pie, or with `innerRadius` a donut; it has its chart, each facet panel, or its `panel` to itself. */

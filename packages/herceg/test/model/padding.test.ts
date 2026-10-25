@@ -12,6 +12,7 @@ import { NAVIGATOR_PANEL, rangeNavigator } from "../../src/model/navigator.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import type { LineGeometry, ShapesGeometry } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 400, height = 200) {
   const model = new ChartModel(
@@ -114,9 +115,9 @@ describe("padding given", () => {
       x: { domain: [2, 8], padding: { px: 10 } },
     });
     expect(padded.model.xScale()!.map(2)).toBeCloseTo(padded.plot.x + 10, 3);
-    padded.model.setViewport([4, 6]);
+    setViewport(padded.model, [4, 6]);
     padded.model.scene(estimateText);
-    expect(padded.model.viewport).toEqual([4, 6]);
+    expect(padded.model.getViewport().x).toEqual([4, 6]);
     expect(padded.model.xScale()!.map(4)).toBeCloseTo(padded.plot.x + 10, 3);
   });
 
@@ -239,7 +240,7 @@ describe("padding given", () => {
       x: { padding: 0.1 },
       navigator: rangeNavigator(),
     });
-    model.setViewport([5, 40]);
+    setViewport(model, [5, 40]);
     const scene = model.scene(estimateText);
     const shown = model.xScale()!.domain;
     const strip = scene.panels.find(({ key }) => key === NAVIGATOR_PANEL)!;

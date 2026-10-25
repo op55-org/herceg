@@ -19,7 +19,13 @@ import { formatNumber } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, niceTimeDomain, timeTicks } from "../scale/time.ts";
-import type { AreaGeometry, Geometry, LineGeometry, RectGeometry } from "../scene/scene.ts";
+import {
+  type AreaGeometry,
+  type Geometry,
+  type LineGeometry,
+  MOVING_BARS,
+  type RectGeometry,
+} from "../scene/scene.ts";
 import type {
   BinSpec,
   Clip,
@@ -481,13 +487,27 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     const out: RectGeometry[] = [];
     // Dodged series split each bin, by their field's values (see dodge.ts).
     this.#shares?.split(series, frame, true);
+    // Charts that animate changed values learn where each bar stands, by its
+    // bin's start, and ends; bars on log axes show their new values at once.
+    const keyed = frame.keyed && (this.#horizontal ? frame.x : frame.y).type !== "log";
     for (const s of visible) {
       const rects = frame.floats(s.key, "rect", s.length * 4);
+      const items = keyed && s.length <= MOVING_BARS;
+      const at = items ? frame.doubles(s.key, "at", s.length) : undefined;
+      const span = items ? frame.floats(s.key, "span", s.length * 2) : undefined;
+      const { edges } = this.#binsOf(s);
       let count = 0;
       for (let i = 0; i < s.length; i++) {
-        const rect = this.binRect(s, i, frame);
-        if (rect) rects.set(rect, count++ * 4);
+        const bar = this.#binBar(s, i, frame);
+        if (!bar) continue;
+        if (at) {
+          at[count] = edges[i]!;
+          span![count * 2] = bar.root;
+          span![count * 2 + 1] = bar.tip;
+        }
+        rects.set(bar.rect, count++ * 4);
       }
+      const bars = at && { horizontal: this.#horizontal, at, span: span! };
       out.push({
         kind: "rect",
         draw: rectDrawing,
@@ -496,6 +516,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
         fillOpacity: opacity,
         rects,
         count,
+        ...(bars && { bars }),
       });
     }
     return out;
@@ -773,6 +794,15 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     bin: number,
     frame: Pick<Frame, "x" | "y">,
   ): readonly [number, number, number, number] | undefined {
+    return this.#binBar(s, bin, frame)?.rect;
+  }
+
+  /** A bin's bar: its rectangle, and where it starts (`root`) and ends (`tip`) across the bin, in pixels. */
+  #binBar(
+    s: Series,
+    bin: number,
+    frame: Pick<Frame, "x" | "y">,
+  ): { rect: readonly [number, number, number, number]; root: number; tip: number } | undefined {
     const horizontal = this.#horizontal;
     const along = horizontal ? frame.y : frame.x;
     const across = horizontal ? frame.x : frame.y;
@@ -788,9 +818,10 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     const root = bases ? across.map(bases[bin]!) : zero;
     const base = Number.isFinite(root) ? root : zero;
     const { start, share } = this.#bar(s, a, b);
-    return horizontal
-      ? [Math.min(tip, base), start, Math.abs(base - tip), share]
-      : [start, Math.min(tip, base), share, Math.abs(base - tip)];
+    const rect = horizontal
+      ? ([Math.min(tip, base), start, Math.abs(base - tip), share] as const)
+      : ([start, Math.min(tip, base), share, Math.abs(base - tip)] as const);
+    return { rect, root: base, tip };
   }
 
   /**

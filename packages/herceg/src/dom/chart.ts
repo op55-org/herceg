@@ -25,15 +25,21 @@ import { axisGuide } from "../model/axis-guide.ts";
 import { chartDescription, describeChart } from "../model/describe.ts";
 import type { FeatureCompiler } from "../model/features.ts";
 import { GUIDE_KIT, type GuideCompiler } from "../model/guides.ts";
+import type { PlaneViewChange } from "../model/item-views.ts";
 import {
   type ChartConfig,
   ChartModel,
   type DrawnPanel,
   type Inspection,
+  SCALES,
+  type ViewChange,
   type Viewport,
+  type ViewSet,
+  viewKey,
 } from "../model/model.ts";
 import type { NavigatorControls } from "../model/navigator.ts";
 import type { RowLink, RowSelectionChange } from "../model/row-selection.ts";
+import type { ScaleName } from "../model/scales.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
 import { titleText } from "../model/titles.ts";
 import { canvasRasterUrl, paintCanvas } from "../render/canvas.ts";
@@ -48,7 +54,7 @@ import {
   type Scene,
   tickLabelGap,
 } from "../scene/scene.ts";
-import { type ChartError, type ChartErrorPhase, chartError } from "../spec/errors.ts";
+import { ChartError, type ChartErrorPhase, chartError } from "../spec/errors.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import { surface, themeReadsPage } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
@@ -60,7 +66,11 @@ import {
   type ChartListener,
   Emitter,
   type PanelTarget,
+  type PanelViewport,
+  type PanelVisibility,
+  type ScaleView,
   type ViewCause,
+  type ViewportEvent,
 } from "./events.ts";
 import {
   type AxisTarget,
@@ -343,35 +353,36 @@ export class MountedChart implements Chart, ExportsScene {
    */
   readonly #member: SyncMember = {
     receive: (channel, value) => {
-      const { scale } = this.#channels[channel]!;
-      const model = this.#model;
+      const spec = this.#channels[channel]!;
+      const { scale, panel } = spec;
       if (channel === "cursor") {
-        this.#cursor = value === null ? null : { at: { [scale]: value } as CursorPosition };
+        // It shows where the panels sharing the channel's panel's scale are, as drawn then.
+        this.#cursor = value === null ? null : { at: { [scale]: value } as CursorPosition, panel };
         schedule(this.#scheduled);
         return;
       }
-      // Panels with scales of their own share cursors only: a view or a
-      // selection belongs to some of them. So do charts whose only axes
-      // are insets', with x scales of their own beside the chart's.
-      if (!(scale === "y" ? model.sharesY : model.sharesX)) return;
-      const panels = model.panels();
-      if (scale !== "y" && panels.length > 0 && !panels.some(({ xGroup }) => !xGroup)) return;
-      if (channel === "selection") {
-        this.#select(this.#decode(value as SharedSelection | null, scale));
-        return;
-      }
-      this.#settle();
-      const range = value as readonly [number, number] | null;
-      // A reset is of the chart's x scale, not of insets' own.
-      const wide = range ? undefined : panels.find(({ xGroup }) => !xGroup)?.key;
-      this.#changeView(
-        () =>
-          scale === "y"
-            ? model.setYViewport({ ...model.yViewport, y: range })
-            : model.setViewport(range, wide),
-        false,
-        "sync",
-      );
+      const take = () => {
+        // A view or a selection is of the scales of the channel's panel, or
+        // those every panel shares; a chart without either takes none.
+        const at = this.#endpoint(spec);
+        if (!at) return;
+        if (channel === "selection") {
+          this.#select(this.#decode(value as SharedSelection | null, scale, at), at);
+          return;
+        }
+        this.#settle();
+        const axis = verticalIn(at, scale);
+        this.#changeView(
+          () => this.#model.setView(axis, at[`${axis}Group`], value as Range | null),
+          "sync",
+          panel,
+        );
+      };
+      // Views and selections land on the panels pending changes make: those
+      // draw first, and what their frame reports is heard after, so changes
+      // its listeners make come after this one.
+      if (this.#shapeChanged) this.#flush(false, take);
+      else take();
     },
   };
   /** The channels the chart syncs on, from `interaction.sync`. */
@@ -380,10 +391,16 @@ export class MountedChart implements Chart, ExportsScene {
   #cursor: ShownCursor | null = null;
   #dirty = true;
   /**
-   * Changes since the last frame that may change the panels or how they
-   * share scales (options, data, size, hidden series), unlike changes of view.
+   * Changes since the last frame that may change the panels or their
+   * scales (options, data, size, hidden series), unlike changes of view.
    */
   #panelsChanged = false;
+  /**
+   * Those that may change which panels there are, how they share scales,
+   * or their axes' categories: options, hidden series, and data where the
+   * chart has facets or a category axis.
+   */
+  #shapeChanged = false;
   #destroyed = false;
   #describedAt = -Infinity;
   /** What the current summary was written from; zooming and hovering do not change it. */
@@ -398,25 +415,21 @@ export class MountedChart implements Chart, ExportsScene {
   #brushLoading: Promise<void> | undefined;
   /** Where the brush draws, in the pointer overlay. */
   readonly #brushLayer: SVGGElement;
-  /**
-   * The panels the selection belongs to: the x scale they share ("" for
-   * one every panel shares) and their keys; null without a selection.
-   */
+  /** What the selection belongs to (see `SelectionOwner`); null without a selection. */
   #owner: SelectionOwner | null = null;
   /** Writes the rows gestures select to the stores `rowSelection` binds, and highlights theirs. */
   #rows: RowLink | undefined;
   readonly #events = new Emitter();
   /** What last changed the view or what bounds it, for `edge` events. */
   #cause: ViewCause = "options";
+  /** What changed the panels since the last frame (data, or options and what is hidden), for the views it retires. */
+  #panelsCause: ViewCause = "options";
   /** Inside `#changeView`, whose end reports the change. */
   #changingView = false;
-  /**
-   * What viewport events reported for each x scale while a change of view
-   * is being reported (see `#reporting`): a listener's own change, reported
-   * inside the report of another, is not reported again by the outer one.
-   */
-  readonly #reported = new Map<string, Viewport>();
-  #reportDepth = 0;
+  /** Counts the changes of view reported (`ViewportEvent.viewRevision`). */
+  #viewRevision = 0;
+  /** Viewport events a listener's changes made, waiting for the one being delivered to reach every listener. */
+  #viewQueue: ViewportEvent[] | undefined;
   readonly #cleanup: (() => void)[] = [];
   /** Subscriptions to the tables the marks read and the row views some show. */
   readonly #tables = new Map<Table | RowView, () => void>();
@@ -515,7 +528,7 @@ export class MountedChart implements Chart, ExportsScene {
           const measure = this.#page?.measure;
           if (measure) this.#fontsMeasure = (text, font) => measure(text, font);
           this.#model.relayout();
-          this.#invalidate();
+          this.#invalidate(true, false);
         }),
       );
       this.#gate();
@@ -541,7 +554,7 @@ export class MountedChart implements Chart, ExportsScene {
           if (width === this.#model.width && height === this.#model.height) return;
           this.#snapshotMeasure = undefined;
           this.#settle();
-          this.#invalidate();
+          this.#invalidate(true, false);
         });
         observer.observe(container, { box: "border-box" });
         this.#cleanup.push(() => observer.disconnect());
@@ -549,8 +562,9 @@ export class MountedChart implements Chart, ExportsScene {
       // The first frame renders synchronously so the chart is never blank.
       this.#flush(true);
       // Its interaction follows: at once where a chart on the page loaded
-      // it, else once that frame is on screen, or at the first input.
-      if (controllers) {
+      // it and that frame drew, else once that frame is on screen, or at
+      // the first input, and once the code it waits for draws it.
+      if (controllers && this.#scene) {
         try {
           this.#attach(controllers);
         } catch (error) {
@@ -585,19 +599,26 @@ export class MountedChart implements Chart, ExportsScene {
     return (chart as MountedChart).#model;
   }
 
+  /**
+   * What restoring a state needs (web/events.ts, from-spec.ts): whether
+   * `chart` is not destroyed, and if so, the views of instances `changes`
+   * names set, limits applied, as one change the chart's options made.
+   */
+  static restore(chart: Chart, changes: readonly ViewSet[] = []): boolean {
+    const mounted = chart as MountedChart;
+    if (mounted.#destroyed) return false;
+    mounted.#changeView(() => mounted.#model.applyViews(changes), "options");
+    return true;
+  }
+
   update(options: ChartUpdate): void {
     const next: Record<string, unknown> = { ...this.#options, ...options };
     for (const [key, value] of Object.entries(options)) if (value === undefined) delete next[key];
     const previous = this.#options;
     // The fonts last taken: the options kept may hold fonts refused when the chart was made.
     const fonts = this.#fonts;
-    const y = this.#model.yViewport;
-    // The x views by scale (named by its first panel), which limits that changed may move.
-    const x = this.#xScales().map((first) => ({
-      group: first?.xGroup ?? "",
-      view: this.#model.viewportOf(first?.key),
-      first,
-    }));
+    // The views, which limits that changed may move.
+    const views = this.#model.views();
     this.#revision++;
     try {
       // Bindings the controller refuses, fonts the page refuses, and options
@@ -629,7 +650,7 @@ export class MountedChart implements Chart, ExportsScene {
     this.#snapshotMeasure = undefined;
     // The page was just read; a change it had is in the theme now.
     this.#pageChanged = false;
-    this.#cause = "options";
+    this.#cause = this.#panelsCause = "options";
     this.#settle();
     this.#applyOptions();
     this.#loadCompilers();
@@ -647,89 +668,61 @@ export class MountedChart implements Chart, ExportsScene {
       [...hidden].filter(keeps),
       panels ? panels.prune(hidden.panels, keeps) : hidden.panels.size ? new Map() : undefined,
     );
-    // Panels given y scales of their own let go of the y viewport, and
-    // limits that changed move views inside them. Which x scales there are
-    // now is known once drawn; listeners drawing calls (hover, select) may
-    // change the view, which this report then includes.
-    // Scales the update gave panels of their own changed anyway (reported below).
-    const model = this.#model;
-    const movedX = x.some(
-      ({ first, view }) => (first || model.sharesX) && model.viewportOf(first?.key) !== view,
-    );
-    if (this.#model.yViewport !== y || movedX) {
-      this.#reporting(() => {
-        this.#flush();
-        const scales = this.#xScales();
-        this.#reportViews(
-          scales,
-          scales.map((first) => ({
-            ...y,
-            x:
-              x.find(({ group }) => group === (first?.xGroup ?? ""))?.view ??
-              this.#model.viewportOf(first?.key),
-          })),
-        );
-      });
-      // Synced charts hear of the chart's x scale, where it still has one, not of insets' own.
-      this.#shareView(
-        model.sharesX && x.some(({ first, view }) => !first && model.viewportOf() !== view),
-      );
-    }
+    // Limits that changed moved views inside them; the views of instances
+    // no longer drawn go with the next frame (see `#finishFrame`).
+    const changed = this.#changed(views);
+    this.#reportViews(changed, "options");
+    this.#shareView(changed);
   }
 
-  setViewport(
-    view: Partial<Viewport> | readonly [number, number] | null,
-    target: PanelTarget = {},
-  ): void {
+  setViewport(view: ViewChange, target: PanelTarget = {}): void {
     const { panel } = target;
-    // Maps' and networks' planes keep views of their own; null resets them too.
-    if (this.#plane()?.setView(view, panel, true)) return;
-    this.#current(panel);
-    const change: Partial<Viewport> = Array.isArray(view)
-      ? { x: view as readonly [number, number] }
-      : ((view as Partial<Viewport> | null) ?? { x: null, y: null, yRight: null });
-    // Checked whole, so a change the chart refuses changes nothing.
-    if (change.x && panel === undefined) this.#model.xGroupOf();
-    this.#model.checkYViewport(change);
+    const plane = this.#plane();
+    // Maps' and networks' planes keep views of their own.
+    if (plane?.ownsView(panel)) {
+      this.#animated(() => plane.setView(view, panel));
+      return;
+    }
+    this.#current(panel, "setViewport");
+    // Checked whole first, so a change the chart refuses changes nothing.
+    const changes = this.#model.viewChanges(view, panel);
     this.#animated(() =>
-      this.#changeView(() => {
-        if (change.x !== undefined) this.#model.setViewport(change.x, panel);
-        if (change.y !== undefined || change.yRight !== undefined) {
-          const kept = this.#model.yViewport;
-          this.#model.setYViewport({
-            y: change.y === undefined ? kept.y : change.y,
-            yRight: change.yRight === undefined ? kept.yRight : change.yRight,
-          });
-        }
-      }, change.x !== undefined),
+      this.#changeView(
+        () => this.#model.applyViews(changes),
+        "api",
+        panel,
+        // null resets the planes too, in the same change.
+        view === null && panel === undefined
+          ? plane?.setView(null, undefined, "api", true)
+          : undefined,
+      ),
     );
   }
 
   getViewport(target: PanelTarget = {}): Viewport {
     const plane = this.#plane()?.view(target.panel, true);
     if (plane) return plane;
-    this.#current(target.panel);
-    return this.#viewOf(target.panel);
+    this.#current(target.panel, "getViewport");
+    return this.#model.getViewport(target.panel);
   }
 
-  #viewOf(panel?: string): Viewport {
-    const { y, yRight } = this.#model.yViewport;
-    return { x: this.#model.viewportOf(panel), y, yRight };
+  get viewRevision(): number {
+    return this.#viewRevision;
   }
 
   /**
-   * The current panel named `panel`; throws when there is none. Pending
-   * changes other than changes of view may change the panels and how they
-   * share x, so they are drawn first, unless the panel is drawn on the one
-   * x scale the chart's options still say every panel shares. Without a
-   * name, nothing.
+   * The current panel named `panel`, throwing, as `where`, when there is
+   * none, or when it has no x axis an `x` call needs. Pending changes may
+   * change the panels and how they share scales (`#shapeChanged`), so a
+   * call naming a panel, or in a chart of several, draws them first.
    */
-  #current(panel: string | undefined): DrawnPanel | undefined {
+  #current(panel: string | undefined, where: string, x = false): DrawnPanel | undefined {
+    const { facet, panels } = this.#options;
+    if (this.#shapeChanged && (panel !== undefined || facet || panels)) this.#flush();
     if (panel === undefined) return undefined;
-    const find = () => this.#model.panels().find(({ key }) => key === panel);
-    if (this.#panelsChanged && !(this.#model.sharesX && find()?.xGroup === "")) this.#flush();
-    this.#model.xGroupOf(panel);
-    return find();
+    const found = this.#model.panels().find(({ key }) => key === panel);
+    if (!found) this.#model.instanceOf("x", panel, where, x);
+    return found;
   }
 
   on<K extends keyof ChartEvents>(type: K, listener: ChartListener<K>): () => void {
@@ -763,9 +756,8 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#selection;
   }
 
-  get selectionPanels(): readonly string[] | null {
-    const owner = this.#owner;
-    return owner && (owner.plane ? owner.panels : this.#keysOf(owner.x));
+  get selectionOwner(): SelectionOwner | null {
+    return this.#owner;
   }
 
   select(
@@ -775,12 +767,14 @@ export class MountedChart implements Chart, ExportsScene {
     // A map's or network's lasso belongs to its plane; clearing names one only to check it.
     const plane =
       selection || target.panel !== undefined ? this.#plane()?.select(target.panel) : undefined;
-    this.#selectIn(selection, plane ? undefined : this.#current(target.panel), target.rows, plane);
+    const at = plane ? undefined : this.#current(target.panel, "select", true);
+    this.#selectIn(selection, at, target.rows, plane);
   }
 
   /**
    * Selects in a panel of the last scene, or on a map's or network's
-   * `plane` (writing its rows), and shares a selection of the axes with synced charts.
+   * `plane` (writing its rows), and shares a selection of the sync
+   * channel's scales with synced charts.
    */
   #selectIn(
     selection: Selection | readonly [number, number] | null,
@@ -788,19 +782,26 @@ export class MountedChart implements Chart, ExportsScene {
     rows = true,
     plane?: SelectionOwner | null,
   ) {
-    const was = this.#owner?.x;
+    const was = this.#owner;
     this.#select(selection, panel, rows, plane);
     const channel = this.#channels.selection;
-    // A selection of an inset's x scale (a group of its own) is the chart's alone.
-    const group = selection ? this.#owner?.x : was;
-    const shares = channel?.scale === "y" ? this.#model.sharesY : this.#model.sharesX && !group;
-    if (channel && shares && !plane)
-      broadcast("selection", channel.group, this.#member, this.#encode(channel.scale));
+    const at = channel && this.#endpoint(channel);
+    // What a selection of other instances (an inset's, another facet's) was or is is the chart's alone.
+    const owner = this.#owner ?? was;
+    const shares = (owner: SelectionOwner | null) =>
+      !owner?.plane &&
+      owner?.scales.every((scale) => scale.instance === at?.[`${scale.scale}Group`]);
+    if (!channel || !at || plane) return;
+    if (shares(owner))
+      broadcast("selection", channel.group, this.#member, this.#encode(channel.scale, at));
+    // One taking the place of the channel's clears what the charts show.
+    else if (shares(was)) broadcast("selection", channel.group, this.#member, null);
   }
 
   /**
-   * Sets the selection, in panel `at` or on a `plane`; one of the chart's
-   * own (`local`), not a synced chart's, writes its rows.
+   * Sets the selection, in panel `at` (by default, the one drawing the
+   * scales every panel shares) or on a `plane`; one of the chart's own
+   * (`local`), not a synced chart's, writes its rows.
    */
   #select(
     selection: Selection | readonly [number, number] | null,
@@ -811,35 +812,65 @@ export class MountedChart implements Chart, ExportsScene {
     const given = Array.isArray(selection)
       ? { x: selection as readonly [number, number], y: null, lasso: null }
       : (selection as Selection | null);
-    const panel = plane ? undefined : (at ?? this.#model.chartPanel());
+    const has = given && (given.x || given.y || given.lasso);
+    // A selection is of the scales it has ranges on: a lasso's, both; a y
+    // range of the right y in a panel (or a chart) without a left one.
+    const model = this.#model;
+    // Without a panel, the right y only where no panel draws a left one.
+    const drawn = [...model.instances.values()].map(({ scale }) => scale);
+    const vertical: ScaleName = (at ? !at.drawsY : drawn.includes("yRight") && !drawn.includes("y"))
+      ? "yRight"
+      : "y";
+    const scales: ScaleName[] = has
+      ? [
+          ...(given.x || given.lasso ? (["x"] as const) : []),
+          ...(given.y || given.lasso ? [vertical] : []),
+        ]
+      : [];
+    // Without a panel, of the instances every panel shares, or the only ones.
+    const owner = has
+      ? (plane ??
+        this.#ownerOf(
+          scales.map((scale) =>
+            viewKey(scale, at?.[`${scale}Group`] ?? model.instanceOf(scale, undefined, "select")!),
+          ),
+        ))
+      : null;
+    const panel = at ?? model.panels().find(({ key }) => owner?.panels.includes(key));
     const fit = (range: readonly [number, number] | null, scale: PositionScale | undefined) =>
       range && (scale ? normalize(scale, range[0], range[1]) : ascending(...range));
-    const next =
-      given && (given.x || given.y || given.lasso)
-        ? { x: fit(given.x, panel?.x), y: fit(given.y, panel?.y), lasso: given.lasso }
-        : null;
-    // A selection belongs to the panels sharing the x scale of the panel it is in.
-    const x = next ? (plane?.x ?? at?.xGroup ?? this.#model.xGroupOf()) : undefined;
+    const next = has
+      ? { x: fit(given.x, panel?.x), y: fit(given.y, panel?.y), lasso: given.lasso }
+      : null;
     // A selection is drawn by the brush.
     if (next) this.#loadBrush();
     const before = this.#owner;
-    if (sameSelection(next, this.#selection) && x === before?.x) {
+    if (sameSelection(next, this.#selection) && sameOwner(owner, before)) {
       // Shown without writing, even unchanged, it is no longer the brush's own.
       if (!local) this.#rows?.brushed(null, null, false);
       return;
     }
     this.#selection = next;
-    this.#owner = next && (plane ?? { x: x!, panels: this.#keysOf(x!) });
+    this.#owner = owner;
     schedule(this.#scheduled);
-    const written = this.#rows?.brushed(next, this.#owner, local);
+    const written = this.#rows?.brushed(next, owner, local);
     // A listener may have changed the selection as its rows were written: that change reported itself.
-    if (this.#selection === next) this.#emitSelection(next, this.#owner ?? before, written);
+    if (this.#selection === next) this.#emitSelection(next, owner ?? before, written);
   }
 
   /**
-   * Reports a selection, naming its panels when they are only some (the
-   * cleared one's, for none), with the rows it wrote (`written`).
+   * What a selection of the instances `keys` (see `viewKey`) belongs to:
+   * them, and the panels drawing them all, as the last frame drew them.
    */
+  #ownerOf(keys: readonly string[]): SelectionOwner {
+    const [first, ...others] = keys.map((key) => this.#model.instance(key));
+    const panels = first!.panels.filter((key) =>
+      others.every(({ panels }) => panels.includes(key)),
+    );
+    return { scales: [first!, ...others], panels };
+  }
+
+  /** Reports a selection with what it belongs to (the cleared one's, for none) and the rows it wrote (`written`). */
   #emitSelection(
     selection: Selection | null,
     owner: SelectionOwner | null,
@@ -847,36 +878,40 @@ export class MountedChart implements Chart, ExportsScene {
   ) {
     this.#events.emit("select", {
       ...(selection ?? { x: null, y: null, lasso: null }),
-      ...(owner?.x && { panels: owner.panels }),
+      // As it is now: a plane's panels follow its subplots.
+      owner: owner ? { ...owner } : { scales: [], panels: [] },
       ...written,
     });
   }
 
   /**
    * The selection as synced charts read it, along the channel's `scale`
-   * ("x" or "y" alone; with "xy" both, and lassos): categories by name.
+   * ("x" or "y" alone; with "xy" both, and lassos), on the scales of panel
+   * `at`: categories by name.
    */
-  #encode(scale: ChannelOf["scale"]): SharedSelection | null {
+  #encode(scale: ChannelOf["scale"], at: DrawnPanel): SharedSelection | null {
     const selection = this.#selection;
-    const panel = this.#model.chartPanel();
     const named = (axis: "x" | "y") => {
       const range = selection![axis];
-      const categories = panel?.[axis].categories;
+      const categories = at[axis].categories;
       return range && categories ? categories.slice(range[0], range[1] + 1) : range;
     };
     // Lassos go between charts of numbers and times only.
-    const lasso = panel?.x.categories || panel?.y.categories ? null : selection?.lasso;
+    const lasso = at.x.categories || at.y.categories ? null : selection?.lasso;
     return (
       selection &&
       (scale === "xy" ? [named("x"), named("y"), lasso ?? null] : [named(scale), null, null])
     );
   }
 
-  /** A selection a synced chart shared, on this chart's scales: names as categories' indices. */
-  #decode(shared: SharedSelection | null, scale: ChannelOf["scale"]): Selection | null {
-    const panel = this.#model.chartPanel();
+  /** A selection a synced chart shared, on the scales of panel `at`: names as categories' indices. */
+  #decode(
+    shared: SharedSelection | null,
+    scale: ChannelOf["scale"],
+    at: DrawnPanel | undefined,
+  ): Selection | null {
     const ranged = (values: SharedSelection[0], axis: "x" | "y"): Range | null => {
-      const categories = panel?.[axis].categories;
+      const categories = at?.[axis].categories;
       if (!values || !categories !== (typeof values[0] === "number")) return null;
       if (!categories) return values as Range;
       const found = (values as readonly string[])
@@ -885,7 +920,7 @@ export class MountedChart implements Chart, ExportsScene {
       return found.length ? [Math.min(...found), Math.max(...found)] : null;
     };
     const xy = scale === "xy";
-    const bands = panel?.x.categories || panel?.y.categories;
+    const bands = at?.x.categories || at?.y.categories;
     return (
       shared && {
         x: scale === "y" ? null : ranged(shared[0], "x"),
@@ -968,19 +1003,19 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   toPixel(value: number, { panel, axis }: AxisTarget): number | undefined {
-    const scale = this.#panelOf(panel)?.[axis];
+    const scale = scaleIn(this.#panelOf(panel), axis);
     if (!scale || !Number.isFinite(value) || scale.breaks?.hides(value)) return undefined;
     return finite(scale.map(value));
   }
 
   fromPixel(pixel: number, { panel, axis }: AxisTarget): number | undefined {
-    const scale = this.#panelOf(panel)?.[axis];
+    const scale = scaleIn(this.#panelOf(panel), axis);
     return scale && Number.isFinite(pixel) ? finite(scale.invert(pixel)) : undefined;
   }
 
   formatValue(value: number, { panel, axis }: AxisTarget): string | undefined {
     const drawn = this.#panelOf(panel);
-    if (!drawn?.[axis] || !Number.isFinite(value)) return undefined;
+    if (!drawn || !scaleIn(drawn, axis) || !Number.isFinite(value)) return undefined;
     const model = this.#model;
     // As the panel's tooltips write values: category axes give "" past their categories.
     const format =
@@ -1009,7 +1044,7 @@ export class MountedChart implements Chart, ExportsScene {
       return panels[0];
     }
     // Throws for a panel the last frame did not have.
-    if (!all.some(({ key }) => key === panel)) this.#model.xGroupOf(panel);
+    if (!all.some(({ key }) => key === panel)) this.#model.instanceOf("x", panel, "panel");
     return panels.find(({ key }) => key === panel);
   }
 
@@ -1022,8 +1057,18 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#options.panels?.hiddenKeys(hidden, panel) ?? [...hidden];
   }
 
-  setHiddenKeys(keys: readonly string[]): void {
-    this.#hide(keys, new Map());
+  setHiddenKeys(keys: readonly string[], { panels }: { panels?: PanelVisibility } = {}): void {
+    const own =
+      panels && Object.keys(panels).length
+        ? this.#options.panels?.own(panels, this.#model.hidden.panels)
+        : new Map();
+    if (!own)
+      throw new ChartError({
+        code: "unsupported",
+        path: "panels",
+        message: "setHiddenKeys panels: the chart has no subplots; drop panels",
+      });
+    this.#hide(keys, own);
   }
 
   setVisibility(
@@ -1182,8 +1227,9 @@ export class MountedChart implements Chart, ExportsScene {
    * Draws what changed: the scheduler calls this once a frame, the chart
    * itself when it must draw at once. A frame that fails shows why; the
    * first frame of a chart made to throw (`rethrow`) throws instead.
+   * `then` runs after drawing, before anything the frame reports.
    */
-  #flush(rethrow = false): void {
+  #flush(rethrow = false, then?: () => void): void {
     if (this.#destroyed) return;
     let drawn: boolean;
     try {
@@ -1194,6 +1240,7 @@ export class MountedChart implements Chart, ExportsScene {
       return;
     }
     if (drawn) this.#succeed();
+    then?.();
     this.#finishFrame(drawn);
   }
 
@@ -1205,6 +1252,7 @@ export class MountedChart implements Chart, ExportsScene {
    */
   #fail(error: unknown, phase: ChartErrorPhase, kept = false): void {
     if (this.#destroyed) return;
+    this.#model.items?.stopWaiting();
     const failure = chartError(error, phase);
     const reported = this.#reportedFailure === this.#revision;
     this.#reportedFailure = this.#revision;
@@ -1279,8 +1327,7 @@ export class MountedChart implements Chart, ExportsScene {
     }
     const drawn = this.#dirty;
     if (drawn) {
-      this.#dirty = false;
-      this.#panelsChanged = false;
+      this.#dirty = this.#panelsChanged = this.#shapeChanged = false;
       this.#draw();
     }
     return drawn;
@@ -1294,27 +1341,37 @@ export class MountedChart implements Chart, ExportsScene {
     // A tree whose data lost the node it was drilled into shows an ancestor:
     // reported before listeners of the frame (hover) may drill again.
     if (drawn) this.#model.items?.finishFrame();
+    // Zoomed instances the frame no longer drew are fitted now: reported as
+    // a change of view, of what changed the panels.
+    if (drawn) {
+      this.#reportViews([], this.#panelsCause, undefined, this.#model.takeRetired());
+      this.#panelsCause = "options";
+    }
     this.#drawSelection();
     this.#controller?.draw(drawn);
     if (drawn) this.#events.emit("render", {});
   }
 
   /**
-   * Keeps the selection while its panels are drawn, and draws it, or the
-   * drag in progress, with the brush.
+   * Keeps the selection while the instances it belongs to are drawn, and
+   * draws it, or the drag in progress, with the brush.
    */
   #drawSelection(): void {
     const scene = this.#scene;
     if (!scene) return;
-    const panels = this.#model.panels();
-    // A selection whose panels are gone (their facet values, or a change of
-    // how they share scales) goes too.
+    const model = this.#model;
+    const panels = model.panels();
+    // A selection whose instances are gone (their facet values, or a change
+    // of how panels share scales) goes too; one whose instance every panel
+    // shares follows the panels drawing it.
     const owner = this.#owner;
+    if (owner && !owner.plane) {
+      const keys = owner.scales.map(({ scale, instance }) => viewKey(scale, instance));
+      const kept = keys.every((key) => model.instances.has(key));
+      this.#owner = kept ? this.#ownerOf(keys) : null;
+    }
     // A map's lasso is on its plane's panels.
-    if (
-      owner &&
-      !(owner.plane ? owner.panels.length : panels.some(({ xGroup }) => xGroup === owner.x))
-    ) {
+    if (owner && !(this.#owner?.panels.length ?? 0)) {
       this.#selection = null;
       this.#owner = null;
       // So do the rows it wrote, from the channels that still hold them.
@@ -1322,125 +1379,158 @@ export class MountedChart implements Chart, ExportsScene {
     }
     // A drag draws in the panels it would select in, a selection in its own.
     const brush = this.#brush;
-    const x = brush?.dragging ? this.#controller?.dragged : this.#owner?.x;
+    const keys = brush?.dragging ? this.#controller?.dragged : this.#owner?.panels;
     brush?.draw(
-      x !== undefined ? panels.filter(({ xGroup }) => xGroup === x) : panels,
+      keys ? panels.filter(({ key }) => keys.includes(key)) : panels,
       scene.theme,
       this.#selection,
     );
   }
 
   /**
-   * Makes the view changes `change` makes, then reports each x scale whose
-   * view changed (its x range, or the y ranges every scale shares) once,
-   * and with `shareX`, shares the x range with synced charts. Listeners run
-   * once the change is complete; changes made inside it report with it.
+   * Makes the view changes `change` makes, then reports them as one change
+   * of view (see `ViewportEvent`) and shares the view of the sync
+   * channel's scale with synced charts. Changes made inside `change` are
+   * part of it; changes listeners make are the next ones.
    */
-  #changeView(change: () => void, shareX: boolean, cause: ViewCause = "api"): void {
+  #changeView(change: () => void, cause: ViewCause, panel?: string, plane?: PlaneViewChange): void {
     if (this.#changingView) {
       change();
       return;
     }
     this.#cause = cause;
-    const scales = this.#xScales();
-    const before = scales.map((first) => this.#viewOf(first?.key));
-    // The chart's x view, where panels share one.
-    const wide = () => (this.#model.sharesX ? this.#model.viewport : null);
-    const was = wide();
+    const before = this.#model.views();
     this.#changingView = true;
     try {
       change();
     } finally {
       this.#changingView = false;
     }
+    const changed = this.#changed(before);
+    if (changed.length === 0 && !plane) return;
     this.#invalidate(false);
-    this.#reportViews(scales, before);
-    // A listener may have changed the view again: share where it ended up.
-    // What a synced chart shared is not shared again, nor a change of an
-    // inset's x scale alone.
-    if (cause !== "sync") this.#shareView(shareX && !sameRange(was, wide()));
+    this.#reportViews(changed, cause, panel, [], plane);
+    // What a synced chart shared is not shared again.
+    if (cause !== "sync") this.#shareView(changed);
   }
 
-  /**
-   * Shares the view with the charts of the viewport channel: along y, or
-   * along x when it changed there (`shareX`). Charts whose panels have
-   * scales of their own share cursors only: a viewport belongs to some panels.
-   */
-  #shareView(shareX: boolean): void {
-    const channel = this.#channels.viewport;
-    const model = this.#model;
-    const y = channel?.scale === "y";
-    if (channel && (y ? model.sharesY : shareX && model.sharesX))
-      broadcast("viewport", channel.group, this.#member, y ? model.yViewport.y : model.viewport);
-  }
-
-  /**
-   * Reports each x scale (named by its first panel) whose view is not what
-   * it was `before`, once: a listener's own change of view, made while
-   * these are reported, reports itself, and the views it reported are not
-   * reported again.
-   */
-  #reportViews(scales: readonly (DrawnPanel | undefined)[], before: readonly Viewport[]): void {
-    this.#reporting(() =>
-      scales.forEach((first, i) => {
-        // A listener may have changed the panels; those gone are left alone.
-        if (first && !this.#still(first)) return;
-        const view = this.#viewOf(first?.key);
-        const group = first?.xGroup ?? "";
-        if (sameView(view, before[i]!) || sameView(view, this.#reported.get(group))) return;
-        this.#reported.set(group, view);
-        this.#events.emit("viewport", { ...view, ...(group && { panels: this.#keysOf(group) }) });
-      }),
+  /** The instances (by `viewKey`) whose views are not what they were `before`. */
+  #changed(before: ReadonlyMap<string, Range>): string[] {
+    const now = this.#model.views();
+    return [...new Set([...before.keys(), ...now.keys()])].filter(
+      (key) => !sameRange(before.get(key) ?? null, now.get(key) ?? null),
     );
   }
 
   /**
-   * Whether a panel of an earlier scene is still drawn, with the same
-   * scales to share.
+   * Shares the view of the viewport channel's scale (in its panel, or
+   * every panel's) with its charts, where it changed, as it is now: a
+   * listener may have changed it again.
    */
-  #still(panel: DrawnPanel): boolean {
-    return this.#model
-      .panels()
-      .some(({ key, xGroup }) => key === panel.key && xGroup === panel.xGroup);
+  #shareView(changed: readonly string[]): void {
+    const channel = this.#channels.viewport;
+    const at = channel && this.#endpoint(channel);
+    if (!at) return;
+    const scale = verticalIn(at, channel.scale);
+    const key = viewKey(scale, at[`${scale}Group`]);
+    if (changed.includes(key))
+      broadcast("viewport", channel.group, this.#member, this.#model.views().get(key) ?? null);
   }
 
-  /** Runs `report` as part of the report of a change of view that `#reported` records. */
-  #reporting(report: () => void): void {
-    this.#reportDepth++;
+  /**
+   * Reports a change of view: the instances `changed` (by `viewKey`) as
+   * they are now, or the `retired` ones, and every panel still drawing one
+   * of them, with a `plane`'s change made with them. Delivered once the
+   * change before it reached every listener.
+   */
+  #reportViews(
+    changed: readonly string[],
+    cause: ViewCause,
+    panel?: string,
+    retired: readonly ScaleView[] = [],
+    plane?: PlaneViewChange,
+  ): void {
+    if (changed.length === 0 && retired.length === 0 && !plane) return;
+    const viewRevision = ++this.#viewRevision;
+    if (!this.#events.has("viewport")) return;
+    const model = this.#model;
+    // In reading order, maps' and networks' panels among the others.
+    const keys = model.allPanels().map(({ key }) => key);
+    const rank = ({ scale, panels: [first] }: ScaleView) =>
+      SCALES.indexOf(scale) * (keys.length + 1) + keys.indexOf(first!) + 1;
+    const views = model.views();
+    // By scale, then first panel; retired instances, drawn in none, first.
+    const scales = [
+      ...retired,
+      ...changed.map((key) => ({ ...model.instance(key), view: views.get(key) ?? null })),
+      ...(plane?.scales ?? []),
+    ].sort((a, b) => rank(a) - rank(b));
+    const event: ViewportEvent = {
+      viewRevision,
+      cause,
+      ...(panel !== undefined && { panel }),
+      scales,
+      views: [
+        ...model
+          .panels()
+          .filter(({ key }) => scales.some((scale) => scale.panels.includes(key)))
+          .map((drawn) => panelViewport(drawn, model.getViewport(drawn.key))),
+        ...(plane?.views ?? []),
+      ].sort((a, b) => keys.indexOf(a.panel) - keys.indexOf(b.panel)),
+    };
+    this.#deliver(event);
+  }
+
+  /**
+   * Delivers a viewport event once those before it reached every listener:
+   * a listener's own change is reported after the one it heard.
+   */
+  #deliver(event: ViewportEvent): void {
+    if (this.#viewQueue) {
+      this.#viewQueue.push(event);
+      return;
+    }
+    const queue = [event];
+    this.#viewQueue = queue;
     try {
-      report();
+      for (let next = queue.shift(); next; next = queue.shift())
+        this.#events.emit("viewport", next);
     } finally {
-      if (--this.#reportDepth === 0) this.#reported.clear();
+      this.#viewQueue = undefined;
     }
   }
 
   /**
-   * The first panel of each x scale; undefined for the one every panel
-   * shares (beside which insets have their own).
+   * The panel whose scales a sync channel's views and selections are of:
+   * its `panel`, or the first drawing the instance every panel shares of
+   * the channel's scale (x for both, then y too if one is shared, the
+   * left one before the right one of panels without a left); undefined
+   * while the chart draws none.
    */
-  #xScales(): (DrawnPanel | undefined)[] {
+  #endpoint({ panel, scale }: ChannelOf): DrawnPanel | undefined {
     const panels = this.#model.panels();
-    const firsts = panels.filter(
-      (p, i) => panels.findIndex(({ xGroup }) => xGroup === p.xGroup) === i,
-    );
-    return this.#model.sharesX ? [undefined, ...firsts.filter(({ xGroup }) => xGroup)] : firsts;
-  }
-
-  /** The keys of the panels drawn with the x scale named `x`. */
-  #keysOf(x: string): string[] {
-    return this.#model
-      .panels()
-      .filter(({ xGroup }) => xGroup === x)
-      .map(({ key }) => key);
+    if (panel !== undefined) return panels.find(({ key }) => key === panel);
+    const along = panels.filter((drawn) => scale === "y" || drawn.xGroup === "");
+    const y = (left: boolean) =>
+      along.find(
+        (drawn) =>
+          (left ? drawn.drawsY : !drawn.drawsY && drawn.plans.yRight) &&
+          drawn[left ? "yGroup" : "yRightGroup"] === "",
+      );
+    return scale === "x"
+      ? along[0]
+      : (y(true) ?? y(false) ?? (scale === "y" ? undefined : along[0]));
   }
 
   /**
    * Draws on the next frame. Changes of view (`panels` false) keep the
-   * panels and how they share scales, which `#current` then need not draw.
+   * panels and their scales, and others but those of `shape` how they
+   * share scales, which `#current` then need not draw.
    */
-  #invalidate(panels = true) {
+  #invalidate(panels = true, shape = panels) {
     this.#dirty = true;
     if (panels) this.#panelsChanged = true;
+    if (shape) this.#shapeChanged = true;
     schedule(this.#scheduled);
   }
 
@@ -1569,9 +1659,14 @@ export class MountedChart implements Chart, ExportsScene {
               this.#drawTime,
             );
             this.#animation?.settle();
-            this.#cause = "data";
+            this.#cause = this.#panelsCause = "data";
             this.#revision++;
-            this.#invalidate();
+            // A facet's panels are its data's, as a category axis' categories are.
+            this.#invalidate(
+              true,
+              !!this.#options.facet ||
+                [...this.#model.instances.values()].some(({ type }) => type === "band"),
+            );
           }),
         );
     }
@@ -1579,11 +1674,23 @@ export class MountedChart implements Chart, ExportsScene {
     this.#channels = channelsOf(options.interaction?.sync);
     this.#leaveSync = join(this.#channels, this.#member);
     if (this.#brush) this.#brush.mode = options.interaction?.brush ?? "x";
-    const { brush, bindings, pan, zoom } = options.interaction ?? {};
+    // The chart's settings, and subplots' own, which may brush or pan where the chart's do not.
+    const settings = [
+      options.interaction,
+      ...(options.panels?.declared ?? []).map((p) => p.interaction),
+    ];
     // Until the controller sets the policy its bindings call for, touches
     // drag along x (where most charts pan and brush) and scroll the page up and down.
-    if (!this.#controller) this.root.style.touchAction = pan || zoom || brush ? "pan-y" : "";
-    if (brush || bindings?.some(({ action }) => action.type === "brush")) this.#loadBrush();
+    if (!this.#controller)
+      this.root.style.touchAction = settings.some((own) => own?.pan || own?.zoom || own?.brush)
+        ? "pan-y"
+        : "";
+    if (
+      settings.some(
+        (own) => own?.brush || own?.bindings?.some(({ action }) => action.type === "brush"),
+      )
+    )
+      this.#loadBrush();
     if (options.animation) this.#loadAnimation();
     if (typeof options.animation === "object" && options.animation.values) this.#loadValues();
     this.#controller?.configure();
@@ -1739,7 +1846,8 @@ export class MountedChart implements Chart, ExportsScene {
       if (!this.#canvas) {
         this.#canvas = this.root.ownerDocument.createElement("canvas");
         this.#canvas.setAttribute("aria-hidden", "true");
-        this.#canvas.style.cssText = "position:absolute;left:0;top:0";
+        // Left to right, as the SVG layer is: text of one direction in both.
+        this.#canvas.style.cssText = "position:absolute;left:0;top:0;direction:ltr";
         this.root.prepend(this.#canvas);
       }
       this.#canvas.style.width = `${width}px`;
@@ -1769,9 +1877,9 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   /**
-   * Makes the view changes `change` makes, moving the axes there gradually
-   * where `animation` allows: in a chart of one panel, on screen, and not
-   * linked to others.
+   * Makes the view changes `change` makes, moving the axes (or a map's or
+   * network's plane) there gradually where `animation` allows: in a chart
+   * of one panel, on screen, and not linked to others.
    */
   #animated(change: () => void): void {
     const animation = this.#animation;
@@ -1779,19 +1887,20 @@ export class MountedChart implements Chart, ExportsScene {
     const { config } = this.#model;
     const movable =
       animation &&
-      panels.length === 1 &&
+      panels.length <= 1 &&
       !config.facet &&
       !config.panels &&
       !config.interaction?.sync &&
       this.#scheduled.visible &&
       this.#scene &&
       cloudsIn(this.#scene) === undefined;
-    // What is on screen: no scene is drawn until the next frame.
-    const from = movable ? panels[0] : undefined;
+    // What is on screen: no scene is drawn until the next frame. A chart
+    // without panels of axes may move its plane.
+    const from = panels[0];
     this.#settle();
     // The transition starts before the change reports itself, so viewport
     // listeners that draw, stream data, or change options end it as usual.
-    if (from && animation!.start(from, this.#options.animation, this.#drawTime))
+    if (movable && animation!.start(from, this.#options.animation, this.#drawTime))
       this.#invalidate(false);
     change();
   }
@@ -1837,9 +1946,13 @@ export class MountedChart implements Chart, ExportsScene {
           }),
         ),
       // Drills, moves, and views of maps and networks report themselves.
-      (type, change) => {
+      (...[type, change]) => {
         if (type !== "camera") this.#invalidate(false);
-        this.#events.emit(type, change);
+        if (type === "viewport") {
+          this.#cause = change.cause;
+          this.#viewRevision++;
+          this.#deliver({ viewRevision: this.#viewRevision, ...change });
+        } else this.#events.emit(type, change as never);
       },
     );
   }
@@ -1857,7 +1970,23 @@ export class MountedChart implements Chart, ExportsScene {
       const held = this.#held;
       if (this.#controller || !held) return;
       this.#loadController().catch(() => {});
-      const { pan, zoom, brush, bindings } = this.#options.interaction ?? {};
+      // Over a subplot of settings of its own, the input is its.
+      let key: string | undefined;
+      if (event instanceof MouseEvent && this.#options.panels?.list.some((p) => p.interaction)) {
+        const box = this.root.getBoundingClientRect();
+        const [x, y] = [event.clientX - box.left, event.clientY - box.top];
+        key = this.#model
+          .panels()
+          .find(
+            ({ key, plot }) =>
+              x >= plot.x &&
+              x <= plot.x + plot.width &&
+              y >= plot.y &&
+              y <= plot.y + plot.height &&
+              !this.#model.coveredAt(key, x, y),
+          )?.key;
+      }
+      const { pan, zoom, brush, bindings } = this.#model.interactionOf(key) ?? {};
       const panning = pan ?? zoom;
       if (event.type === "wheel") {
         // The wheel sideways pans; with Ctrl or ⌘ held, it zooms.
@@ -1913,9 +2042,10 @@ export class MountedChart implements Chart, ExportsScene {
   /** Imports the controller, once, and attaches it when it arrives. */
   #loadController(): Promise<void> {
     this.#attaching ??= loadControllers().then(
-      // A drag held for the controller needs the brush, should it brush.
+      // A drag held for the controller needs the brush, should it brush,
+      // and the panels it lands in, which a chart waiting for code draws once it has it.
       async (module) => {
-        await this.#brushLoading;
+        await Promise.all([this.#brushLoading, this.#compiling?.catch(() => {})]);
         if (!this.#destroyed && !this.#controller) this.#attach(module);
         // What attaching started to load (crosshair labels, tooltip content) is part of it.
         await Promise.all(this.#controller?.loading ?? []).catch((error: unknown) => {
@@ -1992,16 +2122,25 @@ export class MountedChart implements Chart, ExportsScene {
       showValues: () => this.#showValues(),
       settle: () => this.#settle(),
       animated: (change) => this.#animated(change),
-      changeView: (change, shareX, cause) => this.#changeView(change, shareX, cause),
+      changeView: (change, cause, panel) => this.#changeView(change, cause, panel),
       select: (selection, at) => this.#selectIn(selection, at),
       selection: () => this.#selection,
       owner: () => this.#owner,
       rows: () => this.#rows,
       brush: () => this.#brush,
       cursorScale: () => this.#channels.cursor?.scale,
-      shareCursor: (value) => {
+      shareCursor: (value, panel) => {
         const channel = this.#channels.cursor;
-        if (channel) broadcast("cursor", channel.group, this.#member, value);
+        // A channel naming a panel carries the cursor over the panels drawing its scale only.
+        const axis = channel?.scale === "y" ? "yGroup" : "xGroup";
+        const at = channel?.panel === undefined ? panel : this.#endpoint(channel);
+        if (channel)
+          broadcast(
+            "cursor",
+            channel.group,
+            this.#member,
+            at && panel?.[axis] === at[axis] ? value : null,
+          );
       },
       cursor: () => this.#cursor,
       cause: () => this.#cause,
@@ -2119,10 +2258,36 @@ function sameSelection(a: Selection | null, b: Selection | null): boolean {
 }
 
 /** Two viewports show the same ranges. */
-function sameView(a: Viewport, b: Viewport | undefined): boolean {
-  return (
-    b !== undefined && sameRange(a.x, b.x) && sameRange(a.y, b.y) && sameRange(a.yRight, b.yRight)
-  );
+/** A panel's whole view, with the types of the axes it has. */
+/** The scale of `axis` in panel `drawn`: none for a left y it does not draw. */
+function scaleIn(
+  drawn: DrawnPanel | undefined,
+  axis: AxisTarget["axis"],
+): PositionScale | undefined {
+  return axis === "y" && !drawn?.drawsY ? undefined : drawn?.[axis];
+}
+
+/** The scale a sync channel's `scale` names in panel `at`: y the right one where it draws no left y. */
+function verticalIn(at: DrawnPanel, scale: ChannelOf["scale"]): ScaleName {
+  return scale !== "y" ? "x" : at.drawsY ? "y" : "yRight";
+}
+
+function panelViewport(panel: DrawnPanel, view: Viewport): PanelViewport {
+  const { key, x, y, yRight, drawsY } = panel;
+  const types = { x: x.type, ...(drawsY && { y: y.type }), ...(yRight && { yRight: yRight.type }) };
+  return { panel: key, ...view, types };
+}
+
+/** Whether two selections belong to the same instances and panels. */
+function sameOwner(a: SelectionOwner | null, b: SelectionOwner | null): boolean {
+  const named = (owner: SelectionOwner | null) =>
+    owner &&
+    JSON.stringify([
+      owner.plane,
+      owner.scales.map(({ scale, instance }) => [scale, instance]),
+      owner.panels,
+    ]);
+  return named(a) === named(b);
 }
 
 /** Two ranges hold the same values, or are both null. */

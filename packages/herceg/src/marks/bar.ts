@@ -9,6 +9,7 @@ import type { Breaks } from "../lod/m4.ts";
 import { clearDomain } from "../model/clearance.ts";
 import { asksFeatures, type RowPaint } from "../model/features.ts";
 import type { LegendPart } from "../model/legend.ts";
+import type { Nearest } from "../model/nearest.ts";
 import { contrastingText } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import {
@@ -62,7 +63,15 @@ import {
 } from "./mark.ts";
 import { PositionStack } from "./position-stack.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
-import { rowOf, type Series, TableCache, visibleRange, xExtent, yExtent } from "./series.ts";
+import {
+  lowerPosition,
+  rowOf,
+  type Series,
+  TableCache,
+  visibleRange,
+  xExtent,
+  yExtent,
+} from "./series.ts";
 import { Slots } from "./slots.ts";
 import { RowStack, type StackedLayers } from "./stack.ts";
 import {
@@ -660,9 +669,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     const edge = this.#edge(frame);
     const radius = frame.theme.style.bar.radius;
     // Charts that animate changed values learn where each bar stands and
-    // ends; stacks, labeled bars, bars of several looks, and log axes show
-    // their new values at once.
-    const keyed = frame.keyed && !spec.stack && !labels && across.type !== "log";
+    // ends; bars of several looks and log axes show their new values at once.
+    const keyed = frame.keyed && across.type !== "log";
     // Labels past the bars' ends, or inside them where their place says.
     const place = this.#labelOptions.place;
     const inside = !!spec.stack || place?.outside === false;
@@ -825,6 +833,59 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     const along = this.#horizontal ? frame.y : frame.x;
     const { center } = this.#shares.of(s, this.#slot(along));
     return this.#horizontal ? [0, center] : [center, 0];
+  }
+
+  /**
+   * Hands `found` the bars near a pixel, measured as the chart's search
+   * measures points, to the middle of a bar's end, but a bar the pixel is
+   * in at distance 0: a stack's segment under the pointer, not the one
+   * whose top is nearest. Vertical bars of sorted positions are searched
+   * outward from the pointer, nearer side first, until their positions
+   * alone put them farther than the limit.
+   */
+  nearby(series: readonly Series[], px: number, py: number, frame: Frame, found: Nearest): void {
+    const horizontal = this.#horizontal;
+    const [along, across] = horizontal ? [frame.y, frame.x] : [frame.x, frame.y];
+    const [pa, pc] = horizontal ? [py, px] : [px, py];
+    const { width, offset } = this.placement(series, along);
+    const lit = frame.highlighted?.(this.table);
+    const { x, width: plotWidth } = frame.plot;
+    for (const s of series) {
+      // Where along the axis a position's bar would be centered to stand under the pointer.
+      const middle = pa - offset(s) - width / 2;
+      const consider = (k: number) => {
+        const row = rowOf(s, k);
+        const ends = this.ends(s, row, along, across);
+        if (!ends || s.features?.drawn?.(row) === false) return;
+        const off = Math.abs(ends.center - middle);
+        const [low, high] = [Math.min(ends.tip, ends.root), Math.max(ends.tip, ends.root)];
+        // A horizontal bar is read where some of it is in the plot, its end beyond it or not.
+        if (horizontal && (high < x || low > x + plotWidth)) return;
+        const inside = off <= width / 2 && pc >= low && pc <= high;
+        const distance = inside ? 0 : Math.hypot(off, ends.tip - pc);
+        found.take({ series: s, position: k, distance }, this, lit?.[row]);
+      };
+      const [start, end] = this.range(s, frame);
+      const target = along.invert(middle);
+      if (horizontal || this.#categorical || !s.sorted || s.places?.x || !Number.isFinite(target)) {
+        for (let k = start; k < end; k++) consider(k);
+        continue;
+      }
+      // The least distance of position k's bar from the pointer, by its place along x
+      // alone, which grows with k away from the pointer. Unplaced positions go first (and are skipped).
+      const apart = (k: number) => {
+        const off = Math.abs(along.map(s.x[rowOf(s, k)]!) - middle) - width / 2;
+        return off > 0 ? off : 0;
+      };
+      let below = Math.min(end, Math.max(start, lowerPosition(s, target))) - 1;
+      let above = below + 1;
+      while (below >= start || above < end) {
+        const left = below >= start ? apart(below) : Infinity;
+        const right = above < end ? apart(above) : Infinity;
+        if (Math.min(left, right) > found.limit) break;
+        consider(left <= right ? below-- : above++);
+      }
+    }
   }
 
   /** Grouped bars stand within their position's slot: at most half of it off. */

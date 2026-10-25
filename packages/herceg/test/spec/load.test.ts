@@ -786,3 +786,73 @@ describe("layout marks in panels in specs", () => {
     expect(() => specToSVG(repeated)).toThrow("marks[0].facet: not a property");
   });
 });
+
+describe("text styles", () => {
+  it("refuse looks by value, which text does not draw", () => {
+    const spec = {
+      data: { t: { columns: { x: [0, 1], c: ["a", "b"] } } },
+      marks: [
+        {
+          type: "text",
+          data: "t",
+          x: "x",
+          y: "x",
+          label: { field: "c" },
+          style: { by: { field: "c", map: { a: { stroke: "red" } } } },
+        },
+      ],
+    } as unknown as ChartSpec;
+    expect(() => validateSpec(spec)).toThrow(
+      expect.objectContaining({
+        code: "unsupported",
+        path: "marks[0].style.by",
+        message: "marks[0].style.by: this mark draws one look, not looks by value; drop by",
+      }),
+    );
+  });
+
+  it("refuse label places text does not draw", () => {
+    const spec = (mark: object) =>
+      ({
+        data: { t: { columns: { x: [0, 1], y: [1, 2] } } },
+        marks: [
+          { type: "line", id: "l", data: "t", x: "x", y: "y" },
+          { type: "text", ...mark },
+        ],
+      }) as unknown as ChartSpec;
+    const follow = { from: { mark: "l", at: "last" } };
+    const placed = { data: "t", x: 0, y: 1 };
+    const refused = (path: string, problem: string) =>
+      expect.objectContaining({ path, message: `${path}: ${problem}` });
+    for (const label of [{ text: "a" }, { field: "y" }, { content: ["y: ", { field: "y" }] }]) {
+      // Every way a spec is checked refuses it alike.
+      for (const check of [validateSpec, checkSpec, loadSpec])
+        expect(() => check(spec({ ...placed, label: { ...label, place: {} } }))).toThrow(
+          refused(
+            "marks[1].label.place",
+            "text at a place is drawn there; drop place, or follow a series with from",
+          ),
+        );
+      for (const [option, value] of [
+        ["attachment", "start"],
+        ["side", "top"],
+      ] as const)
+        for (const at of [placed, follow])
+          expect(() =>
+            validateSpec(spec({ ...at, label: { ...label, place: { [option]: value } } })),
+          ).toThrow(
+            refused(
+              `marks[1].label.place.${option}`,
+              `text is drawn at its place, or at from.at on its series; drop ${option}`,
+            ),
+          );
+      const outside = { outside: true, reserve: false, offset: 2 };
+      expect(() =>
+        validateSpec(spec({ ...follow, label: { ...label, place: outside } })),
+      ).not.toThrow();
+    }
+    expect(() => validateSpec(spec({ ...follow, label: { text: "a", place: null } }))).toThrow(
+      expect.objectContaining({ path: "marks[1].label.place" }),
+    );
+  });
+});

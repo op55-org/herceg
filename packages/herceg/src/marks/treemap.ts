@@ -8,10 +8,9 @@ import { labelFor } from "../layout/text.ts";
 import { layoutTreemap } from "../layout/treemap.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
-import type { ChartConfig } from "../model/model.ts";
 import { contrastingText } from "../scale/color.ts";
 import type { Geometry, RectGeometry, TextGeometry } from "../scene/scene.ts";
-import type { Frozen, TreemapSpec } from "../spec/spec.ts";
+import type { Frozen, InteractionSpec, TreemapSpec } from "../spec/spec.ts";
 import { surface } from "../theme.ts";
 import { refuseColor } from "./colored.ts";
 import {
@@ -25,6 +24,8 @@ import {
 } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { type ChartMark, DIM, frozen, type MARK } from "./mark.ts";
+import { refuseValues } from "./still.ts";
+import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { type Branch, count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
 
 export type TreemapOptions<S extends Schema> = (
@@ -45,6 +46,8 @@ export type TreemapOptions<S extends Schema> = (
   value?: NumberField<S>;
   /** Names inside the rectangles that have room for them; true by default. */
   labels?: boolean;
+  /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
+  tooltip?: MarkTooltip<S>;
   id?: string;
   /** With the chart's `panels`, the id of the panel the treemap has to itself. */
   panel?: string;
@@ -73,6 +76,7 @@ export class TreemapMark implements LayoutMark {
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.#data = new TreeData(table, spec, "treemap");
+    checkTooltip(table, spec.tooltip, "treemap");
     this.table = table;
     this.measure = spec.value ?? "Count";
     // Branches stand for their top-level nodes' values, as series of that field do.
@@ -87,11 +91,12 @@ export class TreemapMark implements LayoutMark {
     return this.#data.legend(id, color);
   }
 
-  controls(config: ChartConfig): LayoutControls | undefined {
-    return drillControls(config);
+  controls(interaction: InteractionSpec | undefined): LayoutControls | undefined {
+    return drillControls(interaction);
   }
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.spec.type);
     const { theme, hidden, locale } = frame;
     // A facet panel draws the part of the tree its rows give a value; a
     // chart drilled into a node, the subtree under it.
@@ -245,6 +250,8 @@ export class TreemapMark implements LayoutMark {
       indexOf: navigation.indexOf,
       summary: () => this.#summary(view, shown, branches, locale, percent),
       rowsOf: (key, of) => (of === this.table ? this.#data.rowsOf(frame.id, view, key) : undefined),
+      soleRow: (key, of) =>
+        of === this.table ? this.#data.soleRow(frame.id, view, key) : undefined,
       drill: this.#data.drill(frame.id, root, view, path?.crumbs ?? []),
     };
   }
@@ -335,7 +342,7 @@ export function treemap<S extends Schema>(
   // Every option is kept, so the mark refuses a tree named both ways.
   const spec = {
     type: "treemap",
-    ...definedFields(options, ["node", "parent", "value", "labels", "id", "panel"]),
+    ...definedFields(options, ["node", "parent", "value", "labels", "tooltip", "id", "panel"]),
     ...(path !== undefined && { path: [...path] }),
   } as unknown as TreemapSpec;
   if (table.name !== undefined) spec.data = table.name;

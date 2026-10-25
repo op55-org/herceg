@@ -22,6 +22,7 @@ import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { rampsOf } from "../helpers/guides.ts";
 import { cellOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const GRAY = ["#000000", "#ffffff"];
 const HOUR = 3_600_000;
@@ -148,7 +149,7 @@ describe("heatmap cells along number and time axes", () => {
       interaction: { zoom: "x" },
       marks: [heatmap(data, { x: "x", y: "y", color: "v" })],
     });
-    model.setViewport([0.25, 0.35]);
+    setViewport(model, [0.25, 0.35]);
     model.scene(estimateText);
     const plot = model.panels()[0]!.plot;
     expect(model.inspect(plot.x, model.yScale()!.map(0))!.points[0]!.value).toBe(2);
@@ -469,7 +470,7 @@ describe("heatmaps zoomed and panned", () => {
     const write = vi.spyOn(SequentialScale.prototype, "write");
     rasterOf(model);
     expect(write).not.toHaveBeenCalled();
-    model.setViewport([10.5, 20.5]);
+    setViewport(model, [10.5, 20.5]);
     const zoomed = rasterOf(model);
     expect(write).toHaveBeenCalled();
     // Ten columns in view, a pixel each.
@@ -477,7 +478,7 @@ describe("heatmaps zoomed and panned", () => {
     write.mockClear();
     rasterOf(model);
     expect(write).not.toHaveBeenCalled();
-    model.setYViewport({ y: [0, 5], yRight: null });
+    setViewport(model, { y: [0, 5], yRight: null });
     rasterOf(model);
     expect(write).toHaveBeenCalled();
   });
@@ -488,7 +489,7 @@ describe("heatmaps zoomed and panned", () => {
       marks: [heatmap(grid(4), { x: "x", y: "y", color: "v" })],
     });
     const plot = scene.panels[0]!.plot;
-    model.setViewport([0, 2]);
+    setViewport(model, [0, 2]);
     const raster = rasterOf(model);
     // Cells 0, 1, and 2 show; 0 and 2 half of each, past the plot's edges.
     expect(raster.columns).toBe(3);
@@ -505,7 +506,7 @@ describe("heatmaps zoomed and panned", () => {
       interaction: { zoom: "x" },
       marks: [heatmap(grid(4), { x: "x", y: "y", color: "v" })],
     });
-    model.setViewport([1.4, 1.41]);
+    setViewport(model, [1.4, 1.41]);
     const zoomed = model.scene(estimateText).panels[0]!;
     const raster = zoomed.marks[0] as RasterGeometry;
     const plot = zoomed.plot;
@@ -525,7 +526,7 @@ describe("heatmaps zoomed and panned", () => {
       marks: [heatmap(data, { x: "x", y: "y", color: "v" })],
     });
     expect(model.yScale()!.domain).toEqual([-0.5, 9.5]);
-    model.setViewport([8.6, 10]);
+    setViewport(model, [8.6, 10]);
     model.scene(estimateText);
     expect(model.yScale()!.domain).toEqual([3.5, 5.5]);
   });
@@ -541,7 +542,7 @@ describe("heatmaps zoomed and panned", () => {
       [[2.25, 4.25], 3.5],
       [[5.5, 7.5], 6.5],
     ] as const) {
-      model.setViewport(view);
+      setViewport(model, view);
       model.scene(estimateText);
       const x = model.xScale()!;
       const y = model.yScale()!;
@@ -869,6 +870,16 @@ describe("heatmap cells between edges", () => {
     expect(() => heatmap(mixed, { x1: "a", x2: "b", y: "y", color: "v" })).toThrow(
       /heatmap x2: field "b" holds time values and x1's "a" number values; give edges of one kind/,
     );
+  });
+
+  it("refuse the right axis, which specs written by hand may ask for", () => {
+    const spec = {
+      data: { t: { columns: { x: [0], y: [0], v: [1] } } },
+      marks: [{ type: "heatmap", x: "x", y: "y", color: "v", axis: "right" }],
+    };
+    const message = "heatmap axis: heatmaps draw on the left y axis only; drop axis";
+    expect(() => validateSpec(spec)).toThrow(`marks[0]: ${message}`);
+    expect(() => loadSpec(spec as never)).toThrow(message);
   });
 
   it("load from specs", () => {

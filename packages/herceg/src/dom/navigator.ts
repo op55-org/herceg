@@ -46,6 +46,8 @@ interface Drag {
   /** Where the pointer was when the drag last moved the window. */
   last: number;
   strip: DrawnStrip;
+  /** The x instance it moves (see `#moved`), which it ends rather than move another. */
+  moves: string;
   /** The viewport when it started, which Escape goes back to, and the last one it set. */
   from: readonly [number, number] | null;
   set: readonly [number, number] | null;
@@ -122,10 +124,10 @@ export class Sliders {
    */
   #drawn(): DrawnStrip | undefined {
     if (!this.#strip()) return undefined;
-    const view = this.#chart.getViewport().x;
+    const view = this.#view();
     this.#chart.render();
     const strip = this.#strip();
-    return strip && sameRange(this.#chart.getViewport().x, view) ? strip : undefined;
+    return strip && sameRange(this.#view(), view) ? strip : undefined;
   }
 
   /** The strip as last drawn, while the chart still has a navigator. */
@@ -143,12 +145,13 @@ export class Sliders {
       return;
     }
     const { plot, shown } = strip;
-    // Under several panels, it says what it moves.
+    // Under several panels, it says what it moves: all of them, or some.
     const { length } = strip.panels;
+    const all = length === this.#chart.getPanels().length ? "all " : "";
     this.#attribute(
       this.#group,
       "aria-description",
-      length > 1 ? `Shows and moves the x range of all ${length} panels` : null,
+      length > 1 ? `Shows and moves the x range of ${all}${length} panels` : null,
     );
     // A strip that turned around, or changed its scale's type or breaks
     // (the chart did), ends a drag over it: its pixels no longer mean what
@@ -275,7 +278,7 @@ export class Sliders {
       const part = (Object.keys(this.#parts) as Part[]).find(
         (name) => this.#parts[name] === target,
       );
-      const from = this.#chart.getViewport().x;
+      const from = this.#view();
       const x = local(event);
       this.#drag = {
         pointer: event.pointerId,
@@ -284,6 +287,7 @@ export class Sliders {
         x,
         last: x,
         strip,
+        moves: this.#moved(),
         from,
         set: from,
         moved: false,
@@ -327,8 +331,26 @@ export class Sliders {
    * view an application asks for.
    */
   #show(x: readonly [number, number] | null): void {
-    this.#chart.setViewport({ x });
+    this.#chart.setViewport({ x }, this.#target());
     this.#chart.render();
+  }
+
+  /** The x range the window shows, of its panel's x scale or the one every panel shares. */
+  #view(): readonly [number, number] | null {
+    return this.#chart.getViewport(this.#target()).x;
+  }
+
+  /** The panel the strip moves the x of and that x's instance, as the last frame drew them. */
+  #moved(): string {
+    const { panel = "" } = this.#target();
+    const drawn = this.#chart.getPanels().find(({ key, x }) => key === panel || (!panel && x));
+    return JSON.stringify([panel, drawn?.x?.instance]);
+  }
+
+  /** The panel whose x scale the strip moves (`navigator.panel`), as the chart's methods take it. */
+  #target(): { panel?: string } {
+    const panel = this.#strip()?.target;
+    return panel === undefined ? {} : { panel };
   }
 
   /**
@@ -339,7 +361,7 @@ export class Sliders {
   #dragTo(drag: Drag, x: number): void {
     drag.moved ||= Math.abs(x - drag.press) >= DRAG_THRESHOLD;
     if (!drag.moved) return;
-    if (!sameRange(this.#chart.getViewport().x, drag.set)) {
+    if (this.#moved() !== drag.moves || !sameRange(this.#view(), drag.set)) {
       this.#end();
       return;
     }
@@ -351,7 +373,7 @@ export class Sliders {
     this.#show(view);
     // Listeners may have ended the drag, removed the navigator, or more.
     if (this.#disposed || this.#drag !== drag) return;
-    const now = this.#chart.getViewport().x;
+    const now = this.#view();
     if (!sameRange(now, view)) this.#end();
     else drag.set = now;
   }
@@ -375,9 +397,11 @@ export class Sliders {
       const drag = this.#drag;
       if (drag) {
         this.#end();
-        // Back to where it started, unless something else changed the view since.
-        if (drag.moved && sameRange(this.#chart.getViewport().x, drag.set)) this.#show(drag.from);
-      } else if (this.#chart.getViewport().x !== null) {
+        // Back to where it started, unless something else changed the view
+        // since, or the strip moves another instance now.
+        if (drag.moved && this.#moved() === drag.moves && sameRange(this.#view(), drag.set))
+          this.#show(drag.from);
+      } else if (this.#view() !== null) {
         this.#show(null);
         this.#announce();
       } else return;

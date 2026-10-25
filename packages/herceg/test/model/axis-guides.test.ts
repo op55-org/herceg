@@ -17,6 +17,7 @@ import { renderSvg } from "../../src/render/svg.ts";
 import type { AxisGuide, Scene, SegmentsItem, TextItem } from "../../src/scene/scene.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { drawnLines } from "../helpers/guides.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
 const HOUR = 3_600_000;
@@ -565,7 +566,7 @@ describe("tick labels", () => {
       [100, 100.5],
       [5000, 905000],
     ] as const) {
-      model.setViewport([view[0], view[1]]);
+      setViewport(model, [view[0], view[1]]);
       const scene = model.scene(estimateText);
       for (const label of texts(sideOf(scene, "bottom")))
         if (label.angle === -90)

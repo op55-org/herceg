@@ -1,7 +1,9 @@
-// Moving a chart's axes gradually to a view asked for (the `animation`
-// option). Charts load this module only when they animate.
+// Moving a chart's axes, or a map's or network's plane, gradually to a view
+// asked for (the `animation` option). Charts load this module only when
+// they animate.
 
 import type { Breaks } from "../lod/m4.ts";
+import type { ItemViews } from "../model/item-views.ts";
 import type { ChartModel, DrawnPanel, ViewDomains } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { AnimationSpec } from "../spec/spec.ts";
@@ -16,6 +18,9 @@ const DURATION = 250;
  */
 const SLOW_FRAME = 10;
 
+/** Planes' ranges across their rooms, by state (see `planesOf`). */
+type Planes = ReadonlyMap<string, { x: readonly [number, number]; y: readonly [number, number] }>;
+
 /** Where a change of view starts: the ranges drawn before it, and which axes are logarithmic. */
 export interface ViewStart {
   domains: ViewDomains;
@@ -25,12 +30,16 @@ export interface ViewStart {
   breaks?: Breaks | undefined;
 }
 
-/** A change of view playing. */
-export interface Transition extends ViewStart {
+/** A change of view playing: of a panel's axes, of maps' and networks' planes, or both. */
+export interface Transition {
+  /** Where the axes start, in a chart drawing a panel of them. */
+  axes: ViewStart | undefined;
+  /** The planes' ranges drawn before it. */
+  planes: Planes | undefined;
   /** The transitions asked for with it, which play together or not at all. */
   batch: Batch;
   /** Planned on its first frame, once every change asked for before it is in. */
-  to: ViewDomains | undefined;
+  to: { domains: ViewDomains | undefined; planes: Planes | undefined } | undefined;
   start: number;
   duration: number;
 }
@@ -63,8 +72,8 @@ function costOf(batch: Batch): number {
 }
 
 /**
- * Moves one chart's axes to the views asked for. The chart says where a
- * change starts, and calls `step` before drawing each frame.
+ * Moves one chart's axes, or its planes, to the views asked for. The chart
+ * says where a change starts, and calls `step` before drawing each frame.
  */
 export class ViewAnimation {
   readonly #model: ChartModel;
@@ -82,18 +91,21 @@ export class ViewAnimation {
 
   /**
    * Moves from what `from`, a panel drawn before a change of view, shows to
-   * the view now asked for, over the `animation` option's duration;
-   * `frameTime` is how long the chart's last frame took. Whether it started.
+   * the view now asked for, or from what the planes of maps and networks
+   * drawn show, over the `animation` option's duration; `frameTime` is how
+   * long the chart's last frame took. Whether it started.
    */
   start(
-    from: DrawnPanel,
+    from: DrawnPanel | undefined,
     animation: boolean | AnimationSpec | undefined,
     frameTime: number,
   ): boolean {
     const duration = durationOf(animation);
-    if (duration === 0 || this.#reducedMotion?.matches) return false;
+    const planes = planesOf(this.#model.items);
+    if (duration === 0 || this.#reducedMotion?.matches || !(from || planes)) return false;
     this.#transition = {
-      ...startOf(from),
+      axes: from && startOf(from),
+      planes,
       // The first frame also plans the new view: about another frame's work.
       batch: joinBatch(this, 2 * frameTime),
       to: undefined,
@@ -111,16 +123,20 @@ export class ViewAnimation {
   step(plan: () => DrawnPanel | undefined, frameTime: number): boolean {
     const transition = this.#transition;
     if (!transition) return false;
+    const model = this.#model;
     if (!transition.to) {
       // Charts whose first frame together would be slow jump instead,
       // before planning where they would go.
       const { batch } = transition;
       batch.jump ??= costOf(batch) > SLOW_FRAME;
       if (batch.jump) return this.settle();
-      this.#model.setTransitionDomains(null);
+      model.setTransitionDomains(null);
+      this.#setViews(undefined);
       const panel = plan();
-      if (!panel) return this.settle();
-      transition.to = domainsOf(panel);
+      const planes = transition.planes && planesOf(model.items);
+      const domains = transition.axes && panel && domainsOf(panel);
+      if (!domains && !planes) return this.settle();
+      transition.to = { domains, planes };
     }
     const elapsed = performance.now() - transition.start;
     // Slow frames, of this chart or of every chart together, and a page
@@ -132,7 +148,9 @@ export class ViewAnimation {
       this.#reducedMotion?.matches
     )
       return this.settle();
-    this.#model.setTransitionDomains(domainsAt(transition, transition.to, elapsed));
+    const { domains, planes } = transition.to;
+    if (domains) model.setTransitionDomains(domainsAt(transition, domains, elapsed));
+    if (planes) this.#setViews(planesAt(transition, planes, elapsed));
     return true;
   }
 
@@ -142,8 +160,30 @@ export class ViewAnimation {
     this.#transition?.batch.costs.delete(this);
     this.#transition = undefined;
     this.#model.setTransitionDomains(null);
+    this.#setViews(undefined);
     return false;
   }
+
+  /** Has frames draw planes at `views`, by state, or at their own. */
+  #setViews(views: Planes | undefined): void {
+    const items = this.#model.items;
+    if (items) items.transitionViews = views;
+  }
+}
+
+/**
+ * What each plane the last frame drew (a map's or a network's) shows across
+ * its room, by state: x and y ranges in its units, ascending; undefined
+ * without planes.
+ */
+function planesOf(items: ItemViews | undefined): Planes | undefined {
+  const ranges = new Map<string, { x: readonly [number, number]; y: readonly [number, number] }>();
+  for (const { result, state } of items?.panels ?? []) {
+    const { plane } = result;
+    if (plane && !ranges.has(state))
+      ranges.set(state, { x: rangeOf(plane.x)!, y: rangeOf(plane.y)! });
+  }
+  return ranges.size > 0 ? ranges : undefined;
 }
 
 /** Milliseconds an `animation` option takes; 0 when off or unusable. */
@@ -191,10 +231,32 @@ function rangeOf(
   return a <= b ? [a, b] : [b, a];
 }
 
-/** The ranges `elapsed` milliseconds into a transition. */
+/**
+ * The views of planes `elapsed` milliseconds into a transition: the ranges
+ * each shows, between those it showed and those it shows at the end. A
+ * plane that came since moves from nowhere: it shows where it ends.
+ */
+function planesAt(
+  transition: Pick<Transition, "planes" | "duration">,
+  to: Planes,
+  elapsed: number,
+): Planes {
+  const t = ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
+  const views = new Map<string, { x: readonly [number, number]; y: readonly [number, number] }>();
+  for (const [state, end] of to) {
+    const start = transition.planes?.get(state) ?? end;
+    views.set(state, {
+      x: between(start.x, end.x, t, false)!,
+      y: between(start.y, end.y, t, false)!,
+    });
+  }
+  return views;
+}
+
+/** The ranges of the axes `elapsed` milliseconds into a transition of them. */
 export function domainsAt(transition: Transition, to: ViewDomains, elapsed: number): ViewDomains {
   const t = ease(Math.min(1, Math.max(0, elapsed / transition.duration)));
-  const { domains: from, log, breaks } = transition;
+  const { domains: from, log, breaks } = transition.axes!;
   const ranges = (a: Omit<ViewDomains, "ticks">, b: Omit<ViewDomains, "ticks">) => ({
     x: between(a.x, b.x, t, log.x, breaks),
     y: between(a.y, b.y, t, log.y),

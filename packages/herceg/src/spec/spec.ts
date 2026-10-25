@@ -13,7 +13,9 @@ import type {
   ChannelSpec,
   ContinuitySpec,
   EncodingsSpec,
+  LabelPlaceSpec,
   LabelSpec,
+  LabelTextSpec,
   MarkAnchorSpec,
   MarkStyleSpec,
   SeriesLabelsSpec,
@@ -157,14 +159,18 @@ export interface ChartSpec {
    */
   navigator?: boolean | NavigatorSpec;
   /**
-   * Moves the axes gradually to a view asked for: `setViewport`, zooming
-   * to a brush, and double-click reset; with `values`, marks (and the axes
-   * with them) to changed values too. Off by default; `true` takes 250 ms.
-   * Never for wheel zoom, panning, streaming, linked charts, panels, or
-   * slow frames, nor where the page prefers reduced motion.
+   * Moves the axes (or a map's or network's plane) gradually to a view
+   * asked for: `setViewport`, zooming to a brush, and double-click reset;
+   * with `values`, marks (and the axes with them) to changed values too,
+   * in every panel. Off by default; `true` takes 250 ms. Never for wheel
+   * zoom, panning, drilling, streaming, linked charts, views of several
+   * panels, or slow frames, nor where the page prefers reduced motion.
    */
   animation?: boolean | AnimationSpec;
-  /** Renderer for marks. "auto" picks per mark by data size. */
+  /**
+   * Renderer for marks: "auto" (the default) draws them in SVG, and in
+   * Canvas while the chart draws many points; "svg" or "canvas" always.
+   */
   renderer?: RendererName;
   theme?: ThemeName | ThemeSpec;
   /** BCP 47 locale for labels; defaults to the runtime locale. */
@@ -958,10 +964,13 @@ export interface AnimationSpec {
    * Marks move from the values shown to new ones when a table's values
    * change in place or are replaced (`replace`, `set`, `setColumn`,
    * `reset`), and axes whose automatic domains change move with them, as
-   * well as the axes moving to views asked for: bars, pie slices, points
-   * (by row, so not across `reset`), and lines and areas whose rows keep
-   * their x positions. Appended and dropped rows, changed options, and
-   * changes that move the plot or the categories show at once.
+   * well as the axes moving to views asked for: bars, pie slices, gauges,
+   * points (by row, so not across `reset`), lines and areas whose rows
+   * keep their positions, error bars, candlesticks, annotations, and
+   * heatmaps' cells. Appended and dropped rows, changed options, and
+   * changes that move a plot or the categories show at once. Box plots,
+   * boxen plots, violins, rugs, contours, dendrograms, custom marks, and
+   * layout marks other than pies and gauges refuse it.
    */
   values?: boolean;
 }
@@ -1151,6 +1160,7 @@ export interface LineSpec extends SeriesBase, RowTooltip {
   opacity?: number;
   /** From 0 to 1: the line's stroke's. */
   strokeOpacity?: number;
+  /** How the line joins its points (see `Curve`); "linear" by default. */
   curve?: Curve;
   /** Legend and tooltip name for a single-field line without `series`. */
   label?: string;
@@ -1212,6 +1222,7 @@ interface AreaStyle extends SeriesBase, RowTooltip {
   continuity?: ContinuitySpec;
   /** Rows the areas leave out, as gaps (areas that do not stack). */
   where?: Expression;
+  /** How the area's edges join their points (see `Curve`); "linear" by default. */
   curve?: Curve;
   label?: string;
   /** A label following each area's value edge (a band's `edge`). */
@@ -1343,7 +1354,10 @@ export interface DendrogramSpec extends Omit<MarkBase, "axis"> {
   height: Field;
   /** Category labels indexed by leaf id; exactly one more than the merge rows. */
   leaves: readonly string[];
-  /** Plot edge at height zero; default bottom. Heights use plot pixels, not an axis. */
+  /**
+   * Plot edge at height zero; default bottom. Heights are values on the
+   * other axis, whose automatic domain descends for top and right.
+   */
   side?: "bottom" | "top" | "left" | "right";
   stroke?: string;
   strokeWidth?: number;
@@ -1384,6 +1398,15 @@ interface RegionStyle extends AnnotationBase {
 }
 
 /**
+ * Text's label: its text (`LabelTextSpec`). Text at a place is drawn there;
+ * text following a series (`from`) is placed as series' labels are
+ * (`place`: outside the plot, keeping room or not, and its offset).
+ */
+export type TextLabelSpec = LabelTextSpec & {
+  place?: Pick<LabelPlaceSpec, "outside" | "reserve" | "offset">;
+};
+
+/**
  * Text at a place (`at`, or `x` and `y`): constant `label` text, or each
  * row's `label.field`. Labels are drawn above the data and left out when
  * their place is outside the plot.
@@ -1406,7 +1429,7 @@ export interface TextSpec extends AnnotationBase {
    * one label per series. Not with `x`, `y`, or `at`.
    */
   from?: MarkAnchorSpec;
-  label: string | LabelSpec;
+  label: string | TextLabelSpec;
   /**
    * Labels that would cover an earlier one of this mark: drawn anyway
    * ("show", the default), left out ("hide"), or, where their place is taken
@@ -1613,7 +1636,7 @@ export interface CandlestickSpec extends SeriesBase, RowTooltip {
  * of `value` over the category's rows (or their count). Slices hidden
  * through the legend leave the rest to fill the circle.
  */
-export interface PieSpec {
+export interface PieSpec extends RowTooltip {
   type: "pie";
   /** Name of the table in `ChartSpec.data`; defaults to the only table. */
   data?: string;
@@ -1801,7 +1824,7 @@ export type TreeShape =
  */
 export type TreemapSpec = TreemapStyle & TreeShape;
 
-interface TreemapStyle {
+interface TreemapStyle extends RowTooltip {
   type: "treemap";
   data?: string;
   id?: string;
@@ -1818,7 +1841,7 @@ interface TreemapStyle {
  */
 export type SunburstSpec = SunburstStyle & TreeShape;
 
-interface SunburstStyle {
+interface SunburstStyle extends RowTooltip {
   type: "sunburst";
   data?: string;
   id?: string;
@@ -1841,7 +1864,7 @@ export interface GaugeBand {
  * `max`, so appending rows moves it. The dial is a 240-degree arc open at
  * the bottom; bands color ranges of it.
  */
-export interface GaugeSpec {
+export interface GaugeSpec extends RowTooltip {
   type: "gauge";
   data?: string;
   id?: string;
@@ -1865,7 +1888,7 @@ export interface GaugeSpec {
  * proportion to the sum of `value` over the category's rows (or their
  * count), with faint connectors between neighboring bars.
  */
-export interface FunnelSpec {
+export interface FunnelSpec extends RowTooltip {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own.
@@ -1893,7 +1916,7 @@ export interface FunnelSpec {
  * one of the two forms, with 3 to 100 spokes. Every spoke shares one linear
  * scale from the center.
  */
-export interface RadarSpec {
+export interface RadarSpec extends RowTooltip {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own.
@@ -1928,7 +1951,7 @@ export interface RadarSpec {
  * their count). Rows without a positive, finite value, links from a node to
  * itself, and links that would close a cycle are left out.
  */
-export interface SankeySpec {
+export interface SankeySpec extends RowTooltip {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own.
@@ -2090,7 +2113,6 @@ interface GeoPointStyleSpec extends RowTooltip {
   latitude: Field;
   /** Category field naming each point, for tooltips, keyboard reading, and the summary. */
   labelField?: Field;
-  /** Category field: one colored set of points per value, with a legend. */
   /** A category field: a series per value; by default a category `color` field, and `false` for none. */
   series?: Field | false;
   /** A number field colored on a continuous scale. */
@@ -2176,7 +2198,7 @@ export type Histogram1DSpec = SeriesBase & {
  * fields) both fall in a bin of each, colored on a continuous scale from 0
  * by what they measure. Bins holding nothing are left empty.
  */
-export interface Histogram2DSpec extends MarkBase, Legended {
+export interface Histogram2DSpec extends Omit<MarkBase, "axis">, Legended {
   type: "histogram";
   x: Field;
   y: Field;
@@ -2309,7 +2331,7 @@ interface PointStyleSpec extends SeriesBase, RowTooltip {
 export type HeatmapSpec = HeatmapGridSpec | HeatmapCalendarSpec;
 
 /** The options both forms of heatmap share. */
-interface HeatmapBase extends MarkBase, Legended, RowTooltip {
+interface HeatmapBase extends Omit<MarkBase, "axis">, Legended, RowTooltip {
   type: "heatmap";
   /** Number or time field: each cell's value, mapped to color. */
   color: Field;
@@ -2346,7 +2368,7 @@ export type CellReduce = "last" | "mean" | "sum" | "min" | "max";
  * points; points without a value leave holes. Contours end where the grid
  * does.
  */
-export interface ContourSpec extends MarkBase, Legended {
+export interface ContourSpec extends Omit<MarkBase, "axis">, Legended {
   type: "contour";
   /** Number or time field: each grid point's x. */
   x: Field;
@@ -2463,8 +2485,6 @@ export interface HeatmapCalendarSpec extends HeatmapBase {
  */
 export interface Point3DSpec extends RowTooltip {
   type: "point3d";
-  /** 0 only: 3D marks draw by depth (see `MarkBase.zIndex`). */
-  zIndex?: number;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   data?: string;
@@ -2472,7 +2492,6 @@ export interface Point3DSpec extends RowTooltip {
   x: Field;
   y: Field;
   z: Field;
-  /** Category field: one colored set of points per value, with a legend. */
   /** A category field: a series per value; by default a category `color` field, and `false` for none. */
   series?: Field | false;
   /** Category field naming each point, for tooltips and keyboard reading. */
@@ -2500,8 +2519,6 @@ export interface Point3DSpec extends RowTooltip {
  */
 export interface Line3DSpec extends RowTooltip {
   type: "line3d";
-  /** 0 only: 3D marks draw by depth (see `MarkBase.zIndex`). */
-  zIndex?: number;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   data?: string;
@@ -2525,10 +2542,8 @@ export interface Line3DSpec extends RowTooltip {
  * evenly spaced in dictionary order), at the height of `z`. Cells between
  * four grid points with values are drawn; points without a value leave holes.
  */
-export interface SurfaceSpec {
+export interface SurfaceSpec extends RowTooltip {
   type: "surface";
-  /** 0 only: 3D marks draw by depth (see `MarkBase.zIndex`). */
-  zIndex?: number;
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
   data?: string;

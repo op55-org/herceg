@@ -103,6 +103,7 @@ interface LineStyle<S extends Schema> {
   continuity?: Continuity<S>;
   /** Rows to leave out, as gaps: the lines draw only where it holds. */
   where?: Condition;
+  /** How the line joins its points (see `Curve`); "linear" by default. */
   curve?: Curve;
   /** Name of a single line in legends and tooltips. Defaults to the value field. */
   label?: string;
@@ -320,11 +321,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
     const linear = view.x.type !== "log" && view.y.type !== "log";
     const index = this.#indexes.index(this.table, traced, frame.owner, linear);
     const path = tracePath(traced, traced.y, view, "line", this.spec.curve, index);
-    if (orient === "y") {
-      untranspose(path);
-      // Value transitions move lines along y only.
-      path.whole = false;
-    }
+    if (orient === "y") untranspose(path);
     return path;
   }
 

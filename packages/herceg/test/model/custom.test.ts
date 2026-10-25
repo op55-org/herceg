@@ -15,6 +15,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -375,7 +376,7 @@ describe("custom marks with series", () => {
     });
     const model = new ChartModel({ locale: "en-US", marks: [stepped] });
     model.setSize(600, 300, 1);
-    model.setViewport([4, 6]);
+    setViewport(model, [4, 6]);
     model.scene(estimateText);
     const [lo, hi] = model.yScale()!.domain;
     expect(lo).toBeLessThanOrEqual(0);

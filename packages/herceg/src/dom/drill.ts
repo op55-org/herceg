@@ -18,7 +18,6 @@
 
 import type { Drill } from "../marks/tree-data.ts";
 import type { ItemPanel } from "../model/item-views.ts";
-import type { ChartConfig } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import type { Controls as ChartControls, ControlsHost } from "./controls.ts";
 import { RESET_GLYPH, Toolbar } from "./toolbar.ts";
@@ -60,7 +59,7 @@ export class Controls implements ChartControls {
   }
 
   /** Charts load these controls only while `interaction.zoom` is on: nothing changes here. */
-  update(_config: ChartConfig): void {}
+  update(): void {}
 
   draw(scene: Scene): void {
     const trees = this.#trees();
@@ -100,17 +99,18 @@ export class Controls implements ChartControls {
     this.#path.remove();
   }
 
-  /** The panels drawing trees, in order, with their states and drills. */
+  /** The panels drawing trees their settings drill, in order, with their states and drills. */
   #trees(): TreePanel[] {
     return (this.#host.model.items?.panels ?? []).flatMap((panel) => {
-      const drill = panel.result.drill;
+      const drill = this.#drill(panel.key);
       return drill ? [{ ...panel, drill }] : [];
     });
   }
 
-  /** The tree drawn in panel `panel` (the chart's one by default). */
+  /** The tree drawn in panel `panel` (the chart's one by default), if its settings drill it. */
   #drill(panel?: string): Drill | undefined {
-    return this.#host.model.items?.result(panel)?.drill;
+    const { model } = this.#host;
+    return model.interactionOf(panel)?.zoom ? model.items?.result(panel)?.drill : undefined;
   }
 
   #clicked(key: string, panel: string | undefined): void {

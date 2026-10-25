@@ -15,6 +15,7 @@ import type { AreaGeometry, LineGeometry, RuleGeometry, Scene } from "../../src/
 import { loadSpec } from "../../src/spec/load.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { stopsOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 /** The y of a polyline at pixel x, by linear interpolation, if it spans x. */
 function yAt(path: Polyline, x: number): number | undefined {
@@ -62,7 +63,7 @@ function curveAt(
     marks: [line(table({ x: xs, y: ys }), { x: "x", y: "y", curve: "monotone" })],
   });
   model.setSize(width, 300, 1);
-  if (viewport) model.setViewport(viewport);
+  if (viewport) setViewport(model, viewport);
   const path = lines(model.scene(estimateText))[0]!.path;
   return model.yScale()!.invert(yAt(path, model.xScale()!.map(at))!);
 }
@@ -185,7 +186,7 @@ describe("domains", () => {
 
   it("fits y to the visible x range when zoomed", () => {
     const { model } = sceneOf({ marks: [line(data, { x: "x", y: "y" })] });
-    model.setViewport([0, 3]);
+    setViewport(model, [0, 3]);
     const scene = model.scene(estimateText);
     const labels = yAxis(scene).ticks.map((t) => Number(t.label.replace(/,/g, "")));
     // Points just outside the range are drawn but do not stretch the domain.
@@ -199,11 +200,11 @@ describe("domains", () => {
       yRight: { domain: [0, 100] },
       marks: [line(data, { x: "x", y: "y" }), line(data, { x: "x", y: "y", axis: "right" })],
     });
-    model.setViewport([1, 4]);
-    model.setYViewport({ y: [800, 200], yRight: [20, 80] });
+    setViewport(model, [1, 4]);
+    setViewport(model, { y: [800, 200], yRight: [20, 80] });
     model.scene(estimateText);
-    expect(model.viewport).toEqual([1, 4]);
-    expect(model.yViewport).toEqual({ y: [200, 800], yRight: [20, 80] });
+    expect(model.getViewport().x).toEqual([1, 4]);
+    expect(model.getViewport()).toEqual({ x: [1, 4], y: [200, 800], yRight: [20, 80] });
     expect(model.xScale()!.domain).toEqual([4, 1]);
     expect(model.yScale()!.domain).toEqual([800, 200]);
     expect(model.yRightScale()!.domain).toEqual([20, 80]);
@@ -675,13 +676,13 @@ describe("level of detail", () => {
         }),
       ],
     }).model;
-    wave.setViewport([0.25, 0.75]);
+    setViewport(wave, [0.25, 0.75]);
     inPlot(wave);
     const crossing = table({ x: [0, 1, 2, 3], lo: [9, 11, 67, 85], hi: [14, 13, 67, 89] });
     const crossed = sceneOf({
       marks: [area(crossing, { x: "x", y1: "lo", y2: "hi", curve: "monotone" })],
     }).model;
-    crossed.setViewport([1.3, 1.4]);
+    setViewport(crossed, [1.3, 1.4]);
     inPlot(crossed);
     const logs = sceneOf({
       x: { type: "log" },
@@ -693,7 +694,7 @@ describe("level of detail", () => {
         }),
       ],
     }).model;
-    logs.setViewport([2, 3]);
+    setViewport(logs, [2, 3]);
     inPlot(logs);
 
     // A band whose dense stretch is followed by a sparse one curves the

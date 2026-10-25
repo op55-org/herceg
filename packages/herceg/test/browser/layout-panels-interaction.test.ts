@@ -9,14 +9,17 @@ import { selectionStore } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import type { ChartEvents } from "../../src/dom/events.ts";
-import { grid } from "../../src/layout.ts";
+import { columns, grid, panel } from "../../src/layout.ts";
 import { geoshape } from "../../src/marks/geoshape.ts";
 import { graph } from "../../src/marks/graph.ts";
+import { line } from "../../src/marks/line.ts";
+import { pie } from "../../src/marks/pie.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { facet } from "../../src/model/facet.ts";
 import type { ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
+import { brief } from "../helpers/views.ts";
 import { accessibilityTree, MOUSE, modelOf, pageOrigin, realMouse } from "./helpers.ts";
 
 const mounted: Chart[] = [];
@@ -222,6 +225,23 @@ describe("trees in subplots", () => {
     up.click();
     expect(drills.at(-1)).toEqual({ key: null, path: [], panels: ["b"] });
   });
+
+  it("drill only the subplot whose settings zoom, with a toolbar of its own alone", async () => {
+    const chart = await mount({
+      marks: [tree({ panel: "a" }), tree({ panel: "b" })],
+      panels: panels([
+        { id: "a", title: "First", interaction: { zoom: true } },
+        { id: "b", title: "Second" },
+      ]),
+    });
+    const drills = heard(chart, "drill");
+    await click(chart, ...corner(itemNamed(chart, "b", "Asia")));
+    expect(drills).toEqual([]);
+    const toolbars = [...chart.root.querySelectorAll('[role="toolbar"]')];
+    expect(toolbars.map((toolbar) => toolbar.getAttribute("aria-label"))).toEqual(["Tree, First"]);
+    await click(chart, ...corner(itemNamed(chart, "a", "Asia")));
+    expect(drills.map(({ panels }) => panels)).toEqual([["a"]]);
+  });
 });
 
 const ring = (x: number, y: number, s: number) => [
@@ -259,7 +279,8 @@ describe("maps in subplots", () => {
     await mouse(chart, "wheel", ...middle, -300);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     expect(views.length).toBeGreaterThan(0);
-    expect(views.every((view) => view.panels?.join() === "b")).toBe(true);
+    expect(views.every((event) => event.views.every(({ panel }) => panel === "b"))).toBe(true);
+    expect(views.every((event) => event.panel === "b")).toBe(true);
     expect(chart.getViewport({ panel: "a" })).toEqual({ x: null, y: null, yRight: null });
     expect(chart.getViewport({ panel: "b" }).x).not.toBeNull();
     const zoomed = chart.getViewport({ panel: "b" });
@@ -285,6 +306,30 @@ describe("maps in subplots", () => {
     expect(chart.getViewport({ panel: "b" }).x).toBeNull();
     expect(chart.getViewport({ panel: "a" }).x).toEqual([0, 0.1]);
     expect(() => chart.getViewport()).toThrow("getViewport: panel is required");
+  });
+
+  it("show a map and a line beside it whole with null, as one change", async () => {
+    const chart = await mount({
+      marks: [
+        geoshape(fromGeoJSON(countries()), { labelField: "name", panel: "a" }),
+        line(table({ t: [0, 1, 2], v: [1, 3, 2] }), { x: "t", y: "v", panel: "b" }),
+      ],
+      panels: panels([{ id: "a" }, { id: "b" }], grid({ columns: 2 })),
+      projection: "equirectangular",
+    });
+    chart.render();
+    chart.setViewport({ x: [0, 0.5], y: [0, 0.5] }, { panel: "a" });
+    chart.setViewport({ x: [0.5, 1.5] }, { panel: "b" });
+    const views = heard(chart, "viewport");
+    const revision = chart.viewRevision;
+    chart.setViewport(null);
+    expect(views).toHaveLength(1);
+    expect(views[0]!.viewRevision).toBe(revision + 1);
+    expect(views[0]!.views.map(({ panel }) => panel).sort()).toEqual(["a", "b"]);
+    expect(views[0]!.scales.every(({ view }) => view === null)).toBe(true);
+    // Every listener hears a chart reset whole.
+    expect(chart.getViewport({ panel: "a" })).toEqual({ x: null, y: null, yRight: null });
+    expect(chart.getViewport({ panel: "b" })).toEqual({ x: null, y: null, yRight: null });
   });
 
   it("end a pan of a subplot that goes while it pans", async () => {
@@ -319,6 +364,37 @@ describe("maps in subplots", () => {
     expect(chart.getViewport({ panel: "b" }).x).toBeNull();
   });
 
+  it("report what a lasso belongs to as it was, though its subplot goes", async () => {
+    const regions = fromGeoJSON(countries());
+    const options = (keys: string[]): ChartOptions => ({
+      marks: keys.map((key) => geoshape(regions, { panel: key })),
+      panels: panels(
+        keys.map((id) => ({ id })),
+        grid({ columns: 2 }),
+      ),
+      projection: "equirectangular",
+      interaction: { brush: "lasso" },
+    });
+    const chart = await mount(options(["a", "b"]));
+    chart.render();
+    const selects = heard(chart, "select");
+    chart.select(
+      {
+        x: null,
+        y: null,
+        lasso: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+        ],
+      },
+      { panel: "b" },
+    );
+    chart.update(options(["a"]));
+    chart.render();
+    expect(selects[0]!.owner.panels).toEqual(["b"]);
+  });
+
   it("clear a subplot's lasso naming its panel, or none", async () => {
     const regions = fromGeoJSON(countries());
     const chart = await mount({
@@ -337,12 +413,79 @@ describe("maps in subplots", () => {
       ] as [number, number][],
     };
     chart.select(lasso, { panel: "b" });
-    expect(chart.selectionPanels).toEqual(["b"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
     chart.select(null, { panel: "b" });
     expect(chart.selection).toBeNull();
     chart.select(lasso, { panel: "b" });
     chart.select(null);
     expect(chart.selection).toBeNull();
+  });
+});
+
+describe("planes following their subplot's settings", () => {
+  it("zoom only the map whose panel zooms, and lasso only in the one that lassos", async () => {
+    const regions = fromGeoJSON(countries());
+    const chart = await mount({
+      marks: [geoshape(regions, { panel: "a" }), geoshape(regions, { panel: "b" })],
+      panels: panels(
+        [
+          { id: "a", interaction: { zoom: true } },
+          { id: "b", interaction: { brush: "lasso" } },
+        ],
+        grid({ columns: 2 }),
+      ),
+      projection: "equirectangular",
+    });
+    const [a, b] = chart.getPanels();
+    const middle = (p: typeof a) =>
+      [p!.plot.x + p!.plot.width / 2, p!.plot.y + p!.plot.height / 2] as const;
+    // Only the zooming subplot's toolbar shows, with no lasso toggle.
+    const toolbars = [...chart.root.querySelectorAll<HTMLElement>('[role="toolbar"]')];
+    expect(toolbars.map((toolbar) => toolbar.style.display)).toEqual(["flex", "none"]);
+    const lassoToggle = toolbars[0]!.querySelector<HTMLElement>('[aria-label="Lasso"]')!;
+    expect(lassoToggle.hidden || lassoToggle.style.display === "none").toBe(true);
+    await mouse(chart, "move", ...middle(b));
+    await mouse(chart, "wheel", ...middle(b), -300);
+    expect(chart.getViewport({ panel: "b" }).x).toBeNull();
+    await mouse(chart, "move", ...middle(a));
+    await mouse(chart, "wheel", ...middle(a), -300);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(chart.getViewport({ panel: "a" }).x).not.toBeNull();
+    // A drag in the map that lassos selects there; in the other, it pans.
+    const [bx, by] = middle(b);
+    await mouse(chart, "move", bx - 30, by - 20);
+    await mouse(chart, "press", bx - 30, by - 20);
+    for (const [x, y] of [
+      [bx + 30, by - 20],
+      [bx + 30, by + 20],
+      [bx - 30, by + 20],
+    ] as const)
+      await mouse(chart, "move", x, y);
+    await mouse(chart, "release", bx - 30, by + 20);
+    expect(chart.selection?.lasso).toBeDefined();
+    expect(chart.selectionOwner?.panels).toEqual(["b"]);
+    const zoomed = chart.getViewport({ panel: "a" }).x!;
+    const [ax, ay] = middle(a);
+    await drag(chart, [ax, ay], [ax - 40, ay]);
+    expect(chart.getViewport({ panel: "a" }).x![0]).toBeGreaterThan(zoomed[0]);
+    expect(chart.selectionOwner?.panels).toEqual(["b"]);
+  });
+
+  it("move nodes only in the network whose panel drags them", async () => {
+    const links = table({ from: ["a", "b"], to: ["b", "c"] });
+    const network = (panel: string) =>
+      graph(links, { source: "from", target: "to", labels: false, panel });
+    const chart = await mount({
+      marks: [network("a"), network("b")],
+      panels: panels([{ id: "a" }, { id: "b", interaction: { drag: true } }], grid({ columns: 2 })),
+    });
+    const moves = heard(chart, "itemMove");
+    // Node b of each panel's mark.
+    for (const [i, panel] of ["a", "b"].entries()) {
+      const { px, py } = modelOf(chart).inspectItem(`[${i},"b"]`, panel)!.points[0]!;
+      await drag(chart, [px, py], [px + 20, py + 10]);
+    }
+    expect(moves.map(({ panels }) => panels)).toEqual([["b"]]);
   });
 });
 
@@ -397,7 +540,15 @@ describe("maps in facet panels", () => {
     const views = heard(chart, "viewport");
     const selections = heard(chart, "select");
     chart.setViewport({ x: [0, 0.4] }, { panel: "2024" });
-    expect(views.at(-1)).toEqual({ x: [0, 0.4], y: null, yRight: null });
+    // The facet panels share the plane: one change, of each panel's view.
+    expect(brief(views.at(-1)!)).toEqual({
+      panel: "2024",
+      scales: [["x", [0, 0.4], ["2023", "2024"]]],
+    });
+    expect(views.at(-1)!.views).toMatchObject([
+      { panel: "2023", x: [0, 0.4], y: null, yRight: null },
+      { panel: "2024", x: [0, 0.4], y: null, yRight: null },
+    ]);
     chart.setViewport(null);
     chart.render();
     // A lasso around the first panel's plot, on the plane both panels share.
@@ -415,7 +566,7 @@ describe("maps in facet panels", () => {
     await mouse(chart, "release", ...points[0]!);
     expect(selections.at(-1)?.lasso).not.toBeNull();
     expect(selections.at(-1)).not.toHaveProperty("panels");
-    expect(chart.selectionPanels).toEqual(["2023", "2024"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["2023", "2024"]);
     // Every region of both panels is inside the shared plane's lasso.
     const held = store.get("picked");
     expect(held?.kind === "rows" && [...held.rows.positions()]).toEqual([0, 1, 2, 3]);
@@ -477,5 +628,93 @@ describe("networks in facet panels", () => {
     expect(Object.keys(chart.getItemPositions()).sort()).toEqual(['[0,"a"]', '[0,"d"]']);
     const svg = chart.toSVG();
     expect(svg).toContain("<svg");
+  });
+});
+
+describe("planes beside axes", () => {
+  const links = table({ from: ["a", "b"], to: ["b", "c"] });
+  const options = (extra: Partial<ChartOptions> = {}): ChartOptions => ({
+    marks: [
+      graph(links, { source: "from", target: "to", panel: "g" }),
+      line(table({ t: [0, 1, 2], v: [1, 3, 2] }), { x: "t", y: "v", panel: "a" }),
+    ],
+    panels: panels([{ id: "g" }, { id: "a" }], grid({ columns: 2 })),
+    ...extra,
+  });
+
+  it("list a reset's instances by scale, then panel, and its views in reading order", async () => {
+    const chart = await mount(options());
+    chart.render();
+    chart.setViewport({ x: [0, 0.5], y: [0, 0.5] }, { panel: "g" });
+    chart.setViewport({ x: [0.5, 1.5], y: [1, 2] }, { panel: "a" });
+    const views = heard(chart, "viewport");
+    chart.setViewport(null);
+    expect(views[0]!.scales.map(({ scale, panels }) => [scale, panels[0]])).toEqual([
+      ["x", "g"],
+      ["x", "a"],
+      ["y", "g"],
+      ["y", "a"],
+    ]);
+    expect(views[0]!.views.map(({ panel }) => panel)).toEqual(["g", "a"]);
+  });
+
+  it("refuse a right y on a plane, naming its panel", async () => {
+    const chart = await mount(options());
+    chart.render();
+    expect(() => chart.setViewport({ yRight: [0, 1] }, { panel: "g" })).toThrow(
+      expect.objectContaining({ code: "unsupported", path: "yRight", panel: "g" }),
+    );
+  });
+
+  it("refuse a subplot's own settings its layout mark cannot take, naming it where it is listed", () => {
+    const shares = table({ k: ["a", "b"], v: [1, 2] });
+    const make = () =>
+      createChart(document.createElement("div"), {
+        marks: [
+          pie(shares, { category: "k", value: "v", panel: "p" }),
+          line(table({ t: [0, 1], v: [1, 2] }), { x: "t", y: "v", panel: "a" }),
+        ],
+        // The layout draws "p" first.
+        panels: panels(
+          [{ id: "a" }, { id: "p", interaction: { brush: "y" } }],
+          columns([1, 1], [panel("p"), panel("a")]),
+        ),
+        errorMode: "throw",
+      });
+    expect(make).toThrow(
+      expect.objectContaining({
+        code: "unsupported",
+        path: "panels[1].interaction.brush",
+        message: "pie brush: no axes to brush; drop panels[1].interaction.brush",
+      }),
+    );
+  });
+
+  it("refuse views of subplots that draw without axes, telling them from panels the chart lacks", async () => {
+    const shares = table({ k: ["a", "b"], v: [1, 2] });
+    const chart = await mount({
+      marks: [
+        pie(shares, { category: "k", value: "v", panel: "a" }),
+        pie(shares, { category: "k", value: "v", panel: "b" }),
+      ],
+      panels: panels([{ id: "a" }, { id: "b" }], grid({ columns: 2 })),
+    });
+    chart.render();
+    for (const target of [{}, { panel: "a" }])
+      expect(() => chart.setViewport({ x: [0, 1] }, target)).toThrow(
+        expect.objectContaining({ code: "unknown-reference", path: "x" }),
+      );
+    expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: null });
+    expect(chart.getViewport({ panel: "a" })).toEqual({ x: null, y: null, yRight: null });
+    expect(() => chart.select([0, 1], { panel: "a" })).toThrow(
+      expect.objectContaining({ code: "unknown-reference", path: "x" }),
+    );
+    expect(() => chart.setViewport({ x: [0, 1] }, { panel: "c" })).toThrow(
+      expect.objectContaining({
+        code: "unknown-reference",
+        path: "panel",
+        message: 'setViewport: no panel "c"; name one of "a", "b"',
+      }),
+    );
   });
 });

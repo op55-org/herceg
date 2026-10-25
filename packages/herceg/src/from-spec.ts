@@ -2,6 +2,9 @@
 // written by other languages (the Python package) or stored as JSON.
 
 import { type Chart, createChart, MountedChart } from "./dom/chart.ts";
+import type { ChartEvents, PanelVisibility } from "./dom/events.ts";
+import { keepsKey, keyOwner } from "./marks/mark.ts";
+import { keyPlace } from "./model/identity.ts";
 import { type PdfExportOptions, renderToPDF } from "./pdf.ts";
 import { type ChartSnapshot, renderToSnapshot, type SnapshotOptions } from "./render/snapshot.ts";
 import { type StaticOptions, type SvgSettings, svgFor } from "./render/static.ts";
@@ -47,6 +50,63 @@ export function carryNodePositions(from: Chart, to: Chart): void {
   if (!before || !after) return;
   after.adoptPositions(before);
   to.render();
+}
+
+/** What a chart hides, as its `visibility` events report it (see `restoreVisibility`). */
+export type VisibilityState = ChartEvents["visibility"];
+
+/** The states `restoreVisibility` waits to restore, by chart: what those charts hide meanwhile. */
+const restoring = new WeakMap<Chart, VisibilityState>();
+
+/**
+ * What `chart` hides now, as its `visibility` events report it; while
+ * `restoreVisibility` waits to restore a state, that state.
+ */
+export function visibilityState(chart: Chart): VisibilityState {
+  const pending = restoring.get(chart);
+  if (pending) return pending;
+  const model = MountedChart.modelOf(chart);
+  const { hidden } = model;
+  return { hiddenKeys: [...hidden], ...model.config.panels?.overrides(hidden.panels) };
+}
+
+/**
+ * Hides in `chart`, mounted in place of another (as a Streamlit app
+ * remounts its chart on each run), what `state` (`visibilityState` of the
+ * chart it replaces, or as last confirmed) hid, as one change, in every
+ * panel and in each subplot the chart still has: what marks it still has
+ * with that `id` hid, and what series stand for where some mark's series
+ * still stand for values of its kind. Keys of marks known by their index,
+ * and of tables named by one, go, as another mark may take the place.
+ * Waits for what the chart loads to know what its series stand for (and
+ * restores at once when it loads nothing). Resolves to what it hides then.
+ */
+export async function restoreVisibility(
+  chart: Chart,
+  state: VisibilityState,
+): Promise<VisibilityState> {
+  restoring.set(chart, state);
+  try {
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+  } finally {
+    if (restoring.get(chart) === state) restoring.delete(chart);
+  }
+  if (!MountedChart.restore(chart)) return state;
+  const model = MountedChart.modelOf(chart);
+  const { marks, panels } = model.config;
+  const owners = new Set(marks.map(({ spec }, i) => spec.id ?? i));
+  const scopes = model.scopes();
+  // Keys of marks known by their index, or of tables named by one, go.
+  const keeps = (key: string) =>
+    typeof (keyOwner(key) ?? keyPlace(key)) !== "number" && keepsKey(key, owners, scopes);
+  const own: Record<string, PanelVisibility[string]> = {};
+  for (const [panel, { hidden, shown }] of Object.entries(state.panels ?? {})) {
+    if (!panels?.list.some(({ id }) => id === panel)) continue;
+    const kept = { hidden: hidden.filter(keeps), shown: shown.filter(keeps) };
+    if (kept.hidden.length || kept.shown.length) own[panel] = kept;
+  }
+  chart.setHiddenKeys(state.hiddenKeys.filter(keeps), { panels: own });
+  return visibilityState(chart);
 }
 
 /**

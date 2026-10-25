@@ -13,6 +13,7 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import { LinearScale, LogScale } from "../../src/scale/scale.ts";
 import type { RectGeometry, TextGeometry } from "../../src/scene/scene.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { setViewport } from "../helpers/views.ts";
 
 /** Compare full bar geometry and the strip at the same scales and column width. */
 function drawing(input: ChartMark, axes: Partial<Frame> = {}) {
@@ -512,7 +513,7 @@ describe("bar overviews", () => {
       expect(snapshot(model)).toEqual(snapshot(fresh));
     };
     const before = strip(model).marks[0];
-    model.setViewport([500, 550]);
+    setViewport(model, [500, 550]);
     expect(strip(model).marks[0]).toBe(before);
     data.set("a", 100, 15);
     assertFresh();
@@ -543,7 +544,7 @@ describe("bar overviews", () => {
     const strip = () => model.scene(estimateText).panels.find((p) => p.key === "navigator")!;
     const before = strip().marks[0] as RectGeometry;
     const rects = before.rects.slice();
-    model.setViewport([1000, 1100]);
+    setViewport(model, [1000, 1100]);
     expect(strip().marks[0]).toBe(before);
     expect(before.rects).toEqual(rects);
     data.set("v", 100, 8);

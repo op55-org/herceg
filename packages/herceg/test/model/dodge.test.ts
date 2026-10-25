@@ -7,7 +7,7 @@ import { grid } from "../../src/layout.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
 import { jitterOf } from "../../src/marks/dodge.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { histogram } from "../../src/marks/histogram.ts";
 import { point } from "../../src/marks/point.ts";
 import { facet } from "../../src/model/facet.ts";
@@ -46,7 +46,7 @@ describe("dodge", () => {
     const model = build({
       marks: [
         bar(summary, { x: "day", y: "mean", series: "sex" }),
-        errorBar(summary, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true }),
+        errorbar(summary, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true }),
         point(summary, { x: "day", y: "mean", series: "sex", dodge: true }),
       ],
     });
@@ -75,7 +75,7 @@ describe("dodge", () => {
     const model = build({
       marks: [
         bar(summary, { x: "day", y: "mean", series: "sex" }),
-        errorBar(summary, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true }),
+        errorbar(summary, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true }),
       ],
     });
     model.scene(estimateText);
@@ -93,7 +93,7 @@ describe("dodge", () => {
     const model = build({
       marks: [
         bar(summary, { x: "mean", y: "day", series: "sex" }),
-        errorBar(summary, { y: "day", x1: "low", x2: "high", series: "sex", dodge: true }),
+        errorbar(summary, { y: "day", x1: "low", x2: "high", series: "sex", dodge: true }),
       ],
     });
     const scene = model.scene(estimateText);
@@ -137,10 +137,10 @@ describe("dodge", () => {
     expect(() => point(rows, { x: "day", y: "sex", series: "sex", dodge: true })).toThrow(
       /one category position/,
     );
-    expect(() => errorBar(rows, { x: "n", y1: "v", y2: "v", series: "sex", dodge: true })).toThrow(
+    expect(() => errorbar(rows, { x: "n", y1: "v", y2: "v", series: "sex", dodge: true })).toThrow(
       /category positions/,
     );
-    expect(() => errorBar(rows, { x: "day", y1: "v", y2: "v", dodge: true })).toThrow(
+    expect(() => errorbar(rows, { x: "day", y1: "v", y2: "v", dodge: true })).toThrow(
       /series field/,
     );
   });
@@ -275,7 +275,7 @@ describe("dodge across marks and panels", () => {
     const model = build({
       marks: [
         bar(bars, { x: "day", y: "v", series: "sex" }),
-        errorBar(intervals, { x: "day", y1: "lo", y2: "hi", series: "sex", dodge: true }),
+        errorbar(intervals, { x: "day", y1: "lo", y2: "hi", series: "sex", dodge: true }),
       ],
     });
     const scene = model.scene(estimateText);

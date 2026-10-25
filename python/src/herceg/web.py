@@ -228,8 +228,8 @@ def inspection(value: str | Mapping[str, Any] | None) -> Inspection | None:
 
 
 def viewport(value: str | Mapping[str, Any] | None) -> Viewport:
-    """A view a page posts back: a ``herceg:viewport`` event's
-    ``detail.viewport``, as JSON text or parsed."""
+    """A view a page posts back: a panel's, an entry of a ``herceg:viewport``
+    event's ``detail.views``, as JSON text or parsed."""
     return decode_viewport(_read("web.viewport", "viewport", value))
 
 

@@ -31,6 +31,7 @@ import {
   valueKind,
 } from "./mark.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
+import { refuseValues } from "./still.ts";
 
 type StatisticsOptions<S extends Schema> = {
   low: NumericField<S>;
@@ -262,6 +263,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
     series: readonly Series[],
     frame: Frame,
   ): (AreaGeometry | RectGeometry | SegmentGeometry | PointGeometry)[] {
+    refuseValues(frame.keyed, this.spec.type);
     const out: (AreaGeometry | RectGeometry | SegmentGeometry | PointGeometry)[] = [];
     const horizontal = this.horizontal;
     const along = horizontal ? frame.y : frame.x;

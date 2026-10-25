@@ -24,6 +24,7 @@ import { treemap } from "../../src/marks/treemap.ts";
 import { panels } from "../../src/model/panels.ts";
 import type { ArcGeometry, ShapesGeometry, TextShape } from "../../src/scene/scene.ts";
 import { resolveTheme } from "../../src/theme.ts";
+import { brief } from "../helpers/views.ts";
 import { bandBox, labelsOf, MOUSE, modelOf } from "./helpers.ts";
 
 /** Without a background, the canvas holds what marks paint alone. */
@@ -528,7 +529,7 @@ describe("events and brushing", () => {
     // The brush loads on demand.
     await chart.loading;
     const viewports: (readonly [number, number] | null)[] = [];
-    chart.on("viewport", ({ x }) => viewports.push(x));
+    chart.on("viewport", ({ views }) => viewports.push(views[0]!.x));
     drag(chart, 20_000, 60_000);
     const [lo, hi] = chart.getViewport().x!;
     expect(lo).toBeCloseTo(20_000, -3);
@@ -735,7 +736,8 @@ describe("events and brushing", () => {
     const a = createChart(host, { interaction, marks: [line(data, { x: "t", y: "s0" })] });
     const b = createChart(other, { interaction, marks: [line(data, { x: "t", y: "s1" })] });
     // A clamps every viewport to at most 1,000 wide.
-    a.on("viewport", ({ x }) => {
+    a.on("viewport", ({ views }) => {
+      const { x } = views[0]!;
       if (x && x[1] - x[0] > 1000) a.setViewport([x[0], x[0] + 1000]);
     });
     a.setViewport([0, 2000]);
@@ -758,7 +760,8 @@ describe("events and brushing", () => {
       createChart(element, { interaction, marks: [line(data, { x: "t", y: "s0" })] }),
     ) as [Chart, Chart, Chart];
     // B clamps the range it receives and shares the result.
-    b.on("viewport", ({ x }) => {
+    b.on("viewport", ({ views }) => {
+      const { x } = views[0]!;
       if (x && x[1] - x[0] > 1000) b.setViewport([x[0], x[0] + 1000]);
     });
     a.setViewport([0, 2000]);
@@ -1663,7 +1666,7 @@ describe("zooming and brushing in two dimensions", () => {
       marks: [point(points(), { x: "x", y: "y" })],
     });
     const viewports: (readonly [number, number] | null)[] = [];
-    chart.on("viewport", ({ y }) => viewports.push(y));
+    chart.on("viewport", ({ views }) => viewports.push(views[0]!.y));
     at(chart, "wheel", ...center(chart));
     expect(chart.getViewport().x).toBeNull();
     const [lo, hi] = chart.getViewport().y!;
@@ -1947,7 +1950,8 @@ describe("zooming and brushing in two dimensions", () => {
     const zoomed = chart.getViewport();
     expect(zoomed.y![0] * 100).toBeCloseTo(zoomed.yRight![0], 6);
     expect(zoomed.y![1] * 100).toBeCloseTo(zoomed.yRight![1], 6);
-    expect(viewports).toEqual([zoomed]);
+    expect(viewports.map(({ views }) => views[0])).toMatchObject([zoomed]);
+    expect(viewports.map(({ cause }) => cause)).toEqual(["wheel"]);
     // Axes left out keep their view: a right range alone moves only the right axis.
     chart.setViewport({ y: null, yRight: [1000, 2000] });
     expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: [1000, 2000] });
@@ -1958,7 +1962,7 @@ describe("zooming and brushing in two dimensions", () => {
     expect(chart.getViewport()).toEqual({ x: null, y: [10, 20], yRight: [1000, 2000] });
     expect(viewports).toHaveLength(3);
     chart.setViewport(null);
-    expect(viewports.at(-1)).toEqual({ x: null, y: null, yRight: null });
+    expect(viewports.at(-1)!.views[0]).toMatchObject({ x: null, y: null, yRight: null });
     chart.destroy();
   });
 
@@ -1971,22 +1975,31 @@ describe("zooming and brushing in two dimensions", () => {
     chart.on("viewport", (view) => viewports.push(view));
     at(chart, "wheel", ...center(chart));
     expect(viewports).toHaveLength(1);
-    expect(viewports[0]).toEqual(chart.getViewport());
-    expect(viewports[0]!.x && viewports[0]!.y).not.toBeNull();
+    expect(viewports[0]!.views[0]).toMatchObject(chart.getViewport());
+    expect(viewports[0]!.scales.map(({ scale }) => scale)).toEqual(["x", "y"]);
     // A pair is an x range: y keeps its view.
     const { y } = chart.getViewport();
     chart.setViewport([5, 15]);
     expect(chart.getViewport()).toEqual({ x: [5, 15], y, yRight: null });
     // A listener changing the view again reports that change, and the first
     // change is not reported a second time with it.
-    const stop = chart.on("viewport", (view) => {
-      if (view.y) chart.setViewport({ y: null });
+    const stop = chart.on("viewport", ({ views }) => {
+      if (views[0]!.y) chart.setViewport({ y: null });
     });
     viewports.length = 0;
     chart.setViewport({ x: [0, 10], y: [0, 10] });
-    expect(viewports).toEqual([
+    expect(viewports.map(({ views }) => views[0])).toMatchObject([
       { x: [0, 10], y: [0, 10], yRight: null },
       { x: [0, 10], y: null, yRight: null },
+    ]);
+    expect(viewports.map(brief)).toEqual([
+      {
+        scales: [
+          ["x", [0, 10], [""]],
+          ["y", [0, 10], [""]],
+        ],
+      },
+      { scales: [["y", null, [""]]] },
     ]);
     stop();
     chart.destroy();
@@ -2009,7 +2022,8 @@ describe("zooming and brushing in two dimensions", () => {
     expect(b.getViewport().y).toEqual([0, 20]);
     a.setViewport({ x: [5, 15], y: [10, 20] });
     expect(b.getViewport()).toEqual({ x: [5, 15], y: [0, 20], yRight: null });
-    expect(seen.map((view) => view.x)).toEqual([null, [5, 15]]);
+    expect(seen.map(({ views }) => views[0]!.x)).toEqual([null, [5, 15]]);
+    expect(seen.map(({ cause }) => cause)).toEqual(["api", "sync"]);
     a.destroy();
     b.destroy();
     other.remove();

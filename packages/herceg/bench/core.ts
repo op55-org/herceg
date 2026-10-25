@@ -701,7 +701,7 @@ for (const n of [1000, 10_000, 100_000]) {
     `swarm: scene of ${n.toLocaleString("en-US")} points in 4 bands, zoomed`,
     () => {
       const spread = 3 + (zoom++ % 2);
-      swarmed.setYViewport({ y: [-spread, spread], yRight: null });
+      swarmed.applyViews(swarmed.viewChanges({ y: [-spread, spread] }));
       swarmed.scene(estimateText);
     },
     { warmup: 2, samples: n >= 100_000 ? 5 : 15 },
@@ -768,7 +768,7 @@ for (const [name, values] of Object.entries(fields)) {
     `contour: scene of ${name} bands, zoomed`,
     () => {
       const half = 200 + (zoomed++ % 2) * 100;
-      chart.setViewport([500 - half, 500 + half]);
+      chart.applyViews(chart.viewChanges([500 - half, 500 + half]));
       chart.scene(estimateText);
     },
     { warmup: 1, samples: 5 },

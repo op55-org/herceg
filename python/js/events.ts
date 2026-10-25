@@ -2,7 +2,15 @@
 // beside the JSON forms of selections, views, and inspections, which the
 // engine's web module shares with pages' DOM events.
 
-import type { Chart, ChartOptions, DrillRoot, PanelTarget } from "herceg";
+import type {
+  Chart,
+  ChartOptions,
+  DrillRoot,
+  PanelTarget,
+  Selection,
+  SelectionOwner,
+} from "herceg";
+import { type SelectionPayload, selectionPayload } from "../../packages/herceg/src/web/events.ts";
 
 export {
   chartSelection,
@@ -16,6 +24,20 @@ export {
   type ViewportPayload,
   viewportPayload,
 } from "../../packages/herceg/src/web/events.ts";
+
+/**
+ * A selection as Python reads it: naming its panels only where they are
+ * not the chart's own, of instances every panel shares (a subplot's lasso,
+ * or panels' own scales).
+ */
+export function selectionReport(
+  selection: Selection | null,
+  owner: SelectionOwner | null,
+): SelectionPayload | null {
+  const payload = selectionPayload(selection, owner);
+  if (payload && !owner?.scales.some(({ instance }) => instance !== "")) delete payload.panels;
+  return payload;
+}
 
 export interface DrillPayload {
   path: string[];

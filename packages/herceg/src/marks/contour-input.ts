@@ -5,11 +5,14 @@
 const MAX_THRESHOLDS = 1000;
 
 /**
- * Why a contour spec's options do not go together, if they do not: a
- * count of thresholds out of range, too few or too many of them for its
- * variant, or styles of the other variant.
+ * Why a contour spec's options do not go together, if they do not: the
+ * right axis (which specs written by hand may ask for), a count of
+ * thresholds out of range, too few or too many of them for its variant, or
+ * styles of the other variant.
  */
 export function contourFormError(spec: Record<string, unknown>): string | undefined {
+  if (spec.axis === "right")
+    return "contour axis: contours draw on the left y axis only; drop axis";
   const bands = spec.variant === "bands";
   const { thresholds } = spec;
   if (

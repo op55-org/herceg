@@ -17,6 +17,7 @@ import type { LineGeometry, Panel, RectGeometry, Scene } from "../../src/scene/s
 import { loadSpec } from "../../src/spec/load.ts";
 import { headersOf, legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -618,24 +619,35 @@ describe("facet panels with y scales of their own", () => {
     expect(labels.map((n) => n > 0)).toEqual([true, false, false, true]);
   });
 
-  it("let go of a y zoom when panels get y scales of their own", () => {
-    const model = new ChartModel({ marks, facet: facet("region") });
-    model.setYViewport({ y: [0, 50], yRight: null });
-    expect(model.yViewport.y).toEqual([0, 50]);
+  it("let go of a y zoom when panels get y scales of their own, noting it fitted", () => {
+    const { model } = build({ marks, facet: facet("region") });
+    setViewport(model, { y: [0, 50] });
+    expect(model.getViewport().y).toEqual([0, 50]);
+    const keys = model.panels().map(({ key }) => key);
     model.update({ marks, facet: facet("region"), y: { scope: "panel" } });
-    expect(model.yViewport).toEqual({ y: null, yRight: null });
-    expect(() => model.setYViewport({ y: [0, 50], yRight: null })).toThrow("no one y range");
+    model.scene(estimateText);
+    expect(model.takeRetired()).toEqual([
+      { scale: "y", instance: "", type: "linear", panels: keys, view: null },
+    ]);
+    expect(keys.map((key) => model.getViewport(key).y)).toEqual(keys.map(() => null));
+    expect(() => setViewport(model, { y: [0, 50] })).toThrow(
+      "setViewport y: the panels have y scales of their own; name one with { panel }",
+    );
   });
 
-  it("refuse y zoom", () => {
-    expect(() =>
-      build({
-        marks,
-        facet: facet("region"),
-        y: { scope: "panel" },
-        interaction: { zoom: "xy" },
-      }),
-    ).toThrow("cannot zoom along y");
+  it("zoom y, each panel's own", () => {
+    const { model } = build({
+      marks,
+      facet: facet("region"),
+      y: { scope: "panel" },
+      interaction: { zoom: "xy" },
+    });
+    const [first, second] = model.panels();
+    const before = second!.y.domain;
+    setViewport(model, { y: [0, 50] }, first!.key);
+    model.scene(estimateText);
+    expect(model.panels()[0]!.y.domain).toEqual([0, 50]);
+    expect(model.panels()[1]!.y.domain).toEqual(before);
     expect(() =>
       loadSpec(
         {
@@ -840,12 +852,12 @@ describe("facet panels with x scales of their own", () => {
     // Zooming A to where it is 1 shrinks the shared y of B's panel too,
     // while B's x stays where it was.
     const bx = [...model.panels()[1]!.x.domain];
-    model.setViewport([0, 5], "A");
+    setViewport(model, [0, 5], "A");
     model.scene(estimateText);
     expect(top()).toBeLessThan(10);
     expect([...model.panels()[1]!.x.domain]).toEqual(bx);
-    expect(model.viewportOf("A")).toEqual([0, 5]);
-    expect(model.viewportOf("B")).toBeNull();
+    expect(model.getViewport("A").x).toEqual([0, 5]);
+    expect(model.getViewport("B").x).toBeNull();
   });
 
   it("keep a viewport per scale, and refuse ambiguous or unknown panels", () => {
@@ -861,24 +873,27 @@ describe("facet panels with x scales of their own", () => {
       x: { scope: "row" },
     });
     const [a, b, c] = model.panels().map((p) => p.key);
-    model.setViewport([2, 4], b);
+    setViewport(model, [2, 4], b);
     model.scene(estimateText);
     // A row shares its zoom; the other row fits its data.
     expect([...model.panels()[0]!.x.domain]).toEqual([2, 4]);
-    expect(model.viewportOf(a)).toEqual([2, 4]);
-    expect(model.viewportOf(c)).toBeNull();
-    expect(() => model.setViewport([0, 1])).toThrow("panel: required when panels");
-    expect(() => model.viewport).toThrow("panel: required when panels");
-    expect(() => model.setViewport([0, 1], "nowhere")).toThrow('no panel "nowhere"');
+    expect(model.getViewport(a).x).toEqual([2, 4]);
+    expect(model.getViewport(c).x).toBeNull();
+    expect(() => setViewport(model, [0, 1])).toThrow(
+      "setViewport x: the panels have x scales of their own; name one with { panel }",
+    );
+    // Without a panel, no one view: none.
+    expect(model.getViewport().x).toBeNull();
+    expect(() => setViewport(model, [0, 1], "nowhere")).toThrow('no panel "nowhere"');
     // Null without a panel fits every scale.
-    model.setViewport([1000, 1050], c);
-    model.setViewport(null);
-    expect([model.viewportOf(a), model.viewportOf(c)]).toEqual([null, null]);
+    setViewport(model, [1000, 1050], c);
+    setViewport(model, null);
+    expect([model.getViewport(a).x, model.getViewport(c).x]).toEqual([null, null]);
     // A scale whose panels change (another sensor appears) starts over.
-    model.setViewport([2, 4], a);
+    setViewport(model, [2, 4], a);
     streamed.append({ t: [5], v: [9], site: ["A"], sensor: ["r"] });
     model.scene(estimateText);
-    expect(model.viewportOf(a)).toBeNull();
+    expect(model.getViewport(a).x).toBeNull();
   });
 
   it("load from specs and check the scales' scopes", () => {

@@ -5,7 +5,8 @@
 // scene but not one of the model's views, so tooltips, the keyboard, and
 // viewports never see it, and every renderer draws it. In charts with
 // facets or subplots, one strip under all the panels draws the marks of
-// every panel and moves the x range they share. In the browser, sliders
+// the panels sharing an x scale (the one every panel shares, or that of
+// the navigator's `panel`) and moves its range. In the browser, sliders
 // over the strip (dom/navigator.ts) move the window; they load on demand.
 
 import type { NumericArray } from "../data/column.ts";
@@ -60,14 +61,14 @@ const DRAWN = new Set(["line", "area", "point", "bar", "candlestick"]);
 export const NAVIGATOR_PANEL = "navigator";
 
 /**
- * How the model plans the x axis of its first x scale (group 0) along a plot
- * `width` pixels wide over `domain`, found as `source` says: rounded and
- * given room for glyphs when fitted, as an unzoomed axis is; a range drawn
- * already chose its ticks `within` its view.
+ * How the model plans the x axis of the strip's x scale along a plot
+ * `width` pixels wide from `start`, over `domain`, found as `source` says:
+ * rounded and given room for glyphs when fitted, as an unzoomed axis is; a
+ * range drawn already chose its ticks `within` its view.
  */
 export type XPlan = (
+  start: number,
   width: number,
-  group: 0,
   domain: [number, number],
   source: RangeSource,
   within?: readonly [number, number],
@@ -91,6 +92,8 @@ export interface DrawnStrip {
    * are formatted for as the first one's x axis formats them.
    */
   panels: readonly string[];
+  /** The panel whose x range it moves (`NavigatorSpec.panel`); undefined for the one every panel shares. */
+  target: string | undefined;
 }
 
 /**
@@ -189,10 +192,14 @@ export class Navigator {
   readonly height: number;
   /** The ids of the marks the strip draws; undefined for every mark it can draw. */
   readonly marks: readonly string[] | undefined;
+  /** The panel whose x scale's range it moves; undefined for the one every panel shares. */
+  readonly target: string | undefined;
   readonly #spec: NavigatorSpec;
 
   constructor(options: NavigatorSpec = {}) {
-    const { height = HEIGHT, marks } = options;
+    const { height = HEIGHT, marks, panel } = options;
+    if (panel !== undefined && typeof panel !== "string")
+      throw new TypeError("navigator panel: expected a panel's key: a facet value or a subplot id");
     if (!(typeof height === "number" && Number.isFinite(height) && height >= MIN_HEIGHT))
       throw new RangeError(
         `navigator height: expected at least ${MIN_HEIGHT} pixels; received ${String(height)}`,
@@ -216,10 +223,12 @@ export class Navigator {
       );
     this.height = height;
     this.marks = marks && Object.freeze([...marks]);
+    this.target = panel;
     this.#spec = {
       ...(options.height !== undefined && { height }),
       ...(options.halo !== undefined && { halo: options.halo }),
       ...(this.marks && { marks: this.marks }),
+      ...(panel !== undefined && { panel }),
     };
   }
 
@@ -235,32 +244,56 @@ export class Navigator {
     if (!strip) return undefined;
     const format = model.formatsOf(undefined, strip.panels[0]).x;
     const [start, end] = strip.shown;
-    // Insets keep x ranges of their own.
+    // Insets, and panels of x scales of their own, keep x ranges of their own.
     const controls =
       strip.panels.length === model.panels().length
         ? strip.panels.length > 1
           ? "; it controls every panel's x range"
           : ""
-        : "; it controls the x range the panels share, not the insets' own";
+        : strip.target === undefined
+          ? "; it controls the x range the panels share, not the insets' own"
+          : `; it controls the x range of ${strip.panels.map((key) => model.panels().find((panel) => panel.key === key)?.label || key).join(", ")}`;
     return `A range navigator shows the whole x range, with ${format(start)} to ${format(end)} in view${controls}.`;
   }
 
   /**
-   * Refuses what the strip cannot draw along: panels with x scales of their
-   * own, layout marks, category x axes, marks placed along y, and named
-   * marks the chart lacks or the strip cannot draw.
+   * Refuses what the strip cannot draw along: without a panel, panels with
+   * x scales of their own; a subplot the chart lacks; layout marks,
+   * category x axes, and marks placed along y among those it draws; and
+   * named marks the chart lacks or the strip cannot draw.
    */
   check(marks: readonly Mark[], options: ChartConfig): void {
     const layout = options.marks.find(isLayoutMark);
     if (layout) throw new Error(`${layout.spec.type}: no x axis for a navigator; drop navigator`);
-    // One window shows one x range, so every panel must share it, also
-    // before data gives them more than one.
+    const { facet, panels } = options;
+    const target = this.target;
     const x = options.x?.scope;
-    if ((options.facet || options.panels) && x && x !== "chart")
-      throw new Error(
-        `navigator: needs one x scale shared by every panel, and x.scope is "${x}"; set x.scope to "chart" or drop navigator`,
+    let drawn = marks;
+    if (target === undefined) {
+      // One window shows one x range, so every panel must share it, also
+      // before data gives them more than one.
+      if ((facet || panels) && x && x !== "chart")
+        throw new Error(
+          `navigator: needs one x scale shared by every panel, and x.scope is "${x}"; set x.scope to "chart", name the panel whose x it moves with panel, or drop navigator`,
+        );
+    } else if (panels) {
+      const at = panels.list.findIndex(({ id }) => id === target);
+      if (at < 0)
+        throw new Error(
+          `navigator panel: no panel "${target}"; name one of ${panels.list.map(({ id }) => JSON.stringify(id)).join(", ")}`,
+        );
+      // The strip draws the marks of the panels sharing that panel's x scale.
+      const groups = panels.groupsOf(x ?? panels.scopes(options).x, "x");
+      const ids = new Set(
+        panels.list.flatMap(({ id }, i) => (groups[i] === groups[at] ? [id] : [])),
       );
-    for (const mark of marks) {
+      // Marks of every panel ("*") draw there too.
+      drawn = marks.filter(({ spec }) => spec.panel === "*" || ids.has(spec.panel!));
+    } else if (!facet)
+      throw new Error(
+        "navigator panel: the chart has one panel, without facets or subplots; drop panel",
+      );
+    for (const mark of drawn) {
       const { type } = mark.spec;
       if (mark.channelKind("x") === "category")
         throw new Error(`navigator: needs a number or time x axis; ${type} x holds categories`);
@@ -300,9 +333,11 @@ export class Navigator {
   /**
    * The strip's panel for a scene of the chart `owner`, at the bottom of the
    * `room` pixels it took (see `room`), under the plots of the scene's
-   * panels `views` sharing the chart's x scale (not insets, with their own),
-   * whose marks it draws; `plan` plans x over a domain as the plots' shared
-   * axis is planned, along a width, and `context` is that axis.
+   * panels `views` drawing the x instance it moves (the navigator's
+   * panel's, or the one every panel shares), whose marks it draws; none
+   * while that panel is not drawn. The scene's x instances are `xKeys`,
+   * their axes `contexts`, and `plans(h)` plans the `h`th over a domain as
+   * its axis is planned, along a width.
    */
   panel(
     owner: Owner & { readonly height: number },
@@ -310,12 +345,21 @@ export class Navigator {
       readonly xGroup: string;
       readonly plans: { readonly x: AxisPlan };
     })[],
-    plan: XPlan,
-    context: AxisContext,
+    xKeys: readonly string[],
+    plans: (h: number) => XPlan,
+    contexts: readonly AxisContext[],
     room: number,
     lift = 0,
-  ): Panel {
-    const sources = views.flatMap((view, index) => (view.xGroup ? [] : [{ ...view, index }]));
+  ): Panel | undefined {
+    const { target } = this;
+    const xGroup = target === undefined ? "" : views.find(({ key }) => key === target)?.xGroup;
+    const h = xGroup === undefined ? -1 : xKeys.indexOf(xGroup);
+    if (h < 0) return undefined;
+    const plan = plans(h);
+    const context = contexts[h]!;
+    const sources = views.flatMap((view, index) =>
+      view.xGroup === xGroup ? [{ ...view, index }] : [],
+    );
     let state = states.get(owner);
     if (!state) {
       state = {
@@ -349,7 +393,7 @@ export class Navigator {
     const shown = ascending(frame.x.domain);
     const { rail, labeled } = railPlan(
       sources.flatMap(({ inspector }) => inspector.marks),
-      (width, domain, source, within) => plan(width, 0, domain, source, within),
+      (...args) => plan(x, ...args),
       Math.min(...plots.map((plot) => plot.width)),
       strip.width,
       context,
@@ -406,6 +450,7 @@ export class Navigator {
       shown,
       view: (range) => unpadded(plotsX, range),
       panels: sources.map(({ key }) => key),
+      target: this.target,
     };
     state.of = owner.panels();
     const marks: Geometry[] = [...state.overview, frameShapes(strip, scale, shown, theme)];

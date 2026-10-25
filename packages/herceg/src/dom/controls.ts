@@ -20,8 +20,12 @@ export interface ControlsHost {
   readonly chart: Chart;
   /** What the chart drew last: its items, and for maps and networks the plane's scales. */
   readonly model: ChartModel;
-  /** The gestures the chart's `interaction` binds: what the wheel, drags, and double clicks do. */
-  bindings(): Bindings;
+  /**
+   * The gestures panel `panel`'s interaction binds (a subplot's own
+   * settings over the chart's; the chart's without a panel): what the
+   * wheel, drags, and double clicks do.
+   */
+  bindings(panel?: string): Bindings;
   /** Whether the chart has the keyboard focus, which wheel bindings may ask for. */
   focused(): boolean;
   /** The pointer overlay, above the marks, where controls draw outlines (a lasso). */

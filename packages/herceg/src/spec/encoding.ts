@@ -200,19 +200,20 @@ export type LabelPart =
 export type LabelContent = readonly LabelPart[];
 
 /**
- * A label: constant `text`, each row's `field` (numbers written with
- * `format`), or `content` made of parts, styled as `style` says and placed
- * as `place` says.
+ * A label's text: constant `text`, each row's `field` (numbers written with
+ * `format`), or `content` made of parts, styled as `style` says.
  */
-export type LabelSpec = (
+export type LabelTextSpec = (
   | { text: string; field?: never; content?: never }
   | { field: Field; text?: never; content?: never }
   | { content: LabelContent; text?: never; field?: never; format?: never }
 ) & {
   format?: FormatSpec;
   style?: TextStyle;
-  place?: LabelPlaceSpec;
 };
+
+/** A label: its text (`LabelTextSpec`), placed as `place` says. */
+export type LabelSpec = LabelTextSpec & { place?: LabelPlaceSpec };
 
 /**
  * Which point of a series a label follows: its first or last observation
@@ -224,7 +225,8 @@ export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
 /**
  * Labels that follow each series of a line: placed at `at`, saying
  * `content` (the series' name by default), placed as `place` says (beside
- * the point, or `outside` the plot at its edge) and styled as `style` says.
+ * the point within the plot, or `outside` the plot at its edge) and styled
+ * as `style` says.
  */
 export interface SeriesLabelsSpec {
   at: LabelAt;

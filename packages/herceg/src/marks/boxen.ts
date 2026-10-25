@@ -16,6 +16,7 @@ import {
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
+import { refuseValues } from "./still.ts";
 
 export type BoxenOptions<S extends Schema> = DistributionOptions<S> &
   Pick<BoxenSpec, "depth" | "outlierProportion" | "trustAlpha" | "widthMethod" | "outliers">;
@@ -131,6 +132,7 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
     series: readonly Series[],
     frame: Frame,
   ): (RectGeometry | SegmentGeometry | PointGeometry)[] {
+    refuseValues(frame.keyed, this.spec.type);
     const out: (RectGeometry | SegmentGeometry | PointGeometry)[] = [];
     const horizontal = this.horizontal;
     const along = horizontal ? frame.y : frame.x;

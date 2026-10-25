@@ -12,6 +12,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { AreaGeometry, LineGeometry, Scene } from "../../src/scene/scene.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -100,7 +101,7 @@ describe("domains", () => {
   it("keeps a line visible when zoomed in between two samples", () => {
     const data = table({ x: [0, 10], y: [100, 200] });
     const { model } = build({ marks: [line(data, { x: "x", y: "y" })] });
-    model.setViewport([4, 6]);
+    setViewport(model, [4, 6]);
     const scene = model.scene(estimateText);
     const labels = yLabels(scene).map(Number);
     expect(Math.min(...labels)).toBeLessThanOrEqual(140);
@@ -155,7 +156,7 @@ describe("layout", () => {
   it("skips rules outside the visible range", () => {
     const data = table({ x: [0, 10], y: [0, 1] });
     const { model } = build({ marks: [line(data, { x: "x", y: "y" }), rule({ x: 0 })] });
-    model.setViewport([2, 10]);
+    setViewport(model, [2, 10]);
     expect(model.scene(estimateText).panels[0]!.marks.some((m) => m.kind === "rule")).toBe(false);
   });
 

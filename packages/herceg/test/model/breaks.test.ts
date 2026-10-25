@@ -24,6 +24,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -150,7 +151,7 @@ describe("charts with time axis breaks", () => {
     const data = table({ t: time([utc(2025, 10, 10), utc(2025, 10, 13)]), v: [100, 200] });
     const { model } = build({ marks: [line(data, { x: "t", y: "v" })], x: { breaks: weekend() } });
     // A view from Friday 18:00 to Monday 06:00: a quarter to three quarters of the segment.
-    model.setViewport([utc(2025, 10, 10, 18), utc(2025, 10, 13, 6)]);
+    setViewport(model, [utc(2025, 10, 10, 18), utc(2025, 10, 13, 6)]);
     model.scene(estimateText);
     const [lo, hi] = model.yScale()!.domain;
     expect(lo).toBeLessThanOrEqual(175);
@@ -204,7 +205,7 @@ describe("charts with time axis breaks", () => {
     ).toThrow("inside an axis break");
     // A view onto a weekend shows the hour either side of it.
     const { model } = build({ marks: [candlestick(prices, fields)], x: { breaks: weekend() } });
-    model.setViewport([utc(2025, 10, 11, 1), utc(2025, 10, 12, 1)]);
+    setViewport(model, [utc(2025, 10, 11, 1), utc(2025, 10, 12, 1)]);
     model.scene(estimateText);
     expect(model.xScale()!.domain).toEqual([utc(2025, 10, 10, 23), utc(2025, 10, 13, 1)]);
   });
@@ -280,7 +281,7 @@ describe("lines and bands across breaks at the view's edges", () => {
         marks: [line(data, { x: "t", y: "v" })],
         x: { breaks: gap(), ...(reversed ? { domain: [10, 0] as [number, number] } : {}) },
       });
-      model.setViewport(domain);
+      setViewport(model, domain);
       return (
         (model.scene(estimateText).panels[0]!.marks[0] as LineGeometry).path.count + 0 * scene.width
       );
@@ -299,7 +300,7 @@ describe("lines and bands across breaks at the view's edges", () => {
       marks: [line(grouped, { x: "t", y: "v", series: "g" })],
       x: { breaks: gap() },
     });
-    model.setViewport([5, 9]);
+    setViewport(model, [5, 9]);
     const counts = model
       .scene(estimateText)
       .panels[0]!.marks.map((m) => (m as LineGeometry).path.count);
@@ -310,7 +311,7 @@ describe("lines and bands across breaks at the view's edges", () => {
       marks: [line(curved, { x: "t", y: "v", curve: "monotone" })],
       x: { breaks: gap() },
     });
-    chart.model.setViewport([5, 9]);
+    setViewport(chart.model, [5, 9]);
     const path = (chart.model.scene(estimateText).panels[0]!.marks[0] as LineGeometry).path;
     expect(path.count).toBe(4);
     expect(linePoints({ marks: [line(curved, { x: "t", y: "v" })], x: { breaks: gap() } })).toBe(4);

@@ -494,6 +494,21 @@ export interface ArcGeometry extends Geometry {
   rims?: Float32Array | undefined;
   /** A pie's slices in scenes of charts that animate changed values. */
   slices?: PieSlices | undefined;
+  /** A gauge's value in scenes of charts that animate changed values. */
+  dial?: GaugeDial | undefined;
+}
+
+/**
+ * What a value transition (`animation.values`) needs of a gauge, which it
+ * gives only in scenes of charts that ask for it: its value, and how it
+ * draws others, so that frames between two scenes draw the dial, the value,
+ * and its labels as the gauge does.
+ */
+export interface GaugeDial {
+  /** The value drawn; NaN for none. */
+  value: number;
+  /** The gauge's geometry at `value`. */
+  draw(value: number): Geometry[];
 }
 
 /** One slice of a pie: its key (the item's), its category, and the value it sums. */

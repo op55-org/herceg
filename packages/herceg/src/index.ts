@@ -158,7 +158,7 @@ export {
 export { type DendrogramOptions, dendrogram } from "./marks/dendrogram.ts";
 export {
   type ErrorBarOptions,
-  errorBar,
+  errorbar,
   type HorizontalErrorBarOptions,
   type HorizontalSymmetricErrorBarOptions,
   type VerticalErrorBarOptions,

@@ -173,7 +173,12 @@ describe("layouts in the browser", () => {
     const views: unknown[] = [];
     chart.on("viewport", (event) => views.push(event));
     chart.setViewport([120, 130], { panel: "detail" });
-    expect(views).toEqual([expect.objectContaining({ x: [120, 130], panels: ["detail"] })]);
+    expect(views).toEqual([
+      expect.objectContaining({
+        panel: "detail",
+        scales: [expect.objectContaining({ scale: "x", view: [120, 130], panels: ["detail"] })],
+      }),
+    ]);
     chart.setViewport([2, 4]);
     chart.render();
     // A double click on the inset resets its view alone.
@@ -424,7 +429,7 @@ describe("layouts in the browser", () => {
       chart.render();
       await frame();
     }
-    expect(chart.selectionPanels).toEqual(["main"]);
+    expect(chart.selectionOwner?.panels ?? null).toEqual(["main"]);
     chart.destroy();
   });
 

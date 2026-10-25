@@ -10,6 +10,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { Panel, RectGeometry, SegmentGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -198,7 +199,7 @@ describe("candlesticks", () => {
       c: [11, 11, 11],
     });
     const { model } = build({ marks: [candlestick(spiky, ohlc)] });
-    model.setViewport([0.9, 1.1]);
+    setViewport(model, [0.9, 1.1]);
     model.scene(estimateText);
     expect(model.yScale()!.domain[1]).toBeLessThan(100);
   });

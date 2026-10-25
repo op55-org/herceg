@@ -16,6 +16,7 @@ import type { Panel, SegmentGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const data = table({ t: time([0, 20]), v: [1, 2] });
 const gap = () =>
@@ -121,10 +122,10 @@ describe("time-axis seam markers", () => {
       [0, 5],
       [12, 20],
     ] as [number, number][]) {
-      model.setViewport(domain);
+      setViewport(model, domain);
       expect(positions(model.scene(estimateText).panels[0]!)).toBeUndefined();
     }
-    model.setViewport([8, 20]);
+    setViewport(model, [8, 20]);
     expect(positions(model.scene(estimateText).panels[0]!)).toEqual([
       placed(model.xScale()!.map(12)),
     ]);

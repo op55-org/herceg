@@ -1,9 +1,11 @@
 import type { NumberField, Schema, Table } from "../data/table.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import { formatNumber } from "../format/format.ts";
-import type { SegmentGeometry } from "../scene/scene.ts";
+import type { PositionScale } from "../scale/scale.ts";
+import type { Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, DendrogramSpec, Frozen } from "../spec/spec.ts";
 import { checkLinkage } from "./dendrogram-data.ts";
+import { markKey } from "./hidden.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -20,6 +22,7 @@ import {
   requireField,
 } from "./mark.ts";
 import { TableCache } from "./series.ts";
+import { refuseValues } from "./still.ts";
 
 export interface DendrogramOptions<S extends Schema> {
   /** Linkage child cluster ids; leaves are 0 to n-1, merge row k makes n+k. */
@@ -142,11 +145,16 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
     this.resolveBands(bands);
     return [];
   }
-  xExtent() {
-    return undefined;
+  /** Heights are values on the axis across the leaves': from zero to the largest. */
+  #heights(axis: "x" | "y", log: boolean): readonly [number, number] | undefined {
+    const { max } = this.#linkage();
+    return axis === this.#leafAxis() || log || max === 0 ? undefined : [0, max];
   }
-  yExtent() {
-    return undefined;
+  xExtent(_series: unknown, log: boolean) {
+    return this.#heights("x", log);
+  }
+  yExtent(_series: unknown, _x0: number, _x1: number, log: boolean) {
+    return this.#heights("y", log);
   }
 
   describe(format: AxisFormat, locale: string | undefined): string {
@@ -157,10 +165,39 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
     return `${this.spec.label ?? "Dendrogram"}: ${formatNumber(n, locale)} ${n === 1 ? "leaf" : "leaves"}, ${formatNumber(rows, locale)} ${rows === 1 ? "merge" : "merges"}.${range}`;
   }
 
+  /**
+   * The axis across the leaves runs from high to low with leaves at the top
+   * or right, so heights grow away from them on its automatic domain.
+   */
+  get descends(): "x" | "y" | undefined {
+    const { side } = this.spec;
+    return side === "top" ? "y" : side === "right" ? "x" : undefined;
+  }
+
+  /**
+   * Where links at a height are drawn across the plot: on `scale` where it
+   * is linear, so its ticks read them and views move them; else (another
+   * mark's categories, a log axis) at the height's share of the largest,
+   * `max`, from the leaves' edge to the opposite one.
+   */
+  #placeHeights(scale: PositionScale, plot: Rect, max: number): (h: number) => number {
+    if (scale.type === "linear") return (h) => scale.map(h);
+    const side = this.spec.side ?? "bottom";
+    const { x, y, width, height } = plot;
+    const edge =
+      side === "bottom" ? y + height : side === "top" ? y : side === "left" ? x : x + width;
+    // Pixels run up from the bottom and left from the right.
+    const away = side === "bottom" || side === "right" ? -1 : 1;
+    const span = (side === "bottom" || side === "top" ? height : width) * away;
+    return (h) => edge + (max > 0 ? h / max : 0) * span;
+  }
+
   geometry(_series: unknown, frame: Frame, key: MarkKey): SegmentGeometry[] {
+    refuseValues(frame.keyed, this.spec.type);
     const { first, second, height, max } = this.#linkage();
     const { spec, table } = this;
-    if (table.length === 0 || spec.strokeWidth === 0) return [];
+    // A legend entry targeting the mark hides it whole.
+    if (table.length === 0 || spec.strokeWidth === 0 || frame.hidden.has(markKey(key))) return [];
     const horizontal = this.#leafAxis() === "x";
     const scale = horizontal ? frame.x : frame.y;
     if (scale.type !== "band") throw new Error("dendrogram leaves: expected a category axis");
@@ -171,12 +208,7 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
     const centers = frame.doubles(JSON.stringify(key), "dendrogram-centers", n + table.length);
     for (let leaf = 0; leaf < n; leaf++)
       centers[leaf] = positions.get(`c:${spec.leaves[leaf]!}`) ?? NaN;
-    const { x, y, width, height: size } = frame.plot;
-    const side = spec.side ?? "bottom";
-    const edge =
-      side === "bottom" ? y + size : side === "top" ? y : side === "left" ? x : x + width;
-    const span = (horizontal ? size : width) * (side === "bottom" || side === "right" ? -1 : 1);
-    const atHeight = (h: number) => edge + (max > 0 ? h / max : 0) * span;
+    const atHeight = this.#placeHeights(horizontal ? frame.y : frame.x, frame.plot, max);
     const childHeight = (cluster: number) => atHeight(cluster < n ? 0 : height[cluster - n]!);
     const coords = frame.floats(JSON.stringify(key), "dendrogram-segments", table.length * 12);
     let count = 0;

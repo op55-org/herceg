@@ -5,9 +5,12 @@
 // positions are their labels rather than band indices.
 
 import type { Selection } from "../dom/brushed.ts";
-import type { ChartEvents, ViewCause } from "../dom/events.ts";
-import type { Axis, AxisInfo, Chart } from "../dom/handle.ts";
-import type { Inspection, Viewport } from "../model/model.ts";
+import { MountedChart } from "../dom/chart.ts";
+import type { ChartEvents, PanelViewport, ViewCause, ViewportEvent } from "../dom/events.ts";
+import type { Axis, AxisInfo, Chart, ScaleInstance, SelectionOwner } from "../dom/handle.ts";
+import type { Inspection, Viewport, ViewSet } from "../model/model.ts";
+import type { RowSelectionChange } from "../model/row-selection.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { Expression } from "../spec/spec.ts";
 
 type Ends = [number, number] | [string, string];
@@ -24,7 +27,7 @@ export interface ViewportPayload {
 
 /** A selection: x and y ranges and a lasso's outline. */
 export interface SelectionPayload {
-  /** The panels it belongs to, when they are a subplot's (a map's or network's lasso). */
+  /** The panels it belongs to (`SelectionOwner.panels`), whose axes read its ranges. */
   panels?: string[];
   x: Ends | null;
   y: Ends | null;
@@ -67,6 +70,32 @@ export interface ViewportEventPayload {
   panel?: string;
   scales: ScaleViewPayload[];
   views: PanelViewportPayload[];
+}
+
+/** A scale instance's view in a chart's state (`viewportStatePayload`). */
+export interface ScaleStatePayload extends ScaleViewPayload {
+  /**
+   * The instance as another mount of the chart finds it again
+   * (`restoreViewportState`): of the same scale and type, shared by every
+   * panel, or drawn by the same panels. Opaque; kept as given.
+   */
+  identity: string;
+}
+
+/**
+ * Every view a chart's axes show now (`viewportStatePayload`): each
+ * instance, as a change of view lists them, and each panel with axes.
+ */
+export interface ViewportStatePayload {
+  viewRevision: number;
+  scales: ScaleStatePayload[];
+  views: PanelViewportPayload[];
+  /**
+   * What `getViewport()` returns without a panel: the views of the scales
+   * every panel shares. Absent where it needs a panel (maps' and networks'
+   * subplots).
+   */
+  view?: ViewportPayload;
 }
 
 /** What a selection belongs to (`SelectionOwner`). */
@@ -143,6 +172,8 @@ interface Scales {
   yRight?: AxisInfo | undefined;
 }
 
+const AXES = ["x", "y", "yRight"] as const;
+
 /**
  * The axes Python reads, as the chart last drew them: of `panel`, or by
  * default of the first panel drawing with the x scale panels share (else
@@ -161,15 +192,260 @@ function scalesOf(chart: Chart, panel?: string): Scales {
 const timeAxes = (scales: Scales, axes: readonly Axis[]): Axis[] =>
   axes.filter((axis) => scales[axis]?.type === "time");
 
-/** An edge event as Python reads it, with whether its scale holds times. */
-export function edgePayload(chart: Chart, edge: ChartEvents["edge"]) {
-  // The scale of the panels the edge names, or of those sharing x.
+/** A scale instance as JSON: whether its values are times, rather than its type. */
+function instancePayload({ scale, instance, type, panels }: ScaleInstance): ScaleInstancePayload {
+  return { scale, instance, time: type === "time", panels: [...panels] };
+}
+
+/** A view as JSON: ascending ends, null where fitted. Category axes do not zoom. */
+const view = (range: Range | null): [number, number] | null => range && [range[0], range[1]];
+
+/** A panel's whole view as JSON, naming its axes of times. */
+function panelViewportPayload({ panel, types, ...shown }: PanelViewport): PanelViewportPayload {
+  return {
+    panel,
+    x: view(shown.x),
+    y: view(shown.y),
+    yRight: view(shown.yRight),
+    time: AXES.filter((axis) => types[axis] === "time"),
+  };
+}
+
+/** A change of view as JSON; it carries the types of its axes, so it needs no chart. */
+export function viewportEventPayload(event: ViewportEvent): ViewportEventPayload {
+  return {
+    viewRevision: event.viewRevision,
+    cause: event.cause,
+    ...(event.panel !== undefined && { panel: event.panel }),
+    scales: event.scales.map((scale) => ({ ...instancePayload(scale), view: view(scale.view) })),
+    views: event.views.map(panelViewportPayload),
+  };
+}
+
+/** What finds an instance again in another mount: its scale, its type, and its name, which its panels' keys make. */
+const identityOf = (scale: Axis, type: AxisInfo["type"], instance: string) =>
+  JSON.stringify([scale, type, instance]);
+
+/**
+ * Every view the chart's axes show now, as a change of view lists them:
+ * for mounting a chart, and restoring one, whatever happened before. Maps'
+ * and networks' planes are read with `getViewport` and their panel.
+ */
+export function viewportStatePayload(chart: Chart): ViewportStatePayload {
+  // Reading a panel's view draws the changes to the panels pending first.
+  // The rest is read from the last scene and the views of its instances,
+  // which draws nothing again: all of one scene, though a listener of that
+  // frame changed the chart again.
+  try {
+    chart.getViewport({ panel: chart.getPanels()[0]?.key ?? "" });
+  } catch {
+    // That panel is gone now.
+  }
+  const model = MountedChart.modelOf(chart);
   const panels = chart.getPanels();
-  const panel =
-    panels.find(({ key }) => edge.panels?.includes(key)) ??
-    panels.find(({ x }) => x?.instance === "") ??
-    panels.find(({ x }) => x);
-  return { ...edge, time: panel?.[edge.scale]?.type === "time" };
+  const scales = new Map<string, ScaleStatePayload>();
+  const views: PanelViewportPayload[] = [];
+  for (const panel of panels) {
+    if (!panel.x) continue;
+    const shown = {} as Viewport;
+    for (const axis of AXES) {
+      const info = panel[axis];
+      shown[axis] = info ? model.viewOf(axis, info.instance) : null;
+      if (!info) continue;
+      const key = `${axis} ${info.instance}`;
+      const found = scales.get(key);
+      if (found) found.panels.push(panel.key);
+      else
+        scales.set(key, {
+          scale: axis,
+          instance: info.instance,
+          time: info.type === "time",
+          panels: [panel.key],
+          view: view(shown[axis]),
+          identity: identityOf(axis, info.type, info.instance),
+        });
+    }
+    const types = Object.fromEntries(
+      AXES.flatMap((axis) => (panel[axis] ? [[axis, panel[axis].type]] : [])),
+    );
+    views.push(panelViewportPayload({ panel: panel.key, ...shown, types }));
+  }
+  // By scale, then by first panel, as a change of view lists them.
+  const listed = [...scales.values()].sort((a, b) => AXES.indexOf(a.scale) - AXES.indexOf(b.scale));
+  let shown: Viewport | undefined;
+  if (scales.size) {
+    // Without a panel, as `getViewport` reads it: along each scale, the
+    // instance every panel shares, else the only one.
+    shown = { x: null, y: null, yRight: null };
+    for (const axis of AXES) {
+      const of = listed.filter(({ scale }) => scale === axis);
+      const one =
+        of.find(({ instance }) => instance === "") ?? (of.length === 1 ? of[0] : undefined);
+      shown[axis] = one ? model.viewOf(axis, one.instance) : null;
+    }
+  } else
+    try {
+      // A map's or network's plane, without axes beside it.
+      shown = chart.getViewport();
+    } catch {
+      // Subplots of maps or networks: each panel's plane has a view of its own.
+    }
+  return {
+    viewRevision: chart.viewRevision,
+    scales: listed,
+    views,
+    ...(shown && { view: viewportPayload(chart, shown) }),
+  };
+}
+
+/**
+ * Gives `chart`, mounted in place of another (as a Streamlit app remounts
+ * its chart on each run), the views of `state` (`viewportStatePayload` of
+ * the chart it replaces, or as last confirmed): each instance the chart
+ * draws again (by `identity`: the one every panel shares, though panels
+ * come and go; another, only with the same panels; neither across a change
+ * of type) takes its view, limits applied, and the others are fitted.
+ * Waits for what the chart loads to draw its panels; one `viewport` event,
+ * of cause "options", reports what changed. A state of another shape, or
+ * with two views of one instance, is refused whole; a restore another
+ * started while this one waited gives way to it. Resolves to the chart's
+ * state then.
+ */
+export async function restoreViewportState(
+  chart: Chart,
+  state: ViewportStatePayload,
+): Promise<ViewportStatePayload> {
+  const views = stateViews(state);
+  const restore = {};
+  restores.set(chart, restore);
+  for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+  // Nothing for a chart destroyed meanwhile.
+  if (!MountedChart.restore(chart)) return state;
+  // The instances the chart draws, as its last scene drew them.
+  if (restores.get(chart) === restore) chart.render();
+  // A restore a listener started meanwhile, which won.
+  if (restores.get(chart) !== restore) return viewportStatePayload(chart);
+  restores.delete(chart);
+  const changes: ViewSet[] = [];
+  for (const { scale, instance, type } of MountedChart.modelOf(chart).instances.values())
+    if (type !== "band")
+      changes.push([scale, instance, views.get(identityOf(scale, type, instance)) ?? null]);
+  MountedChart.restore(chart, changes);
+  return viewportStatePayload(chart);
+}
+
+/** Each chart's latest restore of its views, which restores before it give way to. */
+const restores = new WeakMap<Chart, object>();
+
+/** The views `state` holds by instance identity, checked whole: a state of another shape is refused. */
+function stateViews(state: ViewportStatePayload): Map<string, Range | null> {
+  const refuse = (at: string, problem: string): never => {
+    throw new ChartError({
+      code: "invalid-option",
+      path: at,
+      message: `restoreViewportState ${at}: ${problem}`,
+    });
+  };
+  const scales = (state as Partial<ViewportStatePayload> | null)?.scales;
+  if (!Array.isArray(scales))
+    refuse("scales", "expected a list of instances' views; give a state viewportStatePayload made");
+  const views = new Map<string, Range | null>();
+  for (const [i, entry] of scales!.entries()) {
+    const at = `scales[${i}]`;
+    const { scale, identity, view: range } = (entry ?? {}) as Partial<ScaleStatePayload>;
+    if (
+      !AXES.includes(scale as Axis) ||
+      typeof identity !== "string" ||
+      !identifies(identity, scale!)
+    )
+      refuse(
+        at,
+        'expected a scale ("x", "y", or "yRight") and its identity; give an entry viewportStatePayload made',
+      );
+    const ascending =
+      range === null ||
+      (Array.isArray(range) &&
+        range.length === 2 &&
+        range.every((end) => typeof end === "number" && Number.isFinite(end)) &&
+        (range[0] as number) <= (range[1] as number));
+    if (!ascending)
+      refuse(
+        `${at}.view`,
+        "expected null or two ascending finite numbers; give the view as viewportStatePayload wrote it",
+      );
+    const known = views.get(identity!);
+    const next = range as Range | null;
+    if (known !== undefined && (known?.[0] !== next?.[0] || known?.[1] !== next?.[1]))
+      refuse(at, "holds another view of an instance listed before; give each instance once");
+    views.set(identity!, next);
+  }
+  return views;
+}
+
+/** Whether `identity` is one `identityOf` made of an instance of `scale`. */
+function identifies(identity: string, scale: Axis): boolean {
+  try {
+    const [of, type, instance, ...rest] = JSON.parse(identity) as unknown[];
+    return of === scale && typeof type === "string" && typeof instance === "string" && !rest.length;
+  } catch {
+    return false;
+  }
+}
+
+/** An edge event as JSON. */
+export function edgePayload({
+  side,
+  domain,
+  bound,
+  cause,
+  ...instance
+}: ChartEvents["edge"]): EdgePayload {
+  return { ...instancePayload(instance), side, domain: [domain[0], domain[1]], bound, cause };
+}
+
+/** What a selection belongs to, as JSON. */
+function ownerPayload({ scales, panels }: SelectionOwner): SelectionOwnerPayload {
+  return { scales: scales.map(instancePayload), panels: [...panels] };
+}
+
+/**
+ * A select event as JSON: the selection on the instances it belongs to,
+ * which carry their categories as the event was made, and what it belongs to.
+ */
+export function selectEventPayload(event: ChartEvents["select"]): SelectEventPayload {
+  return { owner: ownerPayload(event.owner), selection: selectionPayload(event, event.owner) };
+}
+
+/**
+ * A change of a channel `rowSelection` binds, as JSON, its table named
+ * `name` (its name in the spec's data): a condition, or rows by identity,
+ * their positions plus the rows the table dropped (`Table.rowOffset`).
+ * `numbering` counts, for a reader numbering rows from an earlier
+ * snapshot, the rows dropped before it and its generation.
+ */
+export function rowSelectionPayload(
+  { table, channel, selection }: RowSelectionChange,
+  name: string,
+  numbering: readonly [dropped: number, generation: number] = [0, 0],
+): RowSelectionPayload {
+  if (selection?.kind !== "rows")
+    return {
+      data: name,
+      channel,
+      selection: selection && { kind: "predicate", expression: selection.expression },
+    };
+  const [dropped, generation] = numbering;
+  // A reset numbers rows afresh, from the table's first.
+  const base = (table.generation === 0 ? dropped : 0) + table.rowOffset;
+  return {
+    data: name,
+    channel,
+    selection: {
+      kind: "rows",
+      rows: Array.from(selection.rows.positions(), (position) => position + base),
+      generation: generation + table.generation,
+    },
+  };
 }
 
 /**
@@ -209,24 +485,30 @@ export function chartViewport(
 }
 
 /**
- * A selection as Python reads it, or null for none. Its y values are read
- * on the y axis of the first panel it belongs to.
+ * A selection as JSON, read on the instances it belongs to (`owner`, as
+ * `select` events and `chart.selectionOwner` give it), or null for none.
  */
 export function selectionPayload(
-  chart: Chart,
   selection: Selection | null,
-  panels?: readonly string[],
+  owner: SelectionOwner | null,
 ): SelectionPayload | null {
   if (!selection || !(selection.x || selection.y || selection.lasso)) return null;
-  const scales = scalesOf(chart, chart.selectionPanels?.[0]);
-  const categories = selection.lasso ? categoriesOf(chart) : undefined;
+  const x = owner?.scales.find(({ scale }) => scale === "x");
+  // A y range is of the right y in a panel without a left one.
+  const y = owner?.scales.find(({ scale }) => scale !== "x");
+  // A lasso's band positions refer to the categories of its axes.
+  const categories = selection.lasso &&
+    (x?.categories || y?.categories) && [
+      x?.categories ? [...x.categories] : null,
+      y?.categories ? [...y.categories] : null,
+    ];
   return {
-    ...(panels && { panels: [...panels] }),
-    x: ends(selection.x, scales.x),
-    y: ends(selection.y, scales.y),
+    ...(owner && { panels: [...owner.panels] }),
+    x: ends(selection.x, x),
+    y: ends(selection.y, y),
     lasso: selection.lasso?.map(([x, y]) => [x, y]) ?? null,
-    ...(categories && { categories }),
-    time: timeAxes(scales, ["x", "y"]),
+    ...(categories && { categories: categories as Categories }),
+    time: (["x", "y"] as const).filter((axis) => (axis === "x" ? x : y)?.type === "time"),
   };
 }
 
@@ -263,7 +545,7 @@ export function namesCategories(payload: SelectionPayload | null): boolean {
 
 /** The categories of the axes a selection is on; undefined when neither is a category axis. */
 function categoriesOf(chart: Chart): Categories | undefined {
-  const { x, y } = scalesOf(chart, chart.selectionPanels?.[0]);
+  const { x, y } = scalesOf(chart, chart.selectionOwner?.panels[0]);
   if (!x?.categories && !y?.categories) return undefined;
   return [x?.categories ? [...x.categories] : null, y?.categories ? [...y.categories] : null];
 }
@@ -299,7 +581,10 @@ export function inspectionPayload(
 }
 
 /** A range's ends as Python reads them: on category axes, labels. */
-function ends(range: Range | null, scale: AxisInfo | undefined): Ends | null {
+function ends(
+  range: Range | null,
+  scale: Pick<AxisInfo, "type" | "categories"> | undefined,
+): Ends | null {
   if (!range) return null;
   const categories = scale?.type === "band" ? scale.categories : undefined;
   if (categories) return [label(categories, range[0]), label(categories, range[1])];

@@ -7,7 +7,7 @@ import type { CategoryField, NumberField, NumericField, Schema, Table } from "..
 import { symbolPath } from "../draw/symbols.ts";
 import { formatNumber } from "../format/format.ts";
 import { ItemViews } from "../model/item-views.ts";
-import type { LegendEntry } from "../model/legend.ts";
+import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import {
   checkColorScale,
@@ -32,12 +32,14 @@ import {
   ownOr,
   withSeries,
 } from "./layout-mark.ts";
+import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type ChartMark,
   type ColorRamp,
   frozen,
   type GlyphKey,
+  type LegendScale,
   type MARK,
   requireField,
 } from "./mark.ts";
@@ -262,6 +264,16 @@ export class Point3DMark implements Layer3D {
       const fill = ownOr(muted ? theme.muted : this.spec.fill, color(key), paint, "point3d fill");
       return { key, label, color: fill, glyph };
     });
+  }
+
+  /** Its color ramp, of a number `color`, which guides name: a colorbar shows it once it has values. */
+  get legendScales(): readonly LegendScale[] {
+    return this.#toneField !== undefined ? ["ramp"] : [];
+  }
+
+  /** Its scales' legends, which guides naming the mark show. */
+  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
+    return legendParts(...this.scales(theme, locale, paint));
   }
 
   scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {

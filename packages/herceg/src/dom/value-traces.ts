@@ -1,10 +1,11 @@
 // Lines, areas, and rules moving to changed values (value-transition.ts).
 // A line or an area moves only when both scenes trace it through the same
-// x positions, with every row a point (no level of detail, missing value, or
-// break), in the same runs: then each point moves along y. Curves are not
-// interpolated: each frame curves its points again as the mark does, a
-// line's alone and a band's or stack's edges together, so frames are
-// monotone curves through the values between.
+// positions (x, or y for a line along y), with every row a point (no level
+// of detail, missing value, or break), in the same runs: then each point
+// moves along its values' axis. Curves are not interpolated: each frame
+// curves its points again as the mark does, a line's alone and a band's or
+// stack's edges together, so frames are monotone curves through the values
+// between.
 
 import type { Polyline } from "../lod/polyline.ts";
 import type { monotonePolyline } from "../marks/curve.ts";
@@ -63,12 +64,16 @@ function pathOf(path: Polyline, own: boolean): ShownPath {
 }
 
 /**
- * A polyline moving along y: per point its x, and its y before and after.
- * A curve's points are placed in `points` and curved into `out` (by
- * `curve`); other polylines' points go straight into `out`.
+ * A polyline moving along its values' axis: per point its position (x, or y
+ * along y), and its value's pixel before and after. A curve's points are
+ * placed in `points` and curved into `out` (by `curve`, along x: a line
+ * along y is curved with x and y swapped); other polylines' points go
+ * straight into `out`.
  */
 interface MovingPath {
   count: number;
+  /** The coordinate of each point that moves: 1 (y), or 0 (x) for a line along y. */
+  axis: 0 | 1;
   x: Float32Array;
   from: Float32Array;
   to: Float32Array;
@@ -77,14 +82,17 @@ interface MovingPath {
   curve: typeof monotonePolyline | undefined;
 }
 
-/** The y scale a trace is on: which, how it moves, and where zero is on it before and after. */
+/**
+ * The scale a trace's values are on: which (x for a line along y), how it
+ * moves, and where zero is on it before and after.
+ */
 export interface TraceScale {
-  side: "y" | "yRight";
+  side: "x" | "y" | "yRight";
   motion: ScaleMotion;
   zero: readonly [number, number];
 }
 
-/** A line or area moving: its edges, on its y scale. */
+/** A line or area moving: its edges, on its values' scale. */
 export interface MovingTrace {
   /** The geometry's place among its panel's. */
   index: number;
@@ -96,11 +104,11 @@ export interface MovingTrace {
 
 /**
  * How `shown` moves to `mark`, the same series in the new scene, along its
- * y scale, the x scale staying; undefined unless both are traced whole
- * through the same x positions, in the same runs (rows at the same x are
- * the same rows of a line, whichever rows of the table they are). A layer
- * of a monotone band or stack (`mark.curve`) moves only with its
- * neighbors, in a `MovingStack`.
+ * values' scale, the positions' scale staying (x, or y for a line `along`
+ * y); undefined unless both are traced whole through the same positions,
+ * in the same runs (rows at the same x are the same rows of a line,
+ * whichever rows of the table they are). A layer of a monotone band or
+ * stack (`mark.curve`) moves only with its neighbors, in a `MovingStack`.
  */
 export function moveTrace(
   index: number,
@@ -108,13 +116,15 @@ export function moveTrace(
   mark: Trace,
   scale: TraceScale,
   lines: Lines,
+  along: "x" | "y" = "x",
 ): { moving: MovingTrace; moves: boolean } | undefined {
   const next = traceOf(mark, false);
   if (!next || !next.lower !== !shown.lower) return undefined;
   // Layers are curved together, not one by one.
   const layered = mark.kind === "area" && mark.curve !== undefined;
-  const upper = movePath(shown.upper, next.upper, lines, layered);
-  const lower = next.lower && movePath(shown.lower!, next.lower, lines, layered);
+  const axis = along === "x" ? 1 : 0;
+  const upper = movePath(shown.upper, next.upper, lines, layered, axis);
+  const lower = next.lower && movePath(shown.lower!, next.lower, lines, layered, axis);
   if (!upper || lower === undefined) return undefined;
   const moves = scale.motion.moves || upper.moves || (lower?.moves ?? false);
   const moving = { index, mark, scale, upper: upper.path, lower: lower?.path ?? null };
@@ -126,6 +136,7 @@ function movePath(
   next: ShownPath,
   { Polyline, monotonePolyline }: Lines,
   layered: boolean,
+  axis: 0 | 1,
 ): { path: MovingPath; moves: boolean } | undefined {
   const { count } = next;
   if (
@@ -138,11 +149,12 @@ function movePath(
   const from = new Float32Array(count);
   const to = new Float32Array(count);
   let moves = false;
+  const position = 1 - axis;
   for (let i = 0; i < count; i++) {
-    if (shown.coords[i * 2] !== next.coords[i * 2]) return undefined;
-    x[i] = next.coords[i * 2]!;
-    from[i] = shown.coords[i * 2 + 1]!;
-    to[i] = next.coords[i * 2 + 1]!;
+    if (shown.coords[i * 2 + position] !== next.coords[i * 2 + position]) return undefined;
+    x[i] = next.coords[i * 2 + position]!;
+    from[i] = shown.coords[i * 2 + axis]!;
+    to[i] = next.coords[i * 2 + axis]!;
     moves ||= from[i] !== to[i];
   }
   const blank = (length: number) => {
@@ -157,10 +169,10 @@ function movePath(
   const out = curved ? new Polyline() : blank(count);
   const points = curved ? blank(count) : undefined;
   const curve = curved ? monotonePolyline : undefined;
-  return { path: { count, x, from, to, out, points, curve }, moves };
+  return { path: { count, axis, x, from, to, out, points, curve }, moves };
 }
 
-/** The line or area at the frame's y scale; `plot` bounds an area's baseline. */
+/** The line or area at the frame's values' scale `y`; `plot` bounds an area's baseline. */
 export function traceAt(moving: MovingTrace, y: Blend, plot: Rect): Trace {
   const { mark } = moving;
   const upper = pathAt(moving.upper, y);
@@ -175,14 +187,37 @@ export function traceAt(moving: MovingTrace, y: Blend, plot: Rect): Trace {
 }
 
 function pathAt(path: MovingPath, y: Blend): Polyline {
-  const { count, x, from, to, out, points, curve } = path;
+  const { count, axis, x, from, to, out, points, curve } = path;
   const coords = (points ?? out).coords;
+  // A curve is placed along x, as its mark curves it, and turned back after.
+  const [position, value] = curve ? [0, 1] : [1 - axis, axis];
   for (let i = 0; i < count; i++) {
-    coords[i * 2] = x[i]!;
-    coords[i * 2 + 1] = blend(y, from[i]!, to[i]!);
+    coords[i * 2 + position] = x[i]!;
+    coords[i * 2 + value] = blend(y, from[i]!, to[i]!);
   }
-  if (curve) curve(points!, out);
+  if (curve) {
+    curve(points!, out);
+    if (axis === 0) transpose(out);
+  }
   return out;
+}
+
+/** Swaps x and y of a polyline's points and curves' control points (as marks/orient.ts `untranspose`). */
+function transpose(path: Polyline): void {
+  const swap = (values: Float32Array, at: number) => {
+    const x = values[at]!;
+    values[at] = values[at + 1]!;
+    values[at + 1] = x;
+  };
+  for (let i = 0; i < path.count * 2; i += 2) swap(path.coords, i);
+  if (!path.curved) return;
+  // A straight segment's controls are NaN first (lod/polyline.ts), and stay so.
+  const k = path.controls;
+  for (let i = 0; i < path.count * 4; i += 4) {
+    if (Number.isNaN(k[i]!)) continue;
+    swap(k, i);
+    swap(k, i + 2);
+  }
 }
 
 /**

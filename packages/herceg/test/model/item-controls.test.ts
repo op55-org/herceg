@@ -57,7 +57,7 @@ describe("layout controls lifetime", () => {
     await third;
     expect(items.controls("drill")).toBe(newest);
     expect(items.controlsLoading).toBeUndefined();
-    expect(newest.update).toHaveBeenCalledWith(model.config);
+    expect(newest.update).toHaveBeenCalledOnce();
     expect(newest.draw).toHaveBeenCalledWith(scene);
 
     const obsolete = [controls(), controls()];

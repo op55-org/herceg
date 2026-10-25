@@ -4195,7 +4195,8 @@ class Chart:
         """A SciPy-layout linkage tree with leaves on category bands.
 
         ``leaves[i]`` labels leaf id i. ``side`` is the plot edge at height
-        zero (bottom by default); heights scale within the panel's pixels.
+        zero (bottom by default); heights are values on the other axis, whose
+        automatic domain descends for ``"top"`` and ``"right"``.
         With facets, pass ``facet="repeat"`` to draw the whole tree in each.
         """
         if side not in (None, "bottom", "top", "left", "right"):

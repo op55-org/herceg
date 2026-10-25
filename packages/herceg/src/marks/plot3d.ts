@@ -59,6 +59,7 @@ import type {
 } from "./layout-mark.ts";
 import { legendParts } from "./legend-parts.ts";
 import type { ColorRamp, GlyphKey, MARK } from "./mark.ts";
+import { refuseValues } from "./still.ts";
 
 export const AXES = ["x", "y", "z"] as const;
 export type AxisName = (typeof AXES)[number];
@@ -167,9 +168,13 @@ export interface Hit3D {
   behind?: number;
 }
 
-/** Refuses a 3D mark's `zIndex` other than 0: a 3D box draws its marks by depth. */
-export function checkDepthOrder(spec: { zIndex?: number }, type: string): void {
-  if (spec.zIndex !== undefined && spec.zIndex !== 0)
+/**
+ * Refuses a `zIndex` other than 0 on a 3D mark, whose spec has none but
+ * which specs written by hand may give: a 3D box draws its marks by depth.
+ */
+export function checkDepthOrder(spec: object, type: string): void {
+  const { zIndex } = spec as { zIndex?: unknown };
+  if (zIndex !== undefined && zIndex !== 0)
     throw new ChartError({
       code: "unsupported",
       path: "zIndex",
@@ -371,6 +376,7 @@ export class Plot3D implements LayoutMark {
   #drawn: { key: string; measure: LayoutFrame["measure"]; result: LayoutResult } | undefined;
 
   draw(frame: LayoutFrame): LayoutResult {
+    refuseValues(frame.keyed, this.layers[0]!.spec.type);
     const { theme, measure, bounds } = frame;
     const key = frame.inPanel
       ? JSON.stringify([

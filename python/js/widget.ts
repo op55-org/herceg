@@ -45,6 +45,7 @@ import {
   recordPosition,
   type SelectionPayload,
   selectionPayload,
+  selectionReport,
   showDrillRoot,
   showItemPositions,
   statePanels,
@@ -538,19 +539,22 @@ class Widget {
     const waiting = this.#waiting(chart) ? chart.loading : undefined;
     if (!waiting) restore();
     chart.on("select", (selection) =>
-      this.#report("select", view, selectionPayload(chart, selection, selection.panels)),
+      this.#report("select", view, selectionReport(selection, selection.owner)),
     );
-    // A subplot's map or network names its panel, and a change of an x
-    // scale that panels have of their own names each panel showing it.
-    chart.on("viewport", (viewport) => {
-      for (const panel of viewport.panels ?? [""]) {
-        const payload = viewportPayload(
-          chart,
-          viewport,
-          planes.includes(panel),
-          panel || undefined,
-        );
-        this.#report("viewport", view, payload, panel);
+    // Python reads views by panel: a subplot's map or network names its
+    // panel, as does each panel of an x scale that panels have of their
+    // own; panels of the x every panel shares, and a map or network of the
+    // whole chart, are the chart's own ("").
+    chart.on("viewport", ({ views }) => {
+      const axes = chart.getPanels();
+      const reported = new Set<string>();
+      for (const { panel, types: _, ...shown } of views) {
+        const x = axes.find(({ key }) => key === panel)?.x;
+        const key = x ? (x.instance === "" ? "" : panel) : config.panels ? panel : "";
+        if (reported.has(key)) continue;
+        reported.add(key);
+        const payload = viewportPayload(chart, shown, planes.includes(key), key || undefined);
+        this.#report("viewport", view, payload, key);
       }
     });
     chart.on("drill", (root) => {
@@ -615,8 +619,7 @@ class Widget {
       this.#model.send({ type: "click", inspection: inspectionPayload(chart, inspection) });
     });
     chart.on("edge", (edge) => {
-      if (this.#listening("edge"))
-        this.#model.send({ type: "edge", edge: edgePayload(chart, edge) });
+      if (this.#listening("edge")) this.#model.send({ type: "edge", edge: edgePayload(edge) });
     });
     // A drag turns the camera every frame: Python hears of it at most once a throttle interval.
     chart.on("camera", ({ camera, panels }) =>
@@ -804,9 +807,13 @@ class Widget {
     // still to draw are drawn first.
     const labels = [viewport?.x, viewport?.y].some((ends) => typeof ends?.[0] === "string");
     if (labels) chart.render();
+    const panels = chart.getPanels();
     if (panel !== "") {
-      // A subplot's plane: numbers in its units; a panel's own x scale: as on its axis.
+      // A subplot's plane: numbers in its units; a panel's own x scale: as
+      // on its axis, unless it shows categories, which do not zoom.
       const plane = statePanels(this.#config!, PLANES).includes(panel);
+      const zooms = panels.find(({ key }) => key === panel)?.x?.canSetViewport;
+      if (!plane && !zooms) return;
       chart.setViewport(
         plane
           ? ({ x: viewport?.x ?? null, y: viewport?.y ?? null } as Viewport)
@@ -817,17 +824,17 @@ class Widget {
     }
     const restored = chartViewport(chart, viewport);
     // Charts whose panels have y scales of their own have no y viewport.
-    const panels = chart.getPanels();
     const first = panels.find(({ x }) => x?.instance === "") ?? panels.find(({ x }) => x);
     chart.setViewport({
-      x: restored.x,
+      x: first?.x && !first.x.canSetViewport ? null : restored.x,
       y:
         (!this.#config?.panels &&
           this.#config?.marks.some((mark) => PLANES.includes(mark.spec.type))) ||
-        first?.y?.canSetViewport
+        (first?.y?.canSetViewport && first.y.instance === "")
           ? restored.y
           : null,
-      yRight: first?.yRight?.canSetViewport ? restored.yRight : null,
+      yRight:
+        first?.yRight?.canSetViewport && first.yRight.instance === "" ? restored.yRight : null,
     });
   }
 
@@ -837,7 +844,7 @@ class Widget {
    * when they move.
    */
   #learnCategories(chart: Chart, selection: SelectionPayload) {
-    const categories = selectionPayload(chart, chart.selection)?.categories;
+    const categories = selectionPayload(chart.selection, chart.selectionOwner)?.categories;
     if (!categories) return;
     const known = { ...selection, categories };
     this.#states.set("select", known);

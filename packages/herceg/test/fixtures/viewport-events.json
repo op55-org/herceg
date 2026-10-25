@@ -1,5 +1,5 @@
 {
-  "about": "Changes of view through the chart's API and the viewport events they make, as the engine and the Python package both keep them: each case a chart (its portable spec over data, as contracts.json gives specs data) and actions in order. setViewport takes view (an x pair, an object of x, y, yRight, or null) and panel; it makes the events listed, in order (none when it changes nothing), or throws error, changing nothing. getViewport returns what returns says. update replaces the table's columns with data, and its events are those the next frame makes. Events are the JSON viewportEventPayload makes (web/events.ts): instance names are opaque, so they are written as placeholders ($x): in a case, a placeholder of a scale stands for one name of that scale's, and two placeholders of a scale for two (instances of different scales may share a name). scopes give each scale's scope in the case (insets keep scales of their own beside \"chart\"). Read by packages/herceg/test/web/viewport-events.test.ts and Python's live tests.",
+  "about": "Changes of view through the chart's API and the viewport events they make, as the engine and the Python package both keep them: each case a chart (its portable spec over data, as contracts.json gives specs data) and actions in order. setViewport takes view (an x pair, an object of x, y, yRight, or null) and panel; it makes the events listed, in order (none when it changes nothing), or throws error (its ChartError's code, path, panel, and message), changing nothing. getViewport returns what returns says. update replaces the table's columns with data, fields keeping their kinds (Table.reset), and its events are those the next frame makes, of cause data; load gives the chart the options its spec makes over data (chart.update), as when fields change kinds, and its events are the next frame's, of cause options. remount mounts a chart in its place, of spec (or the case's) over data (or the case's): it takes the state viewportStatePayload gives of the chart before (restoreViewportState), its events are the restoration's, of cause options (none when nothing changes), and later actions act on it; placeholders name its instances afresh, and its revisions count from 1. Events are the JSON viewportEventPayload makes (web/events.ts): instance names are opaque, so they are written as placeholders ($x): in a case, a placeholder of a scale stands for one name of that scale's, and two placeholders of a scale for two (instances of different scales may share a name). scopes give each scale's scope in the case (insets keep scales of their own beside \"chart\"). Read by packages/herceg/test/web/viewport-events.test.ts (its shape), packages/herceg/test/browser/viewport-events.test.ts (every case through a chart), and Python's live tests.",
   "data": {
     "t": [0, 1, 2, 3, 4, 5, 6, 7],
     "v": [1, 3, 2, 5, 4, 6, 5, 8],
@@ -404,6 +404,7 @@
           },
           "error": {
             "code": "invalid-option",
+            "path": "y",
             "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
           }
         },
@@ -415,6 +416,7 @@
           },
           "error": {
             "code": "invalid-option",
+            "path": "y",
             "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
           }
         },
@@ -541,6 +543,8 @@
           "panel": "zz",
           "error": {
             "code": "unknown-reference",
+            "path": "panel",
+            "panel": "zz",
             "message": "setViewport: no panel \"zz\"; name one of \"a\", \"b\""
           }
         },
@@ -695,6 +699,7 @@
           },
           "error": {
             "code": "invalid-option",
+            "path": "x",
             "message": "setViewport x: the panels have x scales of their own; name one with { panel }"
           }
         },
@@ -832,7 +837,9 @@
           },
           "panel": "b",
           "error": {
-            "code": "invalid-option",
+            "code": "unknown-reference",
+            "path": "yRight",
+            "panel": "b",
             "message": "setViewport yRight: panel \"b\" has no right y axis; drop yRight"
           }
         },
@@ -875,7 +882,9 @@
           },
           "panel": "c",
           "error": {
-            "code": "invalid-option",
+            "code": "unknown-reference",
+            "path": "y",
+            "panel": "c",
             "message": "setViewport y: panel \"c\" has no left y axis; drop y"
           }
         },
@@ -1049,6 +1058,7 @@
           },
           "error": {
             "code": "invalid-option",
+            "path": "y",
             "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
           }
         }
@@ -1398,7 +1408,7 @@
           ]
         },
         {
-          "do": "update",
+          "do": "load",
           "data": {
             "t": ["a", "b", "c", "d", "e", "f", "g", "h"],
             "v": [1, 3, 2, 5, 4, 6, 5, 8],
@@ -1417,7 +1427,7 @@
           "events": [
             {
               "viewRevision": 2,
-              "cause": "data",
+              "cause": "options",
               "scales": [
                 {
                   "scale": "x",
@@ -1571,6 +1581,7 @@
           },
           "error": {
             "code": "invalid-option",
+            "path": "y",
             "message": "setViewport y: the panels have y scales of their own; name one with { panel }"
           }
         },
@@ -1648,7 +1659,8 @@
             "x": [0, 2]
           },
           "error": {
-            "code": "invalid-option",
+            "code": "unsupported",
+            "path": "x",
             "message": "setViewport x: the x axis shows categories, which do not zoom; drop x"
           }
         },
@@ -1682,6 +1694,726 @@
                   "panel": "",
                   "x": null,
                   "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "contract": "interaction.restore-viewport.subplots",
+      "name": "a remount with a panel gone and back: the x every panel shares keeps its view, and a panel's own y keeps its view while it is drawn",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "b"
+          }
+        ],
+        "x": {
+          "scope": "chart"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 3]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": [1, 3]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": [1, 3],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": [1, 3],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": [1, 3],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "remount",
+          "spec": {
+            "panels": [
+              {
+                "id": "a"
+              }
+            ],
+            "marks": [
+              {
+                "type": "line",
+                "x": "t",
+                "y": "v",
+                "panel": "a"
+              }
+            ],
+            "x": {
+              "scope": "chart"
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "options",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [1, 3]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": [1, 3],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "remount",
+          "spec": {
+            "panels": [
+              {
+                "id": "a"
+              },
+              {
+                "id": "b"
+              }
+            ],
+            "marks": [
+              {
+                "type": "line",
+                "x": "t",
+                "y": "v",
+                "panel": "a"
+              },
+              {
+                "type": "line",
+                "x": "t",
+                "y": "w",
+                "panel": "b"
+              }
+            ],
+            "x": {
+              "scope": "chart"
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "options",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["a", "b"],
+                  "view": [1, 3]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": [1, 3],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "b",
+                  "x": [1, 3],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "panel": "b",
+          "returns": {
+            "x": [1, 3],
+            "y": null,
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.restore-viewport.subplots.merged",
+      "name": "a remount whose panels share the y they each had: the shared y is another instance, and stays fitted",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ],
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "panel": "a"
+          },
+          {
+            "type": "line",
+            "x": "t",
+            "y": "w",
+            "panel": "b"
+          }
+        ],
+        "x": {
+          "scope": "chart"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "a",
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "panel": "a",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$ya",
+                  "time": false,
+                  "panels": ["a"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "a",
+                  "x": null,
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 50]
+          },
+          "panel": "b",
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "panel": "b",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yb",
+                  "time": false,
+                  "panels": ["b"],
+                  "view": [0, 50]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "b",
+                  "x": null,
+                  "y": [0, 50],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "remount",
+          "spec": {
+            "panels": [
+              {
+                "id": "a"
+              },
+              {
+                "id": "b"
+              }
+            ],
+            "marks": [
+              {
+                "type": "line",
+                "x": "t",
+                "y": "v",
+                "panel": "a"
+              },
+              {
+                "type": "line",
+                "x": "t",
+                "y": "w",
+                "panel": "b"
+              }
+            ],
+            "x": {
+              "scope": "chart"
+            },
+            "y": {
+              "scope": "chart"
+            }
+          },
+          "events": []
+        },
+        {
+          "do": "getViewport",
+          "returns": {
+            "x": null,
+            "y": null,
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.restore-viewport.chart.replaced",
+      "name": "a remount with a log y and limits on x: x keeps its view, moved inside the limits; y, of another type, stays fitted",
+      "scopes": {
+        "x": "chart",
+        "y": "chart"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 3],
+            "y": [1, 4]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": [1, 3]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$y",
+                  "time": false,
+                  "panels": [""],
+                  "view": [1, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [1, 3],
+                  "y": [1, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "remount",
+          "spec": {
+            "marks": [
+              {
+                "type": "line",
+                "x": "t",
+                "y": "v"
+              }
+            ],
+            "y": {
+              "type": "log"
+            },
+            "interaction": {
+              "limits": {
+                "x": {
+                  "extent": [0, 2]
+                }
+              }
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "options",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": [""],
+                  "view": [0, 2]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "",
+                  "x": [0, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "getViewport",
+          "returns": {
+            "x": [0, 2],
+            "y": null,
+            "yRight": null
+          }
+        }
+      ]
+    },
+    {
+      "contract": "interaction.restore-viewport.facets",
+      "name": "a remount of facets with a panel's rows gone and back: x keeps its view, and the panel still drawn keeps its own y",
+      "scopes": {
+        "x": "chart",
+        "y": "panel"
+      },
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ],
+        "facet": {
+          "field": "region"
+        },
+        "y": {
+          "scope": "panel"
+        }
+      },
+      "actions": [
+        {
+          "do": "setViewport",
+          "view": {
+            "x": [1, 2]
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "api",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["eu", "us"],
+                  "view": [1, 2]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "eu",
+                  "x": [1, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "us",
+                  "x": [1, 2],
+                  "y": null,
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 4]
+          },
+          "panel": "eu",
+          "events": [
+            {
+              "viewRevision": 2,
+              "cause": "api",
+              "panel": "eu",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yeu",
+                  "time": false,
+                  "panels": ["eu"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "eu",
+                  "x": [1, 2],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "setViewport",
+          "view": {
+            "y": [0, 6]
+          },
+          "panel": "us",
+          "events": [
+            {
+              "viewRevision": 3,
+              "cause": "api",
+              "panel": "us",
+              "scales": [
+                {
+                  "scale": "y",
+                  "instance": "$yus",
+                  "time": false,
+                  "panels": ["us"],
+                  "view": [0, 6]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "us",
+                  "x": [1, 2],
+                  "y": [0, 6],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "remount",
+          "data": {
+            "t": [0, 1, 2, 3, 4, 5, 6, 7],
+            "v": [1, 3, 2, 5, 4, 6, 5, 8],
+            "w": [10, 30, 20, 50, 40, 60, 50, 80],
+            "region": ["eu", "eu", "eu", "eu", "eu", "eu", "eu", "eu"],
+            "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "quad": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "when": {
+              "type": "time",
+              "values": [
+                1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000,
+                1700018000000, 1700021600000, 1700025200000
+              ]
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "options",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["eu"],
+                  "view": [1, 2]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$yeu",
+                  "time": false,
+                  "panels": ["eu"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "eu",
+                  "x": [1, 2],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "do": "remount",
+          "data": {
+            "t": [0, 1, 2, 3, 4, 5, 6, 7],
+            "v": [1, 3, 2, 5, 4, 6, 5, 8],
+            "w": [10, 30, 20, 50, 40, 60, 50, 80],
+            "region": ["eu", "eu", "eu", "eu", "us", "us", "us", "us"],
+            "name": ["a", "b", "c", "d", "e", "f", "g", "h"],
+            "quad": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "when": {
+              "type": "time",
+              "values": [
+                1700000000000, 1700003600000, 1700007200000, 1700010800000, 1700014400000,
+                1700018000000, 1700021600000, 1700025200000
+              ]
+            }
+          },
+          "events": [
+            {
+              "viewRevision": 1,
+              "cause": "options",
+              "scales": [
+                {
+                  "scale": "x",
+                  "instance": "$x",
+                  "time": false,
+                  "panels": ["eu", "us"],
+                  "view": [1, 2]
+                },
+                {
+                  "scale": "y",
+                  "instance": "$yeu",
+                  "time": false,
+                  "panels": ["eu"],
+                  "view": [0, 4]
+                }
+              ],
+              "views": [
+                {
+                  "panel": "eu",
+                  "x": [1, 2],
+                  "y": [0, 4],
+                  "yRight": null,
+                  "time": []
+                },
+                {
+                  "panel": "us",
+                  "x": [1, 2],
+                  "y": null,
                   "yRight": null,
                   "time": []
                 }

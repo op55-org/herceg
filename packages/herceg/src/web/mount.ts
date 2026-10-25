@@ -3,25 +3,29 @@
 // mounted once, its chart drawn into a `data-herceg-runtime` element of its
 // own, and what the user does told to the page as DOM events.
 
-import { type Chart, type ChartOptions, createChart } from "../dom/chart.ts";
+import { type Chart, createChart } from "../dom/chart.ts";
 import { showFailure } from "../dom/errors.ts";
 import { ChartError, type ChartErrorInfo, chartError, errorInfo } from "../spec/errors.ts";
-import { loadSpec } from "../spec/load.ts";
+import { type LoadedSpec, loadSpec } from "../spec/load.ts";
 import {
+  type EdgePayload,
+  edgePayload,
   type InspectionPayload,
   inspectionPayload,
-  type SelectionPayload,
-  selectionPayload,
-  type ViewportPayload,
-  viewportPayload,
+  type RowSelectionPayload,
+  rowSelectionPayload,
+  type SelectEventPayload,
+  selectEventPayload,
+  type ViewportEventPayload,
+  type VisibilityPayload,
+  viewportEventPayload,
 } from "./events.ts";
-import { loadPayload, type PayloadSource } from "./load.ts";
+import { loadPayloadSpec, type PayloadSource } from "./load.ts";
 import { readInline } from "./payload.ts";
 
 /**
  * What a host's events carry, by name. They bubble, cross shadow roots,
- * and hold JSON: the host's `id`, and for a subplot's or panel's change,
- * the panels it is in.
+ * and hold JSON (see events.ts): the host's `id` beside the event's own.
  */
 export interface HercegEventMap {
   /** The chart drew its first frame. */
@@ -34,10 +38,16 @@ export interface HercegEventMap {
   "herceg:error": { id: string; error: ChartErrorInfo };
   /** The plot was clicked: the data under the pointer, or null off the data. */
   "herceg:click": { id: string; panel?: string; inspection: InspectionPayload | null };
-  /** The selection changed; null when it was cleared. */
-  "herceg:select": { id: string; panels?: string[]; selection: SelectionPayload | null };
-  /** The view changed: each axis' range, null where it is not zoomed. */
-  "herceg:viewport": { id: string; panels?: string[]; viewport: ViewportPayload };
+  /** The selection changed, null once cleared, and what it belongs (or belonged) to. */
+  "herceg:select": { id: string } & SelectEventPayload;
+  /** The view changed: the scale instances that changed, and the panels drawing them. */
+  "herceg:viewport": { id: string } & ViewportEventPayload;
+  /** A view came near an end of what `interaction.limits` lets it show. */
+  "herceg:edge": { id: string } & EdgePayload;
+  /** A channel `rowSelection` binds changed, whoever changed it. */
+  "herceg:rowselection": { id: string } & RowSelectionPayload;
+  /** Series or items were hidden or shown. */
+  "herceg:visibility": { id: string } & VisibilityPayload;
 }
 
 /** The events, as `addEventListener` types their listeners. */
@@ -136,9 +146,9 @@ async function start(
   made: (chart: Chart) => void,
 ): Promise<Chart> {
   const id = host.id;
-  let options: ChartOptions;
+  let loaded: LoadedSpec;
   try {
-    options = await optionsOf(host, src, signal);
+    loaded = await specOf(host, src, signal);
   } catch (error) {
     if (signal.aborted) throw signal.reason;
     // Errors of loading and of the spec come with their phase.
@@ -152,7 +162,7 @@ async function start(
   if (signal.aborted) throw signal.reason;
   hideFallback(host);
   const chart = createChart(runtime, {
-    ...options,
+    ...loaded.config,
     // Each failure once, whether it also rejects `ready` or comes later.
     onError: (error) => report(host, error),
   });
@@ -169,21 +179,21 @@ async function start(
       inspection: inspectionPayload(chart, inspection),
     }),
   );
-  chart.on("select", (selection) =>
-    dispatch(host, "herceg:select", {
-      id,
-      ...(selection.panels && { panels: [...selection.panels] }),
-      selection: selectionPayload(chart, selection, selection.panels),
-    }),
+  chart.on("select", (event) =>
+    dispatch(host, "herceg:select", { id, ...selectEventPayload(event) }),
   );
-  chart.on("viewport", (viewport) =>
-    dispatch(host, "herceg:viewport", {
-      id,
-      ...(viewport.panels && { panels: [...viewport.panels] }),
-      // Panels a change names share the scale: the first one's axes read it.
-      viewport: viewportPayload(chart, viewport, false, viewport.panels?.[0]),
-    }),
+  chart.on("viewport", (event) =>
+    dispatch(host, "herceg:viewport", { id, ...viewportEventPayload(event) }),
   );
+  chart.on("edge", (event) => dispatch(host, "herceg:edge", { id, ...edgePayload(event) }));
+  // Tables by their names in the spec's data.
+  const names = new Map([...loaded.stores].map(([name, store]) => [store.source, name]));
+  chart.on("rowSelection", (change) => {
+    const name = names.get(change.table);
+    if (name !== undefined)
+      dispatch(host, "herceg:rowselection", { id, ...rowSelectionPayload(change, name) });
+  });
+  chart.on("visibility", (event) => dispatch(host, "herceg:visibility", { id, ...event }));
   // A destroyed chart's `ready` never settles: unmounting settles this. An
   // unmount just after the first frame finds `ready` settled, so ask again.
   await Promise.race([chart.ready, aborted(signal)]);
@@ -192,14 +202,14 @@ async function start(
   return chart;
 }
 
-/** The chart options of the host's payload: given, fetched, or held as JSON. */
-async function optionsOf(
+/** The spec of the host's payload, loaded: given, fetched, or held as JSON. */
+async function specOf(
   host: HTMLElement,
   src: PayloadSource | undefined,
   signal: AbortSignal,
-): Promise<ChartOptions> {
+): Promise<LoadedSpec> {
   const url = src ?? host.dataset.hercegSrc;
-  if (url !== undefined) return loadPayload(url, { signal });
+  if (url !== undefined) return loadPayloadSpec(url, { signal });
   const template = host.querySelector<HTMLTemplateElement>(
     ":scope > template[data-herceg-payload]",
   );
@@ -211,7 +221,7 @@ async function optionsOf(
     });
   const { spec, buffers } = readInline(template.content.textContent ?? "");
   try {
-    return loadSpec(spec, buffers).config;
+    return loadSpec(spec, buffers);
   } catch (error) {
     throw chartError(error, "validate");
   }

@@ -876,6 +876,22 @@ describe("renderToPDF", () => {
     expect(pdf.catalog).toContain("/DisplayDocTitle true");
   });
 
+  it("writes series labels shortened to their plot, as every renderer does", () => {
+    const level = table({ x: [0, 1, 0, 1], y: [1, 1, 1, 1], g: ["a", "a", "b", "b"] });
+    const labels = { at: "last", content: ["A longer series label which does not fit"] } as const;
+    const { content } = readPdf(
+      renderToPDF({
+        marks: [line(level, { x: "x", y: "y", labels })],
+        facet: facet("g"),
+        width: 400,
+        height: 200,
+      }),
+    );
+    // One filled in each panel (over its halo), ending in an ellipsis (WinAnsi octal 205).
+    expect(content.match(/0 Tr [^(]*\(A longer [^)]*\\205\) Tj/g)).toHaveLength(2);
+    expect(content).not.toContain("does not fit");
+  });
+
   it("draws facet headers in bold, row headers reading top to bottom", () => {
     const sales = table({
       x: [0, 1, 0, 1],

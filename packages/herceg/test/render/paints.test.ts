@@ -18,7 +18,7 @@ import { candlestick } from "../../src/marks/candlestick.ts";
 import { contour } from "../../src/marks/contour.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { dendrogram } from "../../src/marks/dendrogram.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { funnel } from "../../src/marks/funnel.ts";
 import { gauge } from "../../src/marks/gauge.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
@@ -156,7 +156,7 @@ const cases: [
   ["rug stroke", () => ({ marks: [rug(samples, { x: "x", stroke: paint(1) })] }), [1]],
   [
     "errorbar stroke",
-    () => ({ marks: [errorBar(samples, { x: "x", y1: "low", y2: "high", stroke: paint(1) })] }),
+    () => ({ marks: [errorbar(samples, { x: "x", y1: "low", y2: "high", stroke: paint(1) })] }),
     [1],
   ],
   [

@@ -128,6 +128,7 @@ interface AreaCommon<S extends Schema> {
   continuity?: Continuity<S>;
   /** Rows to leave out, as gaps: the areas fill only where it holds (not with `stack`). */
   where?: Condition;
+  /** How the area's edges join their points (see `Curve`); "linear" by default. */
   curve?: Curve;
   label?: string;
   /** A label following each area's value edge (a band's `edge`). */

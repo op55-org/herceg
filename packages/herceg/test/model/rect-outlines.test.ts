@@ -12,6 +12,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import type { RectGeometry, Scene } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 400) {
   const model = new ChartModel(
@@ -77,11 +78,11 @@ describe("bars of a width in pixels", () => {
     // zoomed to [19, 21], a bar 7,000 pixels wide reaches about 20 units.
     const wide = bar(daily, { x: "t", y: "v", width: { px: 7000 } });
     const { model } = build({ marks: [wide] });
-    model.setViewport([19, 21]);
+    setViewport(model, [19, 21]);
     expect(rects(model.scene(estimateText))[0]!.count).toBe(5);
     // Bars of their band's width draw the view's neighbors only.
     const plain = build({ marks: [bar(daily, { x: "t", y: "v" })] });
-    plain.model.setViewport([19, 21]);
+    setViewport(plain.model, [19, 21]);
     expect(rects(plain.model.scene(estimateText))[0]!.count).toBe(3);
   });
 });

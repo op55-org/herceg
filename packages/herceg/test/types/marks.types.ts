@@ -8,7 +8,7 @@ import { boxplot } from "../../src/marks/boxplot.ts";
 import { candlestick } from "../../src/marks/candlestick.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { dendrogram } from "../../src/marks/dendrogram.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { funnel } from "../../src/marks/funnel.ts";
 import { gauge } from "../../src/marks/gauge.ts";
 import { graph } from "../../src/marks/graph.ts";
@@ -29,11 +29,13 @@ import type {
   AreaSpec,
   BoxPlotInput,
   BoxPlotSpec,
+  ContourSpec,
   Dash,
   ErrorBarSpec,
   HeatmapSpec,
   HistogramSpec,
   LineSpec,
+  Point3DSpec,
   PointSpec,
   RegionSpec,
   RugSpec,
@@ -129,11 +131,11 @@ area(usage, { x: "t", y: "cpu", series: "host", stack: { gaps: "interpolate" } }
 area(usage, { x: "t", y: "cpu", series: "host", stack: { gaps: "linear" } });
 // @ts-expect-error bands have no gaps to fill
 area(band, { x: "x", y1: "low", y2: "high", stackGaps: "zero" });
-errorBar(band, { x: "x", y1: "low", y2: "high" });
+errorbar(band, { x: "x", y1: "low", y2: "high" });
 // @ts-expect-error vertical error bars have no x range
-errorBar(band, { x: "x", y1: "low", y2: "high", x1: "low" });
+errorbar(band, { x: "x", y1: "low", y2: "high", x1: "low" });
 // @ts-expect-error an error bar's ends are two fields or a center and an error
-errorBar(band, { x: "x", y: "low", yError: "high", y1: "low" });
+errorbar(band, { x: "x", y: "low", yError: "high", y1: "low" });
 rule({ x: 1 });
 rule({ y: 1 });
 // @ts-expect-error a rule needs a position
@@ -161,7 +163,7 @@ heatmap(regions, { x: "shape", y: "name", color: "sales" });
 // @ts-expect-error geometry is not a candle position
 candlestick(regions, { x: "shape", open: "sales", high: "sales", low: "sales", close: "sales" });
 // @ts-expect-error geometry is not an error bar position
-errorBar(regions, { x: "shape", y1: "sales", y2: "sales" });
+errorbar(regions, { x: "shape", y1: "sales", y2: "sales" });
 // Nor is a field that may hold geometry.
 declare const shapesOrNumbers: GeometryInput | number[];
 const either = table({ at: shapesOrNumbers, sales: [1] });
@@ -230,6 +232,12 @@ const cellsNowhere: HeatmapSpec = { type: "heatmap", color: "v" };
 const cellsHalf: HeatmapSpec = { type: "heatmap", x1: "a", y: "c", color: "v" };
 // @ts-expect-error cells sit at values or between edges along an axis, not both
 const cellsBoth: HeatmapSpec = { type: "heatmap", x: "a", x1: "a", x2: "b", y: "c", color: "v" };
+// @ts-expect-error heatmaps draw on the left y axis only
+const cellsRight: HeatmapSpec = { type: "heatmap", x: "a", y: "c", color: "v", axis: "right" };
+// @ts-expect-error contours draw on the left y axis only
+const contourRight: ContourSpec = { type: "contour", x: "a", y: "c", color: "v", axis: "right" };
+// @ts-expect-error a 3D box draws its marks by depth
+const pointsOrdered: Point3DSpec = { type: "point3d", x: "a", y: "b", z: "c", zIndex: 1 };
 
 export {
   areaBoth,
@@ -237,7 +245,10 @@ export {
   cellsBoth,
   cellsHalf,
   cellsNowhere,
+  cellsRight,
+  contourRight,
   errorBoth,
+  pointsOrdered,
   regionHalf,
   ruleSpec,
   ruleWithout,
@@ -318,7 +329,7 @@ void [
 
 const tips = table({ day: ["thu"], sex: ["f"], tip: [1], low: [0], high: [2] });
 bar(tips, { x: "day", y: "tip", series: "sex" });
-errorBar(tips, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true });
+errorbar(tips, { x: "day", y1: "low", y2: "high", series: "sex", dodge: true });
 // A color field splits bars, lines, and areas into series; false splits by neither.
 bar(tips, { x: "day", y: "tip", color: "sex" });
 bar(tips, { x: "day", y: "tip", color: "sex", series: false });
@@ -565,7 +576,7 @@ line(dots, { x: "at", orient: "x", y: { field: "stage" } });
 // @ts-expect-error a band's edges alike
 area(dots, { x: "at", y1: { field: "stage" }, y2: "cpu" });
 // @ts-expect-error error bars' ends alike
-errorBar(dots, { x: "at", y1: { field: "stage" }, y2: "cpu" });
+errorbar(dots, { x: "at", y1: { field: "stage" }, y2: "cpu" });
 
 // Bars' centers as coordinates: a category y's field makes them horizontal.
 bar(dots, { x: "cpu", y: { field: "stage", offset: 2 } });

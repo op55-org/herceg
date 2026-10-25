@@ -14,11 +14,12 @@ import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { BandScale, LinearScale } from "../../src/scale/scale.ts";
-import type { SegmentGeometry } from "../../src/scene/scene.ts";
+import type { AxisGuide, SegmentGeometry } from "../../src/scene/scene.ts";
 import { LIGHT } from "../../src/theme.ts";
 import { clustermap } from "../fixtures/clustermap.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { stopsOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const linkage = () => table({ first: [0, 2, 5], second: [1, 3, 4], height: [1, 2, 4] });
 const options = {
@@ -222,7 +223,7 @@ describe("dendrogram", () => {
     );
     const frame = {
       x: new BandScale(["c", "d", "b"], [0, 300], 0),
-      y: new LinearScale([0, 1], [100, 0]),
+      y: new LinearScale([0, 4], [100, 0]),
       pixelRatio: 1,
       rasterRatio: 1,
       locale: "en-US",
@@ -273,24 +274,107 @@ describe("dendrogram", () => {
     ).toBeUndefined();
   });
 
-  it("keeps heights in panel pixels across viewports and resizing", () => {
+  it("draws heights on the axis across its leaves, which views and resizing move", () => {
     const { model, scene } = build({
       marks: [dendrogram(linkage(), options)],
       interaction: { zoom: "xy" },
     });
+    // The axis runs from zero to the largest height; the root's link is on it.
+    expect(model.panels()[0]!.y.domain).toEqual([0, 4]);
     const before = coords(segments(scene.panels[0]!.marks));
-    model.setViewport([100, 200]);
-    model.setYViewport({ y: [100, 200], yRight: null });
+    expect(before[27]).toBeCloseTo(model.panels()[0]!.y.map(4), 3);
+    // Its leaves are categories, which do not zoom.
+    expect(() => setViewport(model, [100, 200])).toThrow("shows categories");
+    setViewport(model, { y: [0, 2] });
     const after = model.scene(estimateText);
-    // Axis tick margins may change; the normalized height is tied to the plot.
-    const g = segments(after.panels[0]!.marks);
-    const { plot } = after.panels[0]!;
-    expect(coords(g)[27]).toBeCloseTo(plot.y, 3);
+    const y = model.panels()[0]!.y;
+    expect(y.domain).toEqual([0, 2]);
+    // The second merge (row 1, height 2) is at the top of the view, the root above it.
+    const merged = coords(segments(after.panels[0]!.marks));
+    expect(merged[15]).toBeCloseTo(y.map(2), 3);
+    expect(merged[15]).toBeCloseTo(after.panels[0]!.plot.y, 3);
+    expect(merged[27]).toBeLessThan(after.panels[0]!.plot.y);
     model.setSize(1000, 800, 2);
     const larger = model.scene(estimateText);
-    expect(coords(segments(larger.panels[0]!.marks))).not.toEqual(before);
-    expect(coords(segments(larger.panels[0]!.marks))[27]).toBeCloseTo(larger.panels[0]!.plot.y, 3);
+    expect(coords(segments(larger.panels[0]!.marks))[15]).toBeCloseTo(
+      model.panels()[0]!.y.map(2),
+      3,
+    );
   });
+
+  it.each(["bottom", "top", "left", "right"] as const)(
+    "reads merge heights on side %s from the axis' ticks",
+    (side) => {
+      const across = side === "bottom" || side === "top";
+      const axis = across ? "y" : "x";
+      const { model, scene } = build({ marks: [dendrogram(linkage(), { ...options, side })] });
+      const { plot, axes } = scene.panels[0]!;
+      // Heights grow away from the leaves: the automatic domain descends
+      // with leaves at the top or right.
+      const domain = model.panels()[0]![axis].domain;
+      expect(domain).toEqual(side === "top" || side === "right" ? [4, 0] : [0, 4]);
+      const ticks = axes.find((a): a is AxisGuide => a.kind === "axis" && a.scale === axis)!;
+      const tick = (value: number) => ticks.ticks.find((t) => Number(t.label) === value)!.position;
+      const leaves = {
+        bottom: plot.y + plot.height,
+        top: plot.y,
+        left: plot.x,
+        right: plot.x + plot.width,
+      };
+      expect(tick(0)).toBeCloseTo(leaves[side], 3);
+      // Each merge's link across its children, at heights 1, 2, and 4.
+      const links = coords(segments(scene.panels[0]!.marks));
+      for (const [row, height] of [1, 2, 4].entries())
+        expect(links[(row * 3 + 1) * 4 + (across ? 1 : 0)]).toBeCloseTo(tick(height), 3);
+    },
+  );
+
+  it("places heights on an axis' domain as given, and keeps a descending one under views", () => {
+    const at = (config: Omit<ChartConfig, "marks">) => {
+      const { model, scene } = build({
+        marks: [dendrogram(linkage(), { ...options, side: "top" })],
+        ...config,
+      });
+      const links = coords(segments(scene.panels[0]!.marks));
+      return { model, y: model.panels()[0]!.y, links };
+    };
+    // An ascending domain runs as given: heights grow toward the leaves, on its ticks.
+    const given = at({ y: { domain: [0, 4] } });
+    expect(given.y.domain).toEqual([0, 4]);
+    expect(given.links[5]).toBeCloseTo(given.y.map(1), 3);
+    expect(given.links[5]).toBeGreaterThan(given.y.map(4));
+    // A view of the automatic, descending axis runs the same way.
+    const viewed = at({ interaction: { zoom: "xy" } });
+    setViewport(viewed.model, { y: [0, 2] });
+    const after = viewed.model.scene(estimateText);
+    const y = viewed.model.panels()[0]!.y;
+    expect(y.domain).toEqual([2, 0]);
+    const { plot } = after.panels[0]!;
+    const links = coords(segments(after.panels[0]!.marks));
+    // The second merge (height 2) is at the bottom of the view, the root below it.
+    expect(links[17]).toBeCloseTo(y.map(2), 3);
+    expect(links[17]).toBeCloseTo(plot.y + plot.height, 3);
+    expect(links[29]).toBeGreaterThan(plot.y + plot.height);
+  });
+
+  it.each(["top", "right"] as const)(
+    "descends only the axis of the panel whose tree on side %s asks for it",
+    (side) => {
+      const axis = side === "top" ? "y" : "x";
+      const { model } = build({
+        marks: [
+          dendrogram(linkage(), { ...options, side, panel: "tree" }),
+          point(table({ x: [0, 10], y: [0, 10] }), { x: "x", y: "y", panel: "points" }),
+        ],
+        panels: panels([{ id: "tree" }, { id: "points" }]),
+        x: { scope: "panel" },
+        y: { scope: "panel" },
+      });
+      const [tree, points] = model.panels();
+      expect(tree![axis].domain).toEqual([4, 0]);
+      expect(points![axis].domain[0]).toBeLessThan(points![axis].domain[1]);
+    },
+  );
 
   it("aligns clustermap leaves with matrix band centers and permits empty axes", () => {
     const { model, scene } = build(clustermap());

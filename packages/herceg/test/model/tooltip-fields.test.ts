@@ -1,6 +1,6 @@
 // Tooltip fields: data of the row a tooltip is at that marks do not plot,
 // in inspections (and so tooltips, hover events, and announcements).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";
 import { table } from "../../src/data/table.ts";
@@ -8,13 +8,23 @@ import { describeInspection } from "../../src/dom/tooltip.ts";
 import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { funnel } from "../../src/marks/funnel.ts";
+import { gauge } from "../../src/marks/gauge.ts";
 import { geopoint } from "../../src/marks/geopoint.ts";
 import { geoshape } from "../../src/marks/geoshape.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
+import { SoleRows } from "../../src/marks/layout-mark.ts";
 import { line } from "../../src/marks/line.ts";
+import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
+import { radar } from "../../src/marks/radar.ts";
+import { sankey } from "../../src/marks/sankey.ts";
+import { sunburst } from "../../src/marks/sunburst.ts";
+import { surface } from "../../src/marks/surface.ts";
+import { treemap } from "../../src/marks/treemap.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import type { ChartError } from "../../src/spec/errors.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
@@ -218,6 +228,120 @@ describe("tooltip fields", () => {
     ]);
   });
 
+  it("show fields of the rows a radar's values, a gauge's needle, and a surface's points are", () => {
+    const scores = table({
+      skill: ["speed", "power", "range"],
+      score: [5, 9, 7],
+      note: ["quick", "strong", "far"],
+    });
+    const first = (model: ChartModel) => {
+      const result = model.items!.result()!;
+      return model.inspectItem(result.item(0).key)!.points[0]!;
+    };
+    const tooltip = { fields: ["note"] as const };
+    const radars = build({
+      marks: [radar(scores, { category: "skill", value: "score", tooltip })],
+    });
+    const point = first(radars);
+    expect(point.fields?.map((f) => f.text)).toEqual([scores.value("note", point.row!)]);
+    const dial = build({ marks: [gauge(scores, { value: "score", tooltip })] });
+    expect(first(dial).fields?.map((f) => f.text)).toEqual(["far"]);
+    const grid = table({
+      x: [0, 1, 0, 1],
+      y: [0, 0, 1, 1],
+      z: [1, 2, 3, 4],
+      at: ["a", "b", "c", "d"],
+    });
+    const surfaces = build({
+      marks: [surface(grid, { x: "x", y: "y", z: "z", tooltip: { fields: ["at"] } })],
+    });
+    const sample = first(surfaces);
+    expect(sample.fields?.map((f) => f.text)).toEqual([grid.value("at", sample.row!)]);
+    expect(() =>
+      gauge(scores, { value: "score", tooltip: { fields: ["missing" as "note"] } }),
+    ).toThrow('gauge tooltip.fields[0]: no field "missing"');
+  });
+
+  it("show fields of the row a slice, a tree's node, or a link is, and none of items of several", () => {
+    const sales = table({
+      kind: ["k", "k", "m"],
+      item: ["a", "b", "c"],
+      units: [2, 3, 4],
+      note: ["one", "two", "three"],
+    });
+    const fieldsOf = (model: ChartModel, label: string) => {
+      const result = model.items!.result()!;
+      for (let i = 0; i < result.count; i++) {
+        const item = result.item(i);
+        if (item.label === label)
+          return model.inspectItem(item.key)!.points[0]!.fields?.map((f) => f.text);
+      }
+      throw new Error(`no item ${label}`);
+    };
+    const tooltip = { fields: ["note"] as const };
+    const pies = build({ marks: [pie(sales, { category: "kind", value: "units", tooltip })] });
+    expect(fieldsOf(pies, "m")).toEqual(["three"]);
+    expect(fieldsOf(pies, "k")).toBeUndefined();
+    const trees = build({
+      marks: [treemap(sales, { path: ["kind", "item"], value: "units", tooltip })],
+    });
+    expect(fieldsOf(trees, "k / b")).toEqual(["two"]);
+    expect(fieldsOf(trees, "k")).toBeUndefined();
+    const flows = table({
+      from: ["a", "a", "b"],
+      to: ["b", "c", "c"],
+      n: [5, 2, 3],
+      note: ["x", "y", "z"],
+    });
+    const sankeys = build({
+      marks: [sankey(flows, { source: "from", target: "to", value: "n", tooltip })],
+    });
+    expect(fieldsOf(sankeys, "a → c")).toEqual(["y"]);
+  });
+
+  it("find the one row of an item once for all items, not from its rows at each inspection", () => {
+    const n = 20_000;
+    const last = n - 1;
+    const rows = table({
+      kind: Array.from({ length: n }, (_, i) => (i === last ? "lone" : i % 2 ? "a" : "b")),
+      next: Array.from({ length: n }, (_, i) => (i === last ? "end" : "z")),
+      item: Array.from({ length: n }, (_, i) => `i${i % 100}`),
+      // The one row weighs enough to be drawn.
+      units: Array.from({ length: n }, (_, i) => (i === last ? n / 4 : 1)),
+      note: Array.from({ length: n }, (_, i) => (i === last ? "only" : "many")),
+    });
+    const tooltip = { fields: ["note"] as const };
+    const charts = [
+      pie(rows, { category: "kind", value: "units", tooltip }),
+      funnel(rows, { category: "kind", value: "units", tooltip }),
+      treemap(rows, { path: ["kind", "item"], value: "units", tooltip }),
+      sunburst(rows, { path: ["kind", "item"], value: "units", tooltip }),
+      sankey(rows, { source: "kind", target: "next", value: "units", tooltip }),
+    ];
+    const add = vi.spyOn(SoleRows.prototype, "add");
+    for (const mark of charts) {
+      const model = build({ marks: [mark] });
+      const result = model.items!.result()!;
+      const keys = new Map<string, string>();
+      for (let i = 0; i < result.count; i++) keys.set(result.item(i).label, result.item(i).key);
+      const rowsOf = vi.spyOn(result, "rowsOf");
+      add.mockClear();
+      const fieldsOf = (label: string) => {
+        const key = keys.get(label);
+        expect(key, `${mark.spec.type} ${label}`).toBeDefined();
+        return model.inspectItem(key!)!.points[0]!.fields?.map((f) => f.text);
+      };
+      for (let i = 0; i < 20; i++) {
+        expect(fieldsOf("a")).toBeUndefined();
+        expect(fieldsOf("lone")).toEqual(["only"]);
+      }
+      expect(rowsOf).not.toHaveBeenCalled();
+      // One pass over the rows (a link's row notes its two nodes too).
+      expect(add.mock.calls.length).toBeLessThanOrEqual(3 * n);
+    }
+    add.mockRestore();
+  });
+
   it("refuse fields the table does not have, or that hold shapes", () => {
     const data = latency();
     expect(() =>
@@ -269,5 +393,38 @@ describe("tooltip fields", () => {
       /marks\[0\]\.tooltip\.fields\[0\]\.lable: not a property/,
     );
     expect(() => loadSpec(spec({ fields: ["m"] }))).toThrow(/tooltip.fields\[0\]: no field "m"/);
+  });
+
+  it("are refused on marks whose items summarize rows, which hold no one value of a field", () => {
+    const summary = (mark: object) =>
+      ({
+        data: { d: { columns: { x: [1, 2, 3], y: [4, 5, 6], k: ["a", "b", "a"] } } },
+        marks: [{ ...mark, tooltip: { fields: ["k"] } }],
+      }) as unknown as ChartSpec;
+    const refusal = (mark: object) => {
+      try {
+        validateSpec(summary(mark));
+      } catch (error) {
+        const { code, path, message } = error as ChartError;
+        return { code, path, message };
+      }
+      return undefined;
+    };
+    expect(refusal({ type: "histogram", x: "x" })).toEqual({
+      code: "unsupported",
+      path: "marks[0].tooltip.fields",
+      message:
+        "marks[0].tooltip.fields: a histogram's bins count rows, so a field has no one value to read; brush them to select their rows, and read the rows' fields in a chart that draws them",
+    });
+    expect(refusal({ type: "boxplot", x: "k", y: "y" })?.message).toContain(
+      "a boxplot's boxes summarize rows, so a field has no one value to read",
+    );
+    expect(refusal({ type: "contour", x: "x", y: "y", color: "y" })?.message).toContain(
+      "a contour's bands summarize its grid",
+    );
+    // Even where unknown properties are only warned of.
+    expect(() =>
+      loadSpec(summary({ type: "violin", x: "k", y: "y" }), [], { unknown: "ignore" }),
+    ).toThrow("a violin's shapes summarize rows");
   });
 });

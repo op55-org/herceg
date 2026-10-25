@@ -14,7 +14,7 @@ import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
-import { errorBar } from "../../src/marks/errorbar.ts";
+import { errorbar } from "../../src/marks/errorbar.ts";
 import { boundFrame } from "../../src/marks/features/positions.ts";
 import { line } from "../../src/marks/line.ts";
 import type { Frame } from "../../src/marks/mark.ts";
@@ -48,6 +48,7 @@ import type {
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
+import { setViewport } from "../helpers/views.ts";
 
 const rows = table({
   t: [0, 1, 2, 3],
@@ -122,7 +123,7 @@ describe("marks of rows placed by coordinates", () => {
     expect(hi).toBeGreaterThanOrEqual(40);
     // Zooming y moves the values, not the lanes (scenes reuse their buffers).
     const first = points(scene, 0)[0]![1];
-    model.setYViewport({ y: [15, 25], yRight: null });
+    setViewport(model, { y: [15, 25], yRight: null });
     const zoomed = model.scene(estimateText);
     expect(points(zoomed, 1).map(([, y]) => y)).toEqual(
       [0.25, 0.25, 0.75, 0.75].map((share) => expect.closeTo(at(share), 3)),
@@ -243,7 +244,7 @@ describe("marks of rows placed by coordinates", () => {
     // A symmetric error bar's center is a field.
     expect(
       thrown(() =>
-        errorBar(rows, { x: "t", y: { fraction: { field: "lane" } }, yError: "px" } as never),
+        errorbar(rows, { x: "t", y: { fraction: { field: "lane" } }, yError: "px" } as never),
       ),
     ).toMatchObject({ code: "invalid-option", path: "y" });
   });
@@ -655,7 +656,7 @@ describe("positions off their axis, as the review found them", () => {
         line(shares, { x: { fraction: { field: "s" } }, y: "v" }),
       ],
     });
-    framed.model.setViewport([100, 200]);
+    setViewport(framed.model, [100, 200]);
     framed.model.scene(estimateText);
     expect(framed.model.yScale()!.domain[1]).toBeGreaterThanOrEqual(20);
   });

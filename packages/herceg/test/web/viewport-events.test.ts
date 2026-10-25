@@ -20,12 +20,13 @@ import { CONTRACT_ID } from "../helpers/contracts.ts";
 type Range = [number, number] | null;
 
 interface Action {
-  do: "setViewport" | "getViewport" | "update";
+  do: "setViewport" | "getViewport" | "update" | "load" | "remount";
   view?: unknown;
   panel?: string;
+  spec?: object;
   data?: object;
   events?: ViewportEventPayload[];
-  error?: { code: string; message: string };
+  error?: { code: string; path: string; panel?: string; message: string };
   returns?: { x: Range; y: Range; yRight: Range };
 }
 
@@ -89,6 +90,9 @@ describe("the viewport events fixture", () => {
         expect(["chart", "panel", "row", "column"]).toContain(scope);
       }
       let panels = drawn(testCase);
+      // The chart actions act on: a remount's, after one.
+      let mounted: Case = testCase;
+      let data: object = fixture.data;
       // Placeholders name one instance each among their scale's.
       const named = new Map<string, string>();
       let revision = 0;
@@ -103,10 +107,19 @@ describe("the viewport events fixture", () => {
           for (const axis of AXES) expect(isRange(action.returns![axis])).toBe(true);
           continue;
         }
-        const before = panels;
-        if (action.do === "update") {
+        let before = panels;
+        if (action.do === "update" || action.do === "load") {
           expect(keys(action)).toEqual(["data", "do", "events"]);
-          panels = drawn(testCase, action.data);
+          data = action.data!;
+          panels = drawn(mounted, data);
+        } else if (action.do === "remount") {
+          for (const key of keys(action)) expect(["do", "spec", "data", "events"]).toContain(key);
+          mounted = { ...mounted, spec: action.spec ?? mounted.spec };
+          data = action.data ?? data;
+          // Another chart: its instances, named afresh, and its revisions.
+          panels = before = drawn(mounted, data);
+          named.clear();
+          revision = 0;
         } else {
           expect(action.do).toBe("setViewport");
           for (const key of keys(action))
@@ -115,14 +128,24 @@ describe("the viewport events fixture", () => {
           expect("events" in action !== "error" in action).toBe(true);
         }
         if (action.error) {
-          expect(["invalid-option", "unknown-reference"]).toContain(action.error.code);
-          expect(action.error.message).toMatch(/^setViewport[^:]*: .+; .+/);
+          const { code, path, panel, message } = action.error;
+          expect(keys(action.error)).toEqual(
+            keys({ code, path, message, ...(panel !== undefined && { panel }) }),
+          );
+          expect(["invalid-option", "unknown-reference", "unsupported"]).toContain(code);
+          expect(["panel", ...AXES]).toContain(path);
+          expect(panel).toBe(action.panel);
+          expect(message).toMatch(/^setViewport[^:]*: .+; .+/);
           continue;
         }
         for (const event of action.events!) {
           expect(event.viewRevision).toBe(++revision);
           expect(CAUSES).toContain(event.cause);
-          expect(event.cause).toBe(action.do === "update" ? "data" : "api");
+          expect(event.cause).toBe(
+            { update: "data", load: "options", remount: "options", setViewport: "api" }[
+              action.do as string
+            ],
+          );
           expect(keys(event)).toEqual(
             keys({
               viewRevision: 0,

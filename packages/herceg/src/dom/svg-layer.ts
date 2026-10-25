@@ -91,7 +91,9 @@ export interface LayerParts {
 /** The parts of a new, empty layer. */
 function newParts(document: Document): LayerParts {
   const svg = element(document, "svg", { "aria-hidden": "true" });
-  svg.style.cssText = "position:absolute;left:0;top:0;overflow:visible";
+  // Left to right on any page: text is placed by its left or right end
+  // (text-anchor's start and end), as the chart lays it out.
+  svg.style.cssText = "position:absolute;left:0;top:0;overflow:visible;direction:ltr";
   const parts: LayerParts = {
     svg,
     defs: element(document, "defs"),

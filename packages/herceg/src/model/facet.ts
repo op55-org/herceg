@@ -12,18 +12,17 @@ import { aligned } from "../layout/place.ts";
 import { lineCount, type MeasureText } from "../layout/text.ts";
 import type { CustomSpec } from "../marks/custom.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
-import { type BandContext, type Bands, type Mark, usesY } from "../marks/mark.ts";
+import type { BandContext, Bands, Mark } from "../marks/mark.ts";
 import type { Series } from "../marks/series.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { FacetSpec, ScaleScope } from "../spec/spec.ts";
 import type { TextPaint } from "../style/style.ts";
 import type { MarkSeries } from "./inspect.ts";
 import {
   type AnnotatedPanel,
   across,
-  alongY,
   annotations,
-  checkBands,
   checkFit,
   checkLayouts,
   type DescribeAnnotation,
@@ -31,6 +30,7 @@ import {
   groupsOf,
   type HeaderPlace,
   headerGuides,
+  instanceIn,
   type LayoutConfig,
   leastHeight,
   type PanelAxis,
@@ -123,6 +123,10 @@ export class Facet implements PanelLayout {
     return [this.row, this.column].filter((field) => field !== undefined);
   }
 
+  instanceOf(...args: Parameters<typeof instanceIn>): string | undefined {
+    return instanceIn(...args);
+  }
+
   /**
    * Rejects marks that cannot be split by the fields, panels cannot draw
    * yet, and a y zoom over panels with y scales of their own. A layout mark
@@ -135,6 +139,13 @@ export class Facet implements PanelLayout {
     options: LayoutConfig = { marks: [] },
     layouts: readonly LayoutMark[] = [],
   ): LayoutMark[] {
+    if (options.panels)
+      throw new ChartError({
+        code: "unsupported",
+        path: "facet",
+        message:
+          "facet: a chart with panels cannot also split into facets; put each group's marks in a panel of the layout, or facet a chart of its own",
+      });
     let drawn: LayoutMark[] = [];
     if (layouts[0]) {
       const { type } = layouts[0].spec;
@@ -169,23 +180,6 @@ export class Facet implements PanelLayout {
         throw new Error(
           `chart ${axis}.scope: facets share a scale across the chart, by panel, row, or column; scopes naming layout grids or panels are for subplots`,
         );
-    checkBands(marks, options, scopes);
-    // A y zoom or pan moves both y scales through the same pixels, so every panel must share each.
-    const along = alongY(options.interaction);
-    if (along) {
-      const [path, does] = along;
-      if (scopes.y !== "chart")
-        throw new Error(
-          `chart interaction.${path}: panels with y scales of their own cannot ${does} along y yet; share y or ${does} along "x"`,
-        );
-      if (
-        scopes.yRight !== "chart" &&
-        marks.some((mark) => mark.spec.axis === "right" && usesY(mark))
-      )
-        throw new Error(
-          `chart interaction.${path}: panels with right y scales of their own (yRight.scope "${scopes.yRight}") cannot ${does} along y yet; share them or ${does} along "x"`,
-        );
-    }
     for (const mark of marks) {
       const { type } = mark.spec;
       if (!mark.table || mark.spec.facet === "repeat") continue;

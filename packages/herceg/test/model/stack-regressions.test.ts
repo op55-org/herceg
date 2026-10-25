@@ -10,6 +10,7 @@ import { offsetLayers } from "../../src/marks/stack-offset.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", ...config });
@@ -162,7 +163,7 @@ for (const stack of ["fill", "center", "wiggle"] as const) {
     const base = parts()[0]![0]!.y0;
     const totals = parts()[0]![0]!.stackTotals;
     model.setSize(650, 400, 1);
-    model.setViewport([0.2, 0.8]);
+    setViewport(model, [0.2, 0.8]);
     model.scene(estimateText);
     expect(parts()[0]![0]!.y).toBe(top);
     expect(parts()[0]![0]!.y0).toBe(base);

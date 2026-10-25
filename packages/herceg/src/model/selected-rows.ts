@@ -23,7 +23,8 @@
 //   heatmaps, whose weekdays and months no field holds.
 // - Histograms are brushed along their bins' axis, box plots, boxen marks,
 //   and violins along their categories' (the chart refuses the others; see
-//   `check` in row-selection.ts).
+//   `check` in row-selection.ts); contours along x, y, or both, selecting
+//   the rows of their grid there, and never by clicks.
 // - A lasso selects the rows whose drawn point is inside it: a point's
 //   center, a line's or area's vertex, a bar's end, a span's middle, a
 //   cell's center. Rows not drawn (a point missing a value it encodes, a
@@ -50,7 +51,7 @@ import type { BandList, Frame, Mark } from "../marks/mark.ts";
 import { rowField } from "../marks/row-bindings.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "../marks/series.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { ChartModel, DrawnPanel } from "./model.ts";
+import type { ChartModel, DrawnPanel, ScaleInstance } from "./model.ts";
 import { settle } from "./nearest.ts";
 
 /**
@@ -65,18 +66,24 @@ export interface Brushed {
 }
 
 /**
- * The panels a selection belongs to: those sharing the x scale `x` names
- * ("" for one every panel shares), or with `plane`, those of a map's or a
- * network's lasso, drawn on the plane of the state `x` names (see
- * `ItemViews`); and their keys.
+ * What a selection belongs to: the scale instances it has ranges on (an x
+ * brush's x, a y brush's y, a rectangle's or a lasso's both), and the
+ * panels drawing all of them, which show it; with `plane`, a map's or a
+ * network's lasso, on the plane its panels draw (an instance of x and one
+ * of y, see `ItemViews`).
  */
 export interface SelectionOwner {
-  readonly x: string;
+  readonly scales: readonly ScaleInstance[];
   readonly panels: readonly string[];
-  readonly plane?: true;
+  readonly plane?: true | undefined;
 }
 
-/** Marks whose rows a chart selects: those drawing rows along x and y, and rugs' ticks. */
+/** Whether a chart selects a mark's rows: marks drawing rows along x and y, and rugs' ticks. */
+export function selects(mark: Mark): boolean {
+  return SELECTS.has(mark.spec.type);
+}
+
+/** Marks whose rows a chart selects. */
 const SELECTS = new Set([
   "line",
   "area",
@@ -90,10 +97,23 @@ const SELECTS = new Set([
   "violin",
   "heatmap",
   "rug",
+  "contour",
+  "custom",
 ]);
 
+/** Marks whose drawing summarizes their rows (a contour's bands, of a grid), which clicks select none of. */
+const UNCLICKED = new Set(["contour"]);
+
 /** Marks drawing areas of the plot, whose rows are clicked inside them. */
-const REGIONS = new Set(["bar", "histogram", "boxplot", "boxen", "violin", "heatmap"]);
+const REGIONS = new Set([
+  "bar",
+  "histogram",
+  "boxplot",
+  "boxen",
+  "violin",
+  "heatmap",
+  "candlestick",
+]);
 
 /** Pixels from a point's edge a click may land and still select it. */
 const CLICK_SLOP = 4;
@@ -220,6 +240,12 @@ function readingsOf(mark: Mark): Reading[] {
       return [{ [along]: field(spec[along] as string) }];
     case "heatmap":
       return [{ x: cellPlace("x"), y: cellPlace("y") }];
+    // A contour's grid rows, at their x and y.
+    case "contour":
+      return [{ x: field(spec.x as string), y: field(spec.y as string) }];
+    // Custom marks of x and y fields place rows as points do.
+    case "custom":
+      return spec.x === undefined ? [] : byField(field(spec.x as string), list(spec.y!));
     default:
       return [];
   }
@@ -718,7 +744,8 @@ export function clickedRows(
     .find(({ key, plot }) => contains(plot, px, py) && !model.coveredAt(key, px, py));
   if (!panel) return undefined;
   const drawn = drawnIn(model, [panel]).filter(
-    (d) => !d.hidden && d.mark.table && tables.has(d.mark.table),
+    (d) =>
+      !d.hidden && d.mark.table && tables.has(d.mark.table) && !UNCLICKED.has(d.mark.spec.type),
   );
   // Marks painted later are on top: by zIndex, ties as declared.
   const z = ({ mark }: MarkParts) => mark.spec.zIndex ?? 0;
@@ -731,7 +758,7 @@ export function clickedRows(
     if (type === "bar") found = barHit(mark as unknown as BarMark, entry, px, py);
     else if (type === "histogram") found = binHit(mark as unknown as HistogramMark, entry, px, py);
     else if (REGIONS.has(type)) {
-      // Boxes, violins, and cells pick what is under the pointer at distance 0.
+      // Boxes, violins, candles, and cells pick what is under the pointer at distance 0.
       const hit = mark.pick?.(series, px, py, frame);
       if (hit?.distance === 0) found = hit;
     } else if (type === "rug") {
@@ -908,6 +935,7 @@ export function cursorRows(
   const panel = model.panels().find(({ key }) => key === cursor.panel);
   const drawn = panel && drawnIn(model, [panel]).find((d) => d.series.key === cursor.key);
   if (!drawn?.mark.table || !tables.has(drawn.mark.table) || drawn.hidden) return undefined;
+  if (UNCLICKED.has(drawn.mark.spec.type)) return undefined;
   const { position } = cursor;
   if (!(position >= 0 && position < drawn.series.length)) return undefined;
   if (!drawnRow(drawn, rowOf(drawn.series, position))) return undefined;

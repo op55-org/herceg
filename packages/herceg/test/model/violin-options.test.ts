@@ -72,10 +72,11 @@ describe("violin options", () => {
           ],
           ...(legacy.log ? { [legacy.horizontal ? "x" : "y"]: { type: "log", nice: false } } : {}),
         }).replace(/herceg-svg-\d+/g, "herceg-svg");
-        // These fixtures compare the drawing; generated descriptions are tested separately.
-        expect(svg.replace(/ aria-labelledby="[^"]*"|<desc[^>]*>[\s\S]*?<\/desc>/g, "")).toBe(
-          legacy.svg,
-        );
+        // These fixtures compare the drawing; generated descriptions are tested
+        // separately, and the root's direction came after them.
+        const drawing =
+          / aria-labelledby="[^"]*"|<desc[^>]*>[\s\S]*?<\/desc>| style="direction:ltr"/g;
+        expect(svg.replace(drawing, "")).toBe(legacy.svg);
       }
     },
   );

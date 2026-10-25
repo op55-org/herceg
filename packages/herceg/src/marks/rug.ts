@@ -25,6 +25,7 @@ import {
   type SummaryContext,
 } from "./mark.ts";
 import { lowerPosition, rowOf, type Series, TableCache, xExtent } from "./series.ts";
+import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
@@ -174,6 +175,7 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
   }
 
   geometry(series: readonly Series[], frame: Frame): SegmentGeometry[] {
+    refuseValues(frame.keyed, this.spec.type);
     const out: SegmentGeometry[] = [];
     const horizontal = this.tooltip === "y";
     const scale = frame[this.tooltip];
