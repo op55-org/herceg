@@ -125,8 +125,13 @@ interface Grid {
    * matrix's rows are), so that point p shows row p (`rowAt`).
    */
   row: Int32Array | undefined;
-  /** Grid points with values, in grid order. */
-  present: Uint32Array;
+  /**
+   * Grid points with values, in grid order; undefined when every grid
+   * point has one, as a full matrix's do (see `pointAt`).
+   */
+  present: Uint32Array | undefined;
+  /** How many grid points have values. */
+  held: number;
 }
 
 /**
@@ -141,8 +146,14 @@ interface Reading {
   u: Float64Array;
   v: Float64Array;
   w: Float64Array;
-  /** Grid points read, in grid order: those in the box, and grid points outside it at corners of cut cells drawn. */
-  readable: Uint32Array;
+  /**
+   * Grid points read, in grid order: those in the box, and grid points
+   * outside it at corners of cut cells drawn; undefined when that is every
+   * grid point (see `pointAt`).
+   */
+  readable: Uint32Array | undefined;
+  /** How many grid points are read. */
+  count: number;
   /** How many of them lie in the box. */
   inside: number;
   /** Grid points outside the box that are read: the normalized place of the cut cell's corner nearest each. */
@@ -239,9 +250,9 @@ export class SurfaceMark implements Layer3D {
     }
     let held = 0;
     for (let p = 0; p < row.length; p++) if (row[p]! >= 0) held++;
-    const present = new Uint32Array(held);
-    held = 0;
-    for (let p = 0; p < row.length; p++) if (row[p]! >= 0) present[held++] = p;
+    // Every grid point having a value, they need no list.
+    const present = held < row.length ? new Uint32Array(held) : undefined;
+    if (present) for (let p = 0, k = 0; p < row.length; p++) if (row[p]! >= 0) present[k++] = p;
     // Each row at its own grid point needs no index from points to rows.
     if (own) row = undefined;
     this.#grid = {
@@ -254,6 +265,7 @@ export class SurfaceMark implements Layer3D {
       ny,
       row,
       present,
+      held,
     };
     return this.#grid;
   }
@@ -274,13 +286,14 @@ export class SurfaceMark implements Layer3D {
           : undefined;
       return { field, kind, extent };
     }
-    // Heights of the grid points only: rows off the grid do not widen the axis.
+    // Heights of the grid points only: rows off the grid do not widen the
+    // axis, and on log axes only positive ones do.
     const z = table.numbers(spec.z as never);
-    const heights = Float64Array.from(grid.present, (p) => z[rowAt(grid, p)]!);
-    if (log) return { field, kind: "number", extent: positiveExtent(heights) };
     let lo = Number.POSITIVE_INFINITY;
     let hi = Number.NEGATIVE_INFINITY;
-    for (const h of heights) {
+    for (let k = 0; k < grid.held; k++) {
+      const h = z[rowAt(grid, pointAt(grid.present, k))]!;
+      if (log && !(h > 0 && h < Number.POSITIVE_INFINITY)) continue;
       if (h < lo) lo = h;
       if (h > hi) hi = h;
     }
@@ -300,8 +313,8 @@ export class SurfaceMark implements Layer3D {
     const tones = this.#tones();
     let lo = Number.POSITIVE_INFINITY;
     let hi = Number.NEGATIVE_INFINITY;
-    for (const p of grid.present) {
-      const t = tones[rowAt(grid, p)]!;
+    for (let k = 0; k < grid.held; k++) {
+      const t = tones[rowAt(grid, pointAt(grid.present, k))]!;
       if (t < lo) lo = t;
       if (t > hi) hi = t;
     }
@@ -383,20 +396,23 @@ export class SurfaceMark implements Layer3D {
     // Grid points the axes give no place (nonpositive values on log axes) are missing: NaN heights.
     // Usually every grid point with a value is in the box: they are read as they are held.
     let readable = present;
+    let own = false;
     let inside = 0;
-    for (const [k, p] of present.entries()) {
+    for (let k = 0; k < grid.held; k++) {
+      const p = pointAt(present, k);
       const i = p % nx;
       const j = (p - i) / nx;
       const height = az.place(z[rowAt(grid, p)]!);
       const placed = Number.isFinite(u[i]!) && Number.isFinite(v[j]!) && Number.isFinite(height);
       if (placed) w[p] = height;
       if (placed && inBox(u[i]!, v[j]!, height)) {
-        if (readable !== present) readable[inside] = p;
+        if (own) readable![inside] = p;
         inside++;
-      } else if (readable === present) {
+      } else if (!own) {
         // The first left out: those before it were all in.
-        readable = new Uint32Array(present.length);
-        readable.set(present.subarray(0, k));
+        own = true;
+        readable = new Uint32Array(grid.held);
+        for (let q = 0; q < k; q++) readable[q] = pointAt(present, q);
       }
     }
     // Corners outside the box of the cells cut at its walls: each triangle
@@ -449,11 +465,11 @@ export class SurfaceMark implements Layer3D {
           }
         }
       }
-    let read = readable === present ? present : readable.subarray(0, inside);
+    let read = own ? readable!.subarray(0, inside) : present;
     if (anchors.size > 0) {
       // In grid order, the points outside among those inside.
       read = new Uint32Array(inside + anchors.size);
-      read.set(readable.subarray(0, inside));
+      for (let k = 0; k < inside; k++) read[k] = pointAt(readable, k);
       let at = inside;
       for (const p of anchors.keys()) read[at++] = p;
       read.sort();
@@ -465,6 +481,7 @@ export class SurfaceMark implements Layer3D {
       v,
       w,
       readable: read,
+      count: inside + anchors.size,
       inside,
       anchors,
     });
@@ -772,7 +789,8 @@ export class SurfaceMark implements Layer3D {
     // Grid points inside the box become vertices; the rest are left out,
     // and cells reaching past the box are cut at its walls.
     vertexOf.fill(-1);
-    for (const p of present) {
+    for (let k = 0; k < grid.held; k++) {
+      const p = pointAt(present, k);
       const i = p % nx;
       const j = (p - i) / nx;
       const [a, b, c] = [u[i]!, v[j]!, w[p]!];
@@ -888,8 +906,7 @@ export class SurfaceMark implements Layer3D {
     const { axes, id, locale, view } = frame;
     const grid = this.#build();
     const reading = this.#reading(frame);
-    const { readable, anchors, u, v, w } = reading;
-    const count = readable.length;
+    const { readable, count, anchors, u, v, w } = reading;
     const { nx } = grid;
     const z = table.numbers(spec.z as never);
     const tones = spec.color === undefined ? undefined : table.numbers(spec.color as never);
@@ -915,7 +932,7 @@ export class SurfaceMark implements Layer3D {
     };
     const fields = [spec.x, spec.y, spec.z];
     const itemOf = (index: number): LayoutItem => {
-      const p = readable[index]!;
+      const p = pointAt(readable, index);
       const row = rowAt(grid, p);
       const data: Record<string, number | string> = {};
       const parts = fields.map((field, k) => {
@@ -943,7 +960,7 @@ export class SurfaceMark implements Layer3D {
         row,
       };
     };
-    const find = (p: number) => findRow(readable, count, p);
+    const find = (p: number) => (readable ? findRow(readable, count, p) : p < count ? p : -1);
     return {
       count,
       item: itemOf,
@@ -951,7 +968,7 @@ export class SurfaceMark implements Layer3D {
         const identity = identityIn(key, id);
         if (identity === undefined) return -1;
         for (let k = 0; k < count; k++)
-          if (rowAt(grid, readable[k]!) === identity - offset) return k;
+          if (rowAt(grid, pointAt(readable, k)) === identity - offset) return k;
         return -1;
       },
       itemOfCell(a, px, py) {
@@ -978,7 +995,7 @@ export class SurfaceMark implements Layer3D {
       summary: () => {
         const { nx, ny } = grid;
         const what = `Surface of ${spec.z} over ${spec.x} and ${spec.y}`;
-        const held = grid.present.length;
+        const { held } = grid;
         if (held === 0) return `${what}, with nothing to show.`;
         const cells = nx < 2 || ny < 2 ? " (one line of grid points makes no cells)" : "";
         const values = `${what}: ${nx} by ${ny} grid points, ${held} with values${cells}`;
@@ -986,10 +1003,10 @@ export class SurfaceMark implements Layer3D {
         const inBox =
           inside === held ? "" : `, ${inside === 0 ? "none" : inside} of them in the box`;
         if (count === 0) return `${values}${inBox}.`;
-        let highest = readable[0]!;
-        let lowest = readable[0]!;
+        let highest = pointAt(readable, 0);
+        let lowest = highest;
         for (let k = 0; k < count; k++) {
-          const p = readable[k]!;
+          const p = pointAt(readable, k);
           if (z[rowAt(grid, p)]! > z[rowAt(grid, highest)]!) highest = p;
           if (z[rowAt(grid, p)]! < z[rowAt(grid, lowest)]!) lowest = p;
         }
@@ -1144,6 +1161,11 @@ function ascending(values: ArrayLike<number>): boolean {
   for (let k = 0; k < values.length; k++)
     if (!(Number.isFinite(values[k]!) && (k === 0 || values[k]! > values[k - 1]!))) return false;
   return true;
+}
+
+/** The `k`-th of grid points `points`, in grid order: every grid point's when undefined. */
+function pointAt(points: Uint32Array | undefined, k: number): number {
+  return points ? points[k]! : k;
 }
 
 /** The row grid point `p` shows. */

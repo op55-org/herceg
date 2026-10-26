@@ -1753,7 +1753,11 @@ export class MountedChart implements Chart, ExportsScene {
 
   #size(): { width: number; height: number } {
     const { width, height } = this.#options;
-    const box = this.#containerSize ?? this.#remember();
+    // A chart of a given size has no container to measure, which would lay out the page.
+    const box =
+      width !== undefined && height !== undefined
+        ? { width, height }
+        : (this.#containerSize ?? this.#remember());
     return {
       width: Math.round(width ?? (box.width || 640)),
       height: Math.round(height ?? (box.height || DEFAULT_HEIGHT)),

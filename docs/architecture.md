@@ -3082,9 +3082,14 @@ WebGL2, and for surfaces the GPU path does not draw), or, standing in for a
 GPU painter that lost its context, draws nothing until it is back. A matrix
 table's coordinates, when they ascend, are the grid's as they are, and where
 each row is at its own grid point (a matrix's rows, or rows in grid order)
-no index from grid points to rows is kept: a 1001 by 1001 surface of a
-matrix keeps its grid points with values (4 bytes each) and their heights
-in the box (8), about 12 MB beside its 8 MB of values. Per
+no index from grid points to rows is kept. Nor is a list of the grid
+points with values when every grid point has one (a grid with holes keeps
+one, 4 bytes a point with a value). Each chart keeps each grid point's
+height in its box (8 bytes), exact, since points and lines lying on the
+surface, and cells at the box's walls, are decided by it: a 1001 by 1001
+surface of a matrix keeps about 8 MB beside its 8 MB of values (12.7 MB
+with the list; interleaved runs in Chrome, which also mount it in about
+143 ms instead of 174 ms). Per
 scene it projects each grid point once, then writes a face per cell with
 three or four corners holding values; cells reaching past the box (a
 configured domain narrower than the data) are cut at its walls triangle by
@@ -3682,7 +3687,10 @@ assistive technology. Pointer feedback only touches the overlay, so hovering
 never repaints data. Scheduled frames avoid reading layout, which would force
 the browser to lay out the previous frame's DOM writes: the container size is
 measured when a `ResizeObserver` reports a change (layout is current then),
-for the first frame, and on explicit `render()` and `toSVG()` calls. Legend
+for the first frame (not at all when the options give both `width` and
+`height`), and on explicit `render()` and `toSVG()` calls; the interaction
+controller reads the chart's place only for input that arrived before it
+loaded. Legend
 entries are rewritten only when what they show changes, and the data summary
 for assistive technology only when the data or options change, not when the
 view zooms or pans.

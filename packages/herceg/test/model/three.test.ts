@@ -338,6 +338,22 @@ describe("surfaces", () => {
     }
   });
 
+  it("cuts cells at the walls however far past them heights lie", () => {
+    const cliff = table({ x: [0, 1, 0, 1], y: [0, 0, 1, 1], z: [0, 1e300, 0, 1e300] });
+    const { scene } = build({
+      marks: [surface(cliff, { x: "x", y: "y", z: "z" })],
+      z: { domain: [0, 1] },
+    });
+    const mark = faces(scene);
+    expect(mark.count).toBe(2);
+    const plot = scene.panels[0]!.plot;
+    for (let c = 0; c < mark.starts[mark.count]!; c++) {
+      const v = mark.corners[c]!;
+      expect(Number.isFinite(mark.vertices[v * 2]!)).toBe(true);
+      expect(mark.vertices[v * 2 + 1]).toBeLessThanOrEqual(plot.y + plot.height);
+    }
+  });
+
   it("cuts each triangle of a cell, not the cell, so cuts keep to the surface", () => {
     // High corners on the diagonal a-c, low ones off it: below z = 1 lie two corners of triangles.
     const saddle = table({ x: [0, 1, 1, 0], y: [0, 0, 1, 1], z: [2, 0, 2, 0] });
@@ -514,6 +530,34 @@ describe("drawing order", () => {
         return mark.starts[found + 1]! - mark.starts[found]! === 1;
       });
       expect(shown).toEqual(elevation > 0 ? [true, false] : [false, true]);
+    }
+  });
+
+  it("shows points lying on a surface, from above and below", () => {
+    // Heights a float32 would round up (0.3) and down (0.7): the surface's
+    // are exact, so it is never in front of points on it.
+    for (const height of [0.3, 0.7]) {
+      const flat = table({ x: [0, 1, 0, 1], y: [0, 0, 1, 1], z: [height, height, height, height] });
+      const on = table({ x: [0.5], y: [0.5], z: [height] });
+      for (const elevation of [30, -30]) {
+        const { scene, model } = build({
+          marks: [
+            surface(flat, { x: "x", y: "y", z: "z" }),
+            point3d(on, { x: "x", y: "y", z: "z" }),
+          ],
+          camera: { azimuth: -60, elevation },
+          z: { domain: [-1, 1] },
+        });
+        const mark = faces(scene);
+        const plot = scene.panels[0]!.plot;
+        const view = new View(model.getCamera()!, boxRoom(plot, model.theme));
+        const [ax, ay, az] = joinLayers3D(model.config.marks as never, model.config).axes();
+        const out = new Float64Array(2);
+        view.project(ax.place(0.5), ay.place(0.5), az.place(height), out, 0);
+        const found = new FaceIndex(mark, plot).find(out[0]!, out[1]!);
+        // A disc has one corner.
+        expect(mark.starts[found + 1]! - mark.starts[found]!).toBe(1);
+      }
     }
   });
 });

@@ -396,6 +396,8 @@ export class Interaction {
    * were not there to take them: those are dropped, as hovers are not.
    */
   play(held: readonly Event[]): void {
+    // Read only for input held: measuring lays out the chart just drawn.
+    if (held.length === 0) return;
     const controlled = !!this.#host.model.items?.asked().length;
     const rect = this.#host.root.getBoundingClientRect();
     for (const event of held) {
