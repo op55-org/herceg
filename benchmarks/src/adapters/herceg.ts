@@ -4,6 +4,7 @@ import {
   type Chart,
   candlestick,
   createChart,
+  fromMatrix,
   heatmap,
   histogram,
   line,
@@ -134,6 +135,12 @@ function barColumns(data: CategoryData) {
 
 function candleColumns(data: CandleData) {
   return { t: time(data.x), o: data.open, h: data.high, l: data.low, c: data.close };
+}
+
+// A surface's grid as a matrix table: its x and y values and the heights
+// at each pair, as Plotly takes them.
+function surfaceTable(data: SurfaceData) {
+  return fromMatrix({ x: data.x, y: data.y, z: data.z }, { x: "x", y: "y" });
 }
 
 // A surface's grid points as one row each, as a long table gives them.
@@ -322,9 +329,9 @@ export const adapter: Adapter = {
     },
   },
   surface: {
-    prepare: (data) => table(surfaceColumns(data)),
+    prepare: surfaceTable,
     create(container, data, options) {
-      const source = table(surfaceColumns(data));
+      const source = surfaceTable(data);
       const chart = watched(
         createChart(container, {
           ...REFUSALS,

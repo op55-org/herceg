@@ -8,6 +8,7 @@
 // in the data are holes in the surface. Cells are colored by the mean of
 // their corners' values and shaded by how they face a light.
 
+import { matrixOf } from "../data/matrix.ts";
 import type { NumberField, PositionField, Schema, Table } from "../data/table.ts";
 import { symbolPath } from "../draw/symbols.ts";
 import { formatNumber } from "../format/format.ts";
@@ -118,8 +119,12 @@ interface Grid {
   yNames: readonly string[] | undefined;
   nx: number;
   ny: number;
-  /** Per grid point (y * nx + x): the row whose value it shows, or -1. */
-  row: Int32Array;
+  /**
+   * Per grid point (y * nx + x): the row whose value it shows, or -1;
+   * undefined when each row is at its own grid point, row r at r (a
+   * matrix's rows are), so that point p shows row p (`rowAt`).
+   */
+  row: Int32Array | undefined;
   /** Grid points with values, in grid order. */
   present: Uint32Array;
 }
@@ -223,10 +228,12 @@ export class SurfaceMark implements Layer3D {
         `surface x, y: expected at most ${MAX_GRID_POINTS.toLocaleString("en-US")} grid points; ${nx.toLocaleString("en-US")} values of "${spec.x}" by ${ny.toLocaleString("en-US")} of "${spec.y}" make ${(nx * ny).toLocaleString("en-US")}; bin or aggregate the rows first`,
       );
     const z = table.numbers(spec.z as never);
-    const row = new Int32Array(nx * ny).fill(-1);
+    let row: Int32Array | undefined = new Int32Array(nx * ny).fill(-1);
+    let own = table.length === nx * ny;
     for (let r = 0; r < table.length; r++) {
       const i = x.index(r);
       const j = y.index(r);
+      own &&= j * nx + i === r;
       if (i < 0 || j < 0 || !Number.isFinite(z[r]!)) continue;
       row[j * nx + i] = r;
     }
@@ -235,6 +242,8 @@ export class SurfaceMark implements Layer3D {
     const present = new Uint32Array(held);
     held = 0;
     for (let p = 0; p < row.length; p++) if (row[p]! >= 0) present[held++] = p;
+    // Each row at its own grid point needs no index from points to rows.
+    if (own) row = undefined;
     this.#grid = {
       version: table.version,
       xs: x.values,
@@ -267,7 +276,7 @@ export class SurfaceMark implements Layer3D {
     }
     // Heights of the grid points only: rows off the grid do not widen the axis.
     const z = table.numbers(spec.z as never);
-    const heights = Float64Array.from(grid.present, (p) => z[grid.row[p]!]!);
+    const heights = Float64Array.from(grid.present, (p) => z[rowAt(grid, p)]!);
     if (log) return { field, kind: "number", extent: positiveExtent(heights) };
     let lo = Number.POSITIVE_INFINITY;
     let hi = Number.NEGATIVE_INFINITY;
@@ -292,7 +301,7 @@ export class SurfaceMark implements Layer3D {
     let lo = Number.POSITIVE_INFINITY;
     let hi = Number.NEGATIVE_INFINITY;
     for (const p of grid.present) {
-      const t = tones[grid.row[p]!]!;
+      const t = tones[rowAt(grid, p)]!;
       if (t < lo) lo = t;
       if (t > hi) hi = t;
     }
@@ -334,12 +343,12 @@ export class SurfaceMark implements Layer3D {
   /** A cell's color value: the mean of its `m` corners' (grid points) tones; NaN when one is missing. */
   #cellTone(grid: Grid, tones: ArrayLike<number>, corners: Int32Array, m: number): number {
     let tone = 0;
-    for (let k = 0; k < m; k++) tone += tones[grid.row[corners[k]!]!]!;
+    for (let k = 0; k < m; k++) tone += tones[rowAt(grid, corners[k]!)]!;
     let mean = tone / m;
     if (!Number.isFinite(mean)) {
       // Finite values near the largest overflow when summed: average their quarters.
       let quarters = 0;
-      for (let k = 0; k < m; k++) quarters += tones[grid.row[corners[k]!]!]! / 4;
+      for (let k = 0; k < m; k++) quarters += tones[rowAt(grid, corners[k]!)]! / 4;
       mean = (quarters / m) * 4;
     }
     return mean;
@@ -357,7 +366,7 @@ export class SurfaceMark implements Layer3D {
     const key = `${grid.version}|${axesKey(axes)}`;
     const held = readings.get(frame);
     if (held?.key === key) return held;
-    const { nx, ny, present, row } = grid;
+    const { nx, ny, present } = grid;
     const [ax, ay, az] = axes;
     const place = (
       axis: (typeof axes)[number],
@@ -378,7 +387,7 @@ export class SurfaceMark implements Layer3D {
     for (const [k, p] of present.entries()) {
       const i = p % nx;
       const j = (p - i) / nx;
-      const height = az.place(z[row[p]!]!);
+      const height = az.place(z[rowAt(grid, p)]!);
       const placed = Number.isFinite(u[i]!) && Number.isFinite(v[j]!) && Number.isFinite(height);
       if (placed) w[p] = height;
       if (placed && inBox(u[i]!, v[j]!, height)) {
@@ -898,7 +907,7 @@ export class SurfaceMark implements Layer3D {
     const coordinate = (k: number, p: number): number | string => {
       const i = p % nx;
       const j = (p - i) / nx;
-      if (k === 2) return z[grid.row[p]!]!;
+      if (k === 2) return z[rowAt(grid, p)]!;
       const names = k === 0 ? grid.xNames : grid.yNames;
       const values = k === 0 ? grid.xs : grid.ys;
       const at = k === 0 ? i : j;
@@ -907,7 +916,7 @@ export class SurfaceMark implements Layer3D {
     const fields = [spec.x, spec.y, spec.z];
     const itemOf = (index: number): LayoutItem => {
       const p = readable[index]!;
-      const row = grid.row[p]!;
+      const row = rowAt(grid, p);
       const data: Record<string, number | string> = {};
       const parts = fields.map((field, k) => {
         const value = coordinate(k, p);
@@ -941,7 +950,8 @@ export class SurfaceMark implements Layer3D {
       indexOf(key) {
         const identity = identityIn(key, id);
         if (identity === undefined) return -1;
-        for (let k = 0; k < count; k++) if (grid.row[readable[k]!] === identity - offset) return k;
+        for (let k = 0; k < count; k++)
+          if (rowAt(grid, readable[k]!) === identity - offset) return k;
         return -1;
       },
       itemOfCell(a, px, py) {
@@ -980,11 +990,11 @@ export class SurfaceMark implements Layer3D {
         let lowest = readable[0]!;
         for (let k = 0; k < count; k++) {
           const p = readable[k]!;
-          if (z[grid.row[p]!]! > z[grid.row[highest]!]!) highest = p;
-          if (z[grid.row[p]!]! < z[grid.row[lowest]!]!) lowest = p;
+          if (z[rowAt(grid, p)]! > z[rowAt(grid, highest)]!) highest = p;
+          if (z[rowAt(grid, p)]! < z[rowAt(grid, lowest)]!) lowest = p;
         }
         const where = (p: number) =>
-          `${axes[2]!.format(z[grid.row[p]!]!)} at ${[0, 1]
+          `${axes[2]!.format(z[rowAt(grid, p)]!)} at ${[0, 1]
             .map((k) => {
               const value = coordinate(k, p);
               return typeof value === "string" ? value : axes[k]!.format(value);
@@ -1087,6 +1097,18 @@ function gridAxis(
       index: (row) => (codes[row]! >= 0 ? place[codes[row]!]! : -1),
     };
   }
+  // A matrix's coordinates in order are its grid's, read without a value per row.
+  const matrix = matrixOf(table);
+  const across = field === matrix?.x;
+  const along = across ? matrix!.xs : field === matrix?.y ? matrix.ys : undefined;
+  if (along && ascending(along)) {
+    const nx = matrix!.xs.length;
+    return {
+      values: Float64Array.from(along),
+      names: undefined,
+      index: across ? (row) => row % nx : (row) => Math.floor(row / nx),
+    };
+  }
   const numbers = table.numbers(field as never);
   const finite = new Float64Array(table.length);
   let n = 0;
@@ -1115,6 +1137,18 @@ function gridAxis(
       return values[lo] === value ? lo : -1;
     },
   };
+}
+
+/** Whether `values` are finite and each greater than the one before. */
+function ascending(values: ArrayLike<number>): boolean {
+  for (let k = 0; k < values.length; k++)
+    if (!(Number.isFinite(values[k]!) && (k === 0 || values[k]! > values[k - 1]!))) return false;
+  return true;
+}
+
+/** The row grid point `p` shows. */
+function rowAt(grid: Grid, p: number): number {
+  return grid.row ? grid.row[p]! : p;
 }
 
 /**

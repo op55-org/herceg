@@ -99,8 +99,8 @@ the fields `x` and `y` name hold its coordinates, one per column of the
 matrix and one per row, and every other field a value at each pair, in
 rows of x (the i-th x and j-th y at j × the number of x values + i, as a
 NumPy array of shape (y, x) flattens). The table's rows are the pairs in
-that order; contours read the matrix as it is, and other readers (a
-heatmap, a surface) get a value of x and y per row, made when first read.
+that order; contours and surfaces read the matrix as it is, and other
+readers (a heatmap) get a value of x and y per row, made when first read.
 Appending, dropping, or resetting rows, or replacing coordinates, leaves an
 ordinary table; replacing values keeps the matrix.
 
@@ -2622,7 +2622,9 @@ point, the last with a value wins. Each cell between four grid points with
 values is drawn as two triangles (split along the diagonal from its lowest x
 and y corner), a cell with three as their triangle, so missing values leave
 holes. Grid spacing may be irregular; rows not on a grid (scattered samples)
-are not triangulated: bin or aggregate them into one first. A surface holds
+are not triangulated: bin or aggregate them into one first. A matrix table
+(`fromMatrix`) gives a surface its grid without a row of x and y per grid
+point. A surface holds
 at most 1,048,576 grid points (`MAX_GRID_POINTS`), and without a GPU
 painter (SVG, PDF, and PNG exports, the SVG renderer, a browser without
 WebGL2, a wireframe or translucent surface) draws at most 250,000

@@ -14,7 +14,8 @@ export function stepPolyline(
   curve: "step" | "step-before" | "step-after",
   out: Polyline,
 ): void {
-  out.reset();
+  // A corner between each two points, two for "step".
+  out.reset(source.count * (curve === "step" ? 3 : 2));
   const c = source.coords;
   for (let run = 0; run < source.starts.length; run++) {
     out.break();
@@ -132,7 +133,7 @@ export function pushSegment(
  * data with narrow segments, which stay straight.
  */
 export function monotonePolyline(source: Polyline, out: Polyline): void {
-  out.reset();
+  out.reset(source.count);
   const c = source.coords;
   for (let run = 0; run < source.starts.length; run++) {
     out.break();

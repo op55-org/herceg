@@ -15,6 +15,9 @@ export type RenderTooltip = (inspection: Inspection) => string | Node | null | u
  */
 export class Tooltip {
   readonly element: HTMLDivElement;
+  /** The theme the box and its rows are styled with, and each row's swatch color. */
+  #theme: Theme | undefined;
+  #colors: string[] = [];
 
   constructor(document: Document) {
     this.element = document.createElement("div");
@@ -31,32 +34,51 @@ export class Tooltip {
     bounds: { width: number; height: number },
   ) {
     const { element } = this;
-    element.style.background = theme.style.tooltip.fill;
-    element.style.color = theme.text;
-    element.style.border = `1px solid ${theme.style.tooltip.stroke}`;
-    element.style.boxShadow = "0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.12)";
-    element.style.font = `${theme.fontSize}px ${theme.font}`;
-    element.replaceChildren();
     const document = element.ownerDocument;
-    const header = document.createElement("div");
-    header.textContent = inspection.label;
-    // Line breaks in labels break the tooltip's lines too.
-    header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
-    element.append(header);
-    for (const point of inspection.points) {
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
-      const swatch = document.createElement("span");
-      swatch.style.cssText = `width:8px;height:8px;border-radius:2px;background:${point.color};flex:none`;
-      const label = document.createElement("span");
-      label.textContent = point.label;
-      label.style.flex = "1";
-      const value = document.createElement("span");
-      value.textContent = point.text;
-      value.style.cssText = "font-weight:600;margin-left:12px";
-      row.append(swatch, label, value);
-      element.append(row);
+    // Rows are kept from one move to the next and only what changed in them
+    // is written: rebuilding them costs Firefox about 2 ms per move.
+    if (theme !== this.#theme) {
+      this.#theme = theme;
+      element.style.background = theme.style.tooltip.fill;
+      element.style.color = theme.text;
+      element.style.border = `1px solid ${theme.style.tooltip.stroke}`;
+      element.style.boxShadow =
+        "0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.12)";
+      element.style.font = `${theme.fontSize}px ${theme.font}`;
+      element.replaceChildren();
+      this.#colors = [];
     }
+    let header = element.firstElementChild as HTMLDivElement | null;
+    if (!header) {
+      header = document.createElement("div");
+      // Line breaks in labels break the tooltip's lines too.
+      header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
+      element.append(header);
+    }
+    write(header, inspection.label);
+    const { points } = inspection;
+    while (element.childElementCount > points.length + 1) element.lastElementChild!.remove();
+    this.#colors.length = points.length;
+    points.forEach((point, i) => {
+      let row = element.children[i + 1];
+      if (!row) {
+        row = document.createElement("div");
+        (row as HTMLDivElement).style.cssText =
+          "display:flex;align-items:center;gap:6px;white-space:pre";
+        const swatch = document.createElement("span");
+        swatch.style.cssText = "width:8px;height:8px;border-radius:2px;flex:none";
+        const label = document.createElement("span");
+        label.style.flex = "1";
+        const value = document.createElement("span");
+        value.style.cssText = "font-weight:600;margin-left:12px";
+        row.append(swatch, label, value);
+        element.append(row);
+      }
+      const [swatch, label, value] = row.children as unknown as HTMLSpanElement[];
+      if (this.#colors[i] !== point.color) swatch!.style.background = this.#colors[i] = point.color;
+      write(label!, point.label);
+      write(value!, point.text);
+    });
     element.style.display = "block";
     // Right of the pointer, flipped when it would overflow the chart.
     const width = element.offsetWidth;
@@ -70,6 +92,10 @@ export class Tooltip {
   hide() {
     this.element.style.display = "none";
   }
+}
+
+function write(element: HTMLElement, text: string): void {
+  if (element.textContent !== text) element.textContent = text;
 }
 
 /** Plain-text version of an inspection for screen reader announcements. */

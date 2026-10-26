@@ -1,4 +1,4 @@
-import { rectMarkup } from "../draw/markup.ts";
+import { rectMarkup, SvgPath } from "../draw/markup.ts";
 import { canvasRasterUrl } from "../render/canvas.ts";
 import { clipId, cutToChart, gridElement, guidesMarkup, underMarkup } from "../render/svg.ts";
 import { eachPainted } from "../scene/paint.ts";
@@ -175,7 +175,10 @@ export class SvgLayer {
     nodes = {
       clip: this.#clipPath(`${this.#id}-clip-${this.#clips++}`),
       cut: "",
-      content: element(this.#document, "g"),
+      // The chart finds what the pointer is over itself. Left to the
+      // browser, a pointer over a line of 3,000 points costs Firefox a few
+      // milliseconds per move to test against its stroke.
+      content: element(this.#document, "g", { "pointer-events": "none" }),
       marks: new Map(),
       grids: new Map(),
     };
@@ -296,6 +299,16 @@ export class SvgLayer {
     };
     if (marks) {
       const chart = `${this.#id}-clip-chart`;
+      // What a plot of one rectangle cuts is cut by a shape in the view box
+      // rather than a clip path: Firefox works out the exact stroked bounds
+      // of what a clip path cuts whenever anything in the chart changes
+      // (about 3 ms for a line of 3,000 points, on every pointer move).
+      // Plots with insets over them cut through their clip paths.
+      const { x, y, width, height } = panel.plot;
+      const plot = new SvgPath();
+      plot.rect(x, y, width, height);
+      const cut = (id: string | undefined) =>
+        id === nodes.clip.id && !panel.visible ? `path("${plot.d}") view-box` : id && `url(#${id})`;
       eachPainted(
         panel,
         (batch) => {
@@ -310,8 +323,7 @@ export class SvgLayer {
           place(entry);
         },
         (mark) => {
-          const id = clipId(mark, nodes.clip.id, nodes.keep?.clip.id, chart);
-          const clip = id && `url(#${id})`;
+          const clip = cut(clipId(mark, nodes.clip.id, nodes.keep?.clip.id, chart));
           const old = nodes.marks.get(mark.key);
           const elements = elementsOf(mark, context, clip);
           const entry = elements

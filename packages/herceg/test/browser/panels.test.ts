@@ -58,8 +58,11 @@ function groups(layer: SvgLayer) {
   const painted = [...layer.svg.children].filter((node) => node.tagName === "g").slice(1, -2);
   const clips = [...layer.svg.querySelectorAll("clipPath")];
   const rects = painted.map((group) => {
-    const cut = group.querySelector("[clip-path]");
-    const id = cut && /url\(#(.+)\)/.exec(cut.getAttribute("clip-path")!)![1];
+    const cut = group.querySelector("[clip-path]")?.getAttribute("clip-path") ?? "";
+    // A plot of one rectangle is cut by a shape in the view box, others through a clip path.
+    const shape = /^path\("M([\d.]+) /.exec(cut);
+    if (shape) return Number(shape[1]);
+    const id = /url\(#(.+)\)/.exec(cut)?.[1];
     const clip = clips.find((node) => node.id === id);
     return clip ? Number(clip.querySelector("rect")!.getAttribute("x")) : undefined;
   });

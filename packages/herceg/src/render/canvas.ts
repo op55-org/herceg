@@ -51,7 +51,10 @@ export function paintCanvas(
     context.fillStyle = color;
     for (const { x, y, width, height } of rects) context.fillRect(x, y, width, height);
   };
+  // Paths stroked or filled this frame (grid batches and geometry).
+  let paths = 0;
   const grid = (panel: Panel) => (batch: Panel["grids"][number]) => {
+    paths++;
     const paint = batch.paint ?? theme.style.grid;
     const c = gridLines(batch, panel.plot, ratio);
     context.beginPath();
@@ -82,6 +85,7 @@ export function paintCanvas(
     eachPainted(panel, grid(panel), (mark) => {
       const paint = mark.draw.canvas;
       if (!paint) return;
+      paths++;
       const clip = clipOf(mark);
       // Cut to the plot (where insets over it leave it visible), or for
       // the rest, off those insets; the canvas' edges cut it anyway.
@@ -101,6 +105,16 @@ export function paintCanvas(
       context.restore();
     });
   }
+  // Firefox stops accelerating a canvas once, in over 30% of its frames
+  // (from its tenth on), most draws uploaded a new path (DrawTargetWebgl's
+  // usage profile), and rasterizes it on the main thread from then on. A
+  // chart whose lines change every frame (streaming, zooming, new data)
+  // draws little else here, axes and text being SVG: 15 lines of 3,000
+  // points went from about 1 ms a frame to 20. Firefox counts a solid fill
+  // as an ordinary draw, so two transparent ones per path painted (an area
+  // fills and strokes) keep every frame under that share.
+  context.fillStyle = "#0000";
+  for (let i = 0; i < 2 * paths; i++) context.fillRect(0, 0, 1, 1);
 }
 
 /** Raster pixels as a PNG data URL, encoded by the browser through a canvas. */

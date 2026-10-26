@@ -41,14 +41,21 @@ const options = (clip: Clip | undefined, renderer: "svg" | "canvas") => ({
   ],
 });
 
-/** The clip paths cutting `node`: its own and its groups'. */
+/** What cuts `node`, its own and its groups': clip paths' ids, or shapes as given. */
 const cuts = (node: Element) => {
   const ids: string[] = [];
   for (let at: Element | null = node; at && at.tagName !== "svg"; at = at.parentElement) {
     const clip = at.getAttribute("clip-path");
-    if (clip) ids.push(clip.slice(5, -1));
+    if (clip) ids.push(clip.startsWith("url(#") ? clip.slice(5, -1) : clip);
   }
   return ids;
+};
+
+/** The shape a plot of one rectangle cuts the SVG layer's data with, to a tenth of a pixel. */
+const plotShape = (chart: ReturnType<typeof createChart>) => {
+  const { x, y, width, height } = chart.getPanels()[0]!.plot;
+  const [a, b, w, h, back] = [x, y, width, height, -width].map((v) => Math.round(v * 10) / 10);
+  return `path("M${a} ${b}h${w}v${h}h${back}Z") view-box`;
 };
 
 describe("clip", () => {
@@ -56,7 +63,9 @@ describe("clip", () => {
     const fill = '[fill="#ff0000"]';
     const plotted = createChart(host, options(undefined, "svg"));
     const [plot] = cuts(host.querySelector(fill)!);
-    expect(plot).toMatch(/-clip-\d+$/);
+    expect(plot).toBe(plotShape(plotted));
+    // The chart finds what the pointer is over itself: the browser need not test the data.
+    expect(getComputedStyle(host.querySelector(fill)!).pointerEvents).toBe("none");
     plotted.update(options(false, "svg"));
     plotted.render();
     expect(cuts(host.querySelector(fill)!)).toEqual([]);
@@ -84,7 +93,7 @@ describe("clip", () => {
     expect(cuts(host.querySelector('[fill="#00aa00"]')!)).toEqual([]);
     chart.update({ renderer: "svg", legend: false, marks: [labels("plot")] });
     chart.render();
-    expect(cuts(host.querySelector('[fill="#00aa00"]')!)[0]).toMatch(/-clip-\d+$/);
+    expect(cuts(host.querySelector('[fill="#00aa00"]')!)[0]).toBe(plotShape(chart));
     chart.destroy();
   });
 
