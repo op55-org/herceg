@@ -3087,9 +3087,7 @@ points with values when every grid point has one (a grid with holes keeps
 one, 4 bytes a point with a value). Each chart keeps each grid point's
 height in its box (8 bytes), exact, since points and lines lying on the
 surface, and cells at the box's walls, are decided by it: a 1001 by 1001
-surface of a matrix keeps about 8 MB beside its 8 MB of values (12.7 MB
-with the list; interleaved runs in Chrome, which also mount it in about
-143 ms instead of 174 ms). Per
+surface of a matrix keeps about 8.7 MB beside its 8 MB of values. Per
 scene it projects each grid point once, then writes a face per cell with
 three or four corners holding values; cells reaching past the box (a
 configured domain narrower than the data) are cut at its walls triangle by
@@ -3228,7 +3226,7 @@ the depth test lets it show.
 
 On the benchmark machine (see `docs/comparison.md`), turning a 1001 by 1001
 surface takes under half a millisecond of JavaScript a frame and keeps 60
-frames a second when turned every frame; mounting it takes about 0.18 s.
+frames a second when turned every frame; mounting it takes about 0.15 s.
 
 ## Dendrograms
 
