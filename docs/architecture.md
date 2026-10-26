@@ -139,9 +139,9 @@ There are no per-row objects anywhere in the pipeline.
   arrays as given and gives the table's coordinate fields deferred columns:
   their buffers (a value per row, `nx` × `ny` each) are made the first time
   something reads them, and until then `byteLength` counts the arrays they
-  come from (`Column.deferred`). Contours read the matrix itself
-  (`matrixOf`), so a contour of a million grid points holds its values and
-  two arrays of a thousand. The matrix is kept in a `WeakMap` by table, not
+  come from (`Column.deferred`). Contours and surfaces read the matrix
+  itself (`matrixOf`), so a contour or surface of a million grid points
+  holds its values and two arrays of a thousand. The matrix is kept in a `WeakMap` by table, not
   in the table, and forgotten when rows are appended, dropped, or reset or
   the coordinates replaced (a subscription), after which the table is an
   ordinary one; tables do not import the module, so line charts do not
@@ -1066,7 +1066,13 @@ points does shorten the path, so dash patterns can shift.
 
 Output is at most four points per device-pixel column for each unbroken run,
 before step curves add a corner per point. That bounds rendering cost, SVG
-path size, and memory for typical data.
+path size, and memory for typical data. Traced polylines (`lod/polyline.ts`,
+8 bytes a point, reused from frame to frame) grow by doubling as points
+come, but no further than the rows in view or four points per device-pixel
+column of the plot, whichever is fewer, and past that by an eighth at a
+time, so a series that keeps a point more each frame does not reallocate
+every frame: ten charts of 15 series of 3,000 points hold 3.6 MB of them
+instead of 4.9 MB.
 
 Monotone curves (Steffen's method, as d3's `curveMonotoneX`) bend lines
 between the points that level of detail keeps, in pixels: segments at least
@@ -3073,7 +3079,13 @@ and per grid point the last row with a value, refused before allocation when
 the grid would exceed 1,048,576 points; the CPU draws at most 250,000 and
 refuses more with a clear error (in exports, with the SVG renderer, without
 WebGL2, and for surfaces the GPU path does not draw), or, standing in for a
-GPU painter that lost its context, draws nothing until it is back. Per
+GPU painter that lost its context, draws nothing until it is back. A matrix
+table's coordinates, when they ascend, are the grid's as they are, and where
+each row is at its own grid point (a matrix's rows, or rows in grid order)
+no index from grid points to rows is kept: a 1001 by 1001 surface of a
+matrix keeps its grid points with values (4 bytes each) and their heights
+in the box (8), about 12 MB beside its 8 MB of values, where rows of x, y,
+and z kept 32 MB. Per
 scene it projects each grid point once, then writes a face per cell with
 three or four corners holding values; cells reaching past the box (a
 configured domain narrower than the data) are cut at its walls triangle by
@@ -3360,10 +3372,24 @@ hold erases that pairing. Each scene can be drawn four ways:
   reparsing markup; others (translucent points, rules, text) are a group
   whose markup is rewritten when its hash changes. Axes and grid are rebuilt
   only when their markup changes. Bars and points are one `path` element per
-  series, not one element per data point.
+  series, not one element per data point. Panels' grid lines and geometry
+  take no pointer events (the chart finds what the pointer is over itself),
+  and what a plot of one rectangle cuts is cut by a `path()` shape in the
+  view box rather than a clip path: Firefox otherwise tests a pointer
+  against a stroked line's outline on every move, and works out the
+  exact stroked bounds of whatever a clip path cuts whenever the chart's
+  DOM changes, a few milliseconds each for a line of 3,000 points. Plots
+  with insets over them cut through their clip paths, as static SVG does.
 - `paintCanvas` redraws grid and marks into a canvas sized to the device pixel
   ratio; point drawings hand clouds, and 3D charts' faces their batches, to
-  the WebGL painter when one is loaded.
+  the WebGL painter when one is loaded. Firefox stops accelerating a canvas
+  whose frames are mostly paths it has not drawn before (in over 30% of
+  its frames from the tenth on, more than two thirds of the draws), and
+  rasterizes it on the main thread from then on: a canvas of lines that
+  change every frame, with axes and text in SVG, is little else, and 15
+  lines of 3,000 points went from about 1 ms a frame to 20. Firefox counts
+  a solid fill as an ordinary draw, so each frame ends with two transparent
+  1-pixel fills per path painted.
 - `drawPdfPage` (`render/pdf.ts`) draws a scene into a PDF page; `renderPdf`
   wraps it in a one-page PDF 1.4 document. The default page is measured in
   points (0.75 per CSS pixel).
@@ -5167,7 +5193,10 @@ label's text is set, and a transform centers its box on its value and keeps
 it inside the chart (`clamp()` and `calc()` over the box's own size), so
 moving the cursor measures no text and lays nothing out in script.
 
-Tooltips write values with their axis' `tooltipFormat`, else its
+The built-in tooltip keeps its rows from one pointer move to the next,
+writing only the text and colors that changed, as the pointer's markers
+keep their circles: rebuilding them cost Firefox about 1 ms a move for
+ten series. Tooltips write values with their axis' `tooltipFormat`, else its
 `format`, the formatter `formatValue` and the keyboard read too. A mark's
 `tooltip.fields` name more fields of the rows its points are: marks check
 them against their tables when they are made (`marks/tooltip-fields.ts`),

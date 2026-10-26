@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { category, time } from "../../src/data/column.ts";
+import { fromMatrix } from "../../src/data/matrix.ts";
 import { table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { line } from "../../src/marks/line.ts";
@@ -244,6 +245,42 @@ describe("surfaces", () => {
     data.reset({ x: [0, 1, 0, 1], y: [0, 0, 1, 1], z: [0, 1, 1, 2] });
     model.scene(estimateText);
     expect(model.inspectItem(JSON.stringify([0, 3]))!.value).toBe(2);
+  });
+
+  it("reads a matrix table as it is, without a value of x and y per row", () => {
+    const n = 9;
+    const xs = Float64Array.from({ length: n }, (_, i) => (i / (n - 1)) * 4 - 2);
+    const height = (x: number, y: number) => x * y;
+    const z = Float64Array.from({ length: n * n }, (_, p) => height(xs[p % n]!, xs[(p / n) | 0]!));
+    z[40] = Number.NaN;
+    const matrix = fromMatrix({ x: xs, y: xs, z }, { x: "x", y: "y" });
+    const before = matrix.byteLength;
+    // The same grid as rows: in grid order, and shuffled (rows not at their own grid point).
+    const rows = field(n, height);
+    rows.set("z", 40, Number.NaN);
+    const order = Array.from({ length: n * n }, (_, p) => (p * 7) % (n * n));
+    const shuffled = table({
+      x: order.map((p) => rows.numbers("x")[p]!),
+      y: order.map((p) => rows.numbers("y")[p]!),
+      z: order.map((p) => rows.numbers("z")[p]!),
+    });
+    const drawn = (data: typeof rows) => {
+      const { scene, model } = build({ marks: [surface(data, { x: "x", y: "y", z: "z" })] });
+      const mark = faces(scene);
+      const values = [];
+      for (let key = model.stepItem(undefined, 1); key; ) {
+        values.push(model.inspectItem(key)!.points[0]!.text);
+        const next = model.stepItem(key, 1);
+        key = next === key ? undefined : next;
+      }
+      return [Array.from(mark.vertices), Array.from(mark.corners), Array.from(mark.style), values];
+    };
+    const fromMatrixTable = drawn(matrix as unknown as typeof rows);
+    expect(fromMatrixTable).toEqual(drawn(rows));
+    expect(fromMatrixTable).toEqual(drawn(shuffled));
+    expect(fromMatrixTable[3]).toHaveLength(n * n - 1);
+    // The coordinates are still the matrix's: no column per row was made.
+    expect(matrix.byteLength).toBe(before);
   });
 
   it("refuses grids larger than it holds, and on the CPU larger than it draws there", () => {

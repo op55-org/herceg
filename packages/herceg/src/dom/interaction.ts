@@ -495,7 +495,8 @@ export class Interaction {
       this.#dots.before(line);
       lines.push(line);
     }
-    const dots: SVGCircleElement[] = [];
+    // Each inspected point's marker: its center, color, and clip.
+    const dots: [number, number, string, string | undefined][] = [];
     let tipped = 0;
     this.#outline.setAttribute("visibility", "hidden");
     const bounds = { width: scene.width, height: scene.height };
@@ -543,19 +544,8 @@ export class Interaction {
             point.py >= box.y - 0.5 &&
             point.py <= box.y + box.height + 0.5,
         );
-      for (const point of inspection.points.filter(inside)) {
-        dots.push(
-          svgElement(document, "circle", {
-            cx: String(point.px),
-            cy: String(point.py),
-            r: "3.5",
-            fill: point.color,
-            stroke: theme.background === "transparent" ? "#ffffff" : theme.background,
-            "stroke-width": "1.5",
-            ...(cut && { "clip-path": cut }),
-          }),
-        );
-      }
+      for (const point of inspection.points.filter(inside))
+        dots.push([point.px, point.py, point.color, cut || undefined]);
       // The pointer's tooltip is at the pointer; others' at the crosshair.
       if (tips.has(inspection)) {
         const anchor =
@@ -566,7 +556,20 @@ export class Interaction {
         this.#tip(tipped++).show(inspection, theme, anchor, bounds);
       }
     }
-    this.#dots.replaceChildren(...dots);
+    // Markers are kept from one move to the next, their attributes rewritten.
+    const markers = this.#dots.children;
+    while (markers.length > dots.length) this.#dots.lastElementChild!.remove();
+    dots.forEach(([cx, cy, fill, cut], i) => {
+      const dot =
+        markers[i] ??
+        this.#dots.appendChild(svgElement(document, "circle", { r: "3.5", "stroke-width": "1.5" }));
+      dot.setAttribute("cx", String(cx));
+      dot.setAttribute("cy", String(cy));
+      dot.setAttribute("fill", fill);
+      dot.setAttribute("stroke", theme.background === "transparent" ? "#ffffff" : theme.background);
+      if (cut) dot.setAttribute("clip-path", cut);
+      else dot.removeAttribute("clip-path");
+    });
     const tooltip = options.tooltip;
     const crosshair = this.#crosshair;
     if (crosshair && typeof tooltip === "object" && tooltip.axisLabels) {

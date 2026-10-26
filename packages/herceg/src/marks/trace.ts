@@ -115,9 +115,9 @@ export function traceBandWith(
 ): { upper: Polyline; lower: Polyline } {
   const upper = frame.polyline(series.key, "upper");
   const lower = frame.polyline(series.key, "lower");
-  upper.reset();
-  lower.reset();
   const [start, end] = drawnRange(series, frame);
+  upper.reset(kept(frame, start, end));
+  lower.reset(kept(frame, start, end));
   fill(upper, lower, start, end, (y, a, b, out, index) =>
     reduce(series, y, a, b, frame, out, index),
   );
@@ -176,6 +176,16 @@ export function drawnRange(series: Series, frame: TraceFrame): [number, number] 
 }
 
 /**
+ * The most points a trace of rows [start, end) usually keeps: one per row,
+ * and level of detail keeps at most four per device-pixel column of the
+ * plot in each run (lines along y, and data broken into many runs, keep
+ * more).
+ */
+function kept(frame: TraceFrame, start: number, end: number): number {
+  return Math.min(end - start, (4 * frame.plot.width * frame.pixelRatio + 4) | 0);
+}
+
+/**
  * The drawn rows widened to two distinct x values past each edge of the
  * view (when the data has them; on an axis with breaks, of shown rows), so
  * a monotone curve's tangents at the view's edges are those it has unzoomed.
@@ -216,8 +226,8 @@ export function tracePath(
   index?: RangeIndex,
 ): Polyline {
   const path = frame.polyline(series.key, stage);
-  path.reset();
   const [start, end] = curve === "monotone" ? curveRows(series, frame) : drawnRange(series, frame);
+  path.reset(kept(frame, start, end));
   const step = (a: number, b: number, sink: PointSink = path) =>
     reduce(series, y, a, b, frame, sink, index);
   const trace = series.features?.trace;
@@ -254,9 +264,9 @@ export function traceBand(
 ): { upper: Polyline; lower: Polyline } {
   const upper = frame.polyline(series.key, "upper");
   const lower = frame.polyline(series.key, "lower");
-  upper.reset();
-  lower.reset();
   const [start, end] = drawnRange(series, frame);
+  upper.reset(kept(frame, start, end));
+  lower.reset(kept(frame, start, end));
   const xMap = frame.x.mapping();
   const yMap = frame.y.mapping();
   if (

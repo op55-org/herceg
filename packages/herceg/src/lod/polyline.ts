@@ -30,8 +30,15 @@ export class Polyline {
    * break. Value transitions move only lines and areas traced whole.
    */
   whole = false;
+  #limit = Infinity;
 
-  reset(): void {
+  /**
+   * Empties the polyline. `limit` is the most points the trace about to be
+   * written usually keeps: the buffer grows by doubling as points come, but
+   * not past it, as doubling alone would hold up to twice what a trace keeps.
+   */
+  reset(limit = Infinity): void {
+    this.#limit = limit;
     this.count = 0;
     this.starts.length = 0;
     this.curved = false;
@@ -46,7 +53,13 @@ export class Polyline {
     if (this.starts.length === 0) this.starts.push(0);
     const at = this.count * 2;
     if (at + 2 > this.coords.length) {
-      const grown = new Float32Array(this.coords.length * 2);
+      // Doubling up to the limit, then an eighth more at a time: a series
+      // keeping a point more each frame (data streaming in) would otherwise
+      // reallocate every frame.
+      const room = this.count;
+      const grown = new Float32Array(
+        2 * Math.max(Math.min(2 * room, this.#limit), room + (room >> 3) + 1),
+      );
       grown.set(this.coords);
       this.coords = grown;
     }
