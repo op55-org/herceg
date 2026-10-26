@@ -1072,7 +1072,7 @@ come, but no further than the rows in view or four points per device-pixel
 column of the plot, whichever is fewer, and past that by an eighth at a
 time, so a series that keeps a point more each frame does not reallocate
 every frame: ten charts of 15 series of 3,000 points hold 3.6 MB of them
-instead of 4.9 MB.
+(4.9 MB doubling without that bound).
 
 Monotone curves (Steffen's method, as d3's `curveMonotoneX`) bend lines
 between the points that level of detail keeps, in pixels: segments at least
@@ -1143,7 +1143,7 @@ search and its extremes by an index query instead of scanning, and the y
 domain is an index query too. Pixel columns that contain gaps are scanned,
 and data where most blocks hold gaps skips the index for reduction; the
 output is identical either way. Zooming into ten million points takes about
-1.3 ms instead of 3 ms. Streaming 10,000 points per tick into a
+1.5 ms, where scanning every point took about 3 ms. Streaming 10,000 points per tick into a
 million-point window takes a median of about 1.5 ms instead of 2.7 ms (p95
 2.0 instead of 3.4 ms); the ticks that move the window's storage also
 rebuild its index and take up to about 5 ms instead of 4 ms. Bands are not
@@ -3084,8 +3084,7 @@ table's coordinates, when they ascend, are the grid's as they are, and where
 each row is at its own grid point (a matrix's rows, or rows in grid order)
 no index from grid points to rows is kept: a 1001 by 1001 surface of a
 matrix keeps its grid points with values (4 bytes each) and their heights
-in the box (8), about 12 MB beside its 8 MB of values, where rows of x, y,
-and z kept 32 MB. Per
+in the box (8), about 12 MB beside its 8 MB of values. Per
 scene it projects each grid point once, then writes a face per cell with
 three or four corners holding values; cells reaching past the box (a
 configured domain narrower than the data) are cut at its walls triangle by
@@ -3118,8 +3117,8 @@ fall in order on the axes (a second surface's categories may not, and its
 cells would overlap). Anything else draws the whole chart on the CPU, as
 does a painter that declines it (sprites larger than the device allows,
 axes without a finite mapping). The threshold was measured: turning a 50
-by 50 surface (2,401 cells) costs 2.7 ms on the CPU and 0.5 ms through the
-GPU, 200 by 200 (39,601 cells) 27 ms against 0.3 ms; below 10,000 cells the
+by 50 surface (2,401 cells) costs 2.6 ms on the CPU and 0.5 ms through the
+GPU, 200 by 200 (39,601 cells) 29 ms against 0.2 ms; below 10,000 cells the
 CPU's frame is under about 7 ms, and small surfaces stay vector and
 antialiased and need no painter loaded.
 
@@ -3224,8 +3223,7 @@ the depth test lets it show.
 
 On the benchmark machine (see `docs/comparison.md`), turning a 1001 by 1001
 surface takes under half a millisecond of JavaScript a frame and keeps 60
-frames a second when turned every frame; mounting it takes about a quarter
-second (half of it the grid, the rest the batch's arrays and the upload).
+frames a second when turned every frame; mounting it takes about 0.18 s.
 
 ## Dendrograms
 
@@ -3386,8 +3384,9 @@ hold erases that pairing. Each scene can be drawn four ways:
   whose frames are mostly paths it has not drawn before (in over 30% of
   its frames from the tenth on, more than two thirds of the draws), and
   rasterizes it on the main thread from then on: a canvas of lines that
-  change every frame, with axes and text in SVG, is little else, and 15
-  lines of 3,000 points went from about 1 ms a frame to 20. Firefox counts
+  change every frame, with axes and text in SVG, is little else, and a
+  streamed tick of 15 lines of 3,000 points then takes about 20 ms instead
+  of about 5. Firefox counts
   a solid fill as an ordinary draw, so each frame ends with two transparent
   1-pixel fills per path painted.
 - `drawPdfPage` (`render/pdf.ts`) draws a scene into a PDF page; `renderPdf`
@@ -5098,7 +5097,7 @@ labels apart.
 
 Styles, guides, and layout are in every chart's bundle: role styles and
 positioned guides added 7,185 bytes gzip to a line chart (`createChart`,
-`line`, `table`; 62,201 bytes before its first frame, as
+`line`, `table`; 62,392 bytes before its first frame, as
 `npm run bench:size` measures every entry). That code is the role styles
 and their cascade (`theme.ts`, `style/style.ts`, `model/styles.ts`), the
 guides as positioned items and the writer every renderer shares
@@ -5343,7 +5342,7 @@ measured against the commit before it, with bindings, limits, sync
 channels with snapping and the page-wide registry and the frame relay's
 loader, the cursor API, and the hydration seams (about 290 B) added, 600 B
 short of the 3 KB reduction aimed for, and 2.2 KB of the React, Vue, and
-Svelte line entries; the controller's chunk is 12,529 B gzip (31,353 B
+Svelte line entries; the controller's chunk is 12,720 B gzip (31,887 B
 minified), loaded after the first frame (`npm run bench:size` reports it
 apart), and the frame relay 0.9 KB, loaded only by charts that sync in a
 sandboxed frame.
@@ -5351,14 +5350,13 @@ sandboxed frame.
 `npm run bench:first-hover` measures what this costs a first hover
 (`benchmarks/results/first-hover.json`; Chrome, headless, Apple M6, 15
 fresh page loads a case, p50, from `createChart` returning): a pointer move
-at once shows its tooltip 5.0 ms later (2.6 ms with the chunk cached), one
-10 ms later 10.2 ms later (8.6 cached; the chunk is then loading, and the
+at once shows its tooltip 5.1 ms later (2.6 ms with the chunk cached), one
+10 ms later 10.1 ms later (8.5 cached; the chunk is then loading, and the
 tooltip waits for it and the next frame), and from 25 ms on 1.8 to 1.9 ms.
 A dashboard of ten charts, timed from the last `createChart`, takes up to
-2 ms longer, except that with the chunk cached a hover 10 ms later shows
-in 2.0 ms (8.6 ms for one chart). With 100 ms of network latency per
-request, a hover at once waits about 105 ms for the chunk, 80 ms at 25 ms,
-54 ms at 50 ms, and 4.5 ms at 100 ms. A run on 2026-10-15 that also built
+2 ms longer. With 100 ms of network latency per request, a hover at once
+waits about 105 ms for the chunk, 80 ms at 25 ms, 54 ms at 50 ms, and
+4.6 ms at 100 ms. A run on 2026-10-15 that also built
 the commit before the deferral (`--baseline`) measured 2.0 to 2.9 ms for
 that chart's hover at once (2.8 ms with the latency), and the same as the
 deferred chart from 25 ms on without it. Once attached, the controller
@@ -6170,7 +6168,7 @@ modules added to the engine's graph join it without changes to the build.
 page's nonce: a nonce'd module script's static and dynamic imports carry its
 nonce, so `script-src 'nonce-...'` alone admits them, and with
 `'strict-dynamic'` too. The entry's static closure is the spec loader, which
-imports every mark a spec can name (870 KiB minified, 329 KiB gzip); the
+imports every mark a spec can name (871 KiB minified, 330 KiB gzip); the
 interaction controller and other chunks load as charts need them.
 
 `Chart.to_html` stays self-contained, a page or `<div>` with the single-file
@@ -6921,7 +6919,7 @@ mouse input, through Playwright's mouse.
   their cells' depth, and lines by their segments', which can draw them
   wrongly where they come close or cross; the GPU's depth test does not. A
   surface's grid has at most 1,048,576 points and is never reduced; the CPU
-  draws at most 250,000 and costs their size every frame (about 27 ms for
+  draws at most 250,000 and costs their size every frame (about 29 ms for
   200 by 200 on the benchmark machine). Translucent points and lines, and
   translucent or wireframed surfaces, keep the whole chart on the CPU
   however large it is (refused past the CPU's budget). On the CPU points are

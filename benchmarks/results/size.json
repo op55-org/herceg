@@ -1,8 +1,8 @@
 {
  "schema": 1,
- "date": "2026-10-26T17:19:42.128Z",
+ "date": "2026-10-26T20:28:25.230Z",
  "commit": {
-  "sha": "34061e99",
+  "sha": "d42d5d65",
   "dirty": false
  },
  "method": "esbuild bundle, ESM, es2022, minified, NODE_ENV=production, code splitting; measured is what loads before the chart renders, the entry chunk and the chunks it imports statically, each compressed on its own as browsers fetch them; chunks reached only by dynamic imports and required CSS are reported separately; gzip level 9; brotli quality 11",
@@ -70,7 +70,7 @@
   {
    "entry": "herceg-area",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 428656,
    "minified": 188317,
    "gzip": 72607,
@@ -89,7 +89,7 @@
   {
    "entry": "herceg-bar",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 427271,
    "minified": 185877,
    "gzip": 72741,
@@ -108,7 +108,7 @@
   {
    "entry": "herceg-contour",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 394095,
    "minified": 174442,
    "gzip": 68258,
@@ -127,7 +127,7 @@
   {
    "entry": "herceg-grid-pivot",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 308665,
    "minified": 136886,
    "gzip": 47033,
@@ -140,7 +140,7 @@
   {
    "entry": "herceg-grid-remote",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 185612,
    "minified": 91808,
    "gzip": 31842,
@@ -153,7 +153,7 @@
   {
    "entry": "herceg-grid",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 199476,
    "minified": 92817,
    "gzip": 32713,
@@ -166,7 +166,7 @@
   {
    "entry": "herceg-heatmap",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 407819,
    "minified": 178130,
    "gzip": 69575,
@@ -185,7 +185,7 @@
   {
    "entry": "herceg-image",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 639210,
    "minified": 300791,
    "gzip": 119583,
@@ -201,7 +201,7 @@
   {
    "entry": "herceg-line",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 363896,
    "minified": 160023,
    "gzip": 62392,
@@ -220,7 +220,7 @@
   {
    "entry": "herceg-pdf-document",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 676421,
    "minified": 316565,
    "gzip": 124798,
@@ -236,7 +236,7 @@
   {
    "entry": "herceg-pdf-fonts",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 720013,
    "minified": 340132,
    "gzip": 134061,
@@ -252,7 +252,7 @@
   {
    "entry": "herceg-pdf",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 676317,
    "minified": 316496,
    "gzip": 124764,
@@ -268,7 +268,7 @@
   {
    "entry": "herceg-pivot",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 150023,
    "minified": 61917,
    "gzip": 21008,
@@ -281,7 +281,7 @@
   {
    "entry": "herceg-react-line",
    "package": "@herceg/react",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 374931,
    "minified": 165882,
    "gzip": 64700,
@@ -300,7 +300,7 @@
   {
    "entry": "herceg-scatter",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 416727,
    "minified": 184340,
    "gzip": 72280,
@@ -319,7 +319,7 @@
   {
    "entry": "herceg-spec-pdf",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 2202597,
    "minified": 1013370,
    "gzip": 384573,
@@ -335,7 +335,7 @@
   {
    "entry": "herceg-svelte-line",
    "package": "@herceg/svelte",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 377475,
    "minified": 167444,
    "gzip": 65304,
@@ -354,7 +354,7 @@
   {
    "entry": "herceg-vue-line",
    "package": "@herceg/vue",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 377353,
    "minified": 166222,
    "gzip": 64799,
@@ -373,7 +373,7 @@
   {
    "entry": "herceg-web",
    "package": "herceg",
-   "version": "0.0.0 (34061e99)",
+   "version": "0.0.0 (d42d5d65)",
    "raw": 1957262,
    "minified": 892070,
    "gzip": 337724,

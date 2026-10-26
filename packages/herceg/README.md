@@ -2746,7 +2746,7 @@ depth, which can be wrong where they come close or cross. On the benchmark
 machine (see `docs/comparison.md`) turning a 1001 by 1001 surface (a million
 cells) takes under half a millisecond of JavaScript a frame and keeps 60
 frames a second when it turns every frame; on the CPU a 317 by 317 surface
-(100,000 cells) takes about 95 ms a turn.
+(100,000 cells) takes about 92 ms a turn.
 
 ### A second y axis
 

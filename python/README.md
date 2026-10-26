@@ -2350,7 +2350,7 @@ from where the application serves the files of `web.manifest()` (in
 `web.manifest().directory`; `web.asset_path(name)` finds one by its name and
 raises `FileNotFoundError` for others). Each file is named by a hash of its
 content, so serve them with `Cache-Control: public, max-age=31536000,
-immutable`: a page fetches the engine once (870 KiB, 329 KiB gzipped, then
+immutable`: a page fetches the engine once (871 KiB, 330 KiB gzipped, then
 the modules charts load as they need them), and later pages take it from
 the browser's cache. Ten fragments of a 200-point line are 61 KB of HTML;
 ten `to_html(full_page=False)` outputs are 10.7 MB.
