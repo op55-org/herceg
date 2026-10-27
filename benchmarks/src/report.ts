@@ -82,11 +82,24 @@ const plusMinus = (s: Summary) => `${ms(s)} ± ${ms({ ...s, median: s.mad })}`;
  * from the run that waits for it (`...ToWebglDone` beside `...ToFrame`).
  */
 function webglDone(row: Row, metric: string): string {
-  if (!metric.endsWith("ToFrame") || !(row.metrics.webglContexts?.summary.median ?? 0)) return "";
+  if (!FRAME_TIMED.has(metric)) return "";
   if (row.fullCostReason) return "; WebGL done: error";
+  const contexts = row.metrics.webglContexts?.summary.median;
+  if (contexts === 0) return "";
   const s = row.metrics[metric.replace(/ToFrame$/, "ToWebglDone")]?.summary;
-  return s ? `; WebGL done ${plusMinus(s)}` : "";
+  return contexts !== undefined && s
+    ? `; WebGL done ${plusMinus(s)}`
+    : "; WebGL done: not measured";
 }
+
+/** Frame timings that a second run also times to WebGL drawing finished. */
+const FRAME_TIMED = new Set([
+  "tickToFrame",
+  "pointerToFrame",
+  "viewportToFrame",
+  "resizeToFrame",
+  "cameraToFrame",
+]);
 
 /**
  * One row per scenario, one column per library: median ± MAD of `metric`,
@@ -207,7 +220,10 @@ function memoryTable(results = browser): string {
       if (!m.gpuBytes) return "not measured";
       const renderer = m.rendererBytes ? `${spread(m, "rendererBytes")} MB renderer, ` : "";
       const parts = gpuParts(m);
-      return `${mb(median(m, "firstRetainedBytes"))} MB heap, ${renderer}${mb(median(m, "gpuBytes"))} MB GPU${parts ? ` (${parts})` : ""}`;
+      const gpuProcess = m.gpuProcessBytes
+        ? `; GPU process ${spread(m, "gpuProcessBytes")} MB`
+        : "";
+      return `${mb(median(m, "firstRetainedBytes"))} MB heap, ${renderer}${mb(median(m, "gpuBytes"))} MB GPU${parts ? ` (${parts})` : ""}${gpuProcess}`;
     }),
   ]);
   return [
@@ -215,7 +231,7 @@ function memoryTable(results = browser): string {
     "",
     table(
       [
-        "First mount in a fresh page (heap; renderer footprint, median ± MAD; GPU memory)",
+        "First mount in a fresh page (heap; renderer footprint, median ± MAD; GPU memory attributed to the page; GPU process footprint, median ± MAD)",
         ...libraries,
       ],
       first,

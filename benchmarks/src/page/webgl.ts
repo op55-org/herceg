@@ -41,14 +41,14 @@ const pixel = new Uint8Array(4);
 /**
  * Waits until the GPU has finished every live WebGL context's commands: a
  * one-pixel read from a context's default framebuffer blocks until the
- * commands before it are done. The library's framebuffer and pixel-pack
- * state are restored afterwards.
+ * commands before it are done. Contexts on canvases outside the document
+ * count too (a library may draw there and copy the result). The library's
+ * framebuffer, read buffer, and pixel-pack state are restored afterwards.
  */
 export function finishWebgl(): void {
   for (const ref of contexts) {
     const gl = ref.deref();
     if (!gl || gl.isContextLost()) continue;
-    if (gl.canvas instanceof HTMLCanvasElement && !gl.canvas.isConnected) continue;
     if (typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext)
       readPixel2(gl);
     else readPixel(gl);
@@ -69,10 +69,14 @@ function readPixel2(gl: WebGL2RenderingContext): void {
     (name) => [name, gl.getParameter(name) as number] as const,
   );
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+  // The default framebuffer's read buffer is the library's to set (BACK or NONE).
+  const readBuffer = gl.getParameter(gl.READ_BUFFER) as number;
+  gl.readBuffer(gl.BACK);
   gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   for (const [name] of store) gl.pixelStorei(name, 0);
   gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
   for (const [name, value] of store) gl.pixelStorei(name, value);
+  gl.readBuffer(readBuffer);
   gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack);
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, framebuffer);
 }

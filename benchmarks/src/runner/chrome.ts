@@ -134,11 +134,17 @@ export function physFootprint(pid: number): number | undefined {
   return Number(match[1]);
 }
 
-/** GPU memory Chrome's memory instrumentation attributes to a renderer, in bytes. */
+/**
+ * GPU memory Chrome's memory instrumentation attributes to a renderer, in
+ * bytes: what the renderer's own memory dump lists.
+ */
 export interface GpuMemory {
-  /** WebGL buffers, textures, renderbuffers, and drawing buffers. */
+  /**
+   * WebGL buffers and drawing buffers. Chrome's WebGL dump does not list
+   * textures or renderbuffers a library creates.
+   */
   webgl: number;
-  /** 2D canvas resources (GPU textures for accelerated canvases). */
+  /** 2D canvas resources shared with the GPU process (a software canvas's pixels are renderer memory). */
   canvas: number;
   /** Compositor tiles rasterized for the page's content. */
   tiles: number;
@@ -151,26 +157,56 @@ export interface GpuMemory {
  * `browser` is a browser-level DevTools session.
  */
 export async function gpuMemory(browser: CDPSession, pid: number): Promise<GpuMemory> {
-  const events = await trace(browser, ["disabled-by-default-memory-infra"], () =>
-    browser.send("Tracing.requestMemoryDump", { deterministic: false, levelOfDetail: "detailed" }),
-  );
+  let success = false;
+  const events = await trace(browser, ["disabled-by-default-memory-infra"], async () => {
+    const result = (await browser.send("Tracing.requestMemoryDump", {
+      deterministic: false,
+      levelOfDetail: "detailed",
+    })) as { success: boolean };
+    success = result.success;
+  });
+  if (!success) throw new Error("gpuMemory: Chrome reported the memory dump as failed");
   const dump = events.find((event) => event.ph === "v" && event.pid === pid && dumpOf(event));
   if (!dump) throw new Error(`gpuMemory: the memory dump has no allocators for process ${pid}`);
-  const allocators = dumpOf(dump)!;
+  const { allocators, allocators_graph: edges = [] } = dumpOf(dump)!;
   const size = (name: string) => {
     const value = allocators[name]?.attrs?.size?.value;
     return value ? Number.parseInt(value, 16) : 0;
   };
+  // A canvas resource the GPU process holds is owned through a dump shared
+  // across processes (a shared image); one in the renderer's own memory
+  // (a software canvas's pixels) is owned through one of its own dumps.
+  const own = new Set(Object.values(allocators).map((allocator) => allocator.guid));
+  const shared = new Set(
+    edges
+      .filter((edge) => edge.type === "ownership" && !own.has(edge.target))
+      .map((edge) => edge.source),
+  );
   let canvas = 0;
-  for (const name of Object.keys(allocators))
-    if (/^canvas\/[^/]+$/.test(name)) canvas += size(name);
+  for (const [name, allocator] of Object.entries(allocators))
+    if (/^canvas\/[^/]+\/[^/]+$/.test(name) && shared.has(allocator.guid ?? ""))
+      canvas += size(name);
   return { webgl: size("webgl"), canvas, tiles: size("cc/tile_memory") };
 }
 
-type Allocators = Record<string, { attrs?: { size?: { value: string } } }>;
+interface ProcessDump {
+  allocators: Record<string, { guid?: string; attrs?: { size?: { value: string } } }>;
+  allocators_graph?: { source: string; target: string; type: string }[];
+}
 
-function dumpOf(event: TraceEvent): Allocators | undefined {
-  return (event.args?.dumps as { allocators?: Allocators } | undefined)?.allocators;
+function dumpOf(event: TraceEvent): ProcessDump | undefined {
+  const dumps = event.args?.dumps as Partial<ProcessDump> | undefined;
+  return dumps?.allocators ? (dumps as ProcessDump) : undefined;
+}
+
+/** The GPU process of the browser a browser-level DevTools session belongs to. */
+async function gpuProcessPid(browser: CDPSession): Promise<number> {
+  const { processInfo } = (await browser.send("SystemInfo.getProcessInfo")) as {
+    processInfo: { type: string; id: number }[];
+  };
+  const gpu = processInfo.find((info) => info.type === "GPU");
+  if (!gpu) throw new Error("gpuProcessPid: the browser lists no GPU process");
+  return gpu.id;
 }
 
 /**
@@ -182,26 +218,42 @@ function dumpOf(event: TraceEvent): Allocators | undefined {
 export const PROCESS_SETTLE_MS = 500;
 
 /**
- * The page's renderer footprint and the GPU memory attributed to it, after
- * a settling pause; call it right after a heap reading, which collects
- * garbage. `browser` is a browser-level DevTools session.
+ * The page's renderer footprint, the GPU memory attributed to it, and the
+ * GPU process's footprint, after a settling pause; call it right after a
+ * heap reading, which collects garbage. `browser` is a browser-level
+ * DevTools session.
  */
 export async function processMemory(page: Page, browser: CDPSession, pid: number) {
   await page.waitForTimeout(PROCESS_SETTLE_MS);
-  return { renderer: physFootprint(pid), gpu: await gpuMemory(browser, pid) };
+  const gpuPid = await gpuProcessPid(browser);
+  return {
+    renderer: physFootprint(pid),
+    gpuPid,
+    gpuProcess: physFootprint(gpuPid),
+    gpu: await gpuMemory(browser, pid),
+  };
 }
 
 type ProcessMemory = Awaited<ReturnType<typeof processMemory>>;
 
-/** Growth between two `processMemory` readings as named metrics; `rendererBytes` only where measured. */
+/**
+ * Growth between two `processMemory` readings as named metrics; footprints
+ * only where measured.
+ */
 export function processGrowth(before: ProcessMemory, after: ProcessMemory): Record<string, number> {
+  if (after.gpuPid !== before.gpuPid)
+    throw new Error("processGrowth: the GPU process restarted between the readings");
   const gpu = (key: keyof GpuMemory) => after.gpu[key] - before.gpu[key];
+  const footprint = (a: number | undefined, b: number | undefined) =>
+    a !== undefined && b !== undefined ? a - b : undefined;
+  const renderer = footprint(after.renderer, before.renderer);
+  const gpuProcess = footprint(after.gpuProcess, before.gpuProcess);
   return {
-    ...(after.renderer !== undefined &&
-      before.renderer !== undefined && { rendererBytes: after.renderer - before.renderer }),
+    ...(renderer !== undefined && { rendererBytes: renderer }),
     gpuBytes: gpu("webgl") + gpu("canvas") + gpu("tiles"),
     gpuWebglBytes: gpu("webgl"),
     gpuCanvasBytes: gpu("canvas"),
     gpuTileBytes: gpu("tiles"),
+    ...(gpuProcess !== undefined && { gpuProcessBytes: gpuProcess }),
   };
 }

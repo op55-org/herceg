@@ -100,6 +100,8 @@ interface ResultRow {
   library: string;
   status: GridResult["status"] | "error";
   reason?: string;
+  /** Why a memory scenario's process samples failed when its heap samples did not. */
+  fullCostReason?: string;
   metrics: Record<string, Metric & { summary: Summary }>;
 }
 
@@ -276,8 +278,6 @@ async function main() {
 
   const rows: ResultRow[] = [];
   const configurations: Record<string, Pick<GridBench, "renderer" | "processing">> = {};
-  let gpu = "unknown";
-  let userAgent = "";
   const order = random(Number(args["order-seed"]));
   /** Browser-level DevTools sessions, for memory dumps; one per browser launched. */
   const browserSessions = new WeakMap<Browser, CDPSession>();
@@ -291,10 +291,25 @@ async function main() {
     return session;
   };
 
+  // Environment readings in a page of their own, so no measured page makes
+  // an extra WebGL context first.
+  const setup = await latency.context.newPage();
+  await setup.goto(`${origin}/grid-${libraries[0]}.html`);
+  await setup.waitForFunction(() => window.gridBench !== undefined);
+  const gpu = await setup.evaluate(() => window.gridBench.gpu());
+  const userAgent = await setup.evaluate(() => navigator.userAgent);
+  await setup.close();
+
+  /**
+   * Measures a scenario: `main`, as the suite always has; `process`, a
+   * memory scenario's process samples, each in a fresh page, which run apart
+   * so a failure there leaves the heap samples.
+   */
   const measure = async (
     context: BrowserContext,
     library: string,
     s: GridScenario,
+    pass: "main" | "process",
     opened: { page?: Page; cdp?: CDPSession },
   ): Promise<GridResult> => {
     let page = await context.newPage();
@@ -305,12 +320,9 @@ async function main() {
       renderer: window.gridBench.renderer,
       processing: window.gridBench.processing,
     }));
-    if (gpu === "unknown") gpu = await page.evaluate(() => window.gridBench.gpu());
-    userAgent ||= await page.evaluate(() => navigator.userAgent);
     if (s.operation === "memory") {
       const metrics: Record<string, Metric> = {};
-      // Heap samples, then as many process samples, each in a fresh page.
-      for (let i = 0; i < 2 * s.samples; i++) {
+      for (let i = 0; i < s.samples; i++) {
         if (i > 0) {
           await page.close();
           opened.page = page = await context.newPage();
@@ -319,7 +331,7 @@ async function main() {
         }
         opened.cdp = await context.newCDPSession(page);
         const sample =
-          i < s.samples
+          pass === "main"
             ? await memorySample(page, opened.cdp, s)
             : await processSample(page, opened.cdp, await browserSession(context), s);
         for (const [name, value] of Object.entries(sample)) {
@@ -339,48 +351,66 @@ async function main() {
     return result;
   };
 
+  type Attempt = GridResult | { status: "error"; reason: string; metrics: Record<string, Metric> };
+  /**
+   * Measures a scenario within its time limit, and starts the browser again
+   * when the page crashed or got stuck.
+   */
+  const attempt = async (
+    library: string,
+    s: (typeof scenarios)[number],
+    pass: "main" | "process",
+  ): Promise<Attempt> => {
+    const isPaced = paced(s);
+    const { context } = isPaced ? realtime! : latency;
+    const opened: { page?: Page; cdp?: CDPSession } = {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let result: Attempt;
+    try {
+      result = await Promise.race([
+        measure(context, library, s, pass, opened),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`timed out after ${s.timeout} s`)),
+            s.timeout * 1000,
+          );
+        }),
+      ]);
+    } catch (error) {
+      const message = (error as Error).message.split("\n")[0]!;
+      // Memory steps report a wrong frame as an error from inside the page.
+      const wrong = /incorrect: (.*)/.exec(message);
+      result = wrong
+        ? { status: "incorrect", reason: wrong[1]!, metrics: {} }
+        : { status: "error", reason: message, metrics: {} };
+    } finally {
+      clearTimeout(timer);
+      // A page still running a timed-out scenario, or a crashed one, may
+      // never answer; cleaning it up must not stall the run.
+      if (opened.cdp) await bounded(opened.cdp.detach());
+      if (opened.page) await bounded(opened.page.close({ runBeforeUnload: false }));
+    }
+    if (result.status === "error") {
+      // A crashed or stuck page can leave its browser unable to open tabs.
+      const failed = isPaced ? realtime! : latency;
+      await failed.browser.close().catch(() => {});
+      if (isPaced) realtime = await launch(true);
+      else latency = await launch(false);
+    }
+    return result;
+  };
+
   let complete = false;
   try {
     for (const s of scenarios) {
       for (const library of shuffled(libraries, order)) {
-        const isPaced = paced(s);
-        const { context } = isPaced ? realtime! : latency;
         const started = performance.now();
-        const opened: { page?: Page; cdp?: CDPSession } = {};
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let result:
-          | GridResult
-          | { status: "error"; reason: string; metrics: Record<string, Metric> };
-        try {
-          result = await Promise.race([
-            measure(context, library, s, opened),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () => reject(new Error(`timed out after ${s.timeout} s`)),
-                s.timeout * 1000,
-              );
-            }),
-          ]);
-        } catch (error) {
-          const message = (error as Error).message.split("\n")[0]!;
-          // Memory steps report a wrong frame as an error from inside the page.
-          const wrong = /incorrect: (.*)/.exec(message);
-          result = wrong
-            ? { status: "incorrect", reason: wrong[1]!, metrics: {} }
-            : { status: "error", reason: message, metrics: {} };
-        } finally {
-          clearTimeout(timer);
-          // A page still running a timed-out scenario, or a crashed one, may
-          // never answer; cleaning it up must not stall the run.
-          if (opened.cdp) await bounded(opened.cdp.detach());
-          if (opened.page) await bounded(opened.page.close({ runBeforeUnload: false }));
-        }
-        if (result.status === "error") {
-          // A crashed or stuck page can leave its browser unable to open tabs.
-          const failed = isPaced ? realtime! : latency;
-          await failed.browser.close().catch(() => {});
-          if (isPaced) realtime = await launch(true);
-          else latency = await launch(false);
+        const result = await attempt(library, s, "main");
+        let fullCostReason: string | undefined;
+        if (s.operation === "memory" && result.status === "measured") {
+          const process = await attempt(library, s, "process");
+          if (process.status === "measured") Object.assign(result.metrics, process.metrics);
+          else fullCostReason = `${process.status}: ${process.reason}`;
         }
         const metrics = Object.fromEntries(
           Object.entries(result.metrics).map(([name, m]) => [
@@ -393,6 +423,7 @@ async function main() {
           library,
           status: result.status,
           reason: result.reason,
+          ...(fullCostReason && { fullCostReason }),
           metrics,
         });
         const headline = Object.entries(metrics)[0];
@@ -433,7 +464,7 @@ function writeResults(run: {
         "operation start until the end of the first frame whose visible rows, cells, selection, and row count match the reference, read just before the frame paints (ResizeObserver callback) and timed at a MessageChannel message posted then; raw times, including the check, whose cost is recorded as checkTime; frame rate limit disabled except for scroll traces, appends, and updates, which run with vsync",
       memory:
         "CDP Runtime.getHeapUsage after forced GC: V8 heap + Blink heap + ArrayBuffer backing stores, one fresh page per sample; reserved = committed heap growth over a step without GC (not a peak)",
-      processMemory: `separate pages, as many as heap samples, from native input prepared to grid mounted, each reading after forced GC and a ${PROCESS_SETTLE_MS} ms pause: rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump attributes to it (webgl, canvas resources, cc tile memory)`,
+      processMemory: `separate pages, as many as heap samples, from native input prepared to grid mounted, each reading after forced GC and a ${PROCESS_SETTLE_MS} ms pause: rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump lists (webgl buffers and drawing buffers, canvas resources shared with the GPU process, cc tile memory); gpuProcessBytes = the GPU process's phys_footprint`,
       sampleScale,
       orderSeed: Number(args["order-seed"]),
       seed,

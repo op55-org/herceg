@@ -449,7 +449,7 @@ function writeResults(run: {
         ? "CDP Runtime.getHeapUsage after forced GC: V8 heap + Blink heap + ArrayBuffer backing stores"
         : "not measured: heap sizes need Chrome's DevTools protocol, so memory scenarios were skipped",
       processMemory: measuresMemory
-        ? `separate runs, one fresh page per sample, each a first mount from data prepared to charts mounted, readings after forced GC and a ${PROCESS_SETTLE_MS} ms pause: firstRetainedBytes = heap as above; rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump attributes to it (webgl, canvas resources, cc tile memory)`
+        ? `separate runs, one fresh page per sample, each a first mount from data prepared to charts mounted, readings after forced GC and a ${PROCESS_SETTLE_MS} ms pause: firstRetainedBytes = heap as above; rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump lists (webgl buffers and drawing buffers, canvas resources shared with the GPU process, cc tile memory); gpuProcessBytes = the GPU process's phys_footprint`
         : "not measured: after a forced GC this browser keeps freed memory in its process, and it attributes no GPU memory to a page",
       webglDone:
         "second run of each frame-timed scenario in a fresh page: operation start until the frame and then a 1-pixel readPixels on every live WebGL context the page created (waits for their GPU work); 2D canvas and compositor rasterization on the GPU are not waited for",

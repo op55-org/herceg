@@ -229,12 +229,24 @@ to the page with the charts mounted:
   is found through the page's own trace (`TracingStartedInBrowser` lists its
   frames' processes). Measured on macOS only.
 - `gpuBytes`: GPU memory Chrome's own memory instrumentation (memory-infra,
-  detailed dumps) attributes to the page's renderer: WebGL buffers, textures,
-  and drawing buffers (`gpuWebglBytes`), 2D canvas resources
-  (`gpuCanvasBytes`), and compositor tiles (`gpuTileBytes`, rasterized for
+  detailed dumps) lists in the page's renderer: WebGL buffers and drawing
+  buffers (`gpuWebglBytes`), 2D canvas resources shared with the GPU process
+  (`gpuCanvasBytes`; a software canvas's pixels stay in the renderer and
+  count there), and compositor tiles (`gpuTileBytes`, rasterized for
   whatever DOM, SVG, or canvas content is in view). These are allocation
-  sizes, held by the GPU process; Skia's and the GPU driver's own caches and
-  the window's buffers are not attributed to a page and are not counted.
+  sizes the GPU process holds. Chrome's WebGL dump does not list textures or
+  renderbuffers a library creates (Plotly's 1001 x 1001 surface makes about
+  13 MB of textures, Herceg's 0.02 MB), and nothing the GPU process keeps
+  besides (its own copies of WebGL buffers, driver memory, Skia's caches) is
+  attributed to a page.
+- `gpuProcessBytes`: the GPU process's physical footprint. It counts all of
+  that, but the process is shared with the browser's own drawing and with
+  the pages before: in a run, small charts' readings move by 10 to 20 MB
+  either way between samples, and what a mount adds depends on what the
+  browser drew earlier (Plotly's first 1001 x 1001 surface grew it by about
+  1 GB in a browser that had drawn no WebGL yet, and by 0.36 to 0.38 GB in a
+  run after other WebGL pages, where `gpuBytes` lists 0.34 GB). It shows
+  large GPU costs only.
 
 Process readings come after a forced garbage collection and a 500 ms pause,
 which lets tiles and canvas resources a mount leaves for later frames be
@@ -248,11 +260,11 @@ The heap, `canvasBytes`, `rendererBytes`, and `gpuBytes` overlap (the heap is
 part of the renderer's footprint, and canvas pixels are GPU canvas memory);
 they are not added up.
 
-The GPU process's own footprint is not used: with nothing mounted it moved by
-4 to 87 MB between readings a few seconds apart (its window buffers and
-caches), more than most charts use. The renderer's footprint read 0, 0.1,
-0.5, 1, and 2 s after collection agreed within 0.1 MB in 39 of 40 readings;
-first mounts in fresh pages agreed within about 3% between runs.
+The renderer's footprint read 0, 0.1, 0.5, 1, and 2 s after collection
+agreed within 0.1 MB in 39 of 40 readings; first mounts in fresh pages
+agreed within about 3% between runs. A memory dump that Chrome reports as
+failed, or a GPU process that restarted between the readings, fails the
+sample rather than counting as zero.
 
 Firefox and WebKit are not measured. Playwright can force garbage collection
 in both (`page.requestGC()`), and the page's content process can be found,
@@ -271,7 +283,8 @@ a page.
 | `firstRetainedBytes` | the same heaps, first mount in a fresh page | native and GPU memory | yes | no | no |
 | `canvasBytes` | canvas width x height x 4, estimated | everything else | yes | no | no |
 | `rendererBytes` | the renderer process's physical footprint, first mount: heaps, native memory, freed pages allocators keep | GPU memory, other processes | yes (macOS) | no | no |
-| `gpuBytes` | WebGL buffers and textures, canvas resources, compositor tiles that Chrome attributes to the page | GPU caches and buffers not attributed to a page | yes | no | no |
+| `gpuBytes` | WebGL buffers and drawing buffers, canvas resources shared with the GPU process, compositor tiles, as Chrome lists them for the page | WebGL textures and renderbuffers, the GPU process's own copies and caches | yes | no | no |
+| `gpuProcessBytes` | the GPU process's physical footprint, first mount | nothing in the GPU process, but it moves by 10 to 20 MB between samples and depends on what the browser drew before | yes (macOS) | no | no |
 
 ### Large-data configurations
 
