@@ -55,7 +55,7 @@ Chart.js has no built-in heatmap; those cells are marked n/a.
 | Initial render | Measured. Fast at every size measured: ~0.7 ms for 4 x 200 line points (uPlot: ~0.5 ms), ~2.4 ms for 10 x 5,000, ~4.9 ms for 1M points (uPlot: ~6.4 ms), ~32 ms for 10M points (uPlot: ~46 ms). Bars ~1.4 ms for 100 x 4; scatter ~2.5 ms for 10k points on Canvas, ~4.3 ms for 200k and ~17 ms for 1M with WebGL; heatmaps ~1.5 ms for 100 x 100 and ~13 ms for 500 x 500 cells, drawn as one image. Lines are reduced to at most four points per pixel column; SVG below 4,000 drawn points or cells, Canvas above. | Measured. Canvas; fast for small charts, ~170 ms for a 1M-point line with `minmax` sampling. Scatter and heatmap series render progressively: a 500x500 heatmap shows its first frame after ~50 ms and completes after ~5 s. | Measured. Fast small SVG charts; cost grows with rows because every row becomes a scene node (~0.72 s for 1M points on Canvas). | Measured. Fast for small and medium charts; min-max decimation makes 1M points cheap once the `{x, y}` objects exist. | Measured. Slowest small charts; SVG scatter is expensive at 10k points, WebGL traces handle large data. |
 | Incremental update | Measured. Tables support append, drop, range replace, and reset; charts re-render once on the next frame. Replacing 10 x 5,000 line points takes ~1.2 ms (uPlot ~1.2 ms), 1M points ~3.5 ms (uPlot ~5.7 ms), 10k scatter points ~1.8 ms, 100 x 100 heatmap cells ~0.6 ms. | Measured. `setOption` re-processes the series; no rolling-window append. | Measured. Updates rebuild the definition and scene. | Measured. Mutate arrays and `update('none')`; cheap. | Measured. `extendTraces` with `maxPoints` gives a documented rolling window, but each tick costs ~20–30 ms here (~270 ms in a million-point window). |
 | Streaming | Measured. ~1.2 ms per tick for 15 series x 3,000 points (uPlot: ~0.9 ms); keeps up in every paced scenario, including the ten-chart dashboard at 10 Hz. A million-point rolling window takes ~1.5 ms per 10,000-point tick (uPlot: ~5.8 ms), because min/max indexes are kept current as rows arrive. Rolling windows via `maxRows`. | Measured. ~10 ms per tick for 15 series x 3,000 points; keeps up with 100 Hz ingestion for one chart but drops frames for a 10-chart dashboard at 10 Hz. | Measured. ~31 ms per tick; at 60–100 Hz ingestion only ~33 updates per second get through. | Measured. ~3.5 ms per tick; keeps up in every paced scenario. | Measured. ~20 ms per tick; ~56 updates per second at 100 Hz, ~6 Hz for the 10-chart dashboard. |
-| Memory | Measured (Chrome). Retained heap (median of mounts repeated in one page): ~0.24 MB for 1M points (uPlot ~0.18 MB), since source typed arrays are used in place and geometry buffers are bounded; ~5.9 MB for the ten-chart dashboard, its traced lines growing no further than the points they can keep (uPlot ~2.8 MB, whose paths are browser `Path2D` objects outside the heap); ~9 MB for 100 small charts, which render to SVG without canvas backing stores. Counting native and GPU memory (first mount in a fresh page), the renderer process grows ~8.4 MB for 1M points (uPlot ~7.5 MB), ~20 MB for the dashboard (uPlot ~28 MB), and ~33 MB for 100 small charts (uPlot ~36 MB), and Chrome attributes ~7.5, ~31, and ~22 MB of GPU memory (canvases and compositor tiles) to the page (uPlot ~6.9, ~40, and ~92 MB). | Measured (Chrome). ~240 MB retained heap for 1M points (internal storage plus per-point structures); the renderer grows ~270 MB on a first mount. Dashboard ~115 MB heap, renderer ~140 MB. | Measured (Chrome). ~600 MB retained heap for 1M points (row objects, Dates, scene nodes); the renderer grows ~670 MB on a first mount. Dashboard ~270 MB heap, renderer ~320 MB. | Measured (Chrome). ~49 MB retained heap for 1M points (one `{x, y}` object per point); the renderer grows ~64 MB on a first mount. Dashboard ~57 MB heap, renderer ~85 MB; 100 small charts ~72 MB of GPU canvas memory. | Measured (Chrome). ~110 MB retained heap for 1M points with WebGL; on a first mount the renderer grows ~130 MB and Chrome attributes ~126 MB of GPU memory to the page (~122 MB of it WebGL buffers). A 1001 x 1001 surface keeps ~1.2 MB as the median of repeated mounts but 343 MB of heap on a first mount, with ~340 MB of GPU memory. |
+| Memory | Measured (Chrome). Retained heap (median of mounts repeated in one page): ~0.24 MB for 1M points (uPlot ~0.18 MB), since source typed arrays are used in place and geometry buffers are bounded; ~5.9 MB for the ten-chart dashboard, its traced lines growing no further than the points they can keep (uPlot ~2.8 MB, whose paths are browser `Path2D` objects outside the heap); ~9 MB for 100 small charts, which render to SVG without canvas backing stores. Counting native and GPU memory (first mount in a fresh page, Chrome drawing at a ratio of 2), the renderer process grows ~9.2 MB for 1M points (uPlot ~7.2 MB), ~21 MB for the dashboard (uPlot ~27 MB), and ~35 MB for 100 small charts (uPlot ~40 MB), and Chrome attributes ~14, ~49, and ~87 MB of GPU memory (canvases and compositor tiles) to the page (uPlot ~12, ~89, and ~144 MB; ECharts and Chart.js, whose axes are drawn into their canvases, ~5.1, ~24, and ~72 MB). | Measured (Chrome). ~240 MB retained heap for 1M points (internal storage plus per-point structures); the renderer grows ~270 MB on a first mount. Dashboard ~115 MB heap, renderer ~140 MB. | Measured (Chrome). ~600 MB retained heap for 1M points (row objects, Dates, scene nodes); the renderer grows ~670 MB on a first mount. Dashboard ~270 MB heap, renderer ~320 MB. | Measured (Chrome). ~49 MB retained heap for 1M points (one `{x, y}` object per point); the renderer grows ~64 MB on a first mount. Dashboard ~57 MB heap, renderer ~85 MB; 100 small charts ~72 MB of GPU canvas memory. | Measured (Chrome). ~110 MB retained heap for 1M points with WebGL; on a first mount the renderer grows ~130 MB and Chrome attributes ~137 MB of GPU memory to the page (~122 MB of it WebGL buffers). A 1001 x 1001 surface keeps ~1.2 MB as the median of repeated mounts but 343 MB of heap on a first mount, with ~353 MB of GPU memory. |
 | Bundle size (line chart, gzip) | Measured. ~61 KiB (62,392 B) before the first frame for a time-series line chart with tooltip, events, and brushing, and its interaction controller (tooltips, the pointer, the wheel, keys; ~12.4 KiB, 12,720 B) loaded right after it; styles, positioned guides, and layout options are plain values in TypeScript as in specs and Python, so every chart carries their code, about 7 KiB of it (the style cascade of theme tokens and role styles for axes, legends, titles, and subplots, guides built as positioned items every renderer draws, titles and legends placed on any side or inside a plot with explicit padding, text boxes and halos, per-panel scale instances, clipping per mark, fluid SVG export, and the hooks for supplied fonts; monotone curves, which line charts carry whether they use them, are ~1 KiB of it, the four built-in themes with page-following themes about 2 KiB, the dispatch to layout marks such as pies about 1 KiB, y and xy zoom, rectangle and lasso brushes, and synced selections about 1.4 KiB, and facet headers, per-panel y scales, subplot routing, and weighted rows, which the model plans for any chart, about 1.1 KiB, x scales of panels' own (planned per group for any chart, with zoom, selections, and events per scale in the browser runtime) about 1.5 KiB, categories of panels' own (band axes planned per group, and category positions and values read through each panel's band places in tooltips and keyboard reads, and the chart's bands handed to summaries) about 0.1 KiB, the hooks that start view transitions and value transitions, whose code loads separately, about 0.6 KiB, the hooks that let a map's layers share a chart and tables hold geometry columns, about 0.1 KiB, the hooks for time axis breaks (whose code comes only with `timeBreaks`) and crosshair labels (loaded on demand), about 1.2 KiB, the camera API and the hooks that load 3D turning (`camera`, `setCamera`, the camera event, presses kept to their pointer), about 0.6 KiB, the hooks of row selections (`rowSelection`, whose code comes with `rowSelection()`), about 0.15 KiB, the hooks that load tooltip fields and content of the application's own (`tooltip.fields`, `renderTooltip`) and check fields as marks are made, about 0.3 KiB, exports of a mounted chart (`toPNG`, and the hook `renderToPDF(chart)` uses), about 0.1 KiB, and times read from ISO 8601 strings, numbers as categories, and values converted before a table changes, about 0.15 KiB; the pie, the maps, the breaks and their seam drawing, and the 3D marks themselves are not included). Each mark brings its own drawing code, so a line chart carries no bar, point, symbol, heatmap, or text drawing, color schemes are separate exports, and facets and the code that copies traces through independent panel bands or time breaks are only bundled when used; the chart model still includes band-axis, legend-layout (series, color, size, and shape keys), horizontal-bar inspection, right-axis, and panel-layout logic, and min/max indexes for large lines add ~1 KiB. The WebGL painter for large point series (~3.5 KiB; 3D charts add their ~4.2 KiB programs for points, lines, and surfaces, a separate chunk where the build splits them), 3D turning (~2 KiB), animation of views (~1 KiB) and of values (~6.5 KiB), crosshair labels (~1 KiB), tooltip fields and content of the application's own (~1.1 KiB), and PNG export (~0.4 KiB) load only when a chart needs them, and text is measured with the browser's canvas, so the static text estimator is not bundled. | Measured. ~167 KiB tree-shaken, ~371 KiB full. | Measured. ~44 KiB including `d3-scale` for time. | Measured. ~64 KiB with time scale and date adapter. | Measured. ~391 KiB basic bundle, ~1.4 MiB full. |
 | Line | Line, step lines, smooth monotone curves, several y fields or a long-format series field, gaps for missing values, log and time axes, level of detail for large series. Area (stacked, band) and rule marks. | Documented. Time axes, sampling, area fill, step lines. | Documented. `lineY`/`lineX`, gaps, curves. | Documented. Line, stepped, filled; decimation plugin. | Documented. `scatter`/`scattergl` lines, rich hover. |
 | Stacked areas and bars | Areas and bars stack several fields row by row, or the series of a category field: areas on every x any shown series has (a series without a row there counts as zero, or with `stackGaps: "interpolate"` as the line between its rows, zero beyond its ends; several rows at one x pair up by occurrence), bars by position, positive values up and negative down. Edges are typed arrays aligned on that union of x; tooltips, the keyboard, events, and summaries read each series' own rows, at its layer's top; hidden series leave the stack; facets stack each panel apart; on log axes area stacks stand on the axis' low end; monotone curves and value animation move the layers together. Streaming restacks only what appended and dropped rows touch. One-off measurements (not a committed scenario; Chrome 154, macOS 27, Apple M6, 800 x 400 at DPR 2, three runs interleaved with the version before; the stacks' own cost is in `npm run bench:core`): bars of 10 series x 10,000 positions in a rolling window, a position per tick at 60 Hz, take ~4.0 ms of JavaScript a frame (p95 ~5.8) instead of ~6.4 (p95 ~8.4), with no dropped frames either way, against ~3.6 ms for the same bars grouped; areas of a series field stacked the same way ~3.7 ms. At 10 Hz frames alternate between two clock states for every variant (~4.4 against ~7.6 ms in the fast one). The edges cost 16 bytes per layer and x, so series sharing few x cost up to the number of series times their rows. Areas and bars also normalize nonnegative values per position with `stack: "fill"`, as histograms normalize per bin; area `"center"` and `"wiggle"` offsets retain raw thickness, with optional `stackOrder: "inside-out"`. Both orientations, legend renormalization, facets/subplots, zoom, static export, and share/raw keyboard readings use the same engine across TypeScript, Python, React, Vue, and Svelte. Mixed signs require ordinary stacks; new modes keep per-layer missing gaps. Fill/center in input order retain incremental updates; wiggle and inside-out rebuild the retained window, with inside-out value updates immediate. Comparative timing of these new modes is not yet measured; the measurements above concern ordinary stacks. | Documented. `stack` groups series, `stackStrategy` (same sign, all, positive, negative) and `stackOrder`; series are matched by category on category axes and by data index otherwise, so series on time or value axes must share their x in order, and a series without a value at a position is skipped rather than filled (from its source, 6.1). | Documented. `areaY` stacks implicitly at repeated x by series (`z`), with `stack()` layouts for order, offset (diverging, normalize, center, wiggle), and reversal; a missing position and series pair counts as zero for the layout without a point of its own, so each area is drawn through its own rows. | Documented. `stacked: true` on the value scale stacks datasets matched by their index-scale value; filled lines (`fill: "stack"` or `"-1"`) run through each dataset's own points, so a dataset missing an x adds nothing there and its fill joins its neighbors (from its source, 4.5). | Documented. `stackgroup` on scatter traces with `stackgaps` "infer zero" (the default) or "interpolate" (constant beyond a trace's ends), `groupnorm` for fraction or percent stacks, and orientation; bars with `barmode: "stack"` or "relative". |
@@ -477,7 +477,12 @@ GPU memory Chrome attributes to the page (WebGL buffers and drawing buffers,
 GPU canvas resources, compositor tiles); and the growth of the GPU process's
 footprint, which depends on what ran before and moves by several megabytes
 either way, so it is shown but not compared. `benchmarks/README.md`
-("Memory") says what each includes and excludes.
+("Memory") says what each includes and excludes. The table's tile figures
+were recorded while Chrome rasterized at the display's own scale (1x) with
+pages emulating a ratio of 2, a quarter of the pixels; the figures below
+come from runs drawing at a ratio of 2 (`--force-device-scale-factor`,
+five interleaved with the 1x runs, Chrome 155), which leave canvas, WebGL,
+and heap figures as they were.
 
 <!-- results:memory -->
 | Scenario | herceg | echarts | chartjs | plotly | tanstack | uplot |
@@ -494,25 +499,32 @@ either way, so it is shown but not compared. `benchmarks/README.md`
 <!-- /results:memory -->
 
 Counted in full, Herceg's renderer grows least in every scenario but the
-million-point line, where uPlot's grows ~0.9 MB less; its GPU memory is not
-always the least:
+million-point line, where uPlot's grows ~2 MB less; on the GPU, ECharts and
+Chart.js, which draw everything into their canvases, take the least
+everywhere:
 
-- One million points: the renderer grows ~8.4 MB for Herceg and ~7.5 MB for
-  uPlot, against ~64 MB for Chart.js, ~130 MB for
-  Plotly (plus ~126 MB of GPU memory, almost all WebGL buffers), ~270 MB for
-  ECharts, and ~670 MB for TanStack Charts. Herceg's first mount keeps
-  ~0.9 MB of heap, more than the 0.24 MB of later mounts.
+- One million points: the renderer grows ~9.2 MB for Herceg and ~7.2 MB for
+  uPlot, against ~62 MB for Chart.js, ~132 MB for
+  Plotly (plus ~137 MB of GPU memory, ~122 MB of it WebGL buffers), ~264 MB
+  for ECharts, and ~660 MB for TanStack Charts. On the GPU, Herceg takes
+  ~14 MB (the canvas's 5.1 and ~9 MB of compositor tiles for its SVG axes)
+  and uPlot ~12 MB, against ~5.1 MB of canvas for ECharts and Chart.js.
+  Herceg's first mount keeps ~0.9 MB of heap, more than the 0.24 MB of
+  later mounts.
 - The ten-chart dashboard: uPlot's retained heap is half Herceg's (~2.8
-  against ~5.9 MB), but its renderer grows more (~28 against ~20 MB), as
-  its `Path2D` paths are native memory, and Chrome attributes ~40 MB of GPU
-  memory to its page against ~31 MB for Herceg's. Herceg's ~31 MB is the
-  same 24 MB of canvases as ECharts' and Chart.js's plus ~6.6 MB of
-  compositor tiles; Plotly and TanStack Charts, drawing SVG, have the least
-  (~14 MB of tiles), but their renderers grow ~73 and ~320 MB.
-- 100 small charts: Herceg's SVG charts take ~22 MB of compositor tiles on
+  against ~5.9 MB), but its renderer grows more (~27 against ~21 MB), as
+  its `Path2D` paths are native memory, and Chrome attributes ~89 MB of GPU
+  memory to its page against ~49 MB for Herceg's. Herceg's ~49 MB is the
+  same 24 MB of canvases as ECharts' and Chart.js's (their whole GPU
+  memory) plus ~25 MB of compositor tiles: each chart's SVG layer, drawn
+  over its canvas, is composited as a layer of the chart's size and takes
+  one 1216 x 512 px tile, however little of it the axes and legend cover.
+  Plotly and TanStack Charts, drawing SVG, take ~58 MB of tiles, and their
+  renderers grow ~73 and ~325 MB.
+- 100 small charts: Herceg's SVG charts take ~87 MB of compositor tiles on
   the GPU, as Plotly's and TanStack Charts' do, against ~72 MB of canvas
-  resources for ECharts and Chart.js and ~92 MB for uPlot; renderers grow
-  ~33 MB (Herceg) to ~61 MB (Chart.js).
+  resources for ECharts and Chart.js and ~144 MB of canvas and tiles for
+  uPlot; renderers grow ~35 MB (Herceg) to ~63 MB (Chart.js).
 
 ## 3D charts
 
@@ -571,9 +583,11 @@ which include the GPU's work. Memory is the retained heap after mounting,
 the median of mounts repeated in one page, then a first mount in a fresh
 page counted in full. The median hides Plotly's first-mount cost: its
 million-cell surface keeps ~1.2 MB on later mounts but 343 MB of heap on
-the first, with ~395 MB of renderer growth and ~342 MB of GPU memory
+the first, with ~395 MB of renderer growth and ~353 MB of GPU memory
 (~304 MB WebGL); Herceg's keeps ~9.6 MB, with ~35 MB of renderer growth and
-~72 MB of GPU memory (~63 MB WebGL).
+~72 MB of GPU memory (~63 MB WebGL). These GPU figures are from Chrome
+drawing at a ratio of 2; the table's compositor tiles were rasterized at
+1x (see Memory).
 Herceg's benchmark adapter gives surfaces a matrix table (`fromMatrix`), x
 and y once each and z as the grid's heights, as Plotly takes them, so a
 surface keeps no row per grid point. ECharts (through ECharts-GL) is not
@@ -1590,7 +1604,7 @@ Monthly revenue bars with a target line over the same months.
   in place, so retained memory for 1M points is a fraction of a megabyte, and
   it keeps up with every paced ingestion scenario. Herceg nearly matches its
   memory for large series (~0.24 MB vs ~0.18 MB of retained heap at 1M
-  points; renderer growth ~8.4 MB vs ~7.5 MB on a first mount) and matches
+  points; renderer growth ~9.2 MB vs ~7.2 MB on a first mount) and matches
   its pacing under streaming, mounts and replaces large line charts faster
   (1M points: ~4.9 ms vs ~6.4 ms to mount, ~3.5 ms vs ~5.7 ms to replace),
   and streams a million-point window faster (~1.5 ms vs ~5.8 ms a tick).
@@ -1601,8 +1615,8 @@ Monthly revenue bars with a target line over the same months.
   ~10 ms vs ~11 ms), and on the dashboard's retained heap (~2.8 MB vs
   ~5.9 MB for ten charts). Counted in full it is behind there: its paths are
   browser `Path2D` objects outside the heap, and on a first mount its
-  renderer grows ~28 MB against Herceg's ~20 MB, with ~40 MB of GPU memory
-  against ~31 MB.
+  renderer grows ~27 MB against Herceg's ~21 MB, with ~89 MB of GPU memory
+  against ~49 MB.
 - Scatter from typed columns: at 10,000 points the libraries that render in
   one pass (Herceg ~2.5 ms on Canvas, Chart.js ~4.5 ms) are far ahead of
   ECharts and Plotly (~65–80 ms). Large point series are where GPU rendering
@@ -1677,18 +1691,19 @@ Monthly revenue bars with a target line over the same months.
 - Small charts rendered as SVG avoid canvas backing stores entirely: Herceg's
   100 small charts use ~9 MB of heap and no canvas memory, while the Canvas
   libraries need ~72 MB of canvas pixels for the same charts. On the GPU,
-  Chrome attributes ~22 MB of compositor tiles to Herceg's page, against
-  ~72 MB of canvas resources for ECharts and Chart.js and ~92 MB for uPlot.
+  Chrome attributes ~87 MB of compositor tiles to Herceg's page (as to
+  Plotly's and TanStack Charts'), against ~72 MB of canvas resources for
+  ECharts and Chart.js and ~144 MB of canvas and tiles for uPlot.
 - The median of repeated mounts can hide a first mount's cost: Plotly's
   million-cell surface keeps ~1.2 MB of heap on later mounts in a page but
-  343 MB on the first, with ~395 MB of renderer growth and ~342 MB of GPU
+  343 MB on the first, with ~395 MB of renderer growth and ~353 MB of GPU
   memory (Herceg's: ~9.6 MB, ~35 MB, and ~72 MB).
 - Libraries that need one object per point (TanStack Charts rows, Chart.js
   `{x, y}`, ECharts pairs) retain 3–40x the source data size at 1M points.
-- For many small charts, Canvas backing stores dominate: 100 300x150 charts at
-  DPR 2 need ~72 MB of canvas pixels, more than the JavaScript heap of any
-  library. The SVG libraries have no backing stores but create thousands of DOM
-  nodes.
+- For many small charts, pixels dominate: 100 300x150 charts at DPR 2 need
+  ~72 MB of canvas pixels, more than the JavaScript heap of any library. The
+  SVG libraries have no backing stores, but Chrome rasterizes their charts
+  into ~87 MB of compositor tiles, and they create thousands of DOM nodes.
 - Rebuilding on every update limits streaming: TanStack Charts (new
   definition per update) and Plotly (`extendTraces`) cannot sustain 60 Hz
   ingestion on a 15-series chart, and fall to a few frames per second on a

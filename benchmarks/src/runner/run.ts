@@ -31,6 +31,7 @@ import {
   processMemory,
   REALTIME_ARGS,
   rendererPid,
+  scaleFactorArg,
 } from "./chrome.ts";
 import { COMPARED, commit, machine, PACKAGES, packageVersion, RUNTIMES } from "./environment.ts";
 import { type Summary, summarize } from "./stats.ts";
@@ -73,10 +74,15 @@ type Pass = "main" | "webgl" | "first-mount";
 // Firefox paints as soon as it can with a frame rate of 0 ("ASAP mode").
 // WebKit has no such setting: its latencies include waiting for vsync.
 const FIREFOX_LATENCY_PREFS = { "layout.frame_rate": 0 };
+// Chrome draws at the ratio its pages emulate, whatever the display's.
+const CHROME_ARGS = {
+  latency: [...LATENCY_ARGS, scaleFactorArg(DEVICE_SCALE_FACTOR)],
+  realtime: [...REALTIME_ARGS, scaleFactorArg(DEVICE_SCALE_FACTOR)],
+};
 
 /** How each kind of scenario runs, recorded with the results. */
 const BROWSER_SETTINGS = {
-  chrome: { latency: LATENCY_ARGS, realtime: REALTIME_ARGS },
+  chrome: CHROME_ARGS,
   firefox: { latency: FIREFOX_LATENCY_PREFS, realtime: {} },
   webkit: { latency: "default (frames follow vsync)", realtime: "default" },
 }[browserName];
@@ -231,7 +237,7 @@ async function main() {
     } else if (browserName === "webkit") {
       browser = await webkit.launch({ headless });
     } else {
-      const chromeArgs = realtime ? REALTIME_ARGS : LATENCY_ARGS;
+      const chromeArgs = realtime ? CHROME_ARGS.realtime : CHROME_ARGS.latency;
       browser = await chromium.launch({ channel: "chrome", headless, args: chromeArgs });
     }
     const context = await browser.newContext({

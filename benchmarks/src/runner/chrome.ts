@@ -14,6 +14,18 @@ export const COMMON_ARGS = [
 export const LATENCY_ARGS = [...COMMON_ARGS, "--disable-frame-rate-limit", "--disable-gpu-vsync"];
 export const REALTIME_ARGS = COMMON_ARGS;
 
+/**
+ * Makes Chrome's own scale factor the device pixel ratio its pages emulate.
+ * Emulation alone sets `devicePixelRatio`, and with it canvas sizes, but
+ * Chrome rasterizes and composites at the display's scale: on a 1x display,
+ * a 600x250 CSS px layer got a 640x256 px tile (0.66 MB) at an emulated
+ * ratio of 2, and the 1216x512 px tile (2.5 MB) of a display of ratio 2
+ * with this flag.
+ */
+export function scaleFactorArg(ratio: number): string {
+  return `--force-device-scale-factor=${ratio}`;
+}
+
 /** Waits for `promise` at most `ms`, ignoring its outcome. */
 export function bounded(promise: Promise<unknown>, ms = 10_000): Promise<void> {
   return new Promise<void>((resolve) => {
