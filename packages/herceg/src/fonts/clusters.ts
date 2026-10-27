@@ -12,7 +12,8 @@ const SIMPLE_EXTENSIONS =
 // Every scalar must also pass category, Script_Extensions, and cluster checks.
 // Contour tone letters (U+02E5-02E9, U+A712-A716) ligate, and the vertical
 // kana repeat marks (U+3031-3035) need vertical layout, so they are left out.
-// See docs/architecture.md for the exact ranges and runtime Unicode policy.
+// See docs/architecture/export.md ("Text admission") for the exact ranges and
+// runtime Unicode policy.
 const SIMPLE_SHARED_BLOCK =
   // biome-ignore lint/suspicious/noMisleadingCharacterClass: This tests one scalar; cluster composition is validated separately.
   /^[\u0020-\u007e\u00a0-\u00ff\u02b0-\u02e4\u02ea-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u2000-\u27ff\u2900-\u2bff\u2e00-\u2e7f\u3000-\u3030\u3036-\u303f\u3099-\u309c\u30a0-\u30ff\u3190-\u33ff\ua700-\ua711\ua717-\ua71f\ufe50-\ufe6f\uff01-\uff9f\uffe0-\uffee\u{1d300}-\u{1d37f}\u{1d400}-\u{1d7ff}\u{1f000}-\u{1faff}\u{1fb00}-\u{1fbff}]$/u;

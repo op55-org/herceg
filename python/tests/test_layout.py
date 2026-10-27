@@ -17,8 +17,8 @@ DATA = {
 }
 
 
-def readme_chart() -> hg.Chart:
-    """The layout of the README, as written there."""
+def guide_chart() -> hg.Chart:
+    """The layout of docs/guide/layout.md, as written there."""
     df = DATA
     chart = hg.Chart(df, height=600)
     left, right = chart.columns([2, 1])
@@ -33,8 +33,8 @@ def readme_chart() -> hg.Chart:
     return chart
 
 
-def test_the_readme_layout_draws_and_exports():
-    chart = readme_chart()
+def test_the_guide_layout_draws_and_exports():
+    chart = guide_chart()
     spec, _ = chart.to_spec()
     assert [panel["id"] for panel in spec["panels"]] == ["latency", "errors", "share"]
     layout = spec["layout"]

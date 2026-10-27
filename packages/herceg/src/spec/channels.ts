@@ -7,7 +7,7 @@
 // (marks/features/channels.ts), checking its outputs here, and the
 // validator reads the table of the channels each mark takes in `encode`.
 //
-// Rules every reader keeps (see docs/architecture.md, "Channels"):
+// Rules every reader keeps (see docs/architecture/marks.md, "Channels"):
 // - `fill` and `stroke` win over `color`, the primary paint.
 // - A channel set directly and in `encode` is refused, as is a string that
 //   is both a field of the table and an output (a color, a shape's name):

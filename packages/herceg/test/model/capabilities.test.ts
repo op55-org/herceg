@@ -1,4 +1,4 @@
-// Capability contract: change packages/herceg/README.md's "What each mark
+// Capability contract: change docs/guide/support.md's "What each mark
 // supports" table and its notes together with these tests.
 
 import { describe, expect, it } from "vitest";

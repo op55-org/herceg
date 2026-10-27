@@ -1,7 +1,7 @@
 """Contract tests: ``@pytest.mark.contract("line.z-index.refused.python")``
 marks a test proving a contract, by an ID other tooling finds in the run's
-JUnit XML (a ``contract`` property). IDs are the engine's (see the
-architecture's "Contract tests"): lowercase words joined by dots."""
+JUnit XML (a ``contract`` property). IDs are the engine's (see
+docs/contributing.md, "Contracts"): lowercase words joined by dots."""
 
 from __future__ import annotations
 

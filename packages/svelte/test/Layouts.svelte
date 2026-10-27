@@ -1,4 +1,4 @@
-<!-- Layouts of panels, the README's and others the tests pick by `shape`. -->
+<!-- Layouts of panels, the frameworks guide's and others the tests pick by `shape`. -->
 <script lang="ts">
   import type { ChartError, Chart as HercegChart, Table } from "herceg";
   import { Legend } from "../src/guides.js";

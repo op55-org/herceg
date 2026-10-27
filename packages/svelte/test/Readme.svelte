@@ -1,4 +1,4 @@
-<!-- The README's examples, checked by `npm run typecheck` so the docs stay true. -->
+<!-- The examples of the README and docs/guide/frameworks.md, checked by `npm run typecheck` so the docs stay true. -->
 <script lang="ts" module>
   declare const timestamps: Float64Array;
   declare const p50: Float64Array;

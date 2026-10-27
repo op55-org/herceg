@@ -1,8 +1,8 @@
 # Benchmarks
 
-Reproducible comparisons between Herceg and other chart libraries. Results that
-back published claims are committed in `results/`; everything else goes to
-`tmp/benchmarks/` (gitignored).
+Reproducible comparisons between Herceg and other chart and grid libraries.
+Results that back the [comparison](../docs/comparison.md) are committed in
+`results/`; other runs go to `tmp/benchmarks/` (gitignored).
 
 ```sh
 npm run bench                        # full browser suite -> tmp/benchmarks/bench-<time>.json
@@ -19,9 +19,9 @@ npm run bench:report                 # regenerate the tables in docs/comparison.
 npm run bench:express -- --out results/express.json   # herceg.express timings (Python)
 ```
 
-Run these from the repository root. The browser suite drives the locally
-installed Google Chrome through Playwright and opens a visible window. Leave the
-machine otherwise idle while it runs.
+Run these from the repository root. The browser suite drives the installed
+Google Chrome through Playwright in a visible window; leave the machine
+otherwise idle while it runs.
 
 ## Layout
 
@@ -44,8 +44,8 @@ machine otherwise idle while it runs.
 ### Builds and pages
 
 Each library gets its own production bundle (esbuild, minified,
-`NODE_ENV=production`) containing the harness and that library's adapter, so a
-page never loads two chart libraries. Every scenario runs in a fresh page.
+`NODE_ENV=production`) containing the harness and that library's adapter, so
+a page never loads two chart libraries. Every scenario runs in a fresh page.
 
 ### Browser
 
@@ -57,130 +57,87 @@ px, device pixel ratio 2, cross-origin isolated pages (COOP/COEP) so
 - `--disable-renderer-backgrounding --disable-background-timer-throttling
   --disable-backgrounding-occluded-windows`, so a covered window is not
   throttled;
-- for every scenario except paced ingestion, `--disable-frame-rate-limit
-  --disable-gpu-vsync`: frames are produced as soon as work allows, so waiting
-  for a frame measures work instead of vsync alignment. Paced ingestion runs in
-  a second browser with normal vsync, because frame pacing is what it measures;
-- `--force-device-scale-factor=2`, the ratio pages emulate. Emulation alone
-  sets `devicePixelRatio`, and with it every canvas's size, but Chrome
-  rasterizes and composites at the display's own scale: on a 1x display a
-  600x250 CSS px layer got a 640x256 px compositor tile (0.66 MB) instead of
-  the 1216x512 px one (2.5 MB) it has on a display of ratio 2.
+- for every scenario but paced ingestion, `--disable-frame-rate-limit
+  --disable-gpu-vsync`, so waiting for a frame measures work rather than
+  vsync alignment; paced ingestion runs in a second browser with vsync,
+  since frame pacing is what it measures;
+- `--force-device-scale-factor=2`, the ratio pages emulate, so Chrome
+  rasterizes and composites at that ratio as well (emulation alone sizes
+  canvases at 2 but rasterizes tiles at the display's own scale).
 
-`--browser webkit` runs the suite in Playwright's WebKit build (the engine of
-Safari, not Safari itself; `npx playwright install webkit`), and `--browser
-firefox` in its Firefox build (`npx playwright install firefox`) with
-`layout.frame_rate` 0 so frames come as soon as work allows; paced ingestion
-and orbit scenarios use a separate Firefox process with the default frame
-rate. WebKit has no such setting: frames follow the display,
-so every WebKit timing includes waiting for the next frame from wherever the
-operation started (pointer moves from when the event arrives), and
-differences under a frame are noise. WebKit runs headless: on macOS,
-Playwright's headed WebKit windows that are not frontmost get throttled
-frames (hundreds of milliseconds apart, for every library). Results record the Playwright version,
-the browser build, and the idle frame cadence. Memory scenarios are measured
-in Chrome only (see [Memory](#memory) for why), and long-animation-frame
-counts only in browsers that report them. Both the harness and browser
-tests use `scripts/browser/firefox.ts` to set `MOZ_APP_DATA` and
-`MOZ_LOCAL_APP_DATA` to a temporary writable folder for Firefox. This allows
-Playwright's Firefox build to start on macOS 27, which refuses to create
-`~/Library/Application Support/Firefox`. The folders are removed on process exit.
+`--browser webkit` runs the suite in Playwright's WebKit build (the engine
+of Safari, not Safari itself) and `--browser firefox` in its Firefox build
+(`npx playwright install webkit firefox`).
 
-Firefox has no `performance.memory` and cannot use the harness's Chrome CDP
-heap measurement. The JSON records this in `method.memory` and
-`method.processMemory` and omits memory scenarios from `scenarios` and
-`results`. It also lacks long-animation-frame
-entries: ingestion results omit `metrics.longFrames`, rather than reporting
-zero. Frame intervals, dropped frames, append times, and achieved ingestion
-rates are still measured.
+- **Firefox** runs with `layout.frame_rate` 0, so frames come as soon as
+  work allows; paced ingestion and orbit scenarios use a second Firefox at
+  the default frame rate. `scripts/browser/firefox.ts` gives it a
+  temporary application data folder (`MOZ_APP_DATA`), since macOS 27
+  refuses to create `~/Library/Application Support/Firefox`.
+- **WebKit** runs headless (Playwright's headed WebKit windows that are not
+  frontmost get throttled frames) and has no frame rate setting, so every
+  WebKit timing includes waiting for the next frame and differences under a
+  frame are noise.
+- Neither has Chrome's heap or process measurements, so memory scenarios
+  are omitted (the JSON's `method.memory` and `method.processMemory` say
+  why), and Firefox reports no long animation frames.
+- `--sample-scale 0` gives one sample per scenario without warmups, for a
+  smoke check; recorded results use the catalog's full counts.
 
-For a Firefox smoke check, use `npm run bench -- --browser firefox
---sample-scale 0`: one measured sample per scenario, no warmups. These trial
-timings are unsuitable for comparisons. To record results, leave the machine
-otherwise idle, use the catalog's full sample and warmup counts (omit
-`--sample-scale`), and run `npm run bench -- --browser firefox --out
-results/browser-firefox.json`. Check `complete`, every row's `supported` and
-`reason`, and the recorded environment before publishing. The committed
-`results/browser-firefox.json` is such a run, in Playwright's Firefox 155.0
-(build 1543).
+Results record the Playwright version, the browser build, and the idle
+frame cadence.
 
 ### Timing
 
 An operation starts when the harness calls the library and ends when the
-library reports that rendering is complete and the next frame has been
-produced. The frame boundary is a `MessageChannel` message posted from inside
-`requestAnimationFrame`, which runs after the frame's style, layout, and paint.
-This includes deferred work scheduled with `requestAnimationFrame` or
-`ResizeObserver`. Libraries that render progressively over several frames
-(ECharts scatter and heatmap series) expose completion through their adapter
-(`finished` event), so timings cover the complete render, not the first
-partial frame. Herceg's large point series wait for its on-demand WebGL
-painter the same way (`chart.loading`).
+library reports rendering complete and the next frame has been produced: a
+`MessageChannel` message posted from inside `requestAnimationFrame`, after
+the frame's style, layout, and paint, so work deferred to
+`requestAnimationFrame` or `ResizeObserver` counts. Libraries that render
+progressively (ECharts scatter and heatmap series) report completion
+through their adapter, so timings cover the complete render; Herceg's large
+point series wait for its WebGL painter the same way (`chart.loading`).
 
 These frame timings (`timeToFrame`, `tickToFrame`, `pointerToFrame`,
 `viewportToFrame`, `resizeToFrame`, `cameraToFrame`, ...) end with the main
-thread's frame. Work the browser does after it is not in them: the GPU
-executing WebGL draws, rasterizing canvas recordings and DOM and SVG tiles,
-and compositing.
+thread's frame. GPU work after it (WebGL draws, rasterizing canvases, DOM,
+and SVG, compositing) is not in them.
+
+- Animations are disabled in every library; tooltips are enabled unless a
+  scenario says otherwise.
+- Each scenario discards warmup iterations, then takes measured samples
+  (`src/scenarios.ts`; `--sample-scale` scales both). Reports show the
+  median and median absolute deviation; raw samples, p95, and p99 are in
+  the JSON.
+- Libraries that need another input format (row objects, `[x, y]` pairs)
+  convert the shared typed arrays inside their adapter, so timings include
+  the conversion, as in an application holding columnar data. The
+  conversion is also stored alone as `prepare`, as a diagnostic.
 
 #### WebGL drawing finished
 
-For streaming, hover, zoom, resize, and 3D camera scenarios, a second run in
-a fresh page times the same operations until, after that frame, the GPU has
-also finished every WebGL context the page created (`tickToWebglDone`,
+For streaming, hover, zoom, resize, and 3D camera scenarios, a second run
+in a fresh page times the same operations until the GPU has also finished
+every WebGL context the page created (`tickToWebglDone`,
 `pointerToWebglDone`, `viewportToWebglDone`, `resizeToWebglDone`,
-`cameraToWebglDone`). The harness wraps `getContext` before any library code
-loads (`src/page/webgl.ts`, holding contexts weakly) and reads one pixel from
-each live context's default framebuffer, which blocks until that context's
-earlier commands have run on the GPU; the library's framebuffer and
-pixel-pack state are restored. Results record how many WebGL contexts the
-page created (`webglContexts`); where it created none, the second run times
-the same frames again. The second run fails, and the report says "error",
-when it created a different number of contexts than the first or when a
-context on screen was lost. The procedure is the same in Chrome, Firefox,
-and WebKit.
+`cameraToWebglDone`). The harness wraps `getContext` before library code
+loads (`src/page/webgl.ts`) and reads one pixel from each live context's
+framebuffer, which blocks until its earlier commands have run, restoring
+the library's framebuffer and pixel-pack state. The run fails ("error")
+when it creates a different number of contexts than the first or a context
+is lost. It is a separate run because waiting for the GPU after each
+operation changes how the next one overlaps with it; without waiting,
+Plotly's 10M-point zoom steps queued about 12 ms of GPU work each while
+taking 0.7 ms to their frames, so its display fell behind with no sign in
+the frame timings.
 
-It is a separate run because waiting for the GPU after every operation
-changes how the next one overlaps with it: in one run, Plotly's 10,000,000-point
-zoom steps took 0.17 ms longer to their frames when each waited. Without
-waiting, the steps queue GPU work: 120 consecutive steps took about 0.7 ms
-each to their frames while each draw took about 12 ms on the GPU, so the
-display fell seconds behind with no sign of it in the frame timings.
-
-Still not counted, for any library: rasterizing 2D canvases and DOM and SVG
-content on the GPU, and compositing. The alternatives tried on the
-benchmark machine (Chrome 155, macOS) do not measure them faithfully:
-
-- Presentation times (Chrome's `presentationTime` on Element Timing entries,
-  or frame presentation in a trace) come 18 to 35 ms after the frame's swap,
-  in steps of the display's refresh, and from an idle start they did not
-  move with Plotly's 12 ms of GPU work per zoom step.
-- Reading a pixel back from a 2D canvas (`getImageData`) moves Chrome's
-  canvas to software drawing: Herceg's zoom frames went from 1.5 to 6.1 ms.
-- Copying each 2D canvas into a WebGL texture and reading that back costs
-  about 1.75 ms by itself, the same for Herceg, uPlot, and Chart.js, more
-  than the rasterization it would show.
-- Waiting for one more frame after each operation makes Chrome wait for the
-  display's refresh before the next one (frame timings near 17 ms for
-  everyone).
-
-Paced scenarios with vsync on (`ingest`, `orbit`) see GPU and compositor
-work only when it delays frames past the display's refresh.
-
-Animations are disabled in every library, including ECharts' tooltip
-transition. Tooltips are enabled unless a scenario says otherwise.
-
-Each scenario has warmup iterations that are discarded, followed by measured
-samples (see `src/scenarios.ts`; `--sample-scale` scales both). Reports show
-the median and the median absolute deviation (MAD); raw samples, p95, and p99
-are in the JSON files.
-
-Libraries that need a different input format (row objects, `[x, y]` pairs)
-convert the shared typed arrays inside their adapter, so timings include the
-conversion, as they would in an application holding columnar data. The
-conversion is also timed on its own and stored as `prepare` in the raw results;
-treat it as a diagnostic, since a discarded conversion does not have the same
-allocation and GC behavior as one the library retains.
+Rasterizing 2D canvases, DOM, and SVG, and compositing, are still counted
+for no library: presentation times are quantized to the display's refresh,
+reading back a 2D canvas moves Chrome's canvas to software drawing, copying
+canvases into WebGL textures costs more than the rasterization it would
+show, and waiting a further frame makes every timing a refresh interval.
+Paced scenarios with vsync (`ingest`, `orbit`) see GPU and compositor work
+only when it delays frames.
 
 ### Operations
 
@@ -199,90 +156,51 @@ allocation and GC behavior as one the library retains.
 ### Memory
 
 Memory is read with the Chrome DevTools Protocol after forced garbage
-collection (`HeapProfiler.collectGarbage`, `Runtime.getHeapUsage`). The total
-is the V8 heap plus the Blink (Oilpan) heap plus ArrayBuffer backing stores.
-Backing stores matter: typed-array data lives there, and leaving them out would
-hide columnar storage.
+collection (`HeapProfiler.collectGarbage`, `Runtime.getHeapUsage`): the V8
+heap, the Blink heap, and ArrayBuffer backing stores, where typed-array
+data lives. Each sample: baseline, create source data, mount charts,
+measure, destroy charts and data, measure.
 
-For each sample: baseline → create source data → mount charts → measure →
-destroy charts and data → measure. Reported values:
+| Value | Is |
+| --- | --- |
+| `retainedBytes` | Heap growth from mounting (source data excluded), the median of mounts repeated in one page |
+| `sourceBytes` | The source data itself |
+| `canvasBytes` | Estimated canvas backing stores (width × height × 4); not in the heap |
+| `domNodes` | Elements under the chart containers |
+| `leakedBytes` | Heap after destroying everything, against the baseline |
 
-- `retainedBytes`: heap growth from mounting the charts (source data excluded).
-- `sourceBytes`: the source data itself.
-- `canvasBytes`: estimated canvas backing stores (width x height x 4 per
-  canvas). Not part of the heap number.
-- `domNodes`: elements under the chart containers.
-- `leakedBytes`: heap after destroying everything, relative to the baseline.
+The median of repeated mounts leaves out what a library pays only once
+(compiled code, caches kept after destroying: Plotly's first 1001 x 1001
+surface retains about 340 MB that later surfaces reuse), and the heap
+misses native objects (`Path2D`, Skia recordings, compositor layers) and
+GPU memory. A separate run therefore mounts each memory scenario once per
+fresh page and reads:
 
-`retainedBytes` is the median of mounts repeated in one page, so it leaves
-out what a library pays only the first time: code it compiles, and caches it
-keeps after its charts are destroyed. Plotly's first 1001 x 1001 surface, for
-example, retains about 340 MB of heap, which `Plotly.purge` does not release
-and later surfaces reuse; its median is about 1 MB. The heap also misses memory
-kept outside it: native objects such as `Path2D` paths, Skia recordings,
-compositor layers, and font caches, and GPU memory for WebGL buffers, canvas
-textures, and compositor tiles.
+- `firstRetainedBytes`: the heap growth of that first mount.
+- `rendererBytes`: the growth of the renderer process's physical footprint
+  (macOS `phys_footprint`, read with `footprint`; the process found through
+  the page's trace). Heap and native memory; allocators may keep freed
+  pages. macOS only.
+- `gpuBytes`: GPU memory Chrome's memory instrumentation lists in the
+  page's renderer: WebGL buffers and drawing buffers (`gpuWebglBytes`), 2D
+  canvas resources shared with the GPU process (`gpuCanvasBytes`), and
+  compositor tiles (`gpuTileBytes`, a whole tile per composited layer
+  holding anything, pooled tiles included). WebGL textures and
+  renderbuffers are not listed (Plotly's 1001 x 1001 surface makes about
+  13 MB of them), nor the GPU process's own copies and caches.
+- `gpuProcessBytes`: the GPU process's footprint, which counts all of that
+  but moves 10 to 20 MB between samples and depends on what the browser
+  drew before; shown, not compared.
 
-A separate run therefore mounts each memory scenario's charts once per fresh
-page, one page per sample, and reads, from the page with the data prepared
-to the page with the charts mounted:
-
-- `firstRetainedBytes`: the heap growth of that first mount, as
-  `retainedBytes` measures it.
-- `rendererBytes`: the physical footprint of the page's renderer process
-  (macOS `phys_footprint`, which Activity Monitor shows as a process's
-  memory, read with `footprint`). It includes the heap and native memory;
-  allocators may keep pages the mount freed, which then count. The renderer
-  is found through the page's own trace (`TracingStartedInBrowser` lists its
-  frames' processes). Measured on macOS only.
-- `gpuBytes`: GPU memory Chrome's own memory instrumentation (memory-infra,
-  detailed dumps) lists in the page's renderer: WebGL buffers and drawing
-  buffers (`gpuWebglBytes`), 2D canvas resources shared with the GPU process
-  (`gpuCanvasBytes`; a software canvas's pixels stay in the renderer and
-  count there), and compositor tiles (`gpuTileBytes`, rasterized for
-  whatever DOM, SVG, or canvas content is in view, at the browser's scale
-  factor; a composited layer smaller than a tile gets one tile of about its
-  size, rounded up (600x250 px takes 640x256), a tile holding anything is
-  allocated in full, and tile resources Chrome keeps pooled for reuse count
-  too). These are allocation
-  sizes the GPU process holds. Chrome's WebGL dump does not list textures or
-  renderbuffers a library creates (Plotly's 1001 x 1001 surface makes about
-  13 MB of textures, Herceg's 0.02 MB), and nothing the GPU process keeps
-  besides (its own copies of WebGL buffers, driver memory, Skia's caches) is
-  attributed to a page.
-- `gpuProcessBytes`: the GPU process's physical footprint. It counts all of
-  that, but the process is shared with the browser's own drawing and with
-  the pages before: in a run, small charts' readings move by 10 to 20 MB
-  either way between samples, and what a mount adds depends on what the
-  browser drew earlier (Plotly's first 1001 x 1001 surface grew it by about
-  1 GB in a browser that had drawn no WebGL yet, and by 0.36 to 0.38 GB in a
-  run after other WebGL pages, where `gpuBytes` lists 0.34 GB). It shows
-  large GPU costs only.
-
-Process readings come after a forced garbage collection and a 500 ms pause,
-which lets tiles and canvas resources a mount leaves for later frames be
-allocated. Memory dumps need a trace, whose first dump allocates tracing
-buffers in every process, so one dump is taken before the readings that
-count, and the heap before mounting is read after the first process reading.
-The run is separate because its pauses and dumps changed the repeated
-mounts' heap readings by up to 0.1 MB when taken in the same page.
-
-The heap, `canvasBytes`, `rendererBytes`, and `gpuBytes` overlap (the heap is
-part of the renderer's footprint, and canvas pixels are GPU canvas memory);
-they are not added up.
-
-The renderer's footprint read 0, 0.1, 0.5, 1, and 2 s after collection
-agreed within 0.1 MB in 39 of 40 readings; first mounts in fresh pages
-agreed within about 3% between runs. A memory dump that Chrome reports as
-failed, or a GPU process that restarted between the readings, fails the
-sample rather than counting as zero.
-
-Firefox and WebKit are not measured. Playwright can force garbage collection
-in both (`page.requestGC()`), and the page's content process can be found,
-but after collection Firefox's content process kept 80 MB of freed objects
-and WebKit's kept freed memory until its scavenger ran, so their footprints
-would count garbage that Chrome's does not; neither attributes GPU memory to
-a page.
+Readings come after a forced collection and a 500 ms pause, with one
+memory dump taken first (a trace's first dump allocates tracing buffers).
+The heap, `canvasBytes`, `rendererBytes`, and `gpuBytes` overlap and are not
+added up. Footprints read 0 to 2 s after collection agreed within 0.1 MB
+in 39 of 40 readings; first mounts agreed within about 3% between runs. A
+failed dump or a restarted GPU process fails the sample. Firefox and
+WebKit are not measured: after collection their content processes kept
+freed memory that Chrome's does not count, and neither attributes GPU
+memory to a page.
 
 ### What each metric counts, per browser
 
@@ -335,72 +253,77 @@ crashed tab can leave the old one unable to open pages.
 - Results are from one machine. Compare libraries within a run, not across
   machines.
 
+### Bundle size
+
+`npm run bench:size` bundles each entry in `src/size/entries/` for
+production with tree shaking and reports raw, minified, gzip, and brotli
+sizes, JavaScript and required CSS apart. Sizes count what a page loads
+before the chart renders: the entry chunk and the chunks it imports
+statically, each compressed on its own as browsers fetch them. Herceg's
+interaction controller (tooltips, the pointer, the wheel, and keys), which
+every chart loads right after its first frame, is reported apart. Chunks
+reached only through dynamic imports (the WebGL painter, animation,
+brushes, crosshair labels, the range navigator, and the controls of maps,
+trees, and 3D charts) are reported as optional chunks: the total an entry
+could load for some chart, not what its own chart downloads.
+
+- `herceg-react-line`, `herceg-vue-line`, and `herceg-svelte-line` leave
+  the framework's runtime out, as an application using the adapter already
+  ships it; the Svelte entry's own component, compiled with
+  `svelte/compiler`, is measured with it.
+- `herceg-bar`, `herceg-area`, `herceg-scatter`, `herceg-heatmap`, and
+  `herceg-contour` chart the same data with other marks, to track what each
+  adds. Only the line entries have counterparts among the other libraries.
+- `herceg-pdf` is one line chart as PDF, `herceg-pdf-fonts` the same with
+  embedded-font support (font bytes excluded), `herceg-spec-pdf` a portable
+  spec with its loader, and `herceg-pdf-document` a two-chart A4 report.
+- `herceg-grid`, `herceg-grid-pivot`, `herceg-grid-remote`, `herceg-pivot`,
+  `herceg-image`, and `herceg-web` measure those subpaths; the other
+  libraries have no counterparts.
+
 ### React integration
 
 `npm run bench:react` runs plain `herceg` and `herceg-react` (the same charts
-through `@herceg/react`) in one session and writes `results/react.json`; it
-is not part of the main comparison. The React adapter supports the line and
-area scenarios. Mounting and resizing go through React props, rendered
-synchronously with `flushSync`; data replacement and streaming change the
-table directly, the adapter's documented path for live data. Each chart is
-its own React root here, so per-root setup (event delegation on the
-container) is counted once per chart; an application with one root pays it
-once.
-
-Bundle sizes count what a page loads before the chart renders: the entry
-chunk and the chunks it imports statically, each compressed on its own as
-browsers fetch them. Herceg's interaction controller (tooltips, the
-pointer, the wheel, and keys), which every chart loads right after its
-first frame, is reported apart, as loaded after the first frame. Other
-chunks reached only through dynamic imports (Herceg's WebGL painter,
-animation, crosshair labels) are reported separately as optional chunks:
-the total of every chunk the entry could load for some chart, not what the
-entry's own chart downloads.
-
-The `herceg-react-line` size entry leaves React and React DOM out of the
-bundle, since an application using the adapter already ships them;
-`herceg-vue-line` leaves Vue out and `herceg-svelte-line` Svelte's runtime
-for the same reason. The Svelte entry renders a component of its own,
-compiled with `svelte/compiler`, and that component is measured with it.
-The `herceg-grid` entry mounts a two-column grid (`herceg/grid`) over the
-same data instead of a chart; none of the other libraries has a grid to
-compare it with. `herceg-bar`, `herceg-area`, and `herceg-scatter` chart
-the same data as stacked bars, stacked areas (both split by a series
-field), and points, to track what each mark adds; the other libraries
-have line entries only.
-
-PDF bundle entries measure a single line chart (`herceg-pdf`), the same chart
-with embedded-font support (`herceg-pdf-fonts`, excluding supplied font bytes),
-one buffered portable spec (`herceg-spec-pdf`, including the spec loader), and
-a two-chart report on A4 (`herceg-pdf-document`). The synchronous one-or-list
-PDF exports retain list handling and paper fitting even at single-chart call
-sites. PDF code remains optional for charts that do not export it.
+through `@herceg/react`) in one session and writes `results/react.json`.
+Mounting and resizing go through React props, rendered synchronously with
+`flushSync`; data replacement and streaming change the table directly, the
+adapter's path for live data. Each chart is its own React root, so
+per-root setup is counted once per chart.
 
 ### First hover
 
 `npm run bench:first-hover` measures how long a chart's first tooltip takes
-to show while its interaction controller may still be loading
+while its interaction controller may still be loading
 (`src/first-hover/`). Each sample is a fresh page load, in headless Chrome
 with the frame rate limit off, of a production build split into chunks as
-an application's bundler would split it (esbuild, code splitting). The page
-mounts one line chart (two series of 1,440 minutes) or a dashboard of ten,
-then dispatches a pointer move onto the first chart 0, 10, 25, 50, or
-100 ms after `createChart` returned. `drawn` runs from the move to the
+an application's bundler would. The page mounts one line chart (two series
+of 1,440 minutes) or ten, then moves the pointer onto the first chart 0,
+10, 25, 50, or 100 ms after `createChart` returns. `drawn` runs to the
 tooltip's box being shown (a `MutationObserver`), `frame` to the animation
-frame after it. Caches are `cold` (the HTTP cache off), `warm` (the chunks
-cached by an earlier visit), and `slow` (cold, with 100 ms of added network
-latency per request). `--baseline DIR` builds a second herceg source tree
-(`packages/herceg/src` of an earlier commit) into the same page, for
-comparison, such as the commit before the controller was deferred, whose
-charts load nothing before their first input; the committed
-`results/first-hover.json` measures the current commit alone. Results report the median, p95, and p99 of 15
-samples by default (`--samples`).
+frame after it. Caches are `cold` (HTTP cache off), `warm` (chunks cached),
+and `slow` (cold, with 100 ms of latency per request). `--baseline DIR`
+builds another herceg source tree into the same page for comparison.
+Results report the median, p95, and p99 of 15 samples (`--samples`).
+
+## Statistical charts
+
+`npm run bench:express -- --out results/express.json` times
+`herceg.express` in the Python package's uv environment
+(`python/express.py`), with Seaborn's and statsmodels' computations beside
+it. Each workload is timed over repeated runs after one warmup, with its
+peak Python memory (`tracemalloc`) from one more run:
+
+- `compute`: the numerical routine alone;
+- `chart`: the express function and `to_spec()`;
+- `recompute`: `hx.recompute(chart, data)` and `to_spec()` after rows for
+  one more x value are appended;
+- `svg`: `to_svg()` of a chart already built.
 
 ## Grids
 
-`npm run bench:grid` compares Herceg's grid (`herceg/grid`, and the same grid
-through `@herceg/react/grid`) with TanStack Table and TanStack Virtual, AG
-Grid Community, and Glide Data Grid.
+`npm run bench:grid` compares Herceg's grid (`herceg/grid`, and the same
+grid through `@herceg/react/grid`) with TanStack Table and TanStack Virtual,
+AG Grid Community, and Glide Data Grid.
 
 ```sh
 npm run bench:grid                                   # every scenario -> tmp/benchmarks/grid-<time>.json
@@ -451,97 +374,58 @@ the same formatters when they render a cell.
 
 `src/grid/reference.ts` computes, independently of the adapters, what each
 grid should show: rows filtered (ranges inclusive, missing values never
-pass), sorted (numbers and times numerically, categories by label, missing
-values last in both directions, ties by row identity), with each cell's
-text. Every adapter reports what it shows (`visible()`): the row count its
-rendered extent stands for, row identities, cell text, and selection, read
-from its DOM rows and cells by geometry, or for Glide, which draws on a
-canvas, the region it reported drawing and, for each cell, the row identity,
-text, and highlight Glide last drew there, recorded through its `drawCell`
-hook (which then draws the cell as usual; canvas pixels are not read).
-Herceg's rows carry no identity in the DOM, so they are checked by their
-cells' text alone: a row that repeats its neighbor in every field could
-stand in for it unnoticed. A timed operation
-ends at the first frame whose row count, rows, columns, text, and selection
-match the reference at the grid's scroll offset, so a frame with blank rows,
-stale cells, or a change not yet applied does not count; a grid that never
-shows the right result within 30 s is reported `incorrect` and not timed.
-Before timing, each scenario also compares the library's complete display
-order and row count with the reference, and streaming trials compare them
-after their last tick.
+pass) and sorted (numbers and times numerically, categories by label,
+missing values last both ways, ties by row identity), with each cell's
+text. Every adapter reports what it shows (`visible()`): from its DOM rows
+and cells by geometry, or for Glide, which draws on a canvas, what its
+`drawCell` hook last drew where (pixels are not read). Herceg's rows carry
+no identity in the DOM, so they are checked by their cells' text alone.
 
-Changes that the checks would not see are avoided: updates change a field
-in view, and appends below the viewport change the row count. Adapters made
-to drop, halve, or misapply updates, appends, sorts, selections, or scroll
-offsets were all reported incorrect when this was written; one that delays
-updates came out slow, with unresolved ticks.
+A timed operation ends at the first frame whose row count, rows, columns,
+text, and selection match the reference at the grid's scroll offset, so
+blank rows, stale cells, or a change not yet applied do not count; a grid
+that never shows the right result within 30 s is reported `incorrect` and
+not timed. Before timing, each scenario also compares the complete display
+order with the reference, and streaming trials compare it after their last
+tick. Updates change a field in view, and appends below the viewport change
+the row count, so the checks see them.
 
 ### Timing
 
-As for charts, an operation starts when the harness calls the adapter. The
-harness checks what the grid shows just before each frame paints, in a
-ResizeObserver callback (which runs after the frame's animation callbacks
-and layout), and the time is taken when that frame has been produced.
-Checking after the frame instead would count work done in tasks queued
-before the check, such as a React update scheduled by a scroll event, as if
-the frame had shown it. This is the state observed at that point, not proof
-of what the compositor presented: a library's own ResizeObserver running
-later in the same frame could still change it (none does in these
-scenarios, which do not resize). A frame in which the observer did not run
-is counted as unobserved and never as correct. Times are raw: they include
-the check (reading the visible rows and cells), whose cost is recorded as
-`checkTime`.
-Results record how many frames each operation took (`frames`): Glide, which
-redraws after a scroll in a React update that runs after the frame, takes
-two.
-
-Between samples the harness collects garbage and pauses on a timer: after
-frames that change nothing, Chrome waits for the display's next refresh
-before producing another frame even with the frame rate limit off, which
-would add about a refresh interval to whatever came next. Measurements are
-therefore of an idle start with garbage collected; paced scenarios run with
+As for charts, an operation starts when the harness calls the adapter. What
+the grid shows is checked just before each frame paints (a ResizeObserver
+callback, after the frame's animation callbacks and layout), and the time
+is taken when that frame has been produced, so work queued after the frame
+(a React update scheduled by a scroll event) is not counted as shown. A
+frame in which the observer did not run is never counted as correct. Times
+include the check, whose cost is recorded as `checkTime`, and `frames`
+records how many frames an operation took (Glide, which redraws after a
+scroll in a React update, takes two). Between samples the harness collects
+garbage and pauses, so measurements start idle; paced scenarios run with
 vsync.
 
 | Operation | Measures |
 | --- | --- |
 | `mount` | Create the grid from prepared native input, and from the shared columns (conversion included), to the first correct frame; destroy it. |
-| `scroll` | 40 steps of the body's scroll offset (a screen down, three columns across, both, or to the last row and back), each to its correct frame. Herceg's grid scales scrolling above 8 million pixels of rows, so at 1M rows a scroll lands within one scaled pixel of the requested offset. |
-| `scroll-trace` | Three seconds with vsync of scrolling down at 3,000 px/s (and across at 1,500 px/s for `diagonal`), the offset set every frame from the time elapsed; or (`wheel`) wheel events of 50 px every 16 ms, which the runner sends through the DevTools protocol on a fixed schedule without waiting for the page, while the page asks for them. Frame intervals, dropped frames, long animation frames, incomplete frames (frames that, just before painting, did not show the rows for the offset the body was at: blank rows on a DOM grid, content drawn for an earlier offset on a canvas grid), and for wheel traces the events received and distance scrolled within the trial. |
+| `scroll` | 40 steps of the scroll offset (a screen down, three columns across, both, or to the last row and back), each to its correct frame. Herceg scales scrolling above 8 million pixels of rows, so at 1M rows a scroll lands within one scaled pixel of the requested offset. |
+| `scroll-trace` | Three seconds with vsync of scrolling down at 3,000 px/s (and across at 1,500 px/s for `diagonal`), the offset set every frame; or (`wheel`) 50 px wheel events every 16 ms sent through the DevTools protocol on a fixed schedule. Frame intervals, dropped and long frames, incomplete frames (not showing the rows for the offset just before painting), and for wheel traces the events received and distance scrolled. |
 | `sort`, `filter` | From source order to the result, each sample from a reset grid; also the time inside the library's call. |
 | `select` | Under a sort, select one displayed row, or the first half of the rows in display order, and read the selection back. |
-| `append` | An offered load with vsync: 50 slots over 5 s, one per 100 ms, each after the first moved by a seeded amount up to a refresh interval (so ticks do not all land at one phase of the frame), in which ticks append 1,000 rows each (evicting the oldest 1,000 in the `rolling` cases, under a number sort in the `sorted` ones). Latency from each call to the frame showing its result, the first tick (which may copy data before its first write) apart from the rest, time inside the call, how late each tick was against the schedule, ticks delivered of those offered (a grid that blocks the main thread past its next slots misses them), ticks overtaken before they showed, and the intervals, dropped frames, and long animation frames of the frames that began within the offered period. Every trial starts from a newly mounted grid. |
+| `append` | An offered load with vsync: 50 slots over 5 s, one per 100 ms with seeded jitter, each appending 1,000 rows (evicting the oldest 1,000 in `rolling` cases, under a number sort in `sorted` ones). Latency from each call to the frame showing it (the first tick apart), time inside the call, lateness against the schedule, ticks delivered of those offered (a grid blocking the main thread misses slots), ticks overtaken before they showed, and frame intervals, dropped and long frames. Each trial starts from a newly mounted grid. |
 | `update` | The same with 100 rows changed per tick, 10 of them on screen: a field no query reads, the sort key, or the filtered field. |
-| `memory` | Heap after creating the fixture, after converting it, with the grid mounted, after a sort, a second after destroying the grid, after two rounds of five more mounts, and after releasing everything; the renderer's footprint and the GPU memory attributed to the page before and after mounting; each sample in a fresh page. |
+| `memory` | Heap after creating the fixture, after converting it, with the grid mounted, after a sort, a second after destroying the grid, after two rounds of five more mounts, and after releasing everything; renderer footprint and GPU memory before and after mounting; each sample in a fresh page. |
 
 Streaming ticks keep the grid at the top (`scrollTo(0, 0)` after each
-change), as a live view of the top of its order does: Herceg keeps the rows
-in view in place when sorted rows arrive above them, so it has to be asked;
-for the other grids, which keep the pixel offset, the call does nothing.
+change), as a live view of the top of its order does.
 
 ### Memory
 
-Heap readings are those of the chart suite (V8, Blink, and ArrayBuffer
-backing stores after forced garbage collection), one fresh page per sample.
-What the harness needs to check the sort is computed before the readings
-that count. "Reserved" growth is the heap V8 has committed (with the Blink
-heap and backing stores), without collecting garbage, after mounting less
-before: how much mounting made the heap grow, not its peak, which these
-readings cannot see. The heap a second after destroying a grid, and after
-five more mounts, shows what a library keeps once destroyed; the growth per
-further mount is the difference between two rounds of five. When this was
-written, heap snapshots showed TanStack Table keeping its last destroyed
-table, with its row objects, reachable through V8's allocation feedback for
-an object with getters, and Glide keeping the last data it drew from
-through a module-level object, each until another grid is created; AG Grid
-keeps its grid for a timer's length (less than the second waited); none grew
-per mount. DOM nodes are the elements under the grid's container; canvas memory
-counts the canvases in the DOM, not those a grid keeps off-screen.
-
-The renderer's footprint and the GPU memory attributed to the page
-(`rendererBytes`, `gpuBytes`, read as for charts; see [Memory](#memory))
-span mounting the grid, from its native input prepared to the grid mounted,
-as `retainedBytes` does. A DOM grid's GPU memory is the compositor tiles of
-its cells; Glide's is its canvas.
+Heap readings are the chart suite's, one fresh page per sample. Reserved
+growth is the heap V8 committed while mounting, without collecting. The
+heap a second after destroying a grid, and after rounds of five more
+mounts, shows what a library keeps once destroyed. `rendererBytes` and
+`gpuBytes` span mounting the grid, as for charts; a DOM grid's GPU memory
+is its cells' compositor tiles, Glide's its canvas.
 
 ### Configurations
 
@@ -556,82 +440,50 @@ Each adapter documents its configuration at the top of its file.
 
 ### Fairness notes
 
-- Glide has no row model; its sorting and filtering are adapter code, so its
-  sort and filter rows measure Glide rendering that code's result, not
-  processing of Glide's own. The results label them as external.
-- Glide draws on a canvas; DOM grids create elements for the cells in view.
-  Their DOM node counts and memory are not comparable one to one, and
-  Glide's visible content is the region it reports drawing, not pixels.
-- Glide 6.0.4-alpha24 is a prerelease: the latest stable release (6.0.3)
-  declares React 16 to 18 as peers, and the suite uses React 19 throughout.
-- AG Grid's async transactions batch for 50 ms; the scenarios deliver one
-  batch per tick and use the synchronous path.
-- Herceg is measured from source at the current commit; the competitors are
+- Glide has no row model: its sort and filter rows measure Glide drawing
+  the result of adapter code, labeled external. It draws on a canvas, so
+  DOM node counts and memory are not comparable one to one.
+- Glide is 6.0.4-alpha24, a prerelease: the stable 6.0.3 declares React 16
+  to 18 as peers, and the suite uses React 19 throughout.
+- AG Grid's async transactions batch for 50 ms; the scenarios use the
+  synchronous path, one batch per tick.
+- Herceg is measured from source at the current commit; competitors are
   pinned in `package.json`.
-- Not measured yet: grouping, aggregation, and pivots (AG Grid's are
-  Enterprise features), a separate comparison of rendering a prepared result,
-  a grid linked to a chart, a high-cardinality category stress case,
-  keyboard and screen reader behavior, and grid bundle sizes. Committed
-  results use one data seed (`--seed` changes it) and device pixel ratio 1
-  (`--dpr 2`).
+- Not measured: grouping, aggregation, and pivots (AG Grid's are
+  Enterprise), rendering a prepared result on its own, a grid linked to a
+  chart, a high-cardinality category stress case, keyboard and screen
+  reader behavior, and grid bundle sizes against other grids. Committed
+  results use one data seed (`--seed`) and device pixel ratio 1 (`--dpr`).
 
 ## Remote grids
 
 `npm run bench:grid-remote` compares Herceg's remote grid
-(`herceg/grid/remote`) with AG Grid Community's infinite row model, the
-remote row model of the grids compared here that Community includes (its
-server-side row model is Enterprise; TanStack Table and Glide Data Grid
-leave remote data to the application). Both read one synthetic source in
-the page: ten million rows computed from their place when asked (an id,
-which each grid shows unformatted, a number, and a category), nothing
-stored, so the page's memory is the grid's own. Each answer waits a fixed
-latency on a timer, 0, 20, or 100 ms (`--latency`), the same timer at 0.
-The source counts the requests it starts, those aborted, and those
-answered.
+(`herceg/grid/remote`) with AG Grid Community's infinite row model (its
+server-side model is Enterprise; TanStack Table and Glide leave remote data
+to the application). Both read one synthetic source in the page: ten
+million rows computed from their place when asked, nothing stored, each
+answer after 0, 20, or 100 ms (`--latency`).
 
-Both grids have blocks of 128 rows, two requests in flight, and 16 blocks
-cached (Herceg: 16 besides the blocks its view wants). Each waits 50 ms for
-scrolling to settle, and every scenario also runs with 0 (`--settle 50,0`):
-Herceg's `settleDelay` delays only jumps (rows in view more than two blocks from
-those last wanted), while AG Grid's `blockLoadDebounceMillis` delays every
-block it loads, so its scroll traces at 50 ms show more rows not loaded than
-at 0. AG Grid's datasource cannot abort a request (its `getRows` has no
-signal), so it answers every one; Herceg's are aborted when not needed.
-Herceg prefetches a block ahead in the direction of scrolling; AG Grid asks
-for the blocks of the rows it renders (with `rowBuffer` 10). Each grid is
-moved through its own API for showing a row at the top (`model.scrollTo`,
-`api.ensureIndexVisible`), not through scroll events.
-
-- **Jumps** (frame rate limit off): five warmups, then 40 jumps to seeded
-  random rows over the whole range, each after a pause (garbage collected,
-  a frame, 50 ms), as between the grid suite's samples: right after a frame
-  that changed nothing, Chrome makes the next one only at the display's
-  refresh, which would add up to a refresh interval to a grid that shows its
-  rows in its second frame. A jump starts when the harness asks the
-  grid to put a row at the top (`model.scrollTo`, `api.ensureIndexVisible`)
-  and ends with the first frame, read just before it paints as in the grid
-  suite, in which that row is within a row of the viewport's top and every
-  row covering the viewport from there down is mounted, 28 px below the one
-  before, showing its id. It
-  records the requests the jump started.
-- **Traces** (vsync on, after the same pause): from a random row, the top row moves on every
-  frame at 100 rows a second (about 2,800 px/s) or 1,000 (about 28,000
-  px/s) for two seconds, three trials each in fresh pages, from the same
-  seeded rows for both grids: requests started
-  and aborted per second of scrolling, and the share of frames in which
-  some row in view was not loaded yet.
-- **Memory** (after forced garbage collection, V8 and Blink heaps and
-  ArrayBuffer backing stores): a grid mounted and destroyed once, then
-  mounted again and jumped to 50 places (what it retains over the first),
-  destroyed (what remains), and four more rounds, each leaving what it
-  leaves beyond the one before (single rounds differ by a few hundred KiB
-  either way, so the median is what a round leaks). Herceg also reports the
-  bytes its cached blocks hold.
+- **Settings.** Blocks of 128 rows, two requests in flight, 16 blocks
+  cached, and 50 ms for scrolling to settle, also run with 0 (`--settle
+  50,0`). Herceg's `settleDelay` delays only jumps, AG Grid's
+  `blockLoadDebounceMillis` every block. AG Grid's datasource cannot abort
+  requests; Herceg's are aborted when not needed. Herceg prefetches a block
+  ahead in the scroll direction; AG Grid asks for the rows it renders.
+- **Jumps** (frame rate limit off): 40 jumps to seeded random rows, each
+  after a pause, from the grid's own call to put a row at the top to the
+  first frame in which every row covering the viewport is mounted and shows
+  its id; with the requests each started.
+- **Traces** (vsync on): two seconds of the top row moving every frame at
+  100 or 1,000 rows a second, three trials each: requests per second and
+  the share of frames with a row in view not loaded.
+- **Memory**: a grid mounted and jumped to 50 places, then destroyed and
+  mounted again for four more rounds; the median round's leftover is what a
+  round leaks.
 
 These are a client's costs: the synthetic source answers any offset at
-once, as an indexed or materialized result does. A database paging by
-offset can take much longer to reach row nine million, which no grid
-setting changes.
+once; a database paging by offset can take much longer to reach row nine
+million.
 
 ## Layouts of panels
 

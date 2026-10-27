@@ -15,7 +15,7 @@ import { checkInventory, settingsOfType } from "./contracts/inventory.mjs";
 import { exportedComponents, uncheckedComponents } from "./contracts/props.mjs";
 import { ENGINES, SUITES } from "./contracts/suites.mjs";
 import { checkEvidence } from "./contracts/verify.mjs";
-import { capabilityMarkdown, capabilityRecords } from "./generate-capabilities.mjs";
+import { capabilityJson, capabilityMarkdown, capabilityRecords } from "./generate-capabilities.mjs";
 
 const inventory = {
   spec: "line",
@@ -534,7 +534,7 @@ test("evidence is a suite's complete run of this source, whose report is the one
   assert.deepEqual(read(), []);
 });
 
-test("the docs list each cell, linked to its proof, with refusals' messages and alternatives and the reasons", () => {
+test("the docs list each cell's state, each proof's file once, and notes of refusals and reasons", () => {
   const declared = declarations({
     works: [],
     refused: {
@@ -553,6 +553,14 @@ test("the docs list each cell, linked to its proof, with refusals' messages and 
     choices: { tooltip: { takes: ["*", "nearest"], reason: "any mode, checked later" } },
     untyped: { limits: "a dict" },
   });
+  // Two audits finding the same options of their own, the second's reason given as the first's.
+  const own = { only: { fill: "one class", dash: "As fill." } };
+  Object.assign(declared.api.audits, { "mark * python encode": own, "mark * python style": own });
+  // An option differing in two ways, each with its own reason.
+  declared.api.audits["settings Position hg.Fraction"] = {
+    spelled: { fraction: { as: "value", reason: "the number is value" } },
+    untyped: { fraction: "a column is a field of its own" },
+  };
   const { cells, proofs } = checkDeclarations(declared);
   // An interaction cell is proved by the engine's `<cell>.engine`, whose file its record names.
   const executions = [
@@ -565,35 +573,67 @@ test("the docs list each cell, linked to its proof, with refusals' messages and 
   assert.deepEqual(records.marks.line.cells["legend.colorbar"], {
     state: "na",
     reason: "no ramp",
-    proofs: [{ id: "line.legend.colorbar", file: undefined }],
+    proofs: ["line.legend.colorbar"],
   });
-  assert.deepEqual(records.interaction.cells, [
-    { id: "interaction.zoom-x.chart", file: "../zoom.test.ts" },
-  ]);
-  assert.deepEqual(records.marks.line.cells["placement.panel"].alternative.proofs, [
-    { id: "line.alone", file: "../alone.test.ts" },
-  ]);
+  assert.deepEqual(records.interaction.cells, ["interaction.zoom-x.chart"]);
+  assert.deepEqual(records.marks.line.cells["placement.panel"].alternative.proofs, ["line.alone"]);
+  // Each proof's file once, by file; an unrun proof has none.
+  assert.deepEqual(records.proofFiles, {
+    "../alone.test.ts": ["line.alone"],
+    "../gpu.test.ts": ["gpu.points"],
+    "../placement.test.ts": ["line.placement.panel"],
+    "../zoom.test.ts": ["interaction.zoom-x.chart.engine"],
+  });
+  // The JSON is the records, one value per line where it fits.
+  const json = capabilityJson(records);
+  assert.deepEqual(JSON.parse(json), JSON.parse(JSON.stringify(records)));
+  assert.match(
+    json,
+    /\n {8}"legend\.colorbar": \{ "state": "na", "reason": "no ramp", "proofs": \["line\.legend\.colorbar"\] \}/,
+  );
   const markdown = capabilityMarkdown(records);
-  // Each mark links to the file proving it (an unrun proof has none).
-  assert.match(markdown, /\| line \| \[✗1\]\(\.\.\/placement\.test\.ts\) \| ·2 \|/);
+  // Cells are marks and note numbers; notes link the files no capability lists.
+  assert.match(markdown, /\| line \| ✗1 \| ·2 \|/);
   assert.match(
     markdown,
-    /1\. line, Named panel: refused: `line panel: not here; draw it alone`\. Instead: Draw it alone\. \(\[`line\.alone`\]\(\.\.\/alone\.test\.ts\)\)/,
+    /- ✗1 Refused: `line panel: not here; draw it alone`\. Instead: Draw it alone\. \(\[placement\.test\.ts\]\(\.\.\/placement\.test\.ts\), \[alone\.test\.ts\]\(\.\.\/alone\.test\.ts\)\)\n/,
   );
-  assert.match(markdown, /2\. line, Colorbar: not applicable: no ramp/);
+  assert.match(markdown, /- ·2 Not applicable: no ramp\n/);
   // What Markdown would read as HTML is text, but in code spans.
   assert.match(markdown, /an element &lt;Chart> as `<Chart>`/);
-  assert.match(markdown, /\| zoom-x \| \[✓\]\(\.\.\/zoom\.test\.ts\) \|/);
+  assert.match(
+    markdown,
+    /\| zoom-x \| ✓ \|\n\nProved in \[zoom\.test\.ts\]\(\.\.\/zoom\.test\.ts\)\./,
+  );
   assert.match(
     markdown,
     /\| Points \| 100,000 points \| \[`gpu\.points`\]\(\.\.\/gpu\.test\.ts\) \|/,
   );
   assert.match(
     markdown,
-    /## Names across surfaces\n\nPython spells options in snake_case\.\n[\s\S]*- `chart helper`\n {2}- `x` is `x_axis`: x is a column\n/,
+    /## Names across surfaces\n\nPython spells options in snake_case\.\n[\s\S]*- `x` is `x_axis` \(`chart helper`\): x is a column\n/,
   );
-  assert.match(markdown, /- `tooltip` takes any string, "nearest": any mode, checked later\n/);
-  assert.match(markdown, /- `limits`'s settings are typed on one side alone: a dict\n/);
+  assert.match(
+    markdown,
+    /- `tooltip` takes any string, "nearest" \(`chart helper`\): any mode, checked later\n/,
+  );
+  assert.match(
+    markdown,
+    /- `limits`'s settings are typed on one side alone \(`chart helper`\): a dict\n/,
+  );
+  // A difference several audits find is one item, options sharing a reason with it.
+  assert.match(
+    markdown,
+    /- `fill`, `dash`, each own \(`mark \* python encode`, `mark \* python style`\): one class\n/,
+  );
+  assert.match(
+    markdown,
+    /- `fraction` is `value` \(`settings Position hg\.Fraction`\): the number is value\n/,
+  );
+  assert.match(
+    markdown,
+    /- `fraction`'s settings are typed on one side alone \(`settings Position hg\.Fraction`\): a column is a field of its own\n/,
+  );
 });
 
 /** Settings as the inventory finds them: their options' choices, those of their own settings, and their type's name. */
@@ -716,7 +756,11 @@ test("the docs show an unproved cell as supported but not proved, and count ever
     markdown,
     /Of 2 cells: 0 proved to work, 1 supported but not yet proved, 0 refused, and 1 not applicable\./,
   );
-  assert.match(markdown, /\| line \| ○ \| \[·1\]\(\.\.\/colorbar\.test\.ts\) \|/);
+  assert.match(markdown, /\| line \| ○ \| ·1 \|/);
+  assert.match(
+    markdown,
+    /- ·1 Not applicable: no ramp \(\[colorbar\.test\.ts\]\(\.\.\/colorbar\.test\.ts\)\)\n/,
+  );
 });
 
 test("the API audit spells the spec's names as each surface's convention does", () => {
