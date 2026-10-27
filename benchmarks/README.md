@@ -130,8 +130,10 @@ each live context's default framebuffer, which blocks until that context's
 earlier commands have run on the GPU; the library's framebuffer and
 pixel-pack state are restored. Results record how many WebGL contexts the
 page created (`webglContexts`); where it created none, the second run times
-the same frames again. The procedure is the same in Chrome, Firefox, and
-WebKit.
+the same frames again. The second run fails, and the report says "error",
+when it created a different number of contexts than the first or when a
+context on screen was lost. The procedure is the same in Chrome, Firefox,
+and WebKit.
 
 It is a separate run because waiting for the GPU after every operation
 changes how the next one overlaps with it: in one run, Plotly's 10,000,000-point

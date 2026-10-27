@@ -298,7 +298,7 @@ async function main() {
             s,
             options,
           ] as const);
-    if (result.supported && FRAME_TIMED.has(s.operation) && pass === "main") {
+    if (result.supported && FRAME_TIMED.has(s.operation)) {
       const created = await page.evaluate(() => window.bench.webglContexts());
       result.metrics.webglContexts = { unit: "count", samples: [created] };
     }
@@ -385,6 +385,14 @@ async function main() {
             fullCostReason = extra.reason;
             break;
           }
+          // A run that made other WebGL contexts (one failed to start, say)
+          // did not wait for the drawing the main run did.
+          const contexts = (r: PageResult) => r.metrics.webglContexts?.samples[0];
+          if (contexts(extra) !== contexts(result)) {
+            fullCostReason = `error: the WebGL-done run created ${contexts(extra)} WebGL contexts, the main run ${contexts(result)}`;
+            break;
+          }
+          delete extra.metrics.webglContexts;
           for (const [name, metric] of Object.entries(extra.metrics)) {
             const kept = result.metrics[name];
             if (kept) kept.samples.push(...metric.samples);

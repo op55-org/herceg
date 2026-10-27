@@ -44,14 +44,23 @@ const pixel = new Uint8Array(4);
  * commands before it are done. Contexts on canvases outside the document
  * count too (a library may draw there and copy the result). The library's
  * framebuffer, read buffer, and pixel-pack state are restored afterwards.
+ * Throws when a context on screen is lost (the GPU process reset, say),
+ * before or after the read, since the time would no longer include its
+ * drawing. Lost contexts off screen are skipped: libraries lose probe
+ * contexts and those of destroyed charts on purpose.
  */
 export function finishWebgl(): void {
   for (const ref of contexts) {
     const gl = ref.deref();
-    if (!gl || gl.isContextLost()) continue;
-    if (typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext)
-      readPixel2(gl);
-    else readPixel(gl);
+    if (!gl) continue;
+    if (!gl.isContextLost()) {
+      if (typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext)
+        readPixel2(gl);
+      else readPixel(gl);
+    }
+    const onScreen = gl.canvas instanceof HTMLCanvasElement && gl.canvas.isConnected;
+    if (gl.isContextLost() && onScreen)
+      throw new Error("finishWebgl: a WebGL context on screen was lost");
   }
 }
 
