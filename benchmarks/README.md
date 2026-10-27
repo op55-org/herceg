@@ -60,7 +60,12 @@ px, device pixel ratio 2, cross-origin isolated pages (COOP/COEP) so
 - for every scenario except paced ingestion, `--disable-frame-rate-limit
   --disable-gpu-vsync`: frames are produced as soon as work allows, so waiting
   for a frame measures work instead of vsync alignment. Paced ingestion runs in
-  a second browser with normal vsync, because frame pacing is what it measures.
+  a second browser with normal vsync, because frame pacing is what it measures;
+- `--force-device-scale-factor=2`, the ratio pages emulate. Emulation alone
+  sets `devicePixelRatio`, and with it every canvas's size, but Chrome
+  rasterizes and composites at the display's own scale: on a 1x display a
+  600x250 CSS px layer got a 640x256 px compositor tile (0.66 MB) instead of
+  the 1216x512 px one (2.5 MB) it has on a display of ratio 2.
 
 `--browser webkit` runs the suite in Playwright's WebKit build (the engine of
 Safari, not Safari itself; `npx playwright install webkit`), and `--browser
@@ -235,7 +240,11 @@ to the page with the charts mounted:
   buffers (`gpuWebglBytes`), 2D canvas resources shared with the GPU process
   (`gpuCanvasBytes`; a software canvas's pixels stay in the renderer and
   count there), and compositor tiles (`gpuTileBytes`, rasterized for
-  whatever DOM, SVG, or canvas content is in view). These are allocation
+  whatever DOM, SVG, or canvas content is in view, at the browser's scale
+  factor; a composited layer smaller than a tile gets one tile of about its
+  size, rounded up (600x250 px takes 640x256), a tile holding anything is
+  allocated in full, and tile resources Chrome keeps pooled for reuse count
+  too). These are allocation
   sizes the GPU process holds. Chrome's WebGL dump does not list textures or
   renderbuffers a library creates (Plotly's 1001 x 1001 surface makes about
   13 MB of textures, Herceg's 0.02 MB), and nothing the GPU process keeps
@@ -402,7 +411,7 @@ node --experimental-strip-types benchmarks/src/grid/report.ts <results file>   #
 
 Options: `--lib`, `--size` (`10k`, `100k`, `1m`, `1m-wide`), `--scenario`,
 `--filter`, `--sample-scale`, `--timeout` (seconds), `--headless`, `--dpr`
-(device pixel ratio, 1 by default), `--seed` (the fixture's values), and
+(device pixel ratio, 1 by default, which Chrome also draws at), `--seed` (the fixture's values), and
 `--order-seed` (libraries run in a seeded random order within each scenario,
 so drift over a run does not favor one of them). Every scenario runs in a fresh page; a crash or timeout is
 recorded as an error and the browser is restarted.

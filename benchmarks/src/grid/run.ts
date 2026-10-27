@@ -28,6 +28,7 @@ import {
   processMemory,
   REALTIME_ARGS,
   rendererPid,
+  scaleFactorArg,
 } from "../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../runner/environment.ts";
 import { type Summary, summarize } from "../runner/stats.ts";
@@ -69,6 +70,11 @@ const { values: args } = parseArgs({
 
 const VIEWPORT = { width: 1280, height: 720 };
 const deviceScaleFactor = Number(args.dpr);
+// Chrome draws at the ratio its pages emulate, whatever the display's.
+const CHROME_ARGS = {
+  latency: [...LATENCY_ARGS, scaleFactorArg(deviceScaleFactor)],
+  realtime: [...REALTIME_ARGS, scaleFactorArg(deviceScaleFactor)],
+};
 const sampleScale = Number(args["sample-scale"]);
 const libraries = (args.lib ? args.lib.split(",") : Object.keys(LIBRARIES)).filter((id) => {
   if (!LIBRARIES[id]) throw new Error(`unknown grid library ${id}`);
@@ -267,7 +273,7 @@ async function main() {
     const browser: Browser = await chromium.launch({
       channel: "chrome",
       headless: args.headless,
-      args: realtime ? REALTIME_ARGS : LATENCY_ARGS,
+      args: realtime ? CHROME_ARGS.realtime : CHROME_ARGS.latency,
     });
     const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor });
     return { browser, context };
@@ -484,7 +490,7 @@ function writeResults(run: {
         headerHeight: 32,
         columnWidth: 120,
       },
-      browserSettings: { latency: LATENCY_ARGS, realtime: REALTIME_ARGS },
+      browserSettings: CHROME_ARGS,
       playwright: packageVersion("playwright"),
     },
     libraries: Object.fromEntries(
