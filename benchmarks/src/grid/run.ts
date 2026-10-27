@@ -20,9 +20,14 @@ import { buildPage, ROOT, serve } from "../runner/build.ts";
 import {
   bounded,
   committedBytes,
+  gpuMemory,
   heapBytes,
   LATENCY_ARGS,
+  PROCESS_SETTLE_MS,
+  processGrowth,
+  processMemory,
   REALTIME_ARGS,
+  rendererPid,
 } from "../runner/chrome.ts";
 import { commit, machine, packageVersion } from "../runner/environment.ts";
 import { type Summary, summarize } from "../runner/stats.ts";
@@ -163,6 +168,33 @@ async function memorySample(
   };
 }
 
+/**
+ * The renderer process's footprint and the GPU memory attributed to the
+ * page, from the native input prepared to the grid mounted, as
+ * `retainedBytes` spans, in a page of its own: the pauses and memory dumps
+ * would change `memorySample`'s readings. `browser` is a browser-level
+ * DevTools session.
+ */
+async function processSample(
+  page: Page,
+  cdp: CDPSession,
+  browser: CDPSession,
+  s: GridScenario,
+): Promise<Record<string, number>> {
+  const pid = await rendererPid(cdp);
+  // The first memory dump sets up tracing's buffers in every process; it
+  // comes before the readings that count.
+  await gpuMemory(browser, pid);
+  await page.evaluate((scenario) => window.gridBench.memory.data(scenario), s);
+  await page.evaluate(() => window.gridBench.memory.reference());
+  await page.evaluate(() => window.gridBench.memory.input());
+  await heapBytes(cdp);
+  const input = await processMemory(page, browser, pid);
+  await page.evaluate(() => window.gridBench.memory.mount());
+  await heapBytes(cdp);
+  return processGrowth(input, await processMemory(page, browser, pid));
+}
+
 /** Wheel scrolling: 50 px per event every 16 ms (about 3,000 px/s). */
 const WHEEL_STEP = 50;
 const WHEEL_INTERVAL_MS = 16;
@@ -247,6 +279,17 @@ async function main() {
   let gpu = "unknown";
   let userAgent = "";
   const order = random(Number(args["order-seed"]));
+  /** Browser-level DevTools sessions, for memory dumps; one per browser launched. */
+  const browserSessions = new WeakMap<Browser, CDPSession>();
+  const browserSession = async (context: BrowserContext) => {
+    const browser = context.browser()!;
+    let session = browserSessions.get(browser);
+    if (!session) {
+      session = await browser.newBrowserCDPSession();
+      browserSessions.set(browser, session);
+    }
+    return session;
+  };
 
   const measure = async (
     context: BrowserContext,
@@ -266,7 +309,8 @@ async function main() {
     userAgent ||= await page.evaluate(() => navigator.userAgent);
     if (s.operation === "memory") {
       const metrics: Record<string, Metric> = {};
-      for (let i = 0; i < s.samples; i++) {
+      // Heap samples, then as many process samples, each in a fresh page.
+      for (let i = 0; i < 2 * s.samples; i++) {
         if (i > 0) {
           await page.close();
           opened.page = page = await context.newPage();
@@ -274,7 +318,11 @@ async function main() {
           await page.waitForFunction(() => window.gridBench !== undefined);
         }
         opened.cdp = await context.newCDPSession(page);
-        for (const [name, value] of Object.entries(await memorySample(page, opened.cdp, s))) {
+        const sample =
+          i < s.samples
+            ? await memorySample(page, opened.cdp, s)
+            : await processSample(page, opened.cdp, await browserSession(context), s);
+        for (const [name, value] of Object.entries(sample)) {
           metrics[name] ??= { unit: name === "domNodes" ? "count" : "bytes", samples: [] };
           metrics[name].samples.push(value);
         }
@@ -385,6 +433,7 @@ function writeResults(run: {
         "operation start until the end of the first frame whose visible rows, cells, selection, and row count match the reference, read just before the frame paints (ResizeObserver callback) and timed at a MessageChannel message posted then; raw times, including the check, whose cost is recorded as checkTime; frame rate limit disabled except for scroll traces, appends, and updates, which run with vsync",
       memory:
         "CDP Runtime.getHeapUsage after forced GC: V8 heap + Blink heap + ArrayBuffer backing stores, one fresh page per sample; reserved = committed heap growth over a step without GC (not a peak)",
+      processMemory: `separate pages, as many as heap samples, from native input prepared to grid mounted, each reading after forced GC and a ${PROCESS_SETTLE_MS} ms pause: rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump attributes to it (webgl, canvas resources, cc tile memory)`,
       sampleScale,
       orderSeed: Number(args["order-seed"]),
       seed,

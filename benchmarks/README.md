@@ -73,17 +73,18 @@ operation started (pointer moves from when the event arrives), and
 differences under a frame are noise. WebKit runs headless: on macOS,
 Playwright's headed WebKit windows that are not frontmost get throttled
 frames (hundreds of milliseconds apart, for every library). Results record the Playwright version,
-the browser build, and the idle frame cadence. Memory scenarios need Chrome's
-DevTools protocol and are skipped in other browsers, as are long-animation-
-frame counts in browsers that do not report them. Both the harness and browser
+the browser build, and the idle frame cadence. Memory scenarios are measured
+in Chrome only (see [Memory](#memory) for why), and long-animation-frame
+counts only in browsers that report them. Both the harness and browser
 tests use `scripts/browser/firefox.ts` to set `MOZ_APP_DATA` and
 `MOZ_LOCAL_APP_DATA` to a temporary writable folder for Firefox. This allows
 Playwright's Firefox build to start on macOS 27, which refuses to create
 `~/Library/Application Support/Firefox`. The folders are removed on process exit.
 
 Firefox has no `performance.memory` and cannot use the harness's Chrome CDP
-heap measurement. The JSON records this in `method.memory` and omits memory
-scenarios from `scenarios` and `results`. It also lacks long-animation-frame
+heap measurement. The JSON records this in `method.memory` and
+`method.processMemory` and omits memory scenarios from `scenarios` and
+`results`. It also lacks long-animation-frame
 entries: ingestion results omit `metrics.longFrames`, rather than reporting
 zero. Frame intervals, dropped frames, append times, and achieved ingestion
 rates are still measured.
@@ -111,11 +112,53 @@ This includes deferred work scheduled with `requestAnimationFrame` or
 partial frame. Herceg's large point series wait for its on-demand WebGL
 painter the same way (`chart.loading`).
 
-GPU rasterization happens off the main thread and is not included. For
-WebGL paths (Plotly `scattergl`, Herceg point clouds) that leaves out the GPU
-executing the draw: forcing completion with a pixel read adds about 4 ms to
-Herceg's 1,000,000-point scatter mount on the benchmark machine. Plotly's
-WebGL timings have the same limitation.
+These frame timings (`timeToFrame`, `tickToFrame`, `pointerToFrame`,
+`viewportToFrame`, `resizeToFrame`, `cameraToFrame`, ...) end with the main
+thread's frame. Work the browser does after it is not in them: the GPU
+executing WebGL draws, rasterizing canvas recordings and DOM and SVG tiles,
+and compositing.
+
+#### WebGL drawing finished
+
+For streaming, hover, zoom, resize, and 3D camera scenarios, a second run in
+a fresh page times the same operations until, after that frame, the GPU has
+also finished every WebGL context the page created (`tickToWebglDone`,
+`pointerToWebglDone`, `viewportToWebglDone`, `resizeToWebglDone`,
+`cameraToWebglDone`). The harness wraps `getContext` before any library code
+loads (`src/page/webgl.ts`, holding contexts weakly) and reads one pixel from
+each live context's default framebuffer, which blocks until that context's
+earlier commands have run on the GPU; the library's framebuffer and
+pixel-pack state are restored. Results record how many WebGL contexts the
+page created (`webglContexts`); where it created none, the second run times
+the same frames again. The procedure is the same in Chrome, Firefox, and
+WebKit.
+
+It is a separate run because waiting for the GPU after every operation
+changes how the next one overlaps with it: in one run, Plotly's 10,000,000-point
+zoom steps took 0.17 ms longer to their frames when each waited. Without
+waiting, the steps queue GPU work: 120 consecutive steps took about 0.7 ms
+each to their frames while each draw took about 12 ms on the GPU, so the
+display fell seconds behind with no sign of it in the frame timings.
+
+Still not counted, for any library: rasterizing 2D canvases and DOM and SVG
+content on the GPU, and compositing. The alternatives tried on the
+benchmark machine (Chrome 155, macOS) do not measure them faithfully:
+
+- Presentation times (Chrome's `presentationTime` on Element Timing entries,
+  or frame presentation in a trace) come 18 to 35 ms after the frame's swap,
+  in steps of the display's refresh, and from an idle start they did not
+  move with Plotly's 12 ms of GPU work per zoom step.
+- Reading a pixel back from a 2D canvas (`getImageData`) moves Chrome's
+  canvas to software drawing: Herceg's zoom frames went from 1.5 to 6.1 ms.
+- Copying each 2D canvas into a WebGL texture and reading that back costs
+  about 1.75 ms by itself, the same for Herceg, uPlot, and Chart.js, more
+  than the rasterization it would show.
+- Waiting for one more frame after each operation makes Chrome wait for the
+  display's refresh before the next one (frame timings near 17 ms for
+  everyone).
+
+Paced scenarios with vsync on (`ingest`, `orbit`) see GPU and compositor
+work only when it delays frames past the display's refresh.
 
 Animations are disabled in every library, including ECharts' tooltip
 transition. Tooltips are enabled unless a scenario says otherwise.
@@ -160,9 +203,75 @@ destroy charts and data → measure. Reported values:
 - `retainedBytes`: heap growth from mounting the charts (source data excluded).
 - `sourceBytes`: the source data itself.
 - `canvasBytes`: estimated canvas backing stores (width x height x 4 per
-  canvas). Not part of the heap number; GPU memory is not measured.
+  canvas). Not part of the heap number.
 - `domNodes`: elements under the chart containers.
 - `leakedBytes`: heap after destroying everything, relative to the baseline.
+
+`retainedBytes` is the median of mounts repeated in one page, so it leaves
+out what a library pays only the first time: code it compiles, and caches it
+keeps after its charts are destroyed. Plotly's first 1001 x 1001 surface, for
+example, retains about 340 MB of heap, which `Plotly.purge` does not release
+and later surfaces reuse; its median is about 1 MB. The heap also misses memory
+kept outside it: native objects such as `Path2D` paths, Skia recordings,
+compositor layers, and font caches, and GPU memory for WebGL buffers, canvas
+textures, and compositor tiles.
+
+A separate run therefore mounts each memory scenario's charts once per fresh
+page, one page per sample, and reads, from the page with the data prepared
+to the page with the charts mounted:
+
+- `firstRetainedBytes`: the heap growth of that first mount, as
+  `retainedBytes` measures it.
+- `rendererBytes`: the physical footprint of the page's renderer process
+  (macOS `phys_footprint`, which Activity Monitor shows as a process's
+  memory, read with `footprint`). It includes the heap and native memory;
+  allocators may keep pages the mount freed, which then count. The renderer
+  is found through the page's own trace (`TracingStartedInBrowser` lists its
+  frames' processes). Measured on macOS only.
+- `gpuBytes`: GPU memory Chrome's own memory instrumentation (memory-infra,
+  detailed dumps) attributes to the page's renderer: WebGL buffers, textures,
+  and drawing buffers (`gpuWebglBytes`), 2D canvas resources
+  (`gpuCanvasBytes`), and compositor tiles (`gpuTileBytes`, rasterized for
+  whatever DOM, SVG, or canvas content is in view). These are allocation
+  sizes, held by the GPU process; Skia's and the GPU driver's own caches and
+  the window's buffers are not attributed to a page and are not counted.
+
+Process readings come after a forced garbage collection and a 500 ms pause,
+which lets tiles and canvas resources a mount leaves for later frames be
+allocated. Memory dumps need a trace, whose first dump allocates tracing
+buffers in every process, so one dump is taken before the readings that
+count, and the heap before mounting is read after the first process reading.
+The run is separate because its pauses and dumps changed the repeated
+mounts' heap readings by up to 0.1 MB when taken in the same page.
+
+The heap, `canvasBytes`, `rendererBytes`, and `gpuBytes` overlap (the heap is
+part of the renderer's footprint, and canvas pixels are GPU canvas memory);
+they are not added up.
+
+The GPU process's own footprint is not used: with nothing mounted it moved by
+4 to 87 MB between readings a few seconds apart (its window buffers and
+caches), more than most charts use. The renderer's footprint read 0, 0.1,
+0.5, 1, and 2 s after collection agreed within 0.1 MB in 39 of 40 readings;
+first mounts in fresh pages agreed within about 3% between runs.
+
+Firefox and WebKit are not measured. Playwright can force garbage collection
+in both (`page.requestGC()`), and the page's content process can be found,
+but after collection Firefox's content process kept 80 MB of freed objects
+and WebKit's kept freed memory until its scavenger ran, so their footprints
+would count garbage that Chrome's does not; neither attributes GPU memory to
+a page.
+
+### What each metric counts, per browser
+
+| Metric | Counts | Leaves out | Chrome | Firefox | WebKit |
+| --- | --- | --- | --- | --- | --- |
+| `...ToFrame` | JavaScript, style, layout, and paint recording to the end of the main thread's frame | GPU work, rasterization, compositing | yes | yes | yes, waiting for vsync |
+| `...ToWebglDone` | the above, then the GPU executing every WebGL context's commands | rasterizing 2D canvases and DOM, compositing | yes | yes | yes, waiting for vsync |
+| `retainedBytes` (and its parts), `leakedBytes` | V8 and Blink heaps and ArrayBuffer backing stores, median of mounts repeated in one page | native and GPU memory, costs paid on the first mount only | yes | no | no |
+| `firstRetainedBytes` | the same heaps, first mount in a fresh page | native and GPU memory | yes | no | no |
+| `canvasBytes` | canvas width x height x 4, estimated | everything else | yes | no | no |
+| `rendererBytes` | the renderer process's physical footprint, first mount: heaps, native memory, freed pages allocators keep | GPU memory, other processes | yes (macOS) | no | no |
+| `gpuBytes` | WebGL buffers and textures, canvas resources, compositor tiles that Chrome attributes to the page | GPU caches and buffers not attributed to a page | yes | no | no |
 
 ### Large-data configurations
 
@@ -378,7 +487,7 @@ vsync.
 | `select` | Under a sort, select one displayed row, or the first half of the rows in display order, and read the selection back. |
 | `append` | An offered load with vsync: 50 slots over 5 s, one per 100 ms, each after the first moved by a seeded amount up to a refresh interval (so ticks do not all land at one phase of the frame), in which ticks append 1,000 rows each (evicting the oldest 1,000 in the `rolling` cases, under a number sort in the `sorted` ones). Latency from each call to the frame showing its result, the first tick (which may copy data before its first write) apart from the rest, time inside the call, how late each tick was against the schedule, ticks delivered of those offered (a grid that blocks the main thread past its next slots misses them), ticks overtaken before they showed, and the intervals, dropped frames, and long animation frames of the frames that began within the offered period. Every trial starts from a newly mounted grid. |
 | `update` | The same with 100 rows changed per tick, 10 of them on screen: a field no query reads, the sort key, or the filtered field. |
-| `memory` | Heap after creating the fixture, after converting it, with the grid mounted, after a sort, a second after destroying the grid, after two rounds of five more mounts, and after releasing everything; each sample in a fresh page. |
+| `memory` | Heap after creating the fixture, after converting it, with the grid mounted, after a sort, a second after destroying the grid, after two rounds of five more mounts, and after releasing everything; the renderer's footprint and the GPU memory attributed to the page before and after mounting; each sample in a fresh page. |
 
 Streaming ticks keep the grid at the top (`scrollTo(0, 0)` after each
 change), as a live view of the top of its order does: Herceg keeps the rows
@@ -403,6 +512,12 @@ through a module-level object, each until another grid is created; AG Grid
 keeps its grid for a timer's length (less than the second waited); none grew
 per mount. DOM nodes are the elements under the grid's container; canvas memory
 counts the canvases in the DOM, not those a grid keeps off-screen.
+
+The renderer's footprint and the GPU memory attributed to the page
+(`rendererBytes`, `gpuBytes`, read as for charts; see [Memory](#memory))
+span mounting the grid, from its native input prepared to the grid mounted,
+as `retainedBytes` does. A DOM grid's GPU memory is the compositor tiles of
+its cells; Glide's is its canvas.
 
 ### Configurations
 

@@ -8,6 +8,12 @@
 // For latency scenarios Chrome runs with the frame rate limit disabled, so
 // waiting for the frame measures work rather than vsync alignment. Paced
 // ingestion scenarios run with normal vsync instead.
+//
+// Runs that wait for WebGL (`RunOptions.webgl`) time the same operations to
+// the point where, after that frame, the GPU has also finished every WebGL
+// context the page created. They are separate runs, in fresh pages, so the
+// frame timings keep their meaning: waiting for the GPU after each operation
+// changes how the next one overlaps with it.
 
 import {
   bubbles,
@@ -32,6 +38,7 @@ import {
 } from "../datasets.ts";
 import type { Scenario } from "../scenarios.ts";
 import type { Adapter, ChartHandle, ChartKind, ChartOptions, Point } from "./adapter.ts";
+import { finishWebgl, gpuName, webglContextsCreated } from "./webgl.ts";
 
 export interface Metric {
   unit: "ms" | "bytes" | "count" | "hz";
@@ -73,9 +80,17 @@ interface Timing {
   first: number;
   /** Until rendering finished and a frame was produced; equals `first` for libraries that render at once. */
   complete: number;
+  /** Until, after that frame, the GPU finished the page's WebGL contexts; in runs that wait for WebGL only. */
+  webgl?: number;
 }
 
-/** Times `operation` to its first frame and to completed rendering. */
+export interface RunOptions {
+  /** End timed operations when the GPU has finished the page's WebGL drawing too. */
+  webgl?: boolean;
+}
+
+let waitsForWebgl = false;
+
 /**
  * Runs `run` (a scenario, from mounting to cleanup), failing it when a chart
  * fails outside the calls it returned from: in a promise the library does
@@ -104,6 +119,10 @@ async function guarded<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Times `operation` to its first frame and to completed rendering, and in
+ * runs waiting for WebGL on to the GPU finishing the page's WebGL drawing.
+ */
 async function timed(
   operation: () => unknown,
   handle?: () => AnyHandle | undefined,
@@ -112,9 +131,34 @@ async function timed(
   await operation();
   const first = (await nextFrame()) - start;
   const pending = handle?.()?.rendered?.();
-  if (!pending) return { first, complete: first };
-  await pending;
-  return { first, complete: (await nextFrame()) - start };
+  let complete = first;
+  if (pending) {
+    await pending;
+    complete = (await nextFrame()) - start;
+  }
+  if (!waitsForWebgl) return { first, complete };
+  finishWebgl();
+  return { first, complete, webgl: performance.now() - start };
+}
+
+/**
+ * Metrics of a sequence of timed operations: `${name}ToFrame`, or in a run
+ * waiting for WebGL `${name}ToWebglDone`, whose frame times are not kept.
+ */
+function timings(name: string, measured: Timing[]): Record<string, Metric> {
+  return waitsForWebgl
+    ? {
+        [`${name}ToWebglDone`]: metric(
+          "ms",
+          measured.map((t) => t.webgl!),
+        ),
+      }
+    : {
+        [`${name}ToFrame`]: metric(
+          "ms",
+          measured.map((t) => t.complete),
+        ),
+      };
 }
 
 function makeData(s: Scenario, seed: number): AnyData {
@@ -283,7 +327,7 @@ async function runStream(
     clearStage();
     return appendUnsupported(adapter);
   }
-  const frame = metric("ms");
+  const measured: Timing[] = [];
   const ticks = s.warmup + s.samples;
   // Generate every tick up front so data generation is never timed.
   const batches = Array.from({ length: ticks }, (_, tick) =>
@@ -295,11 +339,11 @@ async function runStream(
       () => handle.append!(batch.x, batch.ys, s.points),
       () => handle,
     );
-    if (i >= s.warmup) frame.samples.push(elapsed.complete);
+    if (i >= s.warmup) measured.push(elapsed);
   }
   handle.destroy();
   clearStage();
-  return { supported: true, metrics: { tickToFrame: frame } };
+  return { supported: true, metrics: timings("tick", measured) };
 }
 
 /** Median requestAnimationFrame interval while idle. */
@@ -514,18 +558,18 @@ async function runZoom(
     if (x > x1) x1 = x;
   }
   const windows = zoomWindows(x0, x1, s.warmup + s.samples);
-  const frame = metric("ms");
+  const measured: Timing[] = [];
   for (let i = 0; i < windows.length; i++) {
     const [x0, x1] = windows[i]!;
     const elapsed = await timed(
       () => handle.setViewport!(x0, x1),
       () => handle,
     );
-    if (i >= s.warmup) frame.samples.push(elapsed.complete);
+    if (i >= s.warmup) measured.push(elapsed);
   }
   handle.destroy();
   clearStage();
-  return { supported: true, metrics: { viewportToFrame: frame } };
+  return { supported: true, metrics: timings("viewport", measured) };
 }
 
 /**
@@ -547,7 +591,7 @@ async function runRotate(
     clearStage();
     return { supported: false, reason: `${adapter.id} adapter has no camera path`, metrics: {} };
   }
-  const frame = metric("ms");
+  const measured: Timing[] = [];
   const angles = cameraAngles(s.warmup + s.samples);
   for (let i = 0; i < angles.length; i++) {
     const [azimuth, elevation] = angles[i]!;
@@ -555,11 +599,11 @@ async function runRotate(
       () => handle.setCamera!(azimuth, elevation),
       () => handle,
     );
-    if (i >= s.warmup) frame.samples.push(elapsed.complete);
+    if (i >= s.warmup) measured.push(elapsed);
   }
   handle.destroy();
   clearStage();
-  return { supported: true, metrics: { cameraToFrame: frame } };
+  return { supported: true, metrics: timings("camera", measured) };
 }
 
 /** The time of the next animation frame. */
@@ -617,7 +661,7 @@ async function runResize(kind: ChartKind<AnyData>, s: Scenario): Promise<PageRes
   const options = optionsFor(s);
   const handle = await create(kind, makeData(s, 1), options);
   const container = stage().lastElementChild as HTMLElement;
-  const frame = metric("ms");
+  const measured: Timing[] = [];
   for (let i = 0; i < s.warmup + s.samples; i++) {
     const small = i % 2 === 0;
     const width = small ? 600 : WIDTH;
@@ -628,11 +672,11 @@ async function runResize(kind: ChartKind<AnyData>, s: Scenario): Promise<PageRes
       () => handle.resize(width, height),
       () => handle,
     );
-    if (i >= s.warmup) frame.samples.push(elapsed.complete);
+    if (i >= s.warmup) measured.push(elapsed);
   }
   handle.destroy();
   clearStage();
-  return { supported: true, metrics: { resizeToFrame: frame } };
+  return { supported: true, metrics: timings("resize", measured) };
 }
 
 async function runDashboard(kind: ChartKind<AnyData>, s: Scenario): Promise<PageResult> {
@@ -705,7 +749,7 @@ function hoverTargets(s: Scenario, count: number): Point[] {
 export interface Bench {
   id: string;
   renderer: Adapter["renderer"];
-  run(s: Scenario): Promise<PageResult>;
+  run(s: Scenario, options?: RunOptions): Promise<PageResult>;
   /** Creates source data only, so its memory can be excluded. */
   prepareData(s: Scenario): number;
   /** Mounts the scenario's charts for hover or memory measurement. */
@@ -713,7 +757,10 @@ export interface Bench {
   hoverTargets(s: Scenario, count: number): Point[];
   /** DOM elements and estimated canvas backing-store bytes under the stage. */
   footprint(): { domNodes: number; canvasBytes: number };
-  armPointer(): void;
+  /** WebGL contexts the page has created since it loaded. */
+  webglContexts(): number;
+  /** Times the next pointer move to its frame, or with `webgl` until WebGL drawing finished too. */
+  armPointer(options?: RunOptions): void;
   pointerLatency(): Promise<number>;
   unmount(): Promise<void>;
   gpu(): string;
@@ -757,7 +804,10 @@ export function installHarness(adapter: Adapter): void {
     renderer: adapter.renderer,
     refreshInterval: () => refreshInterval(),
     // Every scenario, from mounting to cleanup, fails on failures reported outside its calls.
-    run: (s) => guarded(() => runScenario(adapter, s)),
+    run: (s, options) => {
+      waitsForWebgl = options?.webgl ?? false;
+      return guarded(() => runScenario(adapter, s));
+    },
     prepareData(s) {
       retainedData = Array.from({ length: s.charts ?? 1 }, (_, c) => makeData(s, 1 + c));
       return retainedData.length;
@@ -782,12 +832,17 @@ export function installHarness(adapter: Adapter): void {
         canvasBytes += canvas.width * canvas.height * 4;
       return { domNodes: root.getElementsByTagName("*").length, canvasBytes };
     },
-    armPointer() {
+    webglContexts: webglContextsCreated,
+    armPointer(options) {
       pointerDone = new Promise((resolve) => {
         const listener = () => {
           const start = performance.now();
           window.removeEventListener("pointermove", listener, true);
-          nextFrame().then((end) => resolve(end - start));
+          nextFrame().then((end) => {
+            if (!options?.webgl) return resolve(end - start);
+            finishWebgl();
+            resolve(performance.now() - start);
+          });
         };
         window.addEventListener("pointermove", listener, true);
       });
@@ -800,11 +855,7 @@ export function installHarness(adapter: Adapter): void {
         retainedData = [];
         clearStage();
       }),
-    gpu() {
-      const gl = document.createElement("canvas").getContext("webgl");
-      const info = gl?.getExtension("WEBGL_debug_renderer_info");
-      return info ? String(gl!.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "unknown";
-    },
+    gpu: gpuName,
   };
   (window as unknown as { bench: Bench }).bench = bench;
 }

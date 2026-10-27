@@ -151,6 +151,11 @@ export function gridSection(results: GridResults): string {
   };
   const memory = (m: Row["metrics"]) =>
     `${mb(median(m, "retainedBytes"))} MB (reserved +${mb(median(m, "mountReservedBytes"))}); input ${mb(median(m, "inputBytes"))} MB; ${median(m, "domNodes")} nodes${median(m, "canvasBytes") > 0 ? `; canvas ${mb(median(m, "canvasBytes"))} MB` : ""}`;
+  const process = (m: Row["metrics"]) => {
+    if (!m.gpuBytes) return "not measured";
+    const renderer = m.rendererBytes?.summary;
+    return `${renderer ? `${mb(renderer.median)} ± ${mb(renderer.mad)} MB renderer, ` : ""}${mb(median(m, "gpuBytes"))} MB GPU`;
+  };
   const lifecycle = (m: Row["metrics"]) =>
     `${mb(median(m, "destroyLeakBytes"))} / ${mb(median(m, "cycleRetainedBytes"))} MB; ${mb(median(m, "cycleGrowthBytes"))} MB per mount; ${mb(median(m, "leakedBytes"))} MB after release`;
 
@@ -211,6 +216,10 @@ export function gridSection(results: GridResults): string {
     grid(
       "Memory with the grid mounted (retained heap, and growth of the reserved heap while mounting; native input; DOM nodes; canvas)",
       [["memory", "mounted", memory]],
+    ),
+    grid(
+      "Process memory from mounting the grid (renderer footprint, median ± MAD; GPU memory Chrome attributes to the page)",
+      [["memory", "mounted", process]],
     ),
     grid(
       "Heap kept 1 s after destroying the grid (after one mount / after five more); growth per further mount; kept after releasing the data too",

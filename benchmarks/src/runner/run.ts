@@ -18,10 +18,20 @@ import {
   webkit,
 } from "playwright";
 import { createFirefoxAppData } from "../../../scripts/browser/firefox.ts";
-import type { Bench, Metric, PageResult } from "../page/harness.ts";
-import { SCENARIOS, type Scenario } from "../scenarios.ts";
+import type { Bench, Metric, PageResult, RunOptions } from "../page/harness.ts";
+import { type Operation, SCENARIOS, type Scenario } from "../scenarios.ts";
 import { buildPage, ROOT, serve } from "./build.ts";
-import { bounded, heapBytes, LATENCY_ARGS, REALTIME_ARGS } from "./chrome.ts";
+import {
+  bounded,
+  gpuMemory,
+  heapBytes,
+  LATENCY_ARGS,
+  PROCESS_SETTLE_MS,
+  processGrowth,
+  processMemory,
+  REALTIME_ARGS,
+  rendererPid,
+} from "./chrome.ts";
 import { COMPARED, commit, machine, PACKAGES, packageVersion, RUNTIMES } from "./environment.ts";
 import { type Summary, summarize } from "./stats.ts";
 
@@ -51,6 +61,15 @@ const measuresMemory = browserName === "chrome";
 const VIEWPORT = { width: 1280, height: 1400 };
 const DEVICE_SCALE_FACTOR = 2;
 const HOVER_SPACING_MS = 70;
+/** Operations timed to frames, which a second run times to WebGL drawing finished too. */
+const FRAME_TIMED = new Set<Operation>(["stream", "hover", "zoom", "resize", "rotate"]);
+
+/**
+ * The runs of a scenario: `main`, the scenario as it always ran; `webgl`,
+ * frame-timed operations again until WebGL drawing finished; `first-mount`,
+ * one first mount of a memory scenario in a fresh page, per sample.
+ */
+type Pass = "main" | "webgl" | "first-mount";
 // Firefox paints as soon as it can with a frame rate of 0 ("ASAP mode").
 // WebKit has no such setting: its latencies include waiting for vsync.
 const FIREFOX_LATENCY_PREFS = { "layout.frame_rate": 0 };
@@ -82,6 +101,8 @@ interface ResultRow {
   library: string;
   supported: boolean;
   reason?: string;
+  /** Why a `webgl` or `first-mount` run failed when the main run did not. */
+  fullCostReason?: string;
   metrics: Record<string, Metric & { summary: Summary }>;
 }
 
@@ -129,7 +150,47 @@ async function runMemory(page: Page, cdp: CDPSession, s: Scenario): Promise<Page
   return { supported: true, metrics };
 }
 
-async function runHover(page: Page, s: Scenario): Promise<PageResult> {
+/**
+ * One sample of a memory scenario's first mount, in a fresh page: the heap
+ * it retains (`firstRetainedBytes`), the renderer process's footprint, and
+ * the GPU memory attributed to the page, from data prepared to charts
+ * mounted. `runMemory` mounts repeatedly in one page, so its median leaves
+ * out what a library pays only the first time (code, caches it keeps after
+ * being destroyed); and the pauses and memory dumps here would change its
+ * readings, so this runs apart. `browser` is a browser-level DevTools session.
+ */
+async function runFirstMount(
+  page: Page,
+  cdp: CDPSession,
+  browser: CDPSession,
+  s: Scenario,
+): Promise<PageResult> {
+  const pid = await rendererPid(cdp);
+  // The first memory dump sets up tracing's buffers in every process; taken
+  // before the baselines, it is not counted as the charts' memory.
+  await gpuMemory(browser, pid);
+  await page.evaluate((scenario) => window.bench.prepareData(scenario), s);
+  await heapBytes(cdp);
+  const dataProcess = await processMemory(page, browser, pid);
+  // Read after the memory dump, so what the dump leaves in the heap is in the baseline.
+  const withData = await heapBytes(cdp);
+  const mounted = await page.evaluate((scenario) => window.bench.mount(scenario), s);
+  if (!mounted.supported) return { supported: false, reason: mounted.reason, metrics: {} };
+  const withCharts = await heapBytes(cdp);
+  const chartsProcess = await processMemory(page, browser, pid);
+  const growth = {
+    firstRetainedBytes: withCharts.total - withData.total,
+    ...processGrowth(dataProcess, chartsProcess),
+  };
+  return {
+    supported: true,
+    metrics: Object.fromEntries(
+      Object.entries(growth).map(([name, value]) => [name, { unit: "bytes", samples: [value] }]),
+    ),
+  };
+}
+
+async function runHover(page: Page, s: Scenario, options: RunOptions): Promise<PageResult> {
   const mounted = await page.evaluate((scenario) => window.bench.mount(scenario), s);
   if (!mounted.supported) return { supported: false, reason: mounted.reason, metrics: {} };
   // Aim at real data points so every library has something to hit.
@@ -142,13 +203,16 @@ async function runHover(page: Page, s: Scenario): Promise<PageResult> {
     // Space moves out so throttled hover handlers (Plotly: 50 ms) run for
     // every event instead of being skipped.
     await page.waitForTimeout(HOVER_SPACING_MS);
-    await page.evaluate(() => window.bench.armPointer());
+    await page.evaluate((options) => window.bench.armPointer(options), options);
     await page.mouse.move(target.x, target.y);
     const ms = await page.evaluate(() => window.bench.pointerLatency());
     if (i >= s.warmup) latency.samples.push(ms);
   }
   await page.evaluate(() => window.bench.unmount());
-  return { supported: true, metrics: { pointerToFrame: latency } };
+  return {
+    supported: true,
+    metrics: { [options.webgl ? "pointerToWebglDone" : "pointerToFrame"]: latency },
+  };
 }
 
 async function main() {
@@ -184,10 +248,19 @@ async function main() {
 
   const rows: ResultRow[] = [];
   const renderers: Record<string, unknown> = {};
-  let gpu = "unknown";
-  let userAgent = "";
+  /** Browser-level DevTools sessions, for memory dumps; one per Chrome launched. */
+  const browserSessions = new WeakMap<Browser, CDPSession>();
+
+  // Environment readings in a page of their own, so no measured page makes
+  // an extra WebGL context or runs extra frames first.
+  const setup = await latency.context.newPage();
+  await setup.goto(`${origin}/${libraries[0]}.html`);
+  await setup.waitForFunction(() => window.bench !== undefined);
+  const gpu = await setup.evaluate(() => window.bench.gpu());
+  const userAgent = await setup.evaluate(() => navigator.userAgent);
   /** Idle frame cadence in the latency browser, which bounds what WebKit timings can show. */
-  let frameCadence: number | undefined;
+  const frameCadence = await setup.evaluate(() => window.bench.refreshInterval());
+  await setup.close();
 
   /**
    * Runs one scenario in a fresh page, from page creation to measurement,
@@ -195,9 +268,10 @@ async function main() {
    * `opened` for the caller to clean up.
    */
   const measure = async (
-    context: BrowserContext,
+    { browser, context }: { browser: Browser; context: BrowserContext },
     library: string,
     s: Scenario,
+    pass: Pass,
     opened: { page?: Page; cdp?: CDPSession },
   ): Promise<PageResult> => {
     const page = await context.newPage();
@@ -205,71 +279,116 @@ async function main() {
     await page.goto(`${origin}/${library}.html`);
     await page.waitForFunction(() => window.bench !== undefined);
     renderers[library] ??= await page.evaluate(() => window.bench.renderer);
-    if (gpu === "unknown") gpu = await page.evaluate(() => window.bench.gpu());
-    userAgent ||= await page.evaluate(() => navigator.userAgent);
-    if (frameCadence === undefined && context === latency.context)
-      frameCadence = await page.evaluate(() => window.bench.refreshInterval());
     if (s.operation === "memory") {
       const cdp = await context.newCDPSession(page);
       opened.cdp = cdp;
-      return runMemory(page, cdp, s);
+      if (pass !== "first-mount") return runMemory(page, cdp, s);
+      let session = browserSessions.get(browser);
+      if (!session) {
+        session = await browser.newBrowserCDPSession();
+        browserSessions.set(browser, session);
+      }
+      return runFirstMount(page, cdp, session, s);
     }
-    if (s.operation === "hover") return runHover(page, s);
-    return page.evaluate((scenario) => window.bench.run(scenario), s);
+    const options: RunOptions = { webgl: pass === "webgl" };
+    const result =
+      s.operation === "hover"
+        ? await runHover(page, s, options)
+        : await page.evaluate(([scenario, options]) => window.bench.run(scenario, options), [
+            s,
+            options,
+          ] as const);
+    if (result.supported && FRAME_TIMED.has(s.operation) && pass === "main") {
+      const created = await page.evaluate(() => window.bench.webglContexts());
+      result.metrics.webglContexts = { unit: "count", samples: [created] };
+    }
+    return result;
+  };
+
+  /**
+   * Measures a scenario in a fresh page within its time limit, and starts
+   * the browser again when the page crashed or got stuck.
+   */
+  const attempt = async (library: string, s: Scenario, pass: Pass = "main") => {
+    const ingest = paced(s);
+    // A browser left without pages while the other runs can exit (headed
+    // Firefox on macOS does after a minute or so): start it again.
+    if (!(ingest ? realtime : latency).browser.isConnected()) {
+      const fresh = await launch(ingest);
+      if (ingest) realtime = fresh;
+      else latency = fresh;
+    }
+    const opened: { page?: Page; cdp?: CDPSession } = {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let result: PageResult;
+    try {
+      result = await Promise.race([
+        measure(ingest ? realtime : latency, library, s, pass, opened),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`timed out after ${s.timeout} s`)),
+            (s.timeout ?? 600) * 1000,
+          );
+        }),
+      ]);
+    } catch (error) {
+      result = {
+        supported: false,
+        reason: `error: ${(error as Error).message.split("\n")[0]}`,
+        metrics: {},
+      };
+    } finally {
+      clearTimeout(timer);
+      // A page still running a timed-out scenario, or a crashed one, may
+      // never answer; cleaning it up must not stall the run.
+      if (opened.cdp) await bounded(opened.cdp.detach());
+      if (opened.page) await bounded(opened.page.close({ runBeforeUnload: false }));
+    }
+    if (result.reason?.startsWith("error")) {
+      // A crashed or stuck page can leave its browser unable to open tabs.
+      // Later scenarios get a fresh browser once the old one has exited;
+      // closing it waits for Playwright to force-kill it if needed.
+      const shared = realtime === latency;
+      const failed = ingest ? realtime : latency;
+      await failed.browser.close().catch(() => {});
+      const fresh = await launch(ingest && !shared);
+      if (ingest && !shared) realtime = fresh;
+      else {
+        latency = fresh;
+        if (shared) realtime = fresh;
+      }
+    }
+    return result;
   };
 
   let complete = false;
   try {
     for (const library of libraries) {
       for (const s of scenarios) {
-        const ingest = paced(s);
-        // A browser left without pages while the other runs can exit (headed
-        // Firefox on macOS does after a minute or so): start it again.
-        if (!(ingest ? realtime : latency).browser.isConnected()) {
-          const fresh = await launch(ingest);
-          if (ingest) realtime = fresh;
-          else latency = fresh;
-        }
-        const { context } = ingest ? realtime : latency;
         const started = performance.now();
-        const opened: { page?: Page; cdp?: CDPSession } = {};
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let result: PageResult;
-        try {
-          result = await Promise.race([
-            measure(context, library, s, opened),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () => reject(new Error(`timed out after ${s.timeout} s`)),
-                (s.timeout ?? 600) * 1000,
-              );
-            }),
-          ]);
-        } catch (error) {
-          result = {
-            supported: false,
-            reason: `error: ${(error as Error).message.split("\n")[0]}`,
-            metrics: {},
-          };
-        } finally {
-          clearTimeout(timer);
-          // A page still running a timed-out scenario, or a crashed one, may
-          // never answer; cleaning it up must not stall the run.
-          if (opened.cdp) await bounded(opened.cdp.detach());
-          if (opened.page) await bounded(opened.page.close({ runBeforeUnload: false }));
-        }
-        if (result.reason?.startsWith("error")) {
-          // A crashed or stuck page can leave its browser unable to open tabs.
-          // Later scenarios get a fresh browser once the old one has exited;
-          // closing it waits for Playwright to force-kill it if needed.
-          const shared = realtime === latency;
-          const failed = ingest ? realtime : latency;
-          await failed.browser.close().catch(() => {});
-          const fresh = await launch(ingest && !shared);
-          if (ingest && !shared) realtime = fresh;
-          else {
-            latency = fresh;
-            if (shared) realtime = fresh;
+        const result = await attempt(library, s);
+        // Full-cost metrics come from runs of their own in fresh pages, so
+        // the main run's readings stay as they were: frame-timed operations
+        // again, each to WebGL drawing finished; memory scenarios as one
+        // first mount per page and sample.
+        let fullCostReason: string | undefined;
+        const passes: Pass[] = !result.supported
+          ? []
+          : FRAME_TIMED.has(s.operation)
+            ? ["webgl"]
+            : s.operation === "memory"
+              ? Array<Pass>(s.samples).fill("first-mount")
+              : [];
+        for (const pass of passes) {
+          const extra = await attempt(library, s, pass);
+          if (!extra.supported) {
+            fullCostReason = extra.reason;
+            break;
+          }
+          for (const [name, metric] of Object.entries(extra.metrics)) {
+            const kept = result.metrics[name];
+            if (kept) kept.samples.push(...metric.samples);
+            else result.metrics[name] = metric;
           }
         }
         const metrics = Object.fromEntries(
@@ -283,6 +402,7 @@ async function main() {
           library,
           supported: result.supported,
           reason: result.reason,
+          ...(fullCostReason && { fullCostReason }),
           metrics,
         });
         const headline = Object.entries(metrics)[0];
@@ -328,6 +448,11 @@ function writeResults(run: {
       memory: measuresMemory
         ? "CDP Runtime.getHeapUsage after forced GC: V8 heap + Blink heap + ArrayBuffer backing stores"
         : "not measured: heap sizes need Chrome's DevTools protocol, so memory scenarios were skipped",
+      processMemory: measuresMemory
+        ? `separate runs, one fresh page per sample, each a first mount from data prepared to charts mounted, readings after forced GC and a ${PROCESS_SETTLE_MS} ms pause: firstRetainedBytes = heap as above; rendererBytes = the page's renderer process phys_footprint (macOS footprint); gpuBytes = GPU memory the renderer's memory-infra dump attributes to it (webgl, canvas resources, cc tile memory)`
+        : "not measured: after a forced GC this browser keeps freed memory in its process, and it attributes no GPU memory to a page",
+      webglDone:
+        "second run of each frame-timed scenario in a fresh page: operation start until the frame and then a 1-pixel readPixels on every live WebGL context the page created (waits for their GPU work); 2D canvas and compositor rasterization on the GPU are not waited for",
       sampleScale,
     },
     environment: {
