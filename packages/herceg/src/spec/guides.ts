@@ -1,8 +1,8 @@
 // Portable guide types: the position scales a chart names (`scales`), the
 // guides that explain scales (`guides`: axes, legends, colorbars), and how
 // ticks are chosen and written. The chart's `x`, `y`, `yRight`, and
-// `legend` options are their short forms (see docs/architecture.md,
-// "Scales and guides").
+// `legend` options are their short forms (see docs/architecture/layout.md,
+// "The guide compiler").
 
 import type { IdentityScaleSpec, OrdinalScaleSpec, SymbolName } from "./encoding.ts";
 import type { Place, Side } from "./place.ts";

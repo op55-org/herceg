@@ -84,7 +84,7 @@ function focusFirst<S extends Schema>(target: Grid<S>) {
 }
 focusFirst(grid);
 
-// The README's grid and chart linked both ways.
+// The grids guide's grid and chart linked both ways.
 {
   const store = selectionStore(requests);
   const gridRows = rowView(requests);
@@ -191,7 +191,7 @@ focusFirst(grid);
   expectTypeOf(nested.tableOf(either).kind).parameter(0).toEqualTypeOf<"host" | "n" | "worst">();
 }
 
-// The README's row groups and grouped grid.
+// The grids guide's row groups and grouped grid.
 {
   const log = table({
     time: time(new Float64Array(3)),

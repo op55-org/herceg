@@ -111,7 +111,8 @@ const SLOW_FRAME = 10;
 /**
  * Bars, slices, and rules at most in either scene of a change: more show
  * it at once. Each frame rebuilds their paths, which at this many takes
- * about a millisecond (docs/architecture.md). Marks bound each series' bars
+ * about a millisecond (docs/architecture/rendering.md, "Animated values").
+ * Marks bound each series' bars
  * alike (scene.ts MOVING_BARS, which this module does not import, so as to
  * share no chunk with the chart's bundle).
  */
@@ -119,11 +120,15 @@ export const MOVING_ITEMS = 2000;
 /**
  * Points at most in a frame, including exits: a frame of this many takes
  * less JavaScript than drawing the change at once, and the copies about 40
- * bytes a point (docs/architecture.md). Marks bound each series alike
+ * bytes a point (docs/architecture/rendering.md, "Animated values"). Marks
+ * bound each series alike
  * (scene.ts MOVING_POINTS).
  */
 export const MOVING_POINTS = 10_000;
-/** Points of lines, areas, and other geometry at most in either scene of a change (docs/architecture.md). */
+/**
+ * Points of lines, areas, and other geometry at most in either scene of a
+ * change (docs/architecture/rendering.md, "Animated values").
+ */
 export const MOVING_VERTICES = 10_000;
 
 /**

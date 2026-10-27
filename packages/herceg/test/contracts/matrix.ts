@@ -1,8 +1,8 @@
 // The capability matrix's declarations (test/contracts/ at the repository
 // root) and its rows' charts, as the proofs read them: a proof takes a
 // row's declared cell of its capability to choose what to assert, and
-// asserts it with expectations of its own (see the architecture's
-// "Contract tests").
+// asserts it with expectations of its own (see docs/contributing.md,
+// "Contracts").
 
 import { expect } from "vitest";
 import capabilities from "../../../../test/contracts/capabilities.json";

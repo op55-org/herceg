@@ -1,4 +1,5 @@
-// The README examples, compiled by `npm run typecheck` so the docs stay true.
+// The documentation's examples (README and docs/guide), compiled by
+// `npm run typecheck` so the docs stay true.
 import {
   area,
   bar,
@@ -329,7 +330,7 @@ heatmap(load, { x: "hour", y: "host", color: "cpu" });
 // @ts-expect-error heatmap values must be numeric
 heatmap(load, { x: "hour", y: "host", color: "host" });
 
-// README: bars, points, heatmaps
+// The marks guide: bars, points, heatmaps
 declare const regions: string[];
 declare const q1Sales: number[];
 declare const q2Sales: number[];

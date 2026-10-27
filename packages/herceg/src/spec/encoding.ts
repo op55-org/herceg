@@ -3,7 +3,7 @@
 // each row; categorical scales with fixed mappings go in the chart's
 // `scales`; a mark's `style` maps series to looks and styles its parts
 // (markers, leaders); `continuity` and `where` decide which observations
-// lines and areas connect. See docs/architecture.md, "Encodings".
+// lines and areas connect. See docs/architecture/marks.md, "Encodings".
 
 import type { Expression } from "../data/expression.ts";
 import type { FormatSpec } from "./guides.ts";
@@ -81,7 +81,8 @@ export interface EncodingsSpec {
  * their place in the domain. A chart declaring "color" colors every mark's
  * series and fields through it, unless a channel names another; without
  * it, values take the chart's colors of what they stand for (the same
- * field of the same table, see the architecture's "Identity and color").
+ * field of the same table; see docs/architecture/marks.md, "Identity and
+ * color").
  */
 export interface OrdinalScaleSpec {
   type: "ordinal";

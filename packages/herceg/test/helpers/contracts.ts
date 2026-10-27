@@ -1,6 +1,6 @@
 // Tests that prove a contract: what an option, mark, or surface promises,
-// by an ID other tooling can find in a run's results (see the architecture's
-// "Contract tests"). A contract test is an ordinary Vitest test whose name
+// by an ID other tooling can find in a run's results (see docs/contributing.md,
+// "Contracts"). A contract test is an ordinary Vitest test whose name
 // starts with its ID; its assertions are its own.
 
 import { it, type TestFunction } from "vitest";

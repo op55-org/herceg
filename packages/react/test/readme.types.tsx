@@ -1,4 +1,5 @@
-// The README examples, compiled by `npm run typecheck` so the docs stay true.
+// The examples of the README and docs/guide/frameworks.md, compiled by
+// `npm run typecheck` so the docs stay true.
 import { table, time, viridis } from "herceg";
 import { useEffect, useMemo } from "react";
 import { Legend } from "../src/guides.tsx";

@@ -32,7 +32,7 @@ describe("runtime regressions", () => {
 
   // Firefox measures an inline element holding a block as that block, not
   // the box it lies in, so there a chart in one keeps its first width (a
-  // known limit, docs/architecture.md).
+  // limit noted in docs/guide/getting-started.md).
   const inlineMeasured = server.browser !== "firefox";
 
   it.skipIf(!inlineMeasured)(

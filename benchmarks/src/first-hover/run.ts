@@ -1,7 +1,7 @@
 // First-hover latency: how long a tooltip takes to show for a pointer
 // that moves onto a chart a set time after it mounted, while its
-// interaction controller may still be loading (docs/architecture.md, "The
-// interaction controller"). Every sample is a fresh page load of a
+// interaction controller may still be loading (docs/architecture/interaction.md,
+// "The interaction controller"). Every sample is a fresh page load of a
 // production build split as applications bundle it, the controller a chunk
 // of its own. Caches: "cold" (the HTTP cache off), "warm" (the chunk cached
 // by an earlier load), and "slow" (cold, 100 ms of network latency). A

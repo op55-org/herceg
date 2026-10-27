@@ -21,7 +21,7 @@ engineering decisions.
 | `packages/vue`, `packages/svelte` | `@herceg/vue` and `@herceg/svelte`, the Vue and Svelte adapters, in the same model. |
 | `python/` | The `herceg` Python package: a Pythonic chart builder that emits the portable spec, data conversion, HTML, notebook, SVG, PNG, and PDF output, live notebook widgets, and a Streamlit component. |
 | `benchmarks/` | Benchmark harness, competitor adapters, scenarios, and committed results in `benchmarks/results/`. |
-| `docs/` | Permanent documentation: architecture, vocabulary, comparison, benchmark methodology. |
+| `docs/` | Permanent documentation: user guides (`docs/guide/`), architecture and vocabulary (`docs/architecture.md`, `docs/architecture/`), comparison, capability matrix, roadmap, contributing. Benchmark methodology is in `benchmarks/README.md`. |
 | `scripts/` | Contributor and CI checks: tests of packed npm packages and Python distributions, and in `scripts/browser/` the engines browser tests run in and the commands they reach them through. |
 | `tmp/` | Gitignored scratch space. Never commit anything from here. |
 

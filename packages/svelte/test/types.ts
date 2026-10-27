@@ -1,7 +1,7 @@
 // Compile-time checks of the component types, run by `npm run typecheck`
 // (svelte-check). Markup is checked through the same component signatures
 // these calls use, but cannot expect errors, so failing cases are written
-// here; `Readme.svelte` holds the README's examples.
+// here; `Readme.svelte` holds the examples of the README and the frameworks guide.
 import { type Chart as HercegChart, table, time } from "herceg";
 import type { ComponentProps } from "svelte";
 import {

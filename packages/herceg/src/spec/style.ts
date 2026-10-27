@@ -1,7 +1,7 @@
 // Portable style types: how text and shapes look, by visual role. Styles
 // cascade from the theme to the chart's guides, then to a panel's, each
-// level giving only the properties it changes (see docs/architecture.md,
-// "Styles"). Colors are CSS colors, or CSS variables with a fallback for
+// level giving only the properties it changes (see
+// docs/architecture/layout.md, "Themes and styles"). Colors are CSS colors, or CSS variables with a fallback for
 // static output (`var(--ink, #1c2333)`).
 
 import type { Dash } from "./spec.ts";
