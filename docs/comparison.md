@@ -52,14 +52,14 @@ Chart.js has no built-in heatmap; those cells are marked n/a.
 
 | Area | Herceg | ECharts | TanStack Charts | Chart.js | Plotly |
 | --- | --- | --- | --- | --- | --- |
-| Initial render | Measured. Fast at every size measured: ~0.7 ms for 4 x 200 line points (uPlot: ~0.5 ms), ~2.4 ms for 10 x 5,000, ~4.9 ms for 1M points (uPlot: ~6.4 ms), ~38 ms for 10M points (uPlot: ~47 ms). Bars ~1.4 ms for 100 x 4; scatter ~2.5 ms for 10k points on Canvas, ~4.3 ms for 200k and ~17 ms for 1M with WebGL; heatmaps ~1.5 ms for 100 x 100 and ~13 ms for 500 x 500 cells, drawn as one image. Lines are reduced to at most four points per pixel column; SVG below 4,000 drawn points or cells, Canvas above. | Measured. Canvas; fast for small charts, ~170 ms for a 1M-point line with `minmax` sampling. Scatter and heatmap series render progressively: a 500x500 heatmap shows its first frame after ~50 ms and completes after ~5 s. | Measured. Fast small SVG charts; cost grows with rows because every row becomes a scene node (~0.72 s for 1M points on Canvas). | Measured. Fast for small and medium charts; min-max decimation makes 1M points cheap once the `{x, y}` objects exist. | Measured. Slowest small charts; SVG scatter is expensive at 10k points, WebGL traces handle large data. |
+| Initial render | Measured. Fast at every size measured: ~0.7 ms for 4 x 200 line points (uPlot: ~0.5 ms), ~2.4 ms for 10 x 5,000, ~4.9 ms for 1M points (uPlot: ~6.4 ms), ~32 ms for 10M points (uPlot: ~46 ms). Bars ~1.4 ms for 100 x 4; scatter ~2.5 ms for 10k points on Canvas, ~4.3 ms for 200k and ~17 ms for 1M with WebGL; heatmaps ~1.5 ms for 100 x 100 and ~13 ms for 500 x 500 cells, drawn as one image. Lines are reduced to at most four points per pixel column; SVG below 4,000 drawn points or cells, Canvas above. | Measured. Canvas; fast for small charts, ~170 ms for a 1M-point line with `minmax` sampling. Scatter and heatmap series render progressively: a 500x500 heatmap shows its first frame after ~50 ms and completes after ~5 s. | Measured. Fast small SVG charts; cost grows with rows because every row becomes a scene node (~0.72 s for 1M points on Canvas). | Measured. Fast for small and medium charts; min-max decimation makes 1M points cheap once the `{x, y}` objects exist. | Measured. Slowest small charts; SVG scatter is expensive at 10k points, WebGL traces handle large data. |
 | Incremental update | Measured. Tables support append, drop, range replace, and reset; charts re-render once on the next frame. Replacing 10 x 5,000 line points takes ~1.2 ms (uPlot ~1.2 ms), 1M points ~3.5 ms (uPlot ~5.7 ms), 10k scatter points ~1.8 ms, 100 x 100 heatmap cells ~0.6 ms. | Measured. `setOption` re-processes the series; no rolling-window append. | Measured. Updates rebuild the definition and scene. | Measured. Mutate arrays and `update('none')`; cheap. | Measured. `extendTraces` with `maxPoints` gives a documented rolling window, but each tick costs ~20–30 ms here (~270 ms in a million-point window). |
 | Streaming | Measured. ~1.2 ms per tick for 15 series x 3,000 points (uPlot: ~0.9 ms); keeps up in every paced scenario, including the ten-chart dashboard at 10 Hz. A million-point rolling window takes ~1.5 ms per 10,000-point tick (uPlot: ~5.8 ms), because min/max indexes are kept current as rows arrive. Rolling windows via `maxRows`. | Measured. ~10 ms per tick for 15 series x 3,000 points; keeps up with 100 Hz ingestion for one chart but drops frames for a 10-chart dashboard at 10 Hz. | Measured. ~31 ms per tick; at 60–100 Hz ingestion only ~33 updates per second get through. | Measured. ~3.5 ms per tick; keeps up in every paced scenario. | Measured. ~20 ms per tick; ~56 updates per second at 100 Hz, ~6 Hz for the 10-chart dashboard. |
-| Memory | Measured. ~0.24 MB retained for 1M points (uPlot ~0.18 MB): source typed arrays are used in place and geometry buffers are bounded. Ten-chart dashboard ~5.9 MB, its traced lines growing no further than the points they can keep (uPlot ~2.8 MB; its paths are browser `Path2D` objects, outside the measured heap); 100 small charts ~9 MB and no canvas backing stores, because small charts render to SVG. | Measured. ~240 MB retained for 1M points (internal storage plus per-point structures). | Measured. ~600 MB retained for 1M points (row objects, Dates, scene nodes). | Measured. ~49 MB for 1M points (one `{x, y}` object per point). | Measured. ~110 MB for 1M points with WebGL. |
+| Memory | Measured (Chrome). Retained heap (median of mounts repeated in one page): ~0.24 MB for 1M points (uPlot ~0.18 MB), since source typed arrays are used in place and geometry buffers are bounded; ~5.9 MB for the ten-chart dashboard, its traced lines growing no further than the points they can keep (uPlot ~2.8 MB, whose paths are browser `Path2D` objects outside the heap); ~9 MB for 100 small charts, which render to SVG without canvas backing stores. Counting native and GPU memory (first mount in a fresh page), the renderer process grows ~8.4 MB for 1M points (uPlot ~7.5 MB), ~20 MB for the dashboard (uPlot ~28 MB), and ~33 MB for 100 small charts (uPlot ~36 MB), and Chrome attributes ~7.5, ~31, and ~22 MB of GPU memory (canvases and compositor tiles) to the page (uPlot ~6.9, ~40, and ~92 MB). | Measured (Chrome). ~240 MB retained heap for 1M points (internal storage plus per-point structures); the renderer grows ~270 MB on a first mount. Dashboard ~115 MB heap, renderer ~140 MB. | Measured (Chrome). ~600 MB retained heap for 1M points (row objects, Dates, scene nodes); the renderer grows ~670 MB on a first mount. Dashboard ~270 MB heap, renderer ~320 MB. | Measured (Chrome). ~49 MB retained heap for 1M points (one `{x, y}` object per point); the renderer grows ~64 MB on a first mount. Dashboard ~57 MB heap, renderer ~85 MB; 100 small charts ~72 MB of GPU canvas memory. | Measured (Chrome). ~110 MB retained heap for 1M points with WebGL; on a first mount the renderer grows ~130 MB and Chrome attributes ~126 MB of GPU memory to the page (~122 MB of it WebGL buffers). A 1001 x 1001 surface keeps ~1.2 MB as the median of repeated mounts but 343 MB of heap on a first mount, with ~340 MB of GPU memory. |
 | Bundle size (line chart, gzip) | Measured. ~61 KiB (62,392 B) before the first frame for a time-series line chart with tooltip, events, and brushing, and its interaction controller (tooltips, the pointer, the wheel, keys; ~12.4 KiB, 12,720 B) loaded right after it; styles, positioned guides, and layout options are plain values in TypeScript as in specs and Python, so every chart carries their code, about 7 KiB of it (the style cascade of theme tokens and role styles for axes, legends, titles, and subplots, guides built as positioned items every renderer draws, titles and legends placed on any side or inside a plot with explicit padding, text boxes and halos, per-panel scale instances, clipping per mark, fluid SVG export, and the hooks for supplied fonts; monotone curves, which line charts carry whether they use them, are ~1 KiB of it, the four built-in themes with page-following themes about 2 KiB, the dispatch to layout marks such as pies about 1 KiB, y and xy zoom, rectangle and lasso brushes, and synced selections about 1.4 KiB, and facet headers, per-panel y scales, subplot routing, and weighted rows, which the model plans for any chart, about 1.1 KiB, x scales of panels' own (planned per group for any chart, with zoom, selections, and events per scale in the browser runtime) about 1.5 KiB, categories of panels' own (band axes planned per group, and category positions and values read through each panel's band places in tooltips and keyboard reads, and the chart's bands handed to summaries) about 0.1 KiB, the hooks that start view transitions and value transitions, whose code loads separately, about 0.6 KiB, the hooks that let a map's layers share a chart and tables hold geometry columns, about 0.1 KiB, the hooks for time axis breaks (whose code comes only with `timeBreaks`) and crosshair labels (loaded on demand), about 1.2 KiB, the camera API and the hooks that load 3D turning (`camera`, `setCamera`, the camera event, presses kept to their pointer), about 0.6 KiB, the hooks of row selections (`rowSelection`, whose code comes with `rowSelection()`), about 0.15 KiB, the hooks that load tooltip fields and content of the application's own (`tooltip.fields`, `renderTooltip`) and check fields as marks are made, about 0.3 KiB, exports of a mounted chart (`toPNG`, and the hook `renderToPDF(chart)` uses), about 0.1 KiB, and times read from ISO 8601 strings, numbers as categories, and values converted before a table changes, about 0.15 KiB; the pie, the maps, the breaks and their seam drawing, and the 3D marks themselves are not included). Each mark brings its own drawing code, so a line chart carries no bar, point, symbol, heatmap, or text drawing, color schemes are separate exports, and facets and the code that copies traces through independent panel bands or time breaks are only bundled when used; the chart model still includes band-axis, legend-layout (series, color, size, and shape keys), horizontal-bar inspection, right-axis, and panel-layout logic, and min/max indexes for large lines add ~1 KiB. The WebGL painter for large point series (~3.5 KiB; 3D charts add their ~4.2 KiB programs for points, lines, and surfaces, a separate chunk where the build splits them), 3D turning (~2 KiB), animation of views (~1 KiB) and of values (~6.5 KiB), crosshair labels (~1 KiB), tooltip fields and content of the application's own (~1.1 KiB), and PNG export (~0.4 KiB) load only when a chart needs them, and text is measured with the browser's canvas, so the static text estimator is not bundled. | Measured. ~167 KiB tree-shaken, ~371 KiB full. | Measured. ~44 KiB including `d3-scale` for time. | Measured. ~64 KiB with time scale and date adapter. | Measured. ~391 KiB basic bundle, ~1.4 MiB full. |
 | Line | Line, step lines, smooth monotone curves, several y fields or a long-format series field, gaps for missing values, log and time axes, level of detail for large series. Area (stacked, band) and rule marks. | Documented. Time axes, sampling, area fill, step lines. | Documented. `lineY`/`lineX`, gaps, curves. | Documented. Line, stepped, filled; decimation plugin. | Documented. `scatter`/`scattergl` lines, rich hover. |
 | Stacked areas and bars | Areas and bars stack several fields row by row, or the series of a category field: areas on every x any shown series has (a series without a row there counts as zero, or with `stackGaps: "interpolate"` as the line between its rows, zero beyond its ends; several rows at one x pair up by occurrence), bars by position, positive values up and negative down. Edges are typed arrays aligned on that union of x; tooltips, the keyboard, events, and summaries read each series' own rows, at its layer's top; hidden series leave the stack; facets stack each panel apart; on log axes area stacks stand on the axis' low end; monotone curves and value animation move the layers together. Streaming restacks only what appended and dropped rows touch. One-off measurements (not a committed scenario; Chrome 154, macOS 27, Apple M6, 800 x 400 at DPR 2, three runs interleaved with the version before; the stacks' own cost is in `npm run bench:core`): bars of 10 series x 10,000 positions in a rolling window, a position per tick at 60 Hz, take ~4.0 ms of JavaScript a frame (p95 ~5.8) instead of ~6.4 (p95 ~8.4), with no dropped frames either way, against ~3.6 ms for the same bars grouped; areas of a series field stacked the same way ~3.7 ms. At 10 Hz frames alternate between two clock states for every variant (~4.4 against ~7.6 ms in the fast one). The edges cost 16 bytes per layer and x, so series sharing few x cost up to the number of series times their rows. Areas and bars also normalize nonnegative values per position with `stack: "fill"`, as histograms normalize per bin; area `"center"` and `"wiggle"` offsets retain raw thickness, with optional `stackOrder: "inside-out"`. Both orientations, legend renormalization, facets/subplots, zoom, static export, and share/raw keyboard readings use the same engine across TypeScript, Python, React, Vue, and Svelte. Mixed signs require ordinary stacks; new modes keep per-layer missing gaps. Fill/center in input order retain incremental updates; wiggle and inside-out rebuild the retained window, with inside-out value updates immediate. Comparative timing of these new modes is not yet measured; the measurements above concern ordinary stacks. | Documented. `stack` groups series, `stackStrategy` (same sign, all, positive, negative) and `stackOrder`; series are matched by category on category axes and by data index otherwise, so series on time or value axes must share their x in order, and a series without a value at a position is skipped rather than filled (from its source, 6.1). | Documented. `areaY` stacks implicitly at repeated x by series (`z`), with `stack()` layouts for order, offset (diverging, normalize, center, wiggle), and reversal; a missing position and series pair counts as zero for the layout without a point of its own, so each area is drawn through its own rows. | Documented. `stacked: true` on the value scale stacks datasets matched by their index-scale value; filled lines (`fill: "stack"` or `"-1"`) run through each dataset's own points, so a dataset missing an x adds nothing there and its fill joins its neighbors (from its source, 4.5). | Documented. `stackgroup` on scatter traces with `stackgaps` "infer zero" (the default) or "interpolate" (constant beyond a trace's ends), `groupnorm` for fraction or percent stacks, and orientation; bars with `barmode: "stack"` or "relative". |
-| Scatter | Point mark with per-series color, radius, and opacity; every point is drawn. Series of 100,000+ points use WebGL (loaded on demand): ~17 ms to mount 1M points, ~3.7 ms per zoom step, both ahead of Plotly's WebGL. Nearest-point hover through a spatial grid index (~0.4 ms per move at 10k points). Streaming clouds, whole columns or split by a series field, upload only new points (a million points in two series at 1,000 rows per tick: ~3 ms of JavaScript per frame instead of ~13 ms before). Size (bubbles), continuous color (named sequential and diverging schemes, midpoints), category color (the theme's palette per value), opacity, and eight symbol shapes by field, with size, shape, and color keys; outlines (`stroke`, `strokeWidth`); encoded and outlined points are drawn on the CPU, not WebGL. Points on category axes (strip and dot plots, on either axis or both, over bars too), in facets and subplots with each panel's own categories; these are always drawn on the CPU; series dodge within a band, and points jitter by a hash of each row and a seed or pack as a beeswarm (`swarm`: in order of value without overlap, laid out again on resize and zoom; bounded, about 2 ms for 10,000 points in a band). | Documented. `large` mode for big scatter. | Documented. `dot` mark; one scene node per point. | Documented. Scatter/bubble. | Documented. SVG and WebGL scatter. |
+| Scatter | Point mark with per-series color, radius, and opacity; every point is drawn. Series of 100,000+ points use WebGL (loaded on demand): ~17 ms to mount 1M points, ~3.7 ms per zoom step to the frame and ~5.2 ms until the GPU has drawn it (Plotly's WebGL ~7.5 and ~10.1 ms). Nearest-point hover through a spatial grid index (~0.4 ms per move at 10k points). Streaming clouds, whole columns or split by a series field, upload only new points (a million points in two series at 1,000 rows per tick: ~3 ms of JavaScript per frame instead of ~13 ms before). Size (bubbles), continuous color (named sequential and diverging schemes, midpoints), category color (the theme's palette per value), opacity, and eight symbol shapes by field, with size, shape, and color keys; outlines (`stroke`, `strokeWidth`); encoded and outlined points are drawn on the CPU, not WebGL. Points on category axes (strip and dot plots, on either axis or both, over bars too), in facets and subplots with each panel's own categories; these are always drawn on the CPU; series dodge within a band, and points jitter by a hash of each row and a seed or pack as a beeswarm (`swarm`: in order of value without overlap, laid out again on resize and zoom; bounded, about 2 ms for 10,000 points in a band). | Documented. `large` mode for big scatter. | Documented. `dot` mark; one scene node per point. | Documented. Scatter/bubble. | Documented. SVG and WebGL scatter. |
 | Heatmap | Heatmap mark over category, number, or time fields, drawn as one image (Canvas `drawImage`, PNG inside SVG), with a color legend and cell tooltips. Number and time fields place cells along number and time axes that zoom, pan, and brush like other marks' axes and that other marks share: edges halfway between distinct values, or a fixed `xStep` / `yStep` that leaves gaps where values are missing, computed from the data, never the view; boundaries between local days fall halfway in elapsed time across clock changes (calendar weeks end at the zone's midnights); on time axes with breaks, cells either side of a break meet at its seam. `xBanded` / `yBanded` give one band per distinct value instead, and `x1`/`x2` (`y1`/`y2`) place cells between each row's edges, as binned data has them. Rows sharing a cell combine by `reduce` (last, mean, sum, min, or max), the same at every zoom. Calendar heatmaps of a date field in the chart's time zone: weeks along a zoomable time axis by weekday (any first day of the week), or months by day of the month, with missing and nonexistent days empty. Named sequential and diverging schemes, fixed color domains, and midpoints. No cell limit: a grid larger than the plot is drawn at the plot's device resolution, each pixel the mean (or with `sampling.reduce`, the max or min) of its block of cells, weighted by area where cells are unevenly spaced, and tooltips and the keyboard still find the single cell under the pointer (by binary search: at 10M cells a keyboard step along a row, or down a column within 32 rows, takes microseconds, where it scanned every cell, ~0.3 s; longer jumps still scan); memory follows the table's rows and the plot's pixels, not the cell count. Measured in a one-off run outside the committed suite (headless Chrome 154, Apple M6, 800 x 400 chart at DPR 2; competitors not run at these sizes): a sparse 4,000 x 4,000 grid of 200,000 rows mounts in ~42 ms and keeps ~15 MB beyond the source arrays, a dense one (16M rows) mounts in ~0.28 s, and 10M rows over 10,000 x 10,000 cells in ~0.22 s; band indices and the tooltip index take up to 12 bytes per row, and the first tooltip after a change builds that index (~0.1 s at 10M rows). Scene construction in Node (one-off, same chart, medians of 5 runs, interleaved A/B against banded number fields, which could not zoom): a dense 2,000 x 2,000 grid builds its first scene in ~90 ms either way and repaints a zoomed view in ~22 ms (a repaint took ~34 ms); 10M rows over 10,000 x 10,000 cells take ~380 ms (~375 ms) and ~93 ms per zoomed view (~85 ms per repaint); the first tooltip takes the same ~8 ms and ~170 ms (building the index); unevenly spaced cells cost more, ~175 ms for 2,000 x 2,000 (~105 ms banded), which also builds the tooltip index, and ~55 ms per zoomed view. Split by facets (each panel's cells from its own rows, never merged with another panel's), with x and y categories or number and time scales shared or each panel's, row's, or column's own, in facets and subplots, and one color scale across panels. No binning of its own (2D histograms bin rows; see below), no log axes yet, and calendar month labels are the time axis' ticks rather than labels aligned to week columns. | Documented. Heatmap series on a Cartesian grid of two category axes (its development build refuses others), on a matrix, on maps, or on a calendar coordinate system. | Documented. `cell` mark with a D3 color scale. | No built-in heatmap (third-party `chartjs-chart-matrix`). | Documented. Heatmap traces rendered as an image, at cell coordinates (`x` and `y`, or `x0` and `dx`) on zoomable number, date, or category axes, with `xgap` / `ygap`. |
 | Candlestick | Measured. Candlestick mark over number, time, or category x: rising candles hollow, falling ones filled, all four prices in tooltips. ~0.9 ms for 200 candles. With more candles than pixel columns, each column's candles merge into one (the first open, highest high, lowest low, and last close): ~7.5 ms for 100,000, where merged candles show direction by color only. OHLC bars are a `variant` of the same mark (not measured separately); a volume pane is a subplot sharing x. | Measured. Built-in `candlestick` series: ~2.4 ms for 200 candles; its `large` mode draws high-low lines without bodies, ~52 ms for 100,000. | No built-in candlestick. | No built-in candlestick (third-party `chartjs-chart-financial`, not measured). | Measured. Built-in `candlestick` and `ohlc` traces, drawing every candle: ~4.3 ms for 200, ~640 ms for 100,000. |
 | Financial charts | Time axes that leave out breaks (`timeBreaks`): days of the week, daily clock spans, calendar dates, and spans of instants, in the chart's time zone with clock changes; ticks never fall inside a break and move to the session that opens after it, labeled by the day or month that begins; data inside breaks is hidden while lines join across; zoom, pan, brushes, tooltips, and level of detail work in time shown. One-off measurement (Node, scene construction, a 1M-point line over ten years of New York sessions): ~4 ms to mount (~2.4 ms without breaks), ~0.5 ms per zoomed view (~0.1 ms), ~1.2 ms per streamed tick of 1,000 points (~0.6 ms). Candlesticks and OHLC bars (`variant: "ohlc"`), and crosshair labels on the axes (`tooltip.axisLabels`). A range navigator (`rangeNavigator`): a strip under the plot drawing its lines, areas, points (sampled to one per pixel), bars, and candlesticks over the whole x axis, whose window pans and zooms by dragging (dragging elsewhere selects, a double click resets) and is three keyboard sliders with value texts; it follows breaks, streaming data, wheel zoom, brushes, and synced charts, and SVG, PDF, and PNG export draw it. With facets or subplots that share x, one strip under all the panels draws every panel's marks (each panel's part apart, over that panel's y scale) and moves the x range they share; x scales per panel are refused. One-off measurement (Chrome, JavaScript per frame): dragging the window over a 1M-point line ~2.6–2.9 ms a move, as panning without one; with a zoomed 100,000-point rolling window streaming, ~2.3–2.4 ms a frame instead of ~1.5–1.6 ms; under 12 facet panels of a 100,000-row line ~0.5–0.6 ms a move (~0.2–0.3 ms panning without), under 4 subplots of 100,000 rows with a dense volume panel, column reduction takes drag p50/p95 from 2.550/2.820 to 0.340/0.445 ms and retained overview buffers from 2.40 MiB to 223 KiB; a single 1M-bar chart goes from 21.970/23.090 to 0.420/0.475 ms and 22.89 MiB to 110 KiB. Overview rebuild p50 is 1.225 → 1.700 ms and 6.930 → 10.650 ms respectively: checking placed rectangle footprints adds rebuild work, while dragging reuses the bounded geometry. A separate minified Node measurement of 1M rows with only 20 usable bars takes p50 5.944–6.086 → 2.505–2.775 ms after combining density and exact geometry in one source scan. The drag and dense rebuild figures use one-off before/after production Canvas measurements in Chrome 154, DPR 1, three alternating rounds; methodology and p95 rebuilds are in [Range navigator](architecture.md#range-navigator). Dense bars cover every CSS column their placed rectangles intersect, including wide bars and clipped edges, and keep each column's extreme per sign, with the extreme bar's color (ties: first series, then row); stacks retain the segments at the most extreme position per sign. Subpixel gaps fill, shorter bars' colors can disappear, and stack proportions show the chosen positions. Sparse bars stay exact; missing, zero-area, and wholly clipped rectangles do not count toward density. Opt-in dashed seam markers (`x.seams`) behind data in SVG, Canvas, and PDF, thinned in chronological order to a minimum CSS-pixel spacing (default 40); the navigator draws none. No technical indicators beyond derived rolling windows, no drawing tools; dense navigator bars still require a full scan to rebuild after data changes; candlesticks remain one glyph per row. | Documented. Axis breaks since 6.0 (`xAxis.breaks`): each break an explicit `start` and `end` with a visual `gap`, on value, log, and time axes (not category), so recurring weekends and sessions are listed one by one; its candlestick examples use a category axis of trading days instead. `axisPointer` labels values on the axes (by default with the `cross` pointer). OHLC bars through a custom series (an example), not a built-in style. `dataZoom` of type `slider`: a strip with a shadow of one series (a line and an area), handles that label their values, dragging across the shadow to select (`brushSelect`), along x or y and on category axes, controlling one axis or several grids' (`xAxisIndex` as a list); no keyboard operation documented. | No candlesticks, axis breaks, axis pointer labels, or range navigator documented. | Documented. The `timeseries` scale spreads data points equidistant, which closes gaps between them (not breaks of time); candlesticks and OHLC bars only through the third-party `chartjs-chart-financial`; no axis labels at the crosshair; no range navigator (`chartjs-plugin-zoom` zooms and pans without an overview). | Documented. `rangebreaks` on date axes: `bounds` with a `pattern` of "day of week" or "hour", or `values` with a `dvalue` size; `candlestick` and `ohlc` traces; spike lines (`showspikes`) across the plot or to the axes, with no documented labels on the axes. `xaxis.rangeslider`: the traces drawn again in a strip (`thickness`, 15% of the plot by default), shown by default under candlestick and OHLC charts, with `yaxis.rangemode` for its y range; no keyboard operation documented. |
@@ -78,7 +78,7 @@ Chart.js has no built-in heatmap; those cells are marked n/a.
 | 3D charts | `point3d` scatter (series colors or a number field on a color scale), `line3d` lines (a path per series through its rows in table order, broken where a row has no value, a constant width on screen), and `surface` height fields over a grid of rows (number, time, or category x and y; irregular spacing; holes for missing values; up to 1,048,576 grid points, 250,000 on the CPU), sharing one box with x, y, and z axes (linear, log, time), a cube or a given aspect, and an orthographic (default) or perspective camera. Large charts (20,000 points, 10,000 surface cells, or 20,000 line segments, opaque, surfaces without wireframes) are drawn by WebGL with one depth test for every mark, so crossings are exact: points as sprites, lines as round-capped ribbons, cells as triangles with the CPU's flat colors and shading; nothing is uploaded while turning, and the pointer, keyboard, and description read the data. Everything else, and every export, is drawn back to front as ordinary SVG, Canvas, and PDF geometry: exactly for points and one surface with points, approximately for lines (cut over a surface's cells and sorted by depth) and for several surfaces. Drag to turn, wheel zoom (opt-in), double-click reset, Shift+arrow keys and +/− to turn and zoom, buttons for people who cannot drag, a `camera` event and `getCamera`/`setCamera` (targeted by `{ panel }`, subplot events carry `panels`); CPU-rendered subplots beside other panels, with independent cameras and cached geometry and Canvas rasters (standalone charts retain WebGL); tooltips and keyboard reading of every point, line sample, and grid point with their values. Measured (see 3D charts below): turning a 1001 x 1001 surface (a million cells) ~0.4 ms of JavaScript, 60 frames a second turned every frame (Plotly: ~67 ms, 15 frames a second); mounting it ~0.15 s (Plotly ~0.46 s); 100,000 cells ~0.3 ms (Plotly ~12 ms; Herceg on the CPU ~92 ms); 1,000,000 points ~0.4 ms (Plotly failed to allocate); 10,000 points ~1.4 ms (Plotly ~5.2 ms). Memory at a million cells from a matrix table (`fromMatrix`): ~8.7 MB of heap (each grid point's height in the box) and 49 MB of GPU buffers; Plotly ~1.2 MB of heap (its GPU memory not measured). No meshes, parametric surfaces, isosurfaces, volumes, contours, 3D text or bars, translucent or wireframed surfaces on the GPU, color-scaled lines, or specular lighting; GPU edges are not antialiased; labels stay horizontal; flat shading only. | Documented. [ECharts-GL](https://github.com/ecomfe/echarts-gl/blob/master/test/grid3D-viewport.html) (a separate package) supports multiple `grid3D` viewports routed with `grid3DIndex`: `scatter3D`, `bar3D`, `line3D` (polylines through points, with width and color by value), `lines3D`, `surface` (including parametric surfaces from equations or sampled grids, with wireframes), `polygons3D`, `map3D`, and `globe`, all in WebGL with realistic shading, post effects, and antialiasing; mouse orbit, zoom, and pan; no SVG or vector export of 3D scenes; not measured here (its compatibility with ECharts 6 was not checked). | Not implemented. | Not implemented (no 3D chart types). | Documented. [3D subplots via scenes](https://plotly.com/javascript/3d-subplots/) (`scene`, `scene2`, …), each with its own camera. `scatter3d` (markers, lines with width and color scales, and text), `surface` (with contours and lighting, including parametric x and y from 2D arrays), `mesh3d` (vertices and triangle indices, or a Delaunay or alpha-shape triangulation, colored per vertex or face), `cone`, `streamtube`, `isosurface`, and `volume`, all WebGL (gl3d), with orbit, turntable, zoom, and pan modes and camera relayout; no SVG or vector PDF of 3D scenes (static export rasterizes them). Measured below: as fast as Herceg's GPU path at 100,000 cells turned every frame, slower at a million. |
 | Data preparation | Derived tables in the spec and in TypeScript (`derive`) and Python (`hg.derive`): filter and calculate with portable expressions, bin, aggregate (count, sum, mean, median, quantiles, min, max, stdev, variance, distinct, first, last), rolling windows, sort. Computed in the browser over typed columns and kept current as the source streams (incrementally for row-by-row steps): ~15 ms to filter and calculate 1M rows, ~9 ms to aggregate them by 20 groups, ~10 µs to follow a 100-row append (`npm run bench:core`). Row pivots (`herceg/pivot`): a view's rows as a crosstab whose long table of observed combinations charts read (see Data grid). No joins or calendar bins yet. | Documented. `dataset.transform` with filter, sort, and registered external transforms (ecStat for regression and clustering). | Data is prepared by the application. | Data is prepared by the application. | Documented. Plotly.js `transforms` (filter, groupby, aggregate, sort) are deprecated; Plotly Express prepares data in pandas. |
 | Data grid | `herceg/grid`: a DOM grid over a row view that mounts only the rows and columns in view, sorts by header clicks (several keys with Shift) through the view, and selects rows into a selection store other views can read; it follows the WAI grid pattern (one tab stop, a focused cell kept mounted while scrolled away, polite announcements) and takes the charts' themes. Nested groups (a level per grouping field) from `groupRows`, whose aggregate tables (count, sum, mean, min, max at every level, a parent's from its rows, never from its groups' means; updated incrementally as rows are appended and as a rolling window drops them) charts draw too: header rows with aggregates at every level, expansion by key path, each level's groups sorted among their siblings by key or aggregate and rows within their group, group selection of every row below into the same row set with mixed checkboxes, and the WAI tree grid pattern with levels. Columns resize and move by dragging headers (previewed once a frame, Escape to cancel), by keys on a focused header, or from a column menu that also pins them left or right, hides them, and shows hidden ones; the layout is the model's column list, which applications can save and restore. Pinned columns stick to the edges in the same row elements (one row of cells in visual order for screen readers), and scroll with the others in grids too narrow to hold them. ~32 KiB gzip with the data layer it needs, and row groups about 7 KiB more (one-off single-bundle measurement), none of it in a chart's bundle. Measured against TanStack Table with TanStack Virtual, AG Grid Community, and Glide Data Grid (see [Grids](#grids)): over 100k rows by 20 fields, mounting from the table's typed columns takes ~3.4 ms (TanStack ~77 ms and AG Grid ~75 ms with the conversion to row objects they need, Glide ~1.7 ms), sorting by a number ~16 ms to the correct frame (TanStack and AG Grid ~80 ms), and the mounted grid keeps ~2 MB of heap without copying the data (TanStack ~54 MB and AG Grid ~27 MB on top of ~62 MB of row objects); it keeps up with 1,000-row appends at 10 Hz under a sort at every size, as fast as plain typed-array code at 1M rows, and mounts 1M x 100 fields, where the tabs of TanStack and AG Grid crash. Weaker than Glide's canvas on scroll steps (~2.5–5.5 ms against ~1 ms), and than plain typed-array code on filtering at 100k rows. Grouping 1M rows by a category (five aggregates, sums compensated with error bounds) ~16–21 ms against ~35–50 ms for a derived table's aggregate (which also copies filtered columns), and following a 1,000-row append ~0.1 ms (one-off Node measurements); over 100k rows by 20 fields in one to three levels (100 or 1,000 last-level groups, uniform or skewed), a 100-row append and a grouped grid's frame of model work take ~0.05–0.11 ms collapsed and ~0.16–0.2 ms expanded (~0.5 ms when each change listed the groups' rows again; ~0.22 against ~3.3 ms at 1M rows), and in a rolling window of 100k rows (batches of 500 through two turnovers) ~0.12–0.4 ms at the median and ~0.4–0.8 ms at the 99th percentile, where computing the groups again took ~2.5–6 ms (~0.2 against ~55 ms at 1M rows), ~1.2 ms for a sorted and filtered view (~3.9 ms before), and ~0.75 ms for minimums and maximums of a rising field, which leave with every batch (~2.8 ms before), keeping 8 bytes per row for each aggregated field; with nearly unique keys, whose groups vanish with every batch, ~13 ms collapsed (~38 ms before) and no faster fully expanded (~36 ms) (interleaved Node A/B runs). With two columns pinned left and one right, 100k x 20 and 1M x 100 grids scrolled to their middle mount the same 588 cells as without pins; a scroll step of ten rows takes ~1.0 and ~1.1 ms including style and layout either way, a step of one column across ~0.6 and ~0.95 ms (without pins ~0.65 and ~0.95–1.0 ms, against ~0.64 and ~0.94 ms before column layout existed), and a resize preview frame ~0.6 ms, writing no cell's text. Row pivots (`herceg/pivot`, shown by `herceg/grid/pivot`): one rows field by one pivot field with count, sum, mean, min, and max, as row groups by the two fields (a long table of observed combinations, a table of rows with their totals, and a dense or sparse index between them, absent combinations told from missing values); generated columns named by stable ids that layout, focus, and sorting follow as values stream in, values heading their aggregates in a second header row (`aria-colspan`), row selection of the source rows; limits on generated columns, combinations, and estimated bytes (1,024, 1M, 128 MiB by default), refused before the groups grow, never by dropping values. ~40 ms to pivot 1M rows by 100 row keys (as long as grouping them), ~0.7–1.3 ms to follow a 1,000-row append, and ~46 KiB gzip for a pivot grid (~21 KiB the pivot alone); `herceg/grid` grows ~400 B for it (one-off Node measurements, see [Grids](#grids)). Remote grids (`herceg/grid/remote`): a portable query of filters, sorts, and groups with aggregates that the source runs where the data lives, blocks of typed columns from one snapshot loaded as they scroll into view (placeholders marked busy, failures shown and announced), focus and selection by key or condition, an in-memory reference source, and conformance fixtures for servers; over ten million synthetic rows they show rows after a jump as soon as AG Grid's infinite row model does and, asking for the block ahead, kept every frame loaded while scrolling at 1,000 rows a second where AG Grid's showed placeholders in 96% of frames at 100 ms latency (see [Remote grids](#remote-grids)); AG Grid's server-side row model, which groups and pivots on the server, is Enterprise, and TanStack Table's manual pagination and Glide's async cells leave fetching and caching to the application. ~31 KiB gzip for a remote grid; `herceg/grid` grows ~400 B for the model code it shares (and for fixes of its own to commands that listeners interrupt). No column groups but a pivot's values, several pivot fields, subtotals, sizing to content, remote pivots, or editing yet; grouping, pivots, and column layout are not compared. | Documented. No data grid; the toolbox's `dataView` shows (and lets users edit) the chart's data as text. | No data grid; TanStack Table and TanStack Virtual are separate libraries, compared in [Grids](#grids). | No data grid. | Documented. `table` trace with cell values, formats, fills, and column order; no sorting or selection documented. |
-| Interaction | Pan and zoom along x, y, or both through presets (`pan`, `zoom`, `brush`) of gesture bindings (see Embedding in scrolling pages); view limits per scale with `edge` events; brushing along x or y, by rectangle, or by lasso (selections, or drag-to-zoom along zoomed axes); crosshair labels on the axes (`tooltip.axisLabels`); keyboard navigation with Shift-arrow range selection along the axis it steps along (rectangles and lassos are pointer-only); sync channels for cursors, views, and selections (see Synced charts); every facet panel, subplot, layout cell, and inset takes the same gestures on its own scale instances (a subplot's `interaction` overrides the chart's there), with panels sharing a scale following; and `viewport` (one transaction per change: the scale instances it moved and every panel drawing them), `edge`, `select` (with what the selection belongs to), `hover`, and `click` events (also React props, Vue events, and Svelte callback props, and Python widget callbacks with the same payloads); hovered and clicked points name their mark and the row of its table (none for bins, groups, and other points summarizing rows). Tooltips write values with axes' `format` or tooltip-only `tooltipFormat`, show more of the row with marks' `tooltip.fields` (portable, in specs and Python; read by events and the keyboard too), and take content of the application's own with `renderTooltip` (text or a node, React, Vue, and Svelte content in the adapters) inside the built-in box. Linked selections: charts bound to a channel of a selection store (`rowSelection`) write the rows their brushes (as conditions on the marks' fields, which rows streamed in later meet), lassos, clicks, and Space on the keyboard cursor select (a histogram bin's rows by its edges, a box plot's group), and highlight the rows the channel holds, whoever selected them, so charts and grids sharing a channel show one selection; points, bars, lines, areas, error bars, candlesticks, rugs, map regions and points, and network nodes and links dim the rest, and summaries show the selected rows against the whole: a histogram bin's selected part of its bar (normalized as the bar), the selected values' own box or boxen shape over the whole one and their density inside the whole violin, a heatmap or 2D histogram cell's selected share as a square in it, and the selected share of each pie slice, funnel stage, treemap or sunburst node, and Sankey link (pies, funnels, and Sankey diagrams select their items' rows too), each in facet panels and subplots, with "12 of 42 rows selected" in tooltips and the keyboard and the selection in the text alternative (see [Linked selections](#linked-selections)). `select`, `click`, and `rowSelection` events, adapter props, and Python widget and Streamlit callbacks carry the rows. One-off measurement (Chrome, JavaScript per frame, 1,000 rows streamed into a 100,000-row window, interleaved): highlighting a live condition that leaves ~15,000 runs of selected rows takes WebGL points from ~0.3 to ~0.8 ms and a line from ~0.2 to ~1.7 ms (lines cost per run: one run adds ~0.15 ms). A range navigator under the plot (see Financial charts). Maps, treemaps and sunbursts, and networks take the same options: `interaction.zoom` pans and zooms maps' and networks' planes (reported as viewports) and drills into trees (`drill` events), `brush: "lasso"` lassos maps and networks, `interaction.drag` moves networks' nodes (`itemMove` events), and `rowSelection` selects regions, points, tree nodes' rows, and network nodes and links, each with keyboard equivalents (lassos aside, which are pointer-only) and a toolbar of named buttons; 3D charts turn as before. Layout controls and item-change notifications load through the optional item runtime; the ordinary line entry adds 50 B gzip over the version before layout interaction, with its public methods and behavior retained. Brushing, linked selections, the navigator, and these controls are not benchmarked against other libraries yet. | Documented. `dataZoom` (inside, slider), brush component (rectangle, polygon, x or y ranges) whose `brushLink` links selected items across series of one chart and whose `outOfBrush` styles the items outside it, and an event API (`click`, `datazoom`, `brushSelected`, ...). | Documented. Optional controls bound to application state through controlled signals: `keyedSelection` (one point by key, by click, Enter, or Space) with `whenSelected` overlay marks, `brushX` (a horizontal range with keyboard handles), `zoomX`, `continuousCursor`, and synchronized focus cursors; linking charts and what a range selects in them is the application's. | Documented. `onClick`/`onHover` callbacks; zoom, pan, and drag-to-zoom through `chartjs-plugin-zoom`; no selection of data. | Documented. Zoom, pan, box and lasso selection with `selected`/`unselected` styles and `selectedpoints` per trace, and events (`plotly_click`, `plotly_hover`, `plotly_selected`, `plotly_relayout`); linking charts is the application's (in Python, Dash callbacks). |
+| Interaction | Measured (Chrome, to the end of the next frame): hover ~0.3–0.5 ms (uPlot ~0.2–0.5 ms); zoom steps ~0.7 ms over a 1M-point line and ~1.3 ms over 10M points, drawn on a 2D canvas whose GPU rasterization no library's timing includes; ~3.7 ms over 1M WebGL scatter points, ~5.2 ms until the GPU has drawn them. Pan and zoom along x, y, or both through presets (`pan`, `zoom`, `brush`) of gesture bindings (see Embedding in scrolling pages); view limits per scale with `edge` events; brushing along x or y, by rectangle, or by lasso (selections, or drag-to-zoom along zoomed axes); crosshair labels on the axes (`tooltip.axisLabels`); keyboard navigation with Shift-arrow range selection along the axis it steps along (rectangles and lassos are pointer-only); sync channels for cursors, views, and selections (see Synced charts); every facet panel, subplot, layout cell, and inset takes the same gestures on its own scale instances (a subplot's `interaction` overrides the chart's there), with panels sharing a scale following; and `viewport` (one transaction per change: the scale instances it moved and every panel drawing them), `edge`, `select` (with what the selection belongs to), `hover`, and `click` events (also React props, Vue events, and Svelte callback props, and Python widget callbacks with the same payloads); hovered and clicked points name their mark and the row of its table (none for bins, groups, and other points summarizing rows). Tooltips write values with axes' `format` or tooltip-only `tooltipFormat`, show more of the row with marks' `tooltip.fields` (portable, in specs and Python; read by events and the keyboard too), and take content of the application's own with `renderTooltip` (text or a node, React, Vue, and Svelte content in the adapters) inside the built-in box. Linked selections: charts bound to a channel of a selection store (`rowSelection`) write the rows their brushes (as conditions on the marks' fields, which rows streamed in later meet), lassos, clicks, and Space on the keyboard cursor select (a histogram bin's rows by its edges, a box plot's group), and highlight the rows the channel holds, whoever selected them, so charts and grids sharing a channel show one selection; points, bars, lines, areas, error bars, candlesticks, rugs, map regions and points, and network nodes and links dim the rest, and summaries show the selected rows against the whole: a histogram bin's selected part of its bar (normalized as the bar), the selected values' own box or boxen shape over the whole one and their density inside the whole violin, a heatmap or 2D histogram cell's selected share as a square in it, and the selected share of each pie slice, funnel stage, treemap or sunburst node, and Sankey link (pies, funnels, and Sankey diagrams select their items' rows too), each in facet panels and subplots, with "12 of 42 rows selected" in tooltips and the keyboard and the selection in the text alternative (see [Linked selections](#linked-selections)). `select`, `click`, and `rowSelection` events, adapter props, and Python widget and Streamlit callbacks carry the rows. One-off measurement (Chrome, JavaScript per frame, 1,000 rows streamed into a 100,000-row window, interleaved): highlighting a live condition that leaves ~15,000 runs of selected rows takes WebGL points from ~0.3 to ~0.8 ms and a line from ~0.2 to ~1.7 ms (lines cost per run: one run adds ~0.15 ms). A range navigator under the plot (see Financial charts). Maps, treemaps and sunbursts, and networks take the same options: `interaction.zoom` pans and zooms maps' and networks' planes (reported as viewports) and drills into trees (`drill` events), `brush: "lasso"` lassos maps and networks, `interaction.drag` moves networks' nodes (`itemMove` events), and `rowSelection` selects regions, points, tree nodes' rows, and network nodes and links, each with keyboard equivalents (lassos aside, which are pointer-only) and a toolbar of named buttons; 3D charts turn as before. Layout controls and item-change notifications load through the optional item runtime; the ordinary line entry adds 50 B gzip over the version before layout interaction, with its public methods and behavior retained. Brushing, linked selections, the navigator, and these controls are not benchmarked against other libraries yet. | Measured: hover ~0.9–11 ms; zoom steps ~6.5 ms over a 1M-point line, ~48 ms over 10M points. Documented. `dataZoom` (inside, slider), brush component (rectangle, polygon, x or y ranges) whose `brushLink` links selected items across series of one chart and whose `outOfBrush` styles the items outside it, and an event API (`click`, `datazoom`, `brushSelected`, ...). | Measured: hover ~3.5–90 ms; zoom steps ~58 ms over a 1M-point line; its tab crashes at 10M points. Documented. Optional controls bound to application state through controlled signals: `keyedSelection` (one point by key, by click, Enter, or Space) with `whenSelected` overlay marks, `brushX` (a horizontal range with keyboard handles), `zoomX`, `continuousCursor`, and synchronized focus cursors; linking charts and what a range selects in them is the application's. | Measured: hover ~0.4–1.8 ms; zoom steps ~1.7 ms over a 1M-point line, ~7 ms over 10M points. Documented. `onClick`/`onHover` callbacks; zoom, pan, and drag-to-zoom through `chartjs-plugin-zoom`; no selection of data. | Measured: hover ~10–15 ms, ~450 ms over 1M points; zoom steps ~0.9–1.0 ms to the frame over 1M and 10M line points, but its WebGL drawing finishes only ~3.6 and ~12.8 ms after each step. Documented. Zoom, pan, box and lasso selection with `selected`/`unselected` styles and `selectedpoints` per trace, and events (`plotly_click`, `plotly_hover`, `plotly_selected`, `plotly_relayout`); linking charts is the application's (in Python, Dash callbacks). |
 | Embedding in scrolling pages | The vertical wheel scrolls the page over a chart by default; Ctrl or ⌘ with the wheel (as trackpad pinches send it) and touch pinches zoom, the horizontal wheel pans. `pan` pans without zooming. Bindings change any of it (the plain wheel only while the chart has the focus, a touch drag that scrubs the cursor, `pageScroll` to hand a gesture back to the page), the same in axis charts, maps, networks, trees, and 3D charts, and `touch-action` follows them. `limits` keeps views inside an extent, and `edge` events with hysteresis let a page load history as the reader pans back while the view holds (tested while dragging). Input before the deferred controller loads is kept: a first hover as the chart mounts shows its tooltip ~5 ms later (~2 ms without the deferral, in a run of 2026-10-15), ~105 ms with 100 ms of network latency (see Bundle size). | Documented. `dataZoom` of type inside zooms on the wheel by default (`zoomOnMouseWheel`: `true`, `false`, `"shift"`, `"ctrl"`, or `"alt"`), with `moveOnMouseWheel`, `moveOnMouseMove`, and `preventDefaultMouseMove`; spans limited by `minSpan`/`maxSpan` and `minValueSpan`/`maxValueSpan`; `datazoom` events, no edge event. | Documented. `zoomX` takes the wheel only once the plot has the focus by default; `wheelActivation: "modifier"` takes Ctrl or ⌘ with the wheel at once, `"always"` every wheel; an `extent` clamps the domain, and changes are proposals the application applies. | Documented. Through `chartjs-plugin-zoom`: wheel zoom optionally behind a modifier key (`wheel.modifierKey`), pan behind one, and `limits` per scale (`min`, `max`, `minRange`); `onZoom`/`onPan` callbacks, no edge event. | Documented. `scrollZoom` is off for 2D axes by default (on for 3D, geo, and maps); `fixedrange` freezes an axis, `minallowed`/`maxallowed` bound ranges; `plotly_relayout` events, no edge event. |
 | Synced charts | `sync: "group"` shares the cursor, the x range, and the selection; `{ cursor, viewport, selection }` sets each channel's group and scale (a cursor alone, or another chart's x followed along this one's y). Values travel as data (categories by name), received values are never shared again, and `showCursor`/`hideCursor` show a cursor from application code; in charts of several panels a channel shares the scale every panel shares, or a named panel's (`panel`). In Python, notebook outputs are separate iframes, so `sync` reaches only charts of one HTML page. | Documented. `echarts.connect(group)` links charts' tooltips and axis pointers, data zoom, and legend selections, matched by series and data index. | Documented. A shared `createChartCursor` controller syncs focus cursors by value (`match: "x"` or `"y"`); views and selections are linked through application state. | Documented. None built in; plugins or application code. | Documented. None built in: applications forward `plotly_hover` and `plotly_relayout` events (`Fx.hover`, `relayout`); Dash callbacks in Python. |
 | Animation | Opt-in (`animation`): the axes move to a view asked for (`setViewport`, zooming to a brush, double-click reset) over 250 ms by default, eased without overshoot, in log space on log axes; tooltips follow the moving axes. With `values: true`, marks move to changed values (in-place updates and resets) and axes whose automatic domains change move with them: each frame interpolates the domains and plans ticks and grid lines for the domain between, and draws marks through those scales, so a value that stays moves only with its axis. Unstacked bars (by category or position, through their base when values change sign), pie slices (sharing boundaries, opening and closing as categories come and go), points (by row or by an explicit `animationKey` across reordered resets, using finite numbers or category labels; missing or duplicate keys show that series at once; with encoded size, color, and opacity; growing from and shrinking to nothing as rows start and stop being drawn; keyed replacements animate in notebook widgets and JavaScript apps, while Streamlit remounts when data changes and shows points at once), lines and areas whose x positions stay and which level of detail leaves whole (stack layers and band edges together, monotone curves curved again each frame through the values between), and horizontal and vertical rules. A change shows at once when the plot or categories change, when a mark that cannot move (stacked or labeled bars, lines and areas labels follow, text, heatmaps, custom marks, a line whose x changed, unkeyed points across a reset) shares a moving axis, and for appends and drops, frequent changes, more than 2,000 bars, slices, and rules, 10,000 points including exits across all series, or 10,000 line points, clouds, and inspected charts (pointer and keyboard read the new values first). Wheel zoom, panning, resizes, and export show at once; charts with several panels, linked charts, and pages preferring reduced motion do not animate, nor do charts whose frames would take over 10 ms of JavaScript, alone or together (a heuristic from earlier frames). No entrance animations or general path morphing. Frame costs measured outside the benchmark suite (Chrome): about 0.2 to 0.7 ms of JavaScript a frame for up to 2,000 bars, 0.2 to 0.6 ms for 1,000 points and 0.5 to 0.6 ms for 10,000, 0.2 ms for a 2,000-point line. | Documented. On by default: entrance animations, transitions of updated values (`animationDurationUpdate`, 500 ms, `animationEasingUpdate`, `cubicInOut`), and `universalTransition` morphing between series; series of more than `animationThreshold` (2,000) items do not animate. Checked in Chrome (one-off, ECharts 6.1, SVG renderer): when new values grow the y axis, the new tick set shows at once and labels the two axes share slide to their new places. | Not verified here. | Documented. On by default (1,000 ms, `easeOutQuart`): data updates animate per property (`animations`), with modes for show, hide, active, and resize (`transitions`); `animation: false` turns it off. Checked in Chrome (one-off, Chart.js 4.5.1): when new values grow the y axis, the axis takes its new ticks at once and bars move from their old pixels to their new ones over the second, so a bar part way does not read on the axis shown. | Documented. Off by default: `Plotly.animate` with frames and a `transition` (duration, easing) for data and layout, and `layout.transition` for `Plotly.react` updates. |
@@ -168,11 +168,11 @@ itself; no other library's network layout is measured here.
 ## Environment
 
 <!-- results:environment -->
-- Date: 2026-10-26, commit d42d5d65
+- Date: 2026-10-27, commit 31ab2257
 - Machine: Apple M6, 12 cores, 32 GB, Darwin 27.0.0
-- Browser: Chrome 155.0.8059.86 through Playwright 1.63.0 (installed Google Chrome), GPU ANGLE (Apple, ANGLE Metal Renderer: Apple M6, Unspecified Version), headed, idle frames every 16.8 ms
+- Browser: Chrome 155.0.8059.86 through Playwright 1.63.0 (installed Google Chrome), GPU ANGLE (Apple, ANGLE Metal Renderer: Apple M6, Unspecified Version), headed, idle frames every 17.3 ms
 - Viewport 1280x1400, device pixel ratio 2
-- Libraries: herceg 0.0.0 (d42d5d65), echarts 6.1.0, chartjs 4.5.1, plotly 4.1.2, tanstack 1.0.0, uplot 1.6.32
+- Libraries: herceg 0.0.0 (31ab2257), echarts 6.1.0, chartjs 4.5.1, plotly 4.1.2, tanstack 1.0.0, uplot 1.6.32
 - Renderers (normal / large config): herceg: auto (svg below 4,000 drawn points, canvas above; 3D charts on WebGL from 20,000 points or 10,000 surface cells) / auto; echarts: canvas / canvas (sampling: minmax, large: true); chartjs: canvas / canvas (parsing: false, min-max decimation); plotly: svg / webgl (scattergl); tanstack: svg / canvas (mountCanvasChart); uplot: canvas / canvas
 <!-- /results:environment -->
 
@@ -292,23 +292,23 @@ much lower than the time to complete rendering.
 <!-- results:init -->
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| line-small-init (4 series x 200 points) | 0.72 ± 0.13 | 1.51 ± 0.15 | 1.36 ± 0.24 | 3.13 ± 0.32 | 1.07 ± 0.20 | 0.54 ± 0.14 |
-| line-medium-init (10 series x 5,000 points) | 2.44 ± 0.19 | 12.1 ± 1.14 | 5.83 ± 0.92 | 24.2 ± 3.07 | 39.7 ± 3.77 | 2.50 ± 0.20 |
-| line-large-init (1 series x 1,000,000 points) | 4.93 ± 0.23 | 172 ± 21.6 | 16.7 ± 3.68 | 308 ± 10.5 | 719 ± 43.9 | 6.36 ± 0.50 |
-| area-medium-init (3 filled series x 5,000 points) | 1.06 ± 0.12 | 5.88 ± 0.48 | 2.96 ± 0.20 | 10.5 ± 0.65 | 17.1 ± 0.71 | 1.18 ± 0.21 |
-| bar-small-init (12 categories x 3 series) | 0.62 ± 0.16 | 1.32 ± 0.31 | 0.77 ± 0.12 | 2.79 ± 0.41 | 0.62 ± 0.14 | n/a |
-| bar-medium-init (100 categories x 4 series) | 1.38 ± 0.15 | 2.85 ± 0.38 | 2.22 ± 0.28 | 7.87 ± 0.39 | 2.82 ± 0.15 | n/a |
-| scatter-medium-init (10,000 points) | 2.54 ± 0.31 | 68.3 ± 2.43 (first frame 5.07) | 4.52 ± 0.62 | 75.9 ± 4.61 | 26.7 ± 2.75 | n/a |
-| scatter-large-init (200,000 points) | 4.31 ± 0.24 | 59.5 ± 10.1 (first frame 42.6) | 71.9 ± 4.18 | 49.3 ± 3.39 | 235 ± 7.39 | n/a |
-| heatmap-medium-init (100 x 100 cells) | 1.50 ± 0.19 | 25.7 ± 2.31 (first frame 5.17) | n/a | 3.80 ± 0.41 | 34.2 ± 1.12 | n/a |
-| heatmap-large-init (500 x 500 cells) | 13.1 ± 0.82 | 4975 ± 18.1 (first frame 50.1) | n/a | 29.3 ± 3.16 | 461 ± 48.9 | n/a |
-| candlestick-small-init (200 candles, each drawn by every library) | 0.89 ± 0.16 | 2.39 ± 0.29 | n/a | 4.29 ± 0.45 | n/a | n/a |
-| candlestick-large-init (100,000 candles; each library's large-data strategy) | 7.49 ± 0.47 | 52.3 ± 3.39 (first frame 38.6) | n/a | 638 ± 15.4 | n/a | n/a |
-| bubble-medium-init (10,000 points sized and colored by two fields) | 3.35 ± 0.32 | 71.7 ± 1.64 (first frame 6.04) | 65.0 ± 2.72 | 101 ± 2.50 | n/a | n/a |
-| histogram-medium-init (10,000 values in bins 5 wide from 25, x from 25 to 175) | 0.79 ± 0.17 | n/a | n/a | 3.74 ± 0.30 | n/a | n/a |
-| histogram-large-init (1,000,000 values in bins 5 wide from 25, x from 25 to 175) | 10.2 ± 1.40 | n/a | n/a | 77.0 ± 11.0 | n/a | n/a |
-| line-massive-init (1 series x 10,000,000 points) | 38.3 ± 1.80 | 2096 ± 96.7 | 103 ± 5.28 | 2669 ± 11.2 | error | 46.6 ± 1.71 |
-| scatter-massive-init (1,000,000 points) | 16.6 ± 1.89 | 309 ± 13.9 (first frame 176) | 429 ± 4.25 | 177 ± 6.49 | 1198 ± 26.0 | n/a |
+| line-small-init (4 series x 200 points) | 0.69 ± 0.15 | 1.36 ± 0.24 | 1.44 ± 0.13 | 3.27 ± 0.31 | 1.15 ± 0.07 | 0.62 ± 0.08 |
+| line-medium-init (10 series x 5,000 points) | 2.18 ± 0.20 | 11.7 ± 0.80 | 5.77 ± 0.54 | 21.9 ± 2.48 | 40.3 ± 2.91 | 2.76 ± 0.19 |
+| line-large-init (1 series x 1,000,000 points) | 5.47 ± 0.13 | 149 ± 7.68 | 13.3 ± 0.56 | 309 ± 10.3 | 718 ± 10.9 | 6.40 ± 0.50 |
+| area-medium-init (3 filled series x 5,000 points) | 1.47 ± 0.17 | 5.62 ± 0.55 | 3.34 ± 0.56 | 10.1 ± 0.44 | 16.7 ± 1.04 | 0.98 ± 0.10 |
+| bar-small-init (12 categories x 3 series) | 0.70 ± 0.15 | 1.37 ± 0.25 | 0.86 ± 0.14 | 2.66 ± 0.37 | 0.67 ± 0.06 | n/a |
+| bar-medium-init (100 categories x 4 series) | 1.36 ± 0.23 | 2.43 ± 0.21 | 2.15 ± 0.35 | 7.05 ± 0.47 | 2.82 ± 0.29 | n/a |
+| scatter-medium-init (10,000 points) | 2.34 ± 0.47 | 63.9 ± 2.27 (first frame 5.19) | 4.21 ± 0.40 | 76.9 ± 3.63 | 25.9 ± 2.62 | n/a |
+| scatter-large-init (200,000 points) | 4.63 ± 0.59 | 60.5 ± 3.68 (first frame 47.4) | 71.1 ± 4.39 | 48.1 ± 4.93 | 238 ± 5.98 | n/a |
+| heatmap-medium-init (100 x 100 cells) | 1.22 ± 0.18 | 27.4 ± 2.43 (first frame 5.17) | n/a | 3.59 ± 0.45 | 35.0 ± 1.89 | n/a |
+| heatmap-large-init (500 x 500 cells) | 13.4 ± 1.01 | 6056 ± 131 (first frame 57.2) | n/a | 31.5 ± 0.65 | 457 ± 36.4 | n/a |
+| candlestick-small-init (200 candles, each drawn by every library) | 0.88 ± 0.10 | 2.98 ± 0.44 | n/a | 4.40 ± 0.30 | n/a | n/a |
+| candlestick-large-init (100,000 candles; each library's large-data strategy) | 6.85 ± 0.89 | 54.0 ± 6.21 | n/a | 625 ± 13.1 | n/a | n/a |
+| bubble-medium-init (10,000 points sized and colored by two fields) | 3.01 ± 0.12 | 71.5 ± 1.69 (first frame 5.45) | 66.4 ± 0.93 | 97.8 ± 3.21 | n/a | n/a |
+| histogram-medium-init (10,000 values in bins 5 wide from 25, x from 25 to 175) | 0.86 ± 0.25 | n/a | n/a | 4.16 ± 0.31 | n/a | n/a |
+| histogram-large-init (1,000,000 values in bins 5 wide from 25, x from 25 to 175) | 10.5 ± 0.48 | n/a | n/a | 71.4 ± 2.26 | n/a | n/a |
+| line-massive-init (1 series x 10,000,000 points) | 32.0 ± 0.52 | 2010 ± 102 | 251 ± 21.5 | 2693 ± 42.5 | error | 45.8 ± 0.61 |
+| scatter-massive-init (1,000,000 points) | 15.2 ± 0.65 | 311 ± 14.9 (first frame 179) | 435 ± 6.97 | 177 ± 6.69 | 1239 ± 6.87 | n/a |
 <!-- /results:init -->
 
 ## Full data replacement
@@ -316,11 +316,11 @@ much lower than the time to complete rendering.
 <!-- results:update -->
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| line-medium-update (replace 10 x 5,000 points) | 1.16 ± 0.10 | 11.8 ± 1.36 | 4.12 ± 0.36 | 19.6 ± 0.81 | 37.7 ± 2.28 | 1.24 ± 0.19 |
-| line-large-update (replace 1,000,000 points) | 3.53 ± 0.21 | 189 ± 14.1 | 14.9 ± 1.92 | 277 ± 3.24 | 695 ± 67.5 | 5.74 ± 0.07 |
-| bar-medium-update (replace 100 x 4 bars) | 0.70 ± 0.08 | 1.83 ± 0.29 | 1.51 ± 0.12 | 6.04 ± 0.47 | 2.63 ± 0.33 | n/a |
-| scatter-medium-update (replace 10,000 points) | 1.81 ± 0.31 | 80.6 ± 2.08 (first frame 19.4) | 4.44 ± 0.37 | 69.4 ± 5.07 | 41.9 ± 2.59 | n/a |
-| heatmap-medium-update (replace 100 x 100 cells) | 0.65 ± 0.09 | 41.0 ± 0.99 (first frame 19.4) | n/a | 3.66 ± 0.50 | 45.1 ± 2.25 | n/a |
+| line-medium-update (replace 10 x 5,000 points) | 1.22 ± 0.19 | 12.5 ± 1.33 | 4.24 ± 0.30 | 19.2 ± 0.23 | 38.3 ± 1.03 | 1.36 ± 0.21 |
+| line-large-update (replace 1,000,000 points) | 3.97 ± 0.21 | 185 ± 11.1 | 13.6 ± 1.04 | 277 ± 6.05 | 718 ± 67.1 | 5.69 ± 0.43 |
+| bar-medium-update (replace 100 x 4 bars) | 0.71 ± 0.07 | 2.00 ± 0.20 | 1.45 ± 0.13 | 6.51 ± 0.36 | 3.01 ± 0.43 | n/a |
+| scatter-medium-update (replace 10,000 points) | 1.68 ± 0.28 | 78.5 ± 2.07 (first frame 19.4) | 3.92 ± 0.34 | 67.1 ± 2.17 | 40.1 ± 1.63 | n/a |
+| heatmap-medium-update (replace 100 x 100 cells) | 0.75 ± 0.07 | 40.7 ± 1.73 (first frame 18.8) | n/a | 3.38 ± 0.33 | 44.4 ± 1.90 | n/a |
 <!-- /results:update -->
 
 ## Streaming
@@ -334,9 +334,9 @@ live-data path: `setOption` (ECharts), array mutation plus `update('none')`
 <!-- results:stream -->
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 1.20 ± 0.14 | 10.4 ± 0.57 | 3.46 ± 0.41 | 19.6 ± 0.81 | 30.7 ± 1.41 | 0.88 ± 0.08 |
-| stream-large (1 series, 100,000-point window, +100 points per tick) | 0.68 ± 0.11 | 18.1 ± 1.48 | 3.06 ± 0.34 | 29.4 ± 0.62 | 55.9 ± 2.78 | 0.99 ± 0.07 |
-| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 1.45 ± 0.12 | 156 ± 1.57 | 19.1 ± 0.50 | 270 ± 2.41 | 636 ± 28.3 | 5.79 ± 0.17 |
+| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 1.12 ± 0.11 | 10.3 ± 0.40 | 3.36 ± 0.33 | 19.5 ± 0.78 | 31.3 ± 2.03 | 0.98 ± 0.12 |
+| stream-large (1 series, 100,000-point window, +100 points per tick) | 0.64 ± 0.09 | 18.1 ± 1.44 | 3.27 ± 0.17 | 29.7 ± 0.85; WebGL done 33.7 ± 0.83 | 57.0 ± 3.35 | 0.95 ± 0.08 |
+| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 1.43 ± 0.11 | 157 ± 1.82 | 19.7 ± 0.72 | 269 ± 2.25; WebGL done 284 ± 2.25 | 630 ± 23.6 | 5.93 ± 0.19 |
 <!-- /results:stream -->
 
 ### Paced ingestion
@@ -350,11 +350,11 @@ ingestion rate drops below the target.
 <!-- results:ingest -->
 | Scenario (frame interval p50 / p95 / p99, dropped frames, achieved ingest rate) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 16.7 / 16.7 / 17.4 ms, 0 dropped, 10 Hz | 16.7 / 17.0 / 17.6 ms, 0 dropped, 10 Hz | 16.7 / 16.8 / 17.5 ms, 0 dropped, 10 Hz | 16.7 / 16.7 / 17.2 ms, 1 dropped, 10 Hz | 16.7 / 17.0 / 17.4 ms, 2 dropped, 10 Hz | 16.7 / 16.7 / 17.4 ms, 0 dropped, 10 Hz |
-| ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 16.7 / 17.0 / 17.6 ms, 0 dropped, 62 Hz | 16.7 / 16.7 / 17.4 ms, 0 dropped, 62 Hz | 16.7 / 17.1 / 17.5 ms, 0 dropped, 62 Hz | 16.7 / 33.3 / 33.3 ms, 19 dropped, 56 Hz | 33.3 / 33.5 / 34.2 ms, 131 dropped, 34 Hz | 16.7 / 17.2 / 17.6 ms, 0 dropped, 62 Hz |
-| ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 16.7 / 17.2 / 17.5 ms, 0 dropped, 100 Hz | 16.7 / 17.2 / 17.4 ms, 0 dropped, 100 Hz | 16.7 / 17.3 / 17.6 ms, 0 dropped, 100 Hz | 16.7 / 33.3 / 33.3 ms, 21 dropped, 56 Hz | 33.3 / 33.7 / 43.2 ms, 130.5 dropped, 34 Hz | 16.7 / 17.3 / 17.6 ms, 0 dropped, 100 Hz |
-| ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 16.7 / 17.3 / 17.6 ms, 0 dropped, 100 Hz | 16.7 / 16.7 / 17.4 ms, 0 dropped, 60 Hz | 16.7 / 17.1 / 17.6 ms, 0 dropped, 100 Hz | 33.3 / 33.3 / 34.0 ms, 125.5 dropped, 35 Hz | 50.0 / 66.7 / 83.3 ms, 210 dropped, 18 Hz | 16.7 / 17.2 / 17.5 ms, 0 dropped, 100 Hz |
-| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 16.7 / 17.0 / 17.6 ms, 0.5 dropped, 10 Hz | 16.7 / 83.3 / 100.0 ms, 166 dropped, 10 Hz | 16.7 / 16.7 / 17.5 ms, 2 dropped, 10 Hz | 167 / 167 / 184 ms, 264.5 dropped, 6 Hz | 283 / 333 / 342 ms, 291 dropped, 3 Hz | 16.7 / 17.1 / 17.5 ms, 0 dropped, 10 Hz |
+| ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 16.7 / 16.9 / 17.5 ms, 0 dropped, 10 Hz | 16.7 / 17.1 / 17.5 ms, 0 dropped, 10 Hz | 16.7 / 17.0 / 17.5 ms, 0 dropped, 10 Hz | 16.7 / 16.9 / 17.6 ms, 1 dropped, 10 Hz | 16.7 / 17.0 / 17.6 ms, 2 dropped, 10 Hz | 16.7 / 16.7 / 17.4 ms, 0 dropped, 10 Hz |
+| ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 16.7 / 17.2 / 17.6 ms, 0 dropped, 62 Hz | 16.7 / 16.9 / 17.5 ms, 0 dropped, 62 Hz | 16.7 / 17.2 / 17.6 ms, 0 dropped, 62 Hz | 16.7 / 33.3 / 33.3 ms, 22 dropped, 55 Hz | 33.3 / 33.5 / 34.1 ms, 132 dropped, 33 Hz | 16.7 / 17.2 / 17.6 ms, 0 dropped, 62 Hz |
+| ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 16.7 / 17.2 / 17.6 ms, 0 dropped, 100 Hz | 16.7 / 17.1 / 17.5 ms, 0 dropped, 100 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 100 Hz | 16.7 / 33.3 / 33.3 ms, 20.5 dropped, 56 Hz | 33.3 / 33.4 / 34.3 ms, 131 dropped, 34 Hz | 16.7 / 17.3 / 17.6 ms, 0 dropped, 100 Hz |
+| ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 16.7 / 17.1 / 17.5 ms, 0 dropped, 100 Hz | 16.7 / 16.9 / 17.4 ms, 0 dropped, 60 Hz | 16.7 / 17.1 / 17.5 ms, 0 dropped, 100 Hz | 33.3 / 33.3 / 34.0 ms, 125 dropped, 35 Hz | 50.0 / 66.7 / 83.3 ms, 209.5 dropped, 18 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 100 Hz |
+| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 16.7 / 17.2 / 17.6 ms, 1 dropped, 10 Hz | 16.7 / 83.3 / 100 ms, 168 dropped, 10 Hz | 16.7 / 16.7 / 17.5 ms, 2 dropped, 10 Hz | 167 / 183 / 188 ms, 266.5 dropped, 6 Hz | 283 / 333 / 342 ms, 289 dropped, 3 Hz | 16.7 / 17.1 / 17.6 ms, 0 dropped, 10 Hz |
 <!-- /results:ingest -->
 
 ## Interaction
@@ -367,22 +367,32 @@ range through each library's documented zoom path (see
 the others rescale y to the visible points. "error" means the library's tab
 crashed (out of memory) or the scenario timed out.
 
+Frame timings end with the frame's main-thread work; GPU drawing,
+rasterization, and compositing come after, for every library. Where a page
+draws with WebGL, a second run in a fresh page times the same steps until
+the GPU has finished its WebGL drawing too ("WebGL done"). Plotly's line
+zooms show the difference: ~0.9 ms to the frame at 10M points, ~12.8 ms
+until its GPU has drawn the step, so in a sequence of steps its display
+falls behind with no sign of it in the frame timings. Herceg and the other
+libraries draw lines on 2D canvases, whose GPU rasterization no timing here
+includes (see `benchmarks/README.md`, "WebGL drawing finished").
+
 <!-- results:interaction -->
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| hover-line-medium (pointer moves over 10 x 5,000 points) | 0.56 ± 0.21 | 10.7 ± 1.19 | 0.89 ± 0.44 | 10.1 ± 1.44 | 14.8 ± 5.00 | 0.46 ± 0.25 |
-| hover-line-large (pointer moves over 1,000,000 points) | 0.36 ± 0.07 | 0.80 ± 0.33 | 0.44 ± 0.11 | 445 ± 184 | 90.8 ± 1.59 | 0.23 ± 0.04 |
-| hover-scatter-medium (pointer moves over 10,000 points) | 0.41 ± 0.22 | 7.13 ± 1.08 | 1.85 ± 0.67 | 15.5 ± 1.08 | 3.89 ± 1.97 | n/a |
+| hover-line-medium (pointer moves over 10 x 5,000 points) | 0.54 ± 0.19 | 10.5 ± 1.71 | 0.87 ± 0.45 | 9.70 ± 1.64 | 13.2 ± 7.20 | 0.48 ± 0.28 |
+| hover-line-large (pointer moves over 1,000,000 points) | 0.32 ± 0.07 | 0.86 ± 0.33 | 0.43 ± 0.11 | 446 ± 188; WebGL done 447 ± 186 | 90.4 ± 1.57 | 0.23 ± 0.04 |
+| hover-scatter-medium (pointer moves over 10,000 points) | 0.41 ± 0.29 | 6.55 ± 1.11 | 1.77 ± 0.65 | 15.1 ± 1.91 | 3.49 ± 1.56 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 0.77 ± 0.27 | 6.15 ± 0.49 | 1.89 ± 0.61 | 0.99 ± 0.25 | 56.4 ± 49.2 | 1.02 ± 0.68 |
-| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 1.49 ± 0.52 | 47.9 ± 2.02 | 6.81 ± 4.88 | 0.86 ± 0.08 | error | 4.81 ± 3.96 |
-| zoom-scatter-massive (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 3.74 ± 0.22 | 36.6 ± 16.7 | 193 ± 26.3 | 7.33 ± 0.33 | 169 ± 145 | n/a |
+| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 0.71 ± 0.23 | 6.47 ± 0.45 | 1.65 ± 0.32 | 0.99 ± 0.21; WebGL done 3.60 ± 0.70 | 57.6 ± 50.6 | 0.90 ± 0.62 |
+| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 1.32 ± 0.55 | 48.1 ± 2.29 | 7.04 ± 5.07 | 0.87 ± 0.09; WebGL done 12.8 ± 2.04 | error | 5.00 ± 4.13 |
+| zoom-scatter-massive (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 3.73 ± 0.22; WebGL done 5.20 ± 0.97 | 35.4 ± 15.2 | 200 ± 31.8 | 7.51 ± 0.25; WebGL done 10.1 ± 1.54 | 176 ± 149 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| resize-line-medium (resize 800x400 <-> 600x300) | 1.26 ± 0.14 | 3.53 ± 0.35 | 4.18 ± 0.24 | 11.8 ± 1.20 | 35.2 ± 1.59 | 1.43 ± 0.32 |
+| resize-line-medium (resize 800x400 <-> 600x300) | 1.24 ± 0.21 | 3.56 ± 0.34 | 4.11 ± 0.44 | 11.1 ± 1.40 | 35.0 ± 1.92 | 1.65 ± 0.37 |
 <!-- /results:interaction -->
 
 ## Linked selections
@@ -444,28 +454,65 @@ Ten 600x250 line charts, each with 15 series of 3,000 points (450,000 points).
 <!-- results:dashboard -->
 | Mount all charts (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dashboard (10 charts x 15 series x 3,000 points) | 19.1 ± 0.61 | 84.6 ± 2.89 | 44.9 ± 6.20 | 178 ± 6.03 | 313 ± 8.13 | 16.6 ± 1.03 |
+| dashboard (10 charts x 15 series x 3,000 points) | 17.7 ± 0.10 | 85.4 ± 3.62 | 42.8 ± 0.71 | 179 ± 4.27 | 336 ± 11.3 | 17.0 ± 0.52 |
 
 | Refresh all charts (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dashboard (10 charts x 15 series x 3,000 points) | 11.1 ± 0.51 | 108 ± 1.18 | 37.0 ± 1.60 | 180 ± 5.19 | 334 ± 30.1 | 10.7 ± 1.60 |
+| dashboard (10 charts x 15 series x 3,000 points) | 11.3 ± 0.94 | 109 ± 8.65 | 33.9 ± 3.71 | 175 ± 7.37 | 316 ± 13.1 | 9.96 ± 0.19 |
 <!-- /results:dashboard -->
 
 ## Memory
 
 Retained heap is the increase in V8 heap, Blink heap, and ArrayBuffer backing
-stores after mounting, measured after forced garbage collection. Canvas bytes
-are estimated from canvas dimensions (width x height x 4) and are not part of
-the heap number. Source data is created before the baseline and is not
-included.
+stores after mounting, measured after forced garbage collection, as the
+median of mounts repeated in one page. Canvas bytes are estimated from canvas
+dimensions (width x height x 4) and are not part of the heap number. Source
+data is created before the baseline and is not included.
+
+The second table counts what the heap leaves out, from one first mount per
+fresh page (three pages): the retained heap of that first mount; the growth
+of the renderer process's physical footprint (macOS `phys_footprint`, native
+allocations, `Path2D` objects, software canvases, and code included); the
+GPU memory Chrome attributes to the page (WebGL buffers and drawing buffers,
+GPU canvas resources, compositor tiles); and the growth of the GPU process's
+footprint, which depends on what ran before and moves by several megabytes
+either way, so it is shown but not compared. `benchmarks/README.md`
+("Memory") says what each includes and excludes.
 
 <!-- results:memory -->
 | Scenario | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | memory-line-large (1 chart, 1,000,000 points; source 16 MB) | 0.2 MB heap, 5.1 MB canvas, 35 nodes | 243 MB heap, 5.1 MB canvas, 4 nodes | 49 MB heap, 5.1 MB canvas, 3 nodes | 111 MB heap, 15 MB canvas, 135 nodes | 600 MB heap, 26 MB canvas, 8 nodes | 0.2 MB heap, 5.1 MB canvas, 24 nodes |
 | memory-dashboard (10 charts x 15 series x 3,000 points; source 3.9 MB) | 5.9 MB heap, 24 MB canvas, 762 nodes | 115 MB heap, 24 MB canvas, 40 nodes | 57 MB heap, 24 MB canvas, 30 nodes | 48 MB heap, 0.0 MB canvas, 2257 nodes | 273 MB heap, 0.0 MB canvas, 814 nodes | 2.8 MB heap, 24 MB canvas, 1080 nodes |
-| memory-small-100 (100 charts x 2 series x 100 points; source 0.3 MB) | 9.2 MB heap, 0.0 MB canvas, 3679 nodes | 24 MB heap, 72 MB canvas, 400 nodes | 31 MB heap, 72 MB canvas, 300 nodes | 28 MB heap, 0.0 MB canvas, 13061 nodes | 21 MB heap, 0.0 MB canvas, 2274 nodes | 11 MB heap, 72 MB canvas, 3000 nodes |
+| memory-small-100 (100 charts x 2 series x 100 points; source 0.3 MB) | 9.1 MB heap, 0.0 MB canvas, 3679 nodes | 24 MB heap, 72 MB canvas, 400 nodes | 31 MB heap, 72 MB canvas, 300 nodes | 28 MB heap, 0.0 MB canvas, 13061 nodes | 21 MB heap, 0.0 MB canvas, 2274 nodes | 11 MB heap, 72 MB canvas, 3000 nodes |
+
+| First mount in a fresh page (heap; renderer footprint, median ± MAD; GPU memory attributed to the page; GPU process footprint, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| memory-line-large (1 chart, 1,000,000 points; source 16 MB) | 0.9 MB heap, 8.4 ± 0.1 MB renderer, 7.5 MB GPU (canvas 5.1, tiles 2.3); GPU process -1.5 ± 2.2 MB | 244 MB heap, 268 ± 3.2 MB renderer, 5.1 MB GPU (canvas 5.1); GPU process -24.2 ± 6.3 MB | 49 MB heap, 64 ± 0.5 MB renderer, 5.1 MB GPU (canvas 5.1); GPU process -6.9 ± 1.9 MB | 108 MB heap, 130 ± 0.7 MB renderer, 126 MB GPU (WebGL 122, tiles 3.6); GPU process 164 ± 1.8 MB | 600 MB heap, 670 ± 2.7 MB renderer, 26 MB GPU (canvas 26); GPU process 25 ± 5.8 MB | 0.4 MB heap, 7.5 ± 0.1 MB renderer, 6.9 MB GPU (canvas 5.1, tiles 1.8); GPU process -9.3 ± 1.5 MB |
+| memory-dashboard (10 charts x 15 series x 3,000 points; source 3.9 MB) | 7.6 MB heap, 20 ± 0.1 MB renderer, 31 MB GPU (canvas 24, tiles 6.6); GPU process 19 ± 9.2 MB | 117 MB heap, 138 ± 0.5 MB renderer, 24 MB GPU (canvas 24); GPU process 15 ± 1.0 MB | 58 MB heap, 85 ± 0.4 MB renderer, 24 MB GPU (canvas 24); GPU process 8.5 ± 3.9 MB | 50 MB heap, 73 ± 0.5 MB renderer, 14 MB GPU (tiles 14); GPU process 9.2 ± 0.3 MB | 274 MB heap, 324 ± 1.2 MB renderer, 14 MB GPU (tiles 14); GPU process 12 ± 16 MB | 3.4 MB heap, 28 ± 0.1 MB renderer, 40 MB GPU (canvas 24, tiles 16); GPU process 29 ± 3.9 MB |
+| memory-small-100 (100 charts x 2 series x 100 points; source 0.3 MB) | 11 MB heap, 33 ± 1.6 MB renderer, 22 MB GPU (tiles 22); GPU process 13 ± 1.9 MB | 27 MB heap, 52 ± 0.3 MB renderer, 72 MB GPU (canvas 72); GPU process 57 ± 8.3 MB | 32 MB heap, 61 ± 0.4 MB renderer, 72 MB GPU (canvas 72); GPU process 65 ± 4.4 MB | 31 MB heap, 57 ± 0.3 MB renderer, 22 MB GPU (tiles 22); GPU process 30 ± 2.1 MB | 22 MB heap, 43 ± 0.3 MB renderer, 23 MB GPU (tiles 23); GPU process 1.6 ± 3.0 MB | 11 MB heap, 36 ± 0.1 MB renderer, 92 MB GPU (canvas 72, tiles 20); GPU process 90 ± 2.3 MB |
 <!-- /results:memory -->
+
+Counted in full, Herceg's renderer grows least in every scenario but the
+million-point line, where uPlot's grows ~0.9 MB less; its GPU memory is not
+always the least:
+
+- One million points: the renderer grows ~8.4 MB for Herceg and ~7.5 MB for
+  uPlot, against ~64 MB for Chart.js, ~130 MB for
+  Plotly (plus ~126 MB of GPU memory, almost all WebGL buffers), ~270 MB for
+  ECharts, and ~670 MB for TanStack Charts. Herceg's first mount keeps
+  ~0.9 MB of heap, more than the 0.24 MB of later mounts.
+- The ten-chart dashboard: uPlot's retained heap is half Herceg's (~2.8
+  against ~5.9 MB), but its renderer grows more (~28 against ~20 MB), as
+  its `Path2D` paths are native memory, and Chrome attributes ~40 MB of GPU
+  memory to its page against ~31 MB for Herceg's. Herceg's ~31 MB is the
+  same 24 MB of canvases as ECharts' and Chart.js's plus ~6.6 MB of
+  compositor tiles; Plotly and TanStack Charts, drawing SVG, have the least
+  (~14 MB of tiles), but their renderers grow ~73 and ~320 MB.
+- 100 small charts: Herceg's SVG charts take ~22 MB of compositor tiles on
+  the GPU, as Plotly's and TanStack Charts' do, against ~72 MB of canvas
+  resources for ECharts and Chart.js and ~92 MB for uPlot; renderers grow
+  ~33 MB (Herceg) to ~61 MB (Chart.js).
 
 ## 3D charts
 
@@ -513,49 +560,62 @@ Plotly draws every 3D chart with WebGL (gl3d) and turns it through
 below that on a canvas (SVG for small surfaces); `herceg-cpu` is Herceg with
 WebGL2 unavailable, so every chart is drawn on the CPU, the baseline its GPU
 path is measured against (it refuses surfaces over 250,000 grid points,
-so its 1001 x 1001 rows below are refusals). `rotate` timings end with the next frame's script, so they
-leave out the GPU's own work, for Plotly as for Herceg; `orbit` turns the
-camera a step every frame with the display's refresh on (60 Hz) and
-reports the intervals between frames, which include it. Memory is the retained heap after
-mounting; GPU buffers are not in it (Herceg's are 49 MB at a million cells).
+so its 1001 x 1001 rows below are refusals). `rotate` timings end with the next frame's script;
+"WebGL done" times the same turns, in a second run, until the GPU has
+finished drawing them. Herceg's WebGL turns take ~0.3–0.4 ms to the frame
+and ~2.4–4.2 ms until drawn; Plotly's take about as long either way (its
+frames already wait for its drawing), ~69 ms at a million cells against
+Herceg's ~2.5 ms. `orbit` turns the camera a step every frame with the
+display's refresh on (60 Hz) and reports the intervals between frames,
+which include the GPU's work. Memory is the retained heap after mounting,
+the median of mounts repeated in one page, then a first mount in a fresh
+page counted in full. The median hides Plotly's first-mount cost: its
+million-cell surface keeps ~1.2 MB on later mounts but 343 MB of heap on
+the first, with ~395 MB of renderer growth and ~342 MB of GPU memory
+(~304 MB WebGL); Herceg's keeps ~9.6 MB, with ~35 MB of renderer growth and
+~72 MB of GPU memory (~63 MB WebGL).
 Herceg's benchmark adapter gives surfaces a matrix table (`fromMatrix`), x
 and y once each and z as the grid's heights, as Plotly takes them, so a
 surface keeps no row per grid point. ECharts (through ECharts-GL) is not
 included.
 
 <!-- results:three -->
-- Date: 2026-10-26, commit 00800ca5
+- Date: 2026-10-27, commit 31ab2257
 - Machine: Apple M6, 12 cores, 32 GB, Darwin 27.0.0
-- Browser: Chrome 155.0.8059.86 through Playwright 1.63.0 (installed Google Chrome), GPU ANGLE (Apple, ANGLE Metal Renderer: Apple M6, Unspecified Version), headed, idle frames every 17.7 ms
+- Browser: Chrome 155.0.8059.86 through Playwright 1.63.0 (installed Google Chrome), GPU ANGLE (Apple, ANGLE Metal Renderer: Apple M6, Unspecified Version), headed, idle frames every 17.4 ms
 - Viewport 1280x1400, device pixel ratio 2
-- Libraries: herceg 0.0.0 (00800ca5), herceg-cpu 0.0.0 (00800ca5), plotly 4.1.2
+- Libraries: herceg 0.0.0 (31ab2257), herceg-cpu 0.0.0 (31ab2257), plotly 4.1.2
 - Renderers (normal / large config): herceg: auto (svg below 4,000 drawn points, canvas above; 3D charts on WebGL from 20,000 points or 10,000 surface cells) / auto; herceg-cpu: auto without WebGL2 (svg below 4,000 drawn points, canvas above) / auto without WebGL2; plotly: svg / webgl (scattergl)
 
 | Scenario (ms, median ± MAD) | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| scatter3d-10k-init (10,000 points in 3D) | 2.76 ± 0.16 | 2.60 ± 0.19 | 36.6 ± 2.95 |
-| surface-100-init (100 x 100 grid surface) | 10.6 ± 1.47 | 11.9 ± 1.00 | 41.8 ± 2.95 |
-| surface-317-init (317 x 317 grid surface (99,856 cells)) | 20.4 ± 2.60 | 100 ± 4.43 | 71.1 ± 2.50 |
-| surface-1001-init (1001 x 1001 grid surface (1,000,000 cells)) | 148 ± 2.72 | error | 460 ± 21.0 |
+| scatter3d-10k-init (10,000 points in 3D) | 2.70 ± 0.23 | 2.84 ± 0.23 | 35.3 ± 1.76 |
+| surface-100-init (100 x 100 grid surface) | 10.5 ± 1.04 | 10.3 ± 1.06 | 41.2 ± 3.37 |
+| surface-317-init (317 x 317 grid surface (99,856 cells)) | 18.9 ± 1.47 | 104 ± 3.34 | 72.6 ± 1.35 |
+| surface-1001-init (1001 x 1001 grid surface (1,000,000 cells)) | 151 ± 4.91 | error | 481 ± 34.7 |
 
 | Scenario (ms, median ± MAD) | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| rotate-scatter3d-10k (10,000 points in 3D) | 1.39 ± 0.19 | 1.42 ± 0.19 | 5.17 ± 0.27 |
-| rotate-scatter3d-100k (100,000 points in 3D) | 0.29 ± 0.08 | 13.5 ± 2.28 | 10.4 ± 0.37 |
-| rotate-scatter3d-1m (1,000,000 points in 3D) | 0.35 ± 0.06 | 203 ± 6.38 | error |
-| rotate-surface-50 (50 x 50 grid surface) | 2.70 ± 0.47 | 2.72 ± 0.31 | 4.61 ± 0.20 |
-| rotate-surface-200 (200 x 200 grid surface) | 0.39 ± 0.08 | 27.7 ± 2.15 | 6.90 ± 0.33 |
-| rotate-surface-317 (317 x 317 grid surface (99,856 cells)) | 0.35 ± 0.07 | 92.2 ± 2.33 | 11.5 ± 0.38 |
-| rotate-surface-1001 (1001 x 1001 grid surface (1,000,000 cells)) | 0.38 ± 0.03 | error | 66.6 ± 0.75 |
+| rotate-scatter3d-10k (10,000 points in 3D) | 1.40 ± 0.18 | 1.38 ± 0.18 | 5.16 ± 0.28; WebGL done 5.49 ± 0.23 |
+| rotate-scatter3d-100k (100,000 points in 3D) | 0.30 ± 0.08; WebGL done 2.84 ± 0.28 | 13.2 ± 2.44 | 10.7 ± 0.33; WebGL done 10.7 ± 0.40 |
+| rotate-scatter3d-1m (1,000,000 points in 3D) | 0.38 ± 0.04; WebGL done 4.15 ± 0.36 | 205 ± 6.56 | error |
+| rotate-surface-50 (50 x 50 grid surface) | 2.46 ± 0.16 | 2.47 ± 0.19 | 4.30 ± 0.26; WebGL done 4.46 ± 0.22 |
+| rotate-surface-200 (200 x 200 grid surface) | 0.32 ± 0.10; WebGL done 2.39 ± 0.20 | 27.9 ± 1.35 | 6.85 ± 0.22; WebGL done 7.69 ± 0.74 |
+| rotate-surface-317 (317 x 317 grid surface (99,856 cells)) | 0.29 ± 0.06; WebGL done 2.35 ± 0.19 | 92.7 ± 1.48 | 11.7 ± 0.53; WebGL done 11.9 ± 0.48 |
+| rotate-surface-1001 (1001 x 1001 grid surface (1,000,000 cells)) | 0.44 ± 0.13; WebGL done 2.48 ± 0.20 | error | 68.6 ± 0.78; WebGL done 68.8 ± 1.08 |
 
 | Frame interval (ms, median) | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
-| orbit-surface-317 (317 x 317 grid surface (99,856 cells), turned every frame) | 16.7 (p95 17.0), 0 of 60 late | 66.7 (p95 66.7), 60 of 60 late | 16.7 (p95 16.7), 0 of 60 late |
-| orbit-surface-1001 (1001 x 1001 grid surface (1,000,000 cells), turned every frame) | 16.7 (p95 16.8), 0 of 60 late | error | 66.7 (p95 66.7), 60 of 60 late |
+| orbit-surface-317 (317 x 317 grid surface (99,856 cells), turned every frame) | 16.7 (p95 16.7), 0 of 60 late | 66.7 (p95 83.3), 60 of 60 late | 16.7 (p95 16.7), 0 of 60 late |
+| orbit-surface-1001 (1001 x 1001 grid surface (1,000,000 cells), turned every frame) | 16.7 (p95 17.3), 0 of 60 late | error | 66.7 (p95 66.7), 60 of 60 late |
 
 | Scenario | herceg | herceg-cpu | plotly |
 | --- | ---: | ---: | ---: |
 | memory-surface-1001 (1001 x 1001 grid surface (1,000,000 cells); source 8.0 MB) | 8.7 MB heap, 5.1 MB canvas, 56 nodes | error | 1.2 MB heap, 4.6 MB canvas, 78 nodes |
+
+| First mount in a fresh page (heap; renderer footprint, median ± MAD; GPU memory attributed to the page; GPU process footprint, median ± MAD) | herceg | herceg-cpu | plotly |
+| --- | ---: | ---: | ---: |
+| memory-surface-1001 (1001 x 1001 grid surface (1,000,000 cells); source 8.0 MB) | 9.6 MB heap, 35 ± 0.0 MB renderer, 72 MB GPU (WebGL 63, canvas 9.6, tiles 0.1); GPU process 111 ± 2.7 MB | error | 343 MB heap, 395 ± 0.2 MB renderer, 342 MB GPU (WebGL 304, canvas 34, tiles 3.9); GPU process 374 ± 2.7 MB |
 <!-- /results:three -->
 
 ## Grids
@@ -588,12 +648,16 @@ Read these with the configurations in mind:
   last, with delta sorting for transactions.
 - Grouping, pivots, a grid linked to a chart, keyboard and screen reader
   behavior, and bundle sizes are not compared here.
+- Memory is the retained heap, as for charts, and, from a mount in a fresh
+  page, the growth of the renderer process's footprint, the GPU memory
+  Chrome attributes to the page, and the GPU process's footprint (noisy and
+  dependent on what ran before; not compared).
 
 <!-- results:grid -->
-- Date: 2026-10-26, commit d42d5d65
+- Date: 2026-10-27, commit 31ab2257
 - Machine: Apple M6, 12 cores, 32 GB, Darwin 27.0.0
 - Browser: Chrome 155.0.8059.86, GPU ANGLE (Apple, ANGLE Metal Renderer: Apple M6, Unspecified Version), headed, viewport 1280x720, device pixel ratio 1
-- Libraries: herceg 0.0.0 (d42d5d65); herceg-react 0.0.0 (d42d5d65) (react 19.3.0, react-dom 19.3.0); tanstack-table 9.2.8 (@tanstack/react-virtual 3.14.13, react 19.3.0, react-dom 19.3.0); ag-grid 36.2.0; glide 6.0.4-alpha24 (react 19.3.0, react-dom 19.3.0)
+- Libraries: herceg 0.0.0 (31ab2257); herceg-react 0.0.0 (31ab2257) (react 19.3.0, react-dom 19.3.0); tanstack-table 9.2.8 (@tanstack/react-virtual 3.14.13, react 19.3.0, react-dom 19.3.0); ag-grid 36.2.0; glide 6.0.4-alpha24 (react 19.3.0, react-dom 19.3.0)
 - herceg: DOM rows and cells (10 rows and 2 columns of overscan); sort native (row view); filter native (row view, expression)
 - herceg-react: DOM rows and cells, mounted through @herceg/react/grid (React 19); sort native (row view); filter native (row view, expression)
 - tanstack-table: DOM table, React 19 (TanStack Virtual rows with 10 overscan, columns with 3); sort native (sorted row model); filter native (filtered row model)
@@ -602,110 +666,117 @@ Read these with the configurations in mind:
 
 | Mount (ms, median ± MAD) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: from native input | 3.29 ± 0.12 | 3.47 ± 0.27 | 7.60 ± 0.25 | 12.5 ± 0.36 | 1.77 ± 0.18 (3 frames) |
-| 10k x 20: from the columns, conversion included | 3.36 ± 0.26 | 3.55 ± 0.07 | 10.8 ± 0.49 | 15.9 ± 0.74 | 1.68 ± 0.16 |
-| 10k x 20: conversion alone | 0.07 ± 0.01 | 0.06 ± 0.01 | 3.26 ± 0.17 | 3.37 ± 0.19 | 0.00 ± 0.00 |
-| 10k x 20: destroy | 0.58 ± 0.06 | 0.57 ± 0.04 | 0.60 ± 0.04 | 1.13 ± 0.03 | 0.15 ± 0.02 |
-| 100k x 20: from native input | 3.25 ± 0.13 | 3.51 ± 0.25 | 40.0 ± 0.77 | 36.1 ± 0.37 | 1.67 ± 0.22 (3 frames) |
-| 100k x 20: from the columns, conversion included | 3.43 ± 0.26 | 3.62 ± 0.27 | 77.4 ± 1.12 | 75.1 ± 0.48 | 1.68 ± 0.15 |
-| 100k x 20: conversion alone | 0.15 ± 0.03 | 0.14 ± 0.02 | 40.2 ± 0.29 | 39.5 ± 0.36 | 0.00 ± 0.00 |
-| 100k x 20: destroy | 0.58 ± 0.04 | 0.56 ± 0.04 | 0.33 ± 0.00 | 1.10 ± 0.02 | 0.14 ± 0.03 |
-| 1M x 20: from native input | 3.43 ± 0.07 | 3.74 ± 0.09 | 436 ± 62.7 | 308 ± 0.49 | 2.52 ± 0.50 (3 frames) |
-| 1M x 20: from the columns, conversion included | 4.38 ± 0.20 | 4.88 ± 0.33 | 1126 ± 28.7 | 703 ± 3.08 | 2.22 ± 0.02 |
-| 1M x 20: conversion alone | 0.88 ± 0.00 | 1.25 ± 0.01 | 692 ± 6.92 | 394 ± 1.93 | 0.00 ± 0.00 |
-| 1M x 20: destroy | 0.56 ± 0.00 | 0.63 ± 0.02 | 0.40 ± 0.01 | 1.23 ± 0.00 | 0.16 ± 0.05 |
-| 1M x 100: from native input | 3.35 ± 0.15 | 3.74 ± 0.19 | error [1] | error [2] | 2.26 ± 0.69 (3 frames) |
-| 1M x 100: from the columns, conversion included | 7.57 ± 0.35 | 7.67 ± 0.23 | error [1] | error [2] | 2.09 ± 0.18 |
-| 1M x 100: conversion alone | 4.11 ± 0.13 | 4.10 ± 0.02 | error [1] | error [2] | 0.01 ± 0.00 |
-| 1M x 100: destroy | 0.60 ± 0.08 | 0.57 ± 0.08 | error [1] | error [2] | 0.17 ± 0.04 |
+| 10k x 20: from native input | 3.32 ± 0.14 | 3.63 ± 0.39 | 7.43 ± 0.26 | 12.6 ± 0.32 | 1.84 ± 0.19 (3 frames) |
+| 10k x 20: from the columns, conversion included | 3.34 ± 0.17 | 3.62 ± 0.24 | 10.8 ± 0.50 | 15.9 ± 0.66 | 1.80 ± 0.25 |
+| 10k x 20: conversion alone | 0.06 ± 0.01 | 0.07 ± 0.01 | 3.23 ± 0.09 | 3.25 ± 0.11 | 0.00 ± 0.00 |
+| 10k x 20: destroy | 0.58 ± 0.04 | 0.57 ± 0.04 | 0.60 ± 0.05 | 1.14 ± 0.02 | 0.15 ± 0.02 |
+| 100k x 20: from native input | 3.22 ± 0.21 | 3.50 ± 0.31 | 39.2 ± 0.81 | 36.4 ± 0.41 | 1.80 ± 0.26 (3 frames) |
+| 100k x 20: from the columns, conversion included | 3.36 ± 0.18 | 3.66 ± 0.17 | 77.8 ± 1.40 | 75.6 ± 0.38 | 1.71 ± 0.28 |
+| 100k x 20: conversion alone | 0.13 ± 0.02 | 0.16 ± 0.03 | 40.3 ± 0.42 | 39.4 ± 0.21 | 0.00 ± 0.00 |
+| 100k x 20: destroy | 0.55 ± 0.07 | 0.57 ± 0.04 | 0.64 ± 0.01 | 1.11 ± 0.03 | 0.14 ± 0.02 |
+| 1M x 20: from native input | 4.80 ± 0.00 | 5.30 ± 0.02 | 461 ± 86.7 | 279 ± 0.71 | 2.25 ± 0.32 (3 frames) |
+| 1M x 20: from the columns, conversion included | 4.69 ± 0.37 | 4.67 ± 0.07 | 1162 ± 59.5 | 691 ± 3.60 | 2.47 ± 0.15 |
+| 1M x 20: conversion alone | 1.25 ± 0.00 | 0.99 ± 0.00 | 692 ± 1.25 | 392 ± 0.89 | 0.01 ± 0.00 |
+| 1M x 20: destroy | 0.60 ± 0.01 | 0.59 ± 0.03 | 1.25 ± 0.02 | 1.19 ± 0.01 | 0.15 ± 0.02 |
+| 1M x 100: from native input | 3.44 ± 0.05 | 3.65 ± 0.15 | error [1] | error [2] | 2.33 ± 0.35 (3 frames) |
+| 1M x 100: from the columns, conversion included | 7.53 ± 0.10 | 7.63 ± 0.19 | error [1] | error [2] | 2.40 ± 0.22 |
+| 1M x 100: conversion alone | 4.13 ± 0.05 | 4.11 ± 0.01 | error [1] | error [2] | 0.01 ± 0.01 |
+| 1M x 100: destroy | 0.57 ± 0.03 | 0.55 ± 0.04 | error [1] | error [2] | 0.17 ± 0.01 |
 
 | Scroll a step to its correct frame (ms) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: a screen down | 3.63 ± 0.36 | 3.44 ± 0.38 | 4.77 ± 0.60 | 3.54 ± 0.44 | 0.69 ± 0.06 (2 frames) |
-| 10k x 20: three columns across | 2.73 ± 0.80 | 2.58 ± 0.78 | 3.08 ± 0.32 | 2.74 ± 0.31 | 0.69 ± 0.16 (2 frames) |
-| 10k x 20: both | 4.88 ± 0.39 | 5.05 ± 0.51 | 6.69 ± 1.20 | 6.47 ± 1.28 | 0.91 ± 0.16 (2 frames) |
-| 10k x 20: to the last row and back | 2.47 ± 0.32 | 2.68 ± 0.32 | 4.25 ± 0.33 | 5.54 ± 1.05 | 0.78 ± 0.15 (2 frames) |
-| 100k x 20: a screen down | 3.94 ± 0.20 | 3.70 ± 0.34 | 4.96 ± 0.36 | 4.08 ± 0.30 | 0.78 ± 0.12 (2 frames) |
-| 100k x 20: three columns across | 3.10 ± 0.89 | 2.93 ± 0.98 | 2.79 ± 0.29 | 3.03 ± 0.33 | 0.68 ± 0.14 (2 frames) |
-| 100k x 20: both | 5.07 ± 0.46 | 4.76 ± 0.40 | 6.06 ± 0.85 | 5.59 ± 0.34 | 1.10 ± 0.16 (2 frames) |
-| 100k x 20: to the last row and back | 2.62 ± 0.28 | 2.84 ± 0.29 | 3.71 ± 0.37 | 5.00 ± 0.40 | 0.84 ± 0.19 (2 frames) |
-| 1M x 20: a screen down | 3.45 ± 0.56 | 3.37 ± 0.41 | 3.23 ± 0.08 | 5.89 ± 0.70 | 1.02 ± 0.13 (2 frames) |
-| 1M x 20: to the last row and back | 3.32 ± 0.11 | 2.30 ± 0.26 | 4.77 ± 0.41 | 7.06 ± 0.41 | 1.00 ± 0.13 (2 frames) |
-| 1M x 100: a screen down | 3.76 ± 0.16 | 2.89 ± 0.13 | error [3] | error [4] | 1.07 ± 0.20 (2 frames) |
-| 1M x 100: to the last row and back | 3.38 ± 0.32 | 2.47 ± 0.28 | error [5] | error [6] | 1.19 ± 0.22 (2 frames) |
+| 10k x 20: a screen down | 3.87 ± 0.44 | 3.99 ± 0.29 | 4.53 ± 0.41 | 4.41 ± 0.62 | 0.86 ± 0.15 (2 frames) |
+| 10k x 20: three columns across | 2.80 ± 0.85 | 3.20 ± 0.85 | 2.54 ± 0.34 | 3.33 ± 0.37 | 0.65 ± 0.12 (2 frames) |
+| 10k x 20: both | 5.17 ± 0.42 | 5.25 ± 0.43 | 6.76 ± 1.08 | 6.86 ± 0.88 | 0.95 ± 0.16 (2 frames) |
+| 10k x 20: to the last row and back | 2.81 ± 0.20 | 2.78 ± 0.26 | 4.70 ± 0.60 | 6.08 ± 0.71 | 0.81 ± 0.17 (2 frames) |
+| 100k x 20: a screen down | 3.95 ± 0.35 | 3.81 ± 0.38 | 3.99 ± 0.15 | 4.05 ± 0.33 | 0.82 ± 0.14 (2 frames) |
+| 100k x 20: three columns across | 2.89 ± 0.90 | 2.98 ± 1.00 | 2.83 ± 0.29 | 3.15 ± 0.29 | 0.73 ± 0.14 (2 frames) |
+| 100k x 20: both | 5.24 ± 0.46 | 4.91 ± 0.61 | 6.92 ± 0.84 | 5.48 ± 0.26 | 0.83 ± 0.14 (2 frames) |
+| 100k x 20: to the last row and back | 2.76 ± 0.33 | 2.58 ± 0.32 | 3.81 ± 0.49 | 4.92 ± 0.35 | 0.81 ± 0.17 (2 frames) |
+| 1M x 20: a screen down | 2.93 ± 0.15 | 3.06 ± 0.23 | 3.38 ± 0.10 | 5.33 ± 0.14 | 0.88 ± 0.15 (2 frames) |
+| 1M x 20: to the last row and back | 2.16 ± 0.09 | 2.84 ± 0.22 | 4.68 ± 0.23 | 6.89 ± 0.29 | 0.94 ± 0.05 (2 frames) |
+| 1M x 100: a screen down | 3.72 ± 0.24 | 3.72 ± 0.33 | error [3] | error [4] | 1.07 ± 0.09 (2 frames) |
+| 1M x 100: to the last row and back | 2.92 ± 0.19 | 2.30 ± 0.16 | error [5] | error [6] | 0.99 ± 0.13 (2 frames) |
 
 | Continuous scrolling for 3 s with vsync (frame interval p50 / p95 / p99 ms; dropped frames; incomplete frames) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: down, offset set every frame | 16.7 / 16.9 / 17.6; 0 dropped; 0 of 180.5 incomplete | 16.7 / 17.1 / 17.5; 0 dropped; 0 of 181 incomplete | 16.7 / 16.9 / 17.3; 0 dropped; 0 of 180.5 incomplete | 16.7 / 16.9 / 17.6; 0 dropped; 0 of 180 incomplete | 16.7 / 16.8 / 17.4; 0 dropped; 179.5 of 180.5 incomplete |
-| 10k x 20: down and across, offset set every frame | 16.7 / 16.7 / 17.4; 0 dropped; 0 of 181 incomplete | 16.7 / 17.0 / 17.5; 0 dropped; 0 of 181 incomplete | 16.7 / 17.0 / 17.5; 0 dropped; 0 of 180 incomplete | 16.7 / 16.7 / 17.5; 0 dropped; 0 of 180.5 incomplete | 16.7 / 17.1 / 17.5; 0 dropped; 180 of 181 incomplete |
-| 10k x 20: down, browser wheel events | 16.7 / 17.2 / 17.5; 0 dropped; 0 of 180 incomplete; 170 wheel events, 8.7k px | 16.7 / 17.4 / 17.6; 0 dropped; 0 of 180 incomplete; 173 wheel events, 8.8k px | 16.7 / 17.3 / 17.6; 0 dropped; 0 of 180 incomplete; 174.5 wheel events, 8.8k px | 16.7 / 17.4 / 33.3; 3 dropped; 0 of 178 incomplete; 160 wheel events, 8.7k px | 16.7 / 17.0 / 17.6; 0 dropped; 116.5 of 180.5 incomplete; 175.5 wheel events, 8.8k px |
-| 100k x 20: down, offset set every frame | 16.7 / 16.9 / 17.4; 0 dropped; 0 of 180.5 incomplete | 16.7 / 16.8 / 17.4; 0 dropped; 0 of 180 incomplete | 16.7 / 16.9 / 17.6; 0 dropped; 0 of 180 incomplete | 16.7 / 17.0 / 17.5; 0 dropped; 0 of 180 incomplete | 16.7 / 17.0 / 17.6; 0 dropped; 179 of 180 incomplete |
-| 100k x 20: down and across, offset set every frame | 16.7 / 17.0 / 17.5; 0 dropped; 0 of 181 incomplete | 16.7 / 16.7 / 17.4; 0 dropped; 0 of 180.5 incomplete | 16.7 / 16.7 / 17.3; 0 dropped; 0 of 180.5 incomplete | 16.7 / 17.1 / 17.6; 0 dropped; 0 of 180.5 incomplete | 16.7 / 16.8 / 17.4; 0 dropped; 179.5 of 180.5 incomplete |
-| 100k x 20: down, browser wheel events | 16.7 / 17.3 / 17.6; 0 dropped; 0 of 180.5 incomplete; 172.5 wheel events, 8.8k px | 16.7 / 17.3 / 17.6; 0 dropped; 0 of 180.5 incomplete; 170 wheel events, 8.8k px | 16.7 / 17.2 / 17.6; 0 dropped; 0 of 180.5 incomplete; 176.5 wheel events, 8.9k px | 16.7 / 17.3 / 33.3; 4.5 dropped; 0 of 176.5 incomplete; 167.5 wheel events, 8.8k px | 16.7 / 17.0 / 17.5; 0 dropped; 117 of 180 incomplete; 174 wheel events, 8.7k px |
+| 10k x 20: down, offset set every frame | 16.7 / 16.7 / 17.4; 0 dropped; 0 of 180 incomplete | 16.7 / 16.7 / 17.4; 0 dropped; 0 of 180.5 incomplete | 16.7 / 17.1 / 17.5; 0 dropped; 0 of 180.5 incomplete | 16.7 / 16.9 / 17.6; 0.5 dropped; 0 of 180.5 incomplete | 16.7 / 16.9 / 17.6; 0 dropped; 179.5 of 180.5 incomplete |
+| 10k x 20: down and across, offset set every frame | 16.7 / 16.7 / 17.5; 0 dropped; 0 of 180.5 incomplete | 16.7 / 17.1 / 17.5; 0 dropped; 0 of 181 incomplete | 16.7 / 17.0 / 17.5; 0 dropped; 0 of 180 incomplete | 16.7 / 16.7 / 17.3; 0 dropped; 0 of 181 incomplete | 16.7 / 16.7 / 17.4; 0 dropped; 179.5 of 180.5 incomplete |
+| 10k x 20: down, browser wheel events | 16.7 / 17.3 / 17.6; 0 dropped; 0 of 180 incomplete; 173 wheel events, 8.8k px | 16.7 / 17.3 / 17.6; 0 dropped; 0 of 180 incomplete; 174 wheel events, 8.8k px | 16.7 / 17.2 / 17.6; 0 dropped; 0 of 180.5 incomplete; 174 wheel events, 8.8k px | 16.7 / 17.4 / 33.3; 2.5 dropped; 0 of 178 incomplete; 164 wheel events, 8.8k px | 16.7 / 17.1 / 17.5; 0 dropped; 116.5 of 180.5 incomplete; 176 wheel events, 8.8k px |
+| 100k x 20: down, offset set every frame | 16.7 / 16.7 / 17.5; 0 dropped; 0 of 180.5 incomplete | 16.7 / 16.7 / 17.6; 0 dropped; 0 of 181 incomplete | 16.7 / 16.7 / 17.4; 0 dropped; 0 of 180 incomplete | 16.7 / 16.8 / 17.5; 0 dropped; 0 of 180 incomplete | 16.7 / 16.7 / 17.4; 0 dropped; 180 of 181 incomplete |
+| 100k x 20: down and across, offset set every frame | 16.7 / 16.9 / 17.5; 0 dropped; 0 of 180.5 incomplete | 16.7 / 17.0 / 17.6; 0 dropped; 0 of 181 incomplete | 16.7 / 16.7 / 17.6; 0 dropped; 0 of 180 incomplete | 16.7 / 17.0 / 17.5; 0 dropped; 0 of 180 incomplete | 16.7 / 16.7 / 17.4; 0 dropped; 179 of 180 incomplete |
+| 100k x 20: down, browser wheel events | 16.7 / 17.3 / 17.6; 0 dropped; 0 of 180.5 incomplete; 175.5 wheel events, 8.9k px | 16.7 / 17.2 / 17.6; 0 dropped; 0 of 180 incomplete; 176.5 wheel events, 8.9k px | 16.7 / 16.9 / 17.6; 0 dropped; 0 of 180.5 incomplete; 174 wheel events, 8.8k px | 16.7 / 17.3 / 24.2; 2 dropped; 0 of 178.5 incomplete; 164 wheel events, 8.8k px | 16.7 / 17.1 / 17.5; 0 dropped; 118 of 180.5 incomplete; 176.5 wheel events, 8.8k px |
 
 | Sort and filter to the correct frame (ms; time inside the call) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: sort a number ascending | 3.90 ± 0.08; 0.04 in call | 4.32 ± 0.52; 0.03 in call | 9.17 ± 0.30; 6.55 in call | 9.83 ± 0.32; 7.14 in call | 2.87 ± 0.28; 2.62 in call |
-| 10k x 20: sort a number descending | 3.85 ± 0.09; 0.03 in call | 3.95 ± 0.13; 0.03 in call | 9.07 ± 0.09; 6.48 in call | 10.2 ± 0.59; 7.39 in call | 2.60 ± 0.17; 2.35 in call |
-| 10k x 20: sort by category, then number | 5.11 ± 0.13; 0.04 in call | 5.12 ± 0.08; 0.04 in call | 12.1 ± 0.19; 9.53 in call | 11.7 ± 0.23; 9.00 in call | 3.18 ± 0.09; 2.95 in call |
-| 10k x 20: number range, ~1% kept | 2.88 ± 0.16; 0.05 in call | 3.00 ± 0.21; 0.05 in call | 4.22 ± 0.19; 1.61 in call | 6.07 ± 0.25; 3.45 in call | 1.02 ± 0.15; 0.70 in call |
-| 10k x 20: number range, ~50% kept | 2.45 ± 0.12; 0.05 in call | 2.47 ± 0.12; 0.05 in call | 3.50 ± 0.18; 1.74 in call | 4.70 ± 0.44; 3.04 in call | 1.06 ± 0.12; 0.78 in call |
-| 10k x 20: number range, ~99% kept | 0.89 ± 0.06; 0.04 in call | 0.89 ± 0.06; 0.05 in call | 1.99 ± 0.16; 1.38 in call | 2.16 ± 0.25; 1.31 in call | 1.22 ± 0.16; 0.85 in call |
-| 10k x 20: category membership, ~1% kept | 2.84 ± 0.09; 0.07 in call | 3.01 ± 0.18; 0.08 in call | 4.32 ± 0.12; 1.79 in call | 5.99 ± 0.65; 3.36 in call | 0.99 ± 0.19; 0.72 in call |
-| 10k x 20: category membership, ~50% kept | 2.68 ± 0.18; 0.12 in call | 2.64 ± 0.10; 0.12 in call | 3.22 ± 0.19; 1.69 in call | 4.04 ± 0.62; 2.38 in call | 1.74 ± 0.13; 1.45 in call |
-| 10k x 20: category membership, ~99% kept | 1.13 ± 0.12; 0.15 in call | 1.10 ± 0.10; 0.15 in call | 2.34 ± 0.24; 1.62 in call | 1.74 ± 0.22; 1.07 in call | 3.78 ± 0.21; 3.49 in call |
-| 100k x 20: sort a number ascending | 15.7 ± 0.13; 0.03 in call | 15.9 ± 0.20; 0.04 in call | 80.7 ± 2.02; 78.0 in call | 78.0 ± 1.74; 75.3 in call | 14.9 ± 0.20; 14.6 in call |
-| 100k x 20: sort a number descending | 16.0 ± 0.20; 0.04 in call | 15.7 ± 0.17; 0.04 in call | 81.0 ± 1.72; 78.4 in call | 78.5 ± 1.36; 75.8 in call | 14.9 ± 0.12; 14.7 in call |
-| 100k x 20: sort by category, then number | 24.7 ± 0.28; 0.04 in call | 25.2 ± 0.59; 0.03 in call | 91.9 ± 1.08; 89.4 in call | 78.4 ± 2.95; 75.7 in call | 24.0 ± 0.16; 23.7 in call |
-| 100k x 20: number range, ~1% kept | 3.57 ± 0.36; 0.05 in call | 3.63 ± 0.32; 0.06 in call | 8.88 ± 0.43; 6.31 in call | 11.6 ± 0.44; 9.11 in call | 1.06 ± 0.15; 0.77 in call |
-| 100k x 20: number range, ~50% kept | 3.66 ± 0.27; 0.05 in call | 3.62 ± 0.52; 0.06 in call | 11.3 ± 1.09; 9.11 in call | 12.1 ± 0.29; 10.4 in call | 1.36 ± 0.13; 1.07 in call |
-| 100k x 20: number range, ~99% kept | 1.71 ± 0.17; 0.04 in call | 1.72 ± 0.22; 0.05 in call | 8.63 ± 0.43; 7.99 in call | 8.35 ± 0.25; 7.62 in call | 1.18 ± 0.22; 0.89 in call |
-| 100k x 20: category membership, ~1% kept | 3.65 ± 0.33; 0.07 in call | 3.52 ± 0.20; 0.08 in call | 9.29 ± 0.36; 6.69 in call | 8.55 ± 0.67; 6.04 in call | 1.10 ± 0.15; 0.81 in call |
-| 100k x 20: category membership, ~50% kept | 3.84 ± 0.53; 0.12 in call | 3.81 ± 0.43; 0.12 in call | 11.3 ± 0.90; 9.76 in call | 9.08 ± 1.04; 7.52 in call | 2.12 ± 0.16; 1.82 in call |
-| 100k x 20: category membership, ~99% kept | 1.86 ± 0.34; 0.15 in call | 1.93 ± 0.37; 0.16 in call | 9.99 ± 0.66; 9.33 in call | 7.03 ± 1.44; 5.81 in call | 4.29 ± 0.41; 4.00 in call |
-| 1M x 20: sort a number descending | 165 ± 1.96; 0.06 in call | 165 ± 1.41; 0.06 in call | 1528 ± 2.03; 1525 in call | 1461 ± 8.39; 1458 in call | 171 ± 0.50; 171 in call |
-| 1M x 20: number range, ~50% kept | 7.51 ± 0.43; 0.07 in call | 6.08 ± 1.13; 0.07 in call | 108 ± 0.65; 106 in call | 86.8 ± 0.01; 84.9 in call | 6.81 ± 0.30; 6.41 in call |
-| 1M x 100: sort a number descending | 161 ± 1.06; 0.02 in call | 162 ± 0.92; 0.03 in call | error [7] | error [8] | 170 ± 0.02; 170 in call |
-| 1M x 100: number range, ~50% kept | 6.16 ± 1.22; 0.07 in call | 6.12 ± 0.03; 0.07 in call | error [9] | error [10] | 6.18 ± 0.95; 5.87 in call |
+| 10k x 20: sort a number ascending | 4.00 ± 0.20; 0.04 in call | 3.93 ± 0.10; 0.04 in call | 9.17 ± 0.21; 6.59 in call | 9.94 ± 0.44; 7.18 in call | 2.56 ± 0.15; 2.30 in call |
+| 10k x 20: sort a number descending | 3.94 ± 0.10; 0.04 in call | 3.98 ± 0.12; 0.04 in call | 9.17 ± 0.22; 6.57 in call | 10.2 ± 0.45; 7.55 in call | 2.57 ± 0.12; 2.32 in call |
+| 10k x 20: sort by category, then number | 5.17 ± 0.21; 0.03 in call | 5.08 ± 0.12; 0.04 in call | 12.2 ± 0.21; 9.61 in call | 11.9 ± 0.39; 9.11 in call | 3.24 ± 0.16; 2.98 in call |
+| 10k x 20: number range, ~1% kept | 2.93 ± 0.15; 0.05 in call | 2.87 ± 0.11; 0.06 in call | 4.27 ± 0.13; 1.75 in call | 6.04 ± 0.14; 3.48 in call | 0.97 ± 0.10; 0.71 in call |
+| 10k x 20: number range, ~50% kept | 2.55 ± 0.17; 0.05 in call | 2.46 ± 0.09; 0.06 in call | 3.48 ± 0.15; 1.71 in call | 4.36 ± 0.19; 2.67 in call | 1.02 ± 0.12; 0.75 in call |
+| 10k x 20: number range, ~99% kept | 0.94 ± 0.10; 0.05 in call | 0.95 ± 0.13; 0.05 in call | 2.19 ± 0.22; 1.51 in call | 2.29 ± 0.19; 1.39 in call | 1.09 ± 0.14; 0.76 in call |
+| 10k x 20: category membership, ~1% kept | 2.90 ± 0.07; 0.07 in call | 2.88 ± 0.07; 0.08 in call | 4.43 ± 0.23; 1.81 in call | 5.75 ± 0.42; 3.34 in call | 1.04 ± 0.13; 0.73 in call |
+| 10k x 20: category membership, ~50% kept | 2.71 ± 0.18; 0.12 in call | 2.64 ± 0.13; 0.12 in call | 3.41 ± 0.22; 1.88 in call | 3.43 ± 0.17; 2.07 in call | 1.78 ± 0.16; 1.50 in call |
+| 10k x 20: category membership, ~99% kept | 1.11 ± 0.13; 0.15 in call | 1.06 ± 0.07; 0.15 in call | 2.40 ± 0.23; 1.77 in call | 1.70 ± 0.15; 1.01 in call | 4.74 ± 0.28; 4.45 in call |
+| 100k x 20: sort a number ascending | 15.7 ± 0.21; 0.03 in call | 15.8 ± 0.29; 0.04 in call | 79.3 ± 1.43; 76.6 in call | 80.3 ± 2.18; 77.6 in call | 15.2 ± 0.16; 14.9 in call |
+| 100k x 20: sort a number descending | 15.8 ± 0.25; 0.03 in call | 15.7 ± 0.18; 0.04 in call | 81.1 ± 1.98; 78.4 in call | 79.5 ± 1.37; 76.7 in call | 15.2 ± 0.27; 14.9 in call |
+| 100k x 20: sort by category, then number | 25.2 ± 0.27; 0.03 in call | 24.9 ± 0.42; 0.04 in call | 92.1 ± 1.18; 89.6 in call | 80.0 ± 3.60; 77.2 in call | 24.1 ± 0.28; 23.9 in call |
+| 100k x 20: number range, ~1% kept | 3.66 ± 0.42; 0.05 in call | 3.66 ± 0.31; 0.06 in call | 8.63 ± 0.35; 6.04 in call | 11.7 ± 0.82; 9.11 in call | 1.09 ± 0.16; 0.81 in call |
+| 100k x 20: number range, ~50% kept | 3.64 ± 0.48; 0.05 in call | 3.58 ± 0.41; 0.06 in call | 10.4 ± 0.76; 8.62 in call | 11.5 ± 0.38; 9.81 in call | 1.29 ± 0.05; 1.00 in call |
+| 100k x 20: number range, ~99% kept | 1.66 ± 0.26; 0.05 in call | 1.67 ± 0.21; 0.05 in call | 8.85 ± 0.57; 8.21 in call | 8.31 ± 0.08; 7.55 in call | 1.25 ± 0.17; 0.96 in call |
+| 100k x 20: category membership, ~1% kept | 3.79 ± 0.39; 0.08 in call | 3.67 ± 0.23; 0.08 in call | 10.2 ± 0.57; 7.66 in call | 8.22 ± 0.30; 5.69 in call | 1.07 ± 0.05; 0.81 in call |
+| 100k x 20: category membership, ~50% kept | 3.82 ± 0.35; 0.11 in call | 3.89 ± 0.50; 0.12 in call | 11.0 ± 0.66; 9.45 in call | 8.95 ± 1.01; 7.35 in call | 2.40 ± 0.25; 2.13 in call |
+| 100k x 20: category membership, ~99% kept | 1.88 ± 0.22; 0.15 in call | 1.87 ± 0.13; 0.15 in call | 10.1 ± 0.93; 9.44 in call | 8.39 ± 0.19; 7.69 in call | 4.00 ± 0.35; 3.71 in call |
+| 1M x 20: sort a number descending | 165 ± 1.21; 0.05 in call | 168 ± 5.84; 0.06 in call | 1544 ± 1.11; 1541 in call | 1458 ± 4.12; 1455 in call | 172 ± 2.77; 172 in call |
+| 1M x 20: number range, ~50% kept | 6.11 ± 0.16; 0.06 in call | 6.13 ± 0.88; 0.08 in call | 107 ± 1.37; 105 in call | 83.1 ± 1.16; 81.3 in call | 6.03 ± 0.55; 5.73 in call |
+| 1M x 100: sort a number descending | 164 ± 0.72; 0.04 in call | 162 ± 1.09; 0.03 in call | error [7] | error [8] | 169 ± 0.13; 168 in call |
+| 1M x 100: number range, ~50% kept | 6.09 ± 0.09; 0.07 in call | 6.14 ± 0.15; 0.08 in call | error [9] | error [10] | 6.05 ± 0.89; 5.75 in call |
 
 | Select rows, sorted (ms to the correct frame) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: one row | 0.79 ± 0.10 | 0.93 ± 0.06 | 1.18 ± 0.12 | 0.92 ± 0.08 | 0.88 ± 0.14 |
-| 10k x 20: half the rows in display order | 1.01 ± 0.12 | 1.00 ± 0.12 | 2.31 ± 0.28 | 3.03 ± 0.14 | 0.83 ± 0.08 |
-| 10k x 20: read the selection back | 0.08 ± 0.01 | 0.08 ± 0.01 | 0.52 ± 0.08 | 0.17 ± 0.01 | 0.10 ± 0.01 |
-| 100k x 20: one row | 0.84 ± 0.11 | 0.80 ± 0.10 | 1.33 ± 0.11 | 0.94 ± 0.11 | 0.98 ± 0.14 |
-| 100k x 20: half the rows in display order | 1.09 ± 0.12 | 1.26 ± 0.18 | 7.67 ± 0.34 | 17.1 ± 1.62 | 1.07 ± 0.11 |
-| 100k x 20: read the selection back | 0.55 ± 0.01 | 0.56 ± 0.02 | 4.25 ± 0.21 | 1.90 ± 0.16 | 1.06 ± 0.13 |
+| 10k x 20: one row | 0.79 ± 0.11 | 0.78 ± 0.05 | 1.39 ± 0.23 | 0.96 ± 0.13 | 0.99 ± 0.15 |
+| 10k x 20: half the rows in display order | 1.12 ± 0.17 | 1.04 ± 0.14 | 2.28 ± 0.26 | 3.08 ± 0.15 | 0.92 ± 0.13 |
+| 10k x 20: read the selection back | 0.09 ± 0.02 | 0.08 ± 0.01 | 0.41 ± 0.06 | 0.17 ± 0.01 | 0.10 ± 0.00 |
+| 100k x 20: one row | 0.81 ± 0.10 | 0.84 ± 0.12 | 1.23 ± 0.07 | 1.07 ± 0.20 | 0.86 ± 0.08 |
+| 100k x 20: half the rows in display order | 1.25 ± 0.15 | 1.27 ± 0.15 | 7.66 ± 0.24 | 16.3 ± 0.71 | 1.02 ± 0.11 |
+| 100k x 20: read the selection back | 0.57 ± 0.03 | 0.60 ± 0.06 | 4.15 ± 0.22 | 1.82 ± 0.11 | 0.97 ± 0.08 |
 
 | Streaming: ticks offered at 10 Hz for 5 s with vsync (tick to correct frame p50 / p95 ms, first tick; time in call; dropped frames; ticks delivered of those offered) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: append 1,000 rows | 9.23 / 18.6 (first 17.2); 0.55 in call; 0 dropped; 50/50 delivered | 8.92 / 18.7 (first 16.2); 0.54 in call; 0 dropped; 50/50 delivered | 28.3 / 35.9 (first 13.6); 27.7 in call; 1 dropped; 50/50 delivered | 12.7 / 17.0 (first 17.2); 8.99 in call; 0 dropped; 50/50 delivered | 6.98 / 15.1 (first 15.9); 2.73 in call; 0 dropped; 50/50 delivered |
-| 10k x 20: append 1,000 rows, sorted | 11.5 / 17.8 (first 18.1); 2.55 in call; 0 dropped; 50/50 delivered | 11.1 / 19.3 (first 17.9); 2.69 in call; 0 dropped; 50/50 delivered | 37.1 / 61.6 (first 13.9); 36.5 in call; 31.5 dropped; 50/50 delivered | 30.1 / 37.1 (first 10.2); 28.7 in call; 3.5 dropped; 50/50 delivered | 7.73 / 14.8 (first 15.8); 5.69 in call; 0 dropped; 50/50 delivered |
-| 10k x 20: append 1,000, evict 1,000 | 19.7 / 29.7 (first 28.8); 0.66 in call; 0.5 dropped; 50/50 delivered | 20.5 / 28.9 (first 26.5); 0.66 in call; 0.5 dropped; 50/50 delivered | 27.0 / 29.5 (first 15.4); 22.6 in call; 0.5 dropped; 50/50 delivered | 26.8 / 31.0 (first 18.6); 22.8 in call; 0 dropped; 50/50 delivered | 6.30 / 14.8 (first 15.7); 3.17 in call; 0 dropped; 50/50 delivered |
-| 10k x 20: append 1,000, evict 1,000, sorted | 16.0 / 24.2 (first 19.2); 1.77 in call; 0 dropped; 50/50 delivered | 16.5 / 24.4 (first 19.8); 1.77 in call; 0 dropped; 50/50 delivered | 29.2 / 35.1 (first 16.8); 28.0 in call; 2 dropped; 50/50 delivered | 26.7 / 30.3 (first 10.1); 23.6 in call; 0.5 dropped; 50/50 delivered | 6.65 / 13.9 (first 15.6); 5.00 in call; 0 dropped; 50/50 delivered |
-| 10k x 20: change 100 rows, display field | 10.6 / 20.8 (first 20.7); 0.15 in call; 0 dropped; 50/50 delivered | 11.5 / 20.0 (first 16.8); 0.14 in call; 0 dropped; 50/50 delivered | 17.4 / 19.8 (first 12.6); 14.7 in call; 0.5 dropped; 50/50 delivered | 10.6 / 18.7 (first 18.0); 4.30 in call; 0 dropped; 50/50 delivered | 6.19 / 17.0 (first 15.6); 0.36 in call; 0 dropped; 50/50 delivered |
-| 10k x 20: change 100 rows, sort key | 18.2 / 26.8 (first 25.1); 0.76 in call; 1 dropped; 50/50 delivered | 19.0 / 28.3 (first 24.3); 0.76 in call; 0.5 dropped; 50/50 delivered | 30.0 / 33.9 (first 16.3); 28.4 in call; 1.5 dropped; 50/50 delivered | 25.1 / 26.9 (first 13.2); 21.6 in call; 0 dropped; 50/50 delivered | 7.37 / 15.0 (first 15.5); 5.86 in call; 0 dropped; 50/50 delivered |
-| 10k x 20: change 100 rows, filtered field | 18.1 / 27.1 (first 28.8); 0.44 in call; 0 dropped; 50/50 delivered | 18.6 / 28.1 (first 28.0); 0.44 in call; 0 dropped; 50/50 delivered | 23.6 / 26.5 (first 16.6); 20.6 in call; 0 dropped; 50/50 delivered | 20.5 / 22.6 (first 12.8); 16.7 in call; 0 dropped; 50/50 delivered | 6.79 / 14.3 (first 15.8); 4.56 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: append 1,000 rows | 9.51 / 18.8 (first 18.4); 0.58 in call; 0 dropped; 50/50 delivered | 9.58 / 19.5 (first 16.5); 0.59 in call; 0 dropped; 50/50 delivered | 44.3 / 50.2 (first 36.1); 43.8 in call; 38 dropped; 50/50 delivered | 22.2 / 26.5 (first 11.6); 19.9 in call; 0 dropped; 50/50 delivered | 7.25 / 17.2 (first 15.6); 2.77 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: append 1,000 rows, sorted | 9.90 / 18.6 (first 14.8); 5.53 in call; 0 dropped; 50/50 delivered | 10.4 / 18.1 (first 14.4); 5.69 in call; 0 dropped; 50/50 delivered | 155 / 186 (first 145); 155 in call; 185.5 dropped; 24.5/50 delivered | 36.5 / 46.6 (first 30.4); 36.0 in call; 14 dropped; 50/50 delivered | 11.0 / 14.9 (first 16.1); 9.65 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: append 1,000, evict 1,000 | 21.5 / 30.0 (first 23.4); 0.72 in call; 0 dropped; 50/50 delivered | 19.8 / 28.4 (first 27.5); 0.72 in call; 0.5 dropped; 50/50 delivered | 38.3 / 40.1 (first 38.9); 37.1 in call; 19 dropped; 50/50 delivered | 29.8 / 33.5 (first 14.0); 27.4 in call; 0.5 dropped; 50/50 delivered | 6.98 / 14.8 (first 15.6); 3.14 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: append 1,000, evict 1,000, sorted | 9.99 / 19.5 (first 15.9); 5.02 in call; 0 dropped; 50/50 delivered | 10.1 / 19.7 (first 16.0); 5.01 in call; 0 dropped; 50/50 delivered | 132 / 138 (first 137); 131 in call; 154 dropped; 25/50 delivered | 31.8 / 36.0 (first 31.2); 31.3 in call; 2 dropped; 50/50 delivered | 16.4 / 17.9 (first 15.4); 15.5 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: change 100 rows, display field | 10.6 / 20.0 (first 20.4); 0.17 in call; 0 dropped; 50/50 delivered | 11.0 / 19.0 (first 21.0); 0.15 in call; 0 dropped; 50/50 delivered | 34.7 / 37.0 (first 36.6); 34.0 in call; 7 dropped; 50/50 delivered | 18.9 / 21.8 (first 13.5); 16.2 in call; 0 dropped; 50/50 delivered | 6.14 / 14.6 (first 15.8); 0.36 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: change 100 rows, sort key | 18.1 / 27.3 (first 18.2); 5.06 in call; 0.5 dropped; 50/50 delivered | 18.2 / 28.0 (first 18.6); 5.07 in call; 1 dropped; 50/50 delivered | 130 / 139 (first 135); 129 in call; 150.5 dropped; 25/50 delivered | 35.3 / 38.7 (first 37.7); 34.3 in call; 8.5 dropped; 50/50 delivered | 22.5 / 25.0 (first 15.6); 21.7 in call; 0 dropped; 50/50 delivered |
-| 100k x 20: change 100 rows, filtered field | 18.5 / 28.9 (first 23.7); 1.40 in call; 0 dropped; 50/50 delivered | 18.0 / 26.6 (first 23.1); 1.40 in call; 1 dropped; 50/50 delivered | 41.9 / 47.3 (first 47.2); 41.1 in call; 31 dropped; 50/50 delivered | 30.8 / 35.6 (first 14.4); 29.4 in call; 3 dropped; 50/50 delivered | 15.7 / 17.8 (first 15.8); 14.7 in call; 0 dropped; 50/50 delivered |
-| 1M x 20: append 1,000 rows, sorted | 31.1 / 34.8 (first 13.5); 30.6 in call; 0 dropped; 50/50 delivered | 28.8 / 33.7 (first 15.7); 27.8 in call; 0 dropped; 50/50 delivered | 2575 / 2575 (first 2569); 2573 in call; 304 dropped; 2/50 delivered; 190 ms to drain | 415 / 418 (first 414); 415 in call; 230 dropped; 10/50 delivered | 31.2 / 37.3 (first 15.8); 30.8 in call; 3 dropped; 50/50 delivered |
-| 1M x 100: append 1,000 rows, sorted | 29.7 / 33.9 (first 42.2); 28.7 in call; 0 dropped; 50/50 delivered | 29.8 / 35.9 (first 42.3); 28.9 in call; 0 dropped; 50/50 delivered | error [11] | error [12] | 31.3 / 37.2 (first 42.7); 30.9 in call; 4 dropped; 50/50 delivered |
+| 10k x 20: append 1,000 rows | 8.94 / 18.6 (first 15.3); 0.54 in call; 0 dropped; 50/50 delivered | 8.71 / 18.5 (first 17.2); 0.56 in call; 0 dropped; 50/50 delivered | 28.6 / 36.6 (first 12.1); 27.9 in call; 3 dropped; 50/50 delivered | 12.5 / 18.9 (first 16.5); 9.08 in call; 0 dropped; 50/50 delivered | 7.25 / 14.3 (first 16.0); 2.77 in call; 0 dropped; 50/50 delivered |
+| 10k x 20: append 1,000 rows, sorted | 11.3 / 20.1 (first 17.5); 2.61 in call; 0 dropped; 50/50 delivered | 11.4 / 20.0 (first 17.7); 2.68 in call; 0 dropped; 50/50 delivered | 38.3 / 62.5 (first 12.5); 37.7 in call; 30.5 dropped; 50/50 delivered | 30.6 / 38.3 (first 14.4); 29.4 in call; 2.5 dropped; 50/50 delivered | 7.78 / 15.1 (first 16.4); 5.70 in call; 0 dropped; 50/50 delivered |
+| 10k x 20: append 1,000, evict 1,000 | 20.2 / 30.6 (first 28.7); 0.66 in call; 1 dropped; 50/50 delivered | 19.9 / 30.5 (first 26.3); 0.66 in call; 0 dropped; 50/50 delivered | 26.8 / 30.0 (first 13.6); 22.6 in call; 1 dropped; 50/50 delivered | 26.7 / 29.7 (first 17.7); 22.7 in call; 0 dropped; 50/50 delivered | 7.15 / 17.1 (first 15.8); 3.10 in call; 0 dropped; 50/50 delivered |
+| 10k x 20: append 1,000, evict 1,000, sorted | 15.6 / 24.6 (first 19.7); 1.76 in call; 0 dropped; 50/50 delivered | 15.5 / 25.4 (first 18.7); 1.78 in call; 0 dropped; 50/50 delivered | 29.6 / 33.8 (first 16.5); 28.5 in call; 1.5 dropped; 50/50 delivered | 26.3 / 31.3 (first 13.7); 23.4 in call; 0 dropped; 50/50 delivered | 7.02 / 15.7 (first 15.7); 4.99 in call; 0 dropped; 50/50 delivered |
+| 10k x 20: change 100 rows, display field | 10.7 / 20.8 (first 20.7); 0.15 in call; 0 dropped; 50/50 delivered | 11.4 / 20.3 (first 16.7); 0.15 in call; 0 dropped; 50/50 delivered | 17.6 / 20.1 (first 14.1); 14.8 in call; 0 dropped; 50/50 delivered | 10.5 / 18.2 (first 18.3); 4.69 in call; 0 dropped; 50/50 delivered | 6.59 / 15.0 (first 15.7); 0.38 in call; 0 dropped; 50/50 delivered |
+| 10k x 20: change 100 rows, sort key | 20.0 / 28.9 (first 22.8); 0.76 in call; 0.5 dropped; 50/50 delivered | 19.3 / 28.9 (first 21.7); 0.74 in call; 0 dropped; 50/50 delivered | 29.5 / 33.3 (first 16.6); 27.9 in call; 0 dropped; 50/50 delivered | 25.0 / 26.6 (first 12.5); 21.3 in call; 0 dropped; 50/50 delivered | 7.72 / 14.9 (first 16.0); 6.05 in call; 0 dropped; 50/50 delivered |
+| 10k x 20: change 100 rows, filtered field | 18.1 / 28.4 (first 28.4); 0.43 in call; 0 dropped; 50/50 delivered | 18.2 / 28.6 (first 27.6); 0.44 in call; 0.5 dropped; 50/50 delivered | 23.7 / 26.4 (first 16.4); 20.8 in call; 0 dropped; 50/50 delivered | 20.5 / 22.9 (first 8.06); 16.7 in call; 0 dropped; 50/50 delivered | 6.53 / 15.3 (first 17.0); 4.53 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: append 1,000 rows | 9.75 / 17.6 (first 18.8); 0.63 in call; 0 dropped; 50/50 delivered | 9.82 / 19.9 (first 18.6); 0.61 in call; 0 dropped; 50/50 delivered | 44.9 / 51.6 (first 37.1); 44.4 in call; 38.5 dropped; 50/50 delivered | 22.2 / 25.5 (first 12.0); 19.7 in call; 0 dropped; 50/50 delivered | 6.65 / 14.3 (first 15.8); 2.85 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: append 1,000 rows, sorted | 10.2 / 18.8 (first 15.3); 5.54 in call; 0 dropped; 50/50 delivered | 10.2 / 17.9 (first 14.1); 5.73 in call; 0 dropped; 50/50 delivered | 155 / 184 (first 145); 154 in call; 189 dropped; 25/50 delivered | 38.4 / 47.4 (first 30.6); 37.8 in call; 20.5 dropped; 50/50 delivered | 11.0 / 14.8 (first 15.6); 9.56 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: append 1,000, evict 1,000 | 18.3 / 28.4 (first 25.2); 0.69 in call; 0 dropped; 50/50 delivered | 20.4 / 30.5 (first 26.7); 0.73 in call; 0 dropped; 50/50 delivered | 38.9 / 40.8 (first 39.9); 37.7 in call; 20.5 dropped; 50/50 delivered | 29.9 / 34.2 (first 13.7); 27.5 in call; 0.5 dropped; 50/50 delivered | 7.09 / 16.0 (first 16.4); 3.12 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: append 1,000, evict 1,000, sorted | 10.2 / 20.3 (first 16.2); 5.14 in call; 0 dropped; 50/50 delivered | 9.28 / 19.0 (first 15.5); 5.04 in call; 0 dropped; 50/50 delivered | 132 / 145 (first 142); 131 in call; 151 dropped; 25/50 delivered | 32.0 / 36.5 (first 31.3); 31.4 in call; 1.5 dropped; 50/50 delivered | 16.4 / 18.7 (first 15.6); 15.7 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: change 100 rows, display field | 10.2 / 18.3 (first 20.2); 0.18 in call; 0 dropped; 50/50 delivered | 10.6 / 21.3 (first 19.9); 0.15 in call; 0 dropped; 50/50 delivered | 34.2 / 37.0 (first 36.4); 33.6 in call; 5 dropped; 50/50 delivered | 18.8 / 22.3 (first 15.3); 16.1 in call; 0.5 dropped; 50/50 delivered | 7.02 / 17.0 (first 15.6); 0.35 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: change 100 rows, sort key | 18.6 / 27.8 (first 18.3); 5.06 in call; 0 dropped; 50/50 delivered | 18.6 / 28.6 (first 18.5); 5.08 in call; 0.5 dropped; 50/50 delivered | 130 / 136 (first 136); 128 in call; 147.5 dropped; 25/50 delivered | 35.5 / 38.4 (first 37.4); 34.5 in call; 11.5 dropped; 50/50 delivered | 22.2 / 25.6 (first 15.5); 21.5 in call; 0 dropped; 50/50 delivered |
+| 100k x 20: change 100 rows, filtered field | 17.9 / 27.0 (first 23.8); 1.40 in call; 0 dropped; 50/50 delivered | 17.6 / 26.6 (first 24.0); 1.40 in call; 0 dropped; 50/50 delivered | 42.4 / 46.0 (first 45.7); 41.6 in call; 32.5 dropped; 50/50 delivered | 30.4 / 36.6 (first 15.8); 28.9 in call; 1.5 dropped; 50/50 delivered | 15.9 / 18.1 (first 17.0); 14.9 in call; 0 dropped; 50/50 delivered |
+| 1M x 20: append 1,000 rows, sorted | 28.6 / 33.1 (first 13.8); 27.7 in call; 0 dropped; 50/50 delivered | 29.0 / 33.4 (first 15.7); 28.1 in call; 0 dropped; 50/50 delivered | 2578 / 2578 (first 2580); 2577 in call; 306 dropped; 2/50 delivered; 194 ms to drain | 416 / 421 (first 419); 415 in call; 252 dropped; 11/50 delivered; 330 ms to drain | 31.0 / 35.3 (first 15.8); 30.7 in call; 2 dropped; 50/50 delivered |
+| 1M x 100: append 1,000 rows, sorted | 29.8 / 34.8 (first 42.0); 28.8 in call; 1 dropped; 50/50 delivered | 29.5 / 33.1 (first 42.8); 28.6 in call; 0 dropped; 50/50 delivered | error [11] | error [12] | 31.7 / 35.8 (first 42.8); 31.4 in call; 4 dropped; 50/50 delivered |
 
 | Memory with the grid mounted (retained heap, and growth of the reserved heap while mounting; native input; DOM nodes; canvas) | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 10k x 20: mounted | 2.2 MB (reserved +4.3); input 0.0 MB; 461 nodes | 2.1 MB (reserved +4.3); input 0.0 MB; 462 nodes | 8.5 MB (reserved +18); input 6.2 MB; 500 nodes | 7.8 MB (reserved +16); input 6.2 MB; 744 nodes | 1.5 MB (reserved +3.1); input 0.0 MB; 12 nodes; canvas 3.0 MB |
-| 100k x 20: mounted | 2.2 MB (reserved +4.5); input 0.0 MB; 461 nodes | 2.1 MB (reserved +4.5); input 0.0 MB; 462 nodes | 54 MB (reserved +136); input 62 MB; 500 nodes | 27 MB (reserved +59); input 62 MB; 744 nodes | 1.5 MB (reserved +3.1); input 0.0 MB; 12 nodes; canvas 3.0 MB |
-| 1M x 20: mounted | 2.2 MB (reserved +4.3); input 0.0 MB; 461 nodes | 2.3 MB (reserved +4.5); input 0.0 MB; 462 nodes | 515 MB (reserved +784); input 621 MB; 500 nodes | 224 MB (reserved +307); input 621 MB; 744 nodes | 1.5 MB (reserved +3.4); input 0.0 MB; 17 nodes; canvas 3.0 MB |
+| 100k x 20: mounted | 2.0 MB (reserved +4.5); input 0.0 MB; 461 nodes | 2.1 MB (reserved +4.3); input 0.0 MB; 462 nodes | 54 MB (reserved +136); input 62 MB; 500 nodes | 27 MB (reserved +60); input 62 MB; 744 nodes | 1.5 MB (reserved +3.1); input 0.0 MB; 12 nodes; canvas 3.0 MB |
+| 1M x 20: mounted | 2.2 MB (reserved +4.3); input 0.0 MB; 461 nodes | 2.2 MB (reserved +4.5); input 0.0 MB; 462 nodes | 515 MB (reserved +785); input 621 MB; 500 nodes | 224 MB (reserved +301); input 621 MB; 744 nodes | 1.5 MB (reserved +3.6); input 0.0 MB; 17 nodes; canvas 3.0 MB |
 | 1M x 100: mounted | 2.2 MB (reserved +4.8); input 0.1 MB; 461 nodes | 2.3 MB (reserved +4.8); input 0.1 MB; 462 nodes | error [13] | error [14] | 1.5 MB (reserved +3.1); input 0.0 MB; 17 nodes; canvas 3.0 MB |
+
+| Process memory from mounting the grid (renderer footprint, median ± MAD; GPU memory Chrome attributes to the page; GPU process footprint, median ± MAD) | herceg | herceg-react | tanstack-table | ag-grid | glide |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10k x 20: mounted | 7.9 ± 0.3 MB renderer, 13 MB GPU; GPU process 7.4 ± 0.4 MB | 7.2 ± 0.6 MB renderer, 13 MB GPU; GPU process 4.4 ± 4.8 MB | 17 ± 0.7 MB renderer, 13 MB GPU; GPU process 14 ± 1.6 MB | 15 ± 0.1 MB renderer, 13 MB GPU; GPU process 10 ± 7.3 MB | 5.7 ± 0.2 MB renderer, 3.0 MB GPU; GPU process -1.7 ± 5.5 MB |
+| 100k x 20: mounted | 6.8 ± 0.3 MB renderer, 13 MB GPU; GPU process 19 ± 2.2 MB | 6.7 ± 0.5 MB renderer, 13 MB GPU; GPU process 7.0 ± 3.5 MB | 70 ± 0.3 MB renderer, 13 MB GPU; GPU process 16 ± 3.5 MB | 37 ± 1.3 MB renderer, 13 MB GPU; GPU process 13 ± 0.8 MB | 4.5 ± 0.3 MB renderer, 3.0 MB GPU; GPU process -1.7 ± 3.8 MB |
+| 1M x 20: mounted | 6.1 ± 0.0 MB renderer, 13 MB GPU; GPU process 65 ± 0.0 MB | 6.1 ± 0.0 MB renderer, 13 MB GPU; GPU process 22 ± 0.0 MB | 670 ± 0.0 MB renderer, 13 MB GPU; GPU process 23 ± 0.0 MB | 250 ± 0.0 MB renderer, 13 MB GPU; GPU process 14 ± 0.0 MB | 3.9 ± 0.0 MB renderer, 3.0 MB GPU; GPU process 34 ± 0.0 MB |
+| 1M x 100: mounted | 8.7 ± 0.0 MB renderer, 13 MB GPU; GPU process 19 ± 0.0 MB | 4.9 ± 0.0 MB renderer, 13 MB GPU; GPU process 23 ± 0.0 MB | error [13] | error [14] | 5.9 ± 0.0 MB renderer, 3.0 MB GPU; GPU process 4.9 ± 0.0 MB |
 
 | Heap kept 1 s after destroying the grid (after one mount / after five more); growth per further mount; kept after releasing the data too | herceg | herceg-react | tanstack-table | ag-grid | glide |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10k x 20: destroy and remount | 0.7 / 0.7 MB; 0.0 MB per mount; 0.9 MB after release | 0.7 / 1.0 MB; 0.0 MB per mount; 1.3 MB after release | 1.2 / 6.6 MB; 0.0 MB per mount; 13 MB after release | 2.3 / 2.6 MB; 0.1 MB per mount; 3.2 MB after release | 1.8 / 2.1 MB; 0.0 MB per mount; 3.9 MB after release |
+| 10k x 20: destroy and remount | 0.7 / 0.7 MB; 0.0 MB per mount; 0.9 MB after release | 0.7 / 1.0 MB; 0.0 MB per mount; 1.3 MB after release | 1.2 / 6.6 MB; 0.0 MB per mount; 13 MB after release | 2.3 / 2.6 MB; 0.1 MB per mount; 3.2 MB after release | 1.8 / 2.1 MB; 0.0 MB per mount; 3.6 MB after release |
 | 100k x 20: destroy and remount | 0.7 / 0.7 MB; 0.0 MB per mount; 0.9 MB after release | 0.7 / 1.0 MB; 0.0 MB per mount; 1.3 MB after release | 1.2 / 51 MB; 0.0 MB per mount; 113 MB after release | 2.3 / 2.6 MB; 0.1 MB per mount; 3.2 MB after release | 2.2 / 2.1 MB; 0.0 MB per mount; 18 MB after release |
 | 1M x 20: destroy and remount | 0.7 / 0.7 MB; 0.0 MB per mount; 0.9 MB after release | 0.7 / 1.0 MB; 0.0 MB per mount; 1.3 MB after release | 1.2 / 493 MB; 0.0 MB per mount; 1115 MB after release | 2.3 / 2.6 MB; 0.1 MB per mount; 3.2 MB after release | 5.8 / 2.1 MB; 0.0 MB per mount; 154 MB after release |
 | 1M x 100: destroy and remount | 0.7 / 0.7 MB; 0.0 MB per mount; 0.9 MB after release | 0.7 / 1.0 MB; 0.0 MB per mount; 1.4 MB after release | error [13] | error [14] | 5.8 / 2.2 MB; 0.0 MB per mount; 762 MB after release |
@@ -817,11 +888,15 @@ Enterprise).
 - **Data held twice.** TanStack Table and AG Grid need one object per row: at
   100k x 20 converting the columns takes ~40 ms and ~62 MB, and at 1M x 20
   ~0.4–0.7 s and ~620 MB. With the grid mounted they keep ~54 MB (TanStack)
-  and ~27 MB (AG Grid) more at 100k rows, ~0.5 GB and ~0.2 GB at 1M. At
-  1M x 100 their tabs crash. Herceg (its table adopts the typed columns) and
-  Glide (reading them through a callback) mount every size in ~2–3.5 ms from
-  their native input and keep ~2 MB; from the shared columns Herceg takes
-  ~4–8 ms at 1M rows, where building its table checks every category code.
+  and ~27 MB (AG Grid) more heap at 100k rows, ~0.5 GB and ~0.2 GB at 1M;
+  counted as the renderer's growth while mounting, ~70 and ~37 MB at 100k
+  and ~670 and ~250 MB at 1M. At 1M x 100 their tabs crash. Herceg (its
+  table adopts the typed columns) and Glide (reading them through a
+  callback) mount every size in ~2–3.5 ms from their native input and keep
+  ~2 MB of heap, with renderer growth of ~6–9 MB and ~4–6 MB; from the
+  shared columns Herceg takes ~4–8 ms at 1M rows, where building its table
+  checks every category code. On the GPU the DOM grids have ~13 MB of
+  compositor tiles and Glide ~3 MB of canvas.
 - **Sorting and filtering.** Herceg sorts 100k rows by a number in ~16 ms to
   the correct frame and 1M in ~0.16–0.17 s, against ~80 ms and ~1.5 s
   for TanStack Table and AG Grid, whose comparators read row objects. Glide over
@@ -876,82 +951,85 @@ from the operation to the next frame, including the wait for it: operations
 start wherever in a frame they are issued (pointer moves from the event), and
 differences smaller than a frame (the idle cadence below) are noise. Compare
 libraries within these tables, not with the Chrome tables above, which
-disable the frame rate limit. Memory is not measured (it needs Chrome's
-DevTools protocol), nor are long frames.
+disable the frame rate limit. Times to WebGL drawing finished are taken as
+in Chrome, and wait for a frame too, so they move with frame alignment
+(Plotly's 10M-point zoom: ~16 ms to the frame, ~19 ms to its drawing
+finished). Memory, heap or process, is not measured (both need Chrome's
+DevTools protocol; see `benchmarks/README.md`), nor are long frames.
 
 <!-- results:webkit -->
-- Date: 2026-10-26, commit d42d5d65
+- Date: 2026-10-27, commit 31ab2257
 - Machine: Apple M6, 12 cores, 32 GB, Darwin 27.0.0
 - Browser: WebKit 26.6 through Playwright 1.63.0 (webkit revision 2359), GPU Apple GPU, headless, idle frames every 16.7 ms
 - Viewport 1280x1400, device pixel ratio 2
-- Libraries: herceg 0.0.0 (d42d5d65), echarts 6.1.0, chartjs 4.5.1, plotly 4.1.2, tanstack 1.0.0, uplot 1.6.32
+- Libraries: herceg 0.0.0 (31ab2257), echarts 6.1.0, chartjs 4.5.1, plotly 4.1.2, tanstack 1.0.0, uplot 1.6.32
 - Renderers (normal / large config): herceg: auto (svg below 4,000 drawn points, canvas above; 3D charts on WebGL from 20,000 points or 10,000 surface cells) / auto; echarts: canvas / canvas (sampling: minmax, large: true); chartjs: canvas / canvas (parsing: false, min-max decimation); plotly: svg / webgl (scattergl); tanstack: svg / canvas (mountCanvasChart); uplot: canvas / canvas
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| line-small-init (4 series x 200 points) | 17.5 ± 0.17 | 14.4 ± 0.98 | 14.1 ± 0.19 | 16.9 ± 0.13 | 16.8 ± 0.08 | 16.9 ± 0.10 |
-| line-medium-init (10 series x 5,000 points) | 16.8 ± 0.05 | 15.3 ± 0.32 | 15.3 ± 0.20 | 30.8 ± 0.12 | 32.3 ± 0.43 | 16.8 ± 0.02 |
-| line-large-init (1 series x 1,000,000 points) | 16.7 ± 0.12 | 75.3 ± 2.84 | 16.6 ± 0.08 | 308 ± 16.3 | 601 ± 44.2 | 16.3 ± 0.38 |
-| area-medium-init (3 filled series x 5,000 points) | 16.9 ± 0.12 | 16.7 ± 0.05 | 15.4 ± 0.20 | 17.4 ± 0.02 | 17.0 ± 0.25 | 16.7 ± 0.11 |
-| bar-small-init (12 categories x 3 series) | 17.2 ± 0.21 | 15.3 ± 1.18 | 14.5 ± 0.55 | 16.7 ± 0.10 | 16.8 ± 0.08 | n/a |
-| bar-medium-init (100 categories x 4 series) | 17.2 ± 0.18 | 16.7 ± 0.24 | 15.7 ± 0.13 | 16.9 ± 0.04 | 16.8 ± 0.14 | n/a |
-| scatter-medium-init (10,000 points) | 16.8 ± 0.01 | 400 ± 0.97 (first frame 18.5) | 15.7 ± 0.10 | 67.2 ± 2.17 | 32.9 ± 0.59 | n/a |
-| scatter-large-init (200,000 points) | 17.2 ± 0.32 | 115 ± 16.0 (first frame 24.8) | 53.2 ± 1.10 | 41.6 ± 1.76 | 206 ± 8.52 | n/a |
-| heatmap-medium-init (100 x 100 cells) | 16.9 ± 0.05 | 394 ± 18.0 (first frame 16.9) | n/a | 16.7 ± 0.05 | 44.7 ± 2.55 | n/a |
-| heatmap-large-init (500 x 500 cells) | 16.8 ± 0.22 | 11212 ± 76.4 (first frame 45.7) | n/a | 112 ± 1.82 | 343 ± 8.72 | n/a |
-| candlestick-small-init (200 candles, each drawn by every library) | 17.4 ± 0.20 | 15.2 ± 0.21 | n/a | 17.3 ± 0.10 | n/a | n/a |
-| candlestick-large-init (100,000 candles; each library's large-data strategy) | 17.1 ± 0.06 | 199 ± 36.3 (first frame 37.5) | n/a | 844 ± 16.4 | n/a | n/a |
-| bubble-medium-init (10,000 points sized and colored by two fields) | 16.8 ± 0.05 | 406 ± 8.37 (first frame 18.1) | 49.0 ± 0.61 | 83.5 ± 1.90 | n/a | n/a |
-| histogram-medium-init (10,000 values in bins 5 wide from 25, x from 25 to 175) | 16.8 ± 0.35 | n/a | n/a | 16.8 ± 0.02 | n/a | n/a |
-| histogram-large-init (1,000,000 values in bins 5 wide from 25, x from 25 to 175) | 17.0 ± 0.40 | n/a | n/a | 64.9 ± 1.82 | n/a | n/a |
-| line-massive-init (1 series x 10,000,000 points) | 16.9 ± 0.20 | 761 ± 18.2 | 75.3 ± 2.48 | 2735 ± 22.3 | 11326 ± 2718 | 61.4 ± 0.92 |
-| scatter-massive-init (1,000,000 points) | 17.2 ± 0.08 | 367 ± 0.78 (first frame 77.4) | 327 ± 3.92 | 161 ± 5.00 | 1077 ± 43.1 | n/a |
+| line-small-init (4 series x 200 points) | 17.2 ± 0.37 | 16.6 ± 0.10 | 14.5 ± 0.20 | 16.8 ± 0.17 | 16.8 ± 0.10 | 16.8 ± 0.15 |
+| line-medium-init (10 series x 5,000 points) | 16.8 ± 0.07 | 15.5 ± 0.07 | 15.1 ± 0.15 | 30.8 ± 0.23 | 32.2 ± 0.30 | 16.8 ± 0.03 |
+| line-large-init (1 series x 1,000,000 points) | 16.8 ± 0.04 | 75.5 ± 0.96 | 12.4 ± 0.10 | 327 ± 7.34 | 601 ± 32.7 | 16.7 ± 0.06 |
+| area-medium-init (3 filled series x 5,000 points) | 16.8 ± 0.17 | 15.5 ± 0.14 | 15.5 ± 0.25 | 17.3 ± 0.02 | 17.2 ± 0.11 | 16.7 ± 0.12 |
+| bar-small-init (12 categories x 3 series) | 17.3 ± 0.13 | 15.3 ± 1.33 | 14.2 ± 0.27 | 16.8 ± 0.34 | 16.8 ± 0.10 | n/a |
+| bar-medium-init (100 categories x 4 series) | 17.2 ± 0.23 | 16.6 ± 0.11 | 15.7 ± 0.12 | 16.9 ± 0.04 | 16.9 ± 0.21 | n/a |
+| scatter-medium-init (10,000 points) | 16.8 ± 0.03 | 416 ± 0.25 (first frame 18.3) | 15.6 ± 0.17 | 67.3 ± 1.88 | 32.7 ± 0.54 | n/a |
+| scatter-large-init (200,000 points) | 17.0 ± 0.32 | 132 ± 16.4 (first frame 22.4) | 53.0 ± 1.16 | 41.4 ± 4.78 | 215 ± 10.9 | n/a |
+| heatmap-medium-init (100 x 100 cells) | 16.8 ± 0.17 | 407 ± 7.22 (first frame 17.4) | n/a | 16.7 ± 0.03 | 40.2 ± 0.65 | n/a |
+| heatmap-large-init (500 x 500 cells) | 16.8 ± 0.28 | 10792 ± 62.9 (first frame 44.9) | n/a | 107 ± 0.18 | 340 ± 13.1 | n/a |
+| candlestick-small-init (200 candles, each drawn by every library) | 17.2 ± 0.28 | 15.2 ± 0.20 | n/a | 17.4 ± 0.19 | n/a | n/a |
+| candlestick-large-init (100,000 candles; each library's large-data strategy) | 17.1 ± 0.24 | 200 ± 1.22 (first frame 50.8) | n/a | 840 ± 10.8 | n/a | n/a |
+| bubble-medium-init (10,000 points sized and colored by two fields) | 16.8 ± 0.04 | 415 ± 0.27 (first frame 17.2) | 45.9 ± 0.49 | 84.3 ± 0.64 | n/a | n/a |
+| histogram-medium-init (10,000 values in bins 5 wide from 25, x from 25 to 175) | 16.8 ± 0.28 | n/a | n/a | 16.8 ± 0.11 | n/a | n/a |
+| histogram-large-init (1,000,000 values in bins 5 wide from 25, x from 25 to 175) | 17.1 ± 0.18 | n/a | n/a | 64.6 ± 2.04 | n/a | n/a |
+| line-massive-init (1 series x 10,000,000 points) | 17.6 ± 1.12 | 738 ± 14.8 | 97.2 ± 24.4 | 3231 ± 84.4 | 9815 ± 1142 | 64.5 ± 0.80 |
+| scatter-massive-init (1,000,000 points) | 16.9 ± 0.24 | 383 ± 17.1 (first frame 75.4) | 325 ± 2.46 | 163 ± 3.20 | 1056 ± 34.3 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| line-medium-update (replace 10 x 5,000 points) | 16.7 ± 0.25 | 16.6 ± 0.04 | 16.7 ± 0.02 | 29.7 ± 0.64 | 31.7 ± 3.25 | 16.6 ± 0.07 |
-| line-large-update (replace 1,000,000 points) | 16.5 ± 0.12 | 92.5 ± 5.64 | 16.4 ± 3.80 | 337 ± 4.92 | 590 ± 20.2 | 16.6 ± 0.04 |
-| bar-medium-update (replace 100 x 4 bars) | 16.7 ± 0.27 | 16.7 ± 0.06 | 16.6 ± 0.10 | 16.6 ± 0.10 | 16.7 ± 0.09 | n/a |
-| scatter-medium-update (replace 10,000 points) | 16.7 ± 0.17 | 400 ± 0.67 (first frame 20.1) | 16.7 ± 0.28 | 60.5 ± 0.27 | 50.3 ± 3.71 | n/a |
-| heatmap-medium-update (replace 100 x 100 cells) | 16.8 ± 1.00 | 400 ± 0.15 (first frame 18.6) | n/a | 16.6 ± 0.07 | 54.6 ± 3.11 | n/a |
+| line-medium-update (replace 10 x 5,000 points) | 16.8 ± 0.25 | 16.7 ± 0.04 | 16.7 ± 0.03 | 31.4 ± 1.00 | 30.6 ± 3.85 | 16.7 ± 0.06 |
+| line-large-update (replace 1,000,000 points) | 16.5 ± 0.46 | 89.8 ± 1.62 | 16.5 ± 4.56 | 341 ± 4.72 | 584 ± 14.9 | 16.5 ± 0.12 |
+| bar-medium-update (replace 100 x 4 bars) | 16.7 ± 0.34 | 16.7 ± 0.06 | 16.6 ± 0.12 | 16.6 ± 0.05 | 16.7 ± 0.09 | n/a |
+| scatter-medium-update (replace 10,000 points) | 16.6 ± 0.29 | 417 ± 0.05 (first frame 18.8) | 16.7 ± 0.05 | 61.0 ± 0.47 | 49.1 ± 1.60 | n/a |
+| heatmap-medium-update (replace 100 x 100 cells) | 16.7 ± 0.31 | 416 ± 0.46 (first frame 18.4) | n/a | 16.6 ± 0.16 | 57.5 ± 0.93 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 16.7 ± 0.35 | 16.7 ± 0.06 | 16.6 ± 0.10 | 29.5 ± 2.24 | 27.1 ± 2.67 | 16.7 ± 0.10 |
-| stream-large (1 series, 100,000-point window, +100 points per tick) | 16.6 ± 0.28 | 16.7 ± 0.03 | 16.7 ± 0.16 | 35.5 ± 0.68 | 51.2 ± 2.02 | 16.6 ± 0.12 |
-| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 16.7 ± 0.48 | 112 ± 2.95 | 16.6 ± 0.09 | 339 ± 4.93 | 644 ± 27.7 | 16.7 ± 0.04 |
+| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 16.7 ± 0.35 | 16.7 ± 0.06 | 16.7 ± 0.11 | 29.3 ± 1.95 | 27.0 ± 3.22 | 16.7 ± 0.13 |
+| stream-large (1 series, 100,000-point window, +100 points per tick) | 16.6 ± 0.30 | 16.6 ± 0.06 | 16.7 ± 0.16 | 39.2 ± 0.88; WebGL done 40.7 ± 0.58 | 50.3 ± 1.71 | 16.6 ± 0.19 |
+| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 16.6 ± 0.55 | 111 ± 2.92 | 16.6 ± 0.10 | 340 ± 4.73; WebGL done 352 ± 4.43 | 617 ± 22.5 | 16.7 ± 0.04 |
 
 | Scenario (frame interval p50 / p95 / p99, dropped frames, achieved ingest rate) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 16.7 / 17.4 / 18.1 ms, 0 dropped, 9 Hz | 16.7 / 39.0 / 44.2 ms, 55.5 dropped, 9 Hz | 16.7 / 28.4 / 33.7 ms, 25 dropped, 9 Hz | 16.7 / 40.7 / 46.2 ms, 62 dropped, 9 Hz | 16.7 / 39.6 / 44.8 ms, 60 dropped, 9 Hz | 16.7 / 23.5 / 28.7 ms, 10 dropped, 9 Hz |
-| ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 16.7 / 17.3 / 17.7 ms, 0 dropped, 50 Hz | 16.7 / 20.3 / 21.1 ms, 1 dropped, 50 Hz | 16.7 / 20.3 / 21.1 ms, 1 dropped, 50 Hz | 25.4 / 28.9 / 29.9 ms, 141 dropped, 39 Hz | 24.3 / 27.3 / 31.3 ms, 58 dropped, 40 Hz | 16.7 / 20.0 / 20.6 ms, 0 dropped, 50 Hz |
-| ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 16.7 / 17.5 / 17.7 ms, 0 dropped, 72 Hz | 16.3 / 22.1 / 22.5 ms, 0.5 dropped, 83 Hz | 16.7 / 20.8 / 21.4 ms, 0.5 dropped, 83 Hz | 25.6 / 29.7 / 30.5 ms, 148 dropped, 38 Hz | 24.2 / 27.4 / 29.0 ms, 62.5 dropped, 40 Hz | 16.7 / 20.2 / 21.1 ms, 0.5 dropped, 83 Hz |
-| ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 16.7 / 17.7 / 17.8 ms, 0 dropped, 78 Hz | 12.1 / 36.5 / 37.3 ms, 41.5 dropped, 82 Hz | 16.7 / 20.1 / 21.3 ms, 0 dropped, 83 Hz | 33.6 / 37.7 / 39.6 ms, 149 dropped, 29 Hz | 93.8 / 99.4 / 102 ms, 256 dropped, 21 Hz | 16.7 / 20.7 / 21.2 ms, 0 dropped, 83 Hz |
-| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 16.7 / 37.0 / 39.6 ms, 50 dropped, 9 Hz | 16.6 / 66.2 / 70.2 ms, 132 dropped, 9 Hz | 16.7 / 44.0 / 48.5 ms, 71 dropped, 9 Hz | 233 / 243 / 246 ms, 275 dropped, 4 Hz | 259 / 393 / 465 ms, 279 dropped, 4 Hz | 16.7 / 42.6 / 47.7 ms, 66 dropped, 9 Hz |
+| ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 16.7 / 17.3 / 18.1 ms, 0 dropped, 9 Hz | 16.7 / 39.1 / 45.0 ms, 56.5 dropped, 9 Hz | 16.7 / 29.1 / 33.6 ms, 22 dropped, 9 Hz | 16.7 / 40.6 / 46.3 ms, 61 dropped, 9 Hz | 16.7 / 41.1 / 45.0 ms, 63 dropped, 9 Hz | 16.7 / 22.6 / 28.3 ms, 10.5 dropped, 9 Hz |
+| ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 16.7 / 17.3 / 17.6 ms, 0 dropped, 50 Hz | 16.7 / 20.2 / 20.9 ms, 1 dropped, 50 Hz | 16.7 / 20.3 / 21.1 ms, 0.5 dropped, 50 Hz | 25.4 / 28.9 / 29.8 ms, 131.5 dropped, 39 Hz | 24.4 / 27.7 / 31.0 ms, 63 dropped, 40 Hz | 16.7 / 20.1 / 20.8 ms, 0 dropped, 50 Hz |
+| ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 16.7 / 17.7 / 17.7 ms, 0 dropped, 73 Hz | 16.5 / 21.9 / 22.5 ms, 0.5 dropped, 83 Hz | 16.7 / 21.0 / 21.7 ms, 0.5 dropped, 83 Hz | 25.1 / 29.0 / 29.6 ms, 112.5 dropped, 39 Hz | 24.4 / 27.5 / 30.1 ms, 63.5 dropped, 40 Hz | 16.7 / 20.4 / 21.2 ms, 0 dropped, 83 Hz |
+| ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 16.7 / 17.5 / 17.7 ms, 0 dropped, 77 Hz | 12.2 / 27.0 / 36.6 ms, 22.5 dropped, 82 Hz | 16.7 / 20.6 / 21.6 ms, 0 dropped, 83 Hz | 33.8 / 37.7 / 39.4 ms, 148.5 dropped, 29 Hz | 94.2 / 101 / 104 ms, 253.5 dropped, 21 Hz | 16.7 / 20.6 / 21.3 ms, 0 dropped, 83 Hz |
+| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 16.7 / 37.6 / 40.7 ms, 50 dropped, 9 Hz | 16.6 / 64.2 / 67.3 ms, 127.5 dropped, 9 Hz | 16.7 / 43.6 / 48.4 ms, 68.5 dropped, 9 Hz | 235 / 244 / 245 ms, 276.5 dropped, 4 Hz | 259 / 373 / 443 ms, 290 dropped, 4 Hz | 16.7 / 43.9 / 49.1 ms, 69 dropped, 9 Hz |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| hover-line-medium (pointer moves over 10 x 5,000 points) | 4.04 ± 0.45 | 13.9 ± 0.93 | 6.76 ± 0.27 | 14.8 ± 0.42 | 16.8 ± 1.95 | 3.67 ± 0.20 |
-| hover-line-large (pointer moves over 1,000,000 points) | 2.83 ± 0.35 | 9.15 ± 0.41 | 3.03 ± 0.32 | 454 ± 190 | 84.6 ± 2.81 | 3.39 ± 0.29 |
-| hover-scatter-medium (pointer moves over 10,000 points) | 3.58 ± 0.23 | 25.9 ± 1.39 | 9.36 ± 0.21 | 8.89 ± 0.66 | 15.1 ± 0.60 | n/a |
+| hover-line-medium (pointer moves over 10 x 5,000 points) | 4.01 ± 0.54 | 13.9 ± 1.12 | 6.67 ± 0.39 | 14.8 ± 0.33 | 16.8 ± 1.62 | 4.70 ± 0.37 |
+| hover-line-large (pointer moves over 1,000,000 points) | 3.94 ± 0.30 | 8.81 ± 0.30 | 3.02 ± 0.21 | 455 ± 190; WebGL done 456 ± 190 | 85.4 ± 3.66 | 2.92 ± 0.15 |
+| hover-scatter-medium (pointer moves over 10,000 points) | 3.54 ± 0.24 | 25.8 ± 1.58 | 9.26 ± 0.22 | 8.96 ± 0.49 | 14.8 ± 0.60 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 16.5 ± 0.95 | 16.7 ± 0.07 | 16.7 ± 0.07 | 16.7 ± 0.10 | 53.7 ± 45.8 | 16.6 ± 0.17 |
-| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 16.3 ± 0.46 | 16.6 ± 0.24 | 16.7 ± 3.12 | 17.4 ± 1.62 | 660 ± 605 | 13.3 ± 6.64 |
-| zoom-scatter-massive (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 16.9 ± 0.46 | 84.1 ± 65.0 | 131 ± 12.4 | 16.6 ± 0.08 | 178 ± 72.5 | n/a |
+| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 16.5 ± 1.07 | 16.7 ± 0.17 | 16.6 ± 0.09 | 16.6 ± 0.10; WebGL done 16.3 ± 2.16 | 55.3 ± 47.3 | 16.7 ± 0.08 |
+| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 16.4 ± 1.12 | 16.5 ± 0.50 | 16.6 ± 3.48 | 15.8 ± 2.86; WebGL done 19.4 ± 6.02 | 650 ± 588 | 11.5 ± 4.44 |
+| zoom-scatter-massive (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 16.7 ± 0.36; WebGL done 16.3 ± 1.90 | 100.0 ± 80.9 | 140 ± 21.7 | 16.6 ± 0.10; WebGL done 14.6 ± 3.44 | 177 ± 63.8 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| resize-line-medium (resize 800x400 <-> 600x300) | 16.7 ± 0.50 | 17.0 ± 0.50 | 16.6 ± 0.35 | 17.7 ± 1.29 | 31.3 ± 2.83 | 16.7 ± 0.12 |
+| resize-line-medium (resize 800x400 <-> 600x300) | 16.7 ± 0.67 | 16.6 ± 0.61 | 16.7 ± 0.34 | 18.1 ± 1.18 | 31.8 ± 2.55 | 16.6 ± 0.08 |
 
 | Mount all charts (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dashboard (10 charts x 15 series x 3,000 points) | 32.7 ± 1.26 | 56.4 ± 3.96 | 37.3 ± 2.98 | 237 ± 5.42 | 245 ± 7.64 | 27.3 ± 0.28 |
+| dashboard (10 charts x 15 series x 3,000 points) | 30.4 ± 0.16 | 59.1 ± 3.46 | 36.7 ± 2.60 | 241 ± 6.48 | 261 ± 5.90 | 26.9 ± 0.68 |
 
 | Refresh all charts (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dashboard (10 charts x 15 series x 3,000 points) | 22.9 ± 0.96 | 59.9 ± 4.82 | 36.6 ± 0.50 | 262 ± 11.7 | 284 ± 24.5 | 20.3 ± 0.40 |
+| dashboard (10 charts x 15 series x 3,000 points) | 22.9 ± 0.72 | 62.4 ± 5.72 | 36.4 ± 1.00 | 239 ± 3.52 | 291 ± 23.7 | 20.5 ± 0.30 |
 <!-- /results:webkit -->
 
 ## Firefox
@@ -961,83 +1039,84 @@ The same suite in Firefox, through Playwright's Firefox build
 itself). Latency scenarios run with `layout.frame_rate` 0, so frames are not
 held to the display, and paced ingestion runs in a second Firefox at the
 default frame rate. Firefox has neither `performance.memory` nor Chrome's heap
-measurement, so memory scenarios are omitted (the JSON's `method.memory` says
-why), and it reports no long animation frames, so ingestion results omit
-`longFrames`. Compare libraries within these tables rather than with Chrome's.
+and process measurements, so memory scenarios are omitted (the JSON's
+`method.memory` and `method.processMemory` say why), and it reports no long
+animation frames, so ingestion results omit `longFrames`. Compare libraries
+within these tables rather than with Chrome's.
 
 <!-- results:firefox -->
-- Date: 2026-10-26, commit d42d5d65
+- Date: 2026-10-27, commit 31ab2257
 - Machine: Apple M6, 12 cores, 32 GB, Darwin 27.0.0
 - Browser: Firefox 155.0 through Playwright 1.63.0 (firefox revision 1543), GPU Apple M1, or similar, headed, idle frames every 0.00 ms
 - Viewport 1280x1400, device pixel ratio 2
-- Libraries: herceg 0.0.0 (d42d5d65), echarts 6.1.0, chartjs 4.5.1, plotly 4.1.2, tanstack 1.0.0, uplot 1.6.32
+- Libraries: herceg 0.0.0 (31ab2257), echarts 6.1.0, chartjs 4.5.1, plotly 4.1.2, tanstack 1.0.0, uplot 1.6.32
 - Renderers (normal / large config): herceg: auto (svg below 4,000 drawn points, canvas above; 3D charts on WebGL from 20,000 points or 10,000 surface cells) / auto; echarts: canvas / canvas (sampling: minmax, large: true); chartjs: canvas / canvas (parsing: false, min-max decimation); plotly: svg / webgl (scattergl); tanstack: svg / canvas (mountCanvasChart); uplot: canvas / canvas
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| line-small-init (4 series x 200 points) | 1.54 ± 0.20 | 3.83 ± 0.53 | 3.06 ± 0.49 | 6.32 ± 0.65 | 2.48 ± 0.24 | 1.34 ± 0.12 |
-| line-medium-init (10 series x 5,000 points) | 4.19 ± 0.14 | 16.8 ± 1.45 | 11.3 ± 0.73 | 35.5 ± 5.98 | 49.5 ± 3.34 | 4.06 ± 0.30 |
-| line-large-init (1 series x 1,000,000 points) | 9.78 ± 0.58 | 122 ± 1.46 | 19.1 ± 2.66 | 370 ± 5.06 | 1194 ± 46.0 | 7.76 ± 0.12 |
-| area-medium-init (3 filled series x 5,000 points) | 1.92 ± 0.14 | 10.8 ± 1.40 | 6.61 ± 0.58 | 20.9 ± 1.12 | 27.6 ± 2.54 | 1.83 ± 0.17 |
-| bar-small-init (12 categories x 3 series) | 1.37 ± 0.17 | 3.04 ± 0.54 | 1.81 ± 0.30 | 5.61 ± 0.43 | 1.60 ± 0.11 | n/a |
-| bar-medium-init (100 categories x 4 series) | 2.28 ± 0.37 | 6.10 ± 1.11 | 3.29 ± 0.29 | 13.8 ± 0.49 | 5.73 ± 0.49 | n/a |
-| scatter-medium-init (10,000 points) | 2.35 ± 0.18 | 80.1 ± 0.94 (first frame 7.91) | 15.9 ± 0.64 | 122 ± 0.43 | 41.8 ± 2.66 | n/a |
-| scatter-large-init (200,000 points) | 9.16 ± 0.20 | 142 ± 5.16 (first frame 31.7) | 185 ± 2.10 | 73.4 ± 11.1 | 293 ± 24.2 | n/a |
-| heatmap-medium-init (100 x 100 cells) | 1.89 ± 0.17 | 36.0 ± 1.07 (first frame 8.03) | n/a | 6.44 ± 0.27 | 54.3 ± 1.26 | n/a |
-| heatmap-large-init (500 x 500 cells) | 16.8 ± 0.64 | 14457 ± 329 (first frame 48.1) | n/a | 39.2 ± 0.90 | 610 ± 7.46 | n/a |
-| candlestick-small-init (200 candles, each drawn by every library) | 1.77 ± 0.09 | 6.27 ± 0.94 | n/a | 8.95 ± 0.25 | n/a | n/a |
-| candlestick-large-init (100,000 candles; each library's large-data strategy) | 10.8 ± 0.76 | 72.6 ± 17.2 (first frame 56.8) | n/a | 1128 ± 9.36 | n/a | n/a |
-| bubble-medium-init (10,000 points sized and colored by two fields) | 44.4 ± 3.58 | 95.4 ± 1.58 (first frame 8.33) | 53.6 ± 0.46 | 148 ± 0.97 | n/a | n/a |
-| histogram-medium-init (10,000 values in bins 5 wide from 25, x from 25 to 175) | 1.31 ± 0.14 | n/a | n/a | 8.28 ± 0.62 | n/a | n/a |
-| histogram-large-init (1,000,000 values in bins 5 wide from 25, x from 25 to 175) | 10.4 ± 0.48 | n/a | n/a | 78.2 ± 4.50 | n/a | n/a |
-| line-massive-init (1 series x 10,000,000 points) | 40.2 ± 0.28 | 1391 ± 5.90 | 184 ± 59.0 | 3459 ± 6.58 | error | 41.1 ± 0.22 |
-| scatter-massive-init (1,000,000 points) | 23.2 ± 0.74 | 695 ± 6.10 (first frame 125) | 1008 ± 35.9 | 203 ± 4.02 | 1673 ± 27.0 | n/a |
+| line-small-init (4 series x 200 points) | 1.98 ± 0.09 | 3.91 ± 0.77 | 3.25 ± 0.50 | 7.02 ± 0.63 | 2.37 ± 0.16 | 1.27 ± 0.16 |
+| line-medium-init (10 series x 5,000 points) | 3.99 ± 0.23 | 16.9 ± 2.01 | 10.8 ± 0.40 | 34.3 ± 4.41 | 49.4 ± 2.48 | 4.06 ± 0.21 |
+| line-large-init (1 series x 1,000,000 points) | 10.1 ± 0.76 | 120 ± 8.52 | 19.1 ± 3.02 | 381 ± 5.60 | 1182 ± 53.9 | 8.28 ± 1.04 |
+| area-medium-init (3 filled series x 5,000 points) | 1.92 ± 0.19 | 10.8 ± 1.47 | 6.54 ± 0.53 | 20.6 ± 1.04 | 27.3 ± 0.62 | 1.83 ± 0.20 |
+| bar-small-init (12 categories x 3 series) | 1.36 ± 0.14 | 3.27 ± 0.53 | 1.93 ± 0.37 | 5.77 ± 0.31 | 1.63 ± 0.16 | n/a |
+| bar-medium-init (100 categories x 4 series) | 2.30 ± 0.16 | 6.28 ± 0.73 | 3.50 ± 0.27 | 14.3 ± 0.34 | 5.68 ± 0.43 | n/a |
+| scatter-medium-init (10,000 points) | 2.28 ± 0.10 | 80.3 ± 1.94 (first frame 8.31) | 15.0 ± 0.41 | 121 ± 1.47 | 41.5 ± 2.56 | n/a |
+| scatter-large-init (200,000 points) | 9.42 ± 0.30 | 137 ± 6.10 (first frame 32.0) | 185 ± 0.76 | 69.0 ± 5.76 | 292 ± 22.2 | n/a |
+| heatmap-medium-init (100 x 100 cells) | 1.92 ± 0.22 | 35.8 ± 2.82 (first frame 8.99) | n/a | 6.80 ± 0.28 | 55.0 ± 0.74 | n/a |
+| heatmap-large-init (500 x 500 cells) | 15.3 ± 0.64 | 14875 ± 70.7 (first frame 49.4) | n/a | 37.7 ± 1.04 | 594 ± 13.9 | n/a |
+| candlestick-small-init (200 candles, each drawn by every library) | 1.61 ± 0.09 | 5.70 ± 0.96 | n/a | 8.69 ± 0.34 | n/a | n/a |
+| candlestick-large-init (100,000 candles; each library's large-data strategy) | 10.9 ± 0.84 | 71.6 ± 13.8 | n/a | 1141 ± 7.38 | n/a | n/a |
+| bubble-medium-init (10,000 points sized and colored by two fields) | 44.6 ± 4.30 | 93.3 ± 1.33 (first frame 8.25) | 53.3 ± 0.60 | 148 ± 0.53 | n/a | n/a |
+| histogram-medium-init (10,000 values in bins 5 wide from 25, x from 25 to 175) | 1.27 ± 0.17 | n/a | n/a | 8.01 ± 0.54 | n/a | n/a |
+| histogram-large-init (1,000,000 values in bins 5 wide from 25, x from 25 to 175) | 10.7 ± 0.38 | n/a | n/a | 78.3 ± 4.54 | n/a | n/a |
+| line-massive-init (1 series x 10,000,000 points) | 39.8 ± 0.36 | 1396 ± 6.32 | 185 ± 56.9 | 3436 ± 7.18 | error | 43.5 ± 0.70 |
+| scatter-massive-init (1,000,000 points) | 24.4 ± 1.40 | 718 ± 5.58 (first frame 128) | 1010 ± 30.5 | 204 ± 5.80 | 1624 ± 58.0 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| line-medium-update (replace 10 x 5,000 points) | 4.04 ± 0.55 | 15.1 ± 2.76 | 6.13 ± 0.33 | 29.1 ± 1.24 | 48.5 ± 2.32 | 3.42 ± 0.16 |
-| line-large-update (replace 1,000,000 points) | 8.10 ± 0.36 | 153 ± 1.14 | 13.7 ± 1.16 | 342 ± 0.08 | 1001 ± 2.26 | 7.08 ± 0.00 |
-| bar-medium-update (replace 100 x 4 bars) | 1.56 ± 0.33 | 4.43 ± 0.35 | 2.20 ± 0.25 | 12.1 ± 0.43 | 6.31 ± 0.47 | n/a |
-| scatter-medium-update (replace 10,000 points) | 1.90 ± 0.20 | 77.0 ± 2.33 (first frame 8.28) | 15.6 ± 0.46 | 119 ± 0.42 | 56.1 ± 1.23 | n/a |
-| heatmap-medium-update (replace 100 x 100 cells) | 1.18 ± 0.17 | 35.1 ± 1.78 (first frame 8.60) | n/a | 6.44 ± 0.41 | 71.8 ± 1.98 | n/a |
+| line-medium-update (replace 10 x 5,000 points) | 4.13 ± 0.40 | 15.3 ± 2.87 | 6.13 ± 0.38 | 28.7 ± 1.64 | 50.0 ± 3.50 | 3.51 ± 0.30 |
+| line-large-update (replace 1,000,000 points) | 8.22 ± 0.22 | 147 ± 0.30 | 13.3 ± 0.40 | 343 ± 0.56 | 1050 ± 12.9 | 7.06 ± 0.06 |
+| bar-medium-update (replace 100 x 4 bars) | 1.38 ± 0.25 | 4.38 ± 0.37 | 2.27 ± 0.34 | 12.2 ± 0.57 | 6.35 ± 0.42 | n/a |
+| scatter-medium-update (replace 10,000 points) | 1.84 ± 0.20 | 78.1 ± 2.53 (first frame 7.01) | 15.5 ± 0.36 | 118 ± 0.48 | 58.1 ± 2.63 | n/a |
+| heatmap-medium-update (replace 100 x 100 cells) | 1.46 ± 0.21 | 36.3 ± 0.79 (first frame 7.02) | n/a | 6.18 ± 0.63 | 71.5 ± 0.33 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 4.89 ± 0.63 | 8.11 ± 0.28 | 4.35 ± 0.33 | 29.1 ± 1.16 | 43.0 ± 1.34 | 4.23 ± 0.31 |
-| stream-large (1 series, 100,000-point window, +100 points per tick) | 2.00 ± 0.44 | 14.0 ± 0.75 | 2.15 ± 0.20 | 36.3 ± 0.80 | 76.5 ± 1.26 | 1.22 ± 0.08 |
-| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 2.52 ± 0.45 | 139 ± 2.98 | 4.71 ± 0.11 | 341 ± 2.19 | 992 ± 23.7 | 5.42 ± 0.06 |
+| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 4.74 ± 0.54 | 8.13 ± 0.27 | 4.35 ± 0.53 | 29.7 ± 1.31 | 43.0 ± 1.66 | 4.22 ± 0.34 |
+| stream-large (1 series, 100,000-point window, +100 points per tick) | 2.25 ± 0.52 | 13.8 ± 0.57 | 2.17 ± 0.19 | 36.2 ± 0.86; WebGL done 42.0 ± 0.95 | 76.7 ± 1.35 | 1.24 ± 0.10 |
+| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 2.50 ± 0.50 | 138 ± 3.34 | 4.75 ± 0.11 | 340 ± 1.61; WebGL done 358 ± 2.75 | 994 ± 27.4 | 5.42 ± 0.06 |
 
 | Scenario (frame interval p50 / p95 / p99, dropped frames, achieved ingest rate) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 16.7 / 17.2 / 17.6 ms, 0 dropped, 9 Hz | 16.7 / 33.3 / 33.6 ms, 38 dropped, 9 Hz | 16.7 / 17.6 / 33.3 ms, 10 dropped, 9 Hz | 16.7 / 33.3 / 33.3 ms, 37 dropped, 9 Hz | 16.7 / 33.3 / 50.0 ms, 58 dropped, 9 Hz | 16.7 / 17.2 / 17.6 ms, 0.5 dropped, 9 Hz |
-| ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 16.7 / 17.1 / 17.6 ms, 0 dropped, 52 Hz | 16.7 / 17.0 / 17.6 ms, 0 dropped, 56 Hz | 16.7 / 17.0 / 17.5 ms, 0 dropped, 54 Hz | 83.3 / 84.1 / 100 ms, 235.5 dropped, 37 Hz | 83.3 / 84.0 / 100 ms, 236 dropped, 25 Hz | 16.7 / 17.1 / 17.6 ms, 0 dropped, 53 Hz |
-| ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 16.7 / 17.0 / 17.4 ms, 0 dropped, 83 Hz | 16.7 / 17.3 / 17.5 ms, 0 dropped, 93 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 88 Hz | 83.3 / 83.5 / 100 ms, 236 dropped, 37 Hz | 83.3 / 83.4 / 100 ms, 236.5 dropped, 25 Hz | 16.7 / 17.3 / 17.6 ms, 0 dropped, 87 Hz |
-| ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 16.7 / 17.2 / 17.6 ms, 0 dropped, 81 Hz | 66.7 / 83.3 / 84.1 ms, 226.5 dropped, 71 Hz | 16.7 / 17.3 / 17.6 ms, 0 dropped, 89 Hz | 66.7 / 83.3 / 84.1 ms, 230.5 dropped, 27 Hz | 83.3 / 83.3 / 100.0 ms, 237.5 dropped, 13 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 87 Hz |
-| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 16.7 / 16.8 / 17.6 ms, 2.5 dropped, 9 Hz | 16.7 / 83.3 / 109 ms, 178 dropped, 9 Hz | 16.7 / 33.3 / 50.0 ms, 57 dropped, 9 Hz | 250 / 267 / 267 ms, 280.5 dropped, 4 Hz | 425 / 450 / 460 ms, 303 dropped, 2 Hz | 16.7 / 33.3 / 33.3 ms, 20 dropped, 9 Hz |
+| ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 16.7 / 17.3 / 17.6 ms, 0 dropped, 9 Hz | 16.7 / 33.3 / 49.5 ms, 40.5 dropped, 9 Hz | 16.7 / 17.6 / 33.3 ms, 11 dropped, 9 Hz | 16.7 / 33.3 / 33.3 ms, 33 dropped, 9 Hz | 16.7 / 34.0 / 50.0 ms, 60.5 dropped, 9 Hz | 16.7 / 17.1 / 17.6 ms, 0.5 dropped, 9 Hz |
+| ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 16.7 / 17.0 / 17.6 ms, 0 dropped, 52 Hz | 16.7 / 17.0 / 17.5 ms, 0 dropped, 56 Hz | 16.7 / 17.0 / 17.6 ms, 0.5 dropped, 54 Hz | 83.3 / 83.4 / 84.2 ms, 235.5 dropped, 37 Hz | 83.3 / 83.3 / 95.1 ms, 235.5 dropped, 25 Hz | 16.7 / 17.2 / 17.6 ms, 0 dropped, 53 Hz |
+| ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 16.7 / 17.1 / 17.5 ms, 0 dropped, 83 Hz | 16.7 / 17.2 / 17.5 ms, 0 dropped, 93 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 89 Hz | 83.3 / 83.3 / 84.2 ms, 234.5 dropped, 38 Hz | 83.3 / 83.3 / 83.6 ms, 235.5 dropped, 25 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 87 Hz |
+| ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 16.7 / 17.3 / 17.6 ms, 0 dropped, 81 Hz | 66.7 / 83.3 / 83.8 ms, 227 dropped, 72 Hz | 16.7 / 17.2 / 17.6 ms, 0 dropped, 89 Hz | 66.7 / 83.3 / 83.4 ms, 229.5 dropped, 27 Hz | 83.3 / 100.0 / 100 ms, 238.5 dropped, 12 Hz | 16.7 / 17.4 / 17.6 ms, 0 dropped, 88 Hz |
+| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 16.7 / 17.1 / 17.6 ms, 2.5 dropped, 9 Hz | 16.7 / 83.3 / 108 ms, 176 dropped, 9 Hz | 16.7 / 33.3 / 50.0 ms, 56 dropped, 9 Hz | 250 / 267 / 267 ms, 286 dropped, 4 Hz | 425 / 450 / 451 ms, 302.5 dropped, 2 Hz | 16.7 / 33.2 / 33.3 ms, 16.5 dropped, 9 Hz |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| hover-line-medium (pointer moves over 10 x 5,000 points) | 2.88 ± 0.18 | 14.2 ± 0.42 | 5.91 ± 0.25 | 21.1 ± 0.66 | 17.1 ± 1.28 | 2.12 ± 0.15 |
-| hover-line-large (pointer moves over 1,000,000 points) | 1.97 ± 0.15 | 5.61 ± 0.39 | 2.17 ± 0.17 | 572 ± 237 | 127 ± 1.55 | 1.26 ± 0.08 |
-| hover-scatter-medium (pointer moves over 10,000 points) | 1.94 ± 0.13 | 16.1 ± 0.91 | 13.9 ± 0.29 | 28.2 ± 0.40 | 25.0 ± 1.45 | n/a |
+| hover-line-medium (pointer moves over 10 x 5,000 points) | 2.88 ± 0.16 | 14.3 ± 0.46 | 4.95 ± 0.27 | 21.1 ± 0.75 | 16.5 ± 1.85 | 2.18 ± 0.16 |
+| hover-line-large (pointer moves over 1,000,000 points) | 1.96 ± 0.19 | 5.58 ± 0.38 | 2.19 ± 0.29 | 568 ± 237; WebGL done 571 ± 236 | 126 ± 1.21 | 1.57 ± 0.27 |
+| hover-scatter-medium (pointer moves over 10,000 points) | 1.94 ± 0.15 | 16.2 ± 1.03 | 14.0 ± 0.24 | 28.1 ± 0.38 | 26.0 ± 1.11 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 2.40 ± 0.34 | 2.92 ± 0.67 | 3.12 ± 0.85 | 1.36 ± 0.20 | 114 ± 31.0 | 3.09 ± 0.74 |
-| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 1.92 ± 0.30 | 42.3 ± 29.0 | 5.16 ± 3.52 | 1.84 ± 0.52 | error | 4.50 ± 3.72 |
-| zoom-scatter-massive (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 9.52 ± 0.64 | 95.2 ± 89.3 | 249 ± 46.6 | 10.4 ± 0.30 | 856 ± 258 | n/a |
+| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 2.57 ± 0.33 | 3.02 ± 0.72 | 2.66 ± 0.48 | 1.42 ± 0.22; WebGL done 4.32 ± 0.89 | 115 ± 31.1 | 1.18 ± 0.71 |
+| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 1.86 ± 0.40 | 42.1 ± 28.8 | 5.10 ± 3.46 | 1.90 ± 0.34; WebGL done 13.5 ± 1.38 | error | 4.52 ± 3.74 |
+| zoom-scatter-massive (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 9.80 ± 0.80; WebGL done 9.98 ± 0.58 | 97.1 ± 92.6 | 249 ± 49.2 | 10.3 ± 0.20; WebGL done 13.1 ± 0.94 | 876 ± 234 | n/a |
 
 | Scenario (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| resize-line-medium (resize 800x400 <-> 600x300) | 4.03 ± 0.90 | 5.38 ± 0.34 | 6.51 ± 1.05 | 17.4 ± 2.01 | 46.7 ± 1.69 | 3.37 ± 0.41 |
+| resize-line-medium (resize 800x400 <-> 600x300) | 3.95 ± 0.87 | 5.24 ± 0.28 | 6.71 ± 0.56 | 18.4 ± 4.19 | 48.1 ± 2.28 | 3.29 ± 0.44 |
 
 | Mount all charts (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dashboard (10 charts x 15 series x 3,000 points) | 37.3 ± 1.46 | 75.7 ± 2.58 | 55.7 ± 6.94 | 269 ± 2.00 | 439 ± 1.88 | 32.8 ± 0.68 |
+| dashboard (10 charts x 15 series x 3,000 points) | 38.8 ± 2.54 | 81.2 ± 5.16 | 55.9 ± 6.52 | 264 ± 1.88 | 438 ± 2.72 | 32.7 ± 0.82 |
 
 | Refresh all charts (ms, median ± MAD) | herceg | echarts | chartjs | plotly | tanstack | uplot |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dashboard (10 charts x 15 series x 3,000 points) | 17.1 ± 0.20 | 90.5 ± 1.38 | 35.9 ± 1.58 | 262 ± 5.74 | 448 ± 8.10 | 22.5 ± 0.40 |
+| dashboard (10 charts x 15 series x 3,000 points) | 17.6 ± 1.20 | 87.6 ± 1.50 | 36.0 ± 2.90 | 255 ± 2.40 | 450 ± 4.18 | 22.6 ± 0.28 |
 <!-- /results:firefox -->
 
 In Firefox, Herceg mounts most charts fastest: 1M-point scatters in ~23 ms
@@ -1067,8 +1146,10 @@ streams that chart in ~4.4 ms and drops no frames at 60 and 100 Hz (~54 and
 ~1 s for a million. ECharts streams that chart in ~8 ms and shows
 progressive first frames early, but completes a 500 x 500 heatmap after
 ~15 s and drops 226 frames ingesting 10 points at 100 Hz into a
-100,000-point window. Plotly zooms lines fastest (~1.4–1.8 ms; Herceg
-~1.9–2.4 ms), but takes over half a second per hover over 1M points and
+100,000-point window. Plotly's line zoom frames come in ~1.4–1.9 ms (Herceg
+~1.9–2.6 ms, uPlot ~1.2–4.5 ms), but its WebGL drawing finishes ~4.3 and
+~13.5 ms after each step at 1M and 10M points; it takes over half a second
+per hover over 1M points and
 gets ~37 updates a second through at 60 and 100 Hz. TanStack Charts is the
 slowest in most scenarios and fails on 10M-point lines, as in Chrome.
 
@@ -1081,34 +1162,34 @@ per-root setup is counted for every chart. The React wrappers of the other
 libraries are not measured.
 
 <!-- results:react -->
-Measured 2026-10-26 at commit d42d5d65 with react 19.3.0, react-dom 19.3.0, same environment as above.
+Measured 2026-10-27 at commit 31ab2257 with react 19.3.0, react-dom 19.3.0, same environment as above.
 
 | Scenario (median) | herceg | herceg via @herceg/react |
 | --- | ---: | ---: |
-| line-small-init (4 series x 200 points) | 0.71 ± 0.11 ms | 0.74 ± 0.15 ms |
-| line-medium-init (10 series x 5,000 points) | 2.28 ± 0.21 ms | 2.13 ± 0.13 ms |
-| line-large-init (1 series x 1,000,000 points) | 5.25 ± 0.18 ms | 5.51 ± 0.54 ms |
-| area-medium-init (3 filled series x 5,000 points) | 1.28 ± 0.25 ms | 1.50 ± 0.23 ms |
-| line-massive-init (1 series x 10,000,000 points) | 36.0 ± 3.68 ms | 34.2 ± 2.39 ms |
-| line-medium-update (replace 10 x 5,000 points) | 1.19 ± 0.13 ms | 1.18 ± 0.09 ms |
-| line-large-update (replace 1,000,000 points) | 4.06 ± 0.08 ms | 3.82 ± 0.13 ms |
-| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 1.27 ± 0.12 ms | 1.23 ± 0.12 ms |
-| stream-large (1 series, 100,000-point window, +100 points per tick) | 0.68 ± 0.09 ms | 0.65 ± 0.09 ms |
-| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 1.49 ± 0.12 ms | 1.44 ± 0.11 ms |
+| line-small-init (4 series x 200 points) | 0.66 ± 0.13 ms | 0.85 ± 0.20 ms |
+| line-medium-init (10 series x 5,000 points) | 2.27 ± 0.30 ms | 2.30 ± 0.18 ms |
+| line-large-init (1 series x 1,000,000 points) | 5.02 ± 0.43 ms | 5.02 ± 0.14 ms |
+| area-medium-init (3 filled series x 5,000 points) | 1.36 ± 0.14 ms | 1.32 ± 0.09 ms |
+| line-massive-init (1 series x 10,000,000 points) | 34.8 ± 1.11 ms | 34.3 ± 1.00 ms |
+| line-medium-update (replace 10 x 5,000 points) | 1.26 ± 0.08 ms | 1.17 ± 0.13 ms |
+| line-large-update (replace 1,000,000 points) | 3.86 ± 0.13 ms | 4.04 ± 0.12 ms |
+| stream-dashboard-chart (15 series, 3,000-point window, +1 point per tick) | 1.21 ± 0.12 ms | 1.10 ± 0.12 ms |
+| stream-large (1 series, 100,000-point window, +100 points per tick) | 0.66 ± 0.08 ms | 0.60 ± 0.07 ms |
+| stream-massive (1 series, 1,000,000-point window, +10,000 points per tick) | 1.46 ± 0.11 ms | 1.48 ± 0.11 ms |
 | ingest-chart-10hz (15 series, 3,000-point window, +1 point at 10 Hz) | 0 dropped, 10 Hz | 0 dropped, 10 Hz |
 | ingest-chart-60hz (15 series, 3,000-point window, +1 point at 60 Hz) | 0 dropped, 62 Hz | 0 dropped, 62 Hz |
 | ingest-chart-100hz (15 series, 3,000-point window, +1 point at 100 Hz) | 0 dropped, 100 Hz | 0 dropped, 100 Hz |
 | ingest-large-100hz (1 series, 100,000-point window, +10 points at 100 Hz) | 0 dropped, 100 Hz | 0 dropped, 100 Hz |
-| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 1 dropped, 10 Hz | 0.5 dropped, 10 Hz |
-| hover-line-medium (pointer moves over 10 x 5,000 points) | 0.53 ± 0.19 ms | 0.63 ± 0.38 ms |
-| hover-line-large (pointer moves over 1,000,000 points) | 0.33 ± 0.07 ms | 0.35 ± 0.06 ms |
-| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 0.78 ± 0.32 ms | 0.77 ± 0.27 ms |
-| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 1.48 ± 0.57 ms | 1.53 ± 0.65 ms |
-| resize-line-medium (resize 800x400 <-> 600x300) | 1.22 ± 0.09 ms | 1.35 ± 0.18 ms |
-| dashboard (10 charts x 15 series x 3,000 points) | mount 18.0 ms, refresh 10.5 ms | mount 19.9 ms, refresh 11.3 ms |
-| memory-line-large (1 chart, 1,000,000 points) | 0.2 MB heap, 35 nodes | 0.4 MB heap, 36 nodes |
-| memory-dashboard (10 charts x 15 series x 3,000 points) | 5.9 MB heap, 762 nodes | 6.3 MB heap, 772 nodes |
-| memory-small-100 (100 charts x 2 series x 100 points) | 9.2 MB heap, 3679 nodes | 13 MB heap, 3779 nodes |
+| ingest-dashboard-10hz (10 charts x 15 series x 3,000 points, +1 point per series at 10 Hz) | 0.5 dropped, 10 Hz | 1 dropped, 10 Hz |
+| hover-line-medium (pointer moves over 10 x 5,000 points) | 0.53 ± 0.20 ms | 0.62 ± 0.38 ms |
+| hover-line-large (pointer moves over 1,000,000 points) | 0.34 ± 0.07 ms | 0.34 ± 0.07 ms |
+| zoom-line-large (x ranges of 50%, 10%, and 1% of 1,000,000 points, panning) | 0.77 ± 0.26 ms | 0.74 ± 0.31 ms |
+| zoom-line-massive (x ranges of 50%, 10%, and 1% of 10,000,000 points, panning) | 1.38 ± 0.57 ms | 1.53 ± 0.61 ms |
+| resize-line-medium (resize 800x400 <-> 600x300) | 1.25 ± 0.13 ms | 1.43 ± 0.15 ms |
+| dashboard (10 charts x 15 series x 3,000 points) | mount 19.7 ms, refresh 10.8 ms | mount 22.7 ms, refresh 10.7 ms |
+| memory-line-large (1 chart, 1,000,000 points) | 0.2 MB heap, 35 nodes; first mount 0.9 MB heap, 8.4 ± 0.0 MB renderer, 7.5 MB GPU (canvas 5.1, tiles 2.3); GPU process -10.4 ± 4.8 MB | 0.4 MB heap, 36 nodes; first mount 1.0 MB heap, 7.0 ± 0.1 MB renderer, 7.5 MB GPU (canvas 5.1, tiles 2.3); GPU process -5.5 ± 13 MB |
+| memory-dashboard (10 charts x 15 series x 3,000 points) | 5.9 MB heap, 762 nodes; first mount 7.6 MB heap, 20 ± 0.1 MB renderer, 31 MB GPU (canvas 24, tiles 6.6); GPU process 16 ± 2.5 MB | 6.3 MB heap, 772 nodes; first mount 8.4 MB heap, 23 ± 0.3 MB renderer, 31 MB GPU (canvas 24, tiles 6.6); GPU process 22 ± 11 MB |
+| memory-small-100 (100 charts x 2 series x 100 points) | 9.1 MB heap, 3679 nodes; first mount 11 MB heap, 33 ± 0.2 MB renderer, 22 MB GPU (tiles 22); GPU process 6.3 ± 1.0 MB | 13 MB heap, 3779 nodes; first mount 15 MB heap, 38 ± 1.3 MB renderer, 23 MB GPU (tiles 23); GPU process 14 ± 6.8 MB |
 <!-- /results:react -->
 
 ## Statistical charts
@@ -1508,17 +1589,20 @@ Monthly revenue bars with a target line over the same months.
 - uPlot sets the bar for time-series speed and memory: it renders typed arrays
   in place, so retained memory for 1M points is a fraction of a megabyte, and
   it keeps up with every paced ingestion scenario. Herceg nearly matches its
-  memory for large series (~0.24 MB vs ~0.18 MB at 1M points) and matches
+  memory for large series (~0.24 MB vs ~0.18 MB of retained heap at 1M
+  points; renderer growth ~8.4 MB vs ~7.5 MB on a first mount) and matches
   its pacing under streaming, mounts and replaces large line charts faster
   (1M points: ~4.9 ms vs ~6.4 ms to mount, ~3.5 ms vs ~5.7 ms to replace),
   and streams a million-point window faster (~1.5 ms vs ~5.8 ms a tick).
   uPlot is ahead on small charts (~0.5 ms vs ~0.7 ms for 4 x 200 points), on
   streaming the 15-series chart (~0.9 ms vs ~1.2 ms a tick), on hover
   (~0.5 ms vs ~0.6 ms over 10 x 5,000 points, ~0.2 ms vs ~0.4 ms over 1M),
-  on mounting the ten-chart dashboard (~17 ms vs ~19 ms; refreshing it,
-  ~11 ms each, is even), and on dashboard memory (~2.8 MB vs ~5.9 MB for
-  ten charts; uPlot's paths are browser `Path2D` objects, outside the
-  measured heap).
+  on mounting and refreshing the ten-chart dashboard (~17 ms vs ~18 ms,
+  ~10 ms vs ~11 ms), and on the dashboard's retained heap (~2.8 MB vs
+  ~5.9 MB for ten charts). Counted in full it is behind there: its paths are
+  browser `Path2D` objects outside the heap, and on a first mount its
+  renderer grows ~28 MB against Herceg's ~20 MB, with ~40 MB of GPU memory
+  against ~31 MB.
 - Scatter from typed columns: at 10,000 points the libraries that render in
   one pass (Herceg ~2.5 ms on Canvas, Chart.js ~4.5 ms) are far ahead of
   ECharts and Plotly (~65–80 ms). Large point series are where GPU rendering
@@ -1526,13 +1610,15 @@ Monthly revenue bars with a target line over the same months.
   ~17 ms (uploading the data each time; the GPU finishes a few milliseconds
   after the measured frame), against ~180 ms for Plotly's WebGL `scattergl`,
   ~310 ms for ECharts, ~430 ms for Chart.js, and ~1.2 s for TanStack Charts
-  at 1M. Zooming 1M points takes ~4 ms in Herceg and ~7 ms in Plotly, whose
-  data both stay on the GPU, against ~37 ms for ECharts and ~170–200 ms for
+  at 1M. Zooming 1M points takes ~3.7 ms to the frame in Herceg and ~7.5 ms
+  in Plotly, whose data both stay on the GPU (~5.2 and ~10.1 ms until their
+  WebGL drawing finishes), against ~37 ms for ECharts and ~170–200 ms for
   TanStack Charts and Chart.js.
 - Heatmaps drawn as one image scale with cell count at a few bytes per cell:
   500 x 500 cells take ~13 ms in Herceg and ~30 ms in Plotly, against ~460 ms
-  for TanStack Charts (one scene node per cell) and ~5 s for ECharts to
-  complete its progressive render.
+  for TanStack Charts (one scene node per cell) and ~5–6 s for ECharts to
+  complete its progressive render (~5.0 or ~6.0–6.5 s from one run to the
+  next).
 - Of the comparison libraries, only Plotly draws contours and 2D histograms
   (ECharts, TanStack Charts, and Chart.js have neither). Plotly's contours
   are further along in presentation: labels along lines, smoothing, and
@@ -1551,13 +1637,15 @@ Monthly revenue bars with a target line over the same months.
   million-row brush followed by a histogram and a box plot takes ~10 ms a
   step in Node.
 - Massive data separates the libraries that keep data in typed arrays.
-  Mounting a 10M-point line takes ~38 ms in Herceg and ~47 ms in uPlot,
-  ~100 ms in Chart.js, and 2.1–2.7 s in ECharts and Plotly; TanStack Charts
-  runs out of memory (its tab crashes). Zooming into 10M points takes
-  ~0.9 ms in Plotly, whose WebGL traces keep data on the GPU and do not
-  rescale y, ~1.5 ms in Herceg, whose min/max index answers each pixel
-  column without rescanning, ~5–7 ms in Chart.js and uPlot, and ~48 ms in
-  ECharts.
+  Mounting a 10M-point line takes ~32 ms in Herceg and ~46 ms in uPlot,
+  ~110 or ~250 ms in Chart.js (two levels from one run to the next), and
+  2.0–2.7 s in ECharts and Plotly; TanStack Charts runs out of memory (its
+  tab crashes). Zooming into 10M points takes ~1.3 ms to the frame in
+  Herceg, whose min/max index answers each pixel column without rescanning,
+  and ~0.9 ms in Plotly, whose WebGL traces keep data on the GPU and do not
+  rescale y, but Plotly's GPU finishes drawing each step ~12.8 ms after it
+  starts (Herceg's 2D canvas rasterization is not in its timing either);
+  ~5–7 ms in Chart.js and uPlot, and ~48 ms in ECharts.
 - Bars at these sizes (up to 400 bars) take 0.6–7.9 ms in every library;
   differences are not noticeable to users.
 - In WebKit, where every timing includes waiting for the display's next
@@ -1575,18 +1663,26 @@ Monthly revenue bars with a target line over the same months.
   dashboard fastest (~17 ms; uPlot ~23 ms). Its 15-series chart takes
   ~4.9 ms per streamed tick (uPlot ~4.2 ms, Chart.js ~4.4 ms), and paced
   ingestion into it drops no frames. Its widest gaps there are zooming a
-  1M-point line (~2.4 ms; Plotly ~1.4 ms), streaming a 100,000-point
-  window (~2.0 ms; uPlot ~1.2 ms), and hover over a 1M-point line
-  (~2.0 ms; uPlot ~1.3 ms); see [Firefox](#firefox).
+  1M-point line (~2.6 ms to the frame; uPlot ~1.2 ms, Plotly ~1.4 ms but
+  ~4.3 ms until its WebGL drawing finishes), streaming a 100,000-point
+  window (~2.3 ms; uPlot ~1.2 ms), and hover over a 1M-point line
+  (~2.0 ms; uPlot ~1.6 ms); see [Firefox](#firefox).
 - Going through `@herceg/react` costs little because React only describes
   the chart: mounting adds up to ~0.3 ms per chart where the difference
   exceeds the noise, and streaming, data
   replacement, and hover never render React. The other measurable cost is
   memory for React roots: 100 small charts, each its own root, retain ~13 MB
-  instead of ~9 MB.
+  of heap instead of ~9 MB, and the renderer grows ~38 MB instead of ~33 MB
+  on a first mount.
 - Small charts rendered as SVG avoid canvas backing stores entirely: Herceg's
   100 small charts use ~9 MB of heap and no canvas memory, while the Canvas
-  libraries need ~72 MB of canvas pixels for the same charts.
+  libraries need ~72 MB of canvas pixels for the same charts. On the GPU,
+  Chrome attributes ~22 MB of compositor tiles to Herceg's page, against
+  ~72 MB of canvas resources for ECharts and Chart.js and ~92 MB for uPlot.
+- The median of repeated mounts can hide a first mount's cost: Plotly's
+  million-cell surface keeps ~1.2 MB of heap on later mounts in a page but
+  343 MB on the first, with ~395 MB of renderer growth and ~342 MB of GPU
+  memory (Herceg's: ~9.6 MB, ~35 MB, and ~72 MB).
 - Libraries that need one object per point (TanStack Charts rows, Chart.js
   `{x, y}`, ECharts pairs) retain 3–40x the source data size at 1M points.
 - For many small charts, Canvas backing stores dominate: 100 300x150 charts at

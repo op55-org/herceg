@@ -19,6 +19,7 @@ interface Row {
   library: string;
   supported: boolean;
   reason?: string;
+  fullCostReason?: string;
   metrics: Record<string, { unit: string; summary: Summary }>;
 }
 interface BrowserResults {
@@ -74,7 +75,36 @@ function table(header: string[], rows: string[][]): string {
   ].join("\n");
 }
 
-/** One row per scenario, one column per library: median ± MAD of `metric`. */
+const plusMinus = (s: Summary) => `${ms(s)} ± ${ms({ ...s, median: s.mad })}`;
+
+/**
+ * Where the page drew with WebGL, the time until the GPU had finished it,
+ * from the run that waits for it (`...ToWebglDone` beside `...ToFrame`).
+ */
+function webglDone(row: Row, metric: string): string {
+  if (!FRAME_TIMED.has(metric)) return "";
+  if (row.fullCostReason) return "; WebGL done: error";
+  const contexts = row.metrics.webglContexts?.summary.median;
+  if (contexts === 0) return "";
+  const s = row.metrics[metric.replace(/ToFrame$/, "ToWebglDone")]?.summary;
+  return contexts !== undefined && s
+    ? `; WebGL done ${plusMinus(s)}`
+    : "; WebGL done: not measured";
+}
+
+/** Frame timings that a second run also times to WebGL drawing finished. */
+const FRAME_TIMED = new Set([
+  "tickToFrame",
+  "pointerToFrame",
+  "viewportToFrame",
+  "resizeToFrame",
+  "cameraToFrame",
+]);
+
+/**
+ * One row per scenario, one column per library: median ± MAD of `metric`,
+ * and the time to WebGL drawing finished where the library drew with WebGL.
+ */
 function timingTable(scenarios: string[], metric: string, results = browser): string {
   const libraries = Object.keys(results.libraries);
   const rows = scenarios.map((id) => [
@@ -85,7 +115,7 @@ function timingTable(scenarios: string[], metric: string, results = browser): st
       if (!row.supported) return row.reason?.startsWith("error") ? "error" : "n/a";
       const s = row.metrics[metric]?.summary;
       if (!s) return "";
-      const cell = `${ms(s)} ± ${ms({ ...s, median: s.mad })}`;
+      const cell = `${plusMinus(s)}${webglDone(row, metric)}`;
       // Progressive renderers show a partial chart well before they finish.
       const first = row.metrics.firstFrame?.summary;
       return first && first.median < 0.8 * s.median ? `${cell} (first frame ${ms(first)})` : cell;
@@ -136,25 +166,75 @@ function ingestTable(results = browser): string {
   );
 }
 
+const median = (metrics: Row["metrics"], name: string) => metrics[name]!.summary.median;
+const spread = (metrics: Row["metrics"], name: string) => {
+  const s = metrics[name]!.summary;
+  return `${mb(s.median)} ± ${mb(s.mad)}`;
+};
+
+/**
+ * A memory scenario's first mount in a fresh page: retained heap, renderer
+ * footprint, GPU memory attributed to the page, and GPU process footprint.
+ */
+function firstMount(row: Row): string {
+  if (row.fullCostReason) return "error";
+  const m = row.metrics;
+  if (!m.gpuBytes) return "not measured";
+  const renderer = m.rendererBytes ? `${spread(m, "rendererBytes")} MB renderer, ` : "";
+  const parts = (
+    [
+      ["gpuWebglBytes", "WebGL"],
+      ["gpuCanvasBytes", "canvas"],
+      ["gpuTileBytes", "tiles"],
+    ] as const
+  )
+    .filter(([name]) => Math.abs(median(m, name)) >= 5e4)
+    .map(([name, part]) => `${part} ${mb(median(m, name))}`)
+    .join(", ");
+  const gpuProcess = m.gpuProcessBytes ? `; GPU process ${spread(m, "gpuProcessBytes")} MB` : "";
+  return `${mb(median(m, "firstRetainedBytes"))} MB heap, ${renderer}${mb(median(m, "gpuBytes"))} MB GPU${parts ? ` (${parts})` : ""}${gpuProcess}`;
+}
+
+/**
+ * Memory scenarios: the retained heap (median of mounts repeated in one
+ * page), estimated canvas pixels, and DOM nodes; then, from first mounts in
+ * fresh pages, the retained heap, the renderer process's footprint, and the
+ * GPU memory Chrome attributes to the page, which count native and GPU
+ * memory too.
+ */
 function memoryTable(results = browser): string {
   const libraries = Object.keys(results.libraries);
   const scenarios = Object.keys(results.scenarios).filter((id) => id.startsWith("memory-"));
-  const rows: string[][] = [];
-  for (const id of scenarios) {
+  const label = (id: string) => {
     const source = find(id, libraries[0]!, results)?.metrics.sourceBytes?.summary.median ?? 0;
-    rows.push([
-      `${id} (${results.scenarios[id]?.description}; source ${mb(source)} MB)`,
-      ...libraries.map((library) => {
-        const row = find(id, library, results);
-        if (!row?.supported) return row?.reason?.startsWith("error") ? "error" : "n/a";
-        const retained = row.metrics.retainedBytes!.summary.median;
-        const canvas = row.metrics.canvasBytes!.summary.median;
-        const nodes = row.metrics.domNodes!.summary.median;
-        return `${mb(retained)} MB heap, ${mb(canvas)} MB canvas, ${nodes} nodes`;
-      }),
-    ]);
-  }
-  return table(["Scenario", ...libraries], rows);
+    return `${id} (${results.scenarios[id]?.description}; source ${mb(source)} MB)`;
+  };
+  const cells = (id: string, value: (row: Row) => string) =>
+    libraries.map((library) => {
+      const row = find(id, library, results);
+      if (!row?.supported) return row?.reason?.startsWith("error") ? "error" : "n/a";
+      return value(row);
+    });
+  const heap = scenarios.map((id) => [
+    label(id),
+    ...cells(
+      id,
+      ({ metrics: m }) =>
+        `${mb(median(m, "retainedBytes"))} MB heap, ${mb(median(m, "canvasBytes"))} MB canvas, ${median(m, "domNodes")} nodes`,
+    ),
+  ]);
+  const first = scenarios.map((id) => [label(id), ...cells(id, firstMount)]);
+  return [
+    table(["Scenario", ...libraries], heap),
+    "",
+    table(
+      [
+        "First mount in a fresh page (heap; renderer footprint, median ± MAD; GPU memory attributed to the page; GPU process footprint, median ± MAD)",
+        ...libraries,
+      ],
+      first,
+    ),
+  ].join("\n");
 }
 
 function sizeTable(): string {
@@ -278,22 +358,13 @@ function reactTable(react: BrowserResults): string {
     if (!row?.supported) return "n/a";
     const m = row.metrics;
     if (m.retainedBytes) {
-      return `${mb(m.retainedBytes.summary.median)} MB heap, ${m.domNodes!.summary.median} nodes`;
+      return `${mb(m.retainedBytes.summary.median)} MB heap, ${m.domNodes!.summary.median} nodes; first mount ${firstMount(row)}`;
     }
     if (m.droppedFrames) {
       return `${m.droppedFrames.summary.median} dropped, ${m.achievedRate!.summary.median.toFixed(0)} Hz`;
     }
-    const timing = [
-      "timeToFrame",
-      "tickToFrame",
-      "pointerToFrame",
-      "viewportToFrame",
-      "resizeToFrame",
-    ]
-      .map((name) => m[name])
-      .find((metric) => metric !== undefined);
-    if (timing)
-      return `${ms(timing.summary)} ± ${ms({ ...timing.summary, median: timing.summary.mad })} ms`;
+    const timing = ["timeToFrame", ...FRAME_TIMED].find((name) => m[name] !== undefined);
+    if (timing) return `${plusMinus(m[timing]!.summary)} ms${webglDone(row, timing)}`;
     const mount = m.initAllToFrame!.summary;
     const refresh = m.updateAllToFrame!.summary;
     return `mount ${ms(mount)} ms, refresh ${ms(refresh)} ms`;

@@ -27,12 +27,19 @@ export const HERCEG_ALIAS = {
 };
 const OUT = join(ROOT, ".build");
 
-/** The chart harness and adapters, or the grid harness and grid adapters. */
-const SUITES = {
+/**
+ * The chart harness and adapters, or the grid harness and grid adapters.
+ * `first` is imported before the adapter, so it runs before library code.
+ */
+const SUITES: Record<
+  "charts" | "grid",
+  { adapters: string; harness: string; install: string; first?: string }
+> = {
   charts: {
     adapters: "./src/adapters",
     harness: "./src/page/harness.ts",
     install: "installHarness",
+    first: "./src/page/webgl.ts",
   },
   grid: {
     adapters: "./src/grid/adapters",
@@ -50,11 +57,12 @@ export async function buildPage(
   suite: keyof typeof SUITES = "charts",
 ): Promise<void> {
   mkdirSync(OUT, { recursive: true });
-  const { adapters, harness, install } = SUITES[suite];
+  const { adapters, harness, install, first } = SUITES[suite];
   const name = suite === "grid" ? `grid-${library}` : library;
   await esbuild.build({
     stdin: {
       contents: [
+        ...(first ? [`import "${first}";`] : []),
         `import { adapter } from "${adapters}/${library}";`,
         `import { ${install} } from "${harness}";`,
         `${install}(adapter);`,

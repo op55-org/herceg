@@ -18,6 +18,8 @@ interface Row {
   library: string;
   status: "measured" | "unsupported" | "incorrect" | "error";
   reason?: string;
+  /** Why a memory scenario's process samples failed when its heap samples did not. */
+  fullCostReason?: string;
   metrics: Record<string, { unit: string; summary: Summary }>;
 }
 export interface GridResults {
@@ -72,14 +74,20 @@ export function gridSection(results: GridResults): string {
   const find = (scenario: string, library: string) =>
     results.results.find((row) => row.scenario === scenario && row.library === library);
   const notes: string[] = [];
-  /** A cell: the row's value, or why there is none (with a numbered note, one per row). */
-  const cell = (row: Row | undefined, value: (metrics: Row["metrics"]) => string): string => {
-    if (!row) return "";
-    if (row.status === "measured") return value(row.metrics);
-    if (row.status === "unsupported") return "n/a";
-    const note = `${row.library}, ${row.scenario}: ${row.reason}`;
+  /** A cell's value from a measured row's metrics. */
+  type Value = (metrics: Row["metrics"], row: Row) => string;
+  /** A numbered note for a cell without a value, one per distinct reason. */
+  const noted = (row: Row, status: string, reason: string | undefined) => {
+    const note = `${row.library}, ${row.scenario}: ${reason}`;
     if (!notes.includes(note)) notes.push(note);
-    return `${row.status} [${notes.indexOf(note) + 1}]`;
+    return `${status} [${notes.indexOf(note) + 1}]`;
+  };
+  /** A cell: the row's value, or why there is none. */
+  const cell = (row: Row | undefined, value: Value): string => {
+    if (!row) return "";
+    if (row.status === "measured") return value(row.metrics, row);
+    if (row.status === "unsupported") return "n/a";
+    return noted(row, row.status, row.reason);
   };
   const median = (metrics: Row["metrics"], name: string) =>
     metrics[name]?.summary.median ?? Number.NaN;
@@ -88,10 +96,7 @@ export function gridSection(results: GridResults): string {
     return `${ms(s.median)} ± ${ms(s.mad)}`;
   };
   /** One table: a row per size and case, a column per library. */
-  const grid = (
-    title: string,
-    cases: [suffix: string, label: string, value: (m: Row["metrics"]) => string][],
-  ) => {
+  const grid = (title: string, cases: [suffix: string, label: string, value: Value][]) => {
     const rows: string[][] = [];
     for (const size of SIZES) {
       for (const [suffix, label, value] of cases) {
@@ -151,6 +156,13 @@ export function gridSection(results: GridResults): string {
   };
   const memory = (m: Row["metrics"]) =>
     `${mb(median(m, "retainedBytes"))} MB (reserved +${mb(median(m, "mountReservedBytes"))}); input ${mb(median(m, "inputBytes"))} MB; ${median(m, "domNodes")} nodes${median(m, "canvasBytes") > 0 ? `; canvas ${mb(median(m, "canvasBytes"))} MB` : ""}`;
+  const process = (m: Row["metrics"], row: Row) => {
+    if (row.fullCostReason) return noted(row, "error", row.fullCostReason);
+    if (!m.gpuBytes) return "not measured";
+    const renderer = m.rendererBytes?.summary;
+    const gpuProcess = m.gpuProcessBytes?.summary;
+    return `${renderer ? `${mb(renderer.median)} ± ${mb(renderer.mad)} MB renderer, ` : ""}${mb(median(m, "gpuBytes"))} MB GPU${gpuProcess ? `; GPU process ${mb(gpuProcess.median)} ± ${mb(gpuProcess.mad)} MB` : ""}`;
+  };
   const lifecycle = (m: Row["metrics"]) =>
     `${mb(median(m, "destroyLeakBytes"))} / ${mb(median(m, "cycleRetainedBytes"))} MB; ${mb(median(m, "cycleGrowthBytes"))} MB per mount; ${mb(median(m, "leakedBytes"))} MB after release`;
 
@@ -211,6 +223,10 @@ export function gridSection(results: GridResults): string {
     grid(
       "Memory with the grid mounted (retained heap, and growth of the reserved heap while mounting; native input; DOM nodes; canvas)",
       [["memory", "mounted", memory]],
+    ),
+    grid(
+      "Process memory from mounting the grid (renderer footprint, median ± MAD; GPU memory Chrome attributes to the page; GPU process footprint, median ± MAD)",
+      [["memory", "mounted", process]],
     ),
     grid(
       "Heap kept 1 s after destroying the grid (after one mount / after five more); growth per further mount; kept after releasing the data too",
