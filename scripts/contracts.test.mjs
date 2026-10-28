@@ -549,18 +549,6 @@ test("the docs list each cell's state, each proof's file once, and notes of refu
     paths: { points: { title: "Points", when: "100,000 points", proofs: ["gpu.points"] } },
   };
   declared.interaction.cells = ["interaction.zoom-x.chart"];
-  Object.assign(declared.api.audits["chart helper"], {
-    choices: { tooltip: { takes: ["*", "nearest"], reason: "any mode, checked later" } },
-    untyped: { limits: "a dict" },
-  });
-  // Two audits finding the same options of their own, the second's reason given as the first's.
-  const own = { only: { fill: "one class", dash: "As fill." } };
-  Object.assign(declared.api.audits, { "mark * python encode": own, "mark * python style": own });
-  // An option differing in two ways, each with its own reason.
-  declared.api.audits["settings Position hg.Fraction"] = {
-    spelled: { fraction: { as: "value", reason: "the number is value" } },
-    untyped: { fraction: "a column is a field of its own" },
-  };
   const { cells, proofs } = checkDeclarations(declared);
   // An interaction cell is proved by the engine's `<cell>.engine`, whose file its record names.
   const executions = [
@@ -609,31 +597,10 @@ test("the docs list each cell's state, each proof's file once, and notes of refu
     markdown,
     /\| Points \| 100,000 points \| \[`gpu\.points`\]\(\.\.\/gpu\.test\.ts\) \|/,
   );
-  assert.match(
-    markdown,
-    /## Names across surfaces\n\nPython spells options in snake_case\.\n[\s\S]*- `x` is `x_axis` \(`chart helper`\): x is a column\n/,
-  );
-  assert.match(
-    markdown,
-    /- `tooltip` takes any string, "nearest" \(`chart helper`\): any mode, checked later\n/,
-  );
-  assert.match(
-    markdown,
-    /- `limits`'s settings are typed on one side alone \(`chart helper`\): a dict\n/,
-  );
-  // A difference several audits find is one item, options sharing a reason with it.
-  assert.match(
-    markdown,
-    /- `fill`, `dash`, each own \(`mark \* python encode`, `mark \* python style`\): one class\n/,
-  );
-  assert.match(
-    markdown,
-    /- `fraction` is `value` \(`settings Position hg\.Fraction`\): the number is value\n/,
-  );
-  assert.match(
-    markdown,
-    /- `fraction`'s settings are typed on one side alone \(`settings Position hg\.Fraction`\): a column is a field of its own\n/,
-  );
+  // The API audit is api.json's, linked rather than repeated.
+  assert.doesNotMatch(markdown, /## Names across surfaces/);
+  assert.match(markdown, /\[test\/contracts\/api\.json\]\(\.\.\/test\/contracts\/api\.json\)/);
+  assert.equal(records.api, undefined);
 });
 
 /** Settings as the inventory finds them: their options' choices, those of their own settings, and their type's name. */

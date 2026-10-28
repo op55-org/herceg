@@ -75,7 +75,7 @@ export function capabilityRecords({ declarations, cells, proofs, executions }) {
         },
       ]),
     );
-  const { capabilities, marks, express, interaction, api } = declarations;
+  const { capabilities, marks, express, interaction } = declarations;
   // Every cell of the matrix, marks' and Express recipes', by state.
   const totals = Object.fromEntries(Object.keys(STATES).map((state) => [state, 0]));
   for (const { state } of cells) totals[state]++;
@@ -103,7 +103,6 @@ export function capabilityRecords({ declarations, cells, proofs, executions }) {
         ]),
       ),
     },
-    api: { conventions: api.about[0], audits: api.audits },
   };
   const byFile = new Map();
   for (const [id, file] of [...cited].sort(([a], [b]) => (a < b ? -1 : 1)))
@@ -136,68 +135,6 @@ export function capabilityJson(records) {
       .join(",\n")}\n${indent}}`;
   };
   return `${format(records, "")}\n`;
-}
-
-/** One difference of an API audit, for one option or several sharing a reason: what differs, and why. */
-function difference(kind, options, entry, reason) {
-  const names = options.map((option) => `\`${option}\``).join(", ");
-  // "*" is any string; none, names of no choices (a number, a flag).
-  const choicesOf = (takes) =>
-    takes.length === 0
-      ? "no named choices"
-      : takes.map((choice) => (choice === "*" ? "any string" : `"${choice}"`)).join(", ");
-  switch (kind) {
-    case "spelled":
-      return { what: `${names} is \`${entry.as}\``, reason };
-    case "spread": {
-      const as = Object.entries(entry.as ?? {}).map(([from, to]) => `${from} is \`${to}\``);
-      return {
-        what: `${names}'s settings are options of their own${as.length ? ` (${as.join(", ")})` : ""}`,
-        reason,
-      };
-    }
-    case "without":
-      return { what: `no ${names}`, reason };
-    case "only":
-      return { what: `${names}, ${options.length > 1 ? "each" : "its"} own`, reason };
-    case "choices":
-      return { what: `${names} takes ${choicesOf(entry.takes)}`, reason };
-    case "untyped":
-      return { what: `${names}'s settings are typed on one side alone`, reason };
-    default:
-      throw new Error(`api.json: no difference of kind ${kind}`);
-  }
-}
-
-/**
- * An audit's differences, each reason "As <option>." written out as that
- * option's (of the same kind, or else of any). Options missing or the
- * audit's own that share a reason are one difference.
- */
-function differencesOf(kinds) {
-  const reasonIn = (kind, option) => {
-    const entry = kinds[kind]?.[option];
-    return typeof entry === "string" ? entry : entry?.reason;
-  };
-  const reasonOf = (kind, option) => {
-    const reason = reasonIn(kind, option);
-    const as = /^As (\S+)\.$/.exec(reason)?.[1];
-    if (!as) return reason;
-    const of = [kind, ...Object.keys(kinds)].find((other) => reasonIn(other, as) !== undefined);
-    return of ? reasonIn(of, as) : reason;
-  };
-  const found = [];
-  for (const [kind, entries] of Object.entries(kinds)) {
-    const shared = new Map();
-    for (const [option, entry] of Object.entries(entries)) {
-      const reason = reasonOf(kind, option);
-      if (kind === "without" || kind === "only")
-        shared.set(reason, [...(shared.get(reason) ?? []), option]);
-      else found.push(difference(kind, [option], entry, reason));
-    }
-    for (const [reason, options] of shared) found.push(difference(kind, options, null, reason));
-  }
-  return found;
 }
 
 const cellText = (text) => text.replaceAll("|", "\\|");
@@ -236,6 +173,8 @@ export function capabilityMarkdown(records) {
     "[test/contracts/](../test/contracts/) and a complete passing run of every test",
     "suite (see [Contracts](contributing.md#contracts)); do not edit.",
     "[capabilities.json](capabilities.json) has the same matrix with each cell's proofs.",
+    "[test/contracts/api.json](../test/contracts/api.json) lists where option names differ",
+    "between TypeScript, Python, and the adapters, and why.",
     "",
     `- ${STATES.works} works, proved by the test file listed with the capability.`,
     `- ${STATES.unproved} supported, but not yet proved: declared to work, with no test proving it yet.`,
@@ -260,7 +199,6 @@ export function capabilityMarkdown(records) {
     ...(hasExpress ? ["Express recipes"] : []),
     "Interaction in panels",
     "GPU paths",
-    "Names across surfaces",
   ];
   lines.push(contents.map((title) => `[${title}](#${slug(title)})`).join(" · "), "");
 
@@ -390,27 +328,6 @@ export function capabilityMarkdown(records) {
     );
   lines.push("");
 
-  lines.push("## Names across surfaces", "", records.api.conventions, "");
-  lines.push(
-    "Where a surface differs, and why (scripts/contracts/api.mjs checks each), with the " +
-      "audits finding it: what each compares, the surface, and the option whose settings it reads, if any " +
-      "(`mark rule python`: the rule mark's options in Python; `mark line python continuity " +
-      "maxGap`: the settings of a line's continuity.maxGap there; `mark * helper`: what every " +
-      "mark's helper shares; `settings ScalePadding hg.Pixels`: a settings type against the " +
-      "Python class taking it).",
-    "",
-  );
-  // A difference several audits share is listed once, with each audit.
-  const audits = new Map();
-  for (const [audit, kinds] of Object.entries(records.api.audits))
-    for (const { what, reason } of differencesOf(kinds)) {
-      const key = `${what}\n${reason}`;
-      if (!audits.has(key)) audits.set(key, { what, reason, in: [] });
-      audits.get(key).in.push(`\`${audit}\``);
-    }
-  for (const { what, reason, in: names } of audits.values())
-    lines.push(`- ${what} (${names.join(", ")}): ${reason}`);
-  lines.push("");
   return lines.map(escapeTags).join("\n");
 }
 
