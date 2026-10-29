@@ -358,26 +358,36 @@ export class MountedChart implements Chart, ExportsScene {
   readonly #member: SyncMember = {
     receive: (channel, value) => {
       const spec = this.#channels[channel]!;
-      const { scale, panel } = spec;
+      const { group, scale, panel } = spec;
       if (channel === "cursor") {
         // It shows where the panels sharing the channel's panel's scale are, as drawn then.
         this.#cursor = value === null ? null : { at: { [scale]: value } as CursorPosition, panel };
         schedule(this.#scheduled);
         return;
       }
+      // Before the first frame, a panel's channel, and y (left or right as
+      // the chart draws), wait for it, taken if the chart syncs them as it did.
+      const later = () => {
+        const now = this.#channels[channel];
+        if (now?.group === group && now.scale === scale && now.panel === panel)
+          this.#member.receive(channel, value);
+      };
+      if (this.#later(panel !== undefined || scale !== "x", later)) return;
       const take = () => {
         // A view or a selection is of the scales of the channel's panel, or
         // those every panel shares; a chart without either takes none.
+        // Before the first frame, of those every panel shares, as the
+        // chart's own calls are, and reported and shared with it.
         const at = this.#endpoint(spec);
-        if (!at) return;
+        if (!at && !this.#early) return;
         if (channel === "selection") {
           this.#select(this.#decode(value as SharedSelection | null, scale, at), at);
           return;
         }
         this.#settle();
-        const axis = verticalIn(at, scale);
+        const axis = at ? verticalIn(at, scale) : (scale as ScaleName);
         this.#changeView(
-          () => this.#model.setView(axis, at[`${axis}Group`], value as Range | null),
+          () => this.#model.setView(axis, at?.[`${axis}Group`] ?? "", value as Range | null),
           "sync",
           panel,
         );
@@ -430,6 +440,17 @@ export class MountedChart implements Chart, ExportsScene {
   #panelsCause: ViewCause = "options";
   /** Inside `#changeView`, whose end reports the change. */
   #changingView = false;
+  /**
+   * Calls (and what synced charts share) waiting for the first frame, which
+   * makes them in order (`#later`); undefined since it drew.
+   */
+  #early: (() => void)[] | undefined = [];
+  /**
+   * The reports of what changed before the first frame, and with the calls
+   * it makes, which it makes after those calls, sharing each channel's
+   * state then: the newest. Undefined since.
+   */
+  #reports: (() => void)[] | undefined = [];
   /** Counts the changes of view reported (`ViewportEvent.viewRevision`). */
   #viewRevision = 0;
   /** Viewport events a listener's changes made, waiting for the one being delivered to reach every listener. */
@@ -674,12 +695,11 @@ export class MountedChart implements Chart, ExportsScene {
     );
     // Limits that changed moved views inside them; the views of instances
     // no longer drawn go with the next frame (see `#finishFrame`).
-    const changed = this.#changed(views);
-    this.#reportViews(changed, "options");
-    this.#shareView(changed);
+    this.#changeView(() => {}, "options", undefined, undefined, views);
   }
 
   setViewport(view: ViewChange, target: PanelTarget = {}): void {
+    if (this.#later(target.panel !== undefined, () => this.setViewport(view, target))) return;
     const { panel } = target;
     const plane = this.#plane();
     // Maps' and networks' planes keep views of their own.
@@ -701,6 +721,29 @@ export class MountedChart implements Chart, ExportsScene {
           : undefined,
       ),
     );
+  }
+
+  /**
+   * Before the first frame, which draws the panels of facets and subplots
+   * (and which instance of a scale a call means there) and the planes of
+   * maps and networks, which keep views of their own: queues a call that
+   * only that frame resolves (`named`), or on such a chart, for that frame,
+   * and those after it (what synced charts share too), reporting what they
+   * throw then. Whether it did.
+   */
+  #later(named: boolean, call: () => void): boolean {
+    const { panels, facet } = this.#options;
+    // Once one waits, those after it wait too, in order.
+    const known = !(panels || facet || this.#model.layouts.length || this.#early?.length);
+    if (!this.#early || (!named && known)) return false;
+    this.#early.push(() => {
+      try {
+        call();
+      } catch (error) {
+        report(error);
+      }
+    });
+    return true;
   }
 
   getViewport(target: PanelTarget = {}): Viewport {
@@ -768,6 +811,7 @@ export class MountedChart implements Chart, ExportsScene {
     selection: Selection | readonly [number, number] | null,
     target: PanelTarget & { rows?: boolean } = {},
   ): void {
+    if (this.#later(target.panel !== undefined, () => this.select(selection, target))) return;
     // A map's or network's lasso belongs to its plane; clearing names one only to check it.
     const plane =
       selection || target.panel !== undefined ? this.#plane()?.select(target.panel) : undefined;
@@ -795,7 +839,7 @@ export class MountedChart implements Chart, ExportsScene {
     const shares = (owner: SelectionOwner | null) =>
       !owner?.plane &&
       owner?.scales.every((scale) => scale.instance === at?.[`${scale.scale}Group`]);
-    if (!channel || !at || plane) return;
+    if (!channel || !at || plane || this.#reports) return;
     if (shares(owner))
       broadcast("selection", channel.group, this.#member, this.#encode(channel.scale, at));
     // One taking the place of the channel's clears what the charts show.
@@ -857,6 +901,15 @@ export class MountedChart implements Chart, ExportsScene {
     this.#selection = next;
     this.#owner = owner;
     schedule(this.#scheduled);
+    if (this.#reports) {
+      // Selected again in the first frame's panels, unless changed since.
+      this.#reports.push(() => {
+        if (this.#selection !== next) return;
+        this.#selection = this.#owner = null;
+        this.#selectIn(next, at, local, plane);
+      });
+      return;
+    }
     const written = this.#rows?.brushed(next, owner, local);
     // A listener may have changed the selection as its rows were written: that change reported itself.
     if (this.#selection === next) this.#emitSelection(next, owner ?? before, written);
@@ -1333,6 +1386,18 @@ export class MountedChart implements Chart, ExportsScene {
     if (drawn) {
       this.#dirty = this.#panelsChanged = this.#shapeChanged = false;
       this.#draw();
+      const early = this.#early;
+      if (early) {
+        // The first frame, or the first export: with panels to do it in, the
+        // chart makes the calls that waited for it, then reports and shares
+        // what changed before it and with them, and draws what they change.
+        const reports = this.#reports!;
+        this.#early = undefined;
+        for (const step of early) step();
+        this.#reports = undefined;
+        for (const step of reports) step();
+        this.#drawPending();
+      }
     }
     return drawn;
   }
@@ -1395,15 +1460,22 @@ export class MountedChart implements Chart, ExportsScene {
    * Makes the view changes `change` makes, then reports them as one change
    * of view (see `ViewportEvent`) and shares the view of the sync
    * channel's scale with synced charts. Changes made inside `change` are
-   * part of it; changes listeners make are the next ones.
+   * part of it; changes listeners make are the next ones. Before the
+   * first frame, which draws the panels to report it in, the report waits
+   * for that frame, of the change since the views were `before`.
    */
-  #changeView(change: () => void, cause: ViewCause, panel?: string, plane?: PlaneViewChange): void {
+  #changeView(
+    change: () => void,
+    cause: ViewCause,
+    panel?: string,
+    plane?: PlaneViewChange,
+    before: ReadonlyMap<string, Range> = this.#model.views(),
+  ): void {
     if (this.#changingView) {
       change();
       return;
     }
     this.#cause = cause;
-    const before = this.#model.views();
     this.#changingView = true;
     try {
       change();
@@ -1413,6 +1485,10 @@ export class MountedChart implements Chart, ExportsScene {
     const changed = this.#changed(before);
     if (changed.length === 0 && !plane) return;
     this.#invalidate(false);
+    if (this.#reports) {
+      this.#reports.push(() => this.#changeView(() => {}, cause, panel, plane, before));
+      return;
+    }
     this.#reportViews(changed, cause, panel, [], plane);
     // What a synced chart shared is not shared again.
     if (cause !== "sync") this.#shareView(changed);
@@ -1954,14 +2030,14 @@ export class MountedChart implements Chart, ExportsScene {
             normalize,
           }),
         ),
-      // Drills, moves, and views of maps and networks report themselves.
+      // Drills and moves of maps and networks report themselves; views as
+      // the axes' do, in order with them.
       (...[type, change]) => {
-        if (type !== "camera") this.#invalidate(false);
-        if (type === "viewport") {
-          this.#cause = change.cause;
-          this.#viewRevision++;
-          this.#deliver({ viewRevision: this.#viewRevision, ...change });
-        } else this.#events.emit(type, change as never);
+        if (type === "viewport") this.#changeView(() => {}, change.cause, change.panel, change);
+        else {
+          if (type !== "camera") this.#invalidate(false);
+          this.#events.emit(type, change as never);
+        }
       },
     );
   }

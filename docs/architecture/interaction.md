@@ -194,6 +194,14 @@ the view, and the selection, each on one of the chart's scales.
   (`SyncMember.receive`) without sharing it again; a broadcast that a
   receiver's listener supersedes stops, so no member ends on the older
   value.
+- **Before the first frame**, while a chart loads code that frame needs,
+  views and selections set on it apply at once, and their reports and
+  shares wait for the frame (`#early` and `#reports` in `dom/chart.ts`).
+  On charts of facets, subplots, maps, or networks, whose panels and
+  planes that frame draws, calls and what synced charts share wait too,
+  and the frame makes them in order. The reports come after them,
+  sharing each channel's state then, so a newer value a synced chart
+  sent is not overwritten by an older local one.
 - **Values as data.** Numbers and times as they are, categories by name
   (`#encode`, `#decode` in `dom/chart.ts`), so charts with other
   categories show the same one. A chart shares and shows cursors along the

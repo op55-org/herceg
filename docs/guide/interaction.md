@@ -212,6 +212,15 @@ createChart(month, { marks: [line(hours, { x: "at", y: "load" })], interaction: 
 - **Showing a cursor from outside.** `chart.showCursor({ x: order.time })`
   shows the cursor where an application says, and `hideCursor()` hides
   it; both reach the chart's cursor channel unless `{ broadcast: false }`.
+- **Before the first frame.** A view or selection set right after
+  mounting, while the chart still loads code its first frame needs,
+  applies at once (`getViewport` and `selection` read it); its `viewport`
+  or `select` event and what synced charts receive follow with that frame,
+  naming the panels it draws. On a chart of facets, subplots, maps, or
+  networks, whose panels and planes that frame draws, views and selections
+  apply with it, in the order they were set; reading a panel's back
+  (`getViewport({ panel })`) waits for `chart.ready`. What synced charts
+  share before then takes its place in the same order.
 - **Groups.** Each channel's groups are its own: `{ cursor: "all",
   viewport: "pair" }` shares the cursor with every chart of "all" and the
   view with those of "pair".
