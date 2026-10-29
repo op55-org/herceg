@@ -281,6 +281,16 @@ hg.Chart(df, legend=hg.LegendOptions(place=hg.Place(side="bottom", align="center
 - An entry stands for a value, across every mark and panel
   ([Styling](styling.md#colors-follow-what-series-stand-for)); entries never
   merge by label alone.
+- A scale of categories lists its domain, in the automatic legend and in
+  one naming it with `{ scale }`: a declared `domain` whole and in its
+  order, whatever the marks draw now, so filtering rows never changes the
+  key (values drawn outside it, in its `unknown` color, follow); without
+  one, the values the marks draw. An entry of a value nothing draws yet
+  hides that value's rows once they come. Marks left out of legends
+  (`legend: false`) list it only in a legend naming them; a panel's own
+  legend lists the domains of the scales its marks draw with, and a scale
+  of each subplot (`scope: "panel"`) its own. Keys of the colors or shapes
+  rows take list a declared domain the same way.
 - A mark's `legend: false` leaves it out of legends and colorbars that name
   no mark; those naming it show it.
 - Rules, regions, and text with `legend: true` are listed by their labels

@@ -160,7 +160,11 @@ of categories, a mark's scale (`{ mark, channel }`), or a mark whole.
 Listed legends claim what they include, colorbars their ramps, and the
 automatic legend shows the rest. What a mark owns comes of its options, not
 its rows (`Mark.legendScales`), so a reference to a scale a mark does not
-declare is an error naming those it has. Entries are identities: the series
+declare is an error naming those it has. A scale of categories with a
+declared `domain` lists it whole and in order, whatever the marks draw now
+(`CompiledFeatures.listDomains`), so filtering rows keeps the key; its
+entries own the domain's values' identity keys (`domainKeys`), so an entry
+of a value nothing draws yet hides its rows once they come. Entries are identities: the series
 of every mark and panel standing for one value are one entry; labels alone
 never merge entries. `swatches: "mark"` draws each entry from its marks'
 settings (`SeriesFeatures.swatch`, else `sampleOf`). Custom entries target

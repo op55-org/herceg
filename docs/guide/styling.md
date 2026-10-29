@@ -85,7 +85,7 @@ hg.Chart(totals, scales={"color": sites}).bar(x="site", y="gain", color="site")
 | `{ type: "ordinal", ... }` (Python `hg.OrdinalScale`) | Means |
 | --- | --- |
 | `map` | Outputs by value: colors, shapes, dashes, or numbers. Values left out take the theme's palette by their place in the domain. |
-| `domain` | The values in order, and only those; others take `unknown`. Default: the fields' values, dictionary order first, then first seen. |
+| `domain` | The values in order, and only those; others take `unknown`. Legends list it whole, drawn or not. Default: the fields' values, dictionary order first, then first seen. |
 | `unknown` | Output for values outside `domain`; the theme's muted color by default. |
 
 A value keeps its place once it has one, so streaming never recolors.

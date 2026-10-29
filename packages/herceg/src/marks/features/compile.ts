@@ -20,6 +20,7 @@ import type {
   SeriesFeatures,
   SeriesSwatch,
 } from "../../model/features.ts";
+import type { LegendEntry } from "../../model/legend.ts";
 import type { ChartConfig } from "../../model/model.ts";
 import type { AreaGeometry, Geometry, LineGeometry } from "../../scene/scene.ts";
 import type {
@@ -33,7 +34,7 @@ import type { ChartErrorCode } from "../../spec/errors.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
 import type { AreaSpec, BarSpec, LineSpec, TextSpec } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
-import type { Frame, Mark, Palette } from "../mark.ts";
+import type { ChartMark, Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
 import {
   checkOutputs,
@@ -226,6 +227,21 @@ function compile(
       });
     };
   const zone = config.timeZone ?? "local";
+  /**
+   * The scales whose values series and layout items stand for, by the
+   * prefix of their identity keys (a panel's own, for scales of each
+   * subplot), with the marks reading them: legends list their declared
+   * domains for those marks.
+   */
+  const listed = new Map<string, { scale: CategoryScale; marks: Set<ChartMark> }>();
+  const list = (prefix: string, scale: CategoryScale, mark: ChartMark) => {
+    const readers = listed.get(prefix) ?? { scale, marks: new Set<ChartMark>() };
+    readers.marks.add(mark);
+    listed.set(prefix, readers);
+  };
+  /** The keys of a declared domain's values, in its order; none without one. */
+  const domainKeys = (prefix: string, scale: CategoryScale) =>
+    (scale.spec?.domain ?? []).map((value) => `${prefix}${JSON.stringify(value)}}`);
   const byMark = new Map<Mark, MarkFeatures & { use(theme: Theme, paint: PaintReader): void }>();
   const declared = config.scales?.color !== undefined;
   // Labels following series: marks' own `labels`, and text `from` a mark
@@ -311,6 +327,8 @@ function compile(
       checkOutputs(scale, outputCheck("color", kit.isColor), `${path} color`);
       // The scale reads the values that color the mark, not series it colors otherwise.
       if (scope!.field !== undefined) scale.read(mark.table!, scope!.field);
+      const prefix = scalePrefix(scale.name, ofPanels.has(scale.name) ? (panel ?? "") : undefined);
+      if (scope!.color === prefix) list(prefix, scale, mark);
     }
     // Series of lines and areas labels follow record what they draw.
     const labels = (mark.spec as { labels?: AreaLabelsSpec }).labels;
@@ -392,8 +410,9 @@ function compile(
     for (const mark of config.marks as readonly Mark[]) {
       const identity = mark.identity as { field?: string; table?: Table } | undefined;
       if (!marks.includes(mark) && identity?.field !== undefined && mark.table) {
-        colorOf(mark)!.read(identity.table ?? mark.table, identity.field);
-        prefixIn("color", mark.spec.panel);
+        const scale = colorOf(mark)!;
+        scale.read(identity.table ?? mark.table, identity.field);
+        list(prefixIn("color", mark.spec.panel), scale, mark);
       }
     }
   const compiled: Compiled = {
@@ -410,6 +429,37 @@ function compile(
       );
     },
     of: (mark) => byMark.get(mark),
+    listDomains: (entries, plain) => {
+      let out = [...entries];
+      for (const [prefix, { scale, marks }] of listed) {
+        const domain = scale.spec?.domain;
+        // Marks left out of legends list it where guides name them, and only there.
+        if (!domain || !theme || (plain && [...marks].every(({ spec }) => spec.legend === false)))
+          continue;
+        const path = `chart ${scalePath(scale.name)}`;
+        // In the place and look of the scale's first entry drawn, at the end
+        // without one; values drawn outside the domain (in its `unknown`) follow.
+        const at = out.findIndex(({ key }) => key.startsWith(prefix));
+        const look = out[at];
+        const keys = domainKeys(prefix, scale);
+        const drawn = new Map(out.map((entry) => [entry.key, entry]));
+        const listing = domain.map((value, i): LegendEntry => {
+          const color = paint!(scale.output(value, theme!.palette, theme!.muted), path);
+          const glyph = look?.glyph;
+          return (
+            drawn.get(keys[i]!) ?? { key: keys[i]!, label: value, color, ...(glyph && { glyph }) }
+          );
+        });
+        const outside = out.filter(({ key }) => key.startsWith(prefix) && !keys.includes(key));
+        out = out.filter(({ key }) => !key.startsWith(prefix));
+        out.splice(at < 0 ? out.length : at, 0, ...listing, ...outside);
+      }
+      return out;
+    },
+    domainKeys: (mark) =>
+      [...listed].flatMap(([prefix, { scale, marks }]) =>
+        marks.has(mark) ? domainKeys(prefix, scale) : [],
+      ),
     frame: (frame, bound) => boundFrame(kit, frame, bound),
     update(t, slot, p) {
       theme = t;

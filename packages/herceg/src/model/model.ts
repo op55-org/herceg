@@ -2813,13 +2813,14 @@ export class ChartModel {
 
   /**
    * The chart's furniture: its title and legends on their sides (inside a
-   * plot, the legend to place once panels are), and the room they and the
+   * plot, the legend to place once panels are), listing the entries
+   * `drawn` and declared domains whole, and the room they and the
    * padding keep from the panels. `yLabels` says whether y labels may reach
    * above the plots, which explicit padding leaves room for, and `yOver`
    * how much further than text alone their boxes reach.
    */
   #furniture(
-    entries: readonly LegendEntry[],
+    drawn: readonly LegendEntry[],
     parts: readonly LegendPart[],
     measure: MeasureText,
     yLabels: boolean,
@@ -2830,6 +2831,8 @@ export class ChartModel {
   ): Furniture {
     const config = this.#config;
     const { width, height } = this;
+    // A declared domain lists every value, drawn or not.
+    const entries = this.#featured?.listDomains(drawn, !this.#compiled?.legends) ?? drawn;
     this.#entries = entries;
     // Parts that start rows of their own (keys) follow the others (ramps),
     // in the legend and in the chart's description alike.
@@ -2873,6 +2876,7 @@ export class ChartModel {
       hidden: this.hidden,
       also: this.#also,
       color: this.#itemColor,
+      domains: this.#featured?.domainKeys,
       // Subplots' legends list what their panels draw.
       ...(config.panels && { split, panelLegends: config.panels.panelLegends }),
     };

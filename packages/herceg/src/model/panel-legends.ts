@@ -3,7 +3,7 @@
 // look where panels show or hide series of their own. Loaded with subplots
 // (model/panels.ts), which hand it to the guide compiler's legends.
 
-import type { Mark, RowParts } from "../marks/mark.ts";
+import type { ChartMark, Mark, RowParts } from "../marks/mark.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import {
@@ -146,8 +146,18 @@ export class PanelLegends {
         if (list) list.push(key);
         else members.set(entry, [key]);
         targets.set(entry, [entry]);
+        own(entry, mark);
+      };
+      const own = (entry: string, mark: string | number) => {
         const owners = marks.get(entry) ?? [];
         if (!owners.includes(mark)) marks.set(entry, [...owners, mark]);
+      };
+      // The values of the declared domains a mark reads, drawn or not, which
+      // it owns beside those drawing them.
+      const domains = (mark: ChartMark, owner: string | number) => {
+        for (const key of content.domains?.(mark) ?? [])
+          if (targets.has(key)) own(key, owner);
+          else add(key, key, owner);
       };
       const item = split.items?.[p];
       if (item && color) {
@@ -164,6 +174,7 @@ export class PanelLegends {
           also.push({ ...entry, key: identity });
         }
         for (const part of item.mark.legends?.(theme, locale, paint) ?? []) parts.add(part.key);
+        domains(item.mark, owner);
       } else
         split.panels[p]!.forEach(({ mark, series, rows }, m) => {
           const id = mark.spec.id ?? m;
@@ -181,6 +192,7 @@ export class PanelLegends {
           if (mark.spec.legend === false && !named.has(id)) return;
           drawn.add(id);
           for (const s of series) add(s.entry ?? s.key, s.key, id);
+          domains(mark, id);
         });
       this.#panels.set(key, {
         members,

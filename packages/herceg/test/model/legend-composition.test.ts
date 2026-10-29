@@ -3,6 +3,7 @@
 // marks whole, targets that hide marks whole or rows by value, legends
 // stacked in the order the guides list them, and colorbars of maps.
 import { describe, expect, it } from "vitest";
+import { category } from "../../src/data/column.ts";
 import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";
 import { table } from "../../src/data/table.ts";
 import { colorbar, legend } from "../../src/guides/options.ts";
@@ -11,6 +12,7 @@ import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { geoshape } from "../../src/marks/geoshape.ts";
 import { line } from "../../src/marks/line.ts";
+import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { region } from "../../src/marks/region.ts";
 import { rule } from "../../src/marks/rule.ts";
@@ -162,6 +164,161 @@ describe("legends composed", () => {
     },
     "a legend lists the values of a scale it names, across marks",
   );
+
+  it("list a scale's declared domain whole, in its order, whatever the marks draw now", () => {
+    const penguins = () =>
+      table({ x: [1, 2, 3], y: [1, 2, 3], species: ["Gentoo", "Chinstrap", "Gentoo"] });
+    const domain = ["Adelie", "Chinstrap", "Gentoo"];
+    const scales = { color: { type: "ordinal", domain } } as const;
+    const species = (data: ReturnType<typeof penguins>) =>
+      line(data, { x: "x", y: "y", series: "species", color: "species" });
+    // Named, and in the automatic legend of every scale.
+    for (const guides of [[legend({ include: [{ scale: "color" }] })], undefined]) {
+      const data = penguins();
+      const { scene, model } = build({ scales, marks: [species(data)], ...(guides && { guides }) });
+      expect(labelsOf(scene)).toEqual(domain);
+      // An entry of a value nothing draws yet is shown, in the scale's color for it.
+      const [adelie, chinstrap] = entriesOf(scene);
+      expect(adelie!.hidden).toBe(false);
+      expect(adelie!.color).not.toBe(chinstrap!.color);
+      // Hiding it hides the rows that bring the value later.
+      model.hidden.add(adelie!.key);
+      data.append({ x: [4], y: [4], species: ["Adelie"] });
+      expect(entriesOf(model.scene(estimateText)).map(({ hidden }) => hidden)).toEqual([
+        true,
+        false,
+        false,
+      ]);
+    }
+    // A filter leaving no rows of a value keeps the key.
+    const gentoo = table({ x: [1], y: [1], species: ["Gentoo"] });
+    expect(labelsOf(build({ scales, marks: [species(gentoo)], legend: true }).scene)).toEqual(
+      domain,
+    );
+    // Values drawn outside the domain (in its unknown color) follow it.
+    const emperor = table({ x: [1, 2], y: [1, 2], species: ["Emperor", "Gentoo"] });
+    expect(labelsOf(build({ scales, marks: [species(emperor)] }).scene)).toEqual([
+      ...domain,
+      "Emperor",
+    ]);
+    // A key of the colors rows take lists the domain too.
+    const islands = table({
+      x: [1, 2],
+      y: [1, 2],
+      species: ["Gentoo", "Gentoo"],
+      island: ["a", "b"],
+    });
+    const key = guidesOf(
+      build({
+        scales,
+        marks: [point(islands, { x: "x", y: "y", series: "island", color: "species" })],
+      }).scene,
+      "key",
+    )[0]!;
+    const written = key.items.flatMap((item) =>
+      item.type === "text" ? [(item as TextItem).text] : [],
+    );
+    expect(written).toEqual(["species", ...domain]);
+    // Without a declared domain, a scale lists the values its marks draw.
+    const found = build({
+      scales: { color: { type: "ordinal" } },
+      marks: [species(gentoo)],
+      legend: true,
+    });
+    expect(labelsOf(found.scene)).toEqual(["Gentoo"]);
+  });
+
+  it("list a declared domain where its marks are listed: none for marks left out, in panels' own legends", () => {
+    const rows = table({ x: [1, 2], y: [1, 2], species: ["Chinstrap", "Chinstrap"] });
+    const domain = ["Adelie", "Chinstrap", "Gentoo"];
+    const species = (options: { legend?: false; panel?: string; id?: string } = {}) =>
+      line(rows, { x: "x", y: "y", series: "species", color: "species", ...options });
+    const scales = { color: { type: "ordinal", domain } } as const;
+    const listed = (config: ChartConfig) =>
+      guidesOf(build(config).scene, "legend").map(({ entries }) =>
+        entries.map(({ label }) => label),
+      );
+    expect(listed({ scales, marks: [species({ legend: false })], legend: true })).toEqual([]);
+    // A legend naming such a mark lists it whole.
+    expect(
+      listed({
+        scales,
+        marks: [species({ legend: false, id: "m" })],
+        guides: [legend({ include: [{ mark: "m" }] })],
+      }),
+    ).toEqual([domain]);
+    // A panel's own legend lists the domain its marks draw from, and the chart's leaves it.
+    const subplots = panels([{ id: "a" }, { id: "b" }]);
+    expect(
+      listed({
+        scales,
+        marks: [species({ panel: "a" })],
+        panels: subplots,
+        guides: [legend({ panel: "a" })],
+      }),
+    ).toEqual([domain]);
+    // Each panel's legend lists it whole, whatever other panels draw, and
+    // whether its own marks draw rows or not.
+    const of = (drawn: string[], panel: string) =>
+      line(
+        table({ x: drawn.map((_, i) => i), y: drawn.map((_, i) => i), species: category(drawn) }),
+        {
+          x: "x",
+          y: "y",
+          series: "species",
+          color: "species",
+          panel,
+        },
+      );
+    expect(
+      listed({
+        scales,
+        marks: [of(["Chinstrap"], "a"), of(["Gentoo"], "b"), of([], "c")],
+        panels: panels([{ id: "a" }, { id: "b" }, { id: "c" }]),
+        guides: ["a", "b", "c"].map((panel) => legend({ panel })),
+      }),
+    ).toEqual([domain, domain, domain]);
+    // Every mark of a panel reading it owns it there, and a pie's slices list it too.
+    const one = (drawn: string, id: string) =>
+      line(table({ x: [1], y: [1], species: [drawn] }), {
+        x: "x",
+        y: "y",
+        series: "species",
+        color: "species",
+        panel: "p",
+        id,
+      });
+    expect(
+      listed({
+        scales,
+        marks: [one("Chinstrap", "m1"), one("Chinstrap", "m2")],
+        panels: panels([{ id: "p" }]),
+        guides: [legend({ panel: "p", include: [{ mark: "m2" }] })],
+      }),
+    ).toEqual([domain]);
+    const slices = table({ species: ["Chinstrap"], n: [3] });
+    expect(
+      listed({
+        scales,
+        marks: [pie(slices, { category: "species", value: "n", panel: "p" })],
+        panels: panels([{ id: "p" }]),
+        guides: [legend({ panel: "p", include: [{ scale: "color" }] })],
+      }),
+    ).toEqual([domain]);
+    // A legend naming the mark lists it, and no other legend does.
+    expect(
+      listed({
+        scales,
+        marks: [species({ id: "m" })],
+        guides: [legend({ include: [{ mark: "m" }] })],
+      }),
+    ).toEqual([domain]);
+    // A scale of each subplot lists its domain in each.
+    const each = { color: { type: "ordinal", domain, scope: "panel" } } as const;
+    expect(
+      listed({ scales: each, marks: [species({ panel: "a" })], panels: subplots, legend: true }),
+    ).toEqual([domain]);
+  });
 
   contractTest(
     "legend.include.mark",

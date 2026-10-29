@@ -92,6 +92,7 @@ export interface OrdinalScaleSpec {
    * places in that panel's domain.
    */
   scope?: "chart" | "panel";
+  /** The values in order, and only those; legends list every one, drawn or not. */
   domain?: readonly string[];
   map?: Readonly<Record<string, string | number | Dash>>;
   /** For values outside an explicit `domain`: the theme's muted color by default. */
