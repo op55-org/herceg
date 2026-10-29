@@ -1,4 +1,4 @@
-import type { FieldKind, NumericArray } from "../data/column.ts";
+import { type FieldKind, type NumericArray, UNTYPED } from "../data/column.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
 import type { Formatter } from "../format/format.ts";
@@ -790,7 +790,9 @@ export function requireField(
     // values' type.
     const fix =
       kinds[0] === "category"
-        ? "; give its values as strings, or numbers wrapped in category()"
+        ? kind === "number" && !table.extent(field)
+          ? UNTYPED
+          : "; give its values as strings, or numbers wrapped in category()"
         : kinds[0] === "time"
           ? "; give Dates or time() values"
           : kind === "category" && kinds.includes("number")

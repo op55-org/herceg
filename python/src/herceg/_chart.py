@@ -31,7 +31,7 @@ import numpy as np
 
 from . import _geo, _render
 from ._colors import is_color
-from ._data import Column, Matrix, Table, listlike
+from ._data import UNTYPED, Column, Matrix, Table, listlike
 from ._derive import BinSpec, Derived, Expr, _fields_of, bin_spec
 from ._encoding import (
     SYMBOLS,
@@ -5612,12 +5612,17 @@ class Chart:
                 code="unknown-field",
                 path=path,
             )
-        kind = _read(source, field, role, path).kind
+        column = _read(source, field, role, path)
+        kind = column.kind
         if kind not in kinds:
             # Categories come from strings, and times (only a heatmap's date takes
             # nothing else) from datetimes, so the usual fix is the column's type.
             if kinds[0] == "category":
-                fix = "; give its values as strings, or make it a categorical column"
+                fix = (
+                    UNTYPED
+                    if column.untyped
+                    else "; give its values as strings, or make it a categorical column"
+                )
             elif kinds[0] == "time":
                 fix = "; give datetimes"
             elif kind == "category" and "number" in kinds:

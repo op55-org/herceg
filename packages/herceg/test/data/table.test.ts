@@ -162,6 +162,35 @@ describe("append", () => {
     expect(t.value("t", 1)).toBe(5);
   });
 
+  it("makes empty arrays number fields, and says how to start text when text arrives", () => {
+    // An empty array carries no element type, whatever its TypeScript type.
+    const t = table({ label: [] as string[], at: [] as number[], tag: category([]) });
+    expect(t.kind("label")).toBe("number");
+    expect(t.kind("tag")).toBe("category");
+    const fix = "; an empty array makes a number column, so start text with category([])";
+    expect(() => t.append({ label: ["peak"], at: [1], tag: ["a"] })).toThrow(
+      `append "label": row 0: expected a number; received "peak"${fix}`,
+    );
+    expect(() => t.reset({ label: ["peak"], at: [1], tag: ["a"] })).toThrow(
+      `reset() must keep field "label" as number${fix}`,
+    );
+    // Once the table has rows, text is plainly of the wrong kind.
+    t.append({ label: [null as never], at: [1], tag: ["a"] });
+    expect(() => t.append({ label: ["peak"], at: [2], tag: ["b"] })).toThrow(
+      'append "label": row 0: expected a number; received "peak"',
+    );
+    expect(() => t.append({ label: ["peak"], at: [2], tag: ["b"] })).not.toThrow(fix);
+    expect(() => t.set("label", 0, "peak")).not.toThrow(fix);
+    t.append({ label: [3], at: [2], tag: ["b"] });
+    expect(t.categories("tag").dictionary).toEqual(["a", "b"]);
+    // An empty column made as times is plainly of the wrong kind for text.
+    const times = table({ date: time([]) });
+    expect(() => times.reset({ date: category(["peak"]) })).toThrow(
+      'reset() must keep field "date" as time',
+    );
+    expect(() => times.reset({ date: category(["peak"]) })).not.toThrow(fix);
+  });
+
   it("extends category dictionaries", () => {
     const t = table({ c: ["a"] });
     t.append({ c: ["b", null, "a"] });

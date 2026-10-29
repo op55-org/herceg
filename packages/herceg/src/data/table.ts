@@ -17,6 +17,7 @@ import {
   type TimeValue,
   toMilliseconds,
   toNumber,
+  UNTYPED,
 } from "./column.ts";
 import type { GeometryInput, GeometrySet } from "./geometry.ts";
 import { setOrigin } from "./origin.ts";
@@ -432,7 +433,7 @@ export class Table<S extends Schema = Schema> {
       if (values.length !== count)
         throw new RangeError(`Field "${field}" has ${values.length} values, expected ${count}`);
       // Values are checked before anything changes.
-      check(column, values, skip, "append", field);
+      check(column, values, skip, "append", field, !this.#length);
     }
     if (count === 0) return;
     for (const entry of entries) entry[1] = this.#apart(entry[1]);
@@ -546,7 +547,9 @@ export class Table<S extends Schema = Schema> {
       if (input === undefined) throw new TypeError(`reset() is missing field "${field}"`);
       const column = createColumnOfKind(existing.kind, input);
       if (column.kind !== existing.kind)
-        throw new TypeError(`reset() must keep field "${field}" as ${existing.kind}`);
+        throw new TypeError(
+          `reset() must keep field "${field}" as ${existing.kind}${!this.#length && existing.kind === "number" && column.kind === "category" ? UNTYPED : ""}`,
+        );
       length = rowsOf(field, column, length);
       next.set(field, column);
     }
@@ -753,7 +756,8 @@ function own(column: Column): void {
 /**
  * Throws, before anything changes, for a value of a batch that a column
  * keeps (from `skip` on) that is not of its kind (for geometry, not a code
- * of its shapes), naming the change (`method`) and the field.
+ * of its shapes), naming the change (`method`) and the field; text for a
+ * number column of an `empty` table says how to start one of text.
  */
 function check(
   column: Column,
@@ -761,12 +765,14 @@ function check(
   skip: number,
   method: string,
   field: string,
+  empty = false,
 ): void {
   // Geometry codes are checked by their column.
   column.check?.(values);
   if (isNumericArray(values)) return;
+  let i = skip;
   try {
-    for (let i = skip; i < values.length; i++) {
+    for (; i < values.length; i++) {
       const value = values[i];
       if (typeof value === "number") continue;
       if (column.kind !== "category") toNumber(value, i, column.kind === "time");
@@ -776,7 +782,9 @@ function check(
         );
     }
   } catch (error) {
-    throw new TypeError(`${method} "${field}": ${(error as Error).message}`);
+    // Text for a number column of an empty table: an empty array made it.
+    const hint = empty && column.kind === "number" && typeof values[i] === "string";
+    throw new TypeError(`${method} "${field}": ${(error as Error).message}${hint ? UNTYPED : ""}`);
   }
 }
 

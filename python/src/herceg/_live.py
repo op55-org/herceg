@@ -28,7 +28,7 @@ from ._chart import (
     spec_options,
     table_name,
 )
-from ._data import Column, Table
+from ._data import UNTYPED, Column, Table
 from ._errors import ChartError, UnknownOption, key_path, located, shown
 from ._guides import guides_spec
 from ._rows import bound_tables
@@ -539,7 +539,8 @@ def _as_kind(column: Column, current: Column, field: str, method: str) -> Column
             return Column(current.kind, column.values.astype("<f8"))
         raise ChartError(
             f"{method} rows: column {field!r} holds {column.kind} values; "
-            f"expected {current.kind} values, as the chart's column holds",
+            f"expected {current.kind} values, as the chart's column holds"
+            + (UNTYPED if column.kind == "category" and current.untyped else ""),
             path=key_path("rows", field),
         )
     if column.kind in ("category", "geometry"):

@@ -315,6 +315,11 @@ describe("data edge cases", () => {
     expect(() => line(t, { x: "x", y: "x", series: "x" as never })).toThrow(
       'line series: field "x" holds number values; expected category; give its values as strings, or numbers wrapped in category()',
     );
+    // An empty array made a number field: the correction is how to start one of text.
+    const empty = table({ x: [] as number[], host: [] as string[] });
+    expect(() => line(empty, { x: "x", y: "x", series: "host" })).toThrow(
+      'line series: field "host" holds number values; expected category; an empty array makes a number column, so start text with category([])',
+    );
     // A category y lays the line along y, unless orient says x.
     expect(() => line(t, { x: "x", y: "name" as never, orient: "x" })).toThrow(
       'line orient: "x" makes y the values, and "name" holds categories; give orient: "y", or a number field as y',

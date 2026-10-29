@@ -261,6 +261,9 @@ export function createColumn(input: ColumnInput): Column {
   throw new TypeError(`Unsupported column value: ${String(sample)}`);
 }
 
+/** The correction for text meeting a number column made from an empty array, which carries no type. */
+export const UNTYPED = "; an empty array makes a number column, so start text with category([])";
+
 /** Builds a column of a known kind, as when replacing data under an existing schema. */
 export function createColumnOfKind(kind: FieldKind, input: ColumnInput): Column {
   if (kind === "time" && (isNumericArray(input) || Array.isArray(input))) {

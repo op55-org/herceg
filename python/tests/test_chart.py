@@ -119,6 +119,13 @@ def test_fields_are_checked_with_readable_errors():
         "give its values as strings",
     ):
         hg.Chart(DATA).line(x="t", y="p50", series="p50")
+    # An empty list made a number column: the correction is how to start one of text.
+    with pytest.raises(
+        hg.ChartError,
+        match="line series: column 'host' holds number values; expected category; "
+        "an empty list makes a number column, so start a column of text with a string type",
+    ):
+        hg.Chart({"t": [], "p50": [], "host": []}).line(x="t", y="p50", series="host")
     with pytest.raises(ValueError, match="rule: needs exactly one of x and y"):
         hg.Chart(DATA).rule()
     with pytest.raises(ValueError, match="Chart data: the chart has none"):
