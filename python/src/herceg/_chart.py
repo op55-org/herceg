@@ -6286,13 +6286,14 @@ class Chart:
             return None
         table = self._mark_table(data)
         for name, field in fields.items():
-            # Shares and pixels are numbers; values on a scale, numbers or times.
+            # Shares and pixels are numbers; places on a scale, numbers, times,
+            # or categories, which go to their bands.
             value = positions[name]
             if isinstance(value, (Fraction, Pixels)):
                 share = "fraction" if isinstance(value, Fraction) else "px"
                 self._require(table, field, ("number",), f"{role} {name}.{share}.field")
             else:
-                self._require(table, field, _NUMERIC, f"{role} {name}")
+                self._require(table, field, (*_NUMERIC, "category"), f"{role} {name}")
         self._require(table, text, ("category", "number"), f"{role} label field")
         for i, part in parts:
             self._require(table, part, _ANY, f"{role} label.content[{i}].field")

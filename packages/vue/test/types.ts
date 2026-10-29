@@ -45,8 +45,9 @@ const unwrap = <T>(value: T) => value;
 
 Rule({ y: 250, label: "SLO" });
 Rule({ data: unwrap(deploys), x: "at", label: { field: "version" } });
-// @ts-expect-error rule positions from data are number or time fields
 Rule({ data: unwrap(deploys), x: "version" });
+// @ts-expect-error rule positions from data are fields of numbers, times, or categories
+Rule({ data: unwrap(deploys), x: "nowhere" });
 // @ts-expect-error with data, text is a field of it, also next to constant positions
 Rule({ data: unwrap(deploys), x: 5, label: { field: "missing" } });
 Text({ x: Date.now(), y: 100, label: { text: "now", style: { align: "end" } } });

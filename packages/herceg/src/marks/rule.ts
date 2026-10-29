@@ -1,4 +1,4 @@
-import type { NumericField, Schema, Table } from "../data/table.ts";
+import type { PositionField, Schema, Table } from "../data/table.ts";
 import { ruleDrawing, ruleLine } from "../draw/rule.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
@@ -90,7 +90,7 @@ export type RuleOptions = RuleStyle &
 
 /** Rules from a table, one per row; places may also be constants. */
 export type RuleDataOptions<S extends Schema> = RuleStyle &
-  RulePosition<PlaceOption<NumericField<S>>> & {
+  RulePosition<PlaceOption<PositionField<S>>> & {
     /** Text drawn by every rule: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
   };
@@ -194,7 +194,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
       ["Rule", "Rules"],
       locale,
       (i) => {
-        if (place.kind === "category") return `${vertical ? "x" : "y"} ${place.value}`;
+        if (place.kind === "category") {
+          const category = this.#data.category(place, i);
+          return category === undefined ? undefined : `${vertical ? "x" : "y"} ${category}`;
+        }
         if (place.kind !== "value")
           return place.kind === "frame" ? (vertical ? "x" : "y") : undefined;
         const value = valueAt(place.channel, i);

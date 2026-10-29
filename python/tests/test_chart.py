@@ -298,13 +298,28 @@ def test_annotations_at_pixels_of_the_chart_draw_outside_the_plot():
     assert ">gone</text>" not in svg
 
 
+def test_annotations_place_rows_of_a_category_column_in_their_bands():
+    sales = {"region": ["N", "S", "E"], "v": [1, 2, 3]}
+    notes = {"region": ["S", "N"], "note": ["low", "high"], "at": [1.5, 2.5]}
+    chart = (
+        hg.Chart(sales)
+        .bar(x="region", y="v")
+        .rule(x="region", label=hg.Label(field="note"), data=notes)
+        .text(x="region", y="at", label=hg.Label(field="note"), data=notes)
+    )
+    spec, _ = chart.to_spec()
+    assert spec["marks"][1]["x"] == "region"
+    svg = chart.to_svg()
+    assert svg.count(">low</text>") == 2 and svg.count(">high</text>") == 2
+    with pytest.raises(hg.ChartError, match="rule x.px.field: column 'region' holds category"):
+        hg.Chart(notes).rule(x=hg.Pixels(field="region"))
+
+
 def test_annotation_options_are_checked():
     with pytest.raises(ValueError, match="Label: give text, field, or content, one of them"):
         hg.Chart(DATA).text(x=1, y=2, label=hg.Label())
     with pytest.raises(ValueError, match="region x2: needs both x1 and x2"):
         hg.Chart(DATA).region(x1=1)
-    with pytest.raises(hg.ChartError, match="rule x: column 'host'"):
-        hg.Chart(DATA).rule(x="host")
     with pytest.raises(hg.ChartError, match="text label field: column 't'"):
         hg.Chart(DATA).text(x="t", y="p50", label=hg.Label(field="t"))
     with pytest.raises(

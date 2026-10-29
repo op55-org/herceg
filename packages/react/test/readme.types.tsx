@@ -85,8 +85,9 @@ export function Annotated() {
       <Rule data={deploys} x="at" label={{ field: "version" }} />
       <Text x={Date.now()} y={100} label={{ text: "now", style: { align: "end" } }} />
       <Text data={deploys} x="at" y={120} label={{ field: "version" }} />
-      {/* @ts-expect-error rule positions from data are number or time fields */}
       <Rule data={deploys} x="version" />
+      {/* @ts-expect-error rule positions from data are fields of numbers, times, or categories */}
+      <Rule data={deploys} x="nowhere" />
       {/* @ts-expect-error constant text needs a label */}
       <Text x={1} y={2} />
       {/* @ts-expect-error text from data needs a label */}

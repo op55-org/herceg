@@ -224,6 +224,44 @@ describe("region", () => {
     expect(of(grid.scene, "rule")).toHaveLength(1);
   });
 
+  it("place rows of a category field in their bands, as other marks do", () => {
+    const sales = table({ region: ["N", "S", "E"], v: [1, 2, 3] });
+    const notes = table({
+      region: ["S", "W", "N"],
+      note: ["low", "new", "high"],
+      at: [1.5, 1, 2.5],
+    });
+    const { scene, model } = build({
+      marks: [
+        bar(sales, { x: "region", y: "v" }),
+        rule(notes, { x: "region", label: { field: "note" } }),
+        text(notes, { x: "region", y: "at", label: { field: "note" } }),
+        region(notes, { x1: "region", x2: { data: "E" } }),
+      ],
+    });
+    const x = model.xScale()!;
+    const band = (category: string) => x.map(["N", "S", "E"].indexOf(category));
+    // "W" has no band: those rows are left out.
+    const rules = of(scene, "rule") as RuleGeometry[];
+    expect(rules.map((r) => [r.label, r.x1])).toEqual([
+      ["low", band("S")],
+      ["high", band("N")],
+    ]);
+    const [labels] = of(scene, "text") as TextGeometry[];
+    expect(labels!.labels).toEqual(["low", "high"]);
+    expect(labels!.coords[0]).toBeCloseTo(band("S"), 3);
+    const shade = of(scene, "rect")[1] as RectGeometry;
+    expect(shade.count).toBe(2);
+    expect(shade.rects[0]).toBeCloseTo(band("S"), 3);
+    expect(describeChart(model)).toContain("Rules: low (x S), new (x W), high (x N).");
+    expect(describeChart(model)).toContain("Regions: x S to E, x W to E, x N to E.");
+    // They add no bands: alone on a number axis, rows of categories have no place.
+    const alone = build({
+      marks: [line(metrics, { x: "time", y: "value" }), rule(notes, { x: "region" })],
+    });
+    expect(of(alone.scene, "rule")).toHaveLength(0);
+  });
+
   it("needs complete pairs", () => {
     // Types refuse these; JavaScript callers get errors.
     expect(() => region({ x1: 1 } as never)).toThrow(/both x1 and x2/);

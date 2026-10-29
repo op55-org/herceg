@@ -1,4 +1,4 @@
-import type { NumericField, Schema, Table } from "../data/table.ts";
+import type { PositionField, Schema, Table } from "../data/table.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
@@ -88,7 +88,7 @@ export type RegionOptions = RegionStyle &
 
 /** Regions from a table, one per row; places may also be constants. */
 export type RegionDataOptions<S extends Schema> = RegionStyle &
-  RegionRange<PlaceOption<NumericField<S>>> & {
+  RegionRange<PlaceOption<PositionField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
   };
@@ -182,12 +182,18 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     const data = this.#data;
     const x = this.#places("x");
     const y = this.#places("y");
-    // Places that are not values (fractions, pixels) say nothing of where the region is.
+    // Places that are not values or categories (fractions, pixels) say
+    // nothing of where the region is.
     const range = (places: [Place, Place] | undefined, f: Formatter, i: number) => {
-      if (!places || places.some((p) => p.kind !== "value")) return "";
-      const a = data.value(places[0], i);
-      const b = data.value(places[1], i);
-      return Number.isFinite(a) && Number.isFinite(b) ? `${f(a)} to ${f(b)}` : undefined;
+      if (!places || places.some((p) => p.kind === "frame")) return "";
+      const [a, b] = places.map((p) =>
+        p.kind === "category"
+          ? data.category(p, i)
+          : Number.isFinite(data.value(p, i))
+            ? f(data.value(p, i))
+            : undefined,
+      );
+      return a !== undefined && b !== undefined ? `${a} to ${b}` : undefined;
     };
     return data.summary(
       ["Region", "Regions"],

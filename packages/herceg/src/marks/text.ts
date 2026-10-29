@@ -1,4 +1,4 @@
-import type { NumericField, Schema, Table } from "../data/table.ts";
+import type { PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { guideSegmentDrawing } from "../draw/segments.ts";
 import type { Formatter } from "../format/format.ts";
@@ -137,7 +137,7 @@ export type TextOptions = TextStyle &
 
 /** Labels from a table, one per row; places may also be constants. */
 export type TextDataOptions<S extends Schema> = TextStyle &
-  TextPlace<NumericField<S>> & { label: TextLabel<TextField<S>> };
+  TextPlace<PositionField<S>> & { label: TextLabel<TextField<S>> };
 
 /**
  * Text labels at data positions. They are drawn as SVG above the data and,
@@ -224,12 +224,14 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       (i) => {
         const at = data.value(x, i);
         const value = data.value(y, i);
-        // Places that are not values (fractions, pixels) say nothing of where the text is.
+        // Places that are not values or categories (fractions, pixels) say
+        // nothing of where the text is.
         if (x.kind === "value" && !Number.isFinite(at)) return undefined;
         if (y.kind === "value" && !Number.isFinite(value)) return undefined;
+        const [cx, cy] = [data.category(x, i), data.category(y, i)];
         return [
-          x.kind === "value" && `x ${format.x(at)}`,
-          y.kind === "value" && `y ${format.y(value)}`,
+          x.kind === "value" ? `x ${format.x(at)}` : cx !== undefined && `x ${cx}`,
+          y.kind === "value" ? `y ${format.y(value)}` : cy !== undefined && `y ${cy}`,
         ]
           .filter(Boolean)
           .join(", ");

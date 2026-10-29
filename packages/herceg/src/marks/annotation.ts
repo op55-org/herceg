@@ -18,7 +18,10 @@ import type { Coordinate } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen } from "../spec/spec.ts";
 import type { ContentWriter } from "./features/content.ts";
 import { markKey, rowKey, shownItems } from "./hidden.ts";
-import { type Frame, type MarkKey, NUMERIC, type RowParts, requireField } from "./mark.ts";
+import { type Frame, type MarkKey, type RowParts, requireField } from "./mark.ts";
+
+/** Kinds of fields places on a scale read: values, and categories in their bands. */
+const POSITIONS: readonly FieldKind[] = ["number", "time", "category"];
 
 /** Fields whose values can be drawn as text: categories and numbers. */
 export type TextField<S extends Schema> = string extends keyof S
@@ -88,7 +91,7 @@ export function inView(place: Place, at: number, axis: "x" | "y", plot: Rect): b
  */
 export type Place = { readonly coordinate: Coordinate } & (
   | { readonly kind: "value"; readonly channel: Channel; readonly scale?: string | undefined }
-  | { readonly kind: "category"; readonly value: string }
+  | { readonly kind: "category"; readonly value: string | undefined }
   | { readonly kind: "frame"; readonly channel?: Channel | undefined }
 );
 
@@ -184,12 +187,13 @@ export class AnnotationData {
     for (const [channel, place] of Object.entries(positions)) {
       const field = fieldOf(place);
       if (field === undefined) continue;
-      // Shares and pixels are numbers; values on a scale, numbers or times.
+      // Shares and pixels are numbers; places on a scale, numbers, times,
+      // or categories, as other marks take them.
       const share = typeof place === "object" && !("field" in place);
       requireField(
         table,
         field,
-        share ? ["number"] : NUMERIC,
+        share ? ["number"] : POSITIONS,
         `${role} ${channel}${share ? `.${"fraction" in place ? "fraction" : "px"}.field` : ""}`,
       );
     }
@@ -237,16 +241,14 @@ export class AnnotationData {
   place(position: Frozen<AnnotationPosition>): Place {
     if (typeof position === "number")
       return { kind: "value", channel: position, coordinate: { data: position } };
-    if (typeof position === "string")
-      return { kind: "value", channel: this.#column(position), coordinate: { field: position } };
+    if (typeof position === "string") return this.#field(position, { field: position });
     const coordinate = position as Coordinate;
     // A scale of the chart's own, rather than the axis'.
     const scale =
       "scale" in position && position.scale !== this.#scales.x && position.scale !== this.#scales.y
         ? position.scale
         : undefined;
-    if ("field" in position)
-      return { kind: "value", channel: this.#column(position.field), coordinate, scale };
+    if ("field" in position) return this.#field(position.field, coordinate, scale);
     if ("data" in position)
       return typeof position.data === "string"
         ? { kind: "category", value: position.data, coordinate }
@@ -259,8 +261,23 @@ export class AnnotationData {
     };
   }
 
+  /** A field's place: its values on a scale, or its categories in their bands. */
+  #field(field: string, coordinate: Coordinate, scale?: string): Place {
+    return this.table!.kind(field as never) === "category"
+      ? { kind: "category", value: undefined, coordinate }
+      : { kind: "value", channel: this.#column(field), coordinate, scale };
+  }
+
   #column(field: string): NumericArray {
     return this.table!.numbers(field as never);
+  }
+
+  /** An item's category at a category place: the constant, or its row's; undefined for others. */
+  category(place: Place, item: number): string | undefined {
+    if (place.kind !== "category") return undefined;
+    if (place.value !== undefined) return place.value;
+    const value = this.table!.value((place.coordinate as { field: string }).field as never, item);
+    return value === null ? undefined : String(value);
   }
 
   /** An item's value at a place, NaN for places that are not values. */
@@ -303,14 +320,19 @@ export class AnnotationData {
         const at = on.map(value);
         return Number.isNaN(at) ? undefined : at;
       },
-      field: () => valueAt((place as { channel: Channel }).channel, item),
+      // A category field's row reads as its label, which its band places.
+      field: () =>
+        place.kind === "category"
+          ? this.category(place, item)
+          : valueAt((place as { channel: Channel }).channel, item),
     });
   }
 
   /**
    * Kind of a place's field; undefined for constants, which fit any axis
    * (on a category axis a number is a band index, as in Plotly: 0 is the
-   * first band's center and -0.5 its edge).
+   * first band's center and -0.5 its edge), and for category fields, which
+   * add no bands: their rows go to bands other marks give the axis.
    */
   kind(position: Frozen<AnnotationPosition> | undefined): FieldKind | undefined {
     // Shares, pixels, and values on scales of the chart's own tell the axis nothing.

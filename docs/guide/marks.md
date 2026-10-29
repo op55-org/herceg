@@ -472,7 +472,7 @@ text(peaks, {
 
 | Place | Python | Means |
 | --- | --- | --- |
-| A value or field | the same | On the axis' scale; one item per row for a field. |
+| A value or field | the same | On the axis' scale; one item per row for a field. A category field puts each row in its band. |
 | `{ data, scale?, offset? }` | `hg.DataPosition(value or field=, offset=)` | A value on the axis' scale; a string is a category. |
 | `{ field, offset? }` | `hg.DataPosition(field=, offset=)` | Each row's value. |
 | `{ fraction, frame?, offset? }` | `hg.Fraction(f, frame=, offset=)` | A share of the plot or chart. |
@@ -481,7 +481,9 @@ text(peaks, {
 A rule takes a place on one axis and a `span` along the other (the plot by
 default); a region one or two pairs of places; text `at: { x, y }` or `x`
 and `y`. On a category axis a number is a band index (0 is the first band's
-center).
+center), and a category (`{ data: "pear" }`, or a category field's rows) is
+its band's center. Annotations add no bands: a category no other mark
+draws has no place.
 
 | `label` (Python `hg.Label`) | Means |
 | --- | --- |
