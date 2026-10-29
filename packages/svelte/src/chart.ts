@@ -113,3 +113,30 @@ export function sameMark(a: ChartMark, b: ChartMark): boolean {
     canonical(a.spec) === canonical(b.spec)
   );
 }
+
+/** What an inspection is made on (`basisOf`). */
+export interface Basis {
+  marks: readonly ChartMark[];
+  versions: string;
+}
+
+/**
+ * What an inspection of `marks` is made on: the marks, the versions of the
+ * tables they read, and the revisions of the row views they show. Its rows
+ * name rows of those as they were.
+ */
+export const basisOf = (marks: readonly ChartMark[]): Basis => ({
+  marks,
+  versions: marks
+    .map((mark) => [viewOf(mark)?.revision, ...tablesOf(mark).map((table) => table.version)])
+    .join(";"),
+});
+
+/** Whether an inspection made on `basis` is of `marks`: the same marks, their data unchanged since. */
+export function holds(basis: Basis, marks: readonly ChartMark[]): boolean {
+  return (
+    marks.length === basis.marks.length &&
+    marks.every((mark, i) => sameMark(mark, basis.marks[i]!)) &&
+    basisOf(marks).versions === basis.versions
+  );
+}

@@ -229,22 +229,55 @@ function sameMark(a: ChartMark, b: ChartMark): boolean {
 
 type Options = Omit<ChartUpdate, "marks">;
 
-/** What the tooltip is at, and the element its content renders in. */
+/** What an inspection is made on (`basisOf`). */
+interface Basis {
+  marks: readonly ChartMark[];
+  versions: string;
+}
+
+/**
+ * What an inspection of `marks` is made on: the marks, the versions of the
+ * tables they read, and the revisions of the row views they show. Its rows
+ * name rows of those as they were.
+ */
+const basisOf = (marks: readonly ChartMark[]): Basis => ({
+  marks,
+  versions: marks
+    .map((mark) => [viewOf(mark)?.revision, ...tablesOf(mark).map((table) => table.version)])
+    .join(";"),
+});
+
+/** Whether an inspection made on `basis` is of `marks`: the same marks, their data unchanged since. */
+function holds(basis: Basis, marks: readonly ChartMark[]): boolean {
+  return (
+    marks.length === basis.marks.length &&
+    marks.every((mark, i) => sameMark(mark, basis.marks[i]!)) &&
+    basisOf(marks).versions === basis.versions
+  );
+}
+
+/** What the tooltip is at, what that was made on, and the element its content renders in. */
 interface Shown {
   inspection: Inspection;
+  basis: Basis;
   host: HTMLElement;
 }
 
 /**
  * The tooltip's content, rendered into the chart's box through a portal.
  * Its state is its own, so a tooltip that moves re-renders only this.
+ * Content is rendered only of an inspection of the marks rendered now
+ * (`marks`), as their tables are: once they change, nothing until the
+ * chart inspects them again.
  */
 function TooltipContent({
   shows,
   render,
+  marks,
 }: {
   shows: RefObject<((shown: Shown | null) => void) | null>;
   render: (inspection: Inspection) => ReactNode;
+  marks: readonly ChartMark[];
 }) {
   const [shown, setShown] = useState<Shown | null>(null);
   useLayoutEffect(() => {
@@ -253,7 +286,7 @@ function TooltipContent({
       shows.current = null;
     };
   }, [shows]);
-  return shown && createPortal(render(shown.inspection), shown.host);
+  return shown && holds(shown.basis, marks) && createPortal(render(shown.inspection), shown.host);
 }
 
 /**
@@ -261,17 +294,28 @@ function TooltipContent({
  * tooltip is at to `TooltipContent`, and the chart one element to show, or
  * nothing, for the built-in content, where the prop gives none. `version`
  * changes when a new prop would answer that differently for what the chart
- * last asked about, so the chart asks again.
+ * last asked about, so the chart asks again. `shown()` is what the chart
+ * shows, which inspections are made on.
  */
-function useTooltip(render: ((inspection: Inspection) => ReactNode) | undefined) {
+function useTooltip(
+  render: ((inspection: Inspection) => ReactNode) | undefined,
+  marks: readonly ChartMark[],
+  shown: () => readonly ChartMark[],
+) {
   const shows = useRef<((shown: Shown | null) => void) | null>(null);
   const latest = useRef(render);
-  const asked = useRef<{ inspection: Inspection; empty: boolean } | null>(null);
+  const asked = useRef<{ inspection: Inspection; basis: Basis; empty: boolean } | null>(null);
   const [version, setVersion] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: asked again of a new renderer, not of new marks, which the chart inspects again
   useLayoutEffect(() => {
     latest.current = render;
     const last = asked.current;
-    if (render && last && (render(last.inspection) == null) !== last.empty)
+    if (
+      render &&
+      last &&
+      holds(last.basis, marks) &&
+      (render(last.inspection) == null) !== last.empty
+    )
       setVersion((version) => version + 1);
   }, [render]);
   const rendered = render !== undefined;
@@ -280,14 +324,15 @@ function useTooltip(render: ((inspection: Inspection) => ReactNode) | undefined)
     if (!rendered) return undefined;
     let host: HTMLElement | undefined;
     return (inspection) => {
+      const basis = basisOf(shown());
       const empty = latest.current?.(inspection) == null;
-      asked.current = { inspection, empty };
+      asked.current = { inspection, basis, empty };
       if (empty) {
         shows.current?.(null);
         return null;
       }
       host ??= document.createElement("div");
-      shows.current?.({ inspection, host });
+      shows.current?.({ inspection, basis, host });
       return host;
     };
   }, [rendered, version]);
@@ -418,7 +463,7 @@ export function Chart({
     if (props.errorMode === "throw") throw error;
     refused = chartError(error, "validate");
   }
-  const tooltip = useTooltip(renderTooltip);
+  const tooltip = useTooltip(renderTooltip, marks, () => applied.current?.marks ?? []);
   const shown: Options = { ...props, ...given, onError: failing.report };
   const options: Options = tooltip.option ? { ...shown, renderTooltip: tooltip.option } : shown;
   // The tooltip's renderer is new when its version is: canonical JSON
@@ -517,7 +562,9 @@ export function Chart({
           />
         )}
       </div>
-      {renderTooltip && <TooltipContent shows={tooltip.shows} render={renderTooltip} />}
+      {renderTooltip && (
+        <TooltipContent shows={tooltip.shows} render={renderTooltip} marks={marks} />
+      )}
     </>
   );
 }

@@ -224,7 +224,12 @@ Marks take `tooltip={{ fields: [...] }}`, and axes `tooltipFormat`, as in
 the engine ([Tooltips](interaction.md#tooltips)). For content of your own,
 each framework renders its own component in the chart's tooltip box, which
 keeps its placement, crosshair, and keyboard announcements. Only the
-content for what the tooltip is at renders, when that changes.
+content for what the tooltip is at renders, when that changes. Content
+renders only of an inspection of the marks and data rendered now: when a
+render replaces a table (a filter) or a table changed in place, the box
+stays empty until the chart inspects the new data, on its next frame, so
+`table.value(field, inspection.points[0].row)` always reads a row of the
+table it names.
 
 ```tsx
 // React: renderTooltip returns React content, rendered with the app's context

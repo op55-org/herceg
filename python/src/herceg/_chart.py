@@ -31,7 +31,7 @@ import numpy as np
 
 from . import _geo, _render
 from ._colors import is_color
-from ._data import Column, Matrix, Table, listlike
+from ._data import UNTYPED, Column, Matrix, Table, listlike
 from ._derive import BinSpec, Derived, Expr, _fields_of, bin_spec
 from ._encoding import (
     SYMBOLS,
@@ -4631,6 +4631,10 @@ class Chart:
         the plot beside the axis (``hg.LabelPlace``), in a style of its own.
         Rules count toward the axes' domains only with
         ``contribute_domain=True``; otherwise they show where the data is.
+        Without ``clip``, a rule at a value is left out while the value is out
+        of the plot's view, and one at pixels or a share of the chart is drawn
+        wherever it is; ``clip=False`` draws every rule, and ``"plot"`` or
+        ``"chart"`` cuts them to the plot or chart.
         """
         if (x is None) == (y is None):
             raise ChartError("rule: needs exactly one of x and y")
@@ -4707,7 +4711,9 @@ class Chart:
         and the sides of a span across the whole plot are never drawn. Add
         regions before the marks they highlight to draw them underneath, or
         give ``z_index``. Regions count toward the axes' domains only with
-        ``contribute_domain=True``.
+        ``contribute_domain=True``. Regions are cut to the plot; with
+        ``clip="chart"`` or ``False``, to the chart, so a band at pixels of
+        the chart above the plot shows.
         """
         for start, end, name in ((x1, x2, "x"), (y1, y2, "y")):
             if (start is None) != (end is None):
@@ -4794,7 +4800,11 @@ class Chart:
         (``overlap="show"``), left out (``"hide"``), or, where their place is
         taken or outside the plot, tried around their point and left out when
         nothing fits (``"move"``), with a leader line back to it
-        (``style=hg.MarkStyle(leader=hg.StrokeStyle(...))``).
+        (``style=hg.MarkStyle(leader=hg.StrokeStyle(...))``). Without
+        ``clip``, text at a value is left out while the value is out of the
+        plot's view, and text at pixels or a share of the chart (above the
+        plot, say) is drawn wherever it is; ``clip=False`` draws all of it,
+        and ``"plot"`` or ``"chart"`` cuts it to the plot or chart.
         """
         if overlap not in (None, "show", "hide", "move"):
             raise ChartError(
@@ -5612,12 +5622,17 @@ class Chart:
                 code="unknown-field",
                 path=path,
             )
-        kind = _read(source, field, role, path).kind
+        column = _read(source, field, role, path)
+        kind = column.kind
         if kind not in kinds:
             # Categories come from strings, and times (only a heatmap's date takes
             # nothing else) from datetimes, so the usual fix is the column's type.
             if kinds[0] == "category":
-                fix = "; give its values as strings, or make it a categorical column"
+                fix = (
+                    UNTYPED
+                    if column.untyped
+                    else "; give its values as strings, or make it a categorical column"
+                )
             elif kinds[0] == "time":
                 fix = "; give datetimes"
             elif kind == "category" and "number" in kinds:
@@ -6271,13 +6286,14 @@ class Chart:
             return None
         table = self._mark_table(data)
         for name, field in fields.items():
-            # Shares and pixels are numbers; values on a scale, numbers or times.
+            # Shares and pixels are numbers; places on a scale, numbers, times,
+            # or categories, which go to their bands.
             value = positions[name]
             if isinstance(value, (Fraction, Pixels)):
                 share = "fraction" if isinstance(value, Fraction) else "px"
                 self._require(table, field, ("number",), f"{role} {name}.{share}.field")
             else:
-                self._require(table, field, _NUMERIC, f"{role} {name}")
+                self._require(table, field, (*_NUMERIC, "category"), f"{role} {name}")
         self._require(table, text, ("category", "number"), f"{role} label field")
         for i, part in parts:
             self._require(table, part, _ANY, f"{role} label.content[{i}].field")

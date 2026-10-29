@@ -274,6 +274,21 @@ describe("label formats", () => {
     expect(new Set(written).size).toBe(written.length);
   });
 
+  it("keeps ticks whose pattern repeats an earlier, not neighboring, label", () => {
+    const day = 24 * HOUR;
+    const days = Array.from({ length: 731 }, (_, i) => Date.UTC(2024, 0, 1) + i * day);
+    const years = table({ t: time(days), v: days.map((_, i) => i) });
+    const { scene, model } = build(
+      {
+        marks: [line(years, { x: "t", y: "v" })],
+        x: { format: { time: "%b" } },
+      },
+      1176,
+    );
+    expect(xTicks(model).at(-1)).toBeGreaterThanOrEqual(Date.UTC(2025, 9, 1));
+    expect(labels(scene)).toEqual(["Jan", "Apr", "Jul", "Oct", "Jan", "Apr", "Jul", "Oct"]);
+  });
+
   it("leaves out repeats of explicit ticks, keeping their marks", () => {
     const { scene } = build({
       marks: [line(week, { x: "t", y: "v" })],

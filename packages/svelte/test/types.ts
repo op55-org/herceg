@@ -67,8 +67,9 @@ Area(internals, { data: metrics, x: "time", y: "p50", stack: { gaps: "linear" } 
 
 Rule(internals, { y: 250, label: "SLO" });
 Rule(internals, { data: deploys, x: "at", label: { field: "version" } });
-// @ts-expect-error rule positions from data are number or time fields
 Rule(internals, { data: deploys, x: "version" });
+// @ts-expect-error rule positions from data are fields of numbers, times, or categories
+Rule(internals, { data: deploys, x: "nowhere" });
 // @ts-expect-error with data, text is a field of it, also next to constant positions
 Rule(internals, { data: deploys, x: 5, label: { field: "missing" } });
 Text(internals, { x: Date.now(), y: 100, label: { text: "now", style: { align: "end" } } });

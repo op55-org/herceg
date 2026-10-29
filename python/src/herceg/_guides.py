@@ -566,8 +566,9 @@ class OrdinalScale:
 
     ``map`` fixes outputs by value; others take the theme's palette by
     their place in the ``domain``: the given values in that order (others
-    take ``unknown``), or else the columns' values, a categorical's own
-    order first. With ``scope="panel"``, each panel maps its own values."""
+    take ``unknown``; legends list every one, drawn or not), or else the
+    columns' values, a categorical's own order first. With
+    ``scope="panel"``, each panel maps its own values."""
 
     domain: Sequence[str] | None = None
     map: Mapping[str, Any] | None = None

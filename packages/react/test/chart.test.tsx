@@ -1189,6 +1189,110 @@ describe("<Chart>", () => {
     expect([...box()!.children].map((row) => row.textContent)).toEqual(["3", "a4", "b1"]);
   });
 
+  it("never renders tooltip content of an inspection of data that changed since", async () => {
+    const long = table({
+      t: Array.from({ length: 100 }, (_, i) => i),
+      v: Array.from({ length: 100 }, (_, i) => i % 7),
+    });
+    const short = table({
+      t: Array.from({ length: 20 }, (_, i) => i),
+      v: Array.from({ length: 20 }, (_, i) => i % 5),
+    });
+    const ref: { current: HercegChart | null } = { current: null };
+    // Content reading the table rendered now, as an application filtering its data does.
+    const show = (data: typeof long) =>
+      act(() =>
+        root.render(
+          <Chart
+            ref={ref}
+            locale="en-US"
+            renderTooltip={(inspection) => (
+              <b>{`row ${data.value("t", inspection.points[0]!.row!)}`}</b>
+            )}
+          >
+            <Line data={data} x="t" y="v" />
+          </Chart>,
+        ),
+      );
+    show(long);
+    await ref.current!.loading;
+    const chart = ref.current!;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    await act(async () => {
+      chart.root.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: rect.left + chart.toPixel(90, { axis: "x" })!,
+          clientY: rect.top + plot.y + plot.height / 2,
+        }),
+      );
+      chart.render();
+    });
+    const box = () =>
+      [...host.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+        (div) => div.style.display === "block",
+      );
+    expect(box()!.textContent).toBe("row 90");
+    // A filter replaces the table with a shorter one: row 90 is no row of it.
+    show(short);
+    await act(async () => chart.render());
+    expect(box()!.textContent).toMatch(/^row 1\d$/);
+    // Rows dropped in place, then a render of the parent before the chart's next frame.
+    const at = Number(box()!.textContent!.slice(4));
+    short.dropFirst(at);
+    show(short);
+    await act(async () => chart.render());
+    expect(box()!.textContent).toMatch(/^row \d+$/);
+  });
+
+  it("never renders tooltip content of an inspection of marks replaced since", async () => {
+    const data = table({ t: [0, 1, 2, 3], v: [1, 3, 2, 4] });
+    const ref: { current: HercegChart | null } = { current: null };
+    const named: (string | undefined)[] = [];
+    const show = (id: string) =>
+      act(() =>
+        root.render(
+          <Chart
+            ref={ref}
+            locale="en-US"
+            renderTooltip={(inspection) => {
+              named.push(inspection.points[0]?.markId);
+              return <b>{inspection.points[0]?.markId}</b>;
+            }}
+          >
+            <Line id={id} data={data} x="t" y="v" />
+          </Chart>,
+        ),
+      );
+    show("a");
+    await ref.current!.loading;
+    const chart = ref.current!;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    await act(async () => {
+      chart.root.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: rect.left + chart.toPixel(2, { axis: "x" })!,
+          clientY: rect.top + plot.y + plot.height / 2,
+        }),
+      );
+      chart.render();
+    });
+    const box = () =>
+      [...host.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+        (div) => div.style.display === "block",
+      );
+    expect(box()!.textContent).toBe("a");
+    // Another mark over the same table: the inspection names mark a, which is gone.
+    named.length = 0;
+    show("b");
+    await act(async () => chart.render());
+    expect(named).not.toContain("a");
+    expect(box()!.textContent).toBe("b");
+  });
+
   it("rejects children that are not marks, in its place or thrown", () => {
     act(() =>
       root.render(

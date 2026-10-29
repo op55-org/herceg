@@ -229,8 +229,8 @@ export class PointStyles {
 
   /**
    * Keys of the values field channels map through ordinal scales (none for
-   * the series field, which the series' entries show): the values rows hold,
-   * in the scale's order.
+   * the series field, which the series' entries show): a declared domain's
+   * values, held or not, else the values rows hold, in the scale's order.
    */
   #keys(): GlyphKey[] {
     const keys: GlyphKey[] = [];
@@ -238,21 +238,25 @@ export class PointStyles {
     const key = <V>(
       compiled: Compiled<V> | undefined,
       channel: GlyphKey["channel"],
-      entry: (value: string, code: number) => GlyphKey["entries"][number],
+      entry: (value: string) => GlyphKey["entries"][number],
     ) => {
       const c = compiled?.channel;
       if (c?.kind !== "field" || c.field === this.#series) return;
       const { codes, dictionary } = this.#table.categories(c.field as never);
       const held = new Uint8Array(dictionary.length);
       for (const code of codes) if (code >= 0) held[code] = 1;
-      const order = dictionary.flatMap((_, code) => (held[code] ? [code] : []));
-      const placeOf = (code: number) => c.scale.place(dictionary[code]!) ?? Infinity;
-      order.sort((a, b) => placeOf(a) - placeOf(b));
+      const placeOf = (value: string) => c.scale.place(value) ?? Infinity;
+      let values = dictionary
+        .filter((_, code) => held[code])
+        .sort((a, b) => placeOf(a) - placeOf(b));
+      // A declared domain whole, then values held outside it.
+      const domain = c.scale.spec?.domain;
+      if (domain) values = [...domain, ...values.filter((value) => !domain.includes(value))];
       keys.push({
         title: c.field,
         channel,
         scale: c.scale.name,
-        entries: order.map((code) => entry(dictionary[code]!, code)),
+        entries: values.map((value) => entry(value)),
       });
     };
     const circle = markerPath(kit, "circle", 0, 0, KEY_RADIUS);

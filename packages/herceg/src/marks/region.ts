@@ -1,4 +1,4 @@
-import type { NumericField, Schema, Table } from "../data/table.ts";
+import type { PositionField, Schema, Table } from "../data/table.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
@@ -56,9 +56,9 @@ interface RegionStyle {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
-   * What the mark's drawing is cut to: "plot", "chart", or false for
-   * nothing, so markers at the plot's edge show whole. Without it, data is
-   * cut to the plot and labels are drawn whole.
+   * What the regions are cut to: "plot", or the chart with "chart" or false,
+   * so regions at pixels or a share of the chart outside the plot show.
+   * Without it, regions are cut to the plot and labels are drawn whole.
    */
   clip?: Clip;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
@@ -88,7 +88,7 @@ export type RegionOptions = RegionStyle &
 
 /** Regions from a table, one per row; places may also be constants. */
 export type RegionDataOptions<S extends Schema> = RegionStyle &
-  RegionRange<PlaceOption<NumericField<S>>> & {
+  RegionRange<PlaceOption<PositionField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
   };
@@ -182,12 +182,18 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     const data = this.#data;
     const x = this.#places("x");
     const y = this.#places("y");
-    // Places that are not values (fractions, pixels) say nothing of where the region is.
+    // Places that are not values or categories (fractions, pixels) say
+    // nothing of where the region is.
     const range = (places: [Place, Place] | undefined, f: Formatter, i: number) => {
-      if (!places || places.some((p) => p.kind !== "value")) return "";
-      const a = data.value(places[0], i);
-      const b = data.value(places[1], i);
-      return Number.isFinite(a) && Number.isFinite(b) ? `${f(a)} to ${f(b)}` : undefined;
+      if (!places || places.some((p) => p.kind === "frame")) return "";
+      const [a, b] = places.map((p) =>
+        p.kind === "category"
+          ? data.category(p, i)
+          : Number.isFinite(data.value(p, i))
+            ? f(data.value(p, i))
+            : undefined,
+      );
+      return a !== undefined && b !== undefined ? `${a} to ${b}` : undefined;
     };
     return data.summary(
       ["Region", "Regions"],
@@ -277,10 +283,18 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       label &&
       labelPaint(theme, theme.text, label.style && frame.read(label.style, "region label.style"));
     let count = 0;
+    // Regions are cut to the plot, or to the chart with a clip of "chart" or false.
+    const clip = this.spec.clip;
+    const box = clip === "chart" || clip === false ? (frame.chart ?? plot) : plot;
     data.each(rows, (i) => {
-      // Each region is clipped to the plot, its label placed in its visible part.
-      const across = this.#span(xs, "x", i, frame.x, frame, plot.x, plot.x + plot.width);
-      const down = this.#span(ys, "y", i, frame.y, frame, plot.y, plot.y + plot.height);
+      // Each region is cut to its box, its label placed in its visible part;
+      // without places on an axis, it spans the plot.
+      const across = xs
+        ? this.#span(xs, "x", i, frame.x, frame, box.x, box.x + box.width)
+        : ([plot.x, plot.x + plot.width, 0] as const);
+      const down = ys
+        ? this.#span(ys, "y", i, frame.y, frame, box.y, box.y + box.height)
+        : ([plot.y, plot.y + plot.height, 0] as const);
       if (!across || !down) return;
       rects[count * 4] = across[0];
       rects[count * 4 + 1] = down[0];
@@ -302,8 +316,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
                 baseline: "middle",
               }
             : this.#place(text, across, down, paint, frame.measure);
-        // Its box stays inside the plot where the visible part is too small for it.
-        placed.push(movedLabel(label, shiftInside(labelBox(label, paint, frame.measure), plot)));
+        // Its box stays inside the region's where the visible part is too small for it.
+        placed.push(movedLabel(label, shiftInside(labelBox(label, paint, frame.measure), box)));
       }
       count++;
     });
@@ -446,22 +460,20 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
 
   /**
    * Pixel span [start, end] of item i on one axis, clipped to [min, max];
-   * the whole range without places; undefined when nothing of it is in
-   * view. Values a log scale cannot place (zero or below) sit at its low
+   * undefined when nothing of it is in view. Values a log scale cannot place (zero or below) sit at its low
    * end, so a region from zero reaches the axis. Its third element says
    * which ends are the region's own edges, which outlines draw, rather than
    * cut by the view or the range's: 1 its start, 2 its end.
    */
   #span(
-    places: [Place, Place] | undefined,
+    places: [Place, Place],
     axis: "x" | "y",
     item: number,
     scale: PositionScale,
     frame: Frame,
     min: number,
     max: number,
-  ): [number, number, number] | undefined {
-    if (!places) return [min, max, 0];
+  ): readonly [number, number, number] | undefined {
     const a = this.#data.pixel(places[0], axis, item, scale, frame, true);
     const b = this.#data.pixel(places[1], axis, item, scale, frame, true);
     if (a === undefined || b === undefined) return undefined;

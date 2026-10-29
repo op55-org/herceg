@@ -176,6 +176,20 @@ def test_append_takes_one_row_as_a_mapping_of_values():
     assert columns(*browser.last)["v"] == [3.0]
 
 
+def test_text_appended_to_a_column_made_from_an_empty_list_says_how_to_start_one():
+    widget = hg.Chart({"x": [], "y": [], "label": []}).point(x="x", y="y", color="label").widget()
+    with pytest.raises(
+        hg.ChartError,
+        match=r"widget.append rows: column 'label' holds category values; expected number "
+        r"values, as the chart's column holds; an empty list makes a number column, so start a "
+        r"column of text with a string type, such as np.array\(\[\], dtype=str\)",
+    ):
+        widget.append({"x": [1.0], "y": [2.0], "label": ["peak"]})
+    typed = {"x": [], "y": [], "label": np.array([], dtype=str)}
+    widget = hg.Chart(typed).point(x="x", y="y", color="label").widget()
+    widget.append({"x": [1.0], "y": [2.0], "label": ["peak"]})
+
+
 def test_appended_rows_are_checked_against_the_table():
     widget, browser = live()
     with pytest.raises(

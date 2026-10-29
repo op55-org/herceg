@@ -2,7 +2,13 @@
 // from `data`, marks from `marks`. This is how charts built outside
 // TypeScript (the Python package, saved specs) reach the engine.
 
-import { type ColumnInput, encodedCategory, type NumericArray, time } from "../data/column.ts";
+import {
+  type ColumnInput,
+  encodedCategory,
+  type NumericArray,
+  time,
+  UNTYPED,
+} from "../data/column.ts";
 import { deriveTable } from "../data/derive.ts";
 import { geometry } from "../data/geometry.ts";
 import { fromMatrix } from "../data/matrix.ts";
@@ -620,6 +626,12 @@ function loadMark(spec: MarkSpec, index: number, tables: Map<string, Table>): Ma
         );
     }
   } catch (error) {
+    // A spec starts a column of text as an empty category column.
+    if (error instanceof Error)
+      error.message = error.message.replace(
+        UNTYPED,
+        '; an empty array makes a number column, so start text with { "type": "category", "codes": [], "dictionary": [] }',
+      );
     throw within(`marks[${index}]`, error, spec.id ?? index);
   }
 }

@@ -85,7 +85,7 @@ export interface TickLabelsSpec {
   row?: number;
   /** Which labels stay where labels collide, the higher; 0 by default. */
   priority?: number;
-  /** Labels that repeat one before them: left out ("hide", the default) or drawn ("show"). */
+  /** Labels that repeat the one before them: left blank, their ticks kept ("hide", the default), or drawn ("show"). */
   duplicates?: "hide" | "show";
   /**
    * Draw the labels inside the plot, beside their ticks, rather than

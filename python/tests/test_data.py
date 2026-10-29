@@ -149,6 +149,25 @@ def test_object_columns_are_inferred_not_stringified():
     assert np.isnan(times.values[0]) and times.values[1] == JAN_1 and np.isnan(times.values[2])
 
 
+def test_empty_columns_take_their_kind_from_their_type():
+    # Nothing says what an empty list or object column holds: numbers, as in JavaScript.
+    for untyped in ([], pd.Series([], dtype=object), np.array([], dtype=object), pl.Series([])):
+        assert convert(untyped).kind == "number"
+    # A string type says text, even with no values or only missing ones.
+    for text in (
+        np.array([], dtype=str),
+        pd.Series([], dtype="string"),
+        pd.Series([None, None], dtype="string"),
+        pd.Series([], dtype="str"),
+        pl.Series([], dtype=pl.String),
+        pa.array([], pa.string()),
+        pa.array([None], pa.large_string()),
+    ):
+        column = convert(text)
+        assert column.kind == "category" and column.dictionary == ()
+        assert (column.values == -1).all()
+
+
 def test_missing_and_colliding_category_labels():
     with_null = pa.DictionaryArray.from_arrays(pa.array([0, 1], pa.int32()), pa.array(["a", None]))
     assert convert(with_null).values.tolist() == [0, -1]

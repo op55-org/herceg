@@ -9,6 +9,7 @@ import {
   fromMatrix,
   geometry,
   type Chart as HercegChart,
+  type Inspection,
   line,
   panels,
   RowSet,
@@ -1125,6 +1126,104 @@ describe("<Chart>", () => {
     await nextTick();
     await hover(3);
     expect([...box()!.children].map((row) => row.textContent)).toEqual(["3", "a4", "b1"]);
+  });
+
+  it("never renders the renderTooltip slot of an inspection of data that changed since", async () => {
+    const rows = (n: number, k: number) =>
+      table({
+        t: Array.from({ length: n }, (_, i) => i),
+        v: Array.from({ length: n }, (_, i) => i % k),
+      });
+    const long = rows(100, 7);
+    const short = rows(20, 5);
+    const { view } = chartRef();
+    // The slot reads the table rendered now, as an application filtering its data does.
+    const data = shallowRef(long);
+    const tick = ref(0);
+    mount(
+      `<Chart ref="view" locale="en-US">
+        <Line :data="data" x="t" y="v" />
+        <template #renderTooltip="{ inspection }">
+          <b>row {{ data.value("t", inspection.points[0].row) }}{{ tick ? "" : "" }}</b>
+        </template>
+      </Chart>`,
+      () => ({ data, view, tick }),
+    );
+    const chart = view.value!.chart!;
+    await chart.loading;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + chart.toPixel(90, { axis: "x" })!,
+        clientY: rect.top + plot.y + plot.height / 2,
+      }),
+    );
+    chart.render();
+    await nextTick();
+    const box = () =>
+      [...host.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+        (div) => div.style.display === "block",
+      );
+    expect(box()!.textContent!.trim()).toBe("row 90");
+    // A filter replaces the table with a shorter one: row 90 is no row of it.
+    data.value = short;
+    await nextTick();
+    chart.render();
+    await nextTick();
+    expect(box()!.textContent!.trim()).toMatch(/^row 1\d$/);
+    // Rows dropped in place, then a render of the slot before the chart's next frame.
+    short.dropFirst(Number(box()!.textContent!.trim().slice(4)));
+    tick.value++;
+    await nextTick();
+    chart.render();
+    await nextTick();
+    expect(box()!.textContent!.trim()).toMatch(/^row \d+$/);
+  });
+
+  it("never renders the renderTooltip slot of an inspection of marks replaced since", async () => {
+    const data = table({ t: [0, 1, 2, 3], v: [1, 3, 2, 4] });
+    const { view } = chartRef();
+    const id = ref("a");
+    const named: (string | undefined)[] = [];
+    const name = (inspection: Inspection) => {
+      named.push(inspection.points[0]?.markId);
+      return inspection.points[0]?.markId;
+    };
+    mount(
+      `<Chart ref="view" locale="en-US">
+        <Line :id="id" :data="data" x="t" y="v" />
+        <template #renderTooltip="{ inspection }"><b>{{ name(inspection) }}</b></template>
+      </Chart>`,
+      () => ({ data, view, id, name }),
+    );
+    const chart = view.value!.chart!;
+    await chart.loading;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + chart.toPixel(2, { axis: "x" })!,
+        clientY: rect.top + plot.y + plot.height / 2,
+      }),
+    );
+    chart.render();
+    await nextTick();
+    const box = () =>
+      [...host.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+        (div) => div.style.display === "block",
+      );
+    expect(box()!.textContent!.trim()).toBe("a");
+    // Another mark over the same table: the inspection names mark a, which is gone.
+    named.length = 0;
+    id.value = "b";
+    await nextTick();
+    chart.render();
+    await nextTick();
+    expect(named).not.toContain("a");
+    expect(box()!.textContent!.trim()).toBe("b");
   });
 
   it("rejects children that are not marks", () => {

@@ -222,6 +222,33 @@ function sameMark(a: ChartMark, b: ChartMark): boolean {
   );
 }
 
+/** What an inspection is made on (`basisOf`). */
+interface Basis {
+  marks: readonly ChartMark[];
+  versions: string;
+}
+
+/**
+ * What an inspection of `marks` is made on: the marks, the versions of the
+ * tables they read, and the revisions of the row views they show. Its rows
+ * name rows of those as they were.
+ */
+const basisOf = (marks: readonly ChartMark[]): Basis => ({
+  marks,
+  versions: marks
+    .map((mark) => [viewOf(mark)?.revision, ...tablesOf(mark).map((table) => table.version)])
+    .join(";"),
+});
+
+/** Whether an inspection made on `basis` is of `marks`: the same marks, their data unchanged since. */
+function holds(basis: Basis, marks: readonly ChartMark[]): boolean {
+  return (
+    marks.length === basis.marks.length &&
+    marks.every((mark, i) => sameMark(mark, basis.marks[i]!)) &&
+    basisOf(marks).versions === basis.versions
+  );
+}
+
 /** What a render describes, and later what the chart shows. */
 interface View {
   marks: readonly ChartMark[];
@@ -229,16 +256,19 @@ interface View {
   key: string;
 }
 
-/** What the tooltip is at, and the element its content renders in. */
+/** What the tooltip is at, what that was made on, and the element its content renders in. */
 interface Shown {
   inspection: Inspection;
+  basis: Basis;
   host: HTMLElement;
 }
 
 /**
  * The `renderTooltip` slot's content, teleported into the chart's tooltip
  * box. It reads what is shown itself, so a tooltip that moves re-renders
- * only this.
+ * only this. Content is rendered only of an inspection of the marks
+ * rendered now (`marks()`), as their tables are: once they change,
+ * nothing until the chart inspects them again.
  */
 const TooltipContent = defineComponent({
   props: {
@@ -247,12 +277,15 @@ const TooltipContent = defineComponent({
       type: Function as PropType<(props: { inspection: Inspection }) => VNode[]>,
       required: true,
     },
+    marks: { type: Function as PropType<() => readonly ChartMark[]>, required: true },
   },
   setup(props) {
     return () => {
       const shown = props.shown.value;
       return (
-        shown && h(Teleport, { to: shown.host }, props.render({ inspection: shown.inspection }))
+        shown &&
+        holds(shown.basis, props.marks()) &&
+        h(Teleport, { to: shown.host }, props.render({ inspection: shown.inspection }))
       );
     };
   },
@@ -332,7 +365,7 @@ export const Chart = defineComponent({
     /** The chart's `renderTooltip` with the slot: it shows one element, which the slot renders in. */
     const renderTooltip: RenderTooltip = (inspection) => {
       host ??= document.createElement("div");
-      shown.value = { inspection, host };
+      shown.value = { inspection, basis: basisOf(applied?.marks ?? []), host };
       return host;
     };
 
@@ -471,7 +504,13 @@ export const Chart = defineComponent({
                 style: { width: "100%", height: "100%" },
                 innerHTML: snapshot.snapshot.html,
               }),
-            content && h(TooltipContent, { shown, render: content }),
+            content &&
+              h(TooltipContent, {
+                shown,
+                render: content,
+                // What the last render described, refused marks aside.
+                marks: () => rendered?.marks ?? applied?.marks ?? [],
+              }),
           ],
         );
       },

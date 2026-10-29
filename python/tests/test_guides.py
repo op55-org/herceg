@@ -297,6 +297,18 @@ def test_legends_and_colorbars_render():
     assert ">Gain<" in svg and ">+10<" in svg and 'y1="1"' in svg
 
 
+def test_a_legend_lists_a_scale_s_declared_domain_whatever_its_marks_draw():
+    domain = ["Adelie", "Chinstrap", "Gentoo"]
+    rows = {"x": [1, 2, 3], "y": [1, 2, 3], "species": ["Gentoo", "Chinstrap", "Gentoo"]}
+    for guides in ([hg.legend(include=[{"scale": "color"}])], None):
+        chart = hg.Chart(
+            rows, scales={"color": hg.OrdinalScale(domain=domain)}, guides=guides
+        ).line(x="x", y="y", series="species", color="species")
+        root = ET.fromstring(chart.to_svg())
+        texts = [node.text for node in root.iter("{http://www.w3.org/2000/svg}text")]
+        assert [text for text in texts if text in domain] == domain
+
+
 def test_guides_naming_a_mark_show_it_whatever_its_legend_setting():
     cells = hg.Chart(
         {"x": [0, 1, 0, 1], "y": [0, 0, 1, 1], "v": [1, 2, 3, 4]},

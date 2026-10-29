@@ -11,7 +11,7 @@ import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { PointSink, Polyline } from "../lod/polyline.ts";
 import type { ContentWriter } from "../marks/features/content.ts";
 import type { TracedEdge } from "../marks/features/provenance.ts";
-import type { Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts";
+import type { ChartMark, Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts";
 import type { RowBindings } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
 import type { TraceFrame } from "../marks/trace.ts";
@@ -23,6 +23,7 @@ import type { PaintReader, Theme } from "../theme.ts";
 import type { clearDomain } from "./clearance.ts";
 import type { GuideKit } from "./guides.ts";
 import type { TableName } from "./identity.ts";
+import type { LegendEntry } from "./legend.ts";
 import type { ChartConfig } from "./model.ts";
 
 /**
@@ -92,6 +93,16 @@ export interface Identities {
 export interface CompiledFeatures {
   /** What `mark` takes from the features; undefined for a mark that uses none. */
   of(mark: Mark): MarkFeatures | undefined;
+  /**
+   * Legend entries with the declared domain of each of the chart's scales
+   * that series and layout items stand for in place of the entries of its
+   * values: an entry per value in the domain's order, drawn or not. A
+   * `plain` legend (no guides to name marks left out of legends) lists none
+   * of the scales only those read.
+   */
+  listDomains(entries: readonly LegendEntry[], plain: boolean): LegendEntry[];
+  /** The keys of the values of declared domains `mark`'s series stand for, which it owns in legends. */
+  domainKeys(mark: ChartMark): string[];
   /** `frame` with the scales placing a mark's rows where `bound` binds them (marks/row-bindings.ts). */
   frame(frame: Frame, bound: RowBindings): Frame;
   /**

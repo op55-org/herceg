@@ -140,7 +140,10 @@ beyond `place` and `style`, or `zIndex`).
   to coarser ones on the same boundaries, generated directly, so work
   follows ticks drawn. Formats are Intl options, patterns
   (`format/patterns.ts`: d3-format and strftime subsets, compiled once), or
-  functions.
+  functions. A tick is its value, never its text (`writtenTicks` in
+  `model/axis.ts`): where a format writes neighbors alike, a coarser step
+  it tells apart takes their place, and a label still repeating the one
+  before is left blank, its tick and grid line kept.
 - **Listed axes** (`guides/axes.ts`) have layers ("major" first), each with
   tick marks, labels (rows, rotation, collision, priority, duplicates), and
   styles. Rotation tries candidates until neighbors' boxes do not overlap;
@@ -157,7 +160,11 @@ of categories, a mark's scale (`{ mark, channel }`), or a mark whole.
 Listed legends claim what they include, colorbars their ramps, and the
 automatic legend shows the rest. What a mark owns comes of its options, not
 its rows (`Mark.legendScales`), so a reference to a scale a mark does not
-declare is an error naming those it has. Entries are identities: the series
+declare is an error naming those it has. A scale of categories with a
+declared `domain` lists it whole and in order, whatever the marks draw now
+(`CompiledFeatures.listDomains`), so filtering rows keeps the key; its
+entries own the domain's values' identity keys (`domainKeys`), so an entry
+of a value nothing draws yet hides its rows once they come. Entries are identities: the series
 of every mark and panel standing for one value are one entry; labels alone
 never merge entries. `swatches: "mark"` draws each entry from its marks'
 settings (`SeriesFeatures.swatch`, else `sampleOf`). Custom entries target

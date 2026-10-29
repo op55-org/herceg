@@ -263,7 +263,7 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
     theme: Theme,
     chart: { readonly width: number; readonly height: number },
   ): PlacedLegend[] => {
-    const owners = ownersOf(marks);
+    const owners = ownersOf(marks, content.domains);
     const paint = text.paint ?? same;
     const partsOf = partOwners(kit, marks, planned.drawsOwn, places, theme, text.locale, paint);
     // Marks left out of legends (`legend: false`, annotations not listed by
@@ -734,14 +734,19 @@ function colorbarPart(
   );
 }
 
-/** The marks (by id, or their index) each entry's series belong to. */
-function ownersOf(marks: readonly MarkSeries[]): Map<string, (string | number)[]> {
+/**
+ * The marks (by id, or their index) each entry's series belong to, and the
+ * entries of the declared domains they read (`domains`), drawn or not.
+ */
+function ownersOf(
+  marks: readonly MarkSeries[],
+  domains: LegendContent["domains"],
+): Map<string, (string | number)[]> {
   const owners = new Map<string, (string | number)[]>();
   marks.forEach(({ mark, series }, index) => {
     const id = mark.spec.id ?? index;
-    for (const s of series) {
-      // Series are listed under their identity's entry.
-      const key = s.entry ?? s.key;
+    // Series are listed under their identity's entry.
+    for (const key of [...series.map((s) => s.entry ?? s.key), ...(domains?.(mark) ?? [])]) {
       const list = owners.get(key) ?? [];
       if (!list.includes(id)) list.push(id);
       owners.set(key, list);

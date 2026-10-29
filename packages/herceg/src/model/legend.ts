@@ -12,7 +12,7 @@ import {
   textItem,
   textWidth,
 } from "../layout/text.ts";
-import type { ColorRamp, Mark } from "../marks/mark.ts";
+import type { ChartMark, ColorRamp, Mark } from "../marks/mark.ts";
 import type { Series } from "../marks/series.ts";
 import { type Guide, type GuideItem, LEGEND_SWATCH, type LegendItem } from "../scene/scene.ts";
 import type { TextPaint } from "../style/style.ts";
@@ -191,6 +191,8 @@ export interface LegendContent {
   /** Layout marks' items' colors, by key. */
   color?: ((key: string) => string) | undefined;
   panelLegends?: typeof PanelLegends | undefined;
+  /** The keys of the declared domains' values a mark's entries stand for, drawn or not. */
+  domains?: ((mark: ChartMark) => readonly string[]) | undefined;
 }
 
 /**

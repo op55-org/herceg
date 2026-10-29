@@ -49,7 +49,8 @@ const MOST_VALUES = 10_000;
 
 /**
  * How an axis of `scale` with `ticks` and `format` plans its ticks; labels
- * repeating the one before them are left out unless `duplicates` is "show".
+ * repeating the one before them are left blank, their ticks kept, unless
+ * `duplicates` is "show".
  */
 export function tickPlanner(
   kit: GuideKit,
@@ -62,48 +63,29 @@ export function tickPlanner(
 ): Planner {
   const generate = generator(kit, ticks, context, scale, paths.ticks);
   const write = writer(kit, format, context, scale, paths.format);
+  const shown = (labels: string[]) => (duplicates === "show" ? labels : kit.blankRepeats(labels));
   return (ticker, count) => {
     const values = generate?.(ticker, count);
     if (values) {
       const labels = write
         ? write.ticks(values)
         : defaultLabels(kit, values, ticker, context, generate);
-      return { ticks: values, labels: duplicates === "show" ? labels : blankRepeats(labels) };
+      return { ticks: values, labels: shown(labels) };
     }
-    // Automatic ticks: a function writing them labels each, repeats left
-    // out; other formats ask for fewer ticks where they cannot tell them
-    // apart; with duplicates shown, each is labeled as written.
-    let auto = ticker.ticks(count);
-    if (!write) return { ticks: auto, labels: defaultLabels(kit, auto, ticker, context) };
-    let labels = write.ticks(auto);
-    if (duplicates === "show") return { ticks: auto, labels };
-    if (write.callback) return { ticks: auto, labels: blankRepeats(labels) };
-    let unique = new Set(labels);
-    if (unique.size < labels.length) {
-      const coarser = ticker.ticks((count * unique.size) / labels.length);
-      if (coarser.length > 0) {
-        auto = coarser;
-        labels = write.ticks(auto);
-        unique = new Set(labels);
-      }
-    }
-    if (unique.size < labels.length) {
-      const distinct = [...unique];
-      auto = auto.filter((_, i) => unique.delete(labels[i]!));
-      labels = distinct;
-    }
-    return { ticks: auto, labels };
+    // Automatic ticks: a function writing them labels each; other formats
+    // ask for fewer ticks where neighbors read alike; with duplicates
+    // shown, each is labeled as written.
+    const auto = ticker.ticks(count);
+    if (!write) return { ticks: auto, labels: shown(defaultLabels(kit, auto, ticker, context)) };
+    if (duplicates === "show") return { ticks: auto, labels: write.ticks(auto) };
+    if (write.callback) return { ticks: auto, labels: kit.blankRepeats(write.ticks(auto)) };
+    return kit.writtenTicks(ticker, count, write.ticks);
   };
 }
 
 /** How many ticks `ticks` asks for, when it is a count. */
 export function countOf(ticks: Ticks | undefined): number | undefined {
   return typeof ticks === "number" ? ticks : ticks && "count" in ticks ? ticks.count : undefined;
-}
-
-/** Labels equal to the one before them, left out. */
-function blankRepeats(labels: string[]): string[] {
-  return labels.map((label, i) => (i > 0 && label !== "" && label === labels[i - 1] ? "" : label));
 }
 
 /** Writes values as `format` says, for ticks and for single values; undefined for a format of none. */

@@ -194,6 +194,14 @@ the view, and the selection, each on one of the chart's scales.
   (`SyncMember.receive`) without sharing it again; a broadcast that a
   receiver's listener supersedes stops, so no member ends on the older
   value.
+- **Before the first frame**, while a chart loads code that frame needs,
+  views and selections set on it apply at once, and their reports and
+  shares wait for the frame (`#early` and `#reports` in `dom/chart.ts`).
+  On charts of facets, subplots, maps, or networks, whose panels and
+  planes that frame draws, calls and what synced charts share wait too,
+  and the frame makes them in order. The reports come after them,
+  sharing each channel's state then, so a newer value a synced chart
+  sent is not overwritten by an older local one.
 - **Values as data.** Numbers and times as they are, categories by name
   (`#encode`, `#decode` in `dom/chart.ts`), so charts with other
   categories show the same one. A chart shares and shows cursors along the
@@ -234,7 +242,11 @@ the view, and the selection, each on one of the chart's scales.
   locale and time zone, and inspections carry the fields. Layout items
   read fields at their row, or at the one row `rowsOf` gives.
 - **`renderTooltip`** content is asked for when what the tooltip is at
-  changes (compared as JSON, with the theme and renderer). A resize
+  changes (compared as JSON, with the theme and renderer) or the chart's
+  revision does (data or options), and never of an inspection the data
+  changed since: the controller drops one a hover or edge listener's
+  change made stale, and the adapters render content only while the marks
+  and their tables' versions are those it was made on. A resize
   observer places the box again as its content changes size, so the
   adapters render into it after the call: React through a portal, Vue
   through a teleport, Svelte into an element of its markup.

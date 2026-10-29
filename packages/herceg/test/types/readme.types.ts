@@ -126,8 +126,10 @@ rule({ y: 250, label: "SLO" });
 rule({ x: new Date(), label: "now" });
 rule(deploys, { x: "at", label: { field: "version" } });
 rule(deploys, { x: "at", label: { field: "build" } });
-// @ts-expect-error rule positions are number or time fields
+// A category field places each row's rule in its band.
 rule(deploys, { x: "version" });
+// @ts-expect-error rule positions are fields of numbers, times, or categories
+rule(deploys, { x: "nowhere" });
 // @ts-expect-error times cannot be drawn as text
 rule(deploys, { x: "at", label: { field: "at" } });
 

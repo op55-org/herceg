@@ -95,6 +95,15 @@ Herceg never guesses a field's kind from its name or magnitudes.
 - **Categories.** Numbers that name things (years, status codes, ids) are
   categories with `category()`. Colors and legend order follow the
   dictionary order (see [Styling](styling.md#colors-follow-what-series-stand-for)).
+- **Empty columns.** An empty array carries no element type at run time,
+  whatever its TypeScript type, so `[]` (and an array of only missing
+  values) makes a number field: `[] as number[]` starts a number column.
+  Start a column of text with `category([])` and one of times with
+  `time([])`. Appending text to a number field of a table with no rows yet
+  says so: `append "label": row 0: expected a number; received "peak"; an
+  empty array makes a number column, so start text with category([])`.
+  Specs read a JSON `[]` the same way; an empty category column is
+  `{ "type": "category", "codes": [], "dictionary": [] }`.
 
 ## Changing data and streaming
 
@@ -434,6 +443,12 @@ first time a mark uses it, without building Python objects per value:
 - Columns of Python objects (pandas `object` columns, lists) are typed by
   their values: all strings, all numbers, or all dates and datetimes.
   `None`, NaN, `pd.NA`, and `NaT` are missing.
+- An empty or all-missing list or `object` column has no values to type it
+  by and makes a number column, as `[]` does in JavaScript. Columns whose
+  type says text (pandas `"string"` and `"str"`, NumPy `str`, Polars
+  `pl.String`, Arrow `pa.string()`) make category columns even when empty,
+  so start a live chart's column of text with one, such as
+  `pd.Series([], dtype="string")`.
 - Conversions that would silently change data are refused, naming the
   column: integers beyond ±2**53, columns mixing strings, numbers, and
   dates, and names or labels that collide as text (`1` and `"1"`).

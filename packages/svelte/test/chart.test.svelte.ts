@@ -29,10 +29,12 @@ import Gauges from "./Gauges.svelte";
 import Lines from "./Lines.svelte";
 import Lollipops from "./Lollipops.svelte";
 import Maps from "./Maps.svelte";
+import MarkTips from "./MarkTips.svelte";
 import Nodes from "./Nodes.svelte";
 import Parent from "./Parent.svelte";
 import Pies from "./Pies.svelte";
 import Prices from "./Prices.svelte";
+import RowTips from "./RowTips.svelte";
 import Solids from "./Solids.svelte";
 import Stacks from "./Stacks.svelte";
 import Stray from "./Stray.svelte";
@@ -713,6 +715,85 @@ describe("<Chart renderTooltip>", () => {
     expect(host.querySelector("b")).toBeNull();
     hover(2);
     expect(box()!.textContent!.trim()).toBe("3 ms");
+  });
+
+  it("never renders the renderTooltip snippet of an inspection of data that changed since", async () => {
+    const rows = (n: number, k: number) =>
+      table({
+        t: Array.from({ length: n }, (_, i) => i),
+        v: Array.from({ length: n }, (_, i) => i % k),
+      });
+    const short = rows(20, 5);
+    const props = $state({ data: rows(100, 7), tick: 0, chart: null as HercegChart | null });
+    render(RowTips, props);
+    const chart = props.chart!;
+    await chart.loading;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + chart.toPixel(90, { axis: "x" })!,
+        clientY: rect.top + plot.y + plot.height / 2,
+      }),
+    );
+    chart.render();
+    flushSync();
+    const box = () =>
+      [...host.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+        (div) => div.style.display === "block",
+      );
+    expect(box()!.textContent!.trim()).toBe("row 90");
+    // A filter replaces the table with a shorter one: row 90 is no row of it.
+    props.data = short;
+    flushSync();
+    chart.render();
+    flushSync();
+    expect(box()!.textContent!.trim()).toMatch(/^row 1\d$/);
+    // Rows dropped in place, then the snippet renders again before the chart's next frame.
+    short.dropFirst(Number(box()!.textContent!.trim().slice(4)));
+    props.tick++;
+    flushSync();
+    chart.render();
+    flushSync();
+    expect(box()!.textContent!.trim()).toMatch(/^row \d+$/);
+  });
+
+  it("never renders the renderTooltip snippet of an inspection of marks replaced since", async () => {
+    const named: (string | undefined)[] = [];
+    const props = $state({
+      data: table({ t: [0, 1, 2, 3], v: [1, 3, 2, 4] }),
+      id: "a",
+      record: (markId: string | undefined) => named.push(markId),
+      chart: null as HercegChart | null,
+    });
+    render(MarkTips, props);
+    const chart = props.chart!;
+    await chart.loading;
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + chart.toPixel(2, { axis: "x" })!,
+        clientY: rect.top + plot.y + plot.height / 2,
+      }),
+    );
+    chart.render();
+    flushSync();
+    const box = () =>
+      [...host.querySelectorAll<HTMLElement>('div[aria-hidden="true"]')].find(
+        (div) => div.style.display === "block",
+      );
+    expect(box()!.textContent!.trim()).toBe("a");
+    // Another mark over the same table: the inspection names mark a, which is gone.
+    named.length = 0;
+    props.id = "b";
+    flushSync();
+    chart.render();
+    flushSync();
+    expect(named).not.toContain("a");
+    expect(box()!.textContent!.trim()).toBe("b");
   });
 });
 

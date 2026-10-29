@@ -212,6 +212,15 @@ createChart(month, { marks: [line(hours, { x: "at", y: "load" })], interaction: 
 - **Showing a cursor from outside.** `chart.showCursor({ x: order.time })`
   shows the cursor where an application says, and `hideCursor()` hides
   it; both reach the chart's cursor channel unless `{ broadcast: false }`.
+- **Before the first frame.** A view or selection set right after
+  mounting, while the chart still loads code its first frame needs,
+  applies at once (`getViewport` and `selection` read it); its `viewport`
+  or `select` event and what synced charts receive follow with that frame,
+  naming the panels it draws. On a chart of facets, subplots, maps, or
+  networks, whose panels and planes that frame draws, views and selections
+  apply with it, in the order they were set; reading a panel's back
+  (`getViewport({ panel })`) waits for `chart.ready`. What synced charts
+  share before then takes its place in the same order.
 - **Groups.** Each channel's groups are its own: `{ cursor: "all",
   viewport: "pair" }` shares the cursor with every chart of "all" and the
   view with those of "pair".
@@ -268,8 +277,11 @@ hg.Chart(daily).line(x="time", y="p99", tooltip=hg.Tooltip(fields=["requests"]))
   fields; networks take none. A Python helper's `tooltip` is its chart's,
   with fields for its one mark.
 - **`renderTooltip`** text is shown as text, never parsed as markup. It is
-  called when what the tooltip is at changes, not on every move; the box
-  keeps its placement, the crosshair, and the keyboard's announcements.
+  called when what the tooltip is at changes, or the chart's data or
+  options do, not on every move; the box keeps its placement, the
+  crosshair, and the keyboard's announcements. An inspection's rows are
+  rows of the tables as they were when it was made: once the data or
+  marks change, the chart inspects them again before calling it.
   React, Vue, and Svelte render their own components there
   ([Frameworks](frameworks.md#tooltips)).
 

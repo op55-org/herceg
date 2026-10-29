@@ -1,10 +1,10 @@
-import type { NumericField, Schema, Table } from "../data/table.ts";
+import type { PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { guideSegmentDrawing } from "../draw/segments.ts";
 import type { Formatter } from "../format/format.ts";
 import { LabelBoxes, segmentMeetsBox, segmentsMeet } from "../layout/label-boxes.ts";
 import { lineCount } from "../layout/text.ts";
-import type { Geometry, SegmentGeometry } from "../scene/scene.ts";
+import type { Geometry, Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { MarkAnchorSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { FormatSpec } from "../spec/guides.ts";
@@ -13,6 +13,7 @@ import type { Halo, StrokeStyle, TextStyle as TextStyleSpec } from "../spec/styl
 import { dashPattern } from "../style/style.ts";
 import {
   AnnotationData,
+  inView,
   labelOf,
   type PlaceOption,
   position,
@@ -43,7 +44,12 @@ interface TextStyle {
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
-  /** What the text is cut to: "plot", "chart", or false (the default: text of points outside the plot is left out). */
+  /**
+   * What the text is cut to: "plot", "chart", or false for nothing. Without
+   * it, text is drawn whole, and left out while a place in data (a value,
+   * field, or category) is out of the plot's view; text at pixels or a
+   * share of a frame is drawn wherever it is.
+   */
   clip?: Clip;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
@@ -131,12 +137,12 @@ export type TextOptions = TextStyle &
 
 /** Labels from a table, one per row; places may also be constants. */
 export type TextDataOptions<S extends Schema> = TextStyle &
-  TextPlace<NumericField<S>> & { label: TextLabel<TextField<S>> };
+  TextPlace<PositionField<S>> & { label: TextLabel<TextField<S>> };
 
 /**
- * Text labels at data positions. They are drawn as SVG above the data and
- * left out when their point is outside the plot; meant for annotations, not
- * for labeling every point of a large series.
+ * Text labels at data positions. They are drawn as SVG above the data and,
+ * without a clip, left out while their point in data is out of view; meant
+ * for annotations, not for labeling every point of a large series.
  */
 export class TextMark implements Mark<Frozen<TextSpec>> {
   declare readonly [MARK]: true;
@@ -218,12 +224,14 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       (i) => {
         const at = data.value(x, i);
         const value = data.value(y, i);
-        // Places that are not values (fractions, pixels) say nothing of where the text is.
+        // Places that are not values or categories (fractions, pixels) say
+        // nothing of where the text is.
         if (x.kind === "value" && !Number.isFinite(at)) return undefined;
         if (y.kind === "value" && !Number.isFinite(value)) return undefined;
+        const [cx, cy] = [data.category(x, i), data.category(y, i)];
         return [
-          x.kind === "value" && `x ${format.x(at)}`,
-          y.kind === "value" && `y ${format.y(value)}`,
+          x.kind === "value" ? `x ${format.x(at)}` : cx !== undefined && `x ${cx}`,
+          y.kind === "value" ? `y ${format.y(value)}` : cy !== undefined && `y ${cy}`,
         ]
           .filter(Boolean)
           .join(", ");
@@ -315,8 +323,15 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       const block = (lineCount(label) * paint.lineHeight + top + bottom) / 2;
       return verticalAlign === "top" ? block : verticalAlign === "bottom" ? -block : 0;
     };
-    const inPlot = (x0: number, y0: number, x1: number, y1: number) =>
-      x0 >= plot.x && x1 <= plot.x + plot.width && y0 >= plot.y && y1 <= plot.y + plot.height;
+    const chart = frame.chart ?? plot;
+    const inside = (box: Rect, x0: number, y0: number, x1: number, y1: number) =>
+      x0 >= box.x && x1 <= box.x + box.width && y0 >= box.y && y1 <= box.y + box.height;
+    const inPlot = (x0: number, y0: number, x1: number, y1: number) => inside(plot, x0, y0, x1, y1);
+    // Without a clip of its own, text shows while its places in data are in view.
+    const shown = (px: number, py: number) =>
+      Number.isFinite(px) &&
+      Number.isFinite(py) &&
+      (spec.clip !== undefined || (inView(x, px, "x", plot) && inView(y, py, "y", plot)));
     // The points labels belong to, which must be in view; their places' offsets move the labels.
     const dx = x.coordinate.offset ?? 0;
     const dy = y.coordinate.offset ?? 0;
@@ -366,6 +381,8 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     /** Puts an item's label at the first free spot in [from, to); false if none is. */
     const place = (item: number, label: string, width: number, from: number, to: number) => {
       const [px, py] = pointAt(rowAt(item)) as [number, number];
+      // Moved labels stay in the plot, or in the chart when put outside it.
+      const bounds = inPlot(px, py, px, py) ? plot : chart;
       // From the anchor to the label's center, and half its box's width and height.
       const shift = anchor === "start" ? width / 2 : anchor === "end" ? -width / 2 : 0;
       const reach = width / 2 + room;
@@ -379,9 +396,9 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
             ? [px + dx + shift, py + dy + lift(label)]
             : [px + ax * (gap + reach), py + ay * (gap + tall)];
         const [x0, y0, x1, y1] = [cx - reach, cy - tall, cx + reach, cy + tall];
-        // Moving labels stay in the plot, and moved ones off other points
+        // Moving labels stay in their bounds, and moved ones off other points
         // and the lines leading to other labels.
-        if (moving && !inPlot(x0, y0, x1, y1)) continue;
+        if (moving && !inside(bounds, x0, y0, x1, y1)) continue;
         // Labels before dots: in a crowded plot labels refuse most places,
         // and there are fewer of them to check.
         if (placed!.hits(x0, y0, x1, y1)) continue;
@@ -414,8 +431,7 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     for (let item = 0; item < size; item++) {
       const row = rowAt(item);
       const [px, py] = pointAt(row) as [number, number];
-      // Labels are not clipped, so ones whose point is out of view are left out.
-      if (!inPlot(px, py, px, py)) continue;
+      if (!shown(px, py)) continue;
       const label = data.text(row, frame.locale, write, content);
       if (!placed) {
         add(item, label, px + dx, py + dy + lift(label));

@@ -224,6 +224,44 @@ describe("region", () => {
     expect(of(grid.scene, "rule")).toHaveLength(1);
   });
 
+  it("place rows of a category field in their bands, as other marks do", () => {
+    const sales = table({ region: ["N", "S", "E"], v: [1, 2, 3] });
+    const notes = table({
+      region: ["S", "W", "N"],
+      note: ["low", "new", "high"],
+      at: [1.5, 1, 2.5],
+    });
+    const { scene, model } = build({
+      marks: [
+        bar(sales, { x: "region", y: "v" }),
+        rule(notes, { x: "region", label: { field: "note" } }),
+        text(notes, { x: "region", y: "at", label: { field: "note" } }),
+        region(notes, { x1: "region", x2: { data: "E" } }),
+      ],
+    });
+    const x = model.xScale()!;
+    const band = (category: string) => x.map(["N", "S", "E"].indexOf(category));
+    // "W" has no band: those rows are left out.
+    const rules = of(scene, "rule") as RuleGeometry[];
+    expect(rules.map((r) => [r.label, r.x1])).toEqual([
+      ["low", band("S")],
+      ["high", band("N")],
+    ]);
+    const [labels] = of(scene, "text") as TextGeometry[];
+    expect(labels!.labels).toEqual(["low", "high"]);
+    expect(labels!.coords[0]).toBeCloseTo(band("S"), 3);
+    const shade = of(scene, "rect")[1] as RectGeometry;
+    expect(shade.count).toBe(2);
+    expect(shade.rects[0]).toBeCloseTo(band("S"), 3);
+    expect(describeChart(model)).toContain("Rules: low (x S), new (x W), high (x N).");
+    expect(describeChart(model)).toContain("Regions: x S to E, x W to E, x N to E.");
+    // They add no bands: alone on a number axis, rows of categories have no place.
+    const alone = build({
+      marks: [line(metrics, { x: "time", y: "value" }), rule(notes, { x: "region" })],
+    });
+    expect(of(alone.scene, "rule")).toHaveLength(0);
+  });
+
   it("needs complete pairs", () => {
     // Types refuse these; JavaScript callers get errors.
     expect(() => region({ x1: 1 } as never)).toThrow(/both x1 and x2/);
@@ -595,6 +633,112 @@ describe("text", () => {
     expect(() =>
       text(metrics, { x: "time", y: "value", label: { field: "time" } as never }),
     ).toThrow(/text label\.field: field "time" holds time values; expected category or number/);
+  });
+});
+
+describe("places outside the plot", () => {
+  // The plot starts 40 pixels down: room above it for text placed there.
+  const above = (marks: ChartConfig["marks"]) =>
+    build({
+      marks,
+      padding: { top: 40, right: 0, bottom: 0, left: 0 },
+      x: { domain: [0, 1] },
+      y: { domain: [0, 1] },
+    });
+  const words = (scene: Scene) =>
+    (of(scene, "text") as TextGeometry[]).flatMap((g) => [...g.labels]);
+  const heads = table({ x: [0.2, 0.8], top: [10, 12], name: ["Gentoo", "Adelie"] });
+
+  it("draw text at pixels or a share of the chart wherever it is", () => {
+    for (const clip of [undefined, false, "chart"] as const) {
+      const c = clip === undefined ? {} : { clip };
+      const { scene } = above([
+        text({
+          at: { x: { px: 60, frame: "chart" }, y: { px: 10, frame: "chart" } },
+          label: "chart",
+          ...c,
+        }),
+        text({ at: { x: { px: 60 }, y: { px: -10 } }, label: "plot pixels", ...c }),
+        text({ at: { x: 0.5, y: { fraction: 0.5, frame: "chart" } }, label: "share", ...c }),
+        text(heads, {
+          x: "x",
+          y: { px: { field: "top" }, frame: "chart" },
+          label: { field: "name" },
+          ...c,
+        }),
+        text({ x: 0.5, y: { data: 1, offset: -30 }, label: "offset", ...c }),
+      ]);
+      expect(words(scene).sort()).toEqual([
+        "Adelie",
+        "Gentoo",
+        "chart",
+        "offset",
+        "plot pixels",
+        "share",
+      ]);
+      const chart = (of(scene, "text") as TextGeometry[])[0]!;
+      expect([chart.coords[0], chart.coords[1]]).toEqual([60, 10]);
+    }
+  });
+
+  it("leave text out while its place in data is out of view, unless a clip says otherwise", () => {
+    const marks = (clip?: false | "plot") => [
+      text({ x: 0.5, y: 5, label: "data", ...(clip !== undefined && { clip }) }),
+      // In view along x, at pixels along y: shown; out of view along x: not.
+      text({
+        x: 0.5,
+        y: { px: 10, frame: "chart" },
+        label: "mixed",
+        ...(clip !== undefined && { clip }),
+      }),
+      text({
+        x: 3,
+        y: { px: 10, frame: "chart" },
+        label: "gone",
+        ...(clip !== undefined && { clip }),
+      }),
+    ];
+    expect(words(above(marks()).scene)).toEqual(["mixed"]);
+    // A clip leaves nothing out before it cuts: false draws it all, "plot" cuts it.
+    expect(words(above(marks(false)).scene).sort()).toEqual(["data", "gone", "mixed"]);
+    expect(words(above(marks("plot")).scene).sort()).toEqual(["data", "gone", "mixed"]);
+    const cut = of(above(marks("plot")).scene, "text")[0]!;
+    expect(cut.clip).toBe("plot");
+  });
+
+  it("draw rules at pixels of the chart, their labels inside it", () => {
+    const { scene } = above([
+      rule({ y: { px: 10, frame: "chart" }, label: "header" }),
+      rule({ y: 5, label: "out of view" }),
+    ]);
+    const rules = of(scene, "rule") as RuleGeometry[];
+    expect(rules.map((r) => [r.y1, r.label])).toEqual([[10, "header"]]);
+    // The label stays in the chart, not moved down into the plot.
+    expect(rules[0]!.labelIn!.plot).toEqual({ x: 0, y: 0, width: 600, height: 300 });
+    const drawn = above([
+      rule({ y: 5, clip: false }),
+      rule({ y: { px: 10, frame: "chart" }, clip: "plot" }),
+    ]);
+    expect(of(drawn.scene, "rule")).toHaveLength(2);
+  });
+
+  it("cut regions to the plot, or to the chart where a clip says so", () => {
+    const band = (clip?: "chart" | false) =>
+      region({
+        y1: { px: 0, frame: "chart" },
+        y2: { fraction: 1 },
+        label: "band",
+        ...(clip !== undefined && { clip }),
+      });
+    const fills = (scene: Scene) => (of(scene, "rect") as RectGeometry[]).map((g) => g.count);
+    expect(fills(above([band()]).scene)).toEqual([0]);
+    for (const clip of ["chart", false] as const) {
+      const { scene } = above([band(clip)]);
+      const [fill] = of(scene, "rect") as RectGeometry[];
+      const plot = scene.panels[0]!.plot;
+      expect(Array.from(fill!.rects.slice(0, 4))).toEqual([plot.x, 0, plot.width, plot.y]);
+      expect(words(scene)).toEqual(["band"]);
+    }
   });
 });
 

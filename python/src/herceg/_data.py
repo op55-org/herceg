@@ -40,6 +40,13 @@ _INEXACT = (
     "convert the column to float explicitly to accept rounding"
 )
 
+#: The correction for text meeting a number column made from an empty list,
+#: which carries no type.
+UNTYPED = (
+    "; an empty list makes a number column, so start a column of text with a "
+    "string type, such as np.array([], dtype=str)"
+)
+
 #: Milliseconds per unit of NumPy, Polars, and Arrow time units.
 _MS_PER_UNIT = {
     "W": 604_800_000.0,
@@ -67,6 +74,11 @@ class Column:
 
     def __len__(self) -> int:
         return len(self.values)
+
+    @property
+    def untyped(self) -> bool:
+        """A number column holding no numbers, as an empty list makes."""
+        return self.kind == "number" and bool(np.isnan(self.values).all())
 
 
 class Table:
@@ -325,7 +337,10 @@ def _from_numpy(array: np.ndarray) -> Column:
         return Column("time", _datetime64_ms(array))
     if kind == "m":
         raise TypeError("durations (timedelta) are not supported; convert them to numbers")
-    if kind in "UO":
+    if kind == "U":
+        # Text however short, empty included: the dtype says what a list cannot.
+        return _categories(array.tolist())
+    if kind == "O":
         return _from_sequence(array.tolist())
     raise TypeError(f"expected numbers, times, or text; received dtype {array.dtype}")
 
@@ -516,8 +531,11 @@ def _from_pandas(series: Any) -> Column:
         present = series.dropna().to_numpy(dtype="int64" if dtype.kind == "i" else "uint64")
         _exact_integers(present)
         return Column("number", series.to_numpy(dtype="<f8", na_value=np.nan))
-    if pd.api.types.is_string_dtype(dtype) or pd.api.types.is_object_dtype(dtype):
+    if pd.api.types.is_object_dtype(dtype):
         return _from_sequence(series.tolist())
+    if pd.api.types.is_string_dtype(dtype):
+        # String dtypes hold text even when empty or all missing.
+        return _categories(series.tolist())
     return convert(series.to_numpy())
 
 

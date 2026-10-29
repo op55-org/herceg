@@ -609,7 +609,9 @@ export function instanceIn(
       throw new ChartError({
         code: "unknown-reference",
         path: "panel",
-        message: `${where}: no panel ${JSON.stringify(panel)}; name one of ${all.map(({ key }) => JSON.stringify(key)).join(", ")}`,
+        message: all.length
+          ? `${where}: no panel ${JSON.stringify(panel)}; name one of ${all.map(({ key }) => JSON.stringify(key)).join(", ")}`
+          : `${where}: no panel ${JSON.stringify(panel)} yet, as the chart draws its panels with its first frame; call it once chart.ready resolves`,
         panel,
       });
     if (view && (scale === "x" || (scale === "y" ? view.drawsY : view.plans.yRight)))

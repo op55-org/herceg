@@ -57,6 +57,42 @@ describe("loadSpec", () => {
     expect([0, 1, 2].map((row) => metrics.value("zone", row))).toEqual(["eu", "eu", null]);
   });
 
+  it("reads an empty JSON array as numbers, and an empty category column as categories", () => {
+    const { tables } = loadSpec({
+      data: {
+        live: {
+          columns: {
+            x: [],
+            label: [],
+            tag: { type: "category", codes: [], dictionary: [] },
+          },
+        },
+      },
+      marks: [],
+    });
+    const live = tables.get("live")!;
+    expect([live.kind("x"), live.kind("label"), live.kind("tag")]).toEqual([
+      "number",
+      "number",
+      "category",
+    ]);
+    // As tables made in TypeScript say: the correction is an empty category column.
+    expect(() => live.append({ x: [1], label: ["peak"], tag: ["a"] })).toThrow(
+      /^append "label": row 0: expected a number; received "peak"; an empty array makes a number column/,
+    );
+    live.append({ x: [1], label: [2], tag: ["a"] });
+    expect(live.value("tag", 0)).toBe("a");
+    // A mark of the spec needing text of one says how, as a spec writes it.
+    expect(() =>
+      loadSpec({
+        data: { live: { columns: { x: [], y: [], s: [] } } },
+        marks: [{ type: "line", data: "live", x: "x", y: "y", series: "s" }],
+      }),
+    ).toThrow(
+      'field "s" holds number values; expected category; an empty array makes a number column, so start text with { "type": "category", "codes": [], "dictionary": [] }',
+    );
+  });
+
   it("round trips point animation keys", () => {
     const data = table({ x: [1, 2], y: [3, 4], id: ["a", "b"] }, { name: "data" });
     const mark = point(data, { x: "x", y: "y", animationKey: "id" });
