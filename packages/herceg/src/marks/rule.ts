@@ -22,6 +22,7 @@ import type { Theme } from "../theme.ts";
 import {
   AnnotationData,
   checkLegend,
+  inView,
   type Label,
   labelOf,
   type PlaceOption,
@@ -54,7 +55,12 @@ interface RuleStyle {
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
-  /** What the rules are cut to: "plot", "chart", or false (the default: rules outside the plot are left out). */
+  /**
+   * What the rules are cut to: "plot", "chart", or false for nothing.
+   * Without it, rules are drawn whole, and left out while their place in
+   * data (a value, field, or category) is out of the plot's view; rules at
+   * pixels or a share of a frame are drawn wherever they are.
+   */
   clip?: Clip;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
@@ -294,13 +300,14 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     const blocks = this.#plain && paint.verticalAlign !== undefined;
     const plain = (text: string | undefined) => this.#plain && !blocks && !text?.includes("\n");
     const [lo, hi] = vertical ? [plot.y, plot.y + plot.height] : [plot.x, plot.x + plot.width];
+    const [start, end] = vertical ? [plot.x, plot.x + plot.width] : [plot.y, plot.y + plot.height];
+    const axis = vertical ? "x" : "y";
+    const offset = place.coordinate.offset ?? 0;
     data.each(rows, (i) => {
-      const at = data.pixel(place, vertical ? "x" : "y", i, scale, frame);
-      // Rules are drawn unclipped, so ones outside the plot are skipped.
-      const [start, end] = vertical
-        ? [plot.x, plot.x + plot.width]
-        : [plot.y, plot.y + plot.height];
-      if (at === undefined || at < start - 0.5 || at > end + 0.5) return;
+      const at = data.pixel(place, axis, i, scale, frame);
+      // Without a clip of its own, a rule shows while its place in data is in view.
+      if (at === undefined || (spec.clip === undefined && !inView(place, at - offset, axis, plot)))
+        return;
       let a = lo;
       let b = hi;
       if (span) {
@@ -327,17 +334,19 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
         label: plain(text) ? text : undefined,
       };
       if (spec.strokeOpacity !== undefined) rule.opacity = spec.strokeOpacity;
+      // Labels stay in the plot, or in the chart for a rule outside the plot.
+      const bounds = at >= start - 0.5 && at <= end + 0.5 ? plot : (frame.chart ?? plot);
       if (rule.label)
         rule.labelIn = {
           width: frame.measure(rule.label, cssFont(frame.theme.font, frame.theme.fontSize)),
-          plot,
+          plot: bounds,
         };
       out.push(rule);
       if (text && !plain(text)) {
         const at = this.#place(text, rule, frame, paint);
         // A label outside the plot goes beside the axis' labels; others stay inside.
         const box = label?.place?.outside ? undefined : labelBox(at, paint, frame.measure);
-        placed.push(box ? movedLabel(at, shiftInside(box, plot, ruleLine(rule))) : at);
+        placed.push(box ? movedLabel(at, shiftInside(box, bounds, ruleLine(rule))) : at);
       }
     });
     if (placed.length > 0)

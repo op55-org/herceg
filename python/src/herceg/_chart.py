@@ -4631,6 +4631,10 @@ class Chart:
         the plot beside the axis (``hg.LabelPlace``), in a style of its own.
         Rules count toward the axes' domains only with
         ``contribute_domain=True``; otherwise they show where the data is.
+        Without ``clip``, a rule at a value is left out while the value is out
+        of the plot's view, and one at pixels or a share of the chart is drawn
+        wherever it is; ``clip=False`` draws every rule, and ``"plot"`` or
+        ``"chart"`` cuts them to the plot or chart.
         """
         if (x is None) == (y is None):
             raise ChartError("rule: needs exactly one of x and y")
@@ -4707,7 +4711,9 @@ class Chart:
         and the sides of a span across the whole plot are never drawn. Add
         regions before the marks they highlight to draw them underneath, or
         give ``z_index``. Regions count toward the axes' domains only with
-        ``contribute_domain=True``.
+        ``contribute_domain=True``. Regions are cut to the plot; with
+        ``clip="chart"`` or ``False``, to the chart, so a band at pixels of
+        the chart above the plot shows.
         """
         for start, end, name in ((x1, x2, "x"), (y1, y2, "y")):
             if (start is None) != (end is None):
@@ -4794,7 +4800,11 @@ class Chart:
         (``overlap="show"``), left out (``"hide"``), or, where their place is
         taken or outside the plot, tried around their point and left out when
         nothing fits (``"move"``), with a leader line back to it
-        (``style=hg.MarkStyle(leader=hg.StrokeStyle(...))``).
+        (``style=hg.MarkStyle(leader=hg.StrokeStyle(...))``). Without
+        ``clip``, text at a value is left out while the value is out of the
+        plot's view, and text at pixels or a share of the chart (above the
+        plot, say) is drawn wherever it is; ``clip=False`` draws all of it,
+        and ``"plot"`` or ``"chart"`` cuts it to the plot or chart.
         """
         if overlap not in (None, "show", "hide", "move"):
             raise ChartError(

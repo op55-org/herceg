@@ -62,7 +62,7 @@ Most marks take these; where only some do, the row says which, and
 | `legend: false` | Left out of the chart's legends while still drawn. |
 | `axis: "right"` | Draw on the second y axis ([Axes](axes-and-legends.md#a-second-y-axis)): marks with a y value axis; horizontal marks and lines along y stay on the left. |
 | `panel`, `facet` | Which subplot it draws in; `facet: "repeat"` draws all rows in every facet panel ([Layout](layout.md)). |
-| `clip` | What the drawing is cut to: `"plot"` (data's default), `"chart"`, or `false` (rules' and text's default). With `false`, markers at the plot's edge show whole. |
+| `clip` | What the drawing is cut to: `"plot"` (data's and regions' default), `"chart"`, or `false` for nothing, so markers at the plot's edge show whole. Rules and text have their own default ([Annotations](#annotations)). |
 | `zIndex` | Paint order ([Styling](styling.md#paint-order)). |
 | `tooltip: { fields }` | More of the row in tooltips ([Interaction](interaction.md#tooltips)); marks that summarize rows (histograms, box plots, boxen, violins, contours) and networks refuse it. |
 
@@ -496,8 +496,17 @@ center).
 - **Domains.** Annotations count toward the axes' domains only with
   `contributeDomain: true`, so thresholds do not stretch the data's axes.
   An annotation alone in a chart gives the axes its values.
+- **Outside the plot.** Without `clip`, rules and text are drawn whole and
+  left out while a place in data (a value, field, or category, before its
+  offset) is out of the plot's view, so panning hides them; at pixels or a
+  share of a frame (`{ px: 10, frame: "chart" }` above the plot) they are
+  drawn wherever they are. With `clip`, nothing is left out before it
+  cuts: `false` draws everything, `"chart"` and `"plot"` cut to the chart
+  or plot. Regions are cut to the plot unless `clip` is `"chart"` or
+  `false`.
 - **Staying inside.** Labels in the plot stay inside it in every output: a
-  label at the edge flips to the rule's other side or moves in.
+  label at the edge flips to the rule's other side or moves in. Labels of
+  rules and regions outside the plot stay inside the chart.
 - **Overlap.** Text labels that would cover an earlier label of the same
   mark are drawn anyway by default; `overlap: "hide"` leaves them out;
   `overlap: "move"` tries nearby places, then farther ones with a leader

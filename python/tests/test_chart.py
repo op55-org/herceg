@@ -280,6 +280,24 @@ def test_annotations_take_constants_or_columns():
         assert f">{label}</text>" in svg
 
 
+def test_annotations_at_pixels_of_the_chart_draw_outside_the_plot():
+    top = hg.Pixels(10, frame="chart")
+    chart = (
+        hg.Chart({"x": [0.2, 0.8], "y": [0.2, 0.8]}, padding={"top": 40}, width=300)
+        .point(x="x", y="y")
+        .text(at=hg.Position(x=hg.Pixels(60, frame="chart"), y=top), label="above")
+        .rule(y=top, label="header")
+        .region(y1=hg.Pixels(0, frame="chart"), y2=hg.Fraction(1), label="band", clip="chart")
+        # Out of the view in data: left out, unless a clip says otherwise.
+        .text(x=0.5, y=5, label="gone")
+        .text(x=0.5, y=5, label="kept", clip=False)
+    )
+    svg = chart.to_svg()
+    for label in ("above", "header", "band", "kept"):
+        assert f">{label}</text>" in svg
+    assert ">gone</text>" not in svg
+
+
 def test_annotation_options_are_checked():
     with pytest.raises(ValueError, match="Label: give text, field, or content, one of them"):
         hg.Chart(DATA).text(x=1, y=2, label=hg.Label())

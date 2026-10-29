@@ -351,9 +351,11 @@ loader binds a table only to annotations that read one.
   count only where no other mark has one (`Mark.domainFallback`).
 - **Room.** A rule label outside the plot asks for a track beside the y axes
   (`Mark.room`); `Frame.outside` says where labels go.
-- **Drawing.** Regions are rectangles drawn with data, clipped. Rules and
-  text are guides: SVG above the data, not clipped, left out outside the
-  view. Plain rule labels are placed by every renderer from the same plot
+- **Drawing.** Regions are rectangles drawn with data, cut to the plot
+  unless their `clip` says otherwise. Rules and text are guides: SVG above
+  the data, not cut, and left out while their place in data is outside the
+  view; at pixels or a share of a frame they draw wherever they are, and a
+  `clip` cuts them instead of leaving them out. Plain rule labels are placed by every renderer from the same plot
   (`ruleLabel`, `RuleGeometry.labelIn`), so SVG, Canvas, PNG, and PDF agree.
   `scale/css-color.ts` parses colors without DOM APIs for static output.
 - **Placement.** `shiftInside` (`layout/place.ts`) mirrors a rule's label

@@ -11,6 +11,7 @@ import type { Schema, Table } from "../data/table.ts";
 import { type Formatter, formatNumber, numberFormatter } from "../format/format.ts";
 import { coordinateAt } from "../layout/position.ts";
 import type { PositionScale } from "../scale/scale.ts";
+import type { Rect } from "../scene/scene.ts";
 import type { LabelSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Coordinate } from "../spec/place.ts";
@@ -64,6 +65,18 @@ export type Channel = number | NumericArray;
 
 export function valueAt(channel: Channel, item: number): number {
   return typeof channel === "number" ? channel : channel[item]!;
+}
+
+/**
+ * Whether pixel `at` of `place` along `axis`, before its offset, is in the
+ * plot's view, as annotations without a `clip` of their own show places:
+ * one in data (a value, field, or category) while the view holds it, and
+ * one in pixels or a share of a frame always.
+ */
+export function inView(place: Place, at: number, axis: "x" | "y", plot: Rect): boolean {
+  if (place.kind === "frame") return true;
+  const [start, size] = axis === "x" ? [plot.x, plot.width] : [plot.y, plot.height];
+  return at >= start - 0.5 && at <= start + size + 0.5;
 }
 
 /**
