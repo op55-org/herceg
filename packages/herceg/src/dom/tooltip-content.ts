@@ -57,11 +57,16 @@ export const fieldReader: FieldReaders = (locale, zone, numbers, times) => {
  * Makes the chart's tooltip, `tooltip`, show the fields of the rows its
  * points are, and the content `render()` returns in its box (the built-in
  * content where it returns none). `render`'s content is asked for again
- * only when what the tooltip is at changes or the content left the box,
- * and the box is placed again as that content changes size, as frameworks
- * render it. Returns what stops watching its size.
+ * only when what the tooltip is at changes, the chart's options or data
+ * do (`revision()`: the marks and rows an inspection names), or the
+ * content left the box; the box is placed again as that content changes
+ * size, as frameworks render it. Returns what stops watching its size.
  */
-export function ownContent(tooltip: Tooltip, render: () => RenderTooltip | undefined): () => void {
+export function ownContent(
+  tooltip: Tooltip,
+  render: () => RenderTooltip | undefined,
+  revision: () => number,
+): () => void {
   const { element } = tooltip;
   const document = element.ownerDocument;
   let shown: unknown[] = [];
@@ -108,10 +113,17 @@ export function ownContent(tooltip: Tooltip, render: () => RenderTooltip | undef
   tooltip.show = (inspection, theme, pointer, bounds) => {
     const own = render();
     const key = JSON.stringify(inspection);
+    const revised = revision();
     // A framework may have taken its content out of the box (a snippet removed and given again).
-    const kept = !(shown[3] instanceof Node) || element.contains(shown[3]);
-    if (own !== shown[0] || theme !== shown[1] || key !== shown[2] || !kept) {
-      shown = [own, theme, key];
+    const kept = !(shown[4] instanceof Node) || element.contains(shown[4]);
+    if (
+      own !== shown[0] ||
+      theme !== shown[1] ||
+      key !== shown[2] ||
+      revised !== shown[3] ||
+      !kept
+    ) {
+      shown = [own, theme, key, revised];
       element.style.background = theme.style.tooltip.fill;
       element.style.color = theme.text;
       element.style.border = `1px solid ${theme.style.tooltip.stroke}`;

@@ -2118,6 +2118,7 @@ export class MountedChart implements Chart, ExportsScene {
       id: this.#id,
       options: () => this.#options,
       scene: () => this.#scene,
+      revision: () => this.#revision,
       schedule: () => schedule(this.#scheduled),
       report: (error) => this.#report(chartError(error, "load")),
       invalidate: () => this.#invalidate(false),

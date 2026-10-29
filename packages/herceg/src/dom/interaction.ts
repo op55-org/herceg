@@ -76,6 +76,8 @@ export interface InteractionHost {
   options(): ChartOptions;
   /** The scene on screen, undefined before the first. */
   scene(): Scene | undefined;
+  /** Counts changes of options and data, the marks and rows inspections name. */
+  revision(): number;
   /** Draws the overlay again on the next frame. */
   schedule(): void;
   /** Tells of code the controller could not load, as the chart tells of what fails. */
@@ -423,6 +425,12 @@ export class Interaction {
    */
   draw(frame = false): void {
     const host = this.#host;
+    // Whether data or options changed since the scene was drawn, or since
+    // this draw began, or a listener of what it reports drew another: what
+    // it would inspect is gone, and the frame drawing the change inspects again.
+    const [revision, inspected] = [host.revision(), host.scene()];
+    const changed = () =>
+      host.stale() || host.revision() !== revision || host.scene() !== inspected;
     if (frame) {
       this.#framed.clear();
       for (const panel of host.model.panels()) this.#framed.set(panel.key, this.#view(panel));
@@ -438,6 +446,8 @@ export class Interaction {
     if (!scene) return;
     // New data may move what a pointer at rest reads, and so its cursor.
     if (frame && this.#pointer) this.#sharePointer(this.#pointer.x, this.#pointer.y, true);
+    // Listeners of what this frame reported: edges, the cursor shared.
+    if (changed()) return;
     const { theme } = scene;
     const panels = host.model.panels();
     // Panels without insets over them any more need no clip.
@@ -485,6 +495,7 @@ export class Interaction {
       if (key !== this.#hovered) {
         this.#hovered = key;
         host.events.emit("hover", { inspection: read });
+        if (changed()) return;
       }
     }
     const { svgElement, tickLabelGap, surface } = this.#kit;
@@ -1783,7 +1794,13 @@ export class Interaction {
       .then(({ fieldReader, ownContent }) => {
         if (this.#disposed) return;
         host.model.fields = fieldReader;
-        this.#cleanup.push(ownContent(this.#tooltip, () => host.options().renderTooltip));
+        this.#cleanup.push(
+          ownContent(
+            this.#tooltip,
+            () => host.options().renderTooltip,
+            () => host.revision(),
+          ),
+        );
       })
       // Without it, tooltips show the built-in content, and inspections no fields.
       .catch((error: unknown) => this.#host.report(error))

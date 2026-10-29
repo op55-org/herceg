@@ -234,7 +234,11 @@ the view, and the selection, each on one of the chart's scales.
   locale and time zone, and inspections carry the fields. Layout items
   read fields at their row, or at the one row `rowsOf` gives.
 - **`renderTooltip`** content is asked for when what the tooltip is at
-  changes (compared as JSON, with the theme and renderer). A resize
+  changes (compared as JSON, with the theme and renderer) or the chart's
+  revision does (data or options), and never of an inspection the data
+  changed since: the controller drops one a hover or edge listener's
+  change made stale, and the adapters render content only while the marks
+  and their tables' versions are those it was made on. A resize
   observer places the box again as its content changes size, so the
   adapters render into it after the call: React through a portal, Vue
   through a teleport, Svelte into an element of its markup.

@@ -268,8 +268,11 @@ hg.Chart(daily).line(x="time", y="p99", tooltip=hg.Tooltip(fields=["requests"]))
   fields; networks take none. A Python helper's `tooltip` is its chart's,
   with fields for its one mark.
 - **`renderTooltip`** text is shown as text, never parsed as markup. It is
-  called when what the tooltip is at changes, not on every move; the box
-  keeps its placement, the crosshair, and the keyboard's announcements.
+  called when what the tooltip is at changes, or the chart's data or
+  options do, not on every move; the box keeps its placement, the
+  crosshair, and the keyboard's announcements. An inspection's rows are
+  rows of the tables as they were when it was made: once the data or
+  marks change, the chart inspects them again before calling it.
   React, Vue, and Svelte render their own components there
   ([Frameworks](frameworks.md#tooltips)).
 

@@ -18,9 +18,11 @@
     type Inspection,
     type RenderTooltip,
     showFailure,
+    tablesOf,
+    viewOf,
   } from "herceg";
   import { untrack } from "svelte";
-  import { type ChartProps, canonical, sameMark } from "./chart.js";
+  import { type Basis, basisOf, type ChartProps, canonical, holds, sameMark } from "./chart.js";
   import { type Entry, type LayoutEntry, plain, provideMarks } from "./marks.js";
 
   let {
@@ -57,17 +59,44 @@
     );
   let snapshotHost = $state<HTMLDivElement>();
 
-  /** What the tooltip is at, which the `renderTooltip` snippet renders into `tooltipHost`. */
-  let shown = $state.raw<Inspection | null>(null);
+  /**
+   * What the tooltip is at, and what that was made on, which the
+   * `renderTooltip` snippet renders into `tooltipHost`.
+   */
+  let shown = $state.raw<{ inspection: Inspection; basis: Basis } | null>(null);
   let tooltipHost = $state<HTMLDivElement>();
   /** The chart's `renderTooltip` with the snippet: it shows the snippet's element. */
   const showTooltip: RenderTooltip = (inspection) => {
-    shown = inspection;
+    shown = { inspection, basis: basisOf(applied?.marks ?? []) };
     return tooltipHost;
   };
   // A snippet given again starts empty, until the chart shows what it is at.
   $effect.pre(() => {
     if (!renderTooltip) shown = null;
+  });
+  /** Counts changes of the tables and row views the marks read, whose rows inspections name. */
+  let changes = $state(0);
+  $effect(() => {
+    if (!renderTooltip) return;
+    const sources = new Set(
+      described.marks.flatMap((mark) => {
+        const view = viewOf(mark);
+        return view ? [...tablesOf(mark), view] : tablesOf(mark);
+      }),
+    );
+    const stops = [...sources].map((source) => source.subscribe(() => changes++));
+    return () => {
+      for (const stop of stops) stop();
+    };
+  });
+  /**
+   * What the snippet renders: what the tooltip is at, while the marks and
+   * tables it was made on are as they were; once they change, nothing
+   * until the chart inspects them again.
+   */
+  const tip = $derived.by(() => {
+    void changes;
+    return shown && holds(shown.basis, described.marks) ? shown.inspection : null;
   });
 
   /** What the chart shows, to skip updates when nothing changed; with what refused its marks. */
@@ -286,6 +315,6 @@
   {#if thrown}{raise(thrown)}{/if}
   <!-- The chart shows this in its tooltip's box. -->
   {#if renderTooltip}
-    <div bind:this={tooltipHost}>{#if shown}{@render renderTooltip(shown)}{/if}</div>
+    <div bind:this={tooltipHost}>{#if tip}{@render renderTooltip(tip)}{/if}</div>
   {/if}
 </div>

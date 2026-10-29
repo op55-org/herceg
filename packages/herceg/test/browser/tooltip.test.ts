@@ -115,6 +115,72 @@ describe("the tooltip", () => {
     expect(rows(chart)).toEqual(["2", "p99250"]);
   });
 
+  it("asks for content again when the data it was inspected on changes, the inspection alike", async () => {
+    const data = table({ t: [0, 1, 2], p99: [210, 304, 250], host: ["a", "b", "c"] });
+    const chart = await mount({
+      marks: [line(data, { x: "t", y: "p99" })],
+      renderTooltip: (inspection) => `on ${data.value("host", inspection.points[0]!.row!)}`,
+    });
+    hover(chart, 1);
+    expect(box(chart)!.textContent).toBe("on b");
+    // The same times and values, of other hosts: the inspection reads as before.
+    data.reset({ t: [0, 1, 2], p99: [210, 304, 250], host: ["x", "y", "z"] });
+    chart.render();
+    expect(box(chart)!.textContent).toBe("on y");
+  });
+
+  it("never asks for content of an inspection whose data a hover listener changed", async () => {
+    const data = table({ t: [0, 1, 2], p99: [210, 304, 250], host: ["a", "b", "c"] });
+    const chart = await mount({
+      marks: [line(data, { x: "t", y: "p99" })],
+      renderTooltip: (inspection) => `on ${data.value("host", inspection.points[0]!.row!)}`,
+    });
+    // Row 2 is gone before the tooltip would show it, and the chart drew that.
+    const stop = chart.on("hover", () => {
+      stop();
+      data.reset({ t: [0], p99: [210], host: ["a"] });
+      chart.render();
+    });
+    hover(chart, 2);
+    chart.render();
+    expect(box(chart)!.textContent).toBe("on a");
+  });
+
+  it("leaves the tooltip to a frame a hover listener drew", async () => {
+    const data = table({ t: [0, 1, 2], p99: [210, 304, 250], host: ["a", "b", "c"] });
+    const chart = await mount({
+      marks: [line(data, { x: "t", y: "p99" })],
+      interaction: { zoom: "x" },
+      renderTooltip: (inspection) => `on ${data.value("host", inspection.points[0]!.row!)}`,
+    });
+    // It zooms in to the start: the pointer is over row 0 or 1 of that view.
+    const stop = chart.on("hover", () => {
+      stop();
+      chart.setViewport([0, 1]);
+      chart.render();
+    });
+    hover(chart, 2);
+    expect(box(chart)!.textContent).not.toBe("on c");
+  });
+
+  it("never asks for content of an inspection whose data an edge listener changed", async () => {
+    const data = table({ t: [0, 1, 2], p99: [210, 304, 250], host: ["a", "b", "c"] });
+    const chart = await mount({
+      marks: [line(data, { x: "t", y: "p99" })],
+      interaction: { zoom: "x", limits: { x: { extent: [0, 2], edge: true } } },
+      renderTooltip: (inspection) => `on ${data.value("host", inspection.points[0]!.row!)}`,
+    });
+    hover(chart, 2);
+    expect(box(chart)!.textContent).toBe("on c");
+    // A view near the end: its listener drops row 2 before the tooltip would read it.
+    const stop = chart.on("edge", () => data.reset({ t: [0], p99: [210], host: ["a"] }));
+    chart.setViewport([1, 2]);
+    chart.render();
+    stop();
+    chart.render();
+    expect(box(chart)?.textContent ?? "").not.toBe("on c");
+  });
+
   it("keeps a fragment's content, asking for it again only when what it is at changes", async () => {
     let calls = 0;
     const chart = await mount({
