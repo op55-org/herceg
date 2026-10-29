@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { areaPath } from "../../src/draw/area.ts";
 import { labelHalo } from "../../src/draw/label-halo.ts";
@@ -149,25 +150,76 @@ describe("time tick labels", () => {
       expect(planned.labels).toHaveLength(planned.ticks.length);
     },
   );
-  it("drops nonadjacent duplicates, including narrow month initials and repeated DST hours", () => {
-    for (const [format, domain, zone] of [
-      [{ month: "narrow" }, [Date.UTC(2026, 0, 1), Date.UTC(2027, 0, 1)], "UTC"],
-      [
-        { hour: "numeric" },
-        [Date.UTC(2026, 10, 1, 4), Date.UTC(2026, 10, 1, 9)],
-        "America/New_York",
-      ],
-    ] as const) {
-      const { ticks, labels } = planAxis(
-        { type: "time", spec: { format }, zone, locale: "en-US" },
-        domain,
-        [0, 600],
-        12,
-      );
-      expect(new Set(labels).size).toBe(labels.length);
-      expect(ticks.length).toBe(labels.length);
-      expect(ticks.length).toBeGreaterThan(0);
-    }
+  it("keeps every tick, leaving blank only a label repeating its neighbor's", () => {
+    const narrow = planAxis(
+      { type: "time", spec: { format: { month: "narrow" } }, zone: "UTC", locale: "en-US" },
+      [Date.UTC(2026, 0, 1), Date.UTC(2027, 0, 1)],
+      [0, 600],
+      12,
+    );
+    // June and July read "J"; January of both years keeps its label.
+    expect(narrow.ticks).toHaveLength(13);
+    expect(narrow.labels).toEqual(["J", "F", "M", "A", "M", "J", "", "A", "S", "O", "N", "D", "J"]);
+    // Clocks going back repeat 1 AM: both hours keep their ticks.
+    const hours = planAxis(
+      {
+        type: "time",
+        spec: { format: { hour: "numeric" } },
+        zone: "America/New_York",
+        locale: "en-US",
+      },
+      [Date.UTC(2026, 10, 1, 4), Date.UTC(2026, 10, 1, 9)],
+      [0, 600],
+      12,
+    );
+    expect(hours.ticks).toEqual([4, 5, 6, 7, 8, 9].map((h) => Date.UTC(2026, 10, 1, h)));
+    expect(hours.labels).toEqual(["12 AM", "1 AM", "", "2 AM", "3 AM", "4 AM"]);
+  });
+  it("tells ticks apart by value, so a label repeated across years keeps its tick", () => {
+    const from = Date.UTC(2024, 0, 1);
+    const to = Date.UTC(2025, 11, 31);
+    const automatic = planAxis(
+      { type: "time", spec: undefined, zone: "UTC", locale: "en-US" },
+      [from, to],
+      [0, 1176],
+      12,
+    );
+    expect(automatic.labels).toEqual(["2024", "Apr", "Jul", "Oct", "2025", "Apr", "Jul", "Oct"]);
+    const months = planAxis(
+      { type: "time", spec: { format: { month: "short" } }, zone: "UTC", locale: "en-US" },
+      [from, to],
+      [0, 1176],
+      12,
+    );
+    expect(months.ticks.at(-1)).toBe(Date.UTC(2025, 9, 1));
+    expect(months.labels).toEqual(["Jan", "Apr", "Jul", "Oct", "Jan", "Apr", "Jul", "Oct"]);
+    // Number formats too: rounding to one label leaves the tick.
+    const rounded = planAxis(
+      {
+        type: "linear",
+        spec: { format: { maximumFractionDigits: 0 } },
+        zone: "UTC",
+        locale: "en-US",
+      },
+      [0, 1],
+      [0, 300],
+      5,
+    );
+    expect(rounded.ticks).toEqual([0, 0.5, 1]);
+    expect(rounded.labels).toEqual(["0", "1", ""]);
+  });
+  it("labels both years of a two-year time axis in static output", () => {
+    const day = 86_400_000;
+    const times = Array.from({ length: 731 }, (_, i) => Date.UTC(2024, 0, 1) + i * day);
+    const svg = renderToSVG({
+      width: 1176,
+      height: 200,
+      timeZone: "UTC",
+      y: { show: false },
+      marks: [line(table({ t: time(times), v: times.map((_, i) => i) }), { x: "t", y: "v" })],
+    });
+    const texts = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+    expect(texts).toEqual(["2024", "Apr", "Jul", "Oct", "2025", "Apr", "Jul", "Oct"]);
   });
   it("keeps distinguishable defaults and uses tooltipFormat only for values", () => {
     const domain = [Date.UTC(2026, 0, 1), Date.UTC(2026, 0, 2)] as const;
@@ -201,7 +253,10 @@ describe("time tick labels", () => {
         [0, 600],
         30,
       );
-      expect(planned.labels).toEqual(["Jan"]);
+      // Days apart, the ticks keep their grid lines; "Jan" is written once.
+      expect(planned.labels[0]).toBe("Jan");
+      expect(planned.labels.slice(1).every((label) => label === "")).toBe(true);
+      expect(planned.ticks.length).toBeGreaterThan(1);
     }
   });
 });

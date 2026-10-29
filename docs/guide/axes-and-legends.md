@@ -114,10 +114,12 @@ channels read by name, and position scales of a mark's own (see
 | `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`; `%-d` drops padding. |
 | `(value, context) => string` | JavaScript only. `""` leaves a tick unlabeled. |
 
-- Time axes try coarser calendar intervals when `format` would repeat
-  labels, then drop remaining duplicates, so a date-only format uses day
-  ticks. Ticks you choose keep every tick and leave out a label repeating
-  the one before (`labels: { duplicates: "show" }` keeps them).
+- A tick is its value, never its text: "Apr" of 2024 and "Apr" of 2025 are
+  two ticks with their own grid lines. Where `format` writes neighboring
+  automatic ticks alike, the axis takes a coarser interval that tells them
+  apart, so a date-only format uses day ticks. A label still repeating the
+  one before is left blank and its tick kept, on automatic and chosen ticks
+  alike (`labels: { duplicates: "show" }` writes it).
 - Specs and Python carry Intl options and patterns; functions stay in
   JavaScript, and `validateSpec` refuses them with their path.
 

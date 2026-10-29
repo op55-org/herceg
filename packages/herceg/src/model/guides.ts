@@ -44,12 +44,14 @@ import { surface, type Theme } from "../theme.ts";
 import {
   type AxisContext,
   type AxisPlan,
+  blankRepeats,
   createScale,
   niceAxisDomain,
   planAxis,
   tickCountOf,
   tooltipFormatter,
   usableDomain,
+  writtenTicks,
 } from "./axis.ts";
 import type { clearDomain } from "./clearance.ts";
 import type { MarkSeries } from "./inspect.ts";
@@ -86,6 +88,8 @@ export const GUIDE_KIT = {
   chooseInterval,
   timeTicks,
   planAxis,
+  writtenTicks,
+  blankRepeats,
   textItem,
   textLines,
   fitText,

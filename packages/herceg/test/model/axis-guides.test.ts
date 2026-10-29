@@ -143,8 +143,8 @@ describe("axes on other sides", () => {
     }).scene.panels[0]!;
     const right = unit.axes.find((a) => a.side === "right")!;
     expect(gridAt(unit, "y")).toEqual(right.ticks.map((t) => t.position));
-    // Moved, it leaves out repeated labels as its layers do.
-    expect(right.ticks.map((t) => t.label)).toEqual(["0", "1"]);
+    // Moved, it leaves a label repeating the one before blank, as its layers do.
+    expect(right.ticks.map((t) => t.label)).toEqual(["0", "1", ""]);
   });
 
   it("take subplots' own titles to the side an axis moves to", () => {

@@ -140,7 +140,10 @@ beyond `place` and `style`, or `zIndex`).
   to coarser ones on the same boundaries, generated directly, so work
   follows ticks drawn. Formats are Intl options, patterns
   (`format/patterns.ts`: d3-format and strftime subsets, compiled once), or
-  functions.
+  functions. A tick is its value, never its text (`writtenTicks` in
+  `model/axis.ts`): where a format writes neighbors alike, a coarser step
+  it tells apart takes their place, and a label still repeating the one
+  before is left blank, its tick and grid line kept.
 - **Listed axes** (`guides/axes.ts`) have layers ("major" first), each with
   tick marks, labels (rows, rotation, collision, priority, duplicates), and
   styles. Rotation tries candidates until neighbors' boxes do not overlap;

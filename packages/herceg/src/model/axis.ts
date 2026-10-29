@@ -166,43 +166,54 @@ export function planAxis(
   const ticker = within === domain ? scale : createScale(context, within, range);
   if (context.plan) return { scale, ...context.plan(ticker, count), within, context, count };
   const format = context.spec?.format;
-  let ticks = ticker.ticks(count);
-  let labels: string[];
-  if (ticker.type === "time") {
-    const time = ticker as CalendarScale;
-    const formatter =
-      format && timeFormatter(format as Intl.DateTimeFormatOptions, context.zone, context.locale);
-    labels = formatter
-      ? ticks.map(formatter)
-      : timeTickLabels(
-          ticks,
-          time.interval(count),
-          context.zone,
-          context.locale,
-          time.tickContexts?.(ticks),
-        );
-    let unique = new Set(labels);
-    if (formatter && unique.size < labels.length) {
-      // Prefer a coarser calendar interval the format can distinguish.
-      // Keep the useful candidates if that interval has no boundary in view.
-      const coarser = ticker.ticks((count * unique.size) / labels.length);
-      if (coarser.length) {
-        ticks = coarser;
-        labels = ticks.map(formatter);
-        unique = new Set(labels);
-      }
-    }
-    if (unique.size < labels.length) {
-      const distinct = [...unique];
-      ticks = ticks.filter((_, i) => unique.delete(labels[i]!));
-      labels = distinct;
-    }
-  } else {
-    labels = format
-      ? ticks.map(numberFormatter(format as Intl.NumberFormatOptions, context.locale))
-      : numberTickLabels(ticks, context.locale);
+  const time = ticker.type === "time" ? (ticker as CalendarScale) : undefined;
+  if (format) {
+    const write = time
+      ? timeFormatter(format as Intl.DateTimeFormatOptions, context.zone, context.locale)
+      : numberFormatter(format as Intl.NumberFormatOptions, context.locale);
+    const written = writtenTicks(ticker, count, (values) => values.map(write));
+    return { scale, ...written, within, context, count };
   }
-  return { scale, ticks, labels, within, context, count };
+  const ticks = ticker.ticks(count);
+  const labels = time
+    ? timeTickLabels(
+        ticks,
+        time.interval(count),
+        context.zone,
+        context.locale,
+        time.tickContexts?.(ticks),
+      )
+    : numberTickLabels(ticks, context.locale);
+  return { scale, ticks, labels: blankRepeats(labels), within, context, count };
+}
+
+/**
+ * About `count` ticks of `ticker` and their labels as `write` writes them.
+ * Where neighbors read alike, a coarser interval the format tells apart
+ * takes their place if it has ticks in view (a date-only format steps by
+ * days, not hours). A tick is its value, never its text: labels still
+ * repeating the one before are left blank, and their ticks and grid lines
+ * kept ("Apr" of two years are two ticks).
+ */
+export function writtenTicks(
+  ticker: PositionScale,
+  count: number,
+  write: (values: number[]) => string[],
+): { ticks: number[]; labels: string[] } {
+  let ticks = ticker.ticks(count);
+  let labels = blankRepeats(write(ticks));
+  const runs = labels.filter((label, i) => !i || label).length;
+  const coarser = runs < labels.length ? ticker.ticks((count * runs) / labels.length) : [];
+  if (coarser.length) {
+    ticks = coarser;
+    labels = blankRepeats(write(ticks));
+  }
+  return { ticks, labels };
+}
+
+/** `labels` with those equal to the one before them left blank. */
+export function blankRepeats(labels: string[]): string[] {
+  return labels.map((label, i) => (i > 0 && label !== "" && label === labels[i - 1] ? "" : label));
 }
 
 /** `plan` for a panel `offset` pixels along: the same ticks and labels on a moved range. */
