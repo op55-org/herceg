@@ -120,6 +120,11 @@ right.panel("share", title="By region").pie("region", "requests")
 - **A layout that does not fit** is refused with the room it needs
   ("layout: needs at least 280 px of width for its panels' plots, titles,
   and axes, and has 200 px; ...").
+- **Least plots.** Each panel's plot keeps at least 48 px across and 32 px
+  down, room for its ticks and for pointing at its data, so a smaller pixel
+  track is refused rather than drawn cramped: a `{ px: 25 }` row gives
+  "layout: panel "b" needs a plot of 32 px down, and its row gives it
+  25 px; make the row larger".
 - **Per-panel settings.** A panel's `x`, `y`, `yRight` replace the chart's
   for its own axes (one panel can be logarithmic); its `interaction`
   replaces the chart's there, setting by setting.
