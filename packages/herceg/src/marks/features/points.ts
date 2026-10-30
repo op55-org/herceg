@@ -15,8 +15,10 @@ import type { ChannelName } from "../../spec/channels.ts";
 import type { SymbolName } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
+import type { MarkRows } from "../rows.ts";
 import { type Channel, type Check, compileChannel, outputCheck, type ScaleOf } from "./channels.ts";
 import { markerPath } from "./markers.ts";
+import { subset } from "./runs.ts";
 
 /** Legend glyphs: circles of this radius, other shapes reaching at most KEY_REACH (as points' series). */
 const KEY_RADIUS = 4.5;
@@ -46,20 +48,24 @@ export class PointStyles {
   readonly #size: Compiled<number> | undefined;
   readonly #opacity: Compiled<number> | undefined;
   readonly #symbol: Compiled<SymbolName> | undefined;
+  /** The rows the mark draws (marks/rows.ts), which checks, keys, and reach read. */
+  readonly #rows: () => MarkRows;
   #theme: Theme | undefined;
   #paint: PaintReader = (value) => value;
-  #looks: { version: number; looks: PointLooks } | undefined;
+  #looks: { version: number; subset: string | undefined; looks: PointLooks } | undefined;
 
   constructor(
     kit: FeatureKit,
     own: PointChannels,
     table: Table,
+    rows: () => MarkRows,
     scales: ScaleOf,
     path: string,
     series: string | undefined,
   ) {
     this.#kit = kit;
     this.#table = table;
+    this.#rows = rows;
     this.#own = own;
     this.#series = series;
     const compile = <V>(
@@ -132,10 +138,13 @@ export class PointStyles {
     return this.looks().reach;
   }
 
-  /** What the channels give each row, for the table's current version. */
+  /** What the channels give each row, for the table's current version and the rows drawn. */
   looks(): PointLooks {
     const table = this.#table;
-    if (this.#looks?.version === table.version) return this.#looks.looks;
+    const rows = this.#rows();
+    const drawn = subset(rows);
+    if (this.#looks?.version === table.version && this.#looks.subset === drawn)
+      return this.#looks.looks;
     const theme = this.#theme;
     const paint = this.#paint;
     const own = this.#own;
@@ -143,7 +152,8 @@ export class PointStyles {
     const indexes = new Map<string, number>();
     const color =
       this.#color &&
-      this.#rows(
+      this.#outputs(
+        rows,
         this.#color,
         theme?.palette ?? [],
         theme?.muted ?? "#999999",
@@ -159,12 +169,12 @@ export class PointStyles {
         -1,
       );
     const fallback = Math.PI * own.radius * own.radius;
-    const area = this.#size && this.#rows(this.#size, [], fallback, Number, Number.NaN);
-    const opacity = this.#opacity && this.#rows(this.#opacity, [], 1, Number, Number.NaN);
+    const area = this.#size && this.#outputs(rows, this.#size, [], fallback, Number, Number.NaN);
+    const opacity = this.#opacity && this.#outputs(rows, this.#opacity, [], 1, Number, Number.NaN);
     const shapeOf = (symbol: SymbolName) => SYMBOLS.indexOf(symbol);
     const shape =
       this.#symbol &&
-      this.#rows(this.#symbol, SHAPES, undefined as unknown as SymbolName, shapeOf, -1);
+      this.#outputs(rows, this.#symbol, SHAPES, undefined as unknown as SymbolName, shapeOf, -1);
     const symbol = this.#symbol?.channel;
     const looks = {
       color,
@@ -176,20 +186,22 @@ export class PointStyles {
         symbol?.kind === "field" && symbol.field === this.#series
           ? (name: string) => shapeOf(symbol.scale.output(name, SHAPES, "circle"))
           : undefined,
-      keys: this.#keys(),
+      keys: this.#keys(rows),
       text: (row: number, format: (value: number) => string) => this.#text(row, format),
-      reach: this.#reach(),
+      reach: this.#reach(rows),
     };
-    this.#looks = { version: table.version, looks };
+    this.#looks = { version: table.version, subset: drawn, looks };
     return looks;
   }
 
   /**
    * A channel's output for each row through `of`, `none` for a row missing
    * the value it reads; values a scale leaves unmapped take `fallback`, or
-   * where it is undefined, `none`.
+   * where it is undefined, `none`. Identity values are checked at the rows
+   * the mark draws.
    */
-  #rows<V>(
+  #outputs<V>(
+    rows: MarkRows,
     { channel, check, path }: Compiled<V>,
     defaults: readonly V[],
     fallback: V | undefined,
@@ -209,12 +221,17 @@ export class PointStyles {
     if (channel.kind === "identity" && channel.numbers) {
       // The values are the outputs, checked over their extent; others are missing.
       const values = table.numbers(channel.field as never);
-      for (const value of table.extent(channel.field as never) ?? []) check(value, `${path}.field`);
+      for (const value of extentOf(rows, channel.field) ?? []) check(value, `${path}.field`);
       return (row) => (Number.isFinite(values[row]!) ? values[row]! : none);
     }
     const { codes, dictionary } = table.categories(channel.field as never);
-    const outputs = dictionary.map((value) => {
-      if (channel.kind === "identity") check(value, `${path}.field`);
+    const held = heldCodes(rows, codes, dictionary.length);
+    const outputs = dictionary.map((value, code) => {
+      if (channel.kind === "identity") {
+        // Values of rows the mark does not draw are neither checked nor drawn.
+        if (held && !held[code]) return none;
+        check(value, `${path}.field`);
+      }
       const output =
         channel.kind === "identity"
           ? (value as V)
@@ -232,7 +249,7 @@ export class PointStyles {
    * the series field, which the series' entries show): a declared domain's
    * values, held or not, else the values rows hold, in the scale's order.
    */
-  #keys(): GlyphKey[] {
+  #keys(rows: MarkRows): GlyphKey[] {
     const keys: GlyphKey[] = [];
     const kit = this.#kit;
     const key = <V>(
@@ -243,8 +260,8 @@ export class PointStyles {
       const c = compiled?.channel;
       if (c?.kind !== "field" || c.field === this.#series) return;
       const { codes, dictionary } = this.#table.categories(c.field as never);
-      const held = new Uint8Array(dictionary.length);
-      for (const code of codes) if (code >= 0) held[code] = 1;
+      const held = heldCodes(rows, codes, dictionary.length) ?? new Uint8Array(dictionary.length);
+      if (!rows.positions) for (const code of codes) if (code >= 0) held[code] = 1;
       const placeOf = (value: string) => c.scale.place(value) ?? Infinity;
       let values = dictionary
         .filter((_, code) => held[code])
@@ -302,7 +319,7 @@ export class PointStyles {
   }
 
   /** How far points reach past their centers at most: the largest radius, by the farthest-reaching shape, and half the outline. */
-  #reach(): number {
+  #reach(rows: MarkRows): number {
     const own = this.#own;
     const table = this.#table;
     const most = <V>(
@@ -314,10 +331,12 @@ export class PointStyles {
       if (!c) return [];
       if (c.kind === "value") return [c.value];
       if (c.kind === "condition") return [c.then, c.otherwise];
-      if (c.kind === "identity")
-        return c.numbers
-          ? ((table.extent(c.field as never) ?? []) as V[])
-          : (table.categories(c.field as never).dictionary as V[]);
+      if (c.kind === "identity") {
+        if (c.numbers) return (extentOf(rows, c.field) ?? []) as V[];
+        const { codes, dictionary } = table.categories(c.field as never);
+        const held = heldCodes(rows, codes, dictionary.length);
+        return (held ? dictionary.filter((_, code) => held[code]) : dictionary) as V[];
+      }
       if (c.kind !== "field") return [];
       // Values the scale leaves unmapped take `unknown`, else the fallback.
       const { map, unknown } = c.scale.spec ?? {};
@@ -336,4 +355,38 @@ export class PointStyles {
     );
     return radius * reach + own.outline / 2;
   }
+}
+
+/**
+ * Which categories the rows a mark draws hold, 1 each, where it draws some
+ * of its table's rows; undefined where it draws them all.
+ */
+function heldCodes(rows: MarkRows, codes: Int32Array, count: number): Uint8Array | undefined {
+  const { positions } = rows;
+  if (!positions) return undefined;
+  const held = new Uint8Array(count);
+  for (let k = 0; k < positions.length; k++) {
+    const code = codes[positions[k]!]!;
+    if (code >= 0) held[code] = 1;
+  }
+  return held;
+}
+
+/**
+ * The least and greatest finite value of a number field at the rows a mark
+ * draws: as `extentAt` (marks/rows.ts) gives it, which this chunk does not
+ * import from the line chart's.
+ */
+function extentOf(rows: MarkRows, field: string): readonly [number, number] | undefined {
+  const { table, positions } = rows;
+  if (!positions) return table.extent(field as never);
+  const values = table.numbers(field as never);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let k = 0; k < positions.length; k++) {
+    const value = values[positions[k]!]!;
+    if (value < min && value > Number.NEGATIVE_INFINITY) min = value;
+    if (value > max && value < Number.POSITIVE_INFINITY) max = value;
+  }
+  return min <= max ? [min, max] : undefined;
 }

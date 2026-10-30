@@ -751,7 +751,7 @@ function lineFeatures(
     where,
     kit,
     mark.tooltip as "x" | "y",
-    mark.view,
+    () => mark.rows!(),
     bandAxis(mark),
   );
   const along = mark.tooltip as "x" | "y";
@@ -1016,7 +1016,7 @@ function lineFeatures(
           else each(start, end);
           if (!sink) return;
           sink.settle();
-          if (topology) endsIn.set(frame.panel ?? "", pathEnds(out, sink, series));
+          if (topology) endsIn.set(endsKey(series, frame), pathEnds(out, sink, series));
           if (labeled) {
             const { positions } = sink;
             traced = {
@@ -1036,7 +1036,7 @@ function lineFeatures(
         features.across = (series, values, log, breaks) =>
           topology.across(series, values, log, breaks, true);
         features.drawn = (row) => topology.drawn(row);
-        features.pathEnds = (_series, frame) => endsOf(endsIn, frame);
+        features.pathEnds = (series, frame) => endsOf(endsIn, series, frame);
         features.shown = (series) => topology.shown(series);
       }
       s.features = features;
@@ -1044,13 +1044,22 @@ function lineFeatures(
   };
 }
 
-/** As `SeriesFeatures.pathEnds`: whether a row ends a path, as the series was last traced in `frame`'s panel. */
+/**
+ * As `SeriesFeatures.pathEnds`: whether a row ends a path, as `series` was
+ * last traced in `frame`'s panel (a highlight's masked copy of it apart).
+ */
 function endsOf(
   endsIn: ReadonlyMap<string, PathEnds>,
+  series: Series,
   frame: Frame,
 ): ((row: number, way: 1 | -1) => boolean) | undefined {
-  const ends = endsIn.get(frame.panel ?? "");
+  const ends = endsIn.get(endsKey(series, frame));
   return ends && ((row, way) => (way === 1 ? ends.last : ends.first).has(row));
+}
+
+/** Where a series' path ends are kept: by panel, and by series key, which a masked copy changes. */
+function endsKey(series: Series, frame: { readonly panel?: string | undefined }): string {
+  return `${frame.panel ?? ""}\u0000${series.key}`;
 }
 
 /**
@@ -1089,7 +1098,14 @@ function barFeatures(
   locale: string | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as BarSpec;
-  const styles = new RowStyles(resolved<BarSpec>(mark), mark.table!, read, path, kit.isColor);
+  const styles = new RowStyles(
+    resolved<BarSpec>(mark),
+    mark.table!,
+    () => mark.rows!(),
+    read,
+    path,
+    kit.isColor,
+  );
   const format = formatOf(kit, zone);
   // A pattern refused is refused now, not when the first label is drawn.
   const labels = typeof spec.labels === "object" ? spec.labels : undefined;
@@ -1206,7 +1222,7 @@ function areaFeatures(
     where,
     kit,
     mark.tooltip as "x" | "y",
-    mark.view,
+    () => mark.rows!(),
     bandAxis(mark),
   );
   const asks = spec.continuity || spec.where !== undefined;
@@ -1323,7 +1339,7 @@ function areaFeatures(
           else each(start, end);
           if (!recorder) return;
           recorder.settle();
-          if (topology) endsIn.set(frame.panel ?? "", pathEnds(out, recorder, series));
+          if (topology) endsIn.set(endsKey(series, frame), pathEnds(out, recorder, series));
           if (labeled) {
             const { positions } = recorder;
             traced = {
@@ -1367,7 +1383,7 @@ function areaFeatures(
           // runs through the stack's positions, which name none of its rows.
           if (!recorder || !series.features) return;
           recorder.settle();
-          if (topology) endsIn.set(frame.panel ?? "", pathEnds(upper, recorder, series));
+          if (topology) endsIn.set(endsKey(series, frame), pathEnds(upper, recorder, series));
           if (labeled) {
             lowerRecorder!.settle();
             const at = { series, frame };
@@ -1389,7 +1405,7 @@ function areaFeatures(
             };
           }
         };
-        if (topology) features.pathEnds = (_series, frame) => endsOf(endsIn, frame);
+        if (topology) features.pathEnds = (series, frame) => endsOf(endsIn, series, frame);
         if (labeled) {
           features.takeTrace = () => {
             const taken = traced;
@@ -1543,7 +1559,15 @@ function pointFeatures(
   { scope, path, read, scale }: At,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const channels = (mark as Mark & { channels: PointChannels }).channels;
-  const styles = new PointStyles(kit, channels, mark.table!, read, path, mark.identity?.field);
+  const styles = new PointStyles(
+    kit,
+    channels,
+    mark.table!,
+    () => mark.rows!(),
+    read,
+    path,
+    mark.identity?.field,
+  );
   let theme: Theme | undefined;
   return {
     use(t, p) {

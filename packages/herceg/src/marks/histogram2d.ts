@@ -25,9 +25,20 @@ import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, niceTimeDomain, timeTicks } from "../scale/time.ts";
-import type { Geometry, RasterGeometry } from "../scene/scene.ts";
+import type { Geometry, RasterGeometry, Rect } from "../scene/scene.ts";
 import type { BinSpec, Clip, Frozen, Histogram2DSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import {
+  boxOf,
+  cellsCover,
+  coverNear,
+  coverOf,
+  type DrawnMark,
+  distanceToCover,
+  type PickedItem,
+  type PickQuery,
+  pickedHit,
+} from "./drawn.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
 import { paint, rasterAxes } from "./heatmap-raster.ts";
 import { histogramFormError, perAxisBins } from "./histogram-input.ts";
@@ -48,6 +59,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
+import { type MarkRows, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
 
 /** A histogram of x and y both: cells counting pairs of values. */
@@ -148,14 +160,14 @@ const picks = new WeakMap<Uint8Array, WeakMap<Cells, Picked>>();
 
 /** One chart's cells: bins and counts over the whole table, as of its version and zone. */
 interface Binned {
-  version: number;
+  revision: string;
   zone: TimeZone;
   series: Series;
 }
 
 /** A facet split's cells, as of what they were counted from. */
 interface PanelCounts {
-  version: number;
+  revision: string;
   zone: TimeZone;
   rows: readonly Uint32Array[];
   groups: string;
@@ -232,6 +244,14 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
       : (bins as BinSpec | undefined);
   }
 
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
+  }
+
   channelKind(axis: "x" | "y") {
     return this.table.kind(this.spec[axis]);
   }
@@ -246,17 +266,17 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   ): Series[] {
     const id = seriesKey(key, "cells");
     if (split) return [this.#empty(id, context.theme, context.paint)];
-    const { table } = this;
+    const { positions, revision } = this.rows();
     const zone = context.zone;
     const cached = this.#binned.get(zone);
-    if (cached?.version === table.version && cached.series.key === id) return [cached.series];
+    if (cached?.revision === revision && cached.series.key === id) return [cached.series];
     const [xs, ys] = [this.#numbers("x"), this.#numbers("y")];
-    const [rx, ry] = jointRanges(xs, ys, undefined, NO_RANGE, NO_RANGE);
+    const [rx, ry] = jointRanges(xs, ys, positions, NO_RANGE, NO_RANGE);
     const xEdges = this.#edges("x", rx, zone);
     const yEdges = this.#edges("y", ry, zone);
     const scale = { max: 0 };
-    const s = this.#count(id, context, xEdges, yEdges, undefined, scale);
-    this.#binned.set(zone, { version: table.version, zone, series: s });
+    const s = this.#count(id, context, xEdges, yEdges, positions, scale);
+    this.#binned.set(zone, { revision, zone, series: s });
     return [s];
   }
 
@@ -274,14 +294,14 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     context: BandContext,
     yGroupOf: readonly number[] = xGroupOf,
   ): Series[][] {
-    const { table } = this;
+    const { revision } = this.rows();
     const zone = context.zone;
     const groups = `${xGroupOf.join()}|${yGroupOf.join()}`;
     const key = rows[0]!;
     const cached = this.#panels.get(key);
     const id = roster[0]!.key;
     if (
-      cached?.version === table.version &&
+      cached?.revision === revision &&
       cached.zone === zone &&
       cached.groups === groups &&
       cached.rows.length === rows.length &&
@@ -310,7 +330,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const series = rows.map((panel, p) =>
       this.#count(id, context, xEdges[xGroupOf[p]!]!, yEdges[yGroupOf[p]!]!, panel, scale),
     );
-    this.#panels.set(key, { version: table.version, zone, rows, groups, series });
+    this.#panels.set(key, { revision, zone, rows, groups, series });
     this.#rosters.set(roster[0]!, series);
     return series.map((s) => [s]);
   }
@@ -760,6 +780,88 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
         pixels: pixels.subarray(0, columns * rows * 4),
       },
     ];
+  }
+
+  /** Its cells are found by `pick`, and named and bounded by their bins along x and y. */
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    const bins = (s: Series, position: number) => {
+      const cells = this.#cellsOf(s);
+      if (!cells) return undefined;
+      const [c, r] = [cells.columns[position]!, cells.rows[position]!];
+      return [
+        [cells.xEdges[c]!, cells.xEdges[c + 1]!],
+        [cells.yEdges[r]!, cells.yEdges[r + 1]!],
+      ] as const;
+    };
+    const cell = (s: Series, position: number, frame: Frame) => {
+      const [x, y] = bins(s, position) ?? [];
+      return x && y
+        ? boxOf(frame.x.map(x[0]), frame.y.map(y[0]), frame.x.map(x[1]), frame.y.map(y[1]))
+        : undefined;
+    };
+    // What its image covers, cut as it is drawn.
+    const cover = drawn.frame && cellsCover(drawn, this.spec.clip);
+    if (!cover) return undefined;
+    return pickedHit(this, drawn, query, {
+      lookup: (series, px, py, frame) => {
+        const near = coverNear(cover, px, py, query.slop);
+        const at = (s: Series, position: number) => cell(s, position, frame);
+        return this.#nearestBin(series, px, py, frame, query.slop, near, at);
+      },
+      bounds: (s, position, frame) => {
+        const drawnCell = cell(s, position, frame);
+        return drawnCell && coverOf(drawnCell, cover);
+      },
+      group: (s, position) => {
+        const [x, y] = bins(s, position) ?? [];
+        return x && y && { parts: [], names: [x, y] };
+      },
+    });
+  }
+
+  /**
+   * For picking: the cell nearest a pixel as drawn, of the cells holding
+   * something within `reach` of it (`pick` finds only the cell under it),
+   * measured to the part of each in `cover`, what the drawing covers near it
+   * (`cell` gives a cell's rectangle).
+   */
+  #nearestBin(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    reach: number,
+    cover: readonly Rect[],
+    cell: (s: Series, position: number) => Rect | undefined,
+  ): Hit | undefined {
+    const s = series[0];
+    const cells = s && this.#cellsOf(s);
+    if (!cells) return undefined;
+    // The cell under it, where some of it is drawn there (not only its
+    // edge, a neighbor's), before those around it.
+    const under = this.pick(series, px, py, frame);
+    const drawnCell = under && cell(s, under.position);
+    if (drawnCell && distanceToCover(drawnCell, cover, px, py) === 0) return under;
+    const near = (axis: AxisCells, scale: PositionScale, pixel: number) => {
+      // Half a pixel more, so cells at the reach's very end are not lost to rounding.
+      const [a, b] = [scale.invert(pixel - reach - 0.5), scale.invert(pixel + reach + 0.5)];
+      return axis.reaching(Math.min(a, b), Math.max(a, b));
+    };
+    const [c0, c1] = near(cells.xCells, frame.x, px);
+    const [r0, r1] = near(cells.yCells, frame.y, py);
+    let best: Hit | undefined;
+    cells.index.forEachIn(c0, c1, r0, r1, (c, r, position) => {
+      const drawn = boxOf(
+        frame.x.map(cells.xEdges[c]!),
+        frame.y.map(cells.yEdges[r]!),
+        frame.x.map(cells.xEdges[c + 1]!),
+        frame.y.map(cells.yEdges[r + 1]!),
+      );
+      const distance = distanceToCover(drawn, cover, px, py);
+      if (distance < (best?.distance ?? Number.POSITIVE_INFINITY))
+        best = { series: s, position, distance };
+    });
+    return best;
   }
 
   /** The cell under a pixel: in the bins its x and y fall in, if it holds something. */

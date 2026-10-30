@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { category } from "../../../src/data/column.ts";
 import { table } from "../../../src/data/table.ts";
 import type { Chart } from "../../../src/dom/chart.ts";
-import type { ViewCause } from "../../../src/dom/events.ts";
+import type { ChangeCause } from "../../../src/dom/events.ts";
 import type { Axis } from "../../../src/dom/handle.ts";
 import { columns, panel } from "../../../src/layout.ts";
 import { line } from "../../../src/marks/line.ts";
@@ -82,7 +82,7 @@ function doubleClick(chart: Chart, x: number, y: number): void {
 const CELLS: {
   capability: string;
   interaction: InteractionSpec;
-  inputs: { name: string; axes: Axis[]; cause: ViewCause; act: Input }[];
+  inputs: { name: string; axes: Axis[]; cause: ChangeCause; act: Input }[];
 }[] = [
   ...(["x", "y", "xy"] as const).map((zoom) => {
     const axes = [...zoom] as Axis[];

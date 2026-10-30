@@ -778,6 +778,47 @@ describe("<Chart>", () => {
     expect(panels).toEqual([1]);
   });
 
+  it("tells onRender of the revision the first frame drew, not of later changes", () => {
+    const revisions: number[] = [];
+    let drawn: number | undefined;
+    let selected = false;
+    function App() {
+      return (
+        <Chart
+          ref={(chart) => {
+            // A ref selecting before onRender hears of the first frame.
+            if (!chart || selected) return;
+            selected = true;
+            drawn = chart.revision;
+            chart.select([1, 2]);
+          }}
+          interaction={{ brush: "x" }}
+          onRender={({ revision }) => revisions.push(revision)}
+        >
+          <Line data={metrics} x="t" y="a" />
+        </Chart>
+      );
+    }
+    act(() => root.render(<App />));
+    expect(revisions[0]).toBe(drawn);
+  });
+
+  it("tells onRender of no first frame when none drew", () => {
+    const revisions: number[] = [];
+    act(() =>
+      root.render(
+        <Chart
+          animation={{ duration: -1 }}
+          onError={() => {}}
+          onRender={({ revision }) => revisions.push(revision)}
+        >
+          <Line data={metrics} x="t" y="a" />
+        </Chart>,
+      ),
+    );
+    expect(revisions).toEqual([]);
+  });
+
   it("reports hiding that an update makes to the handler given with it", () => {
     const ref: { current: HercegChart | null } = { current: null };
     const seen: string[] = [];

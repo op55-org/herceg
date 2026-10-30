@@ -372,14 +372,16 @@ Fragments report through DOM events that bubble and cross shadow roots
 | --- | --- |
 | `herceg:ready` | `{ id }` |
 | `herceg:error` | `{ id, error }`; `preventDefault()` keeps it out of the console |
-| `herceg:click` | `{ id, panel?, inspection }` |
-| `herceg:select` | `{ id, owner, selection }` |
-| `herceg:viewport` | `{ id, viewRevision, cause, panel?, scales, views }` |
+| `herceg:click` | `{ id, panel?, inspection, cause, revision }` |
+| `herceg:select` | `{ id, owner, selection, cause, revision }` |
+| `herceg:viewport` | `{ id, viewRevision, revision, cause, panel?, scales, views }` |
 | `herceg:edge` | `{ id, scale, instance, time, panels, side, domain, bound, cause }` |
-| `herceg:rowselection` | `{ id, data, channel, selection }` |
-| `herceg:visibility` | `{ id, hiddenKeys, panels? }` |
+| `herceg:rowselection` | `{ id, data, channel, selection, cause, revision }` |
+| `herceg:visibility` | `{ id, hiddenKeys, cause, revision, panels? }` |
 
-Ranges are numbers (epoch ms on time scales) or labels on category axes.
-`viewportStatePayload(chart)` and `restoreViewportState(chart, state)`
-carry the views a chart shows to one mounted in its place. Payloads carry
+Ranges are numbers (epoch ms on time scales) or labels on category axes;
+causes and revisions are as the chart's events give them
+([Events](interaction.md#events)). `viewportStatePayload(chart)` and
+`restoreViewportState(chart, state)` carry the views a chart shows to one
+mounted in its place. Payloads carry
 charts only; grids have no spec.

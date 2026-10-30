@@ -17,6 +17,7 @@ import { outputCheck, rowReader } from "../../src/marks/features/channels.ts";
 import { StyleRuns } from "../../src/marks/features/runs.ts";
 import { translucent } from "../../src/marks/features/series-styles.ts";
 import { line } from "../../src/marks/line.ts";
+import { rowsOf } from "../../src/marks/rows.ts";
 import type { Series } from "../../src/marks/series.ts";
 import { facet } from "../../src/model/facet.ts";
 import { Highlighter } from "../../src/model/highlight.ts";
@@ -619,7 +620,7 @@ describe("style runs", () => {
             ),
         },
       ],
-      undefined,
+      () => rowsOf(rows as unknown as Table, undefined),
       true,
     );
     const whole = () => ({ key: "s", length: rows.length }) as Series;

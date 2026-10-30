@@ -57,6 +57,7 @@ export {
   type ConditionSelection,
   type DataSelection,
   type RowsSelection,
+  type SelectionChange,
   SelectionStore,
   selectionStore,
   selectRows,
@@ -81,12 +82,14 @@ export type { Selection } from "./dom/brushed.ts";
 export { type ChartOptions, type ChartUpdate, createChart } from "./dom/chart.ts";
 export { showFailure } from "./dom/errors.ts";
 export type {
+  ChangeCause,
   ChartEvents,
   ChartListener,
+  InputEvent,
   PanelTarget,
   PanelViewport,
   ScaleView,
-  ViewCause,
+  StateChange,
   ViewportEvent,
 } from "./dom/events.ts";
 export type {

@@ -5,9 +5,21 @@ import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
 import { type Nearest, settle } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { Geometry, RectGeometry, SegmentGeometry } from "../scene/scene.ts";
+import type { Geometry, Rect, RectGeometry, SegmentGeometry } from "../scene/scene.ts";
 import type { CandlestickSpec, Clip, Frozen } from "../spec/spec.ts";
 import { refuseColor } from "./colored.ts";
+import {
+  boxOf,
+  clipBox,
+  cut,
+  type DrawnMark,
+  distanceToCut,
+  type PickedItem,
+  type PickQuery,
+  paintedLater,
+  pickedHit,
+} from "./drawn.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -18,6 +30,7 @@ import {
   buildSeries,
   CATEGORY,
   type ChartMark,
+  checkItemKey,
   type Frame,
   fieldBands,
   frozen,
@@ -34,12 +47,13 @@ import {
   type SummaryContext,
   valueKind,
 } from "./mark.ts";
+import { type MarkRows, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, visibleRange, xExtent } from "./series.ts";
 import { FILL, Slots } from "./slots.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-export interface CandlestickOptions<S extends Schema> {
+export interface CandlestickOptions<S extends Schema> extends ItemKeyed<S> {
   /** Time, number, or category field the candles stand at. */
   x: PositionField<S>;
   open: NumericField<S>;
@@ -137,6 +151,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
   constructor(input: CandlestickSpec, table: Table<Schema>) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "candlestick");
+    checkItemKey(table, this.spec.itemKey, "candlestick");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
@@ -144,14 +159,22 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     for (const name of ["open", "high", "low", "close"] as const)
       requireField(table, spec[name], NUMERIC, `candlestick ${name}`);
     this.#categorical = table.kind(spec.x) === "category";
-    this.#slots = this.#categorical ? undefined : new Slots(table, spec.x);
+    this.#slots = this.#categorical ? undefined : new Slots(() => this.rows(), spec.x);
     this.#split = new SeriesSplitter(
-      table,
+      () => this.rows(),
       this.#categorical ? undefined : spec.x,
       [spec.close],
       undefined,
       spec.label ?? spec.close,
     );
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -162,7 +185,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
     return axis === "x" && this.#categorical
-      ? fieldBands(this.table, this.spec.x, context)
+      ? fieldBands(this.rows(), this.spec.x, context)
       : undefined;
   }
 
@@ -175,7 +198,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
   ): Series[] {
     const { spec, table } = this;
     const positions = this.#categorical
-      ? bandIndices(table, spec.x, bands.x?.keys ?? [], context)
+      ? bandIndices(this.rows(), spec.x, bands.x?.keys ?? [], context)
       : table.numbers(spec.x as never);
     const color = painted(context.paint, spec.rise, "candlestick rise") ?? context.theme.rise;
     return buildSeries(table, this.#split.sources(), positions, key, palette, color);
@@ -340,13 +363,14 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
         const top = Math.min(yo, yc);
         const bottom = Math.max(yo, yc);
         if (c >= o) {
-          // A hollow body: its four sides, and wicks above and below it.
+          // A hollow body: its four sides, and wicks above and below it to
+          // the high and the low, whichever way the axis runs.
           segment(rising, risingCount++, left, top, right, top);
           segment(rising, risingCount++, left, bottom, right, bottom);
           segment(rising, risingCount++, left, top, left, bottom);
           segment(rising, risingCount++, right, top, right, bottom);
-          segment(rising, risingCount++, center, Math.min(yh, top), center, top);
-          segment(rising, risingCount++, center, bottom, center, Math.max(yl, bottom));
+          segment(rising, risingCount++, center, Math.min(yh, yl, top), center, top);
+          segment(rising, risingCount++, center, bottom, center, Math.max(yh, yl, bottom));
         } else {
           segment(falling, fallingCount++, center, yh, center, yl);
           const at = bodyCount++ * 4;
@@ -457,11 +481,327 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
       if (row < 0) continue;
       const open = prices.open[row]!;
       const close = prices.close[last[column]!]!;
-      // The last column may be a fraction of a pixel wide.
-      const left = plot.x + column;
-      const right = Math.min(left + 1, plot.x + plot.width);
-      draw((left + right) / 2, FILL * (right - left), open, highs[column]!, lows[column]!, close);
+      const [center, width] = this.#column(column, frame);
+      draw(center, width, open, highs[column]!, lows[column]!, close);
     }
+  }
+
+  /**
+   * Its candles are found as drawn: by `pick`, as tooltips find them,
+   * bounded from low to high and as wide as their bodies; where a series'
+   * candles merge into one per pixel column, by the merged candles (with a
+   * selection highlighted, the selected rows' own over the column's), each
+   * naming its candle nearest the pointer's value.
+   */
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    // Read once a pick: counting the candles in view reads every one.
+    const merged = new Map<Series, boolean>();
+    const merges = (s: Series, frame: Frame) => {
+      let merging = merged.get(s);
+      if (merging === undefined) {
+        const columns = Math.max(1, Math.ceil(frame.plot.width));
+        merging = this.#inView(s.whole ?? s, frame, columns) > columns;
+        merged.set(s, merging);
+      }
+      return merging;
+    };
+    return pickedHit(this, drawn, query, {
+      lookup: (series, px, py, frame) => {
+        const lit = frame.highlighted?.(this.table);
+        // Paint order: a highlight's selected candles over the others, then later series.
+        const order = ({ series: s, position }: Hit, selected = lit?.[rowOf(s, position)] ?? 0) => [
+          selected,
+          series.indexOf(s),
+        ];
+        const box = clipBox(this.spec.clip, frame);
+        let best = this.#pickSingle(
+          series.filter((s) => !merges(s, frame)),
+          px,
+          py,
+          frame,
+          box,
+          lit,
+          query.slop,
+        );
+        let bestOrder = best ? order(best) : [];
+        for (const s of series) {
+          const found =
+            merges(s, frame) && this.#pickMerged(s, px, py, frame, query.slop, lit, box);
+          if (!found) continue;
+          const at = order(found.hit, found.selected);
+          const { distance } = found.hit;
+          const nearest = best?.distance ?? Number.POSITIVE_INFINITY;
+          if (distance < nearest || (distance === nearest && paintedLater(at, bestOrder)))
+            [best, bestOrder] = [found.hit, at];
+        }
+        return best;
+      },
+      bounds: (s, position, frame) => {
+        const { x, y } = frame;
+        const row = rowOf(s, position);
+        const at = s.x[row]!;
+        const center = x.map(s.places?.x ? s.places.x.at(at) : at);
+        if (merges(s, frame)) {
+          const column = this.#columnOf(center, frame);
+          const lit = frame.highlighted?.(this.table);
+          const [merged] = this.#columns(s, frame, column, column, lit);
+          // A selected row is drawn in the selected rows' own candle.
+          const part = lit?.[row] === 1 ? merged?.selected : merged;
+          return (
+            part &&
+            cut(
+              this.#mergedBox(column, this.#merged(s, part), frame),
+              clipBox(this.spec.clip, frame),
+            )
+          );
+        }
+        const candle = this.#candle;
+        if (!candleOf(this.#prices(), row, y.type === "log", candle)) return undefined;
+        const drawn = this.#candleBox(center, this.#width(frame), candle, false, frame);
+        return cut(drawn, clipBox(this.spec.clip, frame));
+      },
+    });
+  }
+
+  /**
+   * For picking: the candle nearest a pixel of those geometry draws one by
+   * one (positions in view and beside it, whose bodies reach the plot),
+   * measured to what it paints inside `box`; of candles as near, the one
+   * painted last (with `lit`, a highlight's selected rows over the others,
+   * as `Nearest` ranks them; then by series, then falling candles over
+   * rising ones, as geometry paints them).
+   */
+  #pickSingle(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    box: Readonly<Rect>,
+    lit: Uint8Array | undefined,
+    reach: number,
+  ): Hit | undefined {
+    const { x, y, plot } = frame;
+    const prices = this.#prices();
+    const log = y.type === "log";
+    const candle = this.#candle;
+    const width = this.#width(frame);
+    const half = width / 2;
+    // How far a candle's center can be from a pixel its box (wick and strokes too) reaches.
+    const far = reach + half + 2;
+    let best: Hit | undefined;
+    let bestAt: number[] = [];
+    series.forEach((s, i) => {
+      const places = s.places?.x;
+      // Those geometry draws (the view's, and a neighbor beside it each side)...
+      let [start, end] = this.#categorical
+        ? [0, s.length]
+        : visibleRange(s, x.domain[0], x.domain[1]);
+      // ...where the scale alone places x, centered near the pixel.
+      if (!this.#categorical && !places && !x.breaks) {
+        const [from, to] = visibleRange(s, x.invert(px - far), x.invert(px + far));
+        [start, end] = [Math.max(start, from), Math.min(end, to)];
+      }
+      for (let k = start; k < end; k++) {
+        const row = rowOf(s, k);
+        const at = s.x[row]!;
+        if ((this.#categorical && at < 0) || x.breaks?.hides(at)) continue;
+        const center = x.map(places ? places.at(at) : at);
+        if (!(center >= plot.x - half && center <= plot.x + plot.width + half)) continue;
+        if (!candleOf(prices, row, log, candle)) continue;
+        const drawn = this.#candleBox(center, width, candle, false, frame);
+        const distance = distanceToCut(drawn, box, px, py);
+        const order = [lit?.[row] ?? 0, i, this.#batch(candle, center, width, px, py, y), k];
+        const nearest = best?.distance ?? Number.POSITIVE_INFINITY;
+        if (distance < nearest || (distance === nearest && paintedLater(order, bestAt)))
+          [best, bestAt] = [{ series: s, position: k, distance }, order];
+      }
+    });
+    return best;
+  }
+
+  /**
+   * The merged candle nearest a pixel, within `reach` of it, of the columns
+   * near it: with `lit`, a highlight's selected rows, their own candle over
+   * the column's (see `selectedGeometry`), whose candles it names among
+   * the selected rows, the column's among the others.
+   */
+  #pickMerged(
+    s: Series,
+    px: number,
+    py: number,
+    frame: Frame,
+    reach: number,
+    lit: Uint8Array | undefined,
+    clip: Readonly<Rect>,
+  ): { hit: Hit; selected: number } | undefined {
+    const { plot, y } = frame;
+    const log = y.type === "log";
+    const prices = this.#prices();
+    const candle = this.#candle;
+    let best: { hit: Hit; selected: number } | undefined;
+    // Paint order: a highlight's selected rows' candles over the columns', falling over rising, then by column.
+    let bestAt: number[] = [];
+    const from = Math.max(0, Math.floor(px - plot.x - reach - 1));
+    const to = Math.min(Math.ceil(plot.width) - 1, Math.floor(px - plot.x + reach + 1));
+    const near = this.#columns(s, frame, from, to, lit);
+    for (let column = from; column <= to; column++) {
+      const merged = near[column - from];
+      for (const selected of lit ? [0, 1] : [0]) {
+        const part = selected ? merged?.selected : merged;
+        if (!part) continue;
+        const drawn = this.#merged(s, part);
+        const distance = distanceToCut(this.#mergedBox(column, drawn, frame), clip, px, py);
+        if (distance === Number.POSITIVE_INFINITY) continue;
+        const [center, width] = this.#column(column, frame);
+        const at = [selected, this.#batch(drawn, center, width, px, py, y), column];
+        if (
+          best &&
+          (distance > best.hit.distance ||
+            (distance === best.hit.distance && !paintedLater(at, bestAt)))
+        )
+          continue;
+        // Its candle whose range of prices is nearest the pointer.
+        let position = -1;
+        let gap = Number.POSITIVE_INFINITY;
+        for (const k of part.positions) {
+          const row = rowOf(s, k);
+          if ((lit?.[row] ?? 0) !== selected || !candleOf(prices, row, log, candle)) continue;
+          const [high, low] = [y.map(candle[1]!), y.map(candle[2]!)];
+          const off = Math.max(0, Math.min(high, low) - py, py - Math.max(high, low));
+          if (off <= gap) [position, gap] = [k, off];
+        }
+        if (position >= 0)
+          [best, bestAt] = [{ hit: { series: s, position, distance }, selected }, at];
+      }
+    }
+    return best;
+  }
+
+  /** The pixel column of the plot a candle centered at `center` merges into. */
+  #columnOf(center: number, { plot }: Frame): number {
+    return Math.min(Math.ceil(plot.width) - 1, Math.floor(center - plot.x));
+  }
+
+  /**
+   * The candles of `s` merged into each pixel column from `from` to `to`
+   * (see `#merge`), read in one pass: their positions, lowest low, and
+   * highest high, and with `lit`, the lowest and highest of the rows it
+   * holds (`selected`); undefined for a column without any.
+   */
+  #columns(
+    s: Series,
+    frame: Frame,
+    from: number,
+    to: number,
+    lit?: Uint8Array,
+  ): ((Merged & { selected?: Merged }) | undefined)[] {
+    const { x, plot } = frame;
+    const prices = this.#prices();
+    const log = frame.y.type === "log";
+    const candle = this.#candle;
+    const places = s.places?.x;
+    const [a, b] = [x.invert(plot.x + from), x.invert(plot.x + to + 1)];
+    const [start, end] =
+      this.#categorical || !s.sorted
+        ? [0, s.length]
+        : visibleRange(s, Math.min(a, b), Math.max(a, b));
+    const out: ((Merged & { selected?: Merged }) | undefined)[] = [];
+    for (let k = start; k < end; k++) {
+      const row = rowOf(s, k);
+      const at = s.x[row]!;
+      if ((this.#categorical && at < 0) || x.breaks?.hides(at)) continue;
+      const center = x.map(places ? places.at(at) : at);
+      if (!(center >= plot.x && center <= plot.x + plot.width)) continue;
+      const column = this.#columnOf(center, frame);
+      if (column < from || column > to || !candleOf(prices, row, log, candle)) continue;
+      out[column - from] ??= { positions: [], low: Infinity, high: -Infinity };
+      const merged = out[column - from]!;
+      const parts = [merged];
+      if (lit?.[row] === 1) {
+        merged.selected ??= { positions: [], low: Infinity, high: -Infinity };
+        parts.push(merged.selected);
+      }
+      for (const part of parts) {
+        part.positions.push(k);
+        part.low = Math.min(part.low, candle[2]!);
+        part.high = Math.max(part.high, candle[1]!);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * What a merged candle paints, as `#merge` draws it: from its earliest
+   * candle's open to its latest's close, between its low and high.
+   */
+  #mergedBox(column: number, candle: readonly number[], frame: Frame) {
+    const [center, width] = this.#column(column, frame);
+    return this.#candleBox(center, width, candle, true, frame);
+  }
+
+  /** Where a pixel column's merged candle is drawn: its center, and its width (the last column may be a fraction of a pixel wide). */
+  #column(column: number, { plot }: Frame): readonly [number, number] {
+    const left = plot.x + column;
+    const right = Math.min(left + 1, plot.x + plot.width);
+    return [(left + right) / 2, FILL * (right - left)];
+  }
+
+  /** A column's merged candle: the open of its earliest candle, their extremes, and the close of its latest. */
+  #merged(s: Series, { positions, low, high }: Merged): number[] {
+    let [first, last] = [rowOf(s, positions[0]!), rowOf(s, positions[0]!)];
+    for (const k of positions) {
+      const row = rowOf(s, k);
+      if (s.x[row]! < s.x[first]!) first = row;
+      if (s.x[row]! >= s.x[last]!) last = row;
+    }
+    const prices = this.#prices();
+    return [prices.open[first]!, high, low, prices.close[last]!];
+  }
+
+  /**
+   * Which of a series' batches paints the part of a candle (prices
+   * `candle`, `width` wide about `center`) at a pixel, as geometry paints
+   * them: rising candles, then falling wicks (or bars), then falling
+   * bodies over every wick.
+   */
+  #batch(
+    candle: ArrayLike<number>,
+    center: number,
+    width: number,
+    px: number,
+    py: number,
+    y: PositionScale,
+  ): number {
+    if (candle[3]! >= candle[0]!) return 0;
+    if (this.spec.variant === "ohlc") return 1;
+    const [open, close] = [y.map(candle[0]!), y.map(candle[3]!)];
+    const top = Math.min(open, close);
+    // A body at least a pixel tall, down from its top.
+    const body =
+      Math.abs(px - center) <= width / 2 &&
+      py >= top &&
+      py <= top + Math.max(1, Math.abs(close - open));
+    return body ? 2 : 1;
+  }
+
+  /** How wide candles drawn one by one are. */
+  #width({ x }: Frame): number {
+    return this.#categorical ? Math.abs(x.bandwidth ?? 0) : this.#slots!.width(x);
+  }
+
+  /** What a candle of prices `candle` (open, high, low, close) paints, merged or not. */
+  #candleBox(
+    center: number,
+    width: number,
+    candle: ArrayLike<number>,
+    merged: boolean,
+    { y }: Frame,
+  ): Rect {
+    const ohlc = this.spec.variant === "ohlc";
+    // As geometry draws: bars wide enough to read a heavier line get one.
+    const stroke = ohlc && !merged && width >= 8 ? 2 : 1;
+    const pixels = Array.from(candle, (price) => y.map(price));
+    return candleBox(center, width, pixels, candle[3]! >= candle[0]!, ohlc, stroke);
   }
 
   /** The candle under a pixel, else the nearest; of candles tying with it, the one on top (see `Nearest`). */
@@ -604,9 +944,53 @@ export function candlestick<S extends Schema>(
       "clip",
       "zIndex",
       "id",
+      "itemKey",
     ]),
   };
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
   return new CandlestickMark(spec, table as unknown as Table);
+}
+
+/**
+ * What a candle paints, `width` wide about its center, from its open,
+ * high, low, and close pixels, as `geometry` draws it: an OHLC bar's line
+ * and ticks `stroke` wide, a hollow body's sides and wicks, or a filled
+ * body and its wick.
+ */
+function candleBox(
+  center: number,
+  width: number,
+  [o, h, l, c]: readonly number[],
+  rises: boolean,
+  ohlc: boolean,
+  stroke: number,
+): Rect {
+  const half = stroke / 2;
+  // As wide as the body or ticks, or the wick's stroke where that is wider
+  // (a hollow body's side strokes reach past both).
+  const wide = rises && !ohlc ? width : Math.max(width, stroke);
+  const [left, right] = [center - wide / 2, center + wide / 2];
+  // The wick's ends in pixel order, whichever way the axis runs.
+  const [above, below] = [Math.min(h!, l!), Math.max(h!, l!)];
+  if (ohlc)
+    return boxOf(
+      left,
+      Math.min(above, o! - half, c! - half),
+      right,
+      Math.max(below, o! + half, c! + half),
+    );
+  const top = Math.min(o!, c!);
+  const bottom = Math.max(o!, c!);
+  // A hollow body's sides are strokes; a filled one is at least a pixel tall, down from its top.
+  return rises
+    ? boxOf(left - half, Math.min(above, top - half), right + half, Math.max(below, bottom + half))
+    : boxOf(left, Math.min(above, top), right, Math.max(below, top + Math.max(1, bottom - top)));
+}
+
+/** Candles merged into one pixel column: their positions, lowest low, and highest high. */
+interface Merged {
+  positions: number[];
+  low: number;
+  high: number;
 }

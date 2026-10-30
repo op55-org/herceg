@@ -24,6 +24,7 @@ import type { PointGeometry } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, GeoPointSpec } from "../spec/spec.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import { type GeoLayer, joinLayers, type MapFrame } from "./geo.ts";
 import {
   type ItemSources,
@@ -41,6 +42,7 @@ import { definedFields } from "./line.ts";
 import {
   type ChartMark,
   type ColorRamp,
+  checkItemKey,
   DIM,
   frozen,
   type GlyphKey,
@@ -73,7 +75,7 @@ export type GeoPointSize<S extends Schema> =
 
 export type GeoPointOptions<S extends Schema> = GeoPointStyle<S> & GeoPointSize<S>;
 
-interface GeoPointStyle<S extends Schema> {
+interface GeoPointStyle<S extends Schema> extends ItemKeyed<S> {
   /** Number field: each point's longitude, in degrees east. */
   longitude: NumberField<S>;
   /** Number field: each point's latitude, in degrees north. */
@@ -138,6 +140,7 @@ interface Drawn {
 export class GeoPointMark implements GeoLayer {
   declare readonly [MARK]: true;
   readonly layout = true;
+  readonly rowItems = true;
   readonly views = ItemViews;
   readonly geo = true;
   /** As given, but for its series field: see `withSeries`. */
@@ -159,6 +162,7 @@ export class GeoPointMark implements GeoLayer {
     // A category color names the series, as on points along axes.
     this.spec = frozen(withSeries(input, table)) as Frozen<GeoPointSpec & { series?: string }>;
     checkTooltip(table, this.spec.tooltip, "geopoint");
+    checkItemKey(table, this.spec.itemKey, "geopoint");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     requireField(table, spec.longitude, ["number"], "geopoint longitude");
@@ -754,6 +758,7 @@ export function geopoint<S extends Schema>(
       "strokeWidth",
       "label",
       "id",
+      "itemKey",
       "facet",
       "panel",
     ]),

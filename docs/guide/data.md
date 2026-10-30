@@ -288,7 +288,9 @@ store.subscribe(() => filtered.setQuery({ filter: store.condition(["brush"]) }))
 ```
 
 `store.condition(channels)` is the conjunction of those channels'
-conditions. Nothing propagates on its own: the application decides which
+conditions. `store.subscribe` listeners hear each change as it is made
+(`{ channel, selection, revision }`), even one made while others hear an
+earlier change. Nothing propagates on its own: the application decides which
 views read which channels. Grids and charts bound to a channel write and
 highlight it (see [Selected rows](interaction.md#selected-rows)).
 

@@ -346,7 +346,15 @@ describe("selection.click", () => {
       click(chart, pathOf(chart, selecting, "click"));
       const [store, source] = [stores.get(selecting.data)!, tables.get(selecting.data)!];
       expect(heldRows(store, source)).toEqual(selecting.rows.click);
-      expect(changes).toEqual([{ table: source, channel: "focus", selection: store.get("focus") }]);
+      expect(changes).toEqual([
+        {
+          table: source,
+          channel: "focus",
+          selection: store.get("focus"),
+          cause: "pointer",
+          revision: chart.revision,
+        },
+      ]);
     });
 });
 
@@ -432,7 +440,15 @@ describe("selection.receive", () => {
       const [store, source] = [stores.get(selecting.data)!, tables.get(selecting.data)!];
       const received = selecting.receive!;
       selectFromElsewhere(store, received);
-      expect(changes).toEqual([{ table: source, channel: "focus", selection: store.get("focus") }]);
+      expect(changes).toEqual([
+        {
+          table: source,
+          channel: "focus",
+          selection: store.get("focus"),
+          cause: "sync",
+          revision: chart.revision,
+        },
+      ]);
       // The chart counts the rows it highlights in its text alternative.
       if (selecting.effect !== "none")
         await expect

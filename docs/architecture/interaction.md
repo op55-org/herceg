@@ -14,6 +14,7 @@ do, see the [Interaction guide](../guide/interaction.md).
 - [Layout controls](#layout-controls)
 - [Selected rows](#selected-rows)
 - [Accessibility](#accessibility)
+- [Revisions and causes](#revisions-and-causes)
 - [The chart handle](#the-chart-handle)
 - [Chart errors](#chart-errors)
 
@@ -381,6 +382,54 @@ must test columns the chart sends (a binding's `fields` adds others).
   text is the same summary.
 - `test/browser/accessibility.test.ts` runs axe-core and reads each
   engine's accessibility tree ([Browser tests](../contributing.md#browser-tests)).
+
+## Revisions and causes
+
+`chart.revision` (`MountedChart.#revision`) counts changes of options,
+data, and state: views, the selection, hidden keys, drill roots, cameras,
+and moved nodes. Every change follows one order:
+
+1. It applies, and the revision increments once for it: a write to a
+   table once, however many of the chart's views of it show it (their own
+   changes counted by `RowView.queryRevision`, a write made by a listener
+   during another included), and a view's own change (a new query or
+   restriction) once. Options the chart refuses count nothing.
+2. Its event reports it with its `cause` (`ChangeCause`: `"pointer"`,
+   `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, `"options"`) and
+   the revision it made (`StateChange`); views report as transactions
+   ([Views](#views)), and cameras once per frame, each with the revision
+   counted when it was set, whatever changes follow before its report (a
+   camera options replace before then is reported as theirs). Controls of
+   layout marks select with their gesture's cause (`ControlsHost.select`:
+   a map's lasso `"pointer"`, Escape `"keyboard"`). What a listener changes in turn (drilling elsewhere
+   when the data took its root away, say) is a change of its own:
+   `"api"`, with its own revision.
+3. The next frame draws it: the scene records the revision it was built
+   at (`ChartModel.revision`, set as the scene is planned), which its
+   drawn-mark records and the `render` event carry. A selection is drawn
+   over the last scene without building one: once no scene and no brush
+   code waits, that frame renders with the chart's latest revision,
+   unless the chart's content is failing to draw (what is on screen stays
+   the revision before it, until a frame draws).
+
+So a change at revision *r* is on screen once a `render` of *r* or later
+arrives; `chart.drawnRevision` reads the revision on screen (undefined
+until a frame draws). The adapters tell their `render` handlers of the
+first frame, drawn as the chart is created before they listen, with that
+revision, and of a first frame still waiting for code when it draws. `hover` and `click` carry an `InputEvent` envelope: the
+inspection, the input's cause (`"pointer"`, `"keyboard"`, `"sync"`, or
+`"api"` for `showCursor`), and the revision of the frame the input acted
+on, which may be older than `chart.revision` while a change waits for its
+frame; a hover the next frame reads again (the pointer resting while the
+data changes) carries that frame's. Gestures of layout controls pass their cause: a button of a legend, a
+toolbar, or breadcrumbs pressed from the keyboard clicks with no count and
+is `"keyboard"`, and a hover cleared with nothing to read (Escape, the
+pointer leaving) keeps the cause of what read last. A drill root the data or
+options took away is `"data"` or `"options"`, counted with that change (the
+frame's revision, taken before listeners run, as a camera options replaced). The `viewRevision` of views is a
+count of its own; failure reports and tooltip staleness keep counting
+options and data alone (`#content`). Python's widget reports state without
+the cause and revision; the browser's `herceg/web` events carry both.
 
 ## The chart handle
 

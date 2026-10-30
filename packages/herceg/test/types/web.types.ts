@@ -20,6 +20,7 @@ document.addEventListener("herceg:error", (event) => {
 window.addEventListener("herceg:viewport", (event) => event.detail.views[0]?.time);
 document.addEventListener("herceg:edge", (event) => event.detail.side === "start");
 document.addEventListener("herceg:rowselection", (event) => event.detail.selection?.kind);
+document.addEventListener("herceg:rowselection", (event) => event.detail.cause === "sync");
 document.addEventListener("herceg:visibility", (event) => event.detail.hiddenKeys.length);
 // @ts-expect-error a ready event says which host, and nothing else
 element.addEventListener("herceg:ready", (event) => event.detail.chart);

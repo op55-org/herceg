@@ -101,7 +101,7 @@ export type GridRow =
       readonly version: number;
       /** Its position in the table. */
       readonly position: number;
-      /** `rowOffset + position`: the row's own while rows come and go, until the table resets. */
+      /** Its table's identity of it (`Table.identity`): its own while rows come and go, until the table resets. */
       readonly identity: number;
       /** Its group (a row of the groups' last table), or -1 when the grid has no groups. */
       readonly group: number;
@@ -426,11 +426,11 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   }
 
   /**
-   * The row's identity, `rowOffset + position`, which stays its own as rows
+   * The row's identity (`Table.identity`), which stays its own as rows
    * are appended and dropped, until the table resets.
    */
   identityAt(rowIndex: number): number {
-    return this.rowAt(rowIndex) + (this.current() as Display).snapshot.rowOffset;
+    return this.#table.identity(this.rowAt(rowIndex));
   }
 
   /** Where the row of this identity shows now, or -1 when the grid leaves it out (or its group is collapsed). */
@@ -663,7 +663,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
   protected refAt(rowIndex: number): GridRef {
     const { snapshot, grouped } = this.current() as Display;
     const { group, depth, position } = this.#entry(rowIndex);
-    if (position >= 0) return { scope: snapshot.generation, id: snapshot.rowOffset + position };
+    if (position >= 0) return { scope: snapshot.generation, id: this.#table.identity(position) };
     const groups = grouped!.groups;
     return {
       scope: groups,
@@ -691,7 +691,8 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
     }
     const { scope, id } = ref as RowRef;
     if (scope !== snapshot.generation) return -1;
-    const position = id - snapshot.rowOffset;
+    const position = this.#table.positionOf(id, scope);
+    if (position < 0) return -1;
     if (!grouped) return this.data.indexOf(position);
     const { groups, starts, rank, open } = grouped;
     const group = groups.groupOf(position);

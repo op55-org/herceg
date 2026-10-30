@@ -2,9 +2,10 @@ import type { NumberField, Schema, Table } from "../data/table.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import { formatNumber } from "../format/format.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { Rect, SegmentGeometry } from "../scene/scene.ts";
+import type { Geometry, Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, DendrogramSpec, Frozen } from "../spec/spec.ts";
 import { checkLinkage } from "./dendrogram-data.ts";
+import type { DrawnMark, DrawnPart } from "./drawn.ts";
 import { markKey } from "./hidden.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -20,6 +21,7 @@ import {
   type Palette,
   painted,
   requireField,
+  rowBuffer,
 } from "./mark.ts";
 import { TableCache } from "./series.ts";
 import { refuseValues } from "./still.ts";
@@ -65,6 +67,8 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
   readonly table: Table;
   readonly tooltip = "x";
   readonly #cache = new TableCache<Linkage>();
+  /** The row of each merge each geometry drew (see `partOf`). */
+  readonly #merges = new WeakMap<Geometry, Uint32Array>();
   // Scales retain these label lists; keys distinguish categories from numeric
   // bands with the same display label, across charts and panel resolutions.
   readonly #bandKeys = new WeakMap<readonly string[], readonly string[]>();
@@ -211,6 +215,8 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
     const atHeight = this.#placeHeights(horizontal ? frame.y : frame.x, frame.plot, max);
     const childHeight = (cluster: number) => atHeight(cluster < n ? 0 : height[cluster - n]!);
     const coords = frame.floats(JSON.stringify(key), "dendrogram-segments", table.length * 12);
+    // The row of each merge drawn (three segments each), for drawn-mark records.
+    const merges = rowBuffer(frame, JSON.stringify(key), "dendrogram-rows", table.length);
     let count = 0;
     const segment = (a: number, ha: number, b: number, hb: number) => {
       const offset = count++ * 4;
@@ -229,21 +235,29 @@ export class DendrogramMark implements Mark<Frozen<DendrogramSpec>> {
       // moving surviving leaves or drawing a partial merge.
       if (!Number.isFinite(pa) || !Number.isFinite(pb)) continue;
       const h = atHeight(height[row]!);
+      merges[count / 3] = row;
       segment(pa, childHeight(a), pa, h);
       segment(pa, h, pb, h);
       segment(pb, h, pb, childHeight(b));
     }
-    return [
-      {
-        kind: "segments",
-        draw: segmentDrawing,
-        key: JSON.stringify([key, "dendrogram"]),
-        coords,
-        count,
-        stroke: painted(frame.paint, spec.stroke, "dendrogram stroke") ?? frame.theme.muted,
-        strokeWidth: spec.strokeWidth ?? 1,
-      },
-    ];
+    const segments: SegmentGeometry = {
+      kind: "segments",
+      draw: segmentDrawing,
+      key: JSON.stringify([key, "dendrogram"]),
+      coords,
+      count,
+      stroke: painted(frame.paint, spec.stroke, "dendrogram stroke") ?? frame.theme.muted,
+      strokeWidth: spec.strokeWidth ?? 1,
+    };
+    this.#merges.set(segments, merges);
+    return [segments];
+  }
+
+  /** Its segments are its merges' rows, three segments a merge. */
+  partOf(_drawn: DrawnMark, geometry: Geometry, index: number): DrawnPart | undefined {
+    const merges = this.#merges.get(geometry);
+    if (!merges || !(index < (geometry as SegmentGeometry).count)) return undefined;
+    return { kind: "row", table: this.table, position: merges[Math.floor(index / 3)]! };
   }
 }
 

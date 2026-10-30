@@ -2,10 +2,16 @@ import type { PositionField, Schema, Table } from "../data/table.ts";
 import { ruleDrawing, ruleLine } from "../draw/rule.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
-import { shiftInside } from "../layout/place.ts";
+import {
+  type LabelledMark,
+  type LabelPlacement,
+  type LabelRequest,
+  mirrorPlaces,
+  placeLabels,
+} from "../layout/place.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
-import type { Geometry, RuleGeometry } from "../scene/scene.ts";
+import type { Geometry, Rect, RuleGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec, LabelSpec } from "../spec/encoding.ts";
 import type { Coordinate } from "../spec/place.ts";
 import type {
@@ -31,11 +37,12 @@ import {
   type TextField,
   valueAt,
 } from "./annotation.ts";
-import type { LabelPartOf } from "./encoding.ts";
+import type { DrawnMark, PartBuilders } from "./drawn.ts";
+import type { ItemKeyed, LabelPartOf } from "./encoding.ts";
 import { labelBox, labelPaint, labelsGeometry, movedLabel, type PlacedLabel } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame, MARK, Mark, MarkKey, RowParts } from "./mark.ts";
-import { frozen, painted } from "./mark.ts";
+import { checkOptionalItemKey, frozen, painted } from "./mark.ts";
 
 /** A rule's label: its text, or each row's `field`; where it goes and how it looks. */
 export type RuleLabel<F extends string = string> =
@@ -90,6 +97,7 @@ export type RuleOptions = RuleStyle &
 
 /** Rules from a table, one per row; places may also be constants. */
 export type RuleDataOptions<S extends Schema> = RuleStyle &
+  ItemKeyed<S> &
   RulePosition<PlaceOption<PositionField<S>>> & {
     /** Text drawn by every rule: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
@@ -110,13 +118,15 @@ const LABEL_GAP = 4;
  * along `span`. Their values count toward the axis domain when they say so
  * (`contributeDomain`), so thresholds meant to show stay in view.
  */
-export class RuleMark implements Mark<Frozen<RuleSpec>> {
+export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
   declare readonly [MARK]: true;
   readonly spec: Frozen<RuleSpec>;
   readonly tooltip = "x";
   readonly featured: boolean;
   readonly domainFallback: boolean;
   readonly #data: AnnotationData;
+  /** The row of each label its labels geometry drew (see `partOf`). */
+  readonly #labelRows = new WeakMap<Geometry, Uint32Array>();
   /** The label drawn as rules always draw theirs: plain text, in the default place. */
   readonly #plain: boolean;
 
@@ -138,6 +148,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
       { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
       spec.x !== undefined ? "y" : "x",
     );
+    // Rows a constant annotation does not read have no items to name.
+    checkOptionalItemKey(this.#data.table, this.spec.itemKey, "rule");
     this.#plain =
       typeof spec.label === "string" ||
       (label !== undefined && !label.style && !label.place && !label.format);
@@ -280,8 +292,63 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     return (place.attachment ?? "end") === "end" ? [0, room] : [room, 0];
   }
 
+  /**
+   * Its rules and their labels are rows (of its table, or of its places
+   * given alone): a rule's, in its key; labels apart, as drawn.
+   */
+  partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+    if (geometry.kind === "rule")
+      return index === 0
+        ? parts.annotation(
+            drawn,
+            this.table,
+            Number(geometry.key.slice(geometry.key.lastIndexOf(":") + 1)),
+          )
+        : undefined;
+    const rows = this.#labelRows.get(geometry);
+    return rows && index < rows.length
+      ? parts.annotation(drawn, this.table, rows[index]!)
+      : undefined;
+  }
+
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
-    // What the legend hides of it goes undrawn.
+    const { rules, apart } = this.#rules(frame, key, panelRows);
+    if (apart.length === 0) return rules;
+    const labels = this.#labels(frame, key, apart);
+    const placed = placeLabels(
+      labels.map(({ request }) => request),
+      [],
+    );
+    return [...rules, ...this.#drawLabels(frame, key, labels, placed)];
+  }
+
+  /** Its labels placed apart from their rules, for a panel's placer (see `LabelledMark`). */
+  labelRequests(frame: Frame, key: MarkKey, panelRows?: RowParts): readonly LabelRequest[] {
+    return this.#labels(frame, key, this.#rules(frame, key, panelRows).apart).map((l) => l.request);
+  }
+
+  /** Its labels at their placements, in request order. */
+  drawLabels(
+    frame: Frame,
+    key: MarkKey,
+    panelRows: RowParts | undefined,
+    placements: readonly LabelPlacement[],
+  ): Geometry[] {
+    const labels = this.#labels(frame, key, this.#rules(frame, key, panelRows).apart);
+    return this.#drawLabels(frame, key, labels, placements);
+  }
+
+  /**
+   * Its rules in view, of the rows the legend leaves shown, and those whose
+   * labels are placed apart from them (styled, or of several lines), each
+   * with its row, its label's text, and the box the label stays in (the
+   * plot, or the chart for a rule outside the plot).
+   */
+  #rules(
+    frame: Frame,
+    key: MarkKey,
+    panelRows: RowParts | undefined,
+  ): { rules: RuleGeometry[]; apart: ApartRule[] } {
     const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { spec } = this;
     const { plot } = frame;
@@ -296,8 +363,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
     const label = data.label;
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
     const content = frame.features?.of(this)?.content;
-    const out: Geometry[] = [];
-    const placed: PlacedLabel[] = [];
+    const rules: RuleGeometry[] = [];
+    const apart: ApartRule[] = [];
     const paint = this.#paint(frame);
     // Labels placed by verticalAlign are placed as blocks.
     const blocks = this.#plain && paint.verticalAlign !== undefined;
@@ -344,25 +411,70 @@ export class RuleMark implements Mark<Frozen<RuleSpec>> {
           width: frame.measure(rule.label, cssFont(frame.theme.font, frame.theme.fontSize)),
           plot: bounds,
         };
-      out.push(rule);
-      if (text && !plain(text)) {
-        const at = this.#place(text, rule, frame, paint);
-        // A label outside the plot goes beside the axis' labels; others stay inside.
-        const box = label?.place?.outside ? undefined : labelBox(at, paint, frame.measure);
-        placed.push(box ? movedLabel(at, shiftInside(box, bounds, ruleLine(rule))) : at);
-      }
+      rules.push(rule);
+      if (text && !plain(text)) apart.push({ row: i, rule, bounds, text });
     });
-    if (placed.length > 0)
-      out.push(
-        labelsGeometry(
-          `${JSON.stringify(key)}|labels`,
-          placed,
-          paint,
-          label?.style?.halo ?? false,
-          frame,
-        ),
-      );
+    return { rules, apart };
+  }
+
+  /**
+   * The labels of `drawn` placed apart from their rules: each at its place
+   * by the rule, and its request, which may move it to its mirror image
+   * across the rule, then inside its bounds; a label outside the plot goes
+   * beside the axis' labels, and stays there.
+   */
+  #labels(frame: Frame, key: MarkKey, drawn: readonly ApartRule[]): ApartLabel[] {
+    const paint = this.#paint(frame);
+    const outside = this.#data.label?.place?.outside;
+    const out: ApartLabel[] = [];
+    for (const { row, rule, bounds, text } of drawn) {
+      const at = this.#place(text, rule, frame, paint);
+      // Measured either way, so a placer sees what each label covers; one
+      // outside the plot keeps its one place, beside the axis' labels.
+      const box = labelBox(at, paint, frame.measure);
+      const request: LabelRequest = {
+        mark: key,
+        index: out.length,
+        group: undefined,
+        overlap: "show",
+        priority: 0,
+        anchor: { x: box.x, y: box.y },
+        block: { width: box.width, height: box.height },
+        places: outside ? [{ dx: 0, dy: 0 }] : mirrorPlaces(box, ruleLine(rule)),
+        leader: false,
+        bounds: outside ? null : bounds,
+      };
+      out.push({ row, at, request });
+    }
     return out;
+  }
+
+  /** The geometry of `labels` at their placements; none left out. */
+  #drawLabels(
+    frame: Frame,
+    key: MarkKey,
+    labels: readonly ApartLabel[],
+    placements: readonly LabelPlacement[],
+  ): Geometry[] {
+    const placed: PlacedLabel[] = [];
+    // The row of each label drawn, for drawn-mark records.
+    const rows: number[] = [];
+    labels.forEach(({ row, at }, k) => {
+      const placement = placements[k];
+      if (placement === null || placement === undefined) return;
+      placed.push(movedLabel(at, [placement.dx, placement.dy]));
+      rows.push(row);
+    });
+    if (placed.length === 0) return [];
+    const geometry = labelsGeometry(
+      `${JSON.stringify(key)}|labels`,
+      placed,
+      this.#paint(frame),
+      this.#data.label?.style?.halo ?? false,
+      frame,
+    );
+    this.#labelRows.set(geometry, Uint32Array.from(rows));
+    return [geometry];
   }
 
   /**
@@ -488,6 +600,7 @@ export function rule<S extends Schema>(
       },
       [
         "id",
+        "itemKey",
         "x",
         "y",
         "stroke",
@@ -512,3 +625,18 @@ export function rule<S extends Schema>(
 }
 
 export type { Label };
+
+/** A rule whose label is placed apart from it: its row, the box its label stays in, and the label's text. */
+interface ApartRule {
+  row: number;
+  rule: RuleGeometry;
+  bounds: Rect;
+  text: string;
+}
+
+/** A label placed apart from its rule: its row, its place by the rule, and its request. */
+interface ApartLabel {
+  row: number;
+  at: PlacedLabel;
+  request: LabelRequest;
+}

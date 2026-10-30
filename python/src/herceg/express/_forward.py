@@ -55,10 +55,16 @@ class MarkOptions:
     labels: Any = None
     reads: Mapping[str, str] = field(default_factory=dict)
     color: Mapping[str, Any] | None = None
+    item_key: str | None = None
 
     def primary(self) -> dict[str, Any]:
         """The primary mark's keywords."""
-        given = {"z_index": self.z_index, "encode": self.encode, "labels": self.labels}
+        given = {
+            "z_index": self.z_index,
+            "encode": self.encode,
+            "labels": self.labels,
+            "item_key": self.item_key,
+        }
         return {name: value for name, value in given.items() if value is not None}
 
     @property
@@ -111,11 +117,13 @@ def mark_options(
     channels: Sequence[str] = (),
     labels_of: type[SeriesLabels] | type[BarLabels] | None = None,
     edges: bool = False,
+    item_key: str | None = None,
 ) -> MarkOptions:
     """The mark options `function` was given, checked as its primary mark
-    checks them: `channels` its ``encode`` takes, and `labels_of`, the
-    labels it draws (none without), which follow a band's edge where
-    `edges` (an area's) and the line otherwise."""
+    checks them: `channels` its ``encode`` takes, `labels_of`, the labels
+    it draws (none without), which follow a band's edge where `edges` (an
+    area's) and the line otherwise, and the column naming its rows' items
+    (`item_key`, for functions whose mark draws rows)."""
     if z_index is not None and (
         isinstance(z_index, bool) or not is_number(z_index) or not math.isfinite(z_index)
     ):
@@ -127,6 +135,13 @@ def mark_options(
     built: Encodings | None = None
     reads: dict[str, str] = {}
     color: Mapping[str, Any] | None = None
+    if item_key is not None:
+        if not isinstance(item_key, str):
+            raise ChartError(
+                f"{function} item_key: expected a column's name; received {shown(item_key)}",
+                path="item_key",
+            )
+        reads[item_key] = "item_key"
     if encode is not None:
         if not channels:
             raise ChartError(
@@ -160,7 +175,7 @@ def mark_options(
                 )
             for name in _label_fields(labels._spec()):
                 reads.setdefault(name, "labels")
-    return MarkOptions(function, z_index, built, labels or None, reads, color)
+    return MarkOptions(function, z_index, built, labels or None, reads, color, item_key)
 
 
 def _encode_fields(spec: Mapping[str, Any]) -> Iterator[str]:

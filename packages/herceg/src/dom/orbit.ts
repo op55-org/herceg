@@ -5,6 +5,7 @@
 // mark (see controls.ts), so other charts never download it; it listens on
 // the chart's root itself, its keys ahead of the chart's own.
 
+import type { ChangeCause } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import { type Camera, MAX_ZOOM, MIN_ZOOM } from "../three/camera.ts";
@@ -123,10 +124,10 @@ export class Controls implements ChartControls {
           BUTTONS.map(({ label, glyph, act }) => ({
             label,
             glyph,
-            act: () => {
+            act: (cause) => {
               if (!this.#panels().some((panel) => panel.key === key)) return;
               const camera = this.#host.chart.getCamera({ panel: key });
-              if (camera) this.#turn(act(camera), true, key);
+              if (camera) this.#turn(act(camera), true, key, cause);
             },
           })),
         );
@@ -156,10 +157,17 @@ export class Controls implements ChartControls {
   }
 
   /** Moves the camera (null: back to the configured one); `announce` reads the new view aloud. */
-  #turn(camera: CameraSpec | null, announce: boolean, panel: string): void {
+  #turn(
+    camera: CameraSpec | null,
+    announce: boolean,
+    panel: string,
+    cause: ChangeCause = "pointer",
+  ): void {
     const chart = this.#host.chart;
     const before = chart.getCamera({ panel });
-    chart.setCamera(camera, { panel });
+    const items = this.#host.model.items;
+    if (items) items.by(cause, () => chart.setCamera(camera, { panel }));
+    else chart.setCamera(camera, { panel });
     const after = chart.getCamera({ panel });
     if (announce && after && JSON.stringify(after) !== JSON.stringify(before))
       this.#host.announce(
@@ -243,7 +251,7 @@ export class Controls implements ChartControls {
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
         const delta =
           (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY) * unit;
-        this.#turn({ zoom: magnify(camera!, Math.exp(-delta * 0.002)) }, false, panel!);
+        this.#turn({ zoom: magnify(camera!, Math.exp(-delta * 0.002)) }, false, panel!, "wheel");
       },
       { passive: false },
     );
@@ -285,6 +293,6 @@ export class Controls implements ChartControls {
     if (next === undefined) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    this.#turn(next, true, panel!);
+    this.#turn(next, true, panel!, "keyboard");
   }
 }

@@ -721,6 +721,16 @@ describe("<Chart>", () => {
     expect(panels).toEqual([1]);
   });
 
+  it("emits no render for a first frame that did not draw", async () => {
+    const renders: unknown[] = [];
+    mount(
+      `<Chart :animation="{ duration: -1 }" @error="quiet" @render="count"><Line :data="metrics" x="t" y="a" /></Chart>`,
+      () => ({ metrics, quiet: () => {}, count: (event: unknown) => renders.push(event) }),
+    );
+    await nextTick();
+    expect(renders).toEqual([]);
+  });
+
   it("emits the whole view", () => {
     const { view, chart } = chartRef();
     const seen: unknown[] = [];

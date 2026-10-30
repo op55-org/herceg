@@ -510,7 +510,7 @@ describe("value transitions", () => {
   it("animate points across keyed resets in SVG and Canvas, settling before inspection", async () => {
     for (const renderer of ["svg", "canvas"] as const) {
       const data = table({ x: [1, 2, 3], y: [10, 20, 30], id: ["a", "b", "c"] });
-      const marks = () => [point(data, { x: "x", y: "y", animationKey: "id" })];
+      const marks = () => [point(data, { x: "x", y: "y", itemKey: "id" })];
       const moving = await mount({
         animation: VALUES,
         renderer,

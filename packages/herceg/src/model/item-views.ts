@@ -12,6 +12,7 @@
 // scene; states stay while their panels do.
 
 import type { Table } from "../data/table.ts";
+import type { DrawnMark } from "../marks/drawn.ts";
 import type { MovedNodes } from "../marks/graph.ts";
 import {
   drawnHidden,
@@ -34,13 +35,13 @@ import type { Camera } from "../three/camera.ts";
 import type { ItemInspection } from "./inspect.ts";
 import type { LegendPart } from "./legend.ts";
 import type {
+  ChangeCause,
   ChartConfig,
   ChartModel,
   ScaleInstance,
   ScaleView,
-  ViewCause,
   Viewport,
-  ViewportEvent,
+  ViewReport,
 } from "./model.ts";
 import type { LayoutConfig, LayoutOptions, PanelItem } from "./panel-layout.ts";
 import type { SelectionOwner } from "./selected-rows.ts";
@@ -60,8 +61,8 @@ export interface ItemChanges {
   };
 }
 
-/** A change of a plane's view, as the chart reports it (`ViewportEvent`) but for its revision. */
-export type PlaneViewChange = Omit<ViewportEvent, "viewRevision">;
+/** A change of a plane's view, as the model reports one (`ViewReport`) but for its count. */
+export type PlaneViewChange = Omit<ViewReport, "viewRevision">;
 
 /** Optional navigation attached to layout items by an interactive runtime. */
 export interface Controls {
@@ -74,7 +75,18 @@ export interface Controls {
 
 /** What the chart's user changed of the layout marks drawn with one state. */
 interface ItemState {
-  camera?: { current: Camera; configured: Camera; mark: LayoutMark; pending: boolean } | undefined;
+  camera?:
+    | {
+        current: Camera;
+        configured: Camera;
+        mark: LayoutMark;
+        pending: boolean;
+        /** What moved it last, for its report. */
+        cause: ChangeCause;
+        /** The chart's revision once it moved last, for its report (see `revision`). */
+        revision: number | undefined;
+      }
+    | undefined;
   /**
    * The node a tree is drilled into, as set and then as drawn, and the
    * path to it: a node the data lost gives way to its nearest ancestor
@@ -82,6 +94,8 @@ interface ItemState {
    */
   root: DrillRoot;
   reconciled: DrillRoot | undefined;
+  /** How many times its root changed: a report taken before a change is not made after it. */
+  rootChanges: number;
   /** A network's nodes moved, by key, in layout units, and the one being dragged. */
   moved: Map<string, readonly [number, number]>;
   dragged: { key: string; at: readonly [number, number] } | undefined;
@@ -168,7 +182,10 @@ const ITEM_STEPS: Record<string, number> = {
 export class ItemViews {
   /** Reads the fields tooltips show of items' rows (`tooltip.fields`); set by the model. */
   declare fields: FieldReader | undefined;
-  /** Optional sink for item changes; model-only consumers keep the returned values. */
+  /**
+   * Optional sink for item changes, which reads what caused each in `cause`;
+   * model-only consumers keep the returned values.
+   */
   declare changed:
     | ((
         ...change:
@@ -315,6 +332,8 @@ export class ItemViews {
   /** The chart whose layout marks these are. */
   readonly #model: ChartModel;
   #views: ItemView[] = [];
+  /** What the scene's layout marks drew, as drawn-mark records (marks/drawn.ts). */
+  records: DrawnMark[] = [];
   /** Whether a scene has drawn a layout mark, whose views say which states stay (see `#begin`). */
   #drew = false;
   /** Whether the panels are facets or subplots, whose inspections name them, not a chart's one. */
@@ -349,6 +368,36 @@ export class ItemViews {
   }
 
   #cameraConfig: ChartConfig | undefined;
+  /** What the changes being made are caused by (see `by`). */
+  #cause: ChangeCause = "api";
+
+  /** What caused the change being reported: a gesture's (see `by`), the data's, else "api". */
+  get cause(): ChangeCause {
+    return this.#cause;
+  }
+
+  /** The chart's revision a change being reported made, where it was counted as made (a camera's). */
+  #revision: number | undefined;
+
+  get revision(): number | undefined {
+    return this.#revision;
+  }
+
+  /**
+   * Makes the changes `change` makes as caused by `cause`: a gesture's,
+   * rather than a method's; and reports them, with `revision`, as made then.
+   */
+  by(cause: ChangeCause, change: () => void, revision?: number): void {
+    const [was, wasAt] = [this.#cause, this.#revision];
+    this.#cause = cause;
+    this.#revision = revision;
+    try {
+      change();
+    } finally {
+      this.#cause = was;
+      this.#revision = wasAt;
+    }
+  }
 
   /** Reconciles cameras before use; changes to defaults reset only their own state. */
   configureCameras(): void {
@@ -371,6 +420,9 @@ export class ItemViews {
         configured,
         current: same ? held.current : configured,
         pending: held?.pending ?? false,
+        // Options that replace a camera moved since make its report theirs.
+        cause: same ? held.cause : "options",
+        revision: same ? held.revision : undefined,
       };
     }
     for (const [key, state] of this.#states) if (!owners.has(key)) state.camera = undefined;
@@ -405,7 +457,11 @@ export class ItemViews {
     return owner && { ...owner[1].current };
   }
 
-  setCamera(spec: CameraSpec | null, panel?: string): boolean {
+  /**
+   * Sets a panel's camera; `revision`, the chart's count with this change,
+   * goes with its report however many changes follow before it.
+   */
+  setCamera(spec: CameraSpec | null, panel?: string, revision?: number): boolean {
     const owner = this.#cameraOwner(panel, "setCamera");
     if (!owner) throw new Error("setCamera: no 3D camera; add a 3D mark");
     const camera = owner[1];
@@ -413,18 +469,33 @@ export class ItemViews {
     if (JSON.stringify(next) === JSON.stringify(camera.current)) return false;
     camera.current = next;
     camera.pending = true;
+    camera.cause = this.#cause;
+    camera.revision = revision;
     return true;
   }
 
-  /** Reports each camera once per frame; reentrant setters remain pending for the next frame. */
-  finishCameras(): void {
+  /**
+   * Reports each camera once per frame; reentrant setters remain pending for
+   * the next frame. A camera options replaced reports `revision`, the
+   * frame's, taken before any listener counts another change.
+   */
+  finishCameras(revision?: number): void {
+    this.#takeCameras(revision)();
+  }
+
+  /** Takes the cameras' pending reports (see `finishCameras`); reports them when called. */
+  #takeCameras(revision?: number): () => void {
     const changes = [...this.#states].flatMap(([key, state]) => {
       const camera = state.camera;
       if (!camera?.pending) return [];
       camera.pending = false;
-      return [{ camera: { ...camera.current }, ...(key && { panels: [key] }) }];
+      const change = { camera: { ...camera.current }, ...(key && { panels: [key] }) };
+      return [[change, camera.cause, camera.revision ?? revision] as const];
     });
-    for (const change of changes) this.changed?.("camera", change);
+    return () => {
+      for (const [change, cause, revision] of changes)
+        this.by(cause, () => this.changed?.("camera", change), revision);
+    };
   }
 
   /**
@@ -598,6 +669,7 @@ export class ItemViews {
       for (const state of this.#states.keys())
         if (!used.has(state) && !this.#states.get(state)?.camera) this.#states.delete(state);
     this.#views = [];
+    this.records = [];
     this.#named = named;
     // A mounted chart's scenes share a frame's time with drawing; others
     // (exports without a DOM, where there may be no clock) lay out at once.
@@ -687,6 +759,18 @@ export class ItemViews {
       : hiddenWhole(mark, id, frame);
     const result = hidden ? drawnHidden(laid) : laid;
     this.#drew = true;
+    // Its items are picked through `itemAt` (layout-mark.ts's `pickItem`).
+    this.records.push({
+      mark: id,
+      panel: panel.key,
+      frame: undefined,
+      geometry: result.geometry,
+      series: [],
+      layout: result,
+      layoutMark: mark,
+      revision: model.revision,
+      current: model.whileCurrent(mark),
+    });
     this.#views.push({
       ...panel,
       items: true,
@@ -710,6 +794,7 @@ export class ItemViews {
       state = {
         root: NO_ROOT,
         reconciled: undefined,
+        rootChanges: 0,
         moved: new Map(),
         dragged: undefined,
         positions: { current: undefined },
@@ -785,11 +870,37 @@ export class ItemViews {
     return undefined;
   }
 
-  /** Reports reconciled roots and cameras before the frame's hover and render listeners run. */
-  finishFrame(): void {
-    for (let root = this.reconciled(); root; root = this.reconciled())
-      this.changed?.("drill", root);
-    this.finishCameras();
+  /**
+   * Takes a frame's reconciled roots and cameras, before any listener runs,
+   * and gives what reports them (before the frame's hover and render
+   * listeners), with the frame's revision and, for roots, the `cause` of
+   * the change that took their nodes away (data, options).
+   */
+  takeFrame(revision: number, cause: ChangeCause): () => void {
+    const roots: {
+      change: ItemChanges["drill"];
+      key: string;
+      state: ItemState;
+      changes: number;
+    }[] = [];
+    for (const view of this.#views) {
+      const state = this.#states.get(view.state);
+      const root = state?.reconciled;
+      if (!root) continue;
+      state.reconciled = undefined;
+      const change = { ...root, ...this.#scope(view) };
+      roots.push({ change, key: view.state, state, changes: state.rootChanges });
+    }
+    const cameras = this.#takeCameras(revision);
+    return () => {
+      for (const { change, key, state, changes } of roots) {
+        // A listener's drill, or a frame a listener drew, since takes its place,
+        // as does a new state of a tree its owner lost and drew again.
+        if (this.#states.get(key) !== state || state.rootChanges !== changes) continue;
+        this.by(cause, () => this.changed?.("drill", change), revision);
+      }
+      cameras();
+    };
   }
 
   /**
@@ -813,6 +924,7 @@ export class ItemViews {
     if (key === state.root.key) return undefined;
     const root = { key, path: key === null ? [] : drill.pathTo(key) };
     state.root = root;
+    state.rootChanges++;
     // A change the data made before this one is no longer the chart's to report.
     state.reconciled = undefined;
     const change = { ...root, ...this.#scope(view) };
@@ -1035,7 +1147,7 @@ export class ItemViews {
   setView(
     view: Partial<Viewport> | readonly [number, number] | null,
     panel: string | undefined,
-    cause: ViewCause = "api",
+    cause: ChangeCause = "api",
     joined = false,
   ): PlaneViewChange | undefined {
     const all = view === null && panel === undefined;
@@ -1057,7 +1169,7 @@ export class ItemViews {
       });
     const xs: ScaleView[] = [];
     const ys: ScaleView[] = [];
-    const views: ViewportEvent["views"][number][] = [];
+    const views: ViewReport["views"][number][] = [];
     for (const owner of owners) {
       const state = this.#state(owner.state);
       const was = state.view;
@@ -1229,7 +1341,9 @@ function settle(state: ItemState, result: LayoutResult): void {
   const { drill, moves } = result;
   if (drill && drill.key !== state.root.key)
     state.reconciled = { key: drill.key, path: drill.path };
-  state.root = drill ? { key: drill.key, path: drill.path } : NO_ROOT;
+  const root = drill ? { key: drill.key, path: drill.path } : NO_ROOT;
+  if (root.key !== state.root.key) state.rootChanges++;
+  state.root = root;
   if (!moves) return;
   for (const key of state.moved.keys()) if (!moves.owns(key)) state.moved.delete(key);
   if (state.dragged && !moves.owns(state.dragged.key)) state.dragged = undefined;

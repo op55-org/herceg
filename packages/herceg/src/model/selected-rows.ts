@@ -978,10 +978,11 @@ function rowsOf(
   const member = mark.summarized!(series, position);
   const condition = panelCondition(model, mark, [panel.key]);
   const shown = condition === true ? undefined : compileExpression(condition, table).at;
-  const view = mark.view?.read().indices;
-  const length = view ? view.length : table.length;
+  // The rows the mark reads: a view's, or every row of its table.
+  const read = mark.rows?.().positions;
+  const length = read ? read.length : table.length;
   for (let k = 0; k < length; k++) {
-    const at = view ? view[k]! : k;
+    const at = read ? read[k]! : k;
     if (member(at) && (!shown || shown(at) === true)) found.push(at);
   }
   return { table, rows: Uint32Array.from(found) };

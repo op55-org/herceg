@@ -731,14 +731,16 @@ def rugplot(
     color: str | None = None,
     series_order: Sequence[Any] | None = None,
     length: float = 8,
+    item_key: str | None = None,
     z_index: float | None = None,
     palette: Sequence[str] | None = None,
     **options: Unpack[ExpressOptions],
 ) -> Chart:
     """A tick per value of ``x`` along the bottom of the plot (or of ``y``
     along its left), ``length`` pixels long, per ``series``. ``z_index``
-    goes to the rug, as ``Chart.rug`` takes it."""
-    marks = mark_options("rugplot", z_index=z_index)
+    and ``item_key`` (the column naming each tick) go to the rug, as
+    ``Chart.rug`` takes them, reading any column of the data."""
+    marks = mark_options("rugplot", z_index=z_index, item_key=item_key)
     axis, name = _one_axis(x, y, "rugplot")
     facet_row, facet_column = facets(options, "rugplot")
     source = Source(data)
@@ -750,6 +752,7 @@ def rugplot(
     dropped = len(column) - len(rows)
     table = rows_table(variables, rows)
     table[name] = number_column(values(column)[rows], column.kind)
+    carry(table, Outputs(source, marks, {name, *variables}).rows(rows))
     sentence = f"Ticks mark each value of {name}{by(series)}." + dropped_sentence(
         dropped, [name, *variables], series_order is not None
     )
@@ -771,7 +774,7 @@ def rugplot(
         series=series,
         length=length,
         label=None if series else name,
-        z_index=marks.z_index,
+        **marks.primary(),
     )
     return record(
         chart, Statistics("rugplot", sentence, {"values": readable(table)}, None, dropped)

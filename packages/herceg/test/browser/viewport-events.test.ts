@@ -68,15 +68,18 @@ function columnsOf(table: Table, rows: Table): Parameters<Table["reset"]>[0] {
  * The events `expected` lists, with placeholders the names of the
  * instances they stand for: bound at first sight, by `named`, to the
  * instance at their place in `actual`, one name of a scale's to one
- * placeholder.
+ * placeholder. The fixture leaves out the chart's revision, which counts
+ * other changes too: each event has the chart's revision then.
  */
 function resolved(
   expected: readonly ViewportEventPayload[],
   actual: readonly ViewportEventPayload[],
   named: Map<string, string>,
+  revision: number,
 ): ViewportEventPayload[] {
   return expected.map((event, i) => ({
     ...event,
+    revision,
     scales: event.scales.map((entry, j) => {
       const placeholder = `${entry.scale} ${entry.instance}`;
       let instance = named.get(placeholder);
@@ -152,7 +155,7 @@ describe("the viewport events fixture, through charts", () => {
             expect(heard, at).toEqual([]);
           }
           chart.render();
-          expect(heard, at).toEqual(resolved(action.events!, heard, named));
+          expect(heard, at).toEqual(resolved(action.events!, heard, named, chart.revision));
         }
         chart.destroy();
       },

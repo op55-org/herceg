@@ -182,6 +182,7 @@ export function axesAt(panel: Panel, motion: AxesMotion, t: number): Pick<Panel,
     if (!plan || guide.ticks.length === 0) return guide;
     const ticks = plan.labels.map((label, i) => ({
       position: plan.scale.map(plan.ticks[i]!),
+      value: plan.ticks[i]!,
       label,
     }));
     // Placed as the scene placed the axis, with the ticks between.

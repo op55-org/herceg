@@ -12,12 +12,14 @@ import { shapesDrawing } from "../draw/shapes.ts";
 import type { PathShape, PlotRect, ShapesGeometry, TextShape } from "../scene/scene.ts";
 import { dashPattern } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
   buildSeries,
   CATEGORY,
   type ChartMark,
+  checkOptionalItemKey,
   type Frame,
   frozen,
   type MARK,
@@ -31,6 +33,7 @@ import {
   seriesKey,
   valueKind,
 } from "./mark.ts";
+import { extentAt, type MarkRows, rowAt, rowCount, rowsOf } from "./rows.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
 import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -151,7 +154,7 @@ export interface CustomOptions extends CustomBase {
  * A custom mark over a table, whose fields count toward the axis domains.
  * With one `x` field and `y` fields, it shows series as a line does.
  */
-export interface CustomDataOptions<S extends Schema> extends CustomBase {
+export interface CustomDataOptions<S extends Schema> extends CustomBase, ItemKeyed<S> {
   /** Fields whose values the mark places along x; a time field gives a time axis. */
   x?: NumericField<S> | readonly NumericField<S>[];
   /**
@@ -185,6 +188,8 @@ export interface CustomDataOptions<S extends Schema> extends CustomBase {
 export interface CustomSpec {
   type: "custom";
   id?: string;
+  /** The field naming each row's item (see `ItemKeyed`). */
+  itemKey?: string;
   axis?: "left" | "right";
   zero?: "x" | "y";
   facet?: "repeat";
@@ -208,18 +213,18 @@ function customSeries({ key, label, color, x, y, rows, length }: Series): Custom
   return { key, label, color, x, y, rows, length, rowAt: (k) => (rows ? rows[k]! : k) };
 }
 
-/** [min, max] of a field's finite values (cached by the table); positive ones on log axes. */
+/** [min, max] of a field's finite values at the mark's rows; positive ones on log axes. */
 function fieldExtent(
-  table: Table,
+  rows: MarkRows,
   field: string,
   log: boolean,
 ): readonly [number, number] | undefined {
-  if (!log) return table.extent(field as never);
-  const values = table.numbers(field as never);
+  if (!log) return extentAt(rows, field);
+  const values = rows.table.numbers(field as never);
   let min = Infinity;
   let max = -Infinity;
-  for (let i = 0; i < values.length; i++) {
-    const value = values[i]!;
+  for (let k = 0; k < rowCount(rows); k++) {
+    const value = values[rowAt(rows, k)]!;
     if (!(value > 0 && value < Infinity)) continue;
     if (value < min) min = value;
     if (value > max) max = value;
@@ -235,6 +240,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   readonly zero: "x" | "y" | undefined;
   readonly seriesless: boolean;
   readonly identity: MarkSources | undefined;
+  readonly wide: boolean;
   readonly #x: readonly string[];
   readonly #y: readonly string[];
   /** Splits the table into series, when the mark shows any. */
@@ -248,6 +254,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
       type: "custom",
       ...definedFields(options, [
         "id",
+        "itemKey",
         "axis",
         "zero",
         "facet",
@@ -281,7 +288,13 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     const field = options.series === false ? undefined : options.series;
     if (this.#x.length === 1 && this.#y.length > 0 && options.series !== false) {
       if (field !== undefined) requireField(table!, field, CATEGORY, "custom series");
-      this.#split = new SeriesSplitter(table!, this.#x[0], this.#y, field, options.label);
+      this.#split = new SeriesSplitter(
+        () => this.rows(),
+        this.#x[0],
+        this.#y,
+        field,
+        options.label,
+      );
       spec.x = this.#x[0]!;
       spec.y = typeof options.y === "string" ? options.y : [...this.#y];
       if (field !== undefined) spec.series = field;
@@ -301,10 +314,20 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     this.seriesless = !this.#split;
     // Series stand for their field's values, or for their y fields' names, as a line's do.
     this.identity = this.#split ? { field, values: this.#y } : undefined;
+    this.wide = !!this.#split && field === undefined && this.#y.length > 1;
     checkTooltip(table, this.spec.tooltip, "custom");
+    checkOptionalItemKey(table, this.spec.itemKey, "custom");
     this.#draw = options.draw;
     this.#pointText = options.pointText;
     this.#description = options.description;
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table!, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -321,7 +344,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
 
   xExtent(series: readonly Series[], log: boolean): readonly [number, number] | undefined {
     if (this.#split) return unionExtent(series.map((s) => xExtent(s, log)));
-    return unionExtent(this.#x.map((field) => fieldExtent(this.table!, field, log)));
+    return unionExtent(this.#x.map((field) => fieldExtent(this.rows(), field, log)));
   }
 
   /**
@@ -332,7 +355,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
    */
   yExtent(series: readonly Series[], x0: number, x1: number, log: boolean) {
     if (!this.#split)
-      return unionExtent(this.#y.map((field) => fieldExtent(this.table!, field, log)));
+      return unionExtent(this.#y.map((field) => fieldExtent(this.rows(), field, log)));
     return unionExtent(series.map((s) => yExtent(s, x0, x1, s.y, log, undefined, true)));
   }
 

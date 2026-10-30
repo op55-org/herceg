@@ -5,6 +5,7 @@
 // field reads the field's value over each series' rows, which must be one,
 // checked once, then as rows are appended only the new rows.
 
+import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { Drawing, Geometry } from "../../scene/scene.ts";
@@ -23,7 +24,7 @@ import {
   type ScaleOf,
 } from "./channels.ts";
 import type { Where } from "./compile.ts";
-import { firstAfter, type Look, type RunPart, type Runs, StyleRuns } from "./runs.ts";
+import { firstAfter, type Look, type RunPart, type Runs, StyleRuns, subset } from "./runs.ts";
 
 /** The paint a series takes from the features, over its mark's flat paint. */
 export interface SeriesPaint {
@@ -71,7 +72,7 @@ type Reader<V> = (s: Series | undefined, id: string, label?: string) => V | unde
  * the last row holding it (`evidence`), the last of the series' rows
  * (`seen`), and up to which row of the table (`last`; rows by identity,
  * `rowOffset + position`), in which generation, before which change of
- * existing values, and of the mark's row view, which rows count.
+ * existing values, and of which of its rows the mark draws (see `subset`).
  */
 interface Checked {
   value: string | undefined;
@@ -80,19 +81,21 @@ interface Checked {
   last: number;
   generation: number;
   modified: number;
-  view: number | undefined;
+  subset: string | undefined;
 }
 
 /**
  * Where a series' color field has the one value its rows read so far end
  * with: since row `since` (by identity, `rowOffset + row`), with code
  * `code`, up to row `last`; in which generation, before which change of
- * existing values, and of the mark's row view, which rows count.
+ * existing values, of which of its rows the mark draws (see `subset`),
+ * and in which order (the series' rows, which bands reorder).
  */
 interface Uniform {
   generation: number;
   modified: number;
-  view: number | undefined;
+  subset: string | undefined;
+  order: Uint32Array | undefined;
   last: number;
   code: number;
   since: number;
@@ -107,7 +110,8 @@ export class SeriesStyles {
   readonly #where: Where;
   readonly #spec: SeriesStyleSpec;
   readonly #table: Table;
-  readonly #view: { readonly revision: number } | undefined;
+  /** The rows the mark draws (marks/rows.ts). */
+  readonly #rows: () => MarkRows;
   readonly #primary: "stroke" | "fill";
   readonly #color: Reader<string> | undefined;
   readonly #stroke: Reader<string> | undefined;
@@ -151,7 +155,7 @@ export class SeriesStyles {
     where: Where,
     kit: FeatureKit,
     along: "x" | "y",
-    view?: { readonly revision: number },
+    markRows: () => MarkRows,
     bands?: "x" | "y",
   ) {
     const { isColor } = kit;
@@ -160,7 +164,7 @@ export class SeriesStyles {
     this.#where = where;
     this.#spec = spec;
     this.#table = table;
-    this.#view = view;
+    this.#rows = markRows;
     this.#bands = bands;
     this.#primary = primary;
     this.#along = along;
@@ -268,7 +272,9 @@ export class SeriesStyles {
     this.#byRows = rows;
     this.#colorField = colorField;
     // Rows in band order are read whole each version; others as they are appended.
-    this.#runs = parts.length ? new StyleRuns(table, parts, view, bands === undefined) : undefined;
+    this.#runs = parts.length
+      ? new StyleRuns(table, parts, markRows, bands === undefined)
+      : undefined;
   }
 
   /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
@@ -316,7 +322,7 @@ export class SeriesStyles {
   ): string | undefined {
     const table = this.#table;
     const offset = table.rowOffset;
-    const view = this.#view?.revision;
+    const drawn = subset(this.#rows());
     const key = `${s.key}|${field}`;
     let checked = this.#checked.get(key);
     if (
@@ -324,7 +330,7 @@ export class SeriesStyles {
       !(
         checked.generation === table.generation &&
         checked.modified === table.modifiedVersion &&
-        checked.view === view &&
+        checked.subset === drawn &&
         held(checked, offset)
       )
     )
@@ -343,7 +349,7 @@ export class SeriesStyles {
       value = at;
       if (id > evidence) evidence = id;
     };
-    if (checked && !this.#view) {
+    if (checked && drawn === undefined) {
       // Rows appended since: the table's last ones, of the series where they
       // are its field's value (whatever order the series draws them in).
       const { series } = this.#spec;
@@ -363,7 +369,7 @@ export class SeriesStyles {
       last,
       generation: table.generation,
       modified: table.modifiedVersion,
-      view,
+      subset: drawn,
     });
     return value;
   }
@@ -404,7 +410,7 @@ export class SeriesStyles {
     if (field === undefined || s.length === 0) return undefined;
     const table = this.#table;
     const offset = table.rowOffset;
-    const view = this.#view?.revision;
+    const drawn = subset(this.#rows());
     // Series no longer asked for, as a rolling window drops them, go.
     if (this.#uniformAt !== table.version)
       [this.#uniformBefore, this.#uniform, this.#uniformAt] = [
@@ -412,20 +418,24 @@ export class SeriesStyles {
         new Map(),
         table.version,
       ];
-    // Rows in band order are read whole each version.
-    const ascending = this.#bands === undefined;
+    // Rows in band order are read whole each version; a view's or a
+    // provider's, in any order, whole while they and their order (which
+    // another mark's bands can change) are unchanged.
+    const ascending = this.#bands === undefined && drawn === undefined;
     let kept = this.#uniform.get(s.key) ?? this.#uniformBefore.get(s.key);
     if (
       !kept ||
-      !ascending ||
+      (!ascending && drawn === undefined) ||
       kept.generation !== table.generation ||
       kept.modified !== table.modifiedVersion ||
-      kept.view !== view
+      kept.subset !== drawn ||
+      (!ascending && kept.order !== s.rows)
     )
       kept = {
         generation: table.generation,
         modified: table.modifiedVersion,
-        view,
+        subset: drawn,
+        order: s.rows,
         last: -1,
         code: -2,
         since: -1,
@@ -433,7 +443,8 @@ export class SeriesStyles {
     this.#uniform.set(s.key, kept);
     const { codes, dictionary } = table.categories(field as never);
     const rowAt = (k: number) => (s.rows ? s.rows[k]! : k);
-    for (let k = ascending ? firstAfter(s, kept.last - offset) : 0; k < s.length; k++) {
+    const from = ascending ? firstAfter(s, kept.last - offset) : kept.last < 0 ? 0 : s.length;
+    for (let k = from; k < s.length; k++) {
       const row = rowAt(k);
       if (codes[row] !== kept.code) [kept.code, kept.since] = [codes[row]!, offset + row];
       kept.last = offset + row;

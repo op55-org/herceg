@@ -103,6 +103,7 @@ describe("fragments", () => {
         {
           id: "b",
           viewRevision: 1,
+          revision: chart.revision,
           cause: "api",
           scales: [{ ...x, view: [1, 2] }],
           views: [{ panel: "", x: [1, 2], y: null, yRight: null, time: [] }],
@@ -119,6 +120,7 @@ describe("fragments", () => {
         {
           id: "c",
           viewRevision: 1,
+          revision: two.chart.revision,
           cause: "api",
           panel: "b",
           scales: [{ ...x, panels: ["a", "b"], view: [1, 2] }],
@@ -141,9 +143,11 @@ describe("fragments", () => {
           id: "d",
           owner,
           selection: { panels: [""], x: [0.5, 1.5], y: null, lasso: null, time: [] },
+          cause: "api",
+          revision: chart.revision - 1,
         },
         // A cleared selection names what it belonged to.
-        { id: "d", owner, selection: null },
+        { id: "d", owner, selection: null, cause: "api", revision: chart.revision },
       ]);
     },
     "tell the page of selections as JSON, with what they belong to",
@@ -185,6 +189,8 @@ describe("fragments", () => {
           data: "d",
           channel: "picked",
           selection: { kind: "predicate", expression: expect.anything() },
+          cause: "api",
+          revision: chart.revision,
         },
       ]);
     },
@@ -196,7 +202,9 @@ describe("fragments", () => {
     async () => {
       const { chart, of } = await told("g", limited);
       chart.setHiddenKeys(["b"]);
-      expect(of("visibility")).toEqual([{ id: "g", hiddenKeys: ["b"] }]);
+      expect(of("visibility")).toEqual([
+        { id: "g", hiddenKeys: ["b"], cause: "api", revision: chart.revision },
+      ]);
     },
     "tell the page of series hidden and shown",
   );

@@ -511,6 +511,88 @@ describe("3D charts", () => {
 });
 
 describe("3D subplots", () => {
+  it("reports a camera options replace before its move is reported as the options'", async () => {
+    const chart = await mount({ legend: false });
+    const reports: { azimuth: number; cause: string; revision: number }[] = [];
+    chart.on("camera", ({ camera, cause, revision }) =>
+      reports.push({ azimuth: camera.azimuth, cause, revision }),
+    );
+    chart.setCamera({ azimuth: 45 });
+    chart.update({ camera: { azimuth: 90 } });
+    chart.render();
+    await frame();
+    expect(reports).toEqual([{ azimuth: 90, cause: "options", revision: chart.revision }]);
+    chart.destroy();
+  });
+
+  it("reports each panel's camera with the revision that set it, whatever listeners change after", async () => {
+    const chart = await mount({
+      width: 800,
+      height: 350,
+      legend: false,
+      panels: panels([{ id: "a" }, { id: "b" }], grid({ columns: 2 })),
+      marks: ["a", "b"].map((panel) => point3d(points, { x: "x", y: "y", z: "z", panel })),
+    });
+    const reports: { panel: string | undefined; azimuth: number; revision: number }[] = [];
+    let moved = false;
+    chart.on("camera", ({ camera, panels: named, revision }) => {
+      const panel = named?.[0];
+      reports.push({ panel, azimuth: camera.azimuth, revision });
+      // A's listener moves B again, after B's own move waits to be reported.
+      if (panel === "a" && !moved) {
+        moved = true;
+        chart.setCamera({ azimuth: 30 }, { panel: "b" });
+      }
+    });
+    chart.setCamera({ azimuth: 10 }, { panel: "a" });
+    const a = chart.revision;
+    chart.setCamera({ azimuth: 20 }, { panel: "b" });
+    const b = chart.revision;
+    chart.render();
+    await frame();
+    await frame();
+    expect(reports).toEqual([
+      { panel: "a", azimuth: 10, revision: a },
+      { panel: "b", azimuth: 20, revision: b },
+      { panel: "b", azimuth: 30, revision: b + 1 },
+    ]);
+    chart.destroy();
+  });
+
+  it("reports cameras options replaced with the options' revision, whatever listeners change after", async () => {
+    const chart = await mount({
+      width: 800,
+      height: 350,
+      legend: false,
+      panels: panels([{ id: "a" }, { id: "b" }], grid({ columns: 2 })),
+      marks: ["a", "b"].map((panel) => point3d(points, { x: "x", y: "y", z: "z", panel })),
+    });
+    const reports: { panel: string | undefined; azimuth: number; revision: number }[] = [];
+    let moved = false;
+    chart.on("camera", ({ camera, panels: named, revision }) => {
+      const panel = named?.[0];
+      reports.push({ panel, azimuth: camera.azimuth, revision });
+      if (panel === "a" && !moved) {
+        moved = true;
+        chart.setCamera({ azimuth: 30 }, { panel: "b" });
+      }
+    });
+    // Moves of both, then options replacing both cameras.
+    chart.setCamera({ azimuth: 10 }, { panel: "a" });
+    chart.setCamera({ azimuth: 20 }, { panel: "b" });
+    chart.update({ camera: { azimuth: 90 } });
+    const options = chart.revision;
+    chart.render();
+    await frame();
+    await frame();
+    expect(reports).toEqual([
+      { panel: "a", azimuth: 90, revision: options },
+      { panel: "b", azimuth: 90, revision: options },
+      { panel: "b", azimuth: 30, revision: options + 1 },
+    ]);
+    chart.destroy();
+  });
+
   it.each(["canvas", "svg"] as const)(
     "draws and picks surfaces by each panel's depth, and clips at its edges (%s)",
     async (renderer) => {

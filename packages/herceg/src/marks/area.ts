@@ -24,6 +24,7 @@ import type {
   CssColor,
   Encodings,
   FieldCoordinate,
+  ItemKeyed,
   MarkStyle,
 } from "./encoding.ts";
 import { definedFields } from "./line.ts";
@@ -36,6 +37,7 @@ import {
   type ChartMark,
   categoryBands,
   categoryIndices,
+  checkItemKey,
   type Frame,
   frozen,
   type MARK,
@@ -64,7 +66,16 @@ import {
   withBands,
 } from "./orient.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
-import { type LayerEdges, lowerPosition, rowOf, type Series, xExtent, yExtent } from "./series.ts";
+import { type MarkRows, rowsOf } from "./rows.ts";
+import {
+  isSortedSubset,
+  type LayerEdges,
+  lowerPosition,
+  rowOf,
+  type Series,
+  xExtent,
+  yExtent,
+} from "./series.ts";
 import { RowStack } from "./stack.ts";
 import { offsetLayers, stackError, stackPointText } from "./stack-offset.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -81,7 +92,7 @@ import {
 } from "./trace.ts";
 import { type StackLayer, UnionStack } from "./union-stack.ts";
 
-interface AreaCommon<S extends Schema> {
+interface AreaCommon<S extends Schema> extends ItemKeyed<S> {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
@@ -351,12 +362,14 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   readonly bound: RowBindings | undefined;
   readonly featured: boolean;
   readonly identity: MarkSources;
+  readonly wide: boolean;
   /** How layers stack: `stack`, as `true`, a mode, or an object of its parts. */
   readonly #stacking: Stacking;
 
   constructor(input: AreaSpec, table: Table<Schema>) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "area");
+    checkItemKey(table, this.spec.itemKey, "area");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
@@ -412,7 +425,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       // Bands over categories run in band order, which their series sort by.
       if (series !== undefined)
         this.#bandSplit = new SeriesSplitter(
-          table,
+          () => this.rows(),
           banded ? undefined : position,
           [values[1]!],
           series,
@@ -431,7 +444,13 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       this.#roles = roles;
       // Areas over categories run in band order, which their series sort by.
       const position = roles.banded ? undefined : roles.position;
-      this.#split = new SeriesSplitter(table, position, roles.values, series, spec.label);
+      this.#split = new SeriesSplitter(
+        () => this.rows(),
+        position,
+        roles.values,
+        series,
+        spec.label,
+      );
       if (this.#stacking.mode && series !== undefined)
         this.#union = new UnionStack(this.#stacking.mode, this.#stacking.order);
     }
@@ -440,6 +459,8 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     if (spec.dodge && series === undefined)
       throw new Error("area dodge: places series side by side; give a series field");
     this.identity = { field: series, values: this.#roles.values };
+    // A band's two fields bound one item.
+    this.wide = !edges && this.#roles.values.length > 1;
     const { orient, banded } = this.#roles;
     if (spec.dodge) {
       if (!banded)
@@ -454,6 +475,14 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     this.zero = edges ? undefined : orient === "x" ? "y" : "x";
   }
 
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
+  }
+
   channelKind(axis: "x" | "y") {
     if (offAxis(this.bound, axis)) return undefined;
     const { orient, position, values } = this.#roles;
@@ -462,7 +491,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
 
   bands(axis: "x" | "y") {
     const { orient, position, banded } = this.#roles;
-    return banded && axis === orient ? categoryBands(this.table, position) : undefined;
+    return banded && axis === orient ? categoryBands(this.rows(), position) : undefined;
   }
 
   series(
@@ -477,7 +506,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     const { orient, position, values, banded } = this.#roles;
     // A category position is each row's band index on the chart's axis.
     const positions = banded
-      ? categoryIndices(table, position, bands[orient]?.keys ?? [])
+      ? categoryIndices(this.rows(), position, bands[orient]?.keys ?? [])
       : table.numbers(position as never);
     let series: Series[];
     // A color in CSS syntax the mark draws itself; the feature compiler, others.
@@ -486,13 +515,18 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       // One band, standing for its two fields, or one per value of a series field.
       const [low, high] = values as [string, string];
       const name = `${low}–${high}`;
+      const shown = this.rows().positions;
       const sources = this.#bandSplit?.sources() ?? [
         {
           id: name,
           label: spec.label ?? name,
           y: high,
-          rows: undefined,
-          sorted: !banded && table.isSorted(position as never),
+          rows: shown,
+          sorted:
+            !banded &&
+            (shown
+              ? isSortedSubset(table.numbers(position as never), shown)
+              : table.isSorted(position as never)),
         },
       ];
       series = buildSeries(table, sources, positions, key, palette, fill);
@@ -1104,6 +1138,7 @@ export function area<S extends Schema>(
       "label",
       "legend",
       "id",
+      "itemKey",
       "axis",
       "facet",
       "panel",

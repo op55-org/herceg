@@ -6,7 +6,7 @@
 
 import type { Selection } from "../dom/brushed.ts";
 import { MountedChart } from "../dom/chart.ts";
-import type { ChartEvents, PanelViewport, ViewCause, ViewportEvent } from "../dom/events.ts";
+import type { ChangeCause, ChartEvents, PanelViewport } from "../dom/events.ts";
 import type { Axis, AxisInfo, Chart, ScaleInstance, SelectionOwner } from "../dom/handle.ts";
 import type { Inspection, Viewport, ViewSet } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
@@ -63,10 +63,11 @@ export interface PanelViewportPayload extends ViewportPayload {
   panel: string;
 }
 
-/** A change of view (`ViewportEvent`). */
+/** A change of view (`ViewportEvent`), with the chart's revision once it applied. */
 export interface ViewportEventPayload {
   viewRevision: number;
-  cause: ViewCause;
+  revision: number;
+  cause: ChangeCause;
   panel?: string;
   scales: ScaleViewPayload[];
   views: PanelViewportPayload[];
@@ -104,10 +105,15 @@ export interface SelectionOwnerPayload {
   panels: string[];
 }
 
-/** A `select` event: the selection, null once cleared, and what it belongs to (or, cleared, belonged to). */
+/**
+ * A `select` event: the selection, null once cleared, what it belongs to
+ * (or, cleared, belonged to), what made it, and the chart's revision then.
+ */
 export interface SelectEventPayload {
   owner: SelectionOwnerPayload;
   selection: SelectionPayload | null;
+  cause: ChangeCause;
+  revision: number;
 }
 
 /** An `edge` event: the scale instance, the end its view came near, and what moved it there. */
@@ -115,15 +121,14 @@ export interface EdgePayload extends ScaleInstancePayload {
   side: "start" | "end";
   domain: [number, number];
   bound: number;
-  cause: ViewCause;
+  cause: ChangeCause;
 }
 
 /**
  * A `rowSelection` event: a channel a chart binds, of a table named by its
  * name in the spec's `data`, and what it holds: a condition, or rows by
- * identity in the table's generation `generation` (a row's position plus
- * the rows dropped before it, `Table.rowOffset`, so they stay the rows'
- * across drops), or null for none.
+ * identity in the table's generation `generation` (`Table.identity`, so
+ * they stay the rows' across drops), or null for none.
  */
 export interface RowSelectionPayload {
   data: string;
@@ -212,9 +217,10 @@ function panelViewportPayload({ panel, types, ...shown }: PanelViewport): PanelV
 }
 
 /** A change of view as JSON; it carries the types of its axes, so it needs no chart. */
-export function viewportEventPayload(event: ViewportEvent): ViewportEventPayload {
+export function viewportEventPayload(event: ChartEvents["viewport"]): ViewportEventPayload {
   return {
     viewRevision: event.viewRevision,
+    revision: event.revision,
     cause: event.cause,
     ...(event.panel !== undefined && { panel: event.panel }),
     scales: event.scales.map((scale) => ({ ...instancePayload(scale), view: view(scale.view) })),
@@ -413,13 +419,18 @@ function ownerPayload({ scales, panels }: SelectionOwner): SelectionOwnerPayload
  * which carry their categories as the event was made, and what it belongs to.
  */
 export function selectEventPayload(event: ChartEvents["select"]): SelectEventPayload {
-  return { owner: ownerPayload(event.owner), selection: selectionPayload(event, event.owner) };
+  return {
+    owner: ownerPayload(event.owner),
+    selection: selectionPayload(event, event.owner),
+    cause: event.cause,
+    revision: event.revision,
+  };
 }
 
 /**
  * A change of a channel `rowSelection` binds, as JSON, its table named
  * `name` (its name in the spec's data): a condition, or rows by identity,
- * their positions plus the rows the table dropped (`Table.rowOffset`).
+ * as `Table.identity` gives them.
  * `numbering` counts, for a reader numbering rows from an earlier
  * snapshot, the rows dropped before it and its generation.
  */
@@ -436,13 +447,13 @@ export function rowSelectionPayload(
     };
   const [dropped, generation] = numbering;
   // A reset numbers rows afresh, from the table's first.
-  const base = (table.generation === 0 ? dropped : 0) + table.rowOffset;
+  const base = table.generation === 0 ? dropped : 0;
   return {
     data: name,
     channel,
     selection: {
       kind: "rows",
-      rows: Array.from(selection.rows.positions(), (position) => position + base),
+      rows: Array.from(selection.rows.positions(), (position) => base + table.identity(position)),
       generation: generation + table.generation,
     },
   };

@@ -58,6 +58,7 @@ Most marks take these; where only some do, the row says which, and
 | `dodge` | Series side by side within each band (bars by default; points, lines, areas, error bars with `true`). |
 | `stack` | Series piled up at each position: bars, areas, and histograms. |
 | `id` | A name other marks and events refer to. |
+| `itemKey` | A category, number, or time field naming each row's item, on marks whose items are rows (lines, areas, bars, points, rugs, error bars, candlesticks, rules, regions, and text over tables, map layers, 3D points and lines, custom marks) ([Item keys](#item-keys)). Python: `item_key`. |
 | `label` | The series' name in the legend and tooltips for a single series. |
 | `legend: false` | Left out of the chart's legends while still drawn. |
 | `axis: "right"` | Draw on the second y axis ([Axes](axes-and-legends.md#a-second-y-axis)): marks with a y value axis; horizontal marks and lines along y stay on the left. |
@@ -65,6 +66,33 @@ Most marks take these; where only some do, the row says which, and
 | `clip` | What the drawing is cut to: `"plot"` (data's and regions' default), `"chart"`, or `false` for nothing, so markers at the plot's edge show whole. Rules and text have their own default ([Annotations](#annotations)). |
 | `zIndex` | Paint order ([Styling](styling.md#paint-order)). |
 | `tooltip: { fields }` | More of the row in tooltips ([Interaction](interaction.md#tooltips)); marks that summarize rows (histograms, box plots, boxen, violins, contours) and networks refuse it. |
+
+### Item keys
+
+An *item* is one thing a mark draws: a point, a bar, a line's
+observation, an annotation's row, or a layout mark's slice or node.
+Without `itemKey`, a row's item is that row, the same through appends and
+drops but not through `reset`; a bar is named by its series and position.
+With it, the field's value names the item, across resets and replaced
+tables. Points' value transitions match points by it; the
+[roadmap](../roadmap.md) lists what will address items next (clicks,
+selections, a pinned tooltip, every mark's transitions):
+
+```ts
+bar(ranked, { id: "brands", itemKey: "brand", x: "value", y: "rank" });
+point(data, { x: "x", y: "y", itemKey: "id" }); // points move to their new place when values animate
+```
+
+```python
+chart.bar(x="value", y="rank", item_key="brand", id="brands")
+```
+
+Rows sharing a value are one item, and a missing value names the row by
+its identity. `itemKey` neither splits series nor colors; give the mark an
+`id` when its items must be followed while other marks come and go. Marks
+whose items aggregate rows (histograms' bins, box plots' boxes, pies'
+slices, trees' nodes) name their items by what they group, and refuse it,
+as does an annotation placed by constants alone: it reads no rows to name.
 
 **Dash** takes a pixel array or a matplotlib string: `"-"` (solid), `"--"`,
 `":"`, `"-."`. String patterns are `[3.7, 1.6]`, `[1, 1.65]`, and
@@ -291,8 +319,9 @@ hg.scatter(tips, x="day", y="tip", swarm=True)
 - **Rendering.** Points missing an encoded value are not drawn. Encoded and
   outlined points are drawn on the CPU; plain point series of 100,000 or
   more use WebGL ([Large data](large-data.md#points-canvas-and-webgl)).
-- **Animation keys.** `animationKey: "id"` matches points across replaced
-  data by a field ([Animation](interaction.md#animation)).
+- **Item keys.** `itemKey: "id"` names each point by a field, so that
+  points match across replaced data ([Animation](interaction.md#animation)).
+  Every mark whose items are rows takes it ([Item keys](#item-keys)).
 
 ## Heatmaps
 

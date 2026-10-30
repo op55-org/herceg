@@ -424,6 +424,14 @@ describe("<Chart>", () => {
     expect(hidden).toHaveLength(1);
   });
 
+  it("tells onrender of no first frame when none drew", () => {
+    let renders = 0;
+    lines({
+      options: { animation: { duration: -1 }, onrender: () => renders++, onerror: () => {} },
+    });
+    expect(renders).toBe(0);
+  });
+
   it("passes the whole view to onviewport", () => {
     const seen: unknown[] = [];
     const props = lines({ options: { onviewport: (view: unknown) => seen.push(view) } });

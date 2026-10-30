@@ -32,11 +32,17 @@ export class Legend {
   /**
    * A new legend, or one taking over the element and entries of a chart's
    * server markup (`adopted`, see dom/adopt.ts). `toggle` hides and shows
-   * what a button names, and says whether it showed it.
+   * what a button names, pressed by the pointer or the keyboard, and says
+   * whether it showed it.
    */
   constructor(
     document: Document,
-    toggle: (keys: string | readonly string[], panel?: string, show?: boolean) => boolean,
+    toggle: (
+      keys: string | readonly string[],
+      panel: string | undefined,
+      show: boolean | undefined,
+      cause: "pointer" | "keyboard",
+    ) => boolean,
     adopted?: { element: HTMLDivElement; entries: Map<string, Entry> },
   ) {
     this.element = adopted?.element ?? document.createElement("div");
@@ -46,7 +52,7 @@ export class Legend {
     this.element.style.cssText = "position:absolute;left:0;top:0;width:100%;height:0;direction:ltr";
     this.#entries = adopted?.entries ?? new Map();
     // One listener for every button, those adopted included.
-    this.element.addEventListener("click", ({ target }) => {
+    this.element.addEventListener("click", ({ target, detail }) => {
       // A second click before the legend is drawn again undoes the first.
       for (const entry of this.#entries.values())
         if (entry.button.contains(target as Node))
@@ -54,6 +60,8 @@ export class Legend {
             (entry.show && entry.shows) || entry.targets,
             entry.panel,
             entry.show,
+            // A button pressed from the keyboard clicks with no count.
+            detail === 0 ? "keyboard" : "pointer",
           );
     });
   }

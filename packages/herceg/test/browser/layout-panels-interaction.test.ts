@@ -116,7 +116,12 @@ describe("trees in facet panels", () => {
     const drills = heard(chart, "drill");
     await click(chart, ...corner(itemNamed(chart, "2024", "Europe")));
     expect(drills).toEqual([
-      { key: '[0,"Europe"]', path: [{ key: '[0,"Europe"]', label: "Europe" }] },
+      {
+        key: '[0,"Europe"]',
+        path: [{ key: '[0,"Europe"]', label: "Europe" }],
+        cause: "pointer",
+        revision: chart.revision,
+      },
     ]);
     expect(chart.getDrillRoot({ panel: "2023" })?.key).toBe('[0,"Europe"]');
     const live = chart.root.querySelector("[aria-live]")!;
@@ -189,8 +194,9 @@ describe("trees in facet panels", () => {
     chart.render();
     expect(chart.getPanels().map(({ key }) => key)).toEqual(["2024"]);
     const drills = heard(chart, "drill");
+    // `click()` clicks with no count, as a key does.
     chart.root.querySelector<HTMLButtonElement>('[aria-label="Show the whole tree"]')!.click();
-    expect(drills).toEqual([{ key: null, path: [] }]);
+    expect(drills).toEqual([{ key: null, path: [], cause: "keyboard", revision: chart.revision }]);
   });
 });
 
@@ -207,7 +213,13 @@ describe("trees in subplots", () => {
     const drills = heard(chart, "drill");
     await click(chart, ...corner(itemNamed(chart, "b", "Asia")));
     expect(drills).toEqual([
-      { key: '[1,"Asia"]', path: [{ key: '[1,"Asia"]', label: "Asia" }], panels: ["b"] },
+      {
+        key: '[1,"Asia"]',
+        path: [{ key: '[1,"Asia"]', label: "Asia" }],
+        panels: ["b"],
+        cause: "pointer",
+        revision: chart.revision,
+      },
     ]);
     expect(chart.getDrillRoot({ panel: "a" })?.key).toBeNull();
     expect(() => chart.getDrillRoot()).toThrow("getDrillRoot: panel is required");
@@ -223,7 +235,13 @@ describe("trees in subplots", () => {
     ]);
     const up = toolbars[1]!.querySelector("button")!;
     up.click();
-    expect(drills.at(-1)).toEqual({ key: null, path: [], panels: ["b"] });
+    expect(drills.at(-1)).toEqual({
+      key: null,
+      path: [],
+      panels: ["b"],
+      cause: "keyboard",
+      revision: chart.revision,
+    });
   });
 
   it("drill only the subplot whose settings zoom, with a toolbar of its own alone", async () => {

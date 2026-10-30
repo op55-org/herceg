@@ -95,6 +95,14 @@ export interface Series {
  * y for areas along y), which it is drawn through: where the layer has no
  * row, it counts as zero or as interpolated (`StackGaps`). Views valid
  * until the stack's next update.
+ *
+ * Where a stack has no support (a position some shown layer lacks, under
+ * `support: "intersection"`), every layer's `top` and `bottom` are NaN
+ * there, as missing values, which drawing, inspection, labels, domains,
+ * and level of detail read as gaps. A break between two supported
+ * positions is one more entry at the later position, before its own, with
+ * NaN edges: the band from the earlier position stops, and a new one
+ * starts at the later.
  */
 export interface LayerEdges {
   order?: number;

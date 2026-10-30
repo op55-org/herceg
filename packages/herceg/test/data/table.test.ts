@@ -327,3 +327,34 @@ describe("binary search", () => {
     expect(lowerBound(values, 9)).toBe(5);
   });
 });
+
+describe("row identities", () => {
+  it("keep a row's identity across appends and drops, until a reset", () => {
+    const t = table({ x: [1, 2, 3] }, { maxRows: 3 });
+    expect([0, 1, 2].map((p) => t.identity(p))).toEqual([0, 1, 2]);
+    t.append({ x: [4] });
+    // Row 1 then is row 0 now: the same identity.
+    expect(t.identity(0)).toBe(1);
+    expect(t.positionOf(1, 0)).toBe(0);
+    expect(t.positionOf(3, 0)).toBe(2);
+    // Dropped, not yet added, or of another generation: none.
+    expect(t.positionOf(0, 0)).toBe(-1);
+    expect(t.positionOf(4, 0)).toBe(-1);
+    expect(t.positionOf(1.5, 0)).toBe(-1);
+    t.reset({ x: [9, 8] });
+    expect(t.generation).toBe(1);
+    expect(t.identity(0)).toBe(0);
+    expect(t.positionOf(1, 0)).toBe(-1);
+    expect(t.positionOf(1, 1)).toBe(1);
+  });
+
+  it("report no insertion from tables that only append", () => {
+    const t = table({ x: [1] });
+    const changes: TableChange[] = [];
+    t.subscribe((change) => changes.push(change));
+    t.append({ x: [2] });
+    t.set("x", 0, 3);
+    t.reset({ x: [] });
+    expect(changes.map((change) => change.inserted ?? null)).toEqual([null, null, null]);
+  });
+});

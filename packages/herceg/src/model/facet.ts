@@ -13,6 +13,7 @@ import { lineCount, type MeasureText } from "../layout/text.ts";
 import type { CustomSpec } from "../marks/custom.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
 import type { BandContext, Bands, Mark } from "../marks/mark.ts";
+import type { MarkRows } from "../marks/rows.ts";
 import type { Series } from "../marks/series.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -386,8 +387,14 @@ export class Facet implements PanelLayout {
 
 /** A table's codes of a field in order of first appearance, as of a version. */
 interface Appearance {
-  version: number;
+  /** The table's version, or the revision of the rows a mark reads. */
+  version: number | string;
   codes: number[];
+}
+
+/** Every row of a table, as a mark without rows of its own reads it. */
+function everyRow(table: Table): MarkRows {
+  return { table, positions: undefined, revision: "" };
 }
 
 /** A panel's rows of a series, and whether its x (and y, for series that track it) ascend. */
@@ -430,7 +437,7 @@ export class Splitter {
   #dimensions: string[][];
   /** Every combination of the fields' values, rows by columns. */
   #panels: readonly PanelValues[] = [];
-  readonly #appearance = new WeakMap<Table, Map<string, Appearance>>();
+  readonly #appearance = new WeakMap<object, Map<string, Appearance>>();
   /** Each series' split by its key; series of one table's rows share one. */
   readonly #bySeries = new Map<string, Split>();
   /** Each table's rows in each panel, for marks that summarize them (see `#tableRows`). */
@@ -440,6 +447,11 @@ export class Splitter {
   >();
   /** The rows of every panel together, for each list of panels' rows. */
   readonly #unions = new WeakMap<Uint32Array[], Uint32Array>();
+  /** Each panel's rows a mark draws of them, by the rows it draws (see `#drawnRows`). */
+  readonly #drawn = new WeakMap<
+    Uint32Array,
+    { panels: Uint32Array[]; revision: string; rows: Uint32Array[] }
+  >();
   readonly #bands = new PanelBands();
 
   constructor(
@@ -469,13 +481,15 @@ export class Splitter {
     context: BandContext,
   ): PanelSplit {
     const splits = (mark: Mark) => this.#facet.splits(mark);
-    const tables = new Set(base.filter(({ mark }) => splits(mark)).map(({ mark }) => mark.table!));
+    // The rows each mark that splits reads (a view's, a provider's; marks/rows.ts).
+    const read = (mark: Pick<Mark, "rows" | "table">) => mark.rows?.() ?? everyRow(mark.table!);
+    const sources = base.filter(({ mark }) => splits(mark)).map(({ mark }) => read(mark));
     const { marks } = chart.config;
     const [layout] = chart.layouts;
     // A map's layers each split their rows, unless they repeat.
     const layers = layout ? (layout.layers ?? [layout]) : [];
-    for (const layer of layers) if (layer.spec.facet === undefined) tables.add(layer.table!);
-    this.#update(tables, chart);
+    for (const layer of layers) if (layer.spec.facet === undefined) sources.push(read(layer));
+    this.#update(sources, chart);
     const empty = this.#panels.length === 0;
     const keys = empty ? [""] : this.#panels.map(({ key }) => key);
     const values = empty ? [[]] : this.#panels.map(({ values }) => values);
@@ -501,7 +515,7 @@ export class Splitter {
       splits(mark) && mark.summarizePanels
         ? mark.summarizePanels(
             series,
-            this.#tableRows(mark.table!),
+            this.#drawnRows(mark),
             xGroupOf,
             chart.hidden,
             bands,
@@ -570,19 +584,18 @@ export class Splitter {
   }
 
   /**
-   * Finds each field's values in the tables' current rows, keeping the
+   * Finds each field's values in the rows marks read now, keeping the
    * panels while they are unchanged; refuses a shape that could never fit
    * `room` before they are listed.
    */
-  #update(tables: Iterable<Table>, room: PanelRoom): void {
-    const list = [...tables];
+  #update(sources: readonly MarkRows[], room: PanelRoom): void {
     let changed = false;
     const dimensions = this.fields.map((field, f) => {
       const seen = new Set<string>();
       const values: string[] = [];
-      for (const table of list) {
-        const { dictionary } = table.categories(field as never);
-        for (const code of this.#order(table, field)) {
+      for (const rows of sources) {
+        const { dictionary } = rows.table.categories(field as never);
+        for (const code of this.#order(rows, field)) {
           const value = dictionary[code]!;
           if (seen.has(value)) continue;
           seen.add(value);
@@ -611,25 +624,28 @@ export class Splitter {
     this.#panels = dimensions.some((values) => values.length === 0) ? [] : panels;
   }
 
-  /** The codes of a field a table's rows use, in order of first appearance. */
-  #order(table: Table, field: string): number[] {
-    let byField = this.#appearance.get(table);
+  /** The codes of a field rows a mark reads use, in order of first appearance. */
+  #order({ table, positions, revision }: MarkRows, field: string): number[] {
+    const key = positions ?? table;
+    let byField = this.#appearance.get(key);
     if (!byField) {
       byField = new Map();
-      this.#appearance.set(table, byField);
+      this.#appearance.set(key, byField);
     }
+    const version = positions ? revision : table.version;
     const cached = byField.get(field);
-    if (cached?.version === table.version) return cached.codes;
+    if (cached?.version === version) return cached.codes;
     const { codes, dictionary } = table.categories(field as never);
     const seen = new Uint8Array(dictionary.length);
     const order: number[] = [];
-    for (let row = 0; row < codes.length && order.length < dictionary.length; row++) {
-      const code = codes[row]!;
+    const length = positions ? positions.length : codes.length;
+    for (let k = 0; k < length && order.length < dictionary.length; k++) {
+      const code = codes[positions ? positions[k]! : k]!;
       if (code < 0 || seen[code]) continue;
       seen[code] = 1;
       order.push(code);
     }
-    byField.set(field, { version: table.version, codes: order });
+    byField.set(field, { version, codes: order });
     return order;
   }
 
@@ -686,6 +702,26 @@ export class Splitter {
       this.#unions.set(rows, union);
     }
     return union;
+  }
+
+  /**
+   * Each panel's rows of `mark`'s table that the mark draws: all of them,
+   * or those of the rows it reads (a view's, a provider's; marks/rows.ts),
+   * kept while both are unchanged.
+   */
+  #drawnRows(mark: Mark): Uint32Array[] {
+    const panels = this.#tableRows(mark.table!);
+    const answer = mark.rows?.();
+    const shown = answer?.positions;
+    if (!shown) return panels;
+    const { revision } = answer;
+    const kept = this.#drawn.get(shown);
+    if (kept?.panels === panels && kept.revision === revision) return kept.rows;
+    const drawn = new Uint8Array(mark.table!.length);
+    for (let k = 0; k < shown.length; k++) drawn[shown[k]!] = 1;
+    const rows = panels.map((panel) => panel.filter((row) => drawn[row] === 1));
+    this.#drawn.set(shown, { panels, revision, rows });
+    return rows;
   }
 
   #tableRows(table: Table): Uint32Array[] {

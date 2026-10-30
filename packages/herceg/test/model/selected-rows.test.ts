@@ -640,13 +640,14 @@ describe("lassos and clicks as rows", () => {
     ]) {
       const selection = rowSelection({ store, channel: "c" });
       const model = drawn({ marks: [mark], rowSelection: selection });
-      const chart = { selection: null, select() {}, render() {}, root: new EventTarget() as never };
+      const chart = { selection: null, clear() {}, render() {}, root: new EventTarget() as never };
       selection.mount(
         undefined,
         model,
         chart,
         { emit() {} },
         () => {},
+        () => 0,
         () => null,
         {
           textContent: null,

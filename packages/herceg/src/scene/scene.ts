@@ -304,7 +304,7 @@ export interface RectGeometry extends Geometry {
   rounded?: { radius: number; ends: Uint8ClampedArray } | undefined;
   /** Bars in scenes of charts that animate changed values: what identifies each and where it ends. */
   bars?: BarItems | undefined;
-  /** In scenes that write titles (`Frame.attributed`), the table row each rectangle draws. */
+  /** For bars: the table row each rectangle draws, for drawn-mark records and titles. */
   rows?: Uint32Array | undefined;
 }
 
@@ -365,7 +365,7 @@ export interface PointGeometry extends Geometry {
   cloud?: PointCloud;
   /** Points in scenes that animate changed values: their row identities or explicit keys. */
   items?: PointItems | undefined;
-  /** In scenes that write titles (`Frame.attributed`), the table row each point draws. */
+  /** For points drawn on the CPU: the table row each point draws, for drawn-mark records and titles. */
   rows?: Uint32Array | undefined;
 }
 
@@ -742,6 +742,8 @@ export type MarkGeometry =
 export interface AxisTick {
   /** Pixel position along the axis. */
   position: number;
+  /** The tick's value: a number, epoch ms on time axes, a band index on category axes. */
+  value: number;
   label: string;
 }
 

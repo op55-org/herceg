@@ -94,8 +94,9 @@ hg.Chart(sales, zoom=True).treemap(path=["region", "country"], value="revenue")
 - When a row selection takes clicks, a click selects the node's rows and
   Enter still drills.
 - `setDrillRoot` works with or without `interaction.zoom` and is followed by
-  a `drill` event, which also reports when the data loses the drilled node
-  and the tree shows its nearest remaining ancestor.
+  a `drill` event, which also reports when the data (or options replacing
+  the table) lose the drilled node and the tree shows its nearest remaining
+  ancestor.
 - Facet panels share one drill root; each subplot's tree has its own.
   Drilling shows the new layout at once (no animation).
 

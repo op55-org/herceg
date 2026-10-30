@@ -27,6 +27,21 @@ import type { Frame } from "../spec/place.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { StrokeStyle, TextStyle } from "../spec/style.ts";
 
+/**
+ * The option of marks whose items are rows (lines' and points'
+ * observations, bars, annotations' rows): the field whose value names
+ * each row's item, so that what addresses items (selections, a pinned
+ * tooltip, transitions) follows the same item across appends, drops,
+ * `reset`, and a table replaced by another. Without it, an item is its
+ * row (its identity in its table), and a bar is named by its position.
+ * Rows sharing a value are one item; a missing value names the row by its
+ * identity. It neither splits series nor colors.
+ */
+export interface ItemKeyed<S extends Schema> {
+  /** A category, number, or time field. */
+  itemKey?: CategoryField<S> | NumericField<S>;
+}
+
 /** An expression: one built with `col`, or its JSON form. */
 export type Condition = Expr<"boolean"> | Expression;
 

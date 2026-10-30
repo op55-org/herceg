@@ -93,24 +93,24 @@ describe("loadSpec", () => {
     );
   });
 
-  it("round trips point animation keys", () => {
+  it("round trip item keys, checked against the table", () => {
     const data = table({ x: [1, 2], y: [3, 4], id: ["a", "b"] }, { name: "data" });
-    const mark = point(data, { x: "x", y: "y", animationKey: "id" });
+    const mark = point(data, { x: "x", y: "y", itemKey: "id" });
     const json: ChartSpec = {
       data: { data: { columns: { x: [1, 2], y: [3, 4], id: ["a", "b"] } } },
       marks: [JSON.parse(JSON.stringify(mark.spec))],
     };
     expect(checkSpec(json)).toEqual([]);
     expect(loadSpec(json).config.marks[0]!.spec).toEqual(mark.spec);
-    const spec = { marks: [{ type: "point", x: "x", y: "y", animationKey: 42 }] };
-    expect(() => validateSpec(spec)).toThrow(/animationKey.*field name/);
+    const spec = { marks: [{ type: "point", x: "x", y: "y", itemKey: 42 }] };
+    expect(() => validateSpec(spec)).toThrow(/itemKey.*field name/);
     expect(
       () =>
         new PointMark(
-          { type: "point", x: "x", y: "y", animationKey: "missing" },
+          { type: "point", x: "x", y: "y", itemKey: "missing" },
           data as unknown as Table,
         ),
-    ).toThrow(/animationKey/);
+    ).toThrow(/itemKey/);
     const shapes = table({
       x: [1],
       y: [2],
@@ -123,20 +123,19 @@ describe("loadSpec", () => {
     });
     expect(
       () =>
-        new PointMark(
-          { type: "point", x: "x", y: "y", animationKey: "id" },
-          shapes as unknown as Table,
-        ),
-    ).toThrow(/point animationKey: field "id" holds geometry values/);
+        new PointMark({ type: "point", x: "x", y: "y", itemKey: "id" }, shapes as unknown as Table),
+    ).toThrow(/point itemKey: field "id" holds geometry values/);
     const columns = { x: [1], y: [2], id: { type: "time" as const, values: [100] } };
     expect(() =>
       loadSpec({
         data: { data: { columns } },
-        marks: [{ type: "point", x: "x", y: "y", animationKey: "id" }],
+        marks: [{ type: "point", x: "x", y: "y", itemKey: "id" }],
       }),
     ).not.toThrow();
-    expect(checkSpec({ marks: [{ type: "line", x: "x", y: "y", animationKey: "id" }] })).toContain(
-      "marks[0].animationKey",
+    // Marks whose items are rows take it; a histogram's items are its bins.
+    expect(checkSpec({ marks: [{ type: "line", x: "x", y: "y", itemKey: "id" }] })).toEqual([]);
+    expect(checkSpec({ marks: [{ type: "histogram", x: "x", itemKey: "id" }] })).toContain(
+      "marks[0].itemKey",
     );
   });
 

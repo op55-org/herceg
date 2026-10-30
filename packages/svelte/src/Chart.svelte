@@ -286,9 +286,11 @@
   }
 
   // The first frame was drawn as the chart was created: `onrender` hears of
-  // it once the handlers have subscribed.
+  // it once the handlers have subscribed, with the revision it drew. One
+  // still waiting (for code it loads) reports itself when drawn.
   $effect(() => {
-    if (current) untrack(() => onrender?.({}));
+    const revision = current?.drawnRevision;
+    if (revision !== undefined) untrack(() => onrender?.({ revision }));
   });
 
   $effect(() => () => {

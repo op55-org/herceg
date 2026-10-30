@@ -36,6 +36,7 @@ import type {
 } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
 import { BandShares, STILL } from "./dodge.ts";
+import type { DrawnMark, PartBuilders } from "./drawn.ts";
 import type { CssColor } from "./encoding.ts";
 import { histogramFormError } from "./histogram-input.ts";
 import { Histogram2DMark, type Histogram2DOptions } from "./histogram2d.ts";
@@ -55,11 +56,13 @@ import {
   type Palette,
   painted,
   requireField,
+  rowBuffer,
   type SelectionDrawing,
   SeriesSplitter,
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
+import { type MarkRows, rowAt, rowCount, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
 
 interface HistogramStyle<S extends Schema> {
@@ -186,7 +189,7 @@ interface Binned {
 
 /** A facet split's counts: each binned axis group's bins and each panel's counts, as of what they were made from. */
 interface PanelCounts {
-  version: number;
+  revision: string;
   zone: TimeZone;
   /** The panels' rows, and the binned axis group of each. */
   rows: readonly Uint32Array[];
@@ -221,11 +224,11 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   /** With `dodge`, each series' share of the bins. */
   readonly #shares: BandShares | undefined;
   readonly #split: SeriesSplitter;
-  /** One chart's bins per time zone (calendar bins depend on it), as of a table version. */
-  readonly #binned = new Map<TimeZone, Binned & { table: Table; version: number }>();
-  /** The series a split histogram lists, as of a table version (see `#present`). */
+  /** One chart's bins per time zone (calendar bins depend on it), as of the mark's rows. */
+  readonly #binned = new Map<TimeZone, Binned & { rows: MarkRows }>();
+  /** The series a split histogram lists, as of the mark's rows (see `#present`). */
   #seriesPresent:
-    | { version: number; sources: { id: string; label: string }[]; codes: number[] }
+    | { rows: MarkRows; sources: { id: string; label: string }[]; codes: number[] }
     | undefined;
   /** Facet splits' counts, by their first panel's rows: charts split rows apart. */
   readonly #panels = new WeakMap<Uint32Array, PanelCounts>();
@@ -236,8 +239,10 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   readonly #bins = new WeakMap<NumericArray, Bins>();
   /** What each series drawn highlighted holds of the selection, for its tooltips. */
   readonly #selected = new WeakMap<Series, Picked>();
+  /** The bin each rectangle of a geometry drawn is (see `partOf`). */
+  readonly #drawnBins = new WeakMap<Geometry, Uint32Array>();
   /** How many rows each bin of a weighted series has, by the series' counts. */
-  readonly #rows = new WeakMap<NumericArray, NumericArray>();
+  readonly #binnedRows = new WeakMap<NumericArray, NumericArray>();
   /**
    * For parts of steps and polygons (a selection's, and the rest of the
    * bars), by their tops: the bins where they have no height, which their
@@ -262,9 +267,23 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     const { bins } = spec;
     if (bins !== undefined) checkBins(bins, "histogram bins");
     if (Array.isArray(bins)) this.#explicit = Float64Array.from(bins);
-    this.#split = new SeriesSplitter(table, undefined, [this.#field], spec.series, spec.label);
+    this.#split = new SeriesSplitter(
+      () => this.rows(),
+      undefined,
+      [this.#field],
+      spec.series,
+      spec.label,
+    );
     this.identity = { field: spec.series, values: [this.#field] };
     if (spec.dodge) this.#shares = new BandShares();
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -496,10 +515,12 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
       const at = items ? frame.doubles(s.key, "at", s.length) : undefined;
       const span = items ? frame.floats(s.key, "span", s.length * 2) : undefined;
       const { edges } = this.#binsOf(s);
+      const drawnBins = rowBuffer(frame, s.key, "bins", s.length);
       let count = 0;
       for (let i = 0; i < s.length; i++) {
         const bar = this.#binBar(s, i, frame);
         if (!bar) continue;
+        drawnBins[count] = i;
         if (at) {
           at[count] = edges[i]!;
           span![count * 2] = bar.root;
@@ -508,7 +529,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
         rects.set(bar.rect, count++ * 4);
       }
       const bars = at && { horizontal: this.#horizontal, at, span: span! };
-      out.push({
+      const geometry: RectGeometry = {
         kind: "rect",
         draw: rectDrawing,
         key: s.key,
@@ -517,9 +538,26 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
         rects,
         count,
         ...(bars && { bars }),
-      });
+      };
+      this.#drawnBins.set(geometry, drawnBins);
+      out.push(geometry);
     }
     return out;
+  }
+
+  /**
+   * Its bars are its bins, each recorded as drawn (a selection's parts
+   * draw some bins only), named by its edges (and, with a series field,
+   * its series' value). Its outlines (`element`) are no bin's.
+   */
+  partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+    const bins = this.#drawnBins.get(geometry);
+    const s = parts.seriesOf(drawn, geometry);
+    if (!bins || !s || !(index < (geometry as RectGeometry).count)) return undefined;
+    const { edges } = this.#binsOf(s);
+    const bin = bins[index]!;
+    const source = this.spec.series === undefined ? [] : [(JSON.parse(s.key) as string[])[1]!];
+    return parts.group(drawn, source, [[edges[bin]!, edges[bin + 1]!]]);
   }
 
   /**
@@ -598,10 +636,10 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     if (known) return known;
     const weights = this.#weights();
     // Without weights, a bin's count is its rows; with them, its rows are counted once.
-    let all = weights ? this.#rows.get(bins.counts) : bins.counts;
+    let all = weights ? this.#binnedRows.get(bins.counts) : bins.counts;
     if (!all) {
       all = this.#inBins(bins, undefined, weights).rows;
-      this.#rows.set(bins.counts, all);
+      this.#binnedRows.set(bins.counts, all);
     }
     const picked = { ...this.#inBins(bins, selected, weights), all };
     byCounts.set(bins.counts, picked);
@@ -998,11 +1036,11 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
    * The series a split histogram lists, as one chart's sources list them
    * (each series value with rows, in the field's order), and each one's
    * series code (0 without a series field): one pass over the codes per
-   * table version, without grouping rows.
+   * revision of the mark's rows, without grouping rows.
    */
   #present(): { sources: { id: string; label: string }[]; codes: number[] } {
-    const { table } = this;
-    if (this.#seriesPresent?.version === table.version) return this.#seriesPresent;
+    const rows = this.rows();
+    if (this.#seriesPresent?.rows === rows) return this.#seriesPresent;
     const field = this.spec.series;
     let present: { sources: { id: string; label: string }[]; codes: number[] };
     if (field === undefined) {
@@ -1011,44 +1049,47 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
         codes: [0],
       };
     } else {
-      const { codes, dictionary } = table.categories(field as never);
+      const { codes, dictionary } = rows.table.categories(field as never);
       const seen = new Uint8Array(dictionary.length);
-      for (let row = 0; row < codes.length; row++) if (codes[row]! >= 0) seen[codes[row]!] = 1;
+      for (let k = 0; k < rowCount(rows); k++) {
+        const code = codes[rowAt(rows, k)]!;
+        if (code >= 0) seen[code] = 1;
+      }
       const found = Array.from(dictionary, (_, code) => code).filter((code) => seen[code]);
       present = {
         sources: found.map((code) => ({ id: dictionary[code]!, label: dictionary[code]! })),
         codes: found,
       };
     }
-    this.#seriesPresent = { version: table.version, ...present };
+    this.#seriesPresent = { rows, ...present };
     return present;
   }
 
-  /** One chart's bins, from all of the field's values, counted again when the table changes. */
+  /** One chart's bins, from all of the field's values the mark reads, counted again when they change. */
   #binsIn(zone: TimeZone): Binned {
-    const { table } = this;
+    const rows = this.rows();
     const cached = this.#binned.get(zone);
-    if (cached?.table === table && cached.version === table.version) return cached;
-    const values = table.numbers(this.#field as never);
-    const edges = this.#edges(finiteRange(values, undefined), zone);
+    if (cached?.rows === rows) return cached;
+    const values = rows.table.numbers(this.#field as never);
+    const edges = this.#edges(finiteRange(values, rows.positions), zone);
     const binned = { edges, centers: centersOf(edges), counted: this.#countSources(edges) };
-    this.#binned.set(zone, { ...binned, table, version: table.version });
+    this.#binned.set(zone, { ...binned, rows });
     return binned;
   }
 
   /**
    * A facet split's bins and counts: each binned axis group's bins from the values of
    * its panels' rows, and each panel's rows counted in its group's bins.
-   * Kept while the table, the panels' rows, their scale groups, and the zone are
+   * Kept while the mark's rows, the panels' rows, their scale groups, and the zone are
    * the same, so redrawing and hiding series count nothing again.
    */
   #panelCounts(rows: readonly Uint32Array[], groupOf: readonly number[], zone: TimeZone) {
-    const { table } = this;
+    const { table, revision } = this.rows();
     const groups = groupOf.join();
     const key = rows[0]!;
     const cached = this.#panels.get(key);
     if (
-      cached?.version === table.version &&
+      cached?.revision === revision &&
       cached.zone === zone &&
       cached.groups === groups &&
       cached.rows.length === rows.length &&
@@ -1072,7 +1113,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
       field === undefined ? 1 : table.categories(field as never).dictionary.length,
     ).fill(-1);
     const counts: PanelCounts = {
-      version: table.version,
+      revision,
       zone,
       rows,
       groups,

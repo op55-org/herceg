@@ -21,11 +21,22 @@ import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { linearTicks, niceDomain } from "../scale/ticks.ts";
-import type { LineGeometry, PolygonGeometry } from "../scene/scene.ts";
+import type { LineGeometry, PolygonGeometry, Rect } from "../scene/scene.ts";
 import type { Clip, ContourSpec, Frozen } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import { contourFormError } from "./contour-input.ts";
 import { bandRings, GridTracer, type ScalarGrid, type Traced } from "./contour-trace.ts";
+import {
+  boxOf,
+  clipBox,
+  clipSegment,
+  cut,
+  type DrawnMark,
+  distanceToStroke,
+  type PickedItem,
+  type PickQuery,
+  pickedHit,
+} from "./drawn.ts";
 import { distinct } from "./heatmap-cells.ts";
 import { keyLegend, rampLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
@@ -46,7 +57,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
-import type { Series } from "./series.ts";
+import { rowOf, type Series } from "./series.ts";
 import { refuseValues } from "./still.ts";
 
 export interface ContourOptions<S extends Schema> {
@@ -550,11 +561,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   geometry(series: readonly Series[], frame: Frame): (PolygonGeometry | LineGeometry)[] {
     refuseValues(frame.keyed, this.spec.type);
     const out: (PolygonGeometry | LineGeometry)[] = [];
-    const { x, y, plot } = frame;
-    const view = {
-      u: [x.invert(plot.x), x.invert(plot.x + plot.width)],
-      v: [y.invert(plot.y + plot.height), y.invert(plot.y)],
-    };
+    const { x, y } = frame;
     // What projecting depends on: an unchanged view (as when colors change)
     // draws what the buffer holds again.
     const inputs = [...x.domain, ...x.range, ...y.domain, ...y.range];
@@ -562,16 +569,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       const contours = this.#contours.get(s.values);
       if (!contours || s.length === 0 || frame.hidden.has(s.key)) continue;
       const project = projector(contours.grid, x, y);
-      // Rings and lines wholly out of view draw nothing there: a ring out of
-      // view changes no fill inside it.
-      const [u0, u1] = gridRange(contours.grid.xs, view.u);
-      const [v0, v1] = gridRange(contours.grid.ys, view.v);
-      const visible = (boxes: Float32Array, cancelled: Uint8Array, r: number) =>
-        !cancelled[r] &&
-        boxes[r * 4 + 2]! >= u0 &&
-        boxes[r * 4]! <= u1 &&
-        boxes[r * 4 + 3]! >= v0 &&
-        boxes[r * 4 + 1]! <= v1;
+      const [u0, u1, v0, v1] = this.#view(contours, frame);
       if (this.#bands) {
         let points = 0;
         let rings = 0;
@@ -579,7 +577,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
           const set = contours.sets[k]!;
           const cancelled = contours.cancelled[k]!;
           for (let r = 0; r < set.areas.length; r++)
-            if (visible(set.boxes, cancelled, r)) {
+            if (inView(set.boxes, cancelled, r, u0, u1, v0, v1)) {
               points += set.starts[r + 1]! - set.starts[r]!;
               rings++;
             }
@@ -598,7 +596,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
             const set = contours.sets[k]!;
             const cancelled = contours.cancelled[k]!;
             for (let r = 0; r < set.areas.length; r++) {
-              if (!visible(set.boxes, cancelled, r)) continue;
+              if (!inView(set.boxes, cancelled, r, u0, u1, v0, v1)) continue;
               starts[ring++] = at;
               for (let p = set.starts[r]!; p < set.starts[r + 1]!; p++) {
                 project(set.points[p * 2]!, set.points[p * 2 + 1]!, coords, at * 2);
@@ -609,7 +607,6 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
           starts[ring] = at;
           projected.set(coords.buffer, { contours, inputs, starts });
         }
-        const opacity = this.spec.fillOpacity ?? 1;
         out.push({
           kind: "polygons",
           draw: polygonsDrawing,
@@ -617,11 +614,9 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
           shapes: [{ coords: coords.subarray(0, at * 2), rings: starts, path: undefined }],
           colors: [s.color],
           colorIndex: Uint32Array.of(0),
-          fillOpacity: opacity,
-          // Opaque bands are outlined in their own color, which covers the
-          // seams antialiasing leaves between neighbors.
+          fillOpacity: this.spec.fillOpacity ?? 1,
           stroke: s.color,
-          strokeWidth: opacity === 1 ? 0.5 : 0,
+          strokeWidth: this.#edgeWidth(frame),
         });
         continue;
       }
@@ -631,8 +626,9 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
         path.reset();
         const point = new Float32Array(2);
         const [set] = contours.sets;
+        const cancelled = contours.cancelled[0]!;
         for (let r = 0; r < set!.areas.length; r++) {
-          if (!visible(set!.boxes, contours.cancelled[0]!, r)) continue;
+          if (!inView(set!.boxes, cancelled, r, u0, u1, v0, v1)) continue;
           path.break();
           for (let p = set!.starts[r]!; p < set!.starts[r + 1]!; p++) {
             project(set!.points[p * 2]!, set!.points[p * 2 + 1]!, point, 0);
@@ -656,10 +652,140 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   }
 
   /**
+   * Its bands and lines are found by `pick`, named by their level's value,
+   * and bounded by their region's outer ring or their line.
+   */
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    return pickedHit(this, drawn, query, {
+      bounds: (s, position, frame) => {
+        const { x, y } = frame;
+        const contours = this.#contours.get(s.values);
+        if (!contours) return undefined;
+        const { boxes } = contours.sets[contours.parts[position * 2]!]!;
+        const r = contours.parts[position * 2 + 1]! * 4;
+        const { xs, ys } = contours.grid;
+        // With half what their edges paint past them (so straight lines have an area).
+        const grow = this.#edgeWidth(frame) / 2;
+        const x0 = x.map(along(xs, boxes[r]!));
+        const y0 = y.map(along(ys, boxes[r + 1]!));
+        const x1 = x.map(along(xs, boxes[r + 2]!));
+        const y1 = y.map(along(ys, boxes[r + 3]!));
+        const ring = boxOf(
+          Math.min(x0, x1) - grow,
+          Math.min(y0, y1) - grow,
+          Math.max(x0, x1) + grow,
+          Math.max(y0, y1) + grow,
+        );
+        return cut(ring, clipBox(this.spec.clip, frame));
+      },
+      group: (s, position) => ({ parts: [], names: [s.values[rowOf(s, position)]!] }),
+      // What clipping keeps, as far as the query reaches: band regions,
+      // and lines' strokes measured from their edges.
+      lookup: (series, px, py, frame) => {
+        const box = clipBox(this.spec.clip, frame);
+        if (this.#bands) return this.#nearestBand(series, px, py, frame, query.slop, box);
+        // Lines of no width paint nothing.
+        return this.#stroke(frame) > 0
+          ? this.#find(series, px, py, frame, query.slop, box)
+          : undefined;
+      },
+    });
+  }
+
+  /**
+   * For picking: the band region nearest a pixel within `reach` of what
+   * `clip` keeps of it: the one holding the clip's point nearest the
+   * pixel, else the one whose edge, cut to the clip, is nearest.
+   */
+  #nearestBand(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    reach: number,
+    clip: Readonly<Rect>,
+  ): Hit | undefined {
+    const qx = Math.min(Math.max(px, clip.x), clip.x + clip.width);
+    const qy = Math.min(Math.max(py, clip.y), clip.y + clip.height);
+    const distance = Math.hypot(px - qx, py - qy);
+    if (!(distance <= reach)) return undefined;
+    // Outside the clip, the band shown at its edge: just inside it, so a
+    // band that only meets the edge is not.
+    const inward = (p: number, q: number, from: number, size: number) =>
+      p === q ? q : q === from ? from + Math.min(INSIDE, size / 2) : q - Math.min(INSIDE, size / 2);
+    const held = this.#find(
+      series,
+      inward(px, qx, clip.x, clip.width),
+      inward(py, qy, clip.y, clip.height),
+      frame,
+      0,
+    );
+    // Only a region geometry draws (its ring in the view).
+    const contours = held && this.#contours.get(held.series.values);
+    const drawn =
+      held &&
+      contours &&
+      ringShown(contours, this.#view(contours, frame))(
+        contours.parts[held.position * 2]!,
+        contours.parts[held.position * 2 + 1]!,
+      );
+    if (!drawn) return this.#find(series, px, py, frame, reach, clip);
+    // A later band's outline may be painted over the region there.
+    const edge = this.#edgeWidth(frame) > 0 && this.#find(series, px, py, frame, distance, clip);
+    const later = edge && series.indexOf(edge.series) > series.indexOf(held.series);
+    return later ? edge : { ...held, distance };
+  }
+
+  /**
+   * The grid range of the frame's view, a grid unit wider: the rings and
+   * lines geometry draws (`inView`; a ring out of view changes no fill
+   * inside it), which picking finds alone.
+   */
+  #view(contours: Contours, { x, y, plot }: Frame): readonly [number, number, number, number] {
+    const [u0, u1] = gridRange(contours.grid.xs, [x.invert(plot.x), x.invert(plot.x + plot.width)]);
+    const [v0, v1] = gridRange(contours.grid.ys, [
+      y.invert(plot.y + plot.height),
+      y.invert(plot.y),
+    ]);
+    return [u0, u1, v0, v1];
+  }
+
+  #stroke(frame: Frame): number {
+    return this.spec.strokeWidth ?? frame.theme.style.line.strokeWidth;
+  }
+
+  /**
+   * How wide what is painted along a band's or line's edges is: opaque
+   * bands' outlines, in their own color, which cover the seams
+   * antialiasing leaves between neighbors; lines' strokes.
+   */
+  #edgeWidth(frame: Frame): number {
+    if (!this.#bands) return this.#stroke(frame);
+    return (this.spec.fillOpacity ?? 1) === 1 ? 0.5 : 0;
+  }
+
+  /**
    * The band region under the pointer, or the line nearest it within a few
    * pixels, there: tooltips follow the pointer along contours.
    */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
+    return this.#find(series, px, py, frame, LINE_REACH + this.#stroke(frame) / 2);
+  }
+
+  /**
+   * `pick`'s lookup: the band region holding a pixel, or the line within
+   * `reach` pixels of its middle. With `clip`, picking's: lines' strokes
+   * and bands' edges within `reach`, measured to what the clip keeps.
+   */
+  #find(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    reach: number,
+    clip?: Readonly<Rect>,
+  ): Hit | undefined {
+    const half = clip ? this.#edgeWidth(frame) / 2 : 0;
     let best: Hit | undefined;
     for (const s of series) {
       const contours = this.#contours.get(s.values);
@@ -668,24 +794,53 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       const u = gridUnit(grid.xs, frame.x.invert(px));
       const v = gridUnit(grid.ys, frame.y.invert(py));
       contours.index ??= new BlockIndex(contours);
-      if (this.#bands) {
+      const { index } = contours;
+      if (this.#bands && !clip) {
         if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
-        const position = contours.index.region(u, v);
+        const position = index.region(u, v);
         if (position >= 0) return { series: s, position, distance: 0, at: [px, py] };
         continue;
       }
       const project = projector(grid, frame.x, frame.y);
-      const reach = LINE_REACH + (this.spec.strokeWidth ?? frame.theme.style.line.strokeWidth) / 2;
-      // How many grid units the reach spans here, to look in the blocks it touches.
+      // How many grid units the reach (to strokes' middles) spans here, to look in the blocks it touches.
+      const look = reach + half;
       const span = Math.max(
-        Math.abs(gridUnit(grid.xs, frame.x.invert(px + reach)) - u),
-        Math.abs(gridUnit(grid.ys, frame.y.invert(py + reach)) - v),
-        Math.abs(gridUnit(grid.xs, frame.x.invert(px - reach)) - u),
-        Math.abs(gridUnit(grid.ys, frame.y.invert(py - reach)) - v),
+        Math.abs(gridUnit(grid.xs, frame.x.invert(px + look)) - u),
+        Math.abs(gridUnit(grid.ys, frame.y.invert(py + look)) - v),
+        Math.abs(gridUnit(grid.xs, frame.x.invert(px - look)) - u),
+        Math.abs(gridUnit(grid.ys, frame.y.invert(py - look)) - v),
       );
-      const near = contours.index.nearestLine(u, v, span, project, px, py, reach);
+      // Bands' edges count where some of the band shows beside them.
+      const inBand =
+        this.#bands && clip
+          ? (x: number, y: number) =>
+              index.region(
+                gridUnit(grid.xs, frame.x.invert(x)),
+                gridUnit(grid.ys, frame.y.invert(y)),
+              ) >= 0
+          : undefined;
+      // Picking finds what geometry drew.
+      const shown = clip && ringShown(contours, this.#view(contours, frame));
+      const near = index.nearestEdge(
+        u,
+        v,
+        span,
+        project,
+        px,
+        py,
+        reach,
+        clip,
+        half,
+        inBand,
+        shown || undefined,
+      );
       if (near && near.distance <= (best?.distance ?? Infinity))
-        best = { series: s, position: near.position, distance: near.distance, at: near.at };
+        best = {
+          series: s,
+          position: this.#bands ? index.regionOf(near.set, near.ring) : near.ring,
+          distance: near.distance,
+          at: near.at,
+        };
     }
     return best;
   }
@@ -1160,11 +1315,13 @@ class BlockIndex {
   }
 
   /**
-   * The line nearest the pixel (px, py) within `reach` pixels, among those
-   * in the blocks within `span` grid units of (u, v): its position, its
-   * distance, and the nearest point on it.
+   * The line or ring nearest the pixel (px, py) within `reach` pixels,
+   * among those in the blocks within `span` grid units of (u, v): its set
+   * and ring, its distance, and the nearest point on it. Without `clip`,
+   * measured to its middle; with it, to what the clip keeps of its stroke
+   * `half` wide either side (of the edge itself, where `half` is 0).
    */
-  nearestLine(
+  nearestEdge(
     u: number,
     v: number,
     span: number,
@@ -1172,14 +1329,18 @@ class BlockIndex {
     px: number,
     py: number,
     reach: number,
-  ): { position: number; distance: number; at: [number, number] } | undefined {
+    clip: Readonly<Rect> | undefined,
+    half: number,
+    inBand?: (x: number, y: number) => boolean,
+    shown?: (set: number, ring: number) => boolean,
+  ): { set: number; ring: number; distance: number; at: [number, number] } | undefined {
     const { sets } = this.#contours;
-    const set = sets[0]!;
     const rows = (this.#starts.length - 1) / this.#columns;
     const reachable = Number.isFinite(span) ? span : 0;
     const [c0, c1] = [blockOf(u - reachable, this.#columns), blockOf(u + reachable, this.#columns)];
     const [b0, b1] = [blockOf(v - reachable, rows), blockOf(v + reachable, rows)];
-    let best: { position: number; distance: number; at: [number, number] } | undefined;
+    let best: { set: number; ring: number; distance: number; at: [number, number] } | undefined;
+    // Rings by set and ring, which blocks they cross list again.
     const seen = new Set<number>();
     const a = new Float32Array(2);
     const b = new Float32Array(2);
@@ -1187,22 +1348,118 @@ class BlockIndex {
       for (let c = c0; c <= c1; c++) {
         const block = row * this.#columns + c;
         for (let e = this.#starts[block]!; e < this.#starts[block + 1]!; e++) {
+          const k = this.#entries[e * 2]!;
           const r = this.#entries[e * 2 + 1]!;
-          if (seen.has(r)) continue;
-          seen.add(r);
+          if (seen.has(k * 2 ** 32 + r)) continue;
+          seen.add(k * 2 ** 32 + r);
+          if (shown && !shown(k, r)) continue;
+          const set = sets[k]!;
           for (let p = set.starts[r]!; p + 1 < set.starts[r + 1]!; p++) {
             project(set.points[p * 2]!, set.points[p * 2 + 1]!, a, 0);
             project(set.points[p * 2 + 2]!, set.points[p * 2 + 3]!, b, 0);
-            const [qx, qy] = nearestOnSegment(a[0]!, a[1]!, b[0]!, b[1]!, px, py);
-            const distance = Math.hypot(qx - px, qy - py);
+            const kept =
+              clip && half === 0
+                ? clipSegment(a[0]!, a[1]!, b[0]!, b[1]!, clip)
+                : ([a[0]!, a[1]!, b[0]!, b[1]!] as const);
+            if (!kept) continue;
+            // A band's edge bounds what it paints only where the clip keeps
+            // some of the band beside it: not a point, nor a side of the clip
+            // with the band outside. An outline paints on both sides of it.
+            if (clip && inBand && half === 0 && !bounding(kept, clip, inBand)) continue;
+            const [qx, qy] = nearestOnSegment(kept[0], kept[1], kept[2], kept[3], px, py);
+            const distance =
+              clip && half > 0
+                ? distanceToStroke(kept[0], kept[1], kept[2], kept[3], half, clip, px, py)
+                : Math.hypot(qx - px, qy - py);
             if (distance <= reach && distance < (best?.distance ?? Infinity))
-              best = { position: r, distance, at: [qx, qy] };
+              best = { set: k, ring: r, distance, at: [qx, qy] };
           }
         }
       }
     return best;
   }
+
+  /**
+   * The band region ring `r` of set `k` bounds: its own, or around a hole,
+   * the smallest region's ring around it (rings do not cross).
+   */
+  regionOf(k: number, r: number): number {
+    const { sets, positions } = this.#contours;
+    if (positions[k]![r]! >= 0) return positions[k]![r]!;
+    const hole = sets[k]!;
+    const u = hole.points[hole.starts[r]! * 2]!;
+    const v = hole.points[hole.starts[r]! * 2 + 1]!;
+    let best = -1;
+    let smallest = Infinity;
+    sets.forEach((set, j) => {
+      const box = set.boxes;
+      for (let o = 0; o < set.areas.length; o++) {
+        const position = positions[j]![o]!;
+        const area = Math.abs(set.areas[o]!);
+        if (position < 0 || !(area < smallest)) continue;
+        if (u < box[o * 4]! || u > box[o * 4 + 2]! || v < box[o * 4 + 1]! || v > box[o * 4 + 3]!)
+          continue;
+        if (contains(set, o, u, v)) [best, smallest] = [position, area];
+      }
+    });
+    return best;
+  }
 }
+
+/**
+ * Whether a band edge's piece the clip keeps bounds band inside it: a
+ * piece of some length, and along a side of the clip, the band just inside
+ * it (`inBand` at its middle, `INSIDE` in).
+ */
+function bounding(
+  [x0, y0, x1, y1]: readonly number[],
+  clip: Readonly<Rect>,
+  inBand: (x: number, y: number) => boolean,
+): boolean {
+  if (!(Math.hypot(x1! - x0!, y1! - y0!) > 1e-9)) return false;
+  const [mx, my] = [(x0! + x1!) / 2, (y0! + y1!) / 2];
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  const right = clip.x + clip.width;
+  const bottom = clip.y + clip.height;
+  if (near(x0!, clip.x) && near(x1!, clip.x)) return inBand(mx + INSIDE, my);
+  if (near(x0!, right) && near(x1!, right)) return inBand(mx - INSIDE, my);
+  if (near(y0!, clip.y) && near(y1!, clip.y)) return inBand(mx, my + INSIDE);
+  if (near(y0!, bottom) && near(y1!, bottom)) return inBand(mx, my - INSIDE);
+  return true;
+}
+
+/**
+ * Whether ring `r` of a set (its `boxes`, of which `cancelled` cancels
+ * some) is not cancelled and comes within a grid range (see `#view`).
+ */
+function inView(
+  boxes: Float32Array,
+  cancelled: Uint8Array,
+  r: number,
+  u0: number,
+  u1: number,
+  v0: number,
+  v1: number,
+): boolean {
+  return (
+    !cancelled[r] &&
+    boxes[r * 4 + 2]! >= u0 &&
+    boxes[r * 4]! <= u1 &&
+    boxes[r * 4 + 3]! >= v0 &&
+    boxes[r * 4 + 1]! <= v1
+  );
+}
+
+/** Whether geometry draws ring `r` of set `k` in a grid range (`view`). */
+function ringShown(
+  contours: Contours,
+  [u0, u1, v0, v1]: readonly [number, number, number, number],
+): (k: number, r: number) => boolean {
+  return (k, r) => inView(contours.sets[k]!.boxes, contours.cancelled[k]!, r, u0, u1, v0, v1);
+}
+
+/** How far inside the clip a band is looked for where its edge or the pointer is on the clip's side: a thousandth of a pixel. */
+const INSIDE = 1e-3;
 
 /** The block of `size` blocks holding grid unit `u`, clamped to them. */
 function blockOf(u: number, size: number): number {

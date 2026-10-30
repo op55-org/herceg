@@ -11,6 +11,7 @@ import type { clearDomain } from "../model/clearance.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import { keyPrefix } from "../model/identity.ts";
 import type { MarkSeries } from "../model/inspect.ts";
+import type { LocalGroup } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
 import type { Nearest } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -19,15 +20,11 @@ import type { Geometry, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
 import type { ContentWriter } from "./features/content.ts";
 import type { RowBindings } from "./row-bindings.ts";
-import {
-  isSortedSubset,
-  rowsByCode,
-  type Series,
-  type SeriesStream,
-  TableCache,
-} from "./series.ts";
+import { type MarkRows, rowAt, rowCount } from "./rows.ts";
+import { isSortedSubset, rowsByCode, type Series, type SeriesStream } from "./series.ts";
 import type { SplitRows } from "./split.ts";
 
 /**
@@ -204,11 +201,6 @@ export interface Frame {
    */
   keyed?: boolean;
   /**
-   * The scene writes titles (render/titles.ts): bars and points say which
-   * table row each item draws (`rows`).
-   */
-  attributed?: boolean | undefined;
-  /**
    * With a selection highlighted, which of `table`'s rows it holds, 1 each:
    * drawn over the others (model/highlight.ts), so that of points equally
    * near, picking takes those.
@@ -225,6 +217,21 @@ export interface Frame {
   doubles(seriesKey: string, stage: string, length: number): Float64Array;
   /** A byte array of at least `length` items, reused across frames. */
   bytes(seriesKey: string, stage: string, length: number): Uint8ClampedArray<ArrayBuffer>;
+}
+
+/**
+ * A buffer of at least `length` table rows for series `seriesKey`'s
+ * `stage`, reused across frames: its pooled floats, read as 32-bit
+ * integers.
+ */
+export function rowBuffer(
+  frame: Frame,
+  seriesKey: string,
+  stage: string,
+  length: number,
+): Uint32Array {
+  const floats = frame.floats(seriesKey, stage, length);
+  return new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
 }
 
 /** What a mark's summary sentence is written with. */
@@ -352,6 +359,11 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /** The view of `table` whose rows the mark shows, when it shows only some, in its order. */
   readonly view?: RowView | undefined;
   /**
+   * For marks drawing series of a table: the rows they read now, through
+   * which every read of the table goes (marks/rows.ts).
+   */
+  rows?(): MarkRows;
+  /**
    * Kind of the field on a position channel. "category" puts the axis on a
    * band scale; "time" makes it a time axis.
    */
@@ -445,6 +457,27 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * plot groups) rather than being its rows, so inspections name no row.
    */
   readonly summarizes?: boolean;
+  /**
+   * For marks naming items without `itemKey` by their position (bars): the
+   * field of their positions, whose value with their series names each
+   * (model/items.ts).
+   */
+  readonly itemPosition?: string | undefined;
+  /**
+   * Whether one row draws an item per value field: a series of each field
+   * (a line, area, or bar of several fields), which item keys name
+   * (model/items.ts). Error bars and range areas, whose fields bound one
+   * item, are not wide.
+   */
+  readonly wide?: boolean;
+  /**
+   * For marks whose items aggregate rows (bins, boxes, cells, tree nodes):
+   * what the item keyed `key` groups by on the mark's table (its position's
+   * category or interval, its series' value, its facet's), for provenance
+   * and for the rows the key names (model/items.ts); undefined for a key
+   * of none of its items.
+   */
+  groupsOf?(key: string): readonly LocalGroup[] | undefined;
   /**
    * Resolves series for the current data. `key` prefixes series keys,
    * `palette` returns the color for a series key, `hidden` holds keys of
@@ -598,6 +631,25 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * of other facet panels are the caller's to leave out.
    */
   summarized?(series: Series, position: number): (row: number) => boolean;
+  /**
+   * What primitive `index` of `geometry`, which the mark made and `drawn`
+   * paints (itself or as copies), stands for, for geometry that does not
+   * say it itself (bars and points record their rows): an aggregate's
+   * group, an annotation's row, built with `parts` (see drawn-parts.ts).
+   * Undefined for primitives of no item.
+   */
+  partOf?(
+    drawn: DrawnMark,
+    geometry: Geometry,
+    index: number,
+    parts: PartBuilders,
+  ): DrawnPart | undefined;
+  /**
+   * The topmost item at `query`, for marks whose own lookup finds it better
+   * than geometry by kind (cells, boxes, candles; see `pickedHit`). A picker
+   * tests other marks' geometry and asks `partOf`.
+   */
+  pickItem?(drawn: DrawnMark, query: PickQuery): PickedItem | undefined;
   /**
    * For marks that pair rows of their series (stacks of a series field):
    * the position of `s` to read beside the point of `anchor` at
@@ -808,6 +860,30 @@ export function requireField(
 
 export const NUMERIC: readonly FieldKind[] = ["number", "time"];
 export const CATEGORY: readonly FieldKind[] = ["category"];
+const ITEM_KEYS: readonly FieldKind[] = ["number", "time", "category"];
+
+/** Checks a `type` mark's `itemKey`, which names each row's item: a category, number, or time field. */
+export function checkItemKey(table: Table, field: string | undefined, type: string): void {
+  if (field !== undefined) requireField(table, field, ITEM_KEYS, `${type} itemKey`);
+}
+
+/**
+ * `checkItemKey` for marks whose data is optional (annotations, custom
+ * marks): without data, there are no rows to name.
+ */
+export function checkOptionalItemKey(
+  table: Table | undefined,
+  field: string | undefined,
+  type: string,
+): void {
+  if (table) checkItemKey(table, field, type);
+  else if (field !== undefined)
+    throw new ChartError({
+      code: "invalid-option",
+      path: "itemKey",
+      message: `${type} itemKey: names the rows of the mark's data; give it data, or drop itemKey`,
+    });
+}
 
 /** One y column per series before colors and keys are assigned. */
 export interface SeriesSource {
@@ -914,20 +990,17 @@ let splitRows: Promise<typeof import("./split.ts")> | undefined;
 let split: typeof import("./split.ts") | undefined;
 
 /**
- * Splits a table into series sources: one per y field, or one per category of
- * the `series` field. Cached until the table changes. Without an x field (or
- * with a categorical one) sources are reported unsorted.
+ * Splits a mark's rows into series sources: one per y field, or one per
+ * category of the `series` field. Cached until the rows change. Without
+ * an x field (or with a categorical one) sources are reported unsorted.
  */
 export class SeriesSplitter {
-  readonly #table: Table<Schema>;
+  readonly #rows: () => MarkRows;
   readonly #xField: string | undefined;
   readonly yFields: readonly string[];
   readonly #seriesField: string | undefined;
   readonly #label: string | undefined;
-  /** The rows to split, when only a view's rows show. */
-  readonly #view: RowView | undefined;
-  #cache = new TableCache<SeriesSource[]>();
-  #revision = -1;
+  #cache: { rows: MarkRows; sources: SeriesSource[] } | undefined;
   /**
    * A whole table's rows by the series field, kept current as it streams;
    * until its code loads, rows are grouped again each change.
@@ -936,15 +1009,13 @@ export class SeriesSplitter {
   #loading = false;
 
   constructor(
-    table: Table<Schema>,
+    rows: () => MarkRows,
     xField: string | undefined,
     yFields: readonly string[],
     seriesField: string | undefined,
     label: string | undefined,
-    view?: RowView,
   ) {
-    this.#table = table;
-    this.#view = view;
+    this.#rows = rows;
     this.#xField = xField;
     this.yFields = yFields;
     this.#seriesField = seriesField;
@@ -953,66 +1024,60 @@ export class SeriesSplitter {
   }
 
   sources(): SeriesSource[] {
-    // A view changes what shows without the table changing.
-    const revision = this.#view?.revision ?? -1;
-    if (revision !== this.#revision) {
-      this.#cache = new TableCache();
-      this.#revision = revision;
+    const rows = this.#rows();
+    if (this.#cache?.rows !== rows) this.#cache = { rows, sources: this.#split(rows) };
+    return this.#cache.sources;
+  }
+
+  #split({ table, positions: shown }: MarkRows): SeriesSource[] {
+    const xField = this.#xField;
+    const field = this.#seriesField;
+    if (field === undefined) {
+      const x = xField === undefined ? undefined : table.numbers(xField as never);
+      const sorted =
+        x !== undefined && (shown ? isSortedSubset(x, shown) : table.isSorted(xField as never));
+      return this.yFields.map((y) => ({
+        id: y,
+        label: this.yFields.length === 1 ? (this.#label ?? y) : y,
+        y,
+        rows: shown,
+        sorted,
+      }));
     }
-    return this.#cache.get(this.#table, () => {
-      const xField = this.#xField;
-      const field = this.#seriesField;
-      // A copy of a view's positions: the view rewrites its own when anyone
-      // reads it after a change, while this scene's series and picks live on.
-      const shown = this.#view?.read().indices?.slice();
-      if (field === undefined) {
-        const x = xField === undefined ? undefined : this.#table.numbers(xField as never);
-        const sorted =
-          x !== undefined &&
-          (shown ? isSortedSubset(x, shown) : this.#table.isSorted(xField as never));
-        return this.yFields.map((y) => ({
-          id: y,
-          label: this.yFields.length === 1 ? (this.#label ?? y) : y,
-          y,
-          rows: shown,
-          sorted,
-        }));
-      }
-      if (!shown && split) this.#groups ??= new split.SplitRows(this.#table, field, xField);
-      if (!shown && this.#groups) {
-        return this.#groups.groups().map(({ name, rows, sorted, stream }) => ({
-          id: name,
-          label: name,
-          y: this.yFields[0]!,
-          rows,
-          sorted,
-          stream,
-        }));
-      }
-      if (!shown && !this.#loading) {
-        this.#loading = true;
-        splitRows ??= import("./split.ts");
-        splitRows.then(
-          (loaded) => {
-            split = loaded;
-            // The next call groups through it, though the table may not have changed.
-            this.#cache = new TableCache();
-          },
-          // Without it, rows are grouped again each change, as before it loaded.
-          () => {},
-        );
-      }
-      const x = xField === undefined ? undefined : this.#table.numbers(xField as never);
-      const { codes, dictionary } = this.#table.categories(field as never);
-      const groups = rowsByCode(codes, dictionary.length, shown);
-      // Categories with no remaining rows (for example after a rolling
-      // window moved past them) produce no series.
-      return dictionary.flatMap((name, code) => {
-        const rows = groups[code]!;
-        if (rows.length === 0) return [];
-        const sorted = x !== undefined && isSortedSubset(x, rows);
-        return [{ id: name, label: name, y: this.yFields[0]!, rows, sorted }];
-      });
+    if (!shown && split) this.#groups ??= new split.SplitRows(table, field, xField);
+    if (!shown && this.#groups) {
+      return this.#groups.groups().map(({ name, rows, sorted, stream }) => ({
+        id: name,
+        label: name,
+        y: this.yFields[0]!,
+        rows,
+        sorted,
+        stream,
+      }));
+    }
+    if (!shown && !this.#loading) {
+      this.#loading = true;
+      splitRows ??= import("./split.ts");
+      splitRows.then(
+        (loaded) => {
+          split = loaded;
+          // The next call groups through it, though the rows may not have changed.
+          this.#cache = undefined;
+        },
+        // Without it, rows are grouped again each change, as before it loaded.
+        () => {},
+      );
+    }
+    const x = xField === undefined ? undefined : table.numbers(xField as never);
+    const { codes, dictionary } = table.categories(field as never);
+    const groups = rowsByCode(codes, dictionary.length, shown);
+    // Categories with no remaining rows (for example after a rolling
+    // window moved past them) produce no series.
+    return dictionary.flatMap((name, code) => {
+      const rows = groups[code]!;
+      if (rows.length === 0) return [];
+      const sorted = x !== undefined && isSortedSubset(x, rows);
+      return [{ id: name, label: name, y: this.yFields[0]!, rows, sorted }];
     });
   }
 }
@@ -1069,44 +1134,54 @@ interface Ordinal extends BandList {
   own: Int32Array;
 }
 
-const ordinals = new WeakMap<Table, Map<string, { version: number; ordinal: Ordinal }>>();
+const ordinals = new WeakMap<object, Map<string, { revision: string; ordinal: Ordinal }>>();
 
-/** An ordinal of a table, cached under `key` per table version. */
-function cachedOrdinal(table: Table, key: string, compute: () => Ordinal): Ordinal {
-  let byField = ordinals.get(table);
+/**
+ * What caches of bands are kept by: a table, for every row of it, which marks
+ * reading it share; else the positions, copies of their own.
+ */
+function rowsKey(rows: MarkRows): object {
+  return rows.positions ?? rows.table;
+}
+
+/** An ordinal of a mark's rows, cached under `key` per revision of them. */
+function cachedOrdinal(rows: MarkRows, key: string, compute: () => Ordinal): Ordinal {
+  let byField = ordinals.get(rowsKey(rows));
   if (!byField) {
     byField = new Map();
-    ordinals.set(table, byField);
+    ordinals.set(rowsKey(rows), byField);
   }
   const cached = byField.get(key);
-  if (cached && cached.version === table.version) return cached.ordinal;
+  if (cached && cached.revision === rows.revision) return cached.ordinal;
   const result = compute();
-  byField.set(key, { version: table.version, ordinal: result });
+  byField.set(key, { revision: rows.revision, ordinal: result });
   return result;
 }
 
 /**
- * Bands for a field: category fields give their categories that occur in the
- * live rows (in dictionary order); number and time fields give their distinct
- * values in ascending order, labeled for display. Cached per table version.
+ * Bands for a field: category fields give their categories that occur in
+ * the mark's rows (in dictionary order); number and time fields give their
+ * distinct values in ascending order, labeled for display. Cached per
+ * revision of the rows.
  */
-function ordinal(table: Table, field: string, context: BandContext): Ordinal {
-  if (table.kind(field) === "category") return categoryBandsOf(table, field);
-  return cachedOrdinal(table, `${field}|${context.zone}|${context.locale}`, () =>
-    valueOrdinal(table, field, context),
+function ordinal(rows: MarkRows, field: string, context: BandContext): Ordinal {
+  if (rows.table.kind(field) === "category") return categoryBandsOf(rows, field);
+  return cachedOrdinal(rows, `${field}|${context.zone}|${context.locale}`, () =>
+    valueOrdinal(rows, field, context),
   );
 }
 
 /** A category field's bands, which no zone or locale labels. */
-function categoryBandsOf(table: Table, field: string): Ordinal {
-  return cachedOrdinal(table, field, () => categoryOrdinal(table, field));
+function categoryBandsOf(rows: MarkRows, field: string): Ordinal {
+  return cachedOrdinal(rows, field, () => categoryOrdinal(rows, field));
 }
 
-function categoryOrdinal(table: Table, field: string): Ordinal {
-  const { codes, dictionary } = table.categories(field as never);
+function categoryOrdinal(rows: MarkRows, field: string): Ordinal {
+  const { codes, dictionary } = rows.table.categories(field as never);
   const band = new Int32Array(dictionary.length).fill(-1);
-  for (let i = 0; i < codes.length; i++) {
-    const code = codes[i]!;
+  const count = rowCount(rows);
+  for (let k = 0; k < count; k++) {
+    const code = codes[rowAt(rows, k)]!;
     if (code >= 0) band[code] = 0;
   }
   const labels: string[] = [];
@@ -1121,18 +1196,17 @@ function categoryOrdinal(table: Table, field: string): Ordinal {
   return { keys: labels.map((label) => `c:${label}`), labels, own };
 }
 
-function valueOrdinal(table: Table, field: string, context: BandContext): Ordinal {
-  const values = table.numbers(field as never);
+function valueOrdinal(rows: MarkRows, field: string, context: BandContext): Ordinal {
+  const values = rows.table.numbers(field as never);
   // Number distinct values as they appear, then renumber them in ascending
   // order: grids have far fewer distinct values than rows.
   const ids = new Map<number, number>();
-  const own = new Int32Array(values.length);
-  for (let i = 0; i < values.length; i++) {
+  const own = new Int32Array(values.length).fill(-1);
+  const count = rowCount(rows);
+  for (let k = 0; k < count; k++) {
+    const i = rowAt(rows, k);
     const v = values[i]!;
-    if (!Number.isFinite(v)) {
-      own[i] = -1;
-      continue;
-    }
+    if (!Number.isFinite(v)) continue;
     let id = ids.get(v);
     if (id === undefined) {
       id = ids.size;
@@ -1146,7 +1220,7 @@ function valueOrdinal(table: Table, field: string, context: BandContext): Ordina
   for (let i = 0; i < own.length; i++) if (own[i]! >= 0) own[i] = rank[own[i]!]!;
   return {
     keys: Array.from(unique, (v) => `n:${v}`),
-    labels: valueLabels(unique, table.kind(field) === "time", context),
+    labels: valueLabels(unique, rows.table.kind(field) === "time", context),
     own,
   };
 }
@@ -1166,65 +1240,69 @@ export function numericBands(list: BandList): boolean {
   return list.keys.length > 0 && list.keys.every((key) => key.startsWith("n:"));
 }
 
-/** The bands a field contributes to an axis. */
-export function fieldBands(table: Table, field: string, context: BandContext): BandList {
-  return ordinal(table, field, context);
+/** The bands a field of a mark's rows contributes to an axis. */
+export function fieldBands(rows: MarkRows, field: string, context: BandContext): BandList {
+  return ordinal(rows, field, context);
 }
 
 /**
  * The bands a category field contributes to an axis, for marks that band
  * categories only (lines and areas), which need no labels of numbers or times.
  */
-export function categoryBands(table: Table, field: string): BandList {
-  return categoryBandsOf(table, field);
+export function categoryBands(rows: MarkRows, field: string): BandList {
+  return categoryBandsOf(rows, field);
 }
 
 // Keyed weakly by the axis' key list (one per chart while its bands are
 // unchanged), so charts sharing a table do not evict each other's mappings.
 const indexCache = new WeakMap<
   readonly string[],
-  WeakMap<Table, Map<string, { version: number; indices: Int32Array }>>
+  WeakMap<object, Map<string, { revision: string; indices: Int32Array }>>
 >();
 
 /**
  * Each row's band index on an axis whose band keys are `keys` (which may
- * include bands from other marks). Cached per table version and key list;
- * the chart keeps key lists stable while their contents do not change. The
- * array is shared with other callers and must not be modified.
+ * include bands from other marks). Cached per revision of the rows and key
+ * list; the chart keeps key lists stable while their contents do not
+ * change. The array is shared with other callers and must not be modified.
  */
 export function bandIndices(
-  table: Table,
+  rows: MarkRows,
   field: string,
   keys: readonly string[],
   context: BandContext,
 ): Int32Array {
-  return indicesOf(table, field, keys, () => ordinal(table, field, context));
+  return indicesOf(rows, field, keys, () => ordinal(rows, field, context));
 }
 
 /** `bandIndices` of a category field (see `categoryBands`). */
-export function categoryIndices(table: Table, field: string, keys: readonly string[]): Int32Array {
-  return indicesOf(table, field, keys, () => categoryBandsOf(table, field));
+export function categoryIndices(
+  rows: MarkRows,
+  field: string,
+  keys: readonly string[],
+): Int32Array {
+  return indicesOf(rows, field, keys, () => categoryBandsOf(rows, field));
 }
 
 /** Each row's band index on an axis of `keys`, from the field's own bands (`own`). */
 function indicesOf(
-  table: Table,
+  rows: MarkRows,
   field: string,
   keys: readonly string[],
   ownBands: () => Ordinal,
 ): Int32Array {
-  let byTable = indexCache.get(keys);
-  if (!byTable) {
-    byTable = new WeakMap();
-    indexCache.set(keys, byTable);
+  let byRows = indexCache.get(keys);
+  if (!byRows) {
+    byRows = new WeakMap();
+    indexCache.set(keys, byRows);
   }
-  let byField = byTable.get(table);
+  let byField = byRows.get(rowsKey(rows));
   if (!byField) {
     byField = new Map();
-    byTable.set(table, byField);
+    byRows.set(rowsKey(rows), byField);
   }
   const cached = byField.get(field);
-  if (cached && cached.version === table.version) return cached.indices;
+  if (cached && cached.revision === rows.revision) return cached.indices;
   const own = ownBands();
   const position = new Map(keys.map((key, index) => [key, index]));
   const remap = Int32Array.from(own.keys, (key) => position.get(key) ?? -1);
@@ -1236,7 +1314,7 @@ function indicesOf(
     for (let i = 0; i < indices.length; i++)
       indices[i] = own.own[i]! >= 0 ? remap[own.own[i]!]! : -1;
   }
-  byField.set(field, { version: table.version, indices });
+  byField.set(field, { revision: rows.revision, indices });
   return indices;
 }
 

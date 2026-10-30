@@ -3,16 +3,26 @@
 // who use neither: shown while the pointer is over the chart or focus is in
 // it, and focusable while hidden, which shows it.
 
+import type { ChangeCause } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
 
 /** A circling arrow: back to the view the chart starts with. */
 export const RESET_GLYPH = "M4.5 9A3.5 3.5 0 1 0 6 5.2M4 3v3h3";
 
+/** What pressed a control's button: the pointer, or a key. */
+export type Press = Extract<ChangeCause, "pointer" | "keyboard">;
+
+/** What pressed a button, from its click's count: a key clicks with none. */
+export function pressOf(detail: number): Press {
+  return detail === 0 ? "keyboard" : "pointer";
+}
+
 export interface ToolButton {
   label: string;
   /** SVG path data, drawn in a 16 x 16 box with round caps. */
   glyph: string;
-  act(): void;
+  /** Acts on a press: of the pointer, or of a key (a click with no count). */
+  act(cause: Press): void;
   /** For toggles: whether the button is pressed now (`aria-pressed`). */
   pressed?(): boolean;
   /** Whether the button is left out now, for buttons of options that may be off. */
@@ -41,8 +51,8 @@ export class Toolbar {
       button.title = tool.label;
       button.setAttribute("aria-label", tool.label);
       button.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="display:block"><path d="${tool.glyph}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-      button.addEventListener("click", () => {
-        tool.act();
+      button.addEventListener("click", ({ detail }) => {
+        tool.act(pressOf(detail));
         this.refresh();
       });
       return { button, tool };

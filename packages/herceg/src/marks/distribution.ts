@@ -12,10 +12,21 @@ import {
   table,
 } from "../data/table.ts";
 import { clearDomain } from "../model/clearance.ts";
-import type { Geometry } from "../scene/scene.ts";
+import type { Geometry, Rect } from "../scene/scene.ts";
 import type { BoxenSpec, BoxPlotSpec, Clip, Frozen, ViolinSpec } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
+import {
+  boxOf,
+  clipBox,
+  cut,
+  type DrawnMark,
+  distanceToCut,
+  type PickedItem,
+  type PickQuery,
+  paintedLater,
+  pickedHit,
+} from "./drawn.ts";
 import type { CssColor } from "./encoding.ts";
 import {
   type AxisFormat,
@@ -42,6 +53,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
+import { type MarkRows, rowAt, rowCount, rowsOf } from "./rows.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
 
 /** Options box plots and violins share. */
@@ -107,7 +119,7 @@ export interface Summary<G> {
   first: Uint32Array;
   /** Summary rows by series value. */
   split: SeriesSplitter;
-  /** The table rows it summarizes, ascending (a facet panel's); every row when undefined. */
+  /** The table rows it summarizes (a facet panel's, or the mark's when it reads some); every row when undefined. */
   rows: Uint32Array | undefined;
   /**
    * For the summary of a selection's rows, drawn over the whole's: the
@@ -165,12 +177,12 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   protected abstract readonly noun: readonly [string, string];
   /** The fraction of its series' room in a slot a shape is wide. */
   protected abstract readonly width: number;
-  /** One chart's summary of all rows, as of a table version. */
-  #whole: { version: number; summary: Summary<G> } | undefined;
+  /** One chart's summary of all the mark's rows, as of their revision. */
+  #whole: { rows: MarkRows; summary: Summary<G> } | undefined;
   /** Facet panels' summaries, by their first panel's rows: charts split rows apart. */
   readonly #panels = new WeakMap<
     Uint32Array,
-    { version: number; rows: readonly Uint32Array[]; summaries: Summary<G>[] }
+    { revision: string; rows: readonly Uint32Array[]; summaries: Summary<G>[] }
   >();
   /**
    * The summary each series reads, by its values (the summary's medians),
@@ -182,8 +194,8 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
    * table's rows they were read from: charts sharing the mark may have others.
    */
   readonly #positions = new WeakMap<Summary<G>, WeakMap<Int32Array, Int32Array>>();
-  /** The series one chart's summary has, in its order, as of a table version. */
-  #roster: { version: number; ids: string[] } | undefined;
+  /** The series one chart's summary has, in its order, as of the mark's rows. */
+  #roster: { rows: MarkRows; ids: string[] } | undefined;
   /** Each drawn series' slot in its bands, as geometry last placed it. */
   readonly #shares = new BandShares();
   /** Each summary's rows in order, made the first time a selection of them is drawn. */
@@ -221,11 +233,15 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   /** What to keep of a group's ascending, finite values besides `stats`. */
   protected abstract describeGroup(sorted: Float64Array, stats: BoxStats): G;
 
-  /** Calls `add` with every value drawn for a row of `summary`, for the value axis' extent. */
+  /**
+   * Calls `add` with every value drawn for a row of `summary`, for the
+   * value axis' extent and picking, and with both ends of a piece drawn
+   * only where the axis places both (a boxen level).
+   */
   protected abstract drawnValues(
     summary: Summary<G>,
     row: number,
-    add: (value: number) => void,
+    add: (...values: number[]) => void,
   ): void;
 
   abstract geometry(series: readonly Series[], frame: Frame): Geometry[];
@@ -246,10 +262,11 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
     return series;
   }
 
-  /** One chart's summary, of every row. */
+  /** One chart's summary, of every row the mark reads. */
   #wholeSummary(): Summary<G> {
-    const { version } = this.table;
-    if (this.#whole?.version !== version) this.#whole = { version, summary: this.summarizeRows() };
+    const rows = this.rows();
+    if (this.#whole?.rows !== rows)
+      this.#whole = { rows, summary: this.summarizeRows(rows.positions) };
     return this.#whole.summary;
   }
 
@@ -325,6 +342,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
       ),
       ...columns,
     }) as unknown as Table;
+    const summaryRows = rowsOf(summary, undefined);
     const built: Summary<G> = {
       table: summary,
       stats: Object.fromEntries(
@@ -333,7 +351,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
       groups,
       first,
       split: new SeriesSplitter(
-        summary,
+        () => summaryRows,
         undefined,
         ["median"],
         this.spec.series !== undefined ? "group" : undefined,
@@ -359,12 +377,32 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
       if (s.length === 0) return s;
       const part = this.#partOf(this.summaryOf(s), drawing.selected);
       this.#selected.set(s, part);
-      const median = part.stats.median;
-      return this.horizontal
-        ? { ...s, x: median, values: median }
-        : { ...s, y: median, values: median };
+      return this.#partSeries(s, part);
     });
     return [...drawing.dimmed(series), ...drawing.lit(parts)];
+  }
+
+  /**
+   * A group's series and, while a highlight draws over each group the shape
+   * of the values of it the selection holds (see `selectedGeometry`), the
+   * series drawing those.
+   */
+  #layers(s: Series, frame: Frame): Series[] {
+    const part = frame.highlighted?.(this.table) && this.#selected.get(s);
+    return part ? [s, this.#partSeries(s, part)] : [s];
+  }
+
+  /**
+   * The series drawing `part`, the summary of a selection's values of
+   * `s`'s groups: of `s`'s whole, as the highlight draws it, so it keeps
+   * its slot among series side by side.
+   */
+  #partSeries(s: Series, part: Summary<G>): Series {
+    const median = part.stats.median;
+    const whole = s.whole ?? s;
+    return this.horizontal
+      ? { ...s, x: median, values: median, whole }
+      : { ...s, y: median, values: median, whole };
   }
 
   /** What to keep of the selected values of a group, ascending, whose whole is `whole` of `n` values. */
@@ -490,17 +528,17 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
    * and the panels' rows are the same, so redrawing sorts nothing again.
    */
   #panelSummaries(rows: readonly Uint32Array[]): Summary<G>[] {
-    const { version } = this.table;
+    const { revision } = this.rows();
     const key = rows[0]!;
     const cached = this.#panels.get(key);
     if (
-      cached?.version === version &&
+      cached?.revision === revision &&
       cached.rows.length === rows.length &&
       cached.rows.every((r, p) => r === rows[p])
     )
       return cached.summaries;
     const summaries = rows.map((panel) => this.summarizeRows(panel));
-    this.#panels.set(key, { version, rows, summaries });
+    this.#panels.set(key, { revision, rows, summaries });
     return summaries;
   }
 
@@ -526,23 +564,25 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   /** Each table row's band index on the chart's category axis. */
   #bands(bands: Bands, context: BandContext): Int32Array {
     const keys = (this.horizontal ? bands.y : bands.x)?.keys ?? NO_KEYS;
-    return bandIndices(this.table, this.category, keys, context);
+    return bandIndices(this.rows(), this.category, keys, context);
   }
 
   /**
    * The series values one chart's summary has groups of, in its order: by
    * the first category each has values in, as its summary lists them. A
-   * pass over the rows per table version, with nothing summarized.
+   * pass over the mark's rows per revision, with nothing summarized.
    */
   protected rosterIds(): readonly string[] {
-    const source = this.table;
-    if (this.#roster?.version === source.version) return this.#roster.ids;
+    const rows = this.rows();
+    if (this.#roster?.rows === rows) return this.#roster.ids;
     let ids = ["median"];
     if (this.spec.series !== undefined) {
+      const source = rows.table;
       const categories = source.categories(this.category as never).codes;
       const { codes, dictionary } = source.categories(this.spec.series as never);
       const first = new Float64Array(dictionary.length).fill(Infinity);
-      for (let row = 0; row < source.length; row++) {
+      for (let k = 0; k < rowCount(rows); k++) {
+        const row = rowAt(rows, k);
         const c = categories[row]!;
         const s = codes[row]!;
         if (c >= 0 && s >= 0 && this.acceptsRow(row) && c < first[s]!) first[s] = c;
@@ -550,12 +590,20 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
       const order = Array.from(dictionary, (_, s) => s).filter((s) => first[s]! < Infinity);
       ids = order.sort((a, b) => first[a]! - first[b]! || a - b).map((s) => dictionary[s]!);
     }
-    this.#roster = { version: source.version, ids };
+    this.#roster = { rows, ids };
     return ids;
   }
 
   protected acceptsRow(row: number): boolean {
     return Number.isFinite(this.table.numbers(this.value as never)[row]!);
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -566,7 +614,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
     return axis === (this.horizontal ? "y" : "x")
-      ? fieldBands(this.table, this.category, context)
+      ? fieldBands(this.rows(), this.category, context)
       : undefined;
   }
 
@@ -667,10 +715,12 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   #valueExtent(series: readonly Series[], log: boolean) {
     let min = Infinity;
     let max = -Infinity;
-    const add = (value: number) => {
-      if (!Number.isFinite(value) || (log && !(value > 0))) return;
-      if (value < min) min = value;
-      if (value > max) max = value;
+    const add = (...values: number[]) => {
+      for (const value of values) {
+        if (!Number.isFinite(value) || (log && !(value > 0))) continue;
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
     };
     for (const s of series) {
       if (s.length === 0) continue;
@@ -718,46 +768,216 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   }
 
   /**
+   * Its shapes are found by `pick`, within their width and span of values,
+   * or where that is not the shape (violins), by how far each is as drawn
+   * (`shapeDistance`); bounded by them, and named by their category (and,
+   * with a series field, their series' value).
+   */
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    return pickedHit(this, drawn, query, {
+      bounds: (s, position, frame) => {
+        const row = rowOf(s, position);
+        let bounds: Rect | undefined;
+        for (const layer of this.#layers(s, frame)) {
+          const extent = this.#extent(layer, row, frame, this.placement(layer, frame));
+          const box = extent && this.#box(extent, layer, row, frame);
+          const kept = box && cut(box, clipBox(this.spec.clip, frame));
+          if (kept)
+            bounds = bounds
+              ? boxOf(
+                  Math.min(bounds.x, kept.x),
+                  Math.min(bounds.y, kept.y),
+                  Math.max(bounds.x + bounds.width, kept.x + kept.width),
+                  Math.max(bounds.y + bounds.height, kept.y + kept.height),
+                )
+              : kept;
+        }
+        return bounds;
+      },
+      group: (s, position) => {
+        const { table } = this.summaryOf(s);
+        const row = rowOf(s, position);
+        const name = (field: string) => table.value(field as never, row) as string;
+        return {
+          parts: this.spec.series === undefined ? [] : [name("group")],
+          names: [name("category")],
+        };
+      },
+      lookup: (series, px, py, frame) =>
+        this.#nearestShape(series, px, py, frame, query.slop, clipBox(this.spec.clip, frame)),
+    });
+  }
+
+  /**
+   * The rectangle a shape's extent spans (see `#extent`) with what is
+   * painted past it (`paintedPast`: along its values, and across, a pixel
+   * or what is painted across its center), so a shape of one value has an
+   * area; undefined where none of it can be drawn.
+   */
+  #box(
+    [center, half, low, high]: readonly [number, number, number, number],
+    s: Series,
+    row: number,
+    frame: Frame,
+  ): Rect | undefined {
+    if (!(low <= high)) return undefined;
+    const across = this.horizontal ? frame.x : frame.y;
+    let [below, above, least] = this.paintedPast(s, row, frame);
+    // Pixels run against values on reversed axes (y, as usual).
+    if ((across.range[1] - across.range[0]) * (across.domain[1] - across.domain[0]) < 0)
+      [below, above] = [above, below];
+    // Dots and inner boxes on its center keep their width in narrow slots.
+    const wide = Math.max(half + 1, least);
+    let [from, to] = [low - below, high + above];
+    const dot = this.paintedDot?.(s, row, frame);
+    if (dot) [from, to] = [Math.min(from, dot[0] - dot[1]), Math.max(to, dot[0] + dot[1])];
+    return this.horizontal
+      ? boxOf(from, center - wide, to, center + wide)
+      : boxOf(center - wide, from, center + wide, to);
+  }
+
+  /**
+   * A dot painted on a group's shape, which can reach past the rest of it:
+   * its pixel across the value axis and its radius (a violin's median).
+   */
+  protected paintedDot?(
+    s: Series,
+    row: number,
+    frame: Frame,
+  ): readonly [number, number] | undefined;
+
+  /**
+   * How many pixels past the least and greatest value of its span (`span`)
+   * a group's shape is painted, a pixel of strokes unless more, and how far
+   * out from its center it is painted however narrow its slot (outlier
+   * dots' radius, half a violin's inner box; 0 for nothing).
+   */
+  protected paintedPast(
+    _s: Series,
+    _row: number,
+    _frame: Frame,
+  ): readonly [number, number, number] {
+    return [1, 1, 0];
+  }
+
+  /**
+   * How far a pixel is from what `clip` keeps of the shape drawn for
+   * `row`, for shapes their span overstates (violins).
+   */
+  protected shapeDistance?(
+    s: Series,
+    row: number,
+    px: number,
+    py: number,
+    frame: Frame,
+    clip: Readonly<Rect>,
+  ): number;
+
+  /**
+   * For picking: the shape nearest a pixel as drawn, of those whose extent
+   * lies within `reach` of it and shows inside `clip`: measured to the part
+   * of its extent there, or where that is not its shape (violins), to what
+   * the clip keeps of the shape (`shapeDistance`); of shapes as near, the
+   * one painted last (a highlight's selected shapes over every whole, then
+   * by series and position).
+   */
+  #nearestShape(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    reach: number,
+    clip: Readonly<Rect>,
+  ): Hit | undefined {
+    let best: Hit | undefined;
+    // Its paint order: a highlight's selected layer, series index, position.
+    let bestAt: number[] = [];
+    const measure = this.shapeDistance?.bind(this);
+    series.forEach((s, i) => {
+      const layers = this.#layers(s, frame);
+      const placements = layers.map((layer) => this.placement(layer, frame));
+      for (let k = 0; k < s.length; k++) {
+        const row = rowOf(s, k);
+        let distance = Number.POSITIVE_INFINITY;
+        let layer = 0;
+        for (let l = 0; l < layers.length; l++) {
+          const extent = this.#extent(layers[l]!, row, frame, placements[l]!);
+          const box = extent && this.#box(extent, layers[l]!, row, frame);
+          if (!box) continue;
+          const shown = distanceToCut(box, clip, px, py);
+          // Dots reach a few pixels past.
+          if (!(shown <= reach + 4)) continue;
+          const d = measure ? measure(layers[l]!, row, px, py, frame, clip) : shown;
+          // The selection's shape is painted over the whole's.
+          if (d < distance || (l > 0 && d === distance)) [distance, layer] = [d, l];
+        }
+        if (distance === Number.POSITIVE_INFINITY) continue;
+        // ...and over every series' whole.
+        const order = [layer, i, k];
+        const nearest = best?.distance ?? Number.POSITIVE_INFINITY;
+        if (distance < nearest || (distance === nearest && paintedLater(order, bestAt)))
+          [best, bestAt] = [{ series: s, position: k, distance }, order];
+      }
+    });
+    return best;
+  }
+
+  /**
+   * Where `row`'s shape is drawn: its center and half its width along the
+   * category axis, and its least and greatest pixel across (infinite where
+   * none of its values can be drawn); undefined where it is not drawn.
+   */
+  #extent(
+    s: Series,
+    row: number,
+    frame: Frame,
+    { offset, share }: { offset: number; share: number },
+  ): readonly [center: number, half: number, low: number, high: number] | undefined {
+    const horizontal = this.horizontal;
+    const across = horizontal ? frame.x : frame.y;
+    // A panel's own categories are read at their places.
+    const position = placeAt(s, horizontal ? "y" : "x", row);
+    if (position < 0 || !this.shows(s, row)) return undefined;
+    const ends = this.span(s, row)
+      .map((value) => across.map(value))
+      .filter(Number.isFinite);
+    let low = Math.min(...ends);
+    let high = Math.max(...ends);
+    if (ends.length < 2) {
+      // A log axis can omit one extreme but still show the rest of a shape.
+      // Bound what it draws, which the other extreme may be in none of.
+      [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+      this.drawnValues(this.summaryOf(s), row, (...values) => {
+        const pixels = values.map((value) => across.map(value));
+        if (!pixels.every(Number.isFinite)) return;
+        low = Math.min(low, ...pixels);
+        high = Math.max(high, ...pixels);
+      });
+    }
+    const center = (horizontal ? frame.y : frame.x).map(position) + offset;
+    // A selection's shapes are drawn narrower (`partWidth`).
+    return [center, (share * this.width * this.partWidth(s)) / 2, low, high];
+  }
+
+  /**
    * The shape under a pixel (within its width and its span of values), or
    * else the nearest one by its median.
    */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
     const horizontal = this.horizontal;
-    const along = horizontal ? frame.y : frame.x;
     const across = horizontal ? frame.x : frame.y;
     const [pa, pc] = horizontal ? [py, px] : [px, py];
     let best: Hit | undefined;
     for (const s of series) {
       if (s.length === 0 || frame.hidden.has(s.key)) continue;
-      const { offset, share } = this.placement(s, frame);
+      const placement = this.placement(s, frame);
       const { median } = this.summaryOf(s).stats;
       for (let k = 0; k < s.length; k++) {
         const row = rowOf(s, k);
-        // A panel's own categories are read at their places.
-        const position = placeAt(s, horizontal ? "y" : "x", row);
-        if (position < 0 || !this.shows(s, row)) continue;
-        const center = along.map(position) + offset;
-        const ends = this.span(s, row)
-          .map((value) => across.map(value))
-          .filter(Number.isFinite);
-        let low = Math.min(...ends);
-        let high = Math.max(...ends);
-        if (ends.length < 2) {
-          // A log axis can omit one extreme but still show the rest of a shape.
-          // Bound its drawable values rather than fall back to its median alone.
-          this.drawnValues(this.summaryOf(s), row, (value) => {
-            const pixel = across.map(value);
-            if (!Number.isFinite(pixel)) return;
-            low = Math.min(low, pixel);
-            high = Math.max(high, pixel);
-          });
-        }
-        const inside =
-          Math.abs(pa - center) <= (share * this.width) / 2 &&
-          Number.isFinite(low) &&
-          Number.isFinite(high) &&
-          pc >= low &&
-          pc <= high;
+        const extent = this.#extent(s, row, frame, placement);
+        if (!extent) continue;
+        const [center, half, low, high] = extent;
+        const inside = Math.abs(pa - center) <= half && pc >= low && pc <= high;
         const distance = inside ? 0 : Math.hypot(pa - center, pc - across.map(median[row]!));
         if (Number.isFinite(distance) && distance < (best?.distance ?? Infinity))
           best = { series: s, position: k, distance };

@@ -1,6 +1,7 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
+import type { ViewportEvent } from "../../src/index.ts";
 import { inset } from "../../src/layout.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
@@ -67,3 +68,6 @@ custom({
 inset("zoom", { place: { at: { x: { fraction: 0.5 }, y: { px: 10, frame: "chart" } } } });
 // @ts-expect-error data values place marks, not insets
 inset("zoom", { place: { at: { x: { data: 3 }, y: { px: 10 } } } });
+
+// The exported view event is what `viewport` listeners receive, revision included.
+chart.on("viewport", (event: ViewportEvent) => event.revision satisfies number);

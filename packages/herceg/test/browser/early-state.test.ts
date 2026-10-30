@@ -51,8 +51,11 @@ const views = heard(a, "viewport");
 const selections = heard(a, "select");
 const followed = heard(b, "viewport");
 const replaced = heard(c, "viewport");
+const made = a.revision;
 a.setViewport([10, 30]);
 a.select([15, 25]);
+// Each counts once, as it is set: the first frame reports them without counting them again.
+const counted = { view: made + 1, selection: made + 2 };
 c.setViewport([0, 5]);
 const before = { panels: a.getPanels(), views: [...views], selections: [...selections] };
 
@@ -233,6 +236,7 @@ it("applies a view and a selection set before the first frame at once, and repor
   expect(views).toEqual([
     {
       viewRevision: 1,
+      revision: counted.view,
       cause: "api",
       scales: [{ scale: "x", instance: "", type: "linear", panels: [""], view: [10, 30] }],
       views: [
@@ -240,9 +244,11 @@ it("applies a view and a selection set before the first frame at once, and repor
       ],
     },
   ]);
+  expect(a.revision).toBe(counted.selection);
   expect(selections).toHaveLength(1);
   expect(selections[0]).toMatchObject({
     x: [15, 25],
+    revision: counted.selection,
     owner: { scales: [{ scale: "x", instance: "", panels: [""] }], panels: [""] },
   });
 });

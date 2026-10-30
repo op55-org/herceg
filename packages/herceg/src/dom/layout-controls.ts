@@ -9,7 +9,10 @@ import type { Controls, ControlsHost, ControlsModule } from "./controls.ts";
 
 /** What a chart lends its controls, as it has them. */
 export interface ChartParts
-  extends Pick<ControlsHost, "chart" | "model" | "overlay" | "invalidate" | "normalize"> {
+  extends Pick<
+    ControlsHost,
+    "chart" | "model" | "overlay" | "invalidate" | "normalize" | "select"
+  > {
   /** The live region, which reads sentences aloud. */
   live: HTMLElement;
   /** The chart's legend, whose presses are its own. */

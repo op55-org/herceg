@@ -18,7 +18,7 @@ import { point } from "../../src/marks/point.ts";
 import { point3d } from "../../src/marks/point3d.ts";
 import { rug } from "../../src/marks/rug.ts";
 import { rule } from "../../src/marks/rule.ts";
-import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
+import { type ChangeCause, type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import {
   type RowSelectionChange,
@@ -50,17 +50,21 @@ function chart() {
   const element = new EventTarget() as never;
   return {
     selection: { x: [1, 2], y: null, lasso: null } as Selection | null,
-    cleared: 0,
-    select(selection: null) {
-      this.selection = selection;
-      this.cleared++;
+    /** The causes it was cleared as. */
+    cleared: [] as ChangeCause[],
+    clear(cause: ChangeCause) {
+      this.selection = null;
+      this.cleared.push(cause);
     },
     render() {},
     root: element,
   };
 }
 
-function mounted(binding: Partial<SelectionBinding> = {}) {
+function mounted(
+  binding: Partial<SelectionBinding> = {},
+  hear: (change: RowSelectionChange) => void = () => {},
+) {
   const store = binding.store ?? selectionStore(trips);
   const selection = rowSelection({ store, channel: "focus", ...binding });
   const model = drawn({
@@ -70,10 +74,21 @@ function mounted(binding: Partial<SelectionBinding> = {}) {
   });
   const host = chart();
   const changes: RowSelectionChange[] = [];
+  // Each change's cause and revision, apart from what it changed.
+  const counts: [string, number][] = [];
   const events = {
-    emit: (_type: "rowSelection", change: RowSelectionChange) => changes.push(change),
+    emit: (
+      _type: "rowSelection",
+      { cause, revision, ...change }: RowSelectionChange & { cause: string; revision: number },
+    ) => {
+      changes.push(change);
+      counts.push([cause, revision]);
+      hear(change);
+    },
   };
   let redrawn = 0;
+  // The chart's revision, as the link counts changes it did not.
+  let revision = 0;
   const live = { textContent: "" as string | null };
   const link = selection.mount(
     undefined,
@@ -81,10 +96,21 @@ function mounted(binding: Partial<SelectionBinding> = {}) {
     host,
     events,
     () => redrawn++,
+    () => ++revision,
     () => null,
     live,
   );
-  return { store, selection, model, host, link, changes, redrawn: () => redrawn };
+  return {
+    store,
+    selection,
+    model,
+    host,
+    link,
+    changes,
+    counts,
+    redrawn: () => redrawn,
+    revision: () => revision,
+  };
 }
 
 const brush = (x: readonly [number, number]): Selection => ({ x, y: null, lasso: null });
@@ -238,6 +264,7 @@ describe("row selection bindings", () => {
       chart(),
       { emit() {} },
       () => {},
+      () => 0,
       () => null,
       {
         textContent: "",
@@ -385,47 +412,67 @@ describe("the rows gestures select", () => {
 describe("a mounted chart's row selection", () => {
   it("writes a brush's rows, reports them, and clears them while the channel still holds them", () => {
     const { store, link, changes } = mounted();
-    const written = link.brushed(brush([1.5, 3.5]), null, true);
+    const written = link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     const condition = selectWhere(col("km").ge(1.5).and(col("km").le(3.5)));
     expect(store.get("focus")).toEqual(condition);
     expect(written?.rows).toEqual([{ table: trips, channel: "focus", selection: condition }]);
     expect(changes).toEqual(written?.rows);
-    expect(link.brushed(null, null, true)?.rows).toEqual([
+    expect(link.brushed(null, null, true, "pointer", 0)?.rows).toEqual([
       { table: trips, channel: "focus", selection: null },
     ]);
     expect(store.get("focus")).toBeNull();
     // Clearing a brush whose rows another writer replaced leaves theirs.
-    link.brushed(brush([1.5, 3.5]), null, true);
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     const grid = selectRows(new RowSet(trips).add(0));
     store.set("focus", grid);
-    expect(link.brushed(null, null, true)).toBeUndefined();
+    expect(link.brushed(null, null, true, "pointer", 0)).toBeUndefined();
     expect(store.get("focus")).toBe(grid);
   });
 
   it("lets go of its brush when another writer replaces its rows", async () => {
     const { store, link, host, redrawn } = mounted();
-    link.brushed(brush([1.5, 3.5]), null, true);
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     const before = redrawn();
     store.set("focus", selectRows(new RowSet(trips).add(0)));
     // Once the change is reported: views showing the writer's brush let theirs go first.
-    expect(host.cleared).toBe(0);
+    expect(host.cleared).toEqual([]);
     await Promise.resolve();
-    expect(host.cleared).toBe(1);
+    expect(host.cleared).toEqual(["sync"]);
     expect(redrawn()).toBe(before + 1);
     // Another channel's change changes nothing here.
     store.set("other", selectRows(new RowSet(trips)));
-    expect(host.cleared).toBe(1);
+    expect(host.cleared).toEqual(["sync"]);
+  });
+
+  it("lets go of its brush as the click that replaces its rows", () => {
+    const { store, link, model, host } = mounted();
+    const [panel] = model.panels();
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
+    link.clicked(
+      panel!.x.map(trips.value("km", 0) as number),
+      panel!.y.map(trips.value("fare", 0) as number),
+      noKeys,
+    );
+    expect(host.cleared).toEqual(["pointer"]);
+    // As a key does.
+    host.selection = brush([1.5, 3.5]);
+    link.brushed(host.selection, null, true, "pointer", 0);
+    (host.root as EventTarget).dispatchEvent(
+      Object.assign(new Event("keydown"), { key: "Escape", ...noKeys }),
+    );
+    expect(store.get("focus")).toBeNull();
+    expect(host.cleared).toEqual(["pointer", "keyboard"]);
   });
 
   it("lets go of its brush when it shows a selection it does not write", async () => {
     const { store, link, host } = mounted();
-    link.brushed(brush([1.5, 3.5]), null, true);
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     // Another view writes its brush's rows, and this one shows that brush as the change is reported.
     store.set("focus", selectRows(new RowSet(trips).add(0)));
-    expect(link.brushed(brush([0, 1]), null, false)).toBeUndefined();
+    expect(link.brushed(brush([0, 1]), null, false, "pointer", 0)).toBeUndefined();
     await Promise.resolve();
-    expect(host.cleared).toBe(0);
-    expect(link.brushed(null, null, true)).toBeUndefined();
+    expect(host.cleared).toEqual([]);
+    expect(link.brushed(null, null, true, "pointer", 0)).toBeUndefined();
     expect(store.get("focus")).not.toBeNull();
   });
 
@@ -448,7 +495,7 @@ describe("a mounted chart's row selection", () => {
     link.clicked(...at(1), { ...noKeys, metaKey: true });
     expect(rows()).toEqual([3]);
     // A brush's condition becomes its rows as they are when a click adds to it.
-    link.brushed(brush([0, 2.5]), null, true);
+    link.brushed(brush([0, 2.5]), null, true, "pointer", 0);
     link.clicked(...at(3), { ...noKeys, ctrlKey: true });
     expect(rows()).toEqual([0, 1, 3]);
     // Off the data: a modified click changes nothing, a plain one clears.
@@ -460,10 +507,82 @@ describe("a mounted chart's row selection", () => {
     expect(rows()).toBeNull();
   });
 
+  it("reports each change with its cause and revision, counting those the chart did not", () => {
+    const { store, link, model, counts } = mounted();
+    const [panel] = model.panels();
+    // The chart's brush, counted by the chart with its selection.
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 7);
+    expect(counts).toEqual([["pointer", 7]]);
+    // A click, counted once as its change is heard.
+    link.clicked(
+      panel!.x.map(trips.value("km", 1) as number),
+      panel!.y.map(trips.value("fare", 1) as number),
+      noKeys,
+    );
+    expect(counts.at(-1)).toEqual(["pointer", 1]);
+    // Another writer's change.
+    store.set("focus", null);
+    expect(counts.at(-1)).toEqual(["sync", 2]);
+    // An unchanged channel reports and counts nothing.
+    store.set("focus", null);
+    expect(counts).toHaveLength(3);
+  });
+
+  it("gives listeners' writes, and writes heard first, their own causes and counts", () => {
+    // A listener of the chart's brush writes the channel again, and so does the chart.
+    let again: (() => void) | undefined;
+    const { store, link, counts } = mounted({}, () => {
+      const then = again;
+      again = undefined;
+      then?.();
+    });
+    again = () => store.set("focus", selectRows(new RowSet(trips).add(0)));
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 7);
+    expect(counts).toEqual([
+      ["pointer", 7],
+      ["sync", 1],
+    ]);
+    again = () => link.brushed(brush([0, 1]), null, true, "api", 8);
+    store.set("focus", null);
+    expect(counts.slice(2)).toEqual([
+      ["sync", 2],
+      ["api", 8],
+    ]);
+    // A store's earlier listener replaces a change as it hears it: both
+    // count, and what the channel holds after them is reported once.
+    const early = selectionStore(trips);
+    const replaced = selectRows(new RowSet(trips).add(2));
+    early.subscribe(({ selection }) => {
+      if (selection !== replaced && selection !== null) early.set("focus", replaced);
+    });
+    const late = mounted({ store: early });
+    early.set("focus", selectRows(new RowSet(trips).add(1)));
+    expect(late.counts).toEqual([["sync", 1]]);
+    expect(late.changes.map((c) => c.selection)).toEqual([replaced]);
+    expect(late.revision()).toBe(2);
+    // An earlier listener adds a row to what a click wrote and writes it back.
+    const reused = selectionStore(trips);
+    reused.subscribe(({ selection }) => {
+      if (selection?.kind === "rows" && !selection.rows.has(2)) {
+        selection.rows.add(2);
+        reused.set("focus", selection);
+      }
+    });
+    const clicked = mounted({ store: reused });
+    const [panel] = clicked.model.panels();
+    clicked.link.clicked(
+      panel!.x.map(trips.value("km", 1) as number),
+      panel!.y.map(trips.value("fare", 1) as number),
+      noKeys,
+    );
+    expect(clicked.revision()).toBe(2);
+    expect(clicked.counts).toEqual([["sync", 1]]);
+  });
+
   it("writes only the gestures in its events", () => {
     const { store, link } = mounted({ events: ["click"] });
     expect(link.brushes(undefined)).toBe(false);
-    expect(link.brushed(brush([1, 2]), null, true)).toBeUndefined();
+    expect(link.brushed(brush([1, 2]), null, true, "pointer", 0)).toBeUndefined();
     expect(store.get("focus")).toBeNull();
     const reading = mounted({ events: [] });
     expect(reading.link.clicked(5, 5, noKeys)).toBeUndefined();
@@ -489,6 +608,7 @@ describe("a mounted chart's row selection", () => {
         host,
         events,
         () => {},
+        () => 0,
         () => null,
         live,
       ),
@@ -500,6 +620,7 @@ describe("a mounted chart's row selection", () => {
       host,
       events,
       () => {},
+      () => 0,
       () => null,
       live,
     );
@@ -509,7 +630,7 @@ describe("a mounted chart's row selection", () => {
 
   it("keeps what its brush wrote through a binding of the same channel that replaces it", () => {
     const { store, selection, link, model, host } = mounted();
-    link.brushed(brush([1.5, 3.5]), null, true);
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     // The same store and channel, without highlighting: an adapter's new prop.
     const quiet = rowSelection({ store, channel: "focus", effect: "none" });
     expect(quiet.toJSON()).not.toEqual(selection.toJSON());
@@ -519,10 +640,11 @@ describe("a mounted chart's row selection", () => {
       host,
       { emit: () => {} },
       () => {},
+      () => 0,
       () => null,
       { textContent: null },
     );
-    expect(replaced.brushed(null, null, true)?.rows).toEqual([
+    expect(replaced.brushed(null, null, true, "pointer", 0)?.rows).toEqual([
       { table: trips, channel: "focus", selection: null },
     ]);
     expect(store.get("focus")).toBeNull();
@@ -530,7 +652,7 @@ describe("a mounted chart's row selection", () => {
 
   it("lets go of a brush another writer replaced while its binding was being replaced", async () => {
     const { store, link, model, host } = mounted();
-    link.brushed(brush([1.5, 3.5]), null, true);
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     store.set("focus", selectRows(new RowSet(trips).add(0)));
     // Before the check of that change, a binding of the same channel replaces this one.
     rowSelection({ store, channel: "focus", effect: "none" }).mount(
@@ -539,11 +661,69 @@ describe("a mounted chart's row selection", () => {
       host,
       { emit: () => {} },
       () => {},
+      () => 0,
       () => null,
       { textContent: null },
     );
     await Promise.resolve();
-    expect(host.cleared).toBe(1);
+    expect(host.cleared).toEqual(["sync"]);
+  });
+
+  it("clears only channels still holding its brush's rows, as a listener of an earlier clear brushes again", () => {
+    const rides = table({ km: [1, 2, 3, 4], fare: [6, 8, 10, 12] });
+    const [first, second] = [selectionStore(trips), selectionStore(rides)];
+    const selection = rowSelection(
+      { store: first, channel: "focus" },
+      { store: second, channel: "focus" },
+    );
+    const model = drawn({
+      marks: [point(trips, { x: "km", y: "fare" }), point(rides, { x: "km", y: "fare" })],
+      interaction: { brush: "x" },
+      rowSelection: selection,
+    });
+    const link = selection.mount(
+      undefined,
+      model,
+      chart(),
+      { emit() {} },
+      () => {},
+      () => 0,
+      () => null,
+      { textContent: null },
+    );
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 1);
+    // As the first channel is cleared, its listener brushes again, writing both.
+    let again = false;
+    first.subscribe(() => {
+      if (again || first.get("focus") !== null) return;
+      again = true;
+      link.brushed(brush([0.5, 2.5]), null, true, "pointer", 2);
+    });
+    const cleared = link.brushed(null, null, true, "pointer", 3);
+    expect(first.get("focus")).not.toBeNull();
+    expect(second.get("focus")).not.toBeNull();
+    // Only the clear made is reported.
+    expect(cleared?.rows.map((change) => change.table)).toEqual([trips]);
+  });
+
+  it("clears no rows a listener changed in place and wrote back since its lasso wrote them", () => {
+    const { store, link } = mounted({ events: ["lasso"] });
+    const outline: [number, number][] = [
+      [0.5, 4],
+      [1.5, 4],
+      [1.5, 6],
+      [0.5, 6],
+    ];
+    link.brushed({ x: null, y: null, lasso: outline }, null, true, "pointer", 1);
+    const held = store.get("focus");
+    expect(held?.kind === "rows" && Array.from(held.rows.positions())).toEqual([0]);
+    const clear = link.release();
+    // A listener adds a row to the lasso's set and writes the same selection back.
+    if (held?.kind === "rows") held.rows.add(2);
+    store.set("focus", held);
+    clear("pointer", 2);
+    const after = store.get("focus");
+    expect(after?.kind === "rows" && Array.from(after.rows.positions())).toEqual([0, 2]);
   });
 
   it("lets go of its brush when a listener replaces its rows as they are written", () => {
@@ -552,10 +732,10 @@ describe("a mounted chart's row selection", () => {
     const stop = store.subscribe(() => {
       if (store.get("focus")?.kind === "predicate") store.set("focus", grid);
     });
-    link.brushed(brush([1.5, 3.5]), null, true);
+    link.brushed(brush([1.5, 3.5]), null, true, "pointer", 0);
     stop();
     expect(store.get("focus")).toBe(grid);
-    expect(host.cleared).toBe(1);
+    expect(host.cleared).toEqual(["pointer"]);
   });
 
   it("reports a row set changed in place and written again", () => {

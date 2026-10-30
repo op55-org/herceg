@@ -13,6 +13,7 @@ import type {
   CssColor,
   Encodings,
   FieldCoordinate,
+  ItemKeyed,
   MarkStyle,
   SeriesLabels,
 } from "./encoding.ts";
@@ -23,6 +24,7 @@ import {
   type ChartMark,
   categoryBands,
   categoryIndices,
+  checkItemKey,
   type Frame,
   frozen,
   type MARK,
@@ -46,11 +48,12 @@ import {
   untranspose,
 } from "./orient.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
+import { type MarkRows, rowsOf } from "./rows.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { IndexUse, tracePath, unionExtent } from "./trace.ts";
 
-interface LineStyle<S extends Schema> {
+interface LineStyle<S extends Schema> extends ItemKeyed<S> {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
@@ -172,6 +175,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
   readonly tooltip: "x" | "y";
   readonly featured: boolean;
   readonly identity: MarkSources;
+  readonly wide: boolean;
   readonly bound: RowBindings | undefined;
   readonly #roles: Roles;
   readonly #split: SeriesSplitter;
@@ -182,6 +186,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
   constructor(input: LineSpec, table: Table<Schema>) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "line");
+    checkItemKey(table, this.spec.itemKey, "line");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
@@ -202,6 +207,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
     this.#roles = roles;
     this.tooltip = roles.orient;
     this.identity = { field: series, values: roles.values };
+    this.wide = roles.values.length > 1;
     if (spec.dodge) {
       if (!roles.banded)
         throw new Error(
@@ -213,7 +219,15 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
     }
     // Lines over categories run in band order, which their series sort by.
     const position = roles.banded ? undefined : roles.position;
-    this.#split = new SeriesSplitter(table, position, roles.values, series, spec.label);
+    this.#split = new SeriesSplitter(() => this.rows(), position, roles.values, series, spec.label);
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -224,7 +238,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
 
   bands(axis: "x" | "y") {
     const { orient, position, banded } = this.#roles;
-    return banded && axis === orient ? categoryBands(this.table, position) : undefined;
+    return banded && axis === orient ? categoryBands(this.rows(), position) : undefined;
   }
 
   series(key: MarkKey, palette: Palette, _hidden?: ReadonlySet<string>, bands: Bands = {}) {
@@ -232,7 +246,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
     const { orient, position, banded } = this.#roles;
     // A category position is each row's band index on the chart's axis.
     const positions = banded
-      ? categoryIndices(table, position, bands[orient]?.keys ?? [])
+      ? categoryIndices(this.rows(), position, bands[orient]?.keys ?? [])
       : table.numbers(position as never);
     const series = buildSeries(
       table,
@@ -383,6 +397,7 @@ export function line<S extends Schema>(
       "label",
       "legend",
       "id",
+      "itemKey",
       "axis",
       "facet",
       "panel",

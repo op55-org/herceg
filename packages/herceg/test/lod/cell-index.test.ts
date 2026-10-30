@@ -143,4 +143,30 @@ describe("CellIndex", () => {
     );
     expect(empty.find(2, 1)).toBe(-1);
   });
+
+  it("visits the cells holding positions in a range of columns and rows, and only those", () => {
+    // A sparse diagonal: one cell per row, in a grid of 200,000 x 200,000.
+    const n = 200_000;
+    const x = Int32Array.from({ length: n }, (_, i) => i);
+    const y = Int32Array.from({ length: n }, (_, i) => i);
+    const values = new Float64Array(n).fill(1);
+    const index = new CellIndex(x, y, values, n, n);
+    const seen: [number, number, number][] = [];
+    index.forEachIn(1000, 1010, 0, n - 1, (c, r, position) => seen.push([c, r, position]));
+    expect(seen).toEqual(Array.from({ length: 11 }, (_, i) => [1000 + i, 1000 + i, 1000 + i]));
+    // Positions sharing a cell: the last, as drawn; cells outside the range are passed.
+    const shared = new CellIndex(
+      Int32Array.of(0, 2, 2, 5, 1),
+      Int32Array.of(0, 1, 1, 1, 2),
+      Float64Array.of(1, 1, 1, 1, 1),
+      6,
+      3,
+    );
+    const visited: number[][] = [];
+    shared.forEachIn(1, 4, 0, 2, (c, r, position) => visited.push([c, r, position]));
+    expect(visited).toEqual([
+      [2, 1, 2],
+      [1, 2, 4],
+    ]);
+  });
 });

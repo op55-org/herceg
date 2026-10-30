@@ -514,7 +514,12 @@ export function compiledAxes(kit: GuideKit, listed: readonly ListedAxis[]): Comp
           // The default axis' labels, centered on their ticks.
           const paint = state.styles.axisText("tickLabel", "x", i);
           plan.ticks.forEach((t, k) => {
-            add({ position: plan.scale.map(t), label: plan.labels[k] ?? "" }, paint, 0, "below");
+            add(
+              { position: plan.scale.map(t), value: t, label: plan.labels[k] ?? "" },
+              paint,
+              0,
+              "below",
+            );
           });
         }
       }
@@ -738,9 +743,14 @@ export function layered(
       ticks = all
         ? (plan.scale.categories ?? []).map((name, k) => ({
             position: plan.scale.map(k),
+            value: k,
             label: name,
           }))
-        : own.ticks.map((t, k) => ({ position: own.scale.map(t), label: own.labels[k] ?? "" }));
+        : own.ticks.map((t, k) => ({
+            position: own.scale.map(t),
+            value: t,
+            label: own.labels[k] ?? "",
+          }));
     }
     let angle = 0;
     let lanes = 1;

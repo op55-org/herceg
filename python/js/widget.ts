@@ -439,9 +439,10 @@ class Widget {
       return;
     }
     const positions = selection.rows.positions();
-    // Python numbers rows from the snapshot's first, until a reset numbers them afresh.
-    const base = (table.generation === 0 ? dropped : 0) + table.rowOffset;
-    const identities = Float64Array.from(positions, (position) => position + base);
+    // Python numbers rows from the snapshot's first, until a reset numbers them
+    // afresh: the table's identities, past the rows the snapshot left out.
+    const shift = table.generation === 0 ? dropped : 0;
+    const identities = Float64Array.from(positions, (position) => table.identity(position) + shift);
     this.#outbox.post(`rows:${name}:${channel}`, {
       ...content,
       selection: { kind: "rows", generation: generation + table.generation },
@@ -574,8 +575,9 @@ class Widget {
       if (view.following) view.following.event = merged(view.following.event, payload);
       else this.#report("viewport", view, this.#viewsOf(chart), "", false, payload);
     });
-    chart.on("visibility", (state) => {
-      if (!view.newer) this.#report("visibility", view, state);
+    // The state the event reports, without what made it.
+    chart.on("visibility", ({ hiddenKeys, panels }) => {
+      if (!view.newer) this.#report("visibility", view, { hiddenKeys, ...(panels && { panels }) });
     });
     chart.on("drill", (root) => {
       if (!this.#applying) this.#report("drill", view, drillPayload(root), root.panels?.[0] ?? "");

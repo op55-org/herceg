@@ -51,7 +51,7 @@ type Column =
 class Rows implements Fields {
   readonly length: number;
   readonly columns: Map<string, Column>;
-  /** Source row identity (the source's rowOffset + index) of each row, while rows map to source rows. */
+  /** Source row identity (`Table.identity`) of each row, while rows map to source rows. */
   readonly ids: Float64Array | undefined;
 
   constructor(length: number, columns: Map<string, Column>, ids: Float64Array | undefined) {
@@ -146,7 +146,7 @@ function rowsOf(source: Table, from = 0): Rows {
     }
   }
   const ids = new Float64Array(n);
-  for (let i = 0; i < n; i++) ids[i] = source.rowOffset + from + i;
+  for (let i = 0; i < n; i++) ids[i] = source.identity(from + i);
   return new Rows(n, columns, ids);
 }
 

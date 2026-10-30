@@ -451,6 +451,11 @@ describe("maps", () => {
     expect(selects).toHaveLength(1);
     const svg = chart.toSVG();
     expect(svg).toContain("matrix(");
+    // The pointer drew it; the keyboard clears it.
+    expect(selects[0]!.cause).toBe("pointer");
+    chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(chart.selection).toBeNull();
+    expect(selects.at(-1)).toMatchObject({ cause: "keyboard" });
   });
 
   it("draw the lasso selected as it changes, with no row selection to draw a scene", async () => {
@@ -611,7 +616,12 @@ describe("treemaps and sunbursts", () => {
     const drills = heard(chart, "drill");
     await click(chart, ...corner(itemNamed(chart, "Europe")));
     expect(drills).toEqual([
-      { key: '[0,"Europe"]', path: [{ key: '[0,"Europe"]', label: "Europe" }] },
+      {
+        key: '[0,"Europe"]',
+        path: [{ key: '[0,"Europe"]', label: "Europe" }],
+        cause: "pointer",
+        revision: chart.revision,
+      },
     ]);
     expect(chart.getDrillRoot()?.key).toBe('[0,"Europe"]');
     const live = chart.root.querySelector("[aria-live]")!;
@@ -714,6 +724,8 @@ describe("treemaps and sunbursts", () => {
     expect(drills.at(-1)).toEqual({
       key: '[0,"Europe"]',
       path: [{ key: '[0,"Europe"]', label: "Europe" }],
+      cause: "data",
+      revision: chart.revision,
     });
   });
 
@@ -1108,7 +1120,12 @@ describe("networks", () => {
       chart.root.querySelector<HTMLElement>("[aria-label='Put moved nodes back']")!,
     );
     await frame();
-    expect(moves.at(-1)).toEqual({ key: '[0,"a"]', position: null });
+    expect(moves.at(-1)).toEqual({
+      key: '[0,"a"]',
+      position: null,
+      cause: "pointer",
+      revision: chart.revision,
+    });
     expect(where(chart, "a")[0]).toBeCloseTo(ax, 6);
   });
 
