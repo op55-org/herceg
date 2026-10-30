@@ -230,7 +230,7 @@ no arguments, called before the rerun.
 - Maps keep their view and lasso only while the resolved projection stays
   the same.
 - Charts without a theme follow the app's light or dark theme.
-- Points with `animation_key` show at once on remount; keyed replacements
+- Points with `item_key` show at once on remount; keyed replacements
   animate in widgets and JavaScript apps.
 
 [examples/streamlit_app.py](../../../python/examples/streamlit_app.py) is

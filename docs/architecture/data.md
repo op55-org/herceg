@@ -25,7 +25,7 @@ dictionary. Nothing in the pipeline creates an object per row.
 | **Writes check before they write.** `append` and `replace` validate every value first (of an oversized batch, only rows kept), allocating nothing. | A failed write leaves the table as it was; one-row streaming pays nothing extra. |
 | **Contiguous storage.** Live rows are one slice of each buffer. Appends write after it; drops move its start. At the end of the buffer, rows move to the front if that frees a third, otherwise buffers grow to 1.5x the live rows (at least 64). An explicit drop that leaves a buffer under a quarter full shrinks it. | Every reader gets plain contiguous typed arrays. A ring buffer would avoid the headroom but make every consumer handle two segments. |
 | **Rolling windows** (`maxRows`) drop rows before compaction. | Dropped rows are never copied. |
-| **Change events.** Each mutation bumps `version` and reports what changed (dropped, appended, an updated range and its fields, or a reset). `rowOffset + position` is a row's stable identity; `generation` counts resets; `modifiedVersion` is the last change to values already present. | Caches key on versions; incremental structures follow the details. |
+| **Change events.** Each mutation bumps `version` and reports what changed (dropped, appended, inserted, an updated range and its fields, or a reset). `identity(position)` is a row's stable identity, which `positionOf(identity, generation)` finds again; `generation` counts resets; `modifiedVersion` is the last change to values already present. `TableChange` (`data/table.ts`) states the invariants every cache relies on. | Caches key on versions; incremental structures follow the details. Identities go through the table, so tables that keep rows in order and insert before their end can store them. |
 | **Cached derived state.** Sortedness and extents per field, updated cheaply on append. | Scales and lookups need them every frame. |
 | **Rolling categories.** A dictionary holding more than twice the live rows (plus 64) drops unused entries and renumbers codes, bumping `categories(field).revision`. | Long streams over changing categories stay bounded. Consumers key categories by label, not code. |
 
@@ -61,6 +61,48 @@ Over the source data, Herceg adds:
 | Bars stacked by a series field | 28 bytes per row, 29 per position plus its `Map` entry. |
 | Areas stacked by a series field | 16 bytes per row and per layer and x position, plus 8 per x. |
 | Geometry buffers | Bounded by the plot width (see [Level of detail](#level-of-detail)). |
+| A mark's rows of a row view | 4 bytes per row the view shows (see [Marks' rows](#marks-rows)); heatmap cells and calendars over a view, 8 bytes per table row for each value field. |
+| Rows of drawn bars and points | 4 bytes per drawn bar or point, in each frame's pooled buffers (see [Drawn marks](marks.md#drawn-marks)). |
+
+## Marks' rows
+
+A mark drawing series of a table (lines, areas, bars, points, histograms,
+2D histograms, box plots, violins, boxen, error bars, candlesticks,
+heatmaps, rugs, custom marks) reads it through one provider, `rowsOf`
+(`marks/rows.ts`). It gives `MarkRows`: the table, the positions drawn
+(undefined for every row in table order, with no copy), and a `revision`
+that changes whenever the rows may (the table's version, and a view's
+revision).
+
+- **One reading.** Series splitting, category and value bands, bins and
+  their extents, facet panels (found from the rows marks read) and
+  summaries (a facet panel's too: its rows that the mark draws), slots,
+  heatmap cells, calendars, size, color, and opacity
+  domains, and points' identity values (checked, keyed, and padded for)
+  read the mark's rows and nothing around them, so a mark over a row view
+  draws as it draws a table of the view's rows.
+- **Caches by revision.** `rowsOf` returns the last answer while the rows
+  are unchanged, so caches keyed by the rows object or its revision
+  (`MarkRowsCache`) last until a change, and a mark's helpers compare one
+  key instead of a table version and a view revision each.
+- **A copy for views.** A view rewrites its positions as it catches up, so
+  the mark keeps its own copy (4 bytes a row) for the frame's readers. An
+  answer says the view it is of (`MarkRows.view`), so a table's or another
+  view's answer is never taken for its own, however alike their revisions.
+  The view gives it (`RowView.markRows`), so charts of tables alone carry
+  no view code. Extents of a view's rows are kept with the answer, since
+  some readers ask per point (a lasso, each point's size).
+- **Looks too.** Lines' and areas' style maps and channels read by rows
+  (`SeriesStyles`, `StyleRuns`) read on from the table only while the mark
+  draws every row; rows a view or provider gives, in whatever order, they
+  read whole, by position, whenever their revision or their order (which
+  another mark's bands can change) changes; a band keeps the order of the
+  rows a provider gives. Bars' looks
+  and color keys (`RowStyles`) read and check only the rows drawn, again
+  whenever their revision changes.
+- **Not yet through it.** Contours read matrix grids, dendrograms their
+  own clustering, and stacked areas, error bars' computed columns, and
+  selected rows' view filters still read tables or views directly.
 
 ## Series rows and stacks
 
@@ -180,8 +222,9 @@ puts missing values last in either direction, orders infinities, ranks
 categories by label once per sort, and breaks ties by position, so orders
 are stable and settle the same way after updates.
 
-A row's identity across resets is its table, `generation`, and `rowOffset
-+ position`. `RowSet`s (`data/row-set.ts`) are bitsets over identities from
+A row's identity across resets is its table, `generation`, and
+`identity(position)` (in tables that only append, the position plus
+`rowOffset`, the rows dropped before it). `RowSet`s (`data/row-set.ts`) are bitsets over identities from
 the first row they could hold, bound to a generation; dropped rows' bits are
 trimmed as the set is read. `SelectionStore` (`data/selection.ts`) keeps
 selections by channel as portable conditions or local row sets; readers
@@ -189,11 +232,12 @@ choose which channels they read and whether to filter or highlight, so a
 chart's brush need not filter the chart that drew it.
 
 Point marks over a view keep the view's table as their table and the view
-as `mark.view`. The series split copies the view's positions (4 bytes per
-shown row), since the view rewrites its own array while scenes may still
-read the old one, and caches by the view's revision and the table's
-version. Facet panels are found from whole tables, so view marks only
-repeat in facets. The WebGL painter uploads whole columns, so view points
+as `mark.view`, and read the view's rows as every mark reads its rows
+([Marks' rows](#marks-rows)): series, extents, category bands, and size,
+color, and opacity domains come from the rows shown. Facet panels are found
+from the rows marks read (a provider's too), but a view mark still only
+repeats in facets: splitting its rows by panel is refused (`facet:
+"repeat"`). The WebGL painter uploads whole columns, so view points
 stay on the CPU.
 
 ## Row groups
@@ -253,7 +297,9 @@ one packed `Uint32Array` of runs, each with a quarter more room, as
 identities less a base so front drops move nothing. Appends write into
 their run's room (sorted views merge from the back); a full run moves to
 the end with half again of room. A new query, a reset, or an update of a
-read field drops the lists.
+read field drops the lists. Members' identities are positions plus
+`rowOffset`, which holds for tables that only append and drop; tables
+whose rows move will need the lists to follow `Table.identity`.
 
 **Keys.** A group's key is its path of values (labels, numbers, or null);
 its id is the key as JSON with infinities as text. Readers name groups by

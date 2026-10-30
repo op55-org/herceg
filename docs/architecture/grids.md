@@ -31,8 +31,8 @@ them with a model each, since a model holds one viewport and one focus.
 the model's listeners at once; the next read catches up without notifying
 again (readers inside listeners would otherwise loop).
 
-**Rows by identity.** Rows are followed by generation and `rowOffset +
-position`, found again with `RowView.indexOf`, exact because sorted views
+**Rows by identity.** Rows are followed by generation and identity
+(`Table.identity`), found again with `RowView.indexOf`, exact because sorted views
 break ties by position. Catching up after a change of the table, but not of
 the query (`RowView.queryRevision`), puts the top row back where it was, so
 rows dropped from a rolling window or sorted in above do not move the rows

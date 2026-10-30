@@ -69,6 +69,7 @@ def stripplot(
     dodge: bool = False,
     seed: int | None = 0,
     radius: float | None = None,
+    item_key: str | None = None,
     z_index: float | None = None,
     encode: Encodings | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
@@ -82,11 +83,14 @@ def stripplot(
     all. Points keep their places as the chart redraws: each is moved by a
     hash of its row and the seed (``seed``, 0 as the point mark's; None
     draws one and records it), not by a random draw. ``radius`` is the
-    points' radius in pixels. ``z_index`` and ``encode`` go to the points,
-    as ``Chart.point`` takes them, reading any column of the data.
+    points' radius in pixels. ``z_index``, ``encode``, and ``item_key`` (the
+    column naming each point) go to the points, as ``Chart.point`` takes
+    them, reading any column of the data.
     """
     spread = _jitter(jitter, seed)
-    marks = mark_options("stripplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
+    marks = mark_options(
+        "stripplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS, item_key=item_key
+    )
     layout = _Categories(
         data, x, y, series, order, series_order, orient, options, "stripplot", marks
     )
@@ -133,6 +137,7 @@ def swarmplot(
     dodge: bool = False,
     radius: float = 2.5,
     warn_thresh: float = 0.05,
+    item_key: str | None = None,
     z_index: float | None = None,
     encode: Encodings | Mapping[str, Any] | None = None,
     palette: Sequence[str] | None = None,
@@ -146,8 +151,9 @@ def swarmplot(
     out at the chart's ``width`` and ``height`` (or 640 by 320 pixels) and,
     as Seaborn does, warns when more than ``warn_thresh`` of a category's
     points (0.05) cannot be placed. ``radius`` is the points' radius in
-    pixels. ``z_index`` and ``encode`` go to the points, as ``Chart.point``
-    takes them, reading any column of the data.
+    pixels. ``z_index``, ``encode``, and ``item_key`` (the column naming each
+    point) go to the points, as ``Chart.point`` takes them, reading any
+    column of the data.
     """
     if not (is_number(radius) and math.isfinite(radius) and radius > 0):
         raise ChartError(
@@ -157,7 +163,9 @@ def swarmplot(
         raise ChartError(
             f"swarmplot warn_thresh: expected a share from 0 to 1; received {shown(warn_thresh)}"
         )
-    marks = mark_options("swarmplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS)
+    marks = mark_options(
+        "swarmplot", z_index=z_index, encode=encode, channels=_POINT_CHANNELS, item_key=item_key
+    )
     layout = _Categories(
         data, x, y, series, order, series_order, orient, options, "swarmplot", marks
     )

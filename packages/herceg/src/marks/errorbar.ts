@@ -9,7 +9,18 @@ import { ChartError } from "../spec/errors.ts";
 import type { Clip, ErrorBarSpec, Frozen } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
-import type { CssColor, FieldCoordinate } from "./encoding.ts";
+import {
+  boxOf,
+  clipBox,
+  cut,
+  type DrawnMark,
+  distanceToCut,
+  type PickedItem,
+  type PickQuery,
+  paintedLater,
+  pickedHit,
+} from "./drawn.ts";
+import type { CssColor, FieldCoordinate, ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
   type BandContext,
@@ -19,6 +30,7 @@ import {
   buildSeries,
   CATEGORY,
   type ChartMark,
+  checkItemKey,
   type Frame,
   fieldBands,
   frozen,
@@ -34,11 +46,12 @@ import {
   valueKind,
 } from "./mark.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
+import { type MarkRows, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, TableCache, visibleRange, xExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-interface ErrorBarStyle<S extends Schema> {
+interface ErrorBarStyle<S extends Schema> extends ItemKeyed<S> {
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -197,6 +210,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   constructor(input: ErrorBarSpec, table: Table<Schema>) {
     this.spec = frozen(colored(input, table, "stroke"));
     checkTooltip(table, this.spec.tooltip, "errorbar");
+    checkItemKey(table, this.spec.itemKey, "errorbar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
@@ -249,7 +263,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     const defaultLabel =
       "center" in ends ? `${ends.center} ± ${ends.error}` : `${ends.low}–${ends.high}`;
     this.#split = new SeriesSplitter(
-      table,
+      () => this.rows(),
       this.#categorical ? undefined : position,
       ["center" in ends ? ends.center : ends.high],
       spec.series,
@@ -257,6 +271,14 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     );
     const values = "center" in ends ? [ends.center, ends.error] : [ends.low, ends.high];
     this.identity = { field: spec.series, values };
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -268,7 +290,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
     return (axis === "y") === this.#horizontal && this.#categorical
-      ? fieldBands(this.table, this.#position, context)
+      ? fieldBands(this.rows(), this.#position, context)
       : undefined;
   }
 
@@ -282,7 +304,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     const { spec, table } = this;
     const positions = this.#categorical
       ? bandIndices(
-          table,
+          this.rows(),
           this.#position,
           (this.#horizontal ? bands.y : bands.x)?.keys ?? [],
           context,
@@ -375,23 +397,89 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   }
 
   /**
+   * Its bars are found as `pick` finds them, measured to their painted
+   * strokes, the one painted last of those as near; bounded by what the
+   * mark's clip keeps of their stems and caps.
+   */
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    const stroke = this.spec.strokeWidth ?? 1.5;
+    return pickedHit(this, drawn, query, {
+      lookup: (series, px, py, frame) => this.#find(series, px, py, frame, stroke, true),
+      bounds: (s, position, frame) => {
+        const horizontal = this.#horizontal;
+        const along = horizontal ? frame.y : frame.x;
+        const across = horizontal ? frame.x : frame.y;
+        const { positions, lows, highs } = columns(s, horizontal);
+        const row = rowOf(s, position);
+        const band = positions[row]!;
+        const places = s.places?.[horizontal ? "y" : "x"];
+        const p = along.map(places && band >= 0 ? places.at(band) : band) + this.#shift(s, along);
+        const [a, b] = [across.map(lows[row]!), across.map(highs[row]!)];
+        // What the clip keeps of the stem and caps the lookup measures.
+        const box = clipBox(this.spec.clip, frame);
+        let bounds: Rect | undefined;
+        for (const [u1, v1, u2, v2] of this.#pieces(p, a, b, stroke)) {
+          const piece = cut(horizontal ? boxOf(v1, u1, v2, u2) : boxOf(u1, v1, u2, v2), box);
+          if (piece)
+            bounds = bounds
+              ? boxOf(
+                  Math.min(bounds.x, piece.x),
+                  Math.min(bounds.y, piece.y),
+                  Math.max(bounds.x + bounds.width, piece.x + piece.width),
+                  Math.max(bounds.y + bounds.height, piece.y + piece.height),
+                )
+              : piece;
+        }
+        return bounds;
+      },
+    });
+  }
+
+  /**
    * The interval nearest a pixel, measured to its stem and caps as drawn
    * (clipped to the plot). Sorted positions are searched outward from the
    * pointer in both directions until positions alone are farther than the
    * best match.
    */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
+    return this.#find(series, px, py, frame, 0, false);
+  }
+
+  /**
+   * `pick`'s lookup: measured to the stem and caps drawn, as rectangles
+   * `stroke` pixels wide (their butt ends square), cut to the plot; with
+   * `top`, for picking, cut as the mark is (`clip`), and of intervals as
+   * near, the one painted last (a highlight's selected rows over the
+   * others, as tooltips rank them).
+   */
+  #find(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    stroke: number,
+    top: boolean,
+  ): Hit | undefined {
     const horizontal = this.#horizontal;
     const along = horizontal ? frame.y : frame.x;
     const across = horizontal ? frame.x : frame.y;
     const pointer = horizontal ? py : px;
     const half = (this.spec.cap ?? CAP) / 2;
+    const width = stroke / 2;
     const { plot } = frame;
+    // Picking measures what is drawn: past the plot with a clip of "chart" or false.
+    const box = top ? clipBox(this.spec.clip, frame) : plot;
+    const lit = top ? frame.highlighted?.(this.table) : undefined;
     let best: Hit | undefined;
-    for (const s of series) {
+    // Its paint order: selected, series index, position.
+    let bestAt = [-1, -1, -1];
+    series.forEach((s, i) => {
       const { positions, lows, highs } = columns(s, horizontal);
       const shift = this.#shift(s, along);
       const places = s.places?.[horizontal ? "y" : "x"];
+      // The positions geometry draws, for picking: vertical intervals in view and beside it.
+      const [start, end] =
+        top && !horizontal ? visibleRange(s, along.domain[0], along.domain[1]) : [0, s.length];
       /** Considers position k; returns how far along the position axis it stands. */
       const consider = (k: number): number => {
         const row = rowOf(s, k);
@@ -400,36 +488,57 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
         const p = along.map(at) + shift;
         if (!Number.isFinite(p)) return 0;
         const offset = Math.abs(p - pointer);
-        if (this.#categorical && at < 0) return offset;
+        // As geometry draws: nothing off the chart's categories or in an axis break.
+        if ((this.#categorical && at < 0) || along.breaks?.hides(at) || k < start || k >= end)
+          return offset;
         const a = across.map(lows[row]!);
         const b = across.map(highs[row]!);
         if (!(Number.isFinite(a) && Number.isFinite(b))) return offset;
-        // Stem and caps, each an axis-aligned segment, in screen coordinates.
-        const pieces = [
-          [p, a, p, b],
-          [p - half, a, p + half, a],
-          [p - half, b, p + half, b],
-        ];
-        for (const [u1, v1, u2, v2] of pieces) {
-          const distance = horizontal
-            ? clippedDistance(px, py, v1!, u1!, v2!, u2!, plot)
-            : clippedDistance(px, py, u1!, v1!, u2!, v2!, plot);
-          if (distance < (best?.distance ?? Infinity)) best = { series: s, position: k, distance };
+        const order = [lit?.[row] ?? 0, i, k];
+        for (const [u1, v1, u2, v2] of this.#pieces(p, a, b, stroke)) {
+          const [x1, y1, x2, y2] = horizontal ? [v1, u1, v2, u2] : [u1, v1, u2, v2];
+          // Picking measures what is painted, nothing where only an edge is
+          // kept; tooltips also reach stems of no width.
+          const distance = top
+            ? distanceToCut(boxOf(x1, y1, x2, y2), box, px, py)
+            : clippedDistance(px, py, x1, y1, x2, y2, box);
+          const nearest = best?.distance ?? Infinity;
+          if (distance < nearest || (top && distance === nearest && paintedLater(order, bestAt))) {
+            best = { series: s, position: k, distance };
+            bestAt = order;
+          }
         }
         return offset;
       };
-      // Caps reach `half` past their position, so positions within that of
-      // the best distance may still be closer.
-      const farther = (offset: number) => offset - half > (best?.distance ?? Infinity);
+      // Caps and strokes reach past their position, so positions within that
+      // of the best distance may still be as near.
+      const reach = Math.max(half, width);
+      const farther = (offset: number) => offset - reach > (best?.distance ?? Infinity);
       if (!s.sorted) {
         for (let k = 0; k < s.length; k++) consider(k);
-        continue;
+        return;
       }
       const after = lowerPosition(s, along.invert(pointer));
       for (let k = after - 1; k >= 0 && !farther(consider(k)); k--);
       for (let k = after; k < s.length && !farther(consider(k)); k++);
-    }
+    });
     return best;
+  }
+
+  /**
+   * The stem from `a` to `b` at `p` and the caps where drawn, each a
+   * rectangle `stroke` wide (butt ends square), as [along, across] corners.
+   */
+  #pieces(p: number, a: number, b: number, stroke: number): [number, number, number, number][] {
+    const half = (this.spec.cap ?? CAP) / 2;
+    const width = stroke / 2;
+    const pieces: [number, number, number, number][] = [[p - width, a, p + width, b]];
+    if (half > 0)
+      pieces.push(
+        [p - half, a - width, p + half, a + width],
+        [p - half, b - width, p + half, b + width],
+      );
+    return pieces;
   }
 
   /** Where a row is drawn, from where its values place it: dodged within its band. */
@@ -500,8 +609,8 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
 }
 
 /**
- * Distance from (px, py) to the part of an axis-aligned segment inside the
- * plot; Infinity when none of it is.
+ * Distance from (px, py) to the part of an axis-aligned segment inside
+ * `plot` (or the box drawing is cut to); Infinity when none of it is.
  */
 function clippedDistance(
   px: number,
@@ -571,6 +680,7 @@ export function errorbar<S extends Schema>(
       "label",
       "legend",
       "id",
+      "itemKey",
       "axis",
       "facet",
       "panel",

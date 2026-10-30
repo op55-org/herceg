@@ -229,17 +229,30 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
     return stats.outliers;
   }
 
-  /** Boxes, whiskers, and outliers. */
+  /**
+   * Each piece geometry draws where the axis places its values: the box
+   * (a notch's outline between each two of its values, and its quartile
+   * lines), the median line, the whiskers, and the outliers drawn.
+   */
   protected drawnValues(
     { stats, groups }: Summary<readonly number[]>,
     row: number,
-    add: (value: number) => void,
+    add: (...values: number[]) => void,
   ): void {
-    for (const stat of ["low", "q1", "median", "q3", "high"] as const) add(stats[stat][row]!);
-    if (this.spec.outliers !== false) for (const value of groups[row]!) add(value);
+    const [low, q1, median, q3, high] = (["low", "q1", "median", "q3", "high"] as const).map(
+      (stat) => stats[stat][row]!,
+    ) as [number, number, number, number, number];
     if (this.spec.notch) {
-      for (const value of this.notchBounds(stats, row)) add(value);
-    }
+      const [from, to] = this.notchBounds(stats, row);
+      const notch = [q1, from, median, to, q3];
+      for (let i = 1; i < notch.length; i++) add(notch[i - 1]!, notch[i]!);
+      add(q1);
+      add(q3);
+    } else add(q1, q3);
+    add(median);
+    add(q1, low);
+    add(q3, high);
+    if (this.spec.outliers !== false) for (const value of groups[row]!) add(value);
   }
 
   private notchBounds(
@@ -433,6 +446,18 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
     return [
       Math.min(low, outliers[0] ?? low, notchLow),
       Math.max(high, outliers.at(-1) ?? high, notchHigh),
+    ];
+  }
+
+  /** Outlier dots at an end of the span reach their radius past it. */
+  protected override paintedPast(series: Series, row: number): readonly [number, number, number] {
+    if (this.spec.outliers === false) return [1, 1, 0];
+    const outliers = this.summaryOf(series).groups[row]!;
+    const [low, high] = this.span(series, row);
+    return [
+      outliers[0] === low ? RADIUS : 1,
+      outliers.at(-1) === high ? RADIUS : 1,
+      outliers.length > 0 ? RADIUS : 0,
     ];
   }
 

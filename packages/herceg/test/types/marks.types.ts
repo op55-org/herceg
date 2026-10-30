@@ -46,14 +46,17 @@ import type {
 
 const readings = table({ at: time([0]), cpu: [1], stage: ["a"] });
 
-// Explicit animation keys infer number, time, or category fields.
-point(readings, { x: "at", y: "cpu", animationKey: "cpu" });
-point(readings, { x: "at", y: "cpu", animationKey: "stage" });
-point(readings, { x: "at", y: "cpu", animationKey: "at" });
+// Item keys infer number, time, or category fields, on every mark whose items are rows.
+point(readings, { x: "at", y: "cpu", itemKey: "cpu" });
+point(readings, { x: "at", y: "cpu", itemKey: "stage" });
+point(readings, { x: "at", y: "cpu", itemKey: "at" });
+line(readings, { x: "at", y: "cpu", itemKey: "stage" });
+bar(readings, { x: "stage", y: "cpu", itemKey: "stage" });
+rule(readings, { y: "cpu", itemKey: "at" });
 // @ts-expect-error the key must be a field of the table
-point(readings, { x: "at", y: "cpu", animationKey: "missing" });
-// @ts-expect-error animation keys belong to point marks
-line(readings, { x: "at", y: "cpu", animationKey: "stage" });
+point(readings, { x: "at", y: "cpu", itemKey: "missing" });
+// @ts-expect-error a histogram's items are its bins, named by their intervals
+histogram(readings, { x: "cpu", itemKey: "stage" });
 
 // Tooltip fields are fields of the mark's table, of any kind but shapes, and
 // only marks whose points are rows take them.
@@ -154,8 +157,8 @@ region({});
 declare const shapes: GeometryInput;
 const regions = table({ shape: shapes, name: ["a"], sales: [1] });
 bar(regions, { x: "name", y: "sales" });
-// @ts-expect-error geometry cannot identify animated points
-point(regions, { x: "sales", y: "sales", animationKey: "shape" });
+// @ts-expect-error geometry cannot name items
+point(regions, { x: "sales", y: "sales", itemKey: "shape" });
 // @ts-expect-error geometry is not a bar position
 bar(regions, { x: "shape", y: "sales" });
 // @ts-expect-error geometry is not a heatmap column

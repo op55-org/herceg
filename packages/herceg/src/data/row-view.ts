@@ -16,6 +16,25 @@ export interface RowQuery<S extends Schema = Schema> {
   sort?: readonly SortKey<PositionField<S>>[] | undefined;
 }
 
+/**
+ * What a mark reads of its data (marks/rows.ts `rowsOf`): a table's rows, or
+ * the rows a view of it shows.
+ */
+export interface MarkRows<S extends Schema = Schema> {
+  /** The table the rows are of: a view's table, so stores and row identities are the table's. */
+  readonly table: Table<S>;
+  /**
+   * The positions drawn, in the order drawn, a copy the mark keeps (4 bytes
+   * a row, since a view rewrites its own); undefined: every row, in table
+   * order, with no copy.
+   */
+  readonly positions: Uint32Array | undefined;
+  /** Changes whenever the rows drawn may: the table's version and, for views, their revision. */
+  readonly revision: string;
+  /** The view the rows are of; undefined for a table's. */
+  readonly view?: RowView<S> | undefined;
+}
+
 /** What a view shows, as of one version of its table. */
 export interface RowSnapshot {
   /**
@@ -166,6 +185,21 @@ export class RowView<S extends Schema = Schema> {
     this.#rebuild = true;
     this.#queryRevision++;
     this.#invalidate();
+  }
+
+  /**
+   * What marks read of the view (`rowsOf`, marks/rows.ts): its table, its
+   * positions as a copy, since it rewrites its own as it catches up, and a
+   * revision; `known` while they are unchanged. Here, so that charts of
+   * tables alone carry none of it.
+   */
+  markRows(known: MarkRows<S> | undefined): MarkRows<S> {
+    // Reading catches the view up with its table, which may change its revision.
+    const { indices } = this.read();
+    const revision = `${this.source.version} ${this.#revision}`;
+    return known?.view === this && known.revision === revision
+      ? known
+      : { table: this.source, positions: indices?.slice(), revision, view: this };
   }
 
   /** The rows the view shows now, brought up to date with the table. */

@@ -25,6 +25,7 @@ import type {
 import type { Frozen, GraphLayout, GraphSpec, InteractionSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { surface } from "../theme.ts";
+import { distanceToSegment } from "./drawn.ts";
 import {
   type ItemSources,
   insidePolygon,
@@ -1919,21 +1920,6 @@ function band(x0: number, y0: number, x1: number, y1: number, half: number): str
   const nx = (-(y1 - y0) / length) * half;
   const ny = ((x1 - x0) / length) * half;
   return `M${n(x0 + nx)} ${n(y0 + ny)}L${n(x1 + nx)} ${n(y1 + ny)}L${n(x1 - nx)} ${n(y1 - ny)}L${n(x0 - nx)} ${n(y0 - ny)}Z`;
-}
-
-function distanceToSegment(
-  px: number,
-  py: number,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-): number {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const squared = dx * dx + dy * dy;
-  const t = squared > 0 ? Math.min(1, Math.max(0, ((px - x0) * dx + (py - y0) * dy) / squared)) : 0;
-  return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy));
 }
 
 /** The first `count` of `items` in the order `compare` gives, without sorting them all. */

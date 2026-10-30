@@ -388,6 +388,21 @@ is left out only when it cannot fit. Tops move continuously with their
 points while the same labels meet, so labels do not jump as data streams.
 Extents include halos and box outlines.
 
+**Label requests** (`layout/place.ts`). Rule and region labels are placed
+through a placer, so a panel can later place every mark's labels together
+without editing the marks. A mark implementing `LabelledMark` gives a
+`LabelRequest` per label (its block at its first place, the offsets its
+kind allows, the box it stays inside, its overlap rule and priority) and
+draws its labels back at the placements it is handed, `null` leaving one
+out. `placeLabels` places each request as before: at the place reaching
+least past its bounds (the first of equals), then moved inside them. A
+rule's label has two places, where it is and its mirror image across the
+rule (`mirrorPlaces`); its bounds are the plot, the chart for labels in
+the margin, or none. A region's label stays inside its region's box.
+Today each mark calls the placer within its own `geometry`, so every
+caller draws labels as before; plain rule labels without boxes are
+placed as they are drawn (`draw/rule.ts`), following moving rules.
+
 ## Themes and styles
 
 A theme (`theme.ts`) is **tokens** (`background`, `text`, `muted`, `grid`,

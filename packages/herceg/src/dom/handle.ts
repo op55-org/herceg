@@ -142,6 +142,20 @@ export interface Chart {
   getViewport(target?: PanelTarget): Viewport;
   /** Counts the chart's changes of view: the `viewRevision` of the last `viewport` event, 0 before any. */
   readonly viewRevision: number;
+  /**
+   * Counts the chart's changes of options, data, and state (views,
+   * selection, visibility, drill roots, cameras, moved nodes): each change
+   * applies, increments it, and reports itself with it (`revision` on its
+   * event); `render` carries the revision a frame drew, and input events
+   * the revision of the frame they acted on.
+   */
+  readonly revision: number;
+  /**
+   * The revision on screen, which `render` last reported; undefined until
+   * a frame draws (while code the first frame needs loads, or when it
+   * fails).
+   */
+  readonly drawnRevision: number | undefined;
   /** What is brushed (x and y ranges, epoch ms for time axes, and a lasso's outline), or null. */
   readonly selection: Selection | null;
   /**

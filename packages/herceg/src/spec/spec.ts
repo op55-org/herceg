@@ -1106,6 +1106,21 @@ export interface MarkTooltipSpec {
 }
 
 /** Marks whose points are rows of their table, so that tooltips can show more of the row. */
+/**
+ * Marks whose items are rows: what names each row's item (a line's or
+ * point's observation, a bar, an annotation's row), so that selections,
+ * a pinned tooltip, and transitions follow it across appends, drops,
+ * resets, and replaced tables.
+ */
+interface RowItems {
+  /**
+   * A category, number, or time field whose value names each row's item.
+   * Without it, an item is its row (a bar: its position); rows sharing a
+   * value are one item, and a missing value names the row by its identity.
+   */
+  itemKey?: Field;
+}
+
 interface RowTooltip {
   tooltip?: MarkTooltipSpec;
 }
@@ -1134,7 +1149,7 @@ export type Orient = "x" | "y";
  * give several lines. A category position places points at its bands'
  * centers, in band order.
  */
-export interface LineSpec extends SeriesBase, RowTooltip {
+export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
   type: "line";
   /** Positions along x, or with `orient: "y"` the values: one field or several, or a coordinate. */
   x: RowPosition | readonly Field[];
@@ -1188,7 +1203,7 @@ export interface LineSpec extends SeriesBase, RowTooltip {
   labels?: SeriesLabelsSpec;
 }
 
-interface AreaStyle extends SeriesBase, RowTooltip {
+interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
   type: "area";
   orient?: Orient;
   /** On a category position axis, with `series` and no stack: the series side by side in each band. */
@@ -1334,7 +1349,7 @@ interface AnnotationBase extends MarkBase {
   legend?: boolean;
 }
 
-interface RuleStyle extends AnnotationBase {
+interface RuleStyle extends AnnotationBase, RowItems {
   type: "rule";
   stroke?: string;
   strokeWidth?: number;
@@ -1377,7 +1392,7 @@ export type RegionRange<P> =
  */
 export type RegionSpec = RegionStyle & RegionRange<AnnotationPosition>;
 
-interface RegionStyle extends AnnotationBase {
+interface RegionStyle extends AnnotationBase, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own.
@@ -1411,7 +1426,7 @@ export type TextLabelSpec = LabelTextSpec & {
  * row's `label.field`. Labels are drawn above the data and left out when
  * their place is outside the plot.
  */
-export interface TextSpec extends AnnotationBase {
+export interface TextSpec extends AnnotationBase, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own.
@@ -1449,7 +1464,7 @@ export interface TextSpec extends AnnotationBase {
  * pixels included, centers vertical bars on `x`. Several length fields are
  * drawn side by side or stacked.
  */
-export interface BarSpec extends SeriesBase, RowTooltip {
+export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
    * on: "auto" (the default), false for none, or a color of its own.
@@ -1516,7 +1531,7 @@ export type RugSpec = RugStyle &
     | { y: Field; x?: never; side?: "left" | "right"; axis?: "left" }
   );
 
-interface RugStyle extends SeriesBase, RowTooltip {
+interface RugStyle extends SeriesBase, RowTooltip, RowItems {
   type: "rug";
   series?: Field;
   /**
@@ -1585,7 +1600,7 @@ export type ErrorBarSpec = ErrorBarStyle &
       }
   );
 
-interface ErrorBarStyle extends SeriesBase, RowTooltip {
+interface ErrorBarStyle extends SeriesBase, RowTooltip, RowItems {
   type: "errorbar";
   series?: Field;
   /**
@@ -1611,7 +1626,7 @@ interface ErrorBarStyle extends SeriesBase, RowTooltip {
  * Candles that close at or above their open are drawn hollow in the rise
  * color, others filled in the fall color, so direction never rests on color alone.
  */
-export interface CandlestickSpec extends SeriesBase, RowTooltip {
+export interface CandlestickSpec extends SeriesBase, RowTooltip, RowItems {
   type: "candlestick";
   x: Field;
   open: Field;
@@ -2055,7 +2070,7 @@ export interface GraphSpec {
  * a color per value) or with `fill`. Maps project every geo mark of a chart
  * with the chart's `projection`.
  */
-export interface GeoShapeSpec extends RowTooltip {
+export interface GeoShapeSpec extends RowTooltip, RowItems {
   type: "geoshape";
   data?: string;
   id?: string;
@@ -2105,7 +2120,7 @@ export type PointSizeSpec =
  */
 export type GeoPointSpec = GeoPointStyleSpec & PointSizeSpec;
 
-interface GeoPointStyleSpec extends RowTooltip {
+interface GeoPointStyleSpec extends RowTooltip, RowItems {
   type: "geopoint";
   data?: string;
   id?: string;
@@ -2251,7 +2266,7 @@ export type PointSpec = PointStyleSpec &
       }
   );
 
-interface PointStyleSpec extends SeriesBase, RowTooltip {
+interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
   type: "point";
   /** A number, time, or category field (a category field places points in its bands), or a coordinate. */
   x: RowPosition;
@@ -2261,8 +2276,6 @@ interface PointStyleSpec extends SeriesBase, RowTooltip {
    * field; `false` for none, each point colored by its row's `color`.
    */
   series?: Field | false;
-  /** Number, time, or category field matching points across resets when values animate. */
-  animationKey?: Field;
   /** Outline color of every point; the chart's background with only `strokeWidth`. */
   stroke?: string;
   /** Outline width in pixels: 1 with only `stroke`, none by default. */
@@ -2483,7 +2496,7 @@ export interface HeatmapCalendarSpec extends HeatmapBase {
  * Points at (x, y, z) in a 3D chart: number or time fields, z vertical.
  * Points share the chart's box with the chart's other 3D marks.
  */
-export interface Point3DSpec extends RowTooltip {
+export interface Point3DSpec extends RowTooltip, RowItems {
   type: "point3d";
   /** The subplot whose 3D box this layer shares. */
   panel?: string;
@@ -2517,7 +2530,7 @@ export interface Point3DSpec extends RowTooltip {
  * (or without a place on a log axis) breaks it. Lines share the chart's box
  * with its other 3D marks.
  */
-export interface Line3DSpec extends RowTooltip {
+export interface Line3DSpec extends RowTooltip, RowItems {
   type: "line3d";
   /** The subplot whose 3D box this layer shares. */
   panel?: string;

@@ -2,10 +2,15 @@ import type { PositionField, Schema, Table } from "../data/table.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
-import { shiftInside } from "../layout/place.ts";
+import {
+  type LabelledMark,
+  type LabelPlacement,
+  type LabelRequest,
+  placeLabels,
+} from "../layout/place.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { Geometry, RectGeometry } from "../scene/scene.ts";
+import type { Geometry, LabelsGeometry, RectGeometry } from "../scene/scene.ts";
 import type { LabelPlaceSpec } from "../spec/encoding.ts";
 import type { Side } from "../spec/place.ts";
 import type { AnnotationPosition, Clip, Frozen, RegionRange, RegionSpec } from "../spec/spec.ts";
@@ -21,6 +26,8 @@ import {
   readsTable,
   type TextField,
 } from "./annotation.ts";
+import type { DrawnMark, PartBuilders } from "./drawn.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import {
   labelBox,
   labelPaint,
@@ -35,6 +42,7 @@ import {
   type AxisFormat,
   type ChartMark,
   checkOption,
+  checkOptionalItemKey,
   type Frame,
   frozen,
   isPixels,
@@ -44,6 +52,7 @@ import {
   type MarkKey,
   painted,
   type RowParts,
+  rowBuffer,
   seriesKey,
 } from "./mark.ts";
 import type { RuleLabel } from "./rule.ts";
@@ -88,6 +97,7 @@ export type RegionOptions = RegionStyle &
 
 /** Regions from a table, one per row; places may also be constants. */
 export type RegionDataOptions<S extends Schema> = RegionStyle &
+  ItemKeyed<S> &
   RegionRange<PlaceOption<PositionField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
@@ -117,13 +127,15 @@ export function regionFormError(spec: {
  * and y2 across its width, or rectangles with both. Their values count
  * toward the axes' domains when they say so (`contributeDomain`).
  */
-export class RegionMark implements Mark<Frozen<RegionSpec>> {
+export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   declare readonly [MARK]: true;
   readonly spec: Frozen<RegionSpec>;
   readonly tooltip = "x";
   readonly featured: boolean;
   readonly domainFallback: boolean;
   readonly #data: AnnotationData;
+  /** The rows each geometry drawn draws, by item (see `partOf`). */
+  readonly #drawnRows = new WeakMap<Geometry, Uint32Array>();
   /** The label drawn as regions always draw theirs: plain text, in the top left corner. */
   readonly #plain: boolean;
 
@@ -163,6 +175,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       "region",
       { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
     );
+    // Rows a constant annotation does not read have no items to name.
+    checkOptionalItemKey(this.#data.table, this.spec.itemKey, "region");
     this.#plain = label !== undefined && !label.style && !label.place && !label.format;
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
     this.featured =
@@ -261,6 +275,40 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
   }
 
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
+    const { fill, labels } = this.#regions(frame, key, panelRows);
+    if (labels.length === 0) return [fill];
+    const placed = placeLabels(
+      labels.map(({ request }) => request),
+      [],
+    );
+    return [fill, ...this.#drawLabels(frame, key, labels, placed)];
+  }
+
+  /** Its labels, for a panel's placer (see `LabelledMark`). */
+  labelRequests(frame: Frame, key: MarkKey, panelRows?: RowParts): readonly LabelRequest[] {
+    return this.#regions(frame, key, panelRows).labels.map(({ request }) => request);
+  }
+
+  /** Its labels at their placements, in request order. */
+  drawLabels(
+    frame: Frame,
+    key: MarkKey,
+    panelRows: RowParts | undefined,
+    placements: readonly LabelPlacement[],
+  ): Geometry[] {
+    return this.#drawLabels(frame, key, this.#regions(frame, key, panelRows).labels, placements);
+  }
+
+  /**
+   * Its regions of the rows the legend leaves shown, each cut to its box
+   * (the plot, or the chart), and their labels, each placed in its region's
+   * visible part and asked to stay inside the box.
+   */
+  #regions(
+    frame: Frame,
+    key: MarkKey,
+    panelRows: RowParts | undefined,
+  ): { fill: RectGeometry; labels: RegionLabel[] } {
     // What the legend hides of it goes undrawn.
     const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { plot, theme } = frame;
@@ -273,15 +321,15 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
     // Buffers as large as the items drawn: a facet panel's, not the table's.
     const size = data.size(rows);
     const rects = frame.floats(id, "rect", size * 4);
+    // The row each region drawn is (and, with labels, each label), for drawn-mark records.
+    const drawnRows = rowBuffer(frame, id, "rows", size);
     const color = painted(frame.paint, this.spec.fill, "region fill") ?? theme.muted;
     // An outline draws the sides it is given of each region's own edges.
     const edge = this.#edge(frame, color);
     const sides = edge && frame.bytes(id, "sides", size);
     const given = sideMask(this.spec.strokeSides ?? ["top", "right", "bottom", "left"]);
-    const placed: PlacedLabel[] = [];
-    const paint =
-      label &&
-      labelPaint(theme, theme.text, label.style && frame.read(label.style, "region label.style"));
+    const labels: RegionLabel[] = [];
+    const paint = label && this.#paint(frame);
     let count = 0;
     // Regions are cut to the plot, or to the chart with a clip of "chart" or false.
     const clip = this.spec.clip;
@@ -296,6 +344,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
         ? this.#span(ys, "y", i, frame.y, frame, box.y, box.y + box.height)
         : ([plot.y, plot.y + plot.height, 0] as const);
       if (!across || !down) return;
+      drawnRows[count] = i;
       rects[count * 4] = across[0];
       rects[count * 4 + 1] = down[0];
       rects[count * 4 + 2] = across[1] - across[0];
@@ -317,7 +366,20 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
               }
             : this.#place(text, across, down, paint, frame.measure);
         // Its box stays inside the region's where the visible part is too small for it.
-        placed.push(movedLabel(label, shiftInside(labelBox(label, paint, frame.measure), box)));
+        const block = labelBox(label, paint, frame.measure);
+        const request: LabelRequest = {
+          mark: key,
+          index: labels.length,
+          group: undefined,
+          overlap: "show",
+          priority: 0,
+          anchor: { x: block.x, y: block.y },
+          block: { width: block.width, height: block.height },
+          places: [{ dx: 0, dy: 0 }],
+          leader: false,
+          bounds: box,
+        };
+        labels.push({ row: i, at: label, request });
       }
       count++;
     });
@@ -331,27 +393,66 @@ export class RegionMark implements Mark<Frozen<RegionSpec>> {
       count,
     };
     if (edge) fill.edge = { ...edge, sides: sides! };
-    const out: Geometry[] = [fill];
-    if (placed.length > 0 && paint) {
-      const labelKey = seriesKey(key, "region label");
-      const halo = label?.style?.halo ?? this.spec.halo;
-      out.push(
-        this.#plain || plainText(paint, theme)
-          ? textGeometry(
-              labelKey,
-              // Placed by their first lines, drawn by their middles.
-              placed.map((at) => ({
-                ...at,
-                y: at.y + ((lineCount(at.text) - 1) * paint.lineHeight) / 2,
-              })),
-              paint.color,
-              halo,
-              frame,
-            )
-          : labelsGeometry(labelKey, placed, paint, halo, frame),
-      );
-    }
-    return out;
+    this.#drawnRows.set(fill, drawnRows);
+    return { fill, labels };
+  }
+
+  /** The labels' paint: the theme's text in their style. */
+  #paint(frame: Frame): TextPaint {
+    const style = this.#data.label?.style;
+    return labelPaint(
+      frame.theme,
+      frame.theme.text,
+      style && frame.read(style, "region label.style"),
+    );
+  }
+
+  /** The geometry of `labels` at their placements; none left out. */
+  #drawLabels(
+    frame: Frame,
+    key: MarkKey,
+    labels: readonly RegionLabel[],
+    placements: readonly LabelPlacement[],
+  ): Geometry[] {
+    const placed: PlacedLabel[] = [];
+    // The row of each label drawn, for drawn-mark records.
+    const rows: number[] = [];
+    labels.forEach(({ row, at }, k) => {
+      const placement = placements[k];
+      if (placement === null || placement === undefined) return;
+      placed.push(movedLabel(at, [placement.dx, placement.dy]));
+      rows.push(row);
+    });
+    if (placed.length === 0) return [];
+    const { theme } = frame;
+    const paint = this.#paint(frame);
+    const labelKey = seriesKey(key, "region label");
+    const halo = this.#data.label?.style?.halo ?? this.spec.halo;
+    const geometry =
+      this.#plain || plainText(paint, theme)
+        ? textGeometry(
+            labelKey,
+            // Placed by their first lines, drawn by their middles.
+            placed.map((at) => ({
+              ...at,
+              y: at.y + ((lineCount(at.text) - 1) * paint.lineHeight) / 2,
+            })),
+            paint.color,
+            halo,
+            frame,
+          )
+        : labelsGeometry(labelKey, placed, paint, halo, frame);
+    this.#drawnRows.set(geometry, Uint32Array.from(rows));
+    return [geometry];
+  }
+
+  /** Its regions and their labels are rows (of its table, or of its places given alone). */
+  partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+    const rows = this.#drawnRows.get(geometry);
+    const count =
+      (geometry as { count?: number }).count ?? (geometry as LabelsGeometry).items?.length;
+    if (!rows || !(index < (count ?? 0))) return undefined;
+    return parts.annotation(drawn, this.table, rows[index]!);
   }
 
   /**
@@ -533,6 +634,7 @@ export function region<S extends Schema>(
       [
         "halo",
         "id",
+        "itemKey",
         "x1",
         "x2",
         "y1",
@@ -556,4 +658,11 @@ export function region<S extends Schema>(
   if (table?.name !== undefined && readsTable([spec.x1, spec.x2, spec.y1, spec.y2], spec.label))
     spec.data = table.name;
   return new RegionMark(spec, table as unknown as Table | undefined);
+}
+
+/** A region's label: its row, its place in the region, and its request. */
+interface RegionLabel {
+  row: number;
+  at: PlacedLabel;
+  request: LabelRequest;
 }

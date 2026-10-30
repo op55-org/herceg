@@ -6,6 +6,8 @@ see the [marks guide](../guide/marks.md).
 
 - [Series keys](#series-keys)
 - [Identity and color](#identity-and-color)
+- [Items](#items)
+- [Drawn marks](#drawn-marks)
 - [Encodings](#encodings)
 - [Band axes](#band-axes)
 - [Lines and areas along y](#lines-and-areas-along-y)
@@ -88,6 +90,144 @@ stand on the bars of the same field's values even where one mark lacks some.
 Colors by value come from scales of categories, not palette slots: a series
 or row colored by a field takes its value's output in the `"color"` scale
 (or the one `encode.color.scale` names).
+
+## Items
+
+An **item** is one thing a mark draws that input, selections, and
+transitions address: a row's point, bar, or annotation, an aggregate (a
+bin, a box, a cell), or a layout mark's slice or node. One resolver
+(`model/items.ts`) builds item keys and finds items again, so every reader
+names items alike.
+
+- **Keys are JSON arrays** starting with the mark's key (its `id`, else
+  its index), as series keys do, so `keyOwner` reads their mark. A row's
+  item continues with the value field where one row draws several items
+  (a wide mark's series, `Mark.wide`; not an error bar's or a range
+  area's two fields), then its name: its `itemKey` value; for a bar
+  without one, its series and its position's value (`Mark.itemPosition`);
+  else, and where the value is missing, `"row"` with its table's token
+  (one per table object, so a replaced table's rows are other items), the
+  generation, and the identity. Aggregates' and layout items' keys are their parts and
+  names (`groupKey`): a histogram's bin is its series value and interval.
+- **Finding rows again.** `rowsOf(key, table)` gives the positions a key
+  names now, of the rows its mark draws (a view's): one row by identity,
+  every row sharing a name (rows sharing an `itemKey` value are one item;
+  a number names no category's row, nor a category's name a number's),
+  a bar's rows by series and position (none for a wide mark's value field
+  it no longer draws), and an aggregate's through
+  `Mark.groupsOf` (declared; no mark gives it yet).
+  Hints (`ItemHint`) find rows faster but are never part of a key.
+- **References.** Applications name items by the mark's `id` and the parts
+  after it (`keyOfReference`), so keys stay opaque.
+
+The resolver has no reader yet; input targets, item selections, pinned
+tooltips, and every mark's transitions build on it ([roadmap](../roadmap.md)).
+Points' value transitions match points by `itemKey`
+([rendering](rendering.md#animated-values)).
+
+## Drawn marks
+
+Each scene keeps a **drawn-mark record** (`DrawnMark`, `marks/drawn.ts`)
+per mark and panel: the mark's key, its panel, the frame it drew with, the
+geometry as painted, its series, the chart's revision drawn, and
+`current()`, true until a later scene reuses its buffers or the model is
+disposed, and while the chart's options and every table and view the mark
+read keep the versions it read (only then are its series' column views
+valid). Marks along axes get theirs from the model, layout marks from
+`ItemViews` with their `LayoutResult`, the mark that laid it out (a map's
+layers are drawn by one mark the chart does not list), and no frame;
+`ChartModel.drawnMarks()` lists them. Records reference the scene's
+geometry and series and copy nothing, costing one object per mark and
+panel each scene.
+
+What a primitive draws is worked out on demand by `partOf`
+(`marks/drawn-parts.ts`, loaded only by pickers), from the geometry the
+mark made: `paintedAs` sets a mark's `clip` and `zIndex` on its own
+geometry, and a highlight's dimmed, lit, and clipped copies say what they
+copy (`copiedFrom`), so `madeIn` follows a painted primitive back.
+
+| Geometry | Part |
+| --- | --- |
+| Bars, points (with each primitive's row recorded in the frame's pooled buffers, 4 bytes each; a highlight's dots of lone points record theirs beside their geometry, `drawingRows`) | The row, with its series and position |
+| Point clouds | The series position `cloud.start + index` |
+| Markers on lines and areas | The observation the series' features say |
+| Marks with their own `Mark.partOf` | Histogram bins (groups by interval, each rectangle's bin recorded as drawn), rules', regions', and text's rows (annotations without a table: groups by index), dendrogram merges (three segments each) |
+| Other lines and areas | A trace along the mark's tooltip axis: which rows are drawable (as drawn: zeros of stacks on log axes at the bottom), which pairs are in one run (rows a time break hides join their neighbors), and for unsorted lines each path point's position; a highlight's selected values read of the masked series they were traced from (`tracedBy`), whose path ends are kept apart from the whole's |
+
+Heatmaps, 2D histograms, box plots, violins, candlesticks, error bars,
+rugs, and contours pick their items through their existing lookups
+(`Mark.pickItem` over `pick`, through `pickedHit`, among the series shown,
+as tooltips look), within the query's
+reach of the shape as painted: a violin's outline through the vertices
+drawing gives it (the density's samples an axis places and the
+statistics quartile lines draw) and its inner whisker, box, median dot,
+or quartile lines (`shapeDistance`), the others' boxes and spans. Each
+gives the item's drawn
+bounds (`HitReading.bounds`): a cell's or bin's rectangle, a box's or
+violin's slot across its span and what is painted past it (a pixel of
+strokes, an outlier dot's radius, also across where slots are narrower
+than the dots or a violin's inner box, and a violin's median dot; so a
+group of one value has an area; on a log axis, only the pieces it
+places), a candle as painted (its wick from
+low to high, a hollow body's side strokes, a filled body at least a pixel
+tall down from its top, an OHLC bar's ticks as wide as their strokes, and
+at least as wide as the wick's stroke; a merged
+candle's, where dense candles merge per pixel column, naming its candle
+nearest the pointer's value; with a selection highlighted, the selected
+rows' own merged candle, drawn over the column's, names and bounds
+selected rows), what the clip keeps of an error bar's stem and caps or
+a rug's tick, a contour band's outer ring with half its outline (opaque
+bands are outlined half a pixel wide), or a contour line's box with half
+its stroke. Strokes are measured from their
+painted edges, as much of them as the clip keeps: error bars' and rugs'
+as rectangles with square ends, violins' outlines and contour lines as
+each segment's round-ended stroke (`distanceToStroke`, as strokes are
+drawn round-joined; so a stroke whose middle is outside the plot is
+found where it shows). Error bars, rugs, contour
+lines, violins, heatmaps, and 2D histograms are looked for through
+lookups of their own (`HitReading.lookup`), as far as the query reaches:
+cells holding rows within reach of the pointer, edges included
+(`CellIndex.forEachIn`, which passes over empty cells), measured to the
+part of their rectangles inside what was drawn (the image of the cells
+the plot shows and a highlight's cells, each cut to the mark's clip,
+never the box around them; nothing where none show: `cellsCover`);
+candles drawn one by one only where geometry
+draws them (positions in view and beside it whose bodies reach the plot),
+each candle, merged or not, measured to what it paints (of coincident
+candles, falling ones painted over rising ones);
+distributions by the part of their extent the clip keeps (violins by
+what it keeps of their fill, outline, and inner marks instead), and of a
+highlighted selection's shape drawn over them, which ranks over every
+series' whole and widens the bounds; contour
+lines by what the clip keeps of their strokes (none of no width; only
+lines geometry draws in the view), bands by the region
+holding the clip's point nearest the pointer, else by their edges the
+clip keeps (`clipSegment`, with their outline) within reach, where some of the band shows
+beside them (a hole's edge naming the region around it); error bars only where drawn (stems whose clip keeps only an edge
+not at all) (positions geometry draws, not
+in an axis break, caps only where they have length), each mark's shapes
+cut to the plot, or to the chart with a `clip` of `"chart"` or `false`
+(`clipBox`), and of
+error bars or rugs as near, the one painted last (a highlight's selected
+rows over the others, as tooltips rank them); violins measured as drawn,
+each whose extent is within reach, before the nearest is chosen. A
+heatmap's cell is an aggregate named by its x and y values: a band's value
+(a category, number, or time; a calendar's `day:`, `weekday:`, or `month:`
+key), else the cell's, never a label, which locales and rounding change.
+Layout marks pick through
+`itemAt` (`pickItem`, `marks/layout-mark.ts`): rows for marks whose items
+are rows (`LayoutMark.rowItems`: map layers, 3D points and lines' samples, with the layer's
+mark key; a map of one layer names it for items that say none), else
+their item keys. A layout pick is a hit or none, as `itemAt` gives it: a
+panel holds one layout mark, so no distance ranks it against another
+mark's items, and its reach is the tooltip's. Pickers will test the remaining
+geometry by kind and ask `partOf` what was hit; nothing in the library
+reads records yet.
+
+`LayerEdges` (`marks/series.ts`) fixes how a stack will mark positions
+where it has no support (some shown layer lacks a row there): NaN edges
+in every layer, which drawing, domains, and traces already read as gaps,
+as tests pin. No stack writes them yet.
 
 ## Encodings
 

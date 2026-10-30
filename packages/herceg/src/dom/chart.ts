@@ -62,6 +62,7 @@ import type { AdoptedChart } from "./adopt.ts";
 import type { Brush } from "./brush.ts";
 import { ascending, DRAG_THRESHOLD, normalize, type Selection } from "./brushed.ts";
 import {
+  type ChangeCause,
   type ChartEvents,
   type ChartListener,
   Emitter,
@@ -69,8 +70,6 @@ import {
   type PanelViewport,
   type PanelVisibility,
   type ScaleView,
-  type ViewCause,
-  type ViewportEvent,
 } from "./events.ts";
 import {
   type AxisTarget,
@@ -361,7 +360,10 @@ export class MountedChart implements Chart, ExportsScene {
       const { group, scale, panel } = spec;
       if (channel === "cursor") {
         // It shows where the panels sharing the channel's panel's scale are, as drawn then.
-        this.#cursor = value === null ? null : { at: { [scale]: value } as CursorPosition, panel };
+        this.#cursor =
+          value === null
+            ? null
+            : { at: { [scale]: value } as CursorPosition, panel, cause: "sync" };
         schedule(this.#scheduled);
         return;
       }
@@ -381,7 +383,8 @@ export class MountedChart implements Chart, ExportsScene {
         const at = this.#endpoint(spec);
         if (!at && !this.#early) return;
         if (channel === "selection") {
-          this.#select(this.#decode(value as SharedSelection | null, scale, at), at);
+          const decoded = this.#decode(value as SharedSelection | null, scale, at);
+          this.#select(decoded, at, false, undefined, "sync");
           return;
         }
         this.#settle();
@@ -435,9 +438,13 @@ export class MountedChart implements Chart, ExportsScene {
   #rows: RowLink | undefined;
   readonly #events = new Emitter();
   /** What last changed the view or what bounds it, for `edge` events. */
-  #cause: ViewCause = "options";
+  #cause: ChangeCause = "options";
   /** What changed the panels since the last frame (data, or options and what is hidden), for the views it retires. */
-  #panelsCause: ViewCause = "options";
+  #panelsCause: ChangeCause = "options";
+  /** How many times the selection changed: a report taken before a change is not made after it. */
+  #selectionChanges = 0;
+  /** Frames' reports being made, in order: a frame a listener draws reports after them. */
+  #finishing: (() => void)[] | undefined;
   /** Inside `#changeView`, whose end reports the change. */
   #changingView = false;
   /**
@@ -454,10 +461,12 @@ export class MountedChart implements Chart, ExportsScene {
   /** Counts the changes of view reported (`ViewportEvent.viewRevision`). */
   #viewRevision = 0;
   /** Viewport events a listener's changes made, waiting for the one being delivered to reach every listener. */
-  #viewQueue: ViewportEvent[] | undefined;
+  #viewQueue: ChartEvents["viewport"][] | undefined;
   readonly #cleanup: (() => void)[] = [];
   /** Subscriptions to the tables the marks read and the row views some show. */
   readonly #tables = new Map<Table | RowView, () => void>();
+  /** Each view's `queryRevision` when it last reported: its own changes since are new. */
+  readonly #seen = new WeakMap<RowView, number>();
   #leaveSync: (() => void) | undefined;
   #unwatchPage: (() => void) | undefined;
   /** The page changed since its theme was last read; read again on the next frame. */
@@ -474,8 +483,17 @@ export class MountedChart implements Chart, ExportsScene {
   /** What the chart shows in place of a frame, or over the last one, while it cannot draw. */
   #failure: HTMLElement | undefined;
   /** Counts changes of options and data; a failure is reported once per count. */
-  #revision = 0;
+  #content = 0;
   #reportedFailure = -1;
+  /** Whether what keeps the chart from drawing still does: until a frame draws. */
+  #failing = false;
+  /** Counts changes of options, data, and state (see `Chart.revision`). */
+  #revision = 0;
+  /**
+   * The revision on screen, which `render` and input events carry: the last
+   * scene's, or once nothing waits to be drawn, the selection's drawn over it.
+   */
+  #shown = 0;
 
   /**
    * Mounts a chart in `container`, or with `adopted`, takes over the element
@@ -520,10 +538,10 @@ export class MountedChart implements Chart, ExportsScene {
       document,
       // An entry hidden, or hidden in some panels only, shows its series; one
       // adopted from markup, without that state, as its keys are now.
-      (keys, panel, show) => {
+      (keys, panel, show, cause) => {
         const visible =
           show ?? [keys].flat().every((key) => this.#model.hidden.hiddenIn(key, panel));
-        this.setVisibility(keys, visible, { panel });
+        this.#setVisibility(keys, visible, panel, cause);
         return visible;
       },
       adopted?.legend,
@@ -644,7 +662,7 @@ export class MountedChart implements Chart, ExportsScene {
     const fonts = this.#fonts;
     // The views, which limits that changed may move.
     const views = this.#model.views();
-    this.#revision++;
+    this.#content++;
     try {
       // Bindings the controller refuses, fonts the page refuses, and options
       // the model refuses leave the chart as it was.
@@ -661,6 +679,8 @@ export class MountedChart implements Chart, ExportsScene {
       this.#fail(error, "validate", this.#drawn && !(this.#refusal ?? this.#compileFailure));
       return;
     }
+    // Refused options changed nothing, so only applied ones count.
+    this.#revision++;
     this.#refusal = undefined;
     // A controller that refused the options, or failed to load, tries again with these.
     if (!this.#controller && this.#held === null) {
@@ -692,6 +712,7 @@ export class MountedChart implements Chart, ExportsScene {
     this.#hide(
       [...hidden].filter(keeps),
       panels ? panels.prune(hidden.panels, keeps) : hidden.panels.size ? new Map() : undefined,
+      "options",
     );
     // Limits that changed moved views inside them; the views of instances
     // no longer drawn go with the next frame (see `#finishFrame`).
@@ -757,6 +778,14 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#viewRevision;
   }
 
+  get revision(): number {
+    return this.#revision;
+  }
+
+  get drawnRevision(): number | undefined {
+    return this.#drawn ? this.#shown : undefined;
+  }
+
   /**
    * The current panel named `panel`, throwing, as `where`, when there is
    * none, or when it has no x axis an `x` call needs. Pending changes may
@@ -783,7 +812,7 @@ export class MountedChart implements Chart, ExportsScene {
       throw new TypeError(
         `showCursor ${axis}: expected a finite number or a category's name; received ${String(value)}`,
       );
-    this.#cursor = { at: position, shown: options };
+    this.#cursor = { at: position, shown: options, cause: "api" };
     // It is drawn by the controller, which loads now if it has not.
     this.#loadController().catch(() => {});
     schedule(this.#scheduled);
@@ -811,12 +840,22 @@ export class MountedChart implements Chart, ExportsScene {
     selection: Selection | readonly [number, number] | null,
     target: PanelTarget & { rows?: boolean } = {},
   ): void {
-    if (this.#later(target.panel !== undefined, () => this.select(selection, target))) return;
+    this.#selectAs(selection, target, "api");
+  }
+
+  /** `select`, as `cause` made it: a method, or the gesture of a map's or network's controls. */
+  #selectAs(
+    selection: Selection | readonly [number, number] | null,
+    target: PanelTarget & { rows?: boolean },
+    cause: ChangeCause,
+  ): void {
+    const later = () => this.#selectAs(selection, target, cause);
+    if (this.#later(target.panel !== undefined, later)) return;
     // A map's or network's lasso belongs to its plane; clearing names one only to check it.
     const plane =
       selection || target.panel !== undefined ? this.#plane()?.select(target.panel) : undefined;
     const at = plane ? undefined : this.#current(target.panel, "select", true);
-    this.#selectIn(selection, at, target.rows, plane);
+    this.#selectIn(selection, at, target.rows, plane, cause);
   }
 
   /**
@@ -829,9 +868,11 @@ export class MountedChart implements Chart, ExportsScene {
     panel?: DrawnPanel,
     rows = true,
     plane?: SelectionOwner | null,
+    cause: ChangeCause = "pointer",
+    made?: number,
   ) {
     const was = this.#owner;
-    this.#select(selection, panel, rows, plane);
+    this.#select(selection, panel, rows, plane, cause, made);
     const channel = this.#channels.selection;
     const at = channel && this.#endpoint(channel);
     // What a selection of other instances (an inset's, another facet's) was or is is the chart's alone.
@@ -849,13 +890,17 @@ export class MountedChart implements Chart, ExportsScene {
   /**
    * Sets the selection, in panel `at` (by default, the one drawing the
    * scales every panel shares) or on a `plane`; one of the chart's own
-   * (`local`), not a synced chart's, writes its rows.
+   * (`local`), not a synced chart's, writes its rows. A selection the first
+   * frame selects again counted when it was set, and reports the revision
+   * it `made` then.
    */
   #select(
     selection: Selection | readonly [number, number] | null,
     at?: DrawnPanel,
     local = false,
     plane?: SelectionOwner | null,
+    cause: ChangeCause = "api",
+    made?: number,
   ) {
     const given = Array.isArray(selection)
       ? { x: selection as readonly [number, number], y: null, lasso: null }
@@ -895,24 +940,27 @@ export class MountedChart implements Chart, ExportsScene {
     const before = this.#owner;
     if (sameSelection(next, this.#selection) && sameOwner(owner, before)) {
       // Shown without writing, even unchanged, it is no longer the brush's own.
-      if (!local) this.#rows?.brushed(null, null, false);
+      if (!local) this.#rows?.brushed(null, null, false, cause, this.#revision);
       return;
     }
     this.#selection = next;
     this.#owner = owner;
+    this.#selectionChanges++;
+    const revision = made ?? ++this.#revision;
     schedule(this.#scheduled);
     if (this.#reports) {
       // Selected again in the first frame's panels, unless changed since.
       this.#reports.push(() => {
         if (this.#selection !== next) return;
         this.#selection = this.#owner = null;
-        this.#selectIn(next, at, local, plane);
+        this.#selectIn(next, at, local, plane, cause, revision);
       });
       return;
     }
-    const written = this.#rows?.brushed(next, owner, local);
+    const written = this.#rows?.brushed(next, owner, local, cause, revision);
     // A listener may have changed the selection as its rows were written: that change reported itself.
-    if (this.#selection === next) this.#emitSelection(next, owner ?? before, written);
+    if (this.#selection === next)
+      this.#emitSelection(next, owner ?? before, cause, written, revision);
   }
 
   /**
@@ -931,12 +979,16 @@ export class MountedChart implements Chart, ExportsScene {
   #emitSelection(
     selection: Selection | null,
     owner: SelectionOwner | null,
+    cause: ChangeCause,
     written?: { rows: readonly RowSelectionChange[] } | false,
+    revision = this.#revision,
   ) {
     this.#events.emit("select", {
       ...(selection ?? { x: null, y: null, lasso: null }),
       // As it is now: a plane's panels follow its subplots.
       owner: owner ? { ...owner } : { scales: [], panels: [] },
+      cause,
+      revision,
       ...written,
     });
   }
@@ -1010,7 +1062,10 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   setCamera(camera: CameraSpec | null, target?: PanelTarget): void {
-    if (this.#model.setCamera(camera, target?.panel)) this.#invalidate(false);
+    // Its report, made after the frame, carries the count it made.
+    if (!this.#model.setCamera(camera, target?.panel, this.#revision + 1)) return;
+    this.#revision++;
+    this.#invalidate(false);
   }
 
   getDrillRoot(target?: PanelTarget): DrillRoot | undefined {
@@ -1133,6 +1188,15 @@ export class MountedChart implements Chart, ExportsScene {
     visible: boolean,
     { panel }: { panel?: string | undefined } = {},
   ): void {
+    this.#setVisibility(keys, visible, panel, "api");
+  }
+
+  #setVisibility(
+    keys: string | readonly string[],
+    visible: boolean,
+    panel: string | undefined,
+    cause: ChangeCause,
+  ): void {
     const model = this.#model.hidden;
     const list = typeof keys === "string" ? [keys] : keys;
     // What subplots' legends set of them: in one panel as `panel` says, else let go.
@@ -1148,7 +1212,7 @@ export class MountedChart implements Chart, ExportsScene {
       if (visible) hidden.delete(stored);
       else hidden.add(stored);
     }
-    this.#hide(hidden, own);
+    this.#hide(hidden, own, cause);
   }
 
   /**
@@ -1157,7 +1221,11 @@ export class MountedChart implements Chart, ExportsScene {
    * remove marks all hide series and items, reporting once when something
    * changed.
    */
-  #hide(next: Iterable<string>, panels?: Map<string, Map<string, boolean>>): void {
+  #hide(
+    next: Iterable<string>,
+    panels?: Map<string, Map<string, boolean>>,
+    cause: ChangeCause = "api",
+  ): void {
     const hidden = this.#model.hidden;
     // A series of a legend group goes with its group's entry.
     const keys = new Set<string>();
@@ -1172,6 +1240,7 @@ export class MountedChart implements Chart, ExportsScene {
     hidden.clear();
     for (const key of keys) hidden.add(key);
     if (panels) hidden.panels = panels;
+    this.#revision++;
     // Panels' own visibility, and marks or rows hidden, show on the legend through the guide compiler.
     this.#loadCompilers();
     this.#settle();
@@ -1179,6 +1248,8 @@ export class MountedChart implements Chart, ExportsScene {
     this.#events.emit("visibility", {
       hiddenKeys: [...hidden],
       ...this.#options.panels?.overrides(hidden.panels),
+      cause,
+      revision: this.#revision,
     });
   }
 
@@ -1311,8 +1382,11 @@ export class MountedChart implements Chart, ExportsScene {
     if (this.#destroyed) return;
     this.#model.items?.stopWaiting();
     const failure = chartError(error, phase);
-    const reported = this.#reportedFailure === this.#revision;
-    this.#reportedFailure = this.#revision;
+    // Content that failed to draw leaves the last frame behind; refused
+    // options keep the chart as it was.
+    if (phase === "render") this.#failing = true;
+    const reported = this.#reportedFailure === this.#content;
+    this.#reportedFailure = this.#content;
     if (this.#options.errorMode !== "throw" && !(reported && this.#failure)) {
       this.#failure?.remove();
       // The chart keeps its size, its drawing hidden under a box saying why.
@@ -1361,6 +1435,7 @@ export class MountedChart implements Chart, ExportsScene {
   /** A frame is on screen: what showed it could not draw goes. */
   #succeed(): void {
     this.#drawn = true;
+    this.#failing = false;
     this.#settleReady?.[0]();
     this.#settleReady = undefined;
     if (!this.#failure) return;
@@ -1407,29 +1482,69 @@ export class MountedChart implements Chart, ExportsScene {
    * changed: what is hovered, the camera, and with `drawn`, the frame.
    */
   #finishFrame(drawn: boolean): void {
-    // A tree whose data lost the node it was drilled into shows an ancestor:
-    // reported before listeners of the frame (hover) may drill again.
-    if (drawn) this.#model.items?.finishFrame();
-    // Zoomed instances the frame no longer drew are fitted now: reported as
-    // a change of view, of what changed the panels.
-    if (drawn) {
-      this.#reportViews([], this.#panelsCause, undefined, this.#model.takeRetired());
-      this.#panelsCause = "options";
+    // What changed the panels changes what the frame retires (views, a
+    // selection), reported with the revision drawn: taken before listeners
+    // of its reports make the next frame's changes.
+    const cause = this.#panelsCause;
+    const revision = drawn ? this.#model.revision : this.#revision;
+    const retired = drawn ? this.#model.takeRetired() : [];
+    const lost = this.#keepSelection();
+    const selections = this.#selectionChanges;
+    // What its brush wrote goes with it, unless a later selection wrote over it.
+    const release = lost && this.#rows?.release();
+    if (drawn) this.#panelsCause = "options";
+    // A tree whose data or options lost the node it was drilled into shows an
+    // ancestor: reported before listeners of the frame (hover) may drill again.
+    const items = drawn ? this.#model.items?.takeFrame(revision, cause) : undefined;
+    const scene = this.#scene;
+    const report = () => {
+      items?.();
+      // Zoomed instances the frame no longer drew are fitted now: reported as
+      // a change of view, of what changed the panels.
+      this.#reportViews([], cause, undefined, retired, undefined, revision);
+      if (lost) {
+        const written = release?.(cause, revision);
+        // A selection a listener made (or cleared) since takes the place of its report.
+        if (this.#selectionChanges === selections)
+          this.#emitSelection(null, lost, cause, written, revision);
+      }
+      this.#drawSelection();
+      // A selection draws over the last scene: with no scene and no brush to
+      // wait for, what is on screen is the chart's latest revision, which the
+      // cursor's input events read as it draws; not while its content fails
+      // to draw, which leaves what was on screen.
+      const shown = drawn
+        ? revision
+        : !this.#dirty && !this.#failing && (!this.#selection || this.#brush)
+          ? this.#revision
+          : this.#shown;
+      const rendered = drawn || shown !== this.#shown;
+      this.#shown = shown;
+      // A scene a listener drew since is the next report's to read (hover).
+      if (this.#scene === scene) this.#controller?.draw(drawn);
+      if (rendered) this.#events.emit("render", { revision: shown });
+    };
+    // A frame a listener draws reports once this one's reports are out.
+    if (this.#finishing) {
+      this.#finishing.push(report);
+      return;
     }
-    this.#drawSelection();
-    this.#controller?.draw(drawn);
-    if (drawn) this.#events.emit("render", {});
+    const queue = [report];
+    this.#finishing = queue;
+    try {
+      for (let k = 0; k < queue.length; k++) queue[k]!();
+    } finally {
+      this.#finishing = undefined;
+    }
   }
 
   /**
-   * Keeps the selection while the instances it belongs to are drawn, and
-   * draws it, or the drag in progress, with the brush.
+   * Keeps the selection while the instances it belongs to are drawn: what
+   * it belonged to when it goes, else undefined.
    */
-  #drawSelection(): void {
-    const scene = this.#scene;
-    if (!scene) return;
+  #keepSelection(): SelectionOwner | undefined {
+    if (!this.#scene) return undefined;
     const model = this.#model;
-    const panels = model.panels();
     // A selection whose instances are gone (their facet values, or a change
     // of how panels share scales) goes too; one whose instance every panel
     // shares follows the panels drawing it.
@@ -1440,12 +1555,18 @@ export class MountedChart implements Chart, ExportsScene {
       this.#owner = kept ? this.#ownerOf(keys) : null;
     }
     // A map's lasso is on its plane's panels.
-    if (owner && !(this.#owner?.panels.length ?? 0)) {
-      this.#selection = null;
-      this.#owner = null;
-      // So do the rows it wrote, from the channels that still hold them.
-      this.#emitSelection(null, owner, this.#rows?.brushed(null, null, true));
-    }
+    if (!owner || (this.#owner?.panels.length ?? 0)) return undefined;
+    this.#selection = null;
+    this.#owner = null;
+    this.#selectionChanges++;
+    return owner;
+  }
+
+  /** Draws the selection, or the drag in progress, with the brush. */
+  #drawSelection(): void {
+    const scene = this.#scene;
+    if (!scene) return;
+    const panels = this.#model.panels();
     // A drag draws in the panels it would select in, a selection in its own.
     const brush = this.#brush;
     const keys = brush?.dragging ? this.#controller?.dragged : this.#owner?.panels;
@@ -1462,14 +1583,16 @@ export class MountedChart implements Chart, ExportsScene {
    * channel's scale with synced charts. Changes made inside `change` are
    * part of it; changes listeners make are the next ones. Before the
    * first frame, which draws the panels to report it in, the report waits
-   * for that frame, of the change since the views were `before`.
+   * for that frame, of the change since the views were `before`, counted
+   * when it was made, with the revision it `made` then.
    */
   #changeView(
     change: () => void,
-    cause: ViewCause,
+    cause: ChangeCause,
     panel?: string,
     plane?: PlaneViewChange,
     before: ReadonlyMap<string, Range> = this.#model.views(),
+    made?: number,
   ): void {
     if (this.#changingView) {
       change();
@@ -1484,12 +1607,13 @@ export class MountedChart implements Chart, ExportsScene {
     }
     const changed = this.#changed(before);
     if (changed.length === 0 && !plane) return;
+    const revision = made ?? ++this.#revision;
     this.#invalidate(false);
     if (this.#reports) {
-      this.#reports.push(() => this.#changeView(() => {}, cause, panel, plane, before));
+      this.#reports.push(() => this.#changeView(() => {}, cause, panel, plane, before, revision));
       return;
     }
-    this.#reportViews(changed, cause, panel, [], plane);
+    this.#reportViews(changed, cause, panel, [], plane, revision);
     // What a synced chart shared is not shared again.
     if (cause !== "sync") this.#shareView(changed);
   }
@@ -1525,10 +1649,11 @@ export class MountedChart implements Chart, ExportsScene {
    */
   #reportViews(
     changed: readonly string[],
-    cause: ViewCause,
+    cause: ChangeCause,
     panel?: string,
     retired: readonly ScaleView[] = [],
     plane?: PlaneViewChange,
+    revision = this.#revision,
   ): void {
     if (changed.length === 0 && retired.length === 0 && !plane) return;
     const viewRevision = ++this.#viewRevision;
@@ -1545,8 +1670,9 @@ export class MountedChart implements Chart, ExportsScene {
       ...changed.map((key) => ({ ...model.instance(key), view: views.get(key) ?? null })),
       ...(plane?.scales ?? []),
     ].sort((a, b) => rank(a) - rank(b));
-    const event: ViewportEvent = {
+    const event: ChartEvents["viewport"] = {
       viewRevision,
+      revision,
       cause,
       ...(panel !== undefined && { panel }),
       scales,
@@ -1565,7 +1691,7 @@ export class MountedChart implements Chart, ExportsScene {
    * Delivers a viewport event once those before it reached every listener:
    * a listener's own change is reported after the one it heard.
    */
-  #deliver(event: ViewportEvent): void {
+  #deliver(event: ChartEvents["viewport"]): void {
     if (this.#viewQueue) {
       this.#viewQueue.push(event);
       return;
@@ -1700,7 +1826,23 @@ export class MountedChart implements Chart, ExportsScene {
 
   /** The model's scene, its colors and fonts read of the page. */
   #sceneOf(measure: MeasureText, clouds: boolean): Scene {
+    // The revision drawn, which its records, `render`, and input events carry.
+    this.#model.revision = this.#revision;
     return readPage(this.#container, (page) => this.#model.scene(measure, clouds, page));
+  }
+
+  /**
+   * How many changes what `source` reports makes: a table's, its write; a
+   * view's, the changes of its own query or restriction since it last
+   * reported (nested ones included). A view reports its table's writes
+   * too, which the table (always a mark's, so read too) counts.
+   */
+  #counts(source: Table | RowView): number {
+    if (!("source" in source)) return 1;
+    const now = source.queryRevision;
+    const own = now - this.#seen.get(source)!;
+    this.#seen.set(source, now);
+    return own;
   }
 
   /** What the chart measures text with: its fonts, or its document's canvas. */
@@ -1725,30 +1867,32 @@ export class MountedChart implements Chart, ExportsScene {
       }
     }
     for (const table of tables) {
-      if (!this.#tables.has(table))
-        this.#tables.set(
-          table,
-          table.subscribe((change?: TableChange) => {
-            // New data shows at once: a moving view would plan from stale
-            // data. Changed values may move there from what is on screen,
-            // unless something inspects or presses it or moves its view.
-            const busy = this.#animation?.playing || this.#controller?.busy;
-            this.#values?.changed(
-              busy || !this.#scheduled.visible ? undefined : this.#scene,
-              change,
-              this.#drawTime,
-            );
-            this.#animation?.settle();
-            this.#cause = this.#panelsCause = "data";
-            this.#revision++;
-            // A facet's panels are its data's, as a category axis' categories are.
-            this.#invalidate(
-              true,
-              !!this.#options.facet ||
-                [...this.#model.instances.values()].some(({ type }) => type === "band"),
-            );
-          }),
-        );
+      if (this.#tables.has(table)) continue;
+      if ("source" in table) this.#seen.set(table, table.queryRevision);
+      this.#tables.set(
+        table,
+        table.subscribe((change?: TableChange) => {
+          // New data shows at once: a moving view would plan from stale
+          // data. Changed values may move there from what is on screen,
+          // unless something inspects or presses it or moves its view.
+          const busy = this.#animation?.playing || this.#controller?.busy;
+          this.#values?.changed(
+            busy || !this.#scheduled.visible ? undefined : this.#scene,
+            change,
+            this.#drawTime,
+          );
+          this.#animation?.settle();
+          this.#cause = this.#panelsCause = "data";
+          this.#content++;
+          this.#revision += this.#counts(table);
+          // A facet's panels are its data's, as a category axis' categories are.
+          this.#invalidate(
+            true,
+            !!this.#options.facet ||
+              [...this.#model.instances.values()].some(({ type }) => type === "band"),
+          );
+        }),
+      );
     }
     this.#leaveSync?.();
     this.#channels = channelsOf(options.interaction?.sync);
@@ -1783,13 +1927,27 @@ export class MountedChart implements Chart, ExportsScene {
         this as Chart,
         this.#model,
       ) ?? this.#navigator?.dispose();
+    const chart = this;
     this.#rows =
       options.rowSelection?.mount(
         this.#rows,
         this.#model,
-        this,
+        {
+          get selection() {
+            return chart.selection;
+          },
+          // The brush goes as the change that replaced its rows: a click's, another writer's.
+          clear: (cause) => this.#selectAs(null, {}, cause),
+          render: () => this.render(),
+          root: this.root,
+        },
         this.#events,
         () => this.#invalidate(false),
+        () => {
+          // A frame renders the change, which may draw nothing new.
+          schedule(this.#scheduled);
+          return ++this.#revision;
+        },
         () => this.#controller?.keyboard ?? null,
         this.#live,
       ) ?? this.#rows?.dispose();
@@ -2028,16 +2186,27 @@ export class MountedChart implements Chart, ExportsScene {
             invalidate: () => this.#invalidate(false),
             cursor: () => this.#controller?.keyboard ?? undefined,
             normalize,
+            select: (selection, panel, cause) =>
+              this.#selectAs(selection, panel === undefined ? {} : { panel }, cause),
           }),
         ),
       // Drills and moves of maps and networks report themselves; views as
       // the axes' do, in order with them.
       (...[type, change]) => {
-        if (type === "viewport") this.#changeView(() => {}, change.cause, change.panel, change);
-        else {
-          if (type !== "camera") this.#invalidate(false);
-          this.#events.emit(type, change as never);
-        }
+        const items = this.#model.items!;
+        const [cause, counted] = [items.cause, items.revision];
+        // What listeners change in turn is theirs, made as a method's.
+        items.by("api", () => {
+          if (type === "viewport") this.#changeView(() => {}, change.cause, change.panel, change);
+          else {
+            // A camera counted when it was set, and a drill root a frame
+            // reconciled with the change it drew: each reports that count.
+            if (type !== "camera" && counted === undefined) this.#revision++;
+            if (type !== "camera") this.#invalidate(false);
+            const revision = counted ?? this.#revision;
+            this.#events.emit(type, { ...change, cause, revision } as never);
+          }
+        });
       },
     );
   }
@@ -2194,7 +2363,8 @@ export class MountedChart implements Chart, ExportsScene {
       id: this.#id,
       options: () => this.#options,
       scene: () => this.#scene,
-      revision: () => this.#revision,
+      revision: () => this.#content,
+      drawnRevision: () => this.#shown,
       schedule: () => schedule(this.#scheduled),
       report: (error) => this.#report(chartError(error, "load")),
       invalidate: () => this.#invalidate(false),
@@ -2209,7 +2379,7 @@ export class MountedChart implements Chart, ExportsScene {
       settle: () => this.#settle(),
       animated: (change) => this.#animated(change),
       changeView: (change, cause, panel) => this.#changeView(change, cause, panel),
-      select: (selection, at) => this.#selectIn(selection, at),
+      select: (selection, at, cause) => this.#selectIn(selection, at, true, undefined, cause),
       selection: () => this.#selection,
       owner: () => this.#owner,
       rows: () => this.#rows,

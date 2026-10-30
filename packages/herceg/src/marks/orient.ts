@@ -129,9 +129,11 @@ export function bandOrder(
     for (let k = 0; k < length; k++) {
       const band = bands[rows ? rows[k]! : k]!;
       if (band < previous) {
-        // Rows of one band keep their order: rows ascend within a series.
+        // Rows of one band keep their order in the series (a provider's, not the table's).
         const out = withBands(bands, rows, length) ?? Uint32Array.from({ length }, (_, i) => i);
-        return Uint32Array.from(out).sort((a, b) => bands[a]! - bands[b]! || a - b);
+        return Uint32Array.from({ length: out.length }, (_, k) => k)
+          .sort((a, b) => bands[out[a]!]! - bands[out[b]!]! || a - b)
+          .map((k) => out[k]!);
       }
       previous = band;
     }

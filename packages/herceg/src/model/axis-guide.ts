@@ -23,7 +23,7 @@ export const TICK = 5;
  */
 export function axisItems(
   placement: AxisPlacement,
-  ticks: readonly AxisTick[],
+  ticks: readonly Pick<AxisTick, "position" | "label">[],
   title?: AxisGuide["title"],
   measure?: MeasureText,
 ): GuideItem[] {
@@ -85,14 +85,14 @@ export function axisItems(
 }
 
 /** An axis guide of scale `scale` keyed `key`, with its items. */
-export function axisGuide(
+export function axisGuide<T extends Pick<AxisTick, "position" | "label"> = AxisTick>(
   key: string,
   scale: string,
   placement: AxisPlacement,
-  ticks: readonly AxisTick[],
+  ticks: readonly T[],
   title: AxisGuide["title"],
   measure?: MeasureText,
-): AxisGuide {
+): Omit<AxisGuide, "ticks"> & { ticks: readonly T[] } {
   return {
     kind: "axis",
     key,

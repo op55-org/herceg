@@ -9,6 +9,7 @@ import type { RowPaint } from "../../model/features.ts";
 import type { EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
+import type { MarkRows } from "../rows.ts";
 import type { Series } from "../series.ts";
 import {
   type Channel,
@@ -20,6 +21,7 @@ import {
   rowReader,
   type ScaleOf,
 } from "./channels.ts";
+import { subset } from "./runs.ts";
 
 /** The options of a mark's spec its rows' looks come from. */
 export interface RowStyleSpec {
@@ -43,6 +45,8 @@ interface Part {
 /** The looks of a mark's rows, compiled. */
 export class RowStyles {
   readonly #table: Table;
+  /** The rows the mark draws (marks/rows.ts): only theirs are read and checked. */
+  readonly #drawn: () => MarkRows;
   readonly #spec: RowStyleSpec;
   readonly #fill: Channel<string> | undefined;
   readonly #stroke: Channel<string> | undefined;
@@ -66,18 +70,22 @@ export class RowStyles {
       parts: { paints: readonly RowPaint[]; of(row: number): number };
     }
   >();
-  /** Kept for a table version, until the theme or paint reader changes (`use`). */
-  #key: { version: number; key: GlyphKey | undefined } | undefined;
-  #looks: { version: number; of: Int32Array; paints: RowPaint[] } | undefined;
+  /** Kept for a table version and the rows drawn, until the theme or paint reader changes (`use`). */
+  #key: { version: number; subset: string | undefined; key: GlyphKey | undefined } | undefined;
+  #looks:
+    | { version: number; subset: string | undefined; of: Int32Array; paints: RowPaint[] }
+    | undefined;
 
   constructor(
     spec: RowStyleSpec,
     table: Table,
+    drawn: () => MarkRows,
     scales: ScaleOf,
     path: string,
     isColor: (value: string) => boolean,
   ) {
     this.#table = table;
+    this.#drawn = drawn;
     this.#spec = spec;
     this.#path = path;
     const encode = spec.encode ?? {};
@@ -189,7 +197,7 @@ export class RowStyles {
 
   /**
    * A key of the colors a field other than the series field gives rows: the
-   * values rows hold, in the scale's order, for the table's version.
+   * values the rows drawn hold, in the scale's order, for the table's version.
    */
   key(): GlyphKey | undefined {
     const fill = this.#fill;
@@ -197,10 +205,17 @@ export class RowStyles {
     if (fill?.kind !== "field" || fill.field === this.#spec.series) return undefined;
     const table = this.#table;
     const theme = this.#theme;
-    if (this.#key?.version === table.version) return this.#key.key;
+    const rows = this.#drawn();
+    const drawn = subset(rows);
+    if (this.#key?.version === table.version && this.#key.subset === drawn) return this.#key.key;
     const { codes, dictionary } = table.categories(fill.field as never);
     const held = new Uint8Array(dictionary.length);
-    for (let row = 0; row < codes.length; row++) if (codes[row]! >= 0) held[codes[row]!] = 1;
+    const { positions } = rows;
+    const count = positions ? positions.length : codes.length;
+    for (let k = 0; k < count; k++) {
+      const code = codes[positions ? positions[k]! : k]!;
+      if (code >= 0) held[code] = 1;
+    }
     const values = dictionary.filter((_, code) => held[code]);
     const place = (value: string) => fill.scale.place(value) ?? Infinity;
     values.sort((a, b) => place(a) - place(b));
@@ -219,7 +234,7 @@ export class RowStyles {
           })),
         }
       : undefined;
-    this.#key = { version: table.version, key };
+    this.#key = { version: table.version, subset: drawn, key };
     return key;
   }
 
@@ -303,20 +318,27 @@ export class RowStyles {
     return out;
   }
 
-  /** Each row's look, for the table's version: an index into `paints`. */
+  /**
+   * Each drawn row's look, for the table's version and the rows drawn: an
+   * index into `paints`. Rows the mark does not draw are not read (their
+   * identity values are not checked), and keep look 0.
+   */
   #read(): { of: Int32Array; paints: RowPaint[] } | undefined {
     if (!this.byRow) return undefined;
     const table = this.#table;
     const theme = this.#theme;
-    if (this.#looks?.version === table.version) return this.#looks;
+    const rows = this.#drawn();
+    const drawn = subset(rows);
+    if (this.#looks?.version === table.version && this.#looks.subset === drawn) return this.#looks;
     const palette = theme?.palette ?? [];
     const muted = theme?.muted ?? "#999999";
     const [fill, stroke, width, opacity] = this.#checks;
+    const { positions } = rows;
     const channels = [
-      rowReader(this.#fill, table, palette, muted, fill!.check, fill!.path),
-      rowReader(this.#stroke, table, palette, muted, stroke!.check, stroke!.path),
-      rowReader(this.#width, table, [], 1, width!.check, width!.path),
-      rowReader(this.#opacity, table, [], 1, opacity!.check, opacity!.path),
+      rowReader(this.#fill, table, palette, muted, fill!.check, fill!.path, true, positions),
+      rowReader(this.#stroke, table, palette, muted, stroke!.check, stroke!.path, true, positions),
+      rowReader(this.#width, table, [], 1, width!.check, width!.path, true, positions),
+      rowReader(this.#opacity, table, [], 1, opacity!.check, opacity!.path, true, positions),
     ];
     const by = this.#by;
     const byPart = by && this.#codes(by.field);
@@ -331,7 +353,9 @@ export class RowStyles {
     // Past exact integers, ids are their parts' values written out.
     const exact = parts.reduce((size, part) => size * part.count, 1) <= Number.MAX_SAFE_INTEGER;
     const ids = new Map<string, number>();
-    for (let row = 0; row < of.length; row++) {
+    const count = positions ? positions.length : of.length;
+    for (let k = 0; k < count; k++) {
+      const row = positions ? positions[k]! : k;
       let id = 0;
       if (exact) for (const part of parts) id = id * part.count + part.at(row);
       else id = ids.get(parts.map((part) => part.at(row)).join()) ?? ids.size;
@@ -363,7 +387,7 @@ export class RowStyles {
       }
       of[row] = look;
     }
-    this.#looks = { version: table.version, of, paints };
+    this.#looks = { version: table.version, subset: drawn, of, paints };
     return this.#looks;
   }
 

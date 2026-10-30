@@ -12,6 +12,7 @@
 // also work on a network's layout between frames (see `layout-frames.ts`).
 
 import type { NodeMoves } from "../marks/graph.ts";
+import type { ChangeCause } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
 import { LayoutFrames } from "./layout-frames.ts";
@@ -60,7 +61,7 @@ export class Controls implements ChartControls {
         {
           label: "Put moved nodes back",
           glyph: RESET_GLYPH,
-          act: () => this.#reset(panel()),
+          act: (cause) => this.#reset(panel(), cause),
           hidden: () => !moved(panel()),
         },
       ],
@@ -131,12 +132,19 @@ export class Controls implements ChartControls {
   }
 
   /** Moves the node keyed `key` of panel `panel`'s network to a place in layout units. */
-  #moveTo(panel: string, key: string, [x, y]: readonly [number, number]): void {
-    this.#host.model.items?.setItemPosition(key, { x, y }, panel);
+  #moveTo(
+    panel: string,
+    key: string,
+    [x, y]: readonly [number, number],
+    cause: ChangeCause = "pointer",
+  ): void {
+    const items = this.#host.model.items;
+    items?.by(cause, () => items.setItemPosition(key, { x, y }, panel));
   }
 
-  #reset(panel: string): void {
-    this.#host.model.items?.resetItemPositions(panel);
+  #reset(panel: string, cause: ChangeCause = "pointer"): void {
+    const items = this.#host.model.items;
+    items?.by(cause, () => items.resetItemPositions(panel));
     this.#host.announce("Put the moved nodes back.");
   }
 
@@ -284,9 +292,14 @@ export class Controls implements ChartControls {
       const pixel = key !== undefined && moves.movable(key) ? moves.pixelOf(key, moved) : undefined;
       if (!pixel) return;
       const [px, py] = pixel;
-      this.#moveTo(panel!, key!, moves.toLayout(key!, px + way[0] * STEP, py + way[1] * STEP));
+      this.#moveTo(
+        panel!,
+        key!,
+        moves.toLayout(key!, px + way[0] * STEP, py + way[1] * STEP),
+        "keyboard",
+      );
       this.#host.announce(`Moved ${nameOf(key!)} ${way[2]}.`);
-    } else if (event.key === "0" && !pans) this.#reset(panel!);
+    } else if (event.key === "0" && !pans) this.#reset(panel!, "keyboard");
     else return;
     event.preventDefault();
     event.stopImmediatePropagation();

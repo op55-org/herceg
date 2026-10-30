@@ -31,7 +31,7 @@ import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
 import type { Selection } from "./brushed.ts";
 import type { ChartOptions } from "./chart.ts";
-import type { Emitter, ViewCause } from "./events.ts";
+import type { ChangeCause, Emitter, InputEvent } from "./events.ts";
 import type { CursorPosition } from "./handle.ts";
 import type { svgElement } from "./svg-layer.ts";
 import { describeInspection, Tooltip } from "./tooltip.ts";
@@ -78,6 +78,8 @@ export interface InteractionHost {
   scene(): Scene | undefined;
   /** Counts changes of options and data, the marks and rows inspections name. */
   revision(): number;
+  /** The chart's revision the frame on screen drew, which input events carry. */
+  drawnRevision(): number;
   /** Draws the overlay again on the next frame. */
   schedule(): void;
   /** Tells of code the controller could not load, as the chart tells of what fails. */
@@ -96,9 +98,9 @@ export interface InteractionHost {
   settle(): void;
   animated(change: () => void): void;
   /** One change of view, made in `panel` (by default, in none), reported once and shared with synced charts. */
-  changeView(change: () => void, cause: ViewCause, panel?: string): void;
+  changeView(change: () => void, cause: ChangeCause, panel?: string): void;
   /** Sets the selection in panel `at`, as one of the chart's own, sharing it with synced charts. */
-  select(selection: Selection | null, at?: DrawnPanel): void;
+  select(selection: Selection | null, at?: DrawnPanel, cause?: "pointer" | "keyboard"): void;
   selection(): Selection | null;
   owner(): SelectionOwner | null;
   rows(): RowLink | undefined;
@@ -114,7 +116,7 @@ export interface InteractionHost {
   /** The cursor a synced chart shares or `showCursor` shows, or null. */
   cursor(): ShownCursor | null;
   /** What last changed the view or what bounds it. */
-  cause(): ViewCause;
+  cause(): ChangeCause;
 }
 
 /**
@@ -124,6 +126,8 @@ export interface InteractionHost {
 export interface ShownCursor {
   at: CursorPosition;
   shown?: CursorShowSpec;
+  /** Shared by another chart, or shown by `showCursor`. */
+  cause: "sync" | "api";
   /**
    * Its sync channel's panel: it shows on the panels sharing that panel's
    * instance of its axis, as drawn now (none while that panel is not);
@@ -271,6 +275,8 @@ export class Interaction {
   #brushAnchor: { value: number; label: string; axis: "x" | "y" } | null = null;
   /** What the last hover event reported, to emit only changes. */
   #hovered = "";
+  /** What read the last hover reported, for the report once it goes. */
+  #cursorCause: InputEvent["cause"] = "pointer";
   /**
    * The ends each scale instance's view is near, by scale, group, and side:
    * the bound it came near, until it moves away or the bound moves.
@@ -281,7 +287,7 @@ export class Interaction {
   /** The views each panel's frame drew, by panel: what input between frames starts from. */
   readonly #framed = new Map<string, View>();
   /** What the input being handled is, as views changed report it. */
-  #cause: ViewCause = "pointer";
+  #cause: ChangeCause = "pointer";
   /** Handlers by event type, which play held input too. */
   readonly #handlers = new Map<string, (event: never) => void>();
   readonly #cleanup: (() => void)[] = [];
@@ -494,7 +500,16 @@ export class Interaction {
       const key = inspectionKey(read);
       if (key !== this.#hovered) {
         this.#hovered = key;
-        host.events.emit("hover", { inspection: read });
+        // Read by the pointer or keyboard, else by a cursor shown here, or
+        // nothing since what read last went (Escape, the pointer leaving).
+        const cause = own
+          ? this.#pointer
+            ? "pointer"
+            : "keyboard"
+          : (host.cursor()?.cause ??
+            (this.#pointer ? "pointer" : this.#keyboard ? "keyboard" : this.#cursorCause));
+        this.#cursorCause = cause;
+        host.events.emit("hover", { inspection: read, cause, revision: host.drawnRevision() });
         if (changed()) return;
       }
     }
@@ -1514,7 +1529,12 @@ export class Interaction {
     const panel = this.#panelAt(point.x, point.y);
     if (host.model.interactionOf(panel?.key)?.brush && written !== null) host.select(null);
     if (host.events.has("click"))
-      host.events.emit("click", { inspection: host.model.inspect(point.x, point.y), ...written });
+      host.events.emit("click", {
+        inspection: host.model.inspect(point.x, point.y),
+        cause: "pointer",
+        revision: host.drawnRevision(),
+        ...written,
+      });
   }
 
   /**
@@ -1553,7 +1573,7 @@ export class Interaction {
       if (!selection || !at || !this.#zooms(selection, at)) return;
       event.preventDefault();
       this.#brushAnchor = null;
-      host.select(null);
+      host.select(null, undefined, "keyboard");
       // A select listener may have taken the panel away, or given it other
       // scales: zoom only where the selection still is.
       host.current();
@@ -1566,7 +1586,7 @@ export class Interaction {
       this.#keyboard = null;
       this.#brushAnchor = null;
       live.textContent = "";
-      if (host.selection()) host.select(null);
+      if (host.selection()) host.select(null, undefined, "keyboard");
       host.schedule();
       return;
     }
@@ -1703,6 +1723,7 @@ export class Interaction {
       host.select(
         { x: axis === "x" ? range : null, y: axis === "y" ? range : null, lasso: null },
         to,
+        "keyboard",
       );
       const selection = host.selection();
       const zooms = selection && this.#zooms(selection, to!);

@@ -8,7 +8,7 @@
 import type { LabelPlaceSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, TextSpec } from "../spec/spec.ts";
-import { frozen, type MARK, type Mark } from "./mark.ts";
+import { checkOptionalItemKey, frozen, type MARK, type Mark } from "./mark.ts";
 
 /** Options of text that labels series elsewhere, and what to do instead. */
 const PLACED: readonly [option: keyof TextSpec, instead: string][] = [
@@ -41,6 +41,8 @@ export class FollowingTextMark implements Mark<Frozen<TextSpec>> {
       refuse("legend", "labels following series name what the legend lists already; drop legend");
     if (spec.label === undefined)
       refuse("label", "required; give its text, a field of the source mark, or content");
+    // Its rows are the source mark's: it has none of its own to name.
+    checkOptionalItemKey(undefined, spec.itemKey, "text");
     // Typed callers cannot give these; others are told why.
     const place: Frozen<LabelPlaceSpec> | undefined =
       typeof spec.label === "object" ? spec.label.place : undefined;

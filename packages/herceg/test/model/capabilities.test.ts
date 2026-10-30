@@ -1383,7 +1383,7 @@ describe("capabilities: row selection", () => {
           : {};
     const selection = rowSelection({ store, channel: "c", ...options });
     const { model } = build({ marks, rowSelection: selection });
-    const chart = { selection: null, select() {}, render() {}, root: new EventTarget() as never };
+    const chart = { selection: null, clear() {}, render() {}, root: new EventTarget() as never };
     const live = { textContent: null };
     selection.mount(
       undefined,
@@ -1391,6 +1391,7 @@ describe("capabilities: row selection", () => {
       chart,
       { emit() {} },
       () => {},
+      () => 0,
       () => null,
       live,
     );
@@ -1433,13 +1434,14 @@ describe("capabilities: row selection", () => {
       const store = selectionStore(table);
       const selection = rowSelection({ store, channel: "c" });
       const { model } = build({ marks: [mark], rowSelection: selection });
-      const chart = { selection: null, select() {}, render() {}, root: new EventTarget() as never };
+      const chart = { selection: null, clear() {}, render() {}, root: new EventTarget() as never };
       selection.mount(
         undefined,
         model,
         chart,
         { emit() {} },
         () => {},
+        () => 0,
         () => null,
         {
           textContent: null,
@@ -1467,13 +1469,14 @@ describe("capabilities: row selection", () => {
       const store = selectionStore(table);
       const selection = rowSelection({ store, channel: "c" });
       const { model } = build({ marks: [mark], facet: facet("group"), rowSelection: selection });
-      const chart = { selection: null, select() {}, render() {}, root: new EventTarget() as never };
+      const chart = { selection: null, clear() {}, render() {}, root: new EventTarget() as never };
       selection.mount(
         undefined,
         model,
         chart,
         { emit() {} },
         () => {},
+        () => 0,
         () => null,
         {
           textContent: null,
@@ -1984,7 +1987,7 @@ describe("capabilities: value animation preconditions", () => {
   it.each([false, true])("points across reset require an explicit key (keyed: %s)", (keyed) => {
     const values = table({ x: [0, 1], y: [2, 3], id: ["a", "b"] });
     const { model, scene } = build({
-      marks: [point(values, { x: "x", y: "y", ...(keyed ? { animationKey: "id" as const } : {}) })],
+      marks: [point(values, { x: "x", y: "y", ...(keyed ? { itemKey: "id" as const } : {}) })],
       x: { domain: [0, 2] },
       y: { domain: [0, 10] },
       animation: { values: true },

@@ -349,3 +349,13 @@ def test_chart_options_of_round_2_reach_the_chart_as_given():
     assert spec["x"] == {"title": "t", "padding": 0}
     assert spec["y"] == {"title": "v", "padding": {"px": 8}}
     assert spec["theme"] == {"style": {"title": {"verticalAlign": "bottom"}}}
+
+
+def test_rugplot_names_each_tick_by_a_column_of_the_data():
+    data = {"v": [1.0, None, 3.0], "id": ["a", "b", "c"]}
+    for axis in ("x", "y"):
+        chart = hx.rugplot(data, **{axis: "v"}, item_key="id")
+        (rug,) = marks(chart)
+        assert rug["itemKey"] == "id"
+        # The missing value's tick is left out, and its name with it.
+        assert hx.statistics(chart).tables["values"]["id"].tolist() == ["a", "c"]

@@ -191,7 +191,7 @@ def decode_viewport(payload: Any) -> Viewport:
 
 #: What changed a view: a drag or pinch ("pointer"), the wheel, a key, a
 #: call (``set_viewport``), a synced chart, the chart's data, or its options.
-ViewCause = Literal["pointer", "wheel", "keyboard", "api", "sync", "data", "options"]
+ChangeCause = Literal["pointer", "wheel", "keyboard", "api", "sync", "data", "options"]
 _CAUSES = ("pointer", "wheel", "keyboard", "api", "sync", "data", "options")
 
 #: A position scale: ``"x"``, or the left (``"y"``) or right (``"y_right"``) y axis.
@@ -239,7 +239,7 @@ class ViewportEvent:
     counts the changes of view of the chart as one display draws it."""
 
     view_revision: int
-    cause: ViewCause
+    cause: ChangeCause
     panel: str | None
     scales: tuple[ScaleView, ...]
     views: Mapping[str, Viewport]

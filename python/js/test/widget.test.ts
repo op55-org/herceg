@@ -217,7 +217,7 @@ describe("notebook widget", () => {
       x: { domain: [0, 4] },
       y: { domain: [0, 100] },
     });
-    state.spec.marks = [{ type: "point", x: "t", y: "v", data: "data", animationKey: "host" }];
+    state.spec.marks = [{ type: "point", x: "t", y: "v", data: "data", itemKey: "host" }];
     const initial = rows([1, 2, 3], [10, 20, 30], ["a", "b", "c"]);
     state.spec.data = { data: { columns: initial.columns } };
     state.buffers = initial.buffers.map((buffer) => new DataView(buffer.buffer));

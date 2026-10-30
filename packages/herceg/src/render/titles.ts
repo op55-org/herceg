@@ -6,8 +6,8 @@
 // its markup (a line's after its markers), in the order its items paint,
 // so what paints over an item, later in it or in a later mark, takes the
 // pointer as it does on screen. The scene is drawn here, its bars and
-// points saying which row each item draws (`Frame.attributed`), without
-// the DOM; only exports asking for titles load this module.
+// points saying which row each item draws (their `rows`), without the DOM;
+// only exports asking for titles load this module.
 
 import { fieldReader } from "../dom/tooltip-content.ts";
 import { escapeXml, n, SvgPath } from "../draw/markup.ts";
@@ -58,23 +58,14 @@ export function titlesOf(
   { budget = BUDGET, page }: { budget?: number; page?: ThemeEnvironment } = {},
 ): { scene: Scene; titles: SvgTitles } {
   // Every mark is drawn as the chart draws it (highlighted, if it is),
-  // its bars and points saying which position of their series each draws,
-  // and inspected with the fields its tooltip shows.
-  const { highlight, fields } = model;
+  // its bars and points saying which row each draws, and inspected with
+  // the fields its tooltip shows.
+  const { fields } = model;
   model.fields = fields ?? fieldReader;
-  model.highlight = (mark, series, frame, key, rows) =>
-    (highlight ?? ((m, s, f, k, r) => m.geometry(s, f, k, r)))(
-      mark,
-      series,
-      { ...frame, attributed: true },
-      key,
-      rows,
-    );
   let scene: Scene;
   try {
     scene = model.scene(measure, false, page);
   } finally {
-    model.highlight = highlight;
     model.fields = fields;
   }
   const after = new Map<Geometry, string>();

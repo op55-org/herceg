@@ -312,7 +312,9 @@
         "toPNG": "Exports are Chart's: Chart.to_png().",
         "destroy": "The widget's lifetime is the notebook's (ipywidgets' close()).",
         "selectionOwner": "The widget's selection says where it is drawn (Selection.panels).",
-        "viewRevision": "The widget reads and sets views with get_viewport and set_viewport; each change's revision arrives with it, as hg.ViewportEvent's view_revision (on_viewport)."
+        "viewRevision": "The widget reads and sets views with get_viewport and set_viewport; each change's revision arrives with it, as hg.ViewportEvent's view_revision (on_viewport).",
+        "revision": "The chart's revision counts what one browser's chart drew; the widget orders browsers' reports by a transport revision of its own.",
+        "drawnRevision": "Frames are drawn in each browser; the widget orders browsers' reports by a transport revision of its own."
       },
       "only": {
         "append": "Appends rows to the chart's data, as TypeScript appends to its tables.",
@@ -694,6 +696,7 @@
         "expand_margins": "Not offered yet."
       },
       "only": {
+        "item_key": "The column naming each tick, as the core's marks take it, so that selections and transitions follow ticks across replaced data.",
         "z_index": "The marks' drawing order among the chart's, as the core's marks take it."
       }
     },
@@ -712,7 +715,8 @@
       "only": {
         "seed": "The jitter's seed, so that the chart is made again alike (seaborn draws from NumPy's global state).",
         "z_index": "The marks' drawing order among the chart's, as the core's marks take it.",
-        "encode": "The marks' encodings (hg.Encodings), as the core's marks take them."
+        "encode": "The marks' encodings (hg.Encodings), as the core's marks take them.",
+        "item_key": "The column naming each point, as the core's marks take it, so that selections and transitions follow points across replaced data."
       }
     },
     "express swarmplot options": {
@@ -729,7 +733,8 @@
       },
       "only": {
         "z_index": "The marks' drawing order among the chart's, as the core's marks take it.",
-        "encode": "The marks' encodings (hg.Encodings), as the core's marks take them."
+        "encode": "The marks' encodings (hg.Encodings), as the core's marks take them.",
+        "item_key": "The column naming each point, as the core's marks take it, so that selections and transitions follow points across replaced data."
       }
     },
     "express violinplot options": {

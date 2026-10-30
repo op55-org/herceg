@@ -448,8 +448,10 @@ export const Chart = defineComponent({
         created.on("render", (event) => emit("render", event));
         chart.value = created;
         applied = next;
-        // The first frame was drawn as the chart was created, before it had listeners.
-        emit("render", {});
+        // The first frame was drawn as the chart was created, before it had
+        // listeners; one still waiting (for code it loads) reports itself.
+        const revision = created.drawnRevision;
+        if (revision !== undefined) emit("render", { revision });
         return;
       }
       // Unchanged marks keep their identity, so their caches survive.

@@ -26,6 +26,13 @@ export interface RowsSelection<S extends Schema = Schema> {
   readonly rows: RowSet<S>;
 }
 
+/** A change of a store's channel, as its listeners hear it: the channel, what it holds now, and the store's revision then. */
+export interface SelectionChange<S extends Schema = Schema> {
+  readonly channel: string;
+  readonly selection: DataSelection<S> | null;
+  readonly revision: number;
+}
+
 /**
  * Selections of one table by channel: each channel is one owner's
  * selection ("chart-brush", "grid-rows"), set and cleared on its own.
@@ -33,7 +40,7 @@ export interface RowsSelection<S extends Schema = Schema> {
 export class SelectionStore<S extends Schema = Schema> {
   readonly source: Table<S>;
   #channels = new Map<string, DataSelection<S>>();
-  #listeners = new Set<() => void>();
+  #listeners = new Set<(change: SelectionChange<S>) => void>();
   #revision = 0;
 
   constructor(source: Table<S>) {
@@ -63,10 +70,13 @@ export class SelectionStore<S extends Schema = Schema> {
       this.#channels.set(channel, selection);
     }
     this.#revision++;
-    for (const listener of [...this.#listeners]) listener();
+    // Each listener hears each change, even when one sets another as it hears it.
+    const change = { channel, selection, revision: this.#revision };
+    for (const listener of [...this.#listeners]) listener(change);
   }
 
-  subscribe(listener: () => void): () => void {
+  /** Calls `listener` with each change of a channel; the function that stops it. */
+  subscribe(listener: (change: SelectionChange<S>) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }

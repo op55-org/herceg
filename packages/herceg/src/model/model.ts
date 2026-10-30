@@ -25,7 +25,8 @@ import {
 } from "../layout/text.ts";
 import { stackTracks, type TrackRequest } from "../layout/tracks.ts";
 import { Polyline } from "../lod/polyline.ts";
-import { isLayoutMark, type LayoutMark } from "../marks/layout-mark.ts";
+import type { DrawnMark } from "../marks/drawn.ts";
+import { isLayoutMark, type LayoutMark, tablesOf, viewOf } from "../marks/layout-mark.ts";
 import {
   type AxisFormat,
   type BandContext,
@@ -322,11 +323,12 @@ export interface PanelViewport extends Readonly<Viewport> {
  * instance with a view that is no longer drawn (its panels gone, or
  * sharing scales otherwise) is reported fitted (`view` null) with the
  * panels it had, of which those no longer drawn have no view in `views`.
+ * The chart reports it with its revision (`ViewportEvent`).
  */
-export interface ViewportEvent {
+export interface ViewReport {
   /** Counts the chart's changes of view from 0: one per change, none for calls refused or changing nothing. */
   readonly viewRevision: number;
-  readonly cause: ViewCause;
+  readonly cause: ChangeCause;
   /**
    * The panel the change was made in: a gesture's, a call's `panel`, or
    * that of the sync channel it came on; absent for changes naming none
@@ -343,7 +345,7 @@ export interface ViewportEvent {
  * What changed a view: a drag or pinch ("pointer"), the wheel, a key, the
  * application (`setViewport`), a synced chart, the chart's data, or its options.
  */
-export type ViewCause = "pointer" | "wheel" | "keyboard" | "api" | "sync" | "data" | "options";
+export type ChangeCause = "pointer" | "wheel" | "keyboard" | "api" | "sync" | "data" | "options";
 
 /** The position scales, in the order events list their instances. */
 export const SCALES = ["x", "y", "yRight"] as const;
@@ -485,6 +487,15 @@ export class ChartModel {
   #namesPanels = false;
   /** Every mark's series in the last scene: those of all panels. */
   #drawn: MarkSeries[] = [];
+  /** What the last scene drew of each mark in each panel (see `drawnMarks`). */
+  #records: DrawnMark[] = [];
+  /** Counts scenes begun and disposals: a drawn-mark record is current only until the next. */
+  #epoch = 0;
+  /**
+   * The chart's revision the next scene draws, which its drawn-mark
+   * records carry: set by the chart that owns the model.
+   */
+  revision = 0;
   /** Every mark's series before facets split them, for legends and summaries. */
   #base: MarkSeries[] | undefined;
   /** The color scales and size and shape keys the last scene's legends show. */
@@ -722,10 +733,11 @@ export class ChartModel {
     return this.items?.camera(panel);
   }
 
-  setCamera(camera: CameraSpec | null, panel?: string): boolean {
+  /** Sets a 3D state's camera, reported with `revision`, the chart's count with it. */
+  setCamera(camera: CameraSpec | null, panel?: string, revision?: number): boolean {
     const items = this.items;
     if (!items) throw new Error("setCamera: no 3D camera; add a 3D mark");
-    return items.setCamera(camera, panel);
+    return items.setCamera(camera, panel, revision);
   }
 
   /**
@@ -1127,6 +1139,36 @@ export class ChartModel {
     });
   }
 
+  /**
+   * Whether what a scene drew of `mark` is still readable (drawn-mark
+   * records' `current`): no later scene has reused its buffers nor has the
+   * model been disposed, the chart's options are these, and every table
+   * and view the mark reads has the version it has now.
+   */
+  whileCurrent(mark: ChartMark): () => boolean {
+    const epoch = this.#epoch;
+    const config = this.#config;
+    const tables = tablesOf(mark);
+    const versions = tables.map((table) => table.version);
+    const view = viewOf(mark);
+    const seen = view?.revision;
+    return () =>
+      this.#epoch === epoch &&
+      this.#config === config &&
+      tables.every((table, k) => table.version === versions[k]) &&
+      view?.revision === seen;
+  }
+
+  /**
+   * What the last scene drew of each mark in each panel: marks along axes
+   * in panel and mark order, then layout marks in panel order. Records a
+   * picker tests (marks/drawn.ts), read only while they are `current()`.
+   */
+  drawnMarks(): readonly DrawnMark[] {
+    const laid = this.#items?.records;
+    return laid?.length ? [...this.#records, ...laid] : this.#records;
+  }
+
   /** The prefixes of identity keys the configuration's marks' series and items have. */
   scopes(): ReadonlySet<string> {
     const scopes = new Set(this.#featured?.scopes);
@@ -1359,6 +1401,7 @@ export class ChartModel {
    * reader, or output without one).
    */
   scene(measure: MeasureText, clouds = false, page?: ThemeEnvironment): Scene {
+    this.#epoch++;
     const scene = this.#readings.in(page, () => this.#sceneOf(measure, clouds));
     // Series and items a stream left behind let go of what they stood for.
     this.hidden.prune();
@@ -2330,6 +2373,7 @@ export class ChartModel {
       };
       const ticks = labels.map((label, k) => ({
         position: plan.scale.map(plan.ticks[k]!),
+        value: plan.ticks[k]!,
         label: oneLine(plan, label),
       }));
       // Along its span from its bottom on the left (the title reads upward)
@@ -2446,6 +2490,10 @@ export class ChartModel {
       });
     // What marks' labels placed as they are drawn take in each panel.
     const rooms = this.#placing ? new Map<string, readonly [number, number]>() : undefined;
+    // What each mark drew in each panel, readable while its data and the
+    // chart's options are what they were (marks/drawn.ts).
+    const records: DrawnMark[] = [];
+    const { revision } = this;
     const panels = split.keys.map((key, i): Panel => {
       const row = Math.floor(i / columns);
       const column = i % columns;
@@ -2509,7 +2557,11 @@ export class ChartModel {
           paints,
         };
         const ticks = xHas[h]
-          ? xAt.ticks.map((t, k) => ({ position: x.map(t), label: oneLine(xAt, xAt.labels[k]!) }))
+          ? xAt.ticks.map((t, k) => ({
+              position: x.map(t),
+              value: t,
+              label: oneLine(xAt, xAt.labels[k]!),
+            }))
           : [];
         axes.push(axisGuide(`x|${i}`, "x", placement, ticks, title, measure));
       }
@@ -2604,6 +2656,15 @@ export class ChartModel {
         // Labels following series, placed once their series are drawn here.
         const labels = this.#featured?.of(mark)?.labels?.(own);
         const drawn = paintedAs(mark, labels ? [...made, ...labels] : made);
+        records.push({
+          mark: id,
+          panel: key,
+          frame: own,
+          geometry: drawn,
+          series,
+          revision,
+          current: this.whileCurrent(mark),
+        });
         // What labels placed as they are drawn took here, asked before the next panel draws them.
         if (rooms && mark.roomPlaced)
           rooms.set(`${key}\n${id}`, mark.room!(measure, theme, config.locale, this.#featured));
@@ -2720,6 +2781,7 @@ export class ChartModel {
     this.#keepInstances();
     this.#namesPanels = layout !== undefined;
     this.#drawn = marks;
+    this.#records = records;
     this.#base = base;
     // Legends inside plots go over the content panels, not the navigator's
     // strip; those beside a subplot beside its plot.
@@ -3096,6 +3158,7 @@ export class ChartModel {
     this.#views = [];
     this.#keepInstances();
     this.#drawn = [];
+    this.#records = [];
     this.#base = undefined;
     this.#splitter = undefined;
     this.#bands = {};
@@ -3426,6 +3489,7 @@ export class ChartModel {
 
   /** Releases geometry buffers. */
   dispose(): void {
+    this.#epoch++;
     this.#polylines.clear();
     this.#floats.clear();
     this.#doubles.clear();
@@ -3433,6 +3497,7 @@ export class ChartModel {
     this.#views = [];
     this.#panelList = undefined;
     this.#drawn = [];
+    this.#records = [];
     this.#base = undefined;
     this.#entries = [];
     this.#splitter = undefined;
@@ -3579,7 +3644,10 @@ function geometryOf(
 /** A mark's geometry, cut and painted as its `clip` and `zIndex` say when it sets them. */
 function paintedAs(mark: Mark, geometry: Geometry[]): Geometry[] {
   const { clip, zIndex } = mark.spec;
-  return clip === undefined && !zIndex ? geometry : geometry.map((g) => ({ ...g, clip, zIndex }));
+  // Set on the mark's own geometry, which records and marks' lookups know it by.
+  if (clip === undefined && !zIndex) return geometry;
+  for (const g of geometry) Object.assign(g, { clip, zIndex });
+  return geometry;
 }
 
 /** An ascending range, or null for none or an empty one. */

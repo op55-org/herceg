@@ -7,7 +7,12 @@
 
 import { compileExpression } from "../data/expression.ts";
 import { RowSet } from "../data/row-set.ts";
-import { type DataSelection, type SelectionStore, selectRows } from "../data/selection.ts";
+import {
+  type DataSelection,
+  type SelectionChange,
+  type SelectionStore,
+  selectRows,
+} from "../data/selection.ts";
 import type { Schema, Table } from "../data/table.ts";
 import { type LayoutMark, tablesOf } from "../marks/layout-mark.ts";
 import type { Mark } from "../marks/mark.ts";
@@ -15,7 +20,7 @@ import { offAxis } from "../marks/row-bindings.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { BrushSpec, SelectionGesture } from "../spec/spec.ts";
 import { Highlighter, highlights, membership } from "./highlight.ts";
-import type { ChartConfig, ChartModel } from "./model.ts";
+import type { ChangeCause, ChartConfig, ChartModel } from "./model.ts";
 import {
   type Brushed,
   brushedRows,
@@ -68,13 +73,14 @@ export interface KeyPress extends Modifiers {
 
 /**
  * What a bound chart lends its row selection: its brushed selection, which
- * goes when the rows it wrote are replaced, its root element, whose keys
- * select rows under the keyboard cursor, and `render`, which draws pending
- * changes before a key reads what the chart shows.
+ * `clear` lets go, as a change of the cause that replaced the rows it
+ * wrote, its root element, whose keys select rows under the keyboard
+ * cursor, and `render`, which draws pending changes before a key reads
+ * what the chart shows.
  */
 export interface BrushedChart {
   readonly selection: Brushed | null;
-  select(selection: null): void;
+  clear(cause: ChangeCause): void;
   render(): void;
   readonly root: {
     addEventListener(type: "keydown", listener: (event: KeyPress) => void): void;
@@ -91,7 +97,10 @@ export interface Cursor {
 
 /** Reports changes of the bound channels as a chart's `rowSelection` events. */
 interface Reporter {
-  emit(type: "rowSelection", change: RowSelectionChange): void;
+  emit(
+    type: "rowSelection",
+    change: RowSelectionChange & { cause: ChangeCause; revision: number },
+  ): void;
 }
 
 /** A binding with its defaults filled in. */
@@ -271,8 +280,10 @@ export class RowSelection {
   /**
    * The row selection of a mounted chart: `current`, the chart's so far,
    * when it is this one's, or else a new one. `events` reports changes of
-   * the channels, `invalidate` redraws the chart, `cursor` says where its
-   * keyboard cursor is, and `live` announces what the keyboard selected.
+   * the channels, `invalidate` redraws the chart, `count` counts a change
+   * of `cause` the chart did not count and gives its revision, `cursor`
+   * says where its keyboard cursor is, and `live` announces what the
+   * keyboard selected.
    */
   mount(
     current: RowLink | undefined,
@@ -280,11 +291,22 @@ export class RowSelection {
     chart: BrushedChart,
     events: Reporter,
     invalidate: () => void,
+    count: (cause: ChangeCause) => number,
     cursor: () => Cursor | null,
     live: { textContent: string | null },
   ): RowLink {
     if (current?.selection === this) return current;
-    const link = new RowLink(this, this.#bound, model, chart, events, invalidate, cursor, live);
+    const link = new RowLink(
+      this,
+      this.#bound,
+      model,
+      chart,
+      events,
+      invalidate,
+      count,
+      cursor,
+      live,
+    );
     if (current) link.adopt(current);
     current?.dispose();
     return link;
@@ -417,6 +439,7 @@ export class RowLink {
   readonly #chart: BrushedChart;
   readonly #events: Reporter;
   readonly #invalidate: () => void;
+  readonly #count: (cause: ChangeCause) => number;
   readonly #cursor: () => Cursor | null;
   readonly #live: { textContent: string | null };
   /**
@@ -424,11 +447,28 @@ export class RowLink {
    * each change is reported once, also of a set changed in place.
    */
   readonly #seen = new Map<Bound, { selection: DataSelection | null; version: number }>();
-  /** What the chart's brush wrote, which clearing the brush clears while the channel still holds it. */
-  readonly #brushed = new Map<Bound, DataSelection>();
+  /**
+   * What the chart's brush wrote, and its row set's version, which clearing
+   * the brush clears while the channel still holds it, unchanged.
+   */
+  readonly #brushed = new Map<Bound, ReturnType<typeof seen>>();
   readonly #stops: (() => void)[] = [];
   /** How deep in writes of the chart's own selections, which leave its brush in place. */
   #writing = 0;
+  /**
+   * The chart's own write in progress: the store and the revision its
+   * change takes there, by whom, and the chart's revision of it (its count
+   * of the selection that wrote it, or counted as the change is heard:
+   * clicks, keys). Only that change is the chart's; others heard meanwhile
+   * (a listener's) are their own.
+   */
+  #own:
+    | {
+        store: SelectionStore;
+        revision: number;
+        by: { cause: ChangeCause; revision: number | undefined };
+      }
+    | undefined;
   #disposed = false;
 
   constructor(
@@ -438,6 +478,7 @@ export class RowLink {
     chart: BrushedChart,
     events: Reporter,
     invalidate: () => void,
+    count: (cause: ChangeCause) => number,
     cursor: () => Cursor | null,
     live: { textContent: string | null },
   ) {
@@ -447,11 +488,12 @@ export class RowLink {
     this.#chart = chart;
     this.#events = events;
     this.#invalidate = invalidate;
+    this.#count = count;
     this.#cursor = cursor;
     this.#live = live;
     for (const b of bound) this.#seen.set(b, seen(b.store.get(b.channel)));
     for (const store of new Set(bound.map((b) => b.store)))
-      this.#stops.push(store.subscribe(() => this.#changed(store)));
+      this.#stops.push(store.subscribe((change) => this.#changed(store, change)));
     // After the chart's own key handling, which moves the cursor and clears its brush on Escape.
     const keys = (event: KeyPress) => this.#key(event);
     chart.root.addEventListener("keydown", keys);
@@ -469,7 +511,7 @@ export class RowLink {
       if (same) this.#brushed.set(same, written);
     }
     // The replaced link's pending check of another writer's change is this one's now.
-    if (this.#brushed.size > 0) queueMicrotask(() => this.#reconcile());
+    if (this.#brushed.size > 0) queueMicrotask(() => this.#reconcile("sync"));
   }
 
   /** Whether the brush (or lasso) of panel `key` writes rows, and so never zooms. */
@@ -481,14 +523,17 @@ export class RowLink {
 
   /**
    * The chart's brushed selection changed, in the panels of `owner`
-   * (every panel's, for null): with `write`, writes the rows it covers, or
-   * clears what the brush wrote. The changes made, for the `select` event;
-   * undefined for none.
+   * (every panel's, for null), by `cause` at `revision` (the chart's
+   * count of it): with `write`, writes the rows it covers, or clears what
+   * the brush wrote. The changes made, for the `select` event; undefined
+   * for none.
    */
   brushed(
     selection: Brushed | null,
     owner: SelectionOwner | null,
     write: boolean,
+    cause: ChangeCause,
+    revision: number,
   ): Written | undefined {
     // A selection shown without writing (a synced chart's, another view's)
     // replaces the brush: what that wrote is no longer the chart's to clear.
@@ -496,13 +541,7 @@ export class RowLink {
       this.#brushed.clear();
       return undefined;
     }
-    if (!selection) {
-      const cleared = this.#bound.filter(
-        (b) => this.#brushed.has(b) && b.store.get(b.channel) === this.#brushed.get(b),
-      );
-      this.#brushed.clear();
-      return written(this.#write(cleared.map((bound) => ({ bound, selection: null }))));
-    }
+    if (!selection) return this.release()(cause, revision);
     const gesture = selection.lasso ? "lasso" : "brush";
     // Every table's rows are found before any channel changes.
     const changes = this.#bound.flatMap((bound) => {
@@ -511,8 +550,26 @@ export class RowLink {
       return rows ? [{ bound, selection: rows }] : [];
     });
     this.#brushed.clear();
-    for (const { bound, selection } of changes) this.#brushed.set(bound, selection);
-    return written(this.#write(changes));
+    for (const { bound, selection } of changes) this.#brushed.set(bound, seen(selection));
+    return written(this.#write(changes, cause, revision));
+  }
+
+  /**
+   * Lets the brush go, and gives what clears the rows it wrote from the
+   * channels still holding them when called (not those a later selection
+   * wrote since), as a change of `cause` at `revision`: the changes made.
+   */
+  release(): (cause: ChangeCause, revision: number) => Written | undefined {
+    const taken = new Map(this.#brushed);
+    this.#brushed.clear();
+    return (cause, revision) => {
+      const changes: RowSelectionChange[] = [];
+      // Each as its turn comes: a listener of a clear before may have written it since.
+      for (const [bound, wrote] of taken)
+        if (holds(bound, wrote))
+          changes.push(...this.#write([{ bound, selection: null }], cause, revision));
+      return written(changes);
+    };
   }
 
   /**
@@ -528,7 +585,7 @@ export class RowLink {
     if (clickable.length === 0) return undefined;
     const tables = new Set(clickable.map((b) => b.table));
     const found = clickedRows(this.#model, tables, px, py);
-    return found === null ? null : { rows: this.#pick(clickable, found, modeOf(keys)) };
+    return found === null ? null : { rows: this.#pick(clickable, found, modeOf(keys), "pointer") };
   }
 
   /**
@@ -541,7 +598,7 @@ export class RowLink {
     const clickable = this.#bound.filter((b) => b.events.has("click"));
     if (event.target !== this.#chart.root || clickable.length === 0) return;
     if (event.key === "Escape") {
-      this.#pick(clickable, undefined, "only");
+      this.#pick(clickable, undefined, "only", "keyboard");
       return;
     }
     if (event.key !== " " || !this.#cursor()) return;
@@ -553,7 +610,7 @@ export class RowLink {
     const found = cursor && cursorRows(this.#model, tables, cursor);
     if (!found) return;
     event.preventDefault();
-    const [change] = this.#pick(clickable, found, modeOf(event));
+    const [change] = this.#pick(clickable, found, modeOf(event), "keyboard");
     const selected = change?.selection;
     const count = selected?.kind === "rows" ? selected.rows.size : 0;
     // As grids say it.
@@ -569,38 +626,56 @@ export class RowLink {
     return undefined;
   }
 
-  /** Changes the channels clicks write as a click on `found` (none: off the data) does. */
+  /** Changes the channels clicks write as a click (or key) of `cause` on `found` (none: off the data) does. */
   #pick(
     clickable: readonly Bound[],
     found: PointRows | undefined,
     mode: Mode,
+    cause: ChangeCause,
   ): RowSelectionChange[] {
     if (!found) {
       // Off the data, a plain click clears; with a modifier, it changes nothing.
       if (mode !== "only") return [];
       const holding = clickable.filter((b) => b.store.get(b.channel) !== null);
-      return this.#write(holding.map((bound) => ({ bound, selection: null })));
+      return this.#write(
+        holding.map((bound) => ({ bound, selection: null })),
+        cause,
+      );
     }
     const bound = clickable.find((b) => b.table === found.table)!;
     const rows = mode === "only" ? new RowSet(found.table) : held(bound);
     if (mode === "toggle" && found.rows.every((row) => rows.has(row)))
       for (const row of found.rows) rows.delete(row);
     else rows.addAll(found.rows);
-    return this.#write([{ bound, selection: selectRows(rows) }]);
+    return this.#write([{ bound, selection: selectRows(rows) }], cause);
   }
 
-  /** Writes selections to their channels; the changes. */
+  /**
+   * Writes selections to their channels, as a change of `cause` the chart
+   * counted at `revision` (or counts as it is heard); the changes.
+   */
   #write(
     changes: readonly { bound: Bound; selection: DataSelection | null }[],
+    cause: ChangeCause,
+    revision?: number,
   ): RowSelectionChange[] {
+    const by = { cause, revision };
     this.#writing++;
     try {
-      for (const { bound, selection } of changes) bound.store.set(bound.channel, selection);
+      for (const { bound, selection } of changes) {
+        const outer = this.#own;
+        this.#own = { store: bound.store, revision: bound.store.revision + 1, by };
+        try {
+          bound.store.set(bound.channel, selection);
+        } finally {
+          this.#own = outer;
+        }
+      }
     } finally {
       this.#writing--;
     }
     // A listener may have replaced what the brush wrote while it was written.
-    if (this.#writing === 0) this.#reconcile();
+    if (this.#writing === 0) this.#reconcile(cause);
     return changes.map(({ bound, selection }) => ({
       table: bound.table,
       channel: bound.channel,
@@ -609,14 +684,24 @@ export class RowLink {
   }
 
   /**
-   * A store changed: reports the channels that did and redraws the chart
-   * for those it highlights. When another writer replaced every selection
-   * the chart's brush wrote, the brush goes too: it no longer shows the
-   * channels' selection.
+   * A store's channel changed (`change`): counts the change once and, where
+   * a channel it binds now holds something else than last reported, reports
+   * it and redraws the chart for those it highlights. When another writer
+   * replaced every selection the chart's brush wrote, the brush goes too:
+   * it no longer shows the channels' selection.
    */
-  #changed(store: SelectionStore) {
+  #changed(store: SelectionStore, change: SelectionChange) {
+    // The chart's own write reports its cause and revision; any other
+    // (another chart's, a grid's, the application's, a listener's) is "sync".
+    const own = this.#own;
+    const by =
+      own?.store === store && own.revision === change.revision
+        ? own.by
+        : { cause: "sync" as const, revision: undefined };
     for (const bound of this.#bound) {
-      if (bound.store !== store) continue;
+      if (bound.store !== store || bound.channel !== change.channel) continue;
+      // Counted even when a later change heard first already shows what it made.
+      by.revision ??= this.#count(by.cause);
       const now = seen(store.get(bound.channel));
       const before = this.#seen.get(bound);
       if (now.selection === before?.selection && now.version === before.version) continue;
@@ -626,26 +711,34 @@ export class RowLink {
         table: bound.table,
         channel: bound.channel,
         selection: now.selection,
+        cause: by.cause,
+        revision: by.revision,
       });
     }
     // Another writer's change is checked once it has been reported and
     // shown: a view showing that writer's brush lets its own go first.
-    if (this.#writing === 0) queueMicrotask(() => this.#reconcile());
+    if (this.#writing === 0) queueMicrotask(() => this.#reconcile("sync"));
   }
 
-  /** Lets the brush go once no channel holds what it wrote. */
-  #reconcile() {
+  /** Lets the brush go once no channel holds what it wrote, as a change of `cause`, which replaced it. */
+  #reconcile(cause: ChangeCause) {
     if (this.#disposed || this.#brushed.size === 0 || !this.#chart.selection) return;
-    const kept = [...this.#brushed].some(([b, written]) => b.store.get(b.channel) === written);
+    const kept = [...this.#brushed].some(([b, written]) => holds(b, written));
     if (kept) return;
     this.#brushed.clear();
-    this.#chart.select(null);
+    this.#chart.clear(cause);
   }
 }
 
 /** A channel's selection as last seen, with its row set's version. */
 function seen(selection: DataSelection | null) {
   return { selection, version: selection?.kind === "rows" ? selection.rows.version : -1 };
+}
+
+/** Whether a channel still holds what was written to it, its rows unchanged since. */
+function holds(bound: Bound, wrote: ReturnType<typeof seen>): boolean {
+  const now = seen(bound.store.get(bound.channel));
+  return now.selection === wrote.selection && now.version === wrote.version;
 }
 
 /** What a gesture wrote, as its event reports it: undefined when it wrote nothing. */

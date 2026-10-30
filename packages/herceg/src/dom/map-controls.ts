@@ -16,12 +16,12 @@
 import type { LayoutResult, PlaneView } from "../marks/layout-mark.ts";
 import type { Binding } from "../model/bindings.ts";
 import type { ItemPanel } from "../model/item-views.ts";
-import type { ViewCause } from "../model/model.ts";
+import type { ChangeCause } from "../model/model.ts";
 import type { Rect, Scene } from "../scene/scene.ts";
 import type { Theme } from "../theme.ts";
 import { Brush, type BrushPanel } from "./brush.ts";
 import { type Controls as ChartControls, type ControlsHost, PointerOwnership } from "./controls.ts";
-import { RESET_GLYPH, type ToolButton, Toolbar } from "./toolbar.ts";
+import { type Press, RESET_GLYPH, type ToolButton, Toolbar } from "./toolbar.ts";
 
 /** Magnification per key press or button click. */
 const ZOOM = 1.25;
@@ -69,7 +69,7 @@ export class Controls implements ChartControls {
   /** With both a lasso and zoom, whether a plain drag lassos (the toolbars' toggle). */
   #lassoing = true;
   /** What is changing the view: the input being handled. */
-  #cause: ViewCause = "pointer";
+  #cause: ChangeCause = "pointer";
   #theme: Theme | undefined;
   /** The parts of panels' plots their insets leave visible, by panel, as last drawn. */
   #visible = new Map<string, readonly Rect[]>();
@@ -152,9 +152,8 @@ export class Controls implements ChartControls {
         },
       ].map((tool) => ({
         ...tool,
-        // A button is pressed, with the pointer or a key, as a click.
-        act: () => {
-          this.#cause = "pointer";
+        act: (cause: Press) => {
+          this.#cause = cause;
           tool.act();
         },
         hidden: () => !can().zooms,
@@ -533,7 +532,7 @@ export class Controls implements ChartControls {
       // A panel that went while dragging (drawn now, if an update took it) selects nothing.
       this.#host.chart.render();
       if (selection && this.#planeOf(press.panel)) {
-        this.#host.chart.select(selection, { panel: press.panel });
+        this.#host.select(selection, press.panel, "pointer");
         this.#say("Selected a freehand region.");
       }
       this.#drawLasso();
@@ -564,7 +563,8 @@ export class Controls implements ChartControls {
     if (event.target !== this.#root) return;
     this.#cause = "keyboard";
     // Escape clears a lasso, as it clears brushes, and goes on to the chart's keys.
-    if (event.key === "Escape" && this.#host.chart.selection) this.#host.chart.select(null);
+    if (event.key === "Escape" && this.#host.chart.selection)
+      this.#host.select(null, undefined, "keyboard");
     const cursor = this.#host.cursor();
     const [first] = this.#planes();
     const panel = cursor ? cursor.panel : first?.state === "" ? first.key : undefined;

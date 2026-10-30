@@ -93,6 +93,64 @@
       "stage": "load"
     },
     {
+      "contract": "mark.item-key",
+      "name": "bars named by a field",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "region",
+            "y": "v",
+            "itemKey": "region"
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "bar",
+            "args": {
+              "x": "region",
+              "y": "v",
+              "item_key": "region"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "contract": "mark.item-key.unknown",
+      "name": "points named by a field the data lacks",
+      "spec": {
+        "marks": [
+          {
+            "type": "point",
+            "x": "t",
+            "y": "v",
+            "itemKey": "name"
+          }
+        ]
+      },
+      "builder": {
+        "calls": [
+          {
+            "method": "point",
+            "args": {
+              "x": "t",
+              "y": "v",
+              "item_key": "name"
+            }
+          }
+        ]
+      },
+      "code": "unknown-field",
+      "path": "marks[0].itemKey",
+      "python_path": "marks[0].item_key",
+      "message": "point itemKey: no field \"name\"; the table has \"t\", \"v\", \"w\", \"region\", \"paint\"",
+      "python": "point item_key: no column 'name'; the data has 't', 'v', 'w', 'region', 'paint'",
+      "stage": "load"
+    },
+    {
       "contract": "mark.z-index.depth",
       "name": "a 3D mark painted out of its order",
       "spec": {

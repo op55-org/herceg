@@ -18,9 +18,10 @@
 
 import type { Drill } from "../marks/tree-data.ts";
 import type { ItemPanel } from "../model/item-views.ts";
+import type { ChangeCause } from "../model/model.ts";
 import type { Scene } from "../scene/scene.ts";
 import type { Controls as ChartControls, ControlsHost } from "./controls.ts";
-import { RESET_GLYPH, Toolbar } from "./toolbar.ts";
+import { pressOf, RESET_GLYPH, Toolbar } from "./toolbar.ts";
 
 /** A panel drawing a tree, with the key of its state and the tree's drill. */
 type TreePanel = ItemPanel & { state: string; drill: Drill };
@@ -76,11 +77,15 @@ export class Controls implements ChartControls {
         // Its buttons act in the first panel drawn with the state, whichever facet panels are drawn now.
         const panel = () => this.#trees().find((tree) => tree.state === state)?.key;
         toolbar = new Toolbar(this.#root, state === "" ? "Tree" : `Tree, ${label}`, [
-          { label: "Up one level", glyph: "M4 9l4-4 4 4M8 5v7", act: () => this.#up(panel()) },
+          {
+            label: "Up one level",
+            glyph: "M4 9l4-4 4 4M8 5v7",
+            act: (cause) => this.#up(panel(), cause),
+          },
           {
             label: "Show the whole tree",
             glyph: RESET_GLYPH,
-            act: () => this.#open(null, panel()),
+            act: (cause) => this.#open(null, panel(), cause),
           },
         ]);
         this.#toolbars.set(state, toolbar);
@@ -122,9 +127,10 @@ export class Controls implements ChartControls {
   }
 
   /** Drills panel `panel`'s tree into the node keyed `key` (null: the whole tree), and says where it is now. */
-  #open(key: string | null, panel: string | undefined): void {
+  #open(key: string | null, panel: string | undefined, cause: ChangeCause = "pointer"): void {
     const { chart, model } = this.#host;
-    model.items?.setDrillRoot(key, panel);
+    const items = model.items;
+    items?.by(cause, () => items.setDrillRoot(key, panel));
     // Drawn now, so what is said is what the chart shows.
     chart.render();
     const path = model.items?.drillRoot(panel)?.path ?? [];
@@ -135,10 +141,10 @@ export class Controls implements ChartControls {
   }
 
   /** Goes up a level from the root set in panel `panel`, which a frame may not have drawn yet. */
-  #up(panel: string | undefined): void {
+  #up(panel: string | undefined, cause: ChangeCause = "pointer"): void {
     const root = this.#host.model.items?.drillRoot(panel);
     if (root?.key == null) return;
-    this.#open(root.path.at(-2)?.key ?? null, panel);
+    this.#open(root.path.at(-2)?.key ?? null, panel, cause);
   }
 
   /** Enter opens the node read, Backspace goes up, and 0 shows the whole tree, in the panel read. */
@@ -155,11 +161,11 @@ export class Controls implements ChartControls {
     if (event.key === "Enter") {
       const key = cursor?.key;
       if (key === undefined) return;
-      if (key === drill.key) this.#up(panel);
-      else if (drill.opens(key)) this.#open(key, panel);
+      if (key === drill.key) this.#up(panel, "keyboard");
+      else if (drill.opens(key)) this.#open(key, panel, "keyboard");
       else this.#host.announce("Nothing is under this node.");
-    } else if (event.key === "Backspace" && drilled) this.#up(panel);
-    else if (event.key === "0" && drilled) this.#open(null, panel);
+    } else if (event.key === "Backspace" && drilled) this.#up(panel, "keyboard");
+    else if (event.key === "0" && drilled) this.#open(null, panel, "keyboard");
     else return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -199,7 +205,9 @@ export class Controls implements ChartControls {
         else {
           (part as HTMLButtonElement).type = "button";
           if (!read) part.tabIndex = -1;
-          part.addEventListener("click", () => this.#open(node, key));
+          part.addEventListener("click", (event) =>
+            this.#open(node, key, pressOf((event as MouseEvent).detail)),
+          );
         }
         return part;
       });

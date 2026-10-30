@@ -2,10 +2,10 @@
 // from the smallest gap between its distinct positions, so marks drawn that
 // wide (bars, candlesticks) never overlap their neighbors.
 
-import { lowerBound, type Table, upperBound } from "../data/table.ts";
+import { lowerBound, upperBound } from "../data/table.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import { TableCache } from "./series.ts";
+import { type MarkRows, MarkRowsCache } from "./rows.ts";
 
 /** Share of a slot a mark fills, and the widest it gets in pixels. */
 export const FILL = 0.8;
@@ -20,26 +20,30 @@ interface Positions {
 }
 
 export class Slots {
-  readonly #table: Table;
+  readonly #rows: () => MarkRows;
   readonly #field: string;
-  readonly #positions = new TableCache<Positions>();
-  /** The smallest gap in time shown, per table version and breaks. */
-  readonly #shownGap = new TableCache<{ breaks: Breaks; gap: number }>();
+  readonly #positions = new MarkRowsCache<Positions>();
+  /** The smallest gap in time shown, per revision of the mark's rows and breaks. */
+  readonly #shownGap = new MarkRowsCache<{ breaks: Breaks; gap: number }>();
   /** The last pixel gap measured, of the positions on the scale (scales do not change). */
   #pixelGap: { values: Float64Array; scale: PositionScale; gap: number } | undefined;
 
-  constructor(table: Table, field: string) {
-    this.#table = table;
+  constructor(rows: () => MarkRows, field: string) {
+    this.#rows = rows;
     this.#field = field;
   }
 
-  /** The field's distinct positions and the gaps between them, per table version. */
+  /** The field's distinct positions at the mark's rows and the gaps between them, per their revision. */
   positions(): Positions {
-    return this.#positions.get(this.#table, () => {
+    const rows = this.#rows();
+    return this.#positions.get(rows, () => {
+      const { table, positions } = rows;
       const field = this.#field as never;
-      const x = this.#table.numbers(field);
-      const sorted = Float64Array.from(x);
-      if (!this.#table.isSorted(field)) sorted.sort();
+      const x = table.numbers(field);
+      const sorted = positions
+        ? Float64Array.from(positions, (row) => x[row]!)
+        : Float64Array.from(x);
+      if (positions || !table.isSorted(field)) sorted.sort();
       let count = 0;
       for (const value of sorted) {
         if (Number.isFinite(value) && (count === 0 || value !== sorted[count - 1])) {
@@ -74,7 +78,7 @@ export class Slots {
 
   /** Smallest gap between neighboring positions that `breaks` do not hide, in time shown. */
   #gapShown(breaks: Breaks): number {
-    const cached = this.#shownGap.get(this.#table, () => ({ breaks, gap: Number.NaN }));
+    const cached = this.#shownGap.get(this.#rows(), () => ({ breaks, gap: Number.NaN }));
     if (cached.breaks !== breaks || Number.isNaN(cached.gap)) {
       let best = Infinity;
       let previous = Number.NaN;

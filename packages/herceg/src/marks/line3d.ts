@@ -21,6 +21,7 @@ import type { PaintReader } from "../theme.ts";
 import type { View } from "../three/camera.ts";
 import { cutSegment } from "../three/clip.ts";
 import { ScreenGrid } from "../three/hit.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import {
   type ItemSources,
   type LayoutFrame,
@@ -34,6 +35,7 @@ import { definedFields } from "./line.ts";
 import {
   type ChartMark,
   type ColorRamp,
+  checkItemKey,
   frozen,
   type GlyphKey,
   type MARK,
@@ -59,7 +61,7 @@ import {
 } from "./plot3d.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
-export interface Line3DOptions<S extends Schema> {
+export interface Line3DOptions<S extends Schema> extends ItemKeyed<S> {
   /** Number or time fields: each sample's position; z is vertical. */
   x: NumericField<S>;
   y: NumericField<S>;
@@ -131,6 +133,7 @@ const keys = new PerChart<{ paths: Paths; key: object }>();
 export class Line3DMark implements Layer3D {
   declare readonly [MARK]: true;
   readonly layout = true;
+  readonly rowItems = true;
   readonly views = ItemViews;
   readonly dimensions = 3;
   readonly spec: Frozen<Line3DSpec>;
@@ -144,6 +147,7 @@ export class Line3DMark implements Layer3D {
     checkDepthOrder(input, "line3d");
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "line3d");
+    checkItemKey(table, this.spec.itemKey, "line3d");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     for (const axis of ["x", "y", "z"] as const)
@@ -719,6 +723,7 @@ export function line3d<S extends Schema>(
       "label",
       "panel",
       "id",
+      "itemKey",
     ]),
   };
   if (table.name !== undefined) spec.data = table.name;

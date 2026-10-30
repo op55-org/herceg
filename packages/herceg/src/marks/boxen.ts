@@ -89,14 +89,25 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
     return (stats as LetterStats).letters;
   }
 
-  /** The letter values, and the outliers drawn. */
+  /**
+   * The levels geometry draws (of some width), each only where the axis
+   * places both its letter values, the median (drawn on its own where a
+   * log axis drops levels), and the outliers drawn. A level of no width
+   * shares its values with a level beside it or the median, so the value
+   * axis' extent is the same without it.
+   */
   protected drawnValues(
-    { groups }: Summary<Letters>,
+    { stats, groups }: Summary<Letters>,
     row: number,
-    add: (value: number) => void,
+    add: (...values: number[]) => void,
   ): void {
-    const { values, outliers } = groups[row]!;
-    for (const value of values) add(value);
+    const group = groups[row]!;
+    const { values, outliers } = group;
+    const widths = this.#widths(group);
+    for (let i = 0; i + 1 < values.length; i++) {
+      if (widths[i]! > 0) add(values[i]!, values[i + 1]!);
+    }
+    add(stats.median[row]!);
     if (this.spec.outliers !== false) for (const value of outliers) add(value);
   }
 
@@ -254,6 +265,18 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
     if (this.spec.outliers === false) return [low, high];
     const { outliers } = groups[row]!;
     return [Math.min(low, outliers[0] ?? low), Math.max(high, outliers.at(-1) ?? high)];
+  }
+
+  /** Outlier dots at an end of the span reach their radius past it. */
+  protected override paintedPast(series: Series, row: number): readonly [number, number, number] {
+    if (this.spec.outliers === false) return [1, 1, 0];
+    const { outliers } = this.summaryOf(series).groups[row]!;
+    const [low, high] = this.span(series, row);
+    return [
+      outliers[0] === low ? RADIUS : 1,
+      outliers.at(-1) === high ? RADIUS : 1,
+      outliers.length > 0 ? RADIUS : 0,
+    ];
   }
 
   /** A group's median, quartiles, letter values, and counts, formatted as its value axis formats values. */

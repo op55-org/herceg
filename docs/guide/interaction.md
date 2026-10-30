@@ -301,15 +301,39 @@ chart.on("click", ({ inspection }) => {
 
 | Event | Reports |
 | --- | --- |
-| `viewport` | One whole change of view: `viewRevision`, `cause` (`"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, `"options"`), `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`). A map's or network's view is its plane's ranges. |
-| `select` | The selection (`x`, `y`, `lasso`), its `owner` (scale instances and panels), and with `rowSelection`, `rows` per table. |
-| `hover`, `click` | An `inspection` ([below](#panels-and-pixels)); with `rowSelection`, `click` carries `rows`. |
+| `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`). A map's or network's view is its plane's ranges. |
+| `select` | The selection (`x`, `y`, `lasso`), its `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table. |
+| `hover`, `click` | An `inspection` ([below](#panels-and-pixels)), `cause`, and the `revision` of the frame acted on; with `rowSelection`, `click` carries `rows`. |
 | `edge` | A view near an end of its extent: `scale`, `instance`, `panels`, `side`, `domain`, `bound`, `cause`. |
-| `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`. |
-| `visibility` | Series hidden or shown: `hiddenKeys`, and `panels` for panels' own legends. |
-| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled; a network node moved. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
-| `render` | A frame of the data was drawn, for overlays that follow the panels. |
+| `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`, `cause` (this chart's gesture, click, or key, or `"sync"` for another writer), and `revision`. |
+| `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, and `panels` for panels' own legends. |
+| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled; a network node moved, each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
+| `render` | A frame of the data, or a selection over it, was drawn, for overlays that follow the panels: the `revision` on screen. |
 | `error` | A `ChartError`, once per failed change. |
+
+**Causes and revisions.** A `cause` says what made a change:
+`"pointer"` (a drag, pinch, or click), `"wheel"`, `"keyboard"`, `"api"`
+(a call such as `setViewport` or `showCursor`), `"sync"` (another chart in
+the group, or another writer of a bound row selection), `"data"`, or
+`"options"`. A brush whose written rows another change replaces goes with
+that change's cause: a click's, a key's, or `"sync"`. `chart.revision` counts changes of options, data, and state
+(views, selection, bound row selections, visibility, drill roots,
+cameras, moved nodes); each state event carries the revision its change
+made, `render` the revision a frame drew, and `hover` and `click` the
+revision of the frame the pointer or key acted on. A change is on screen
+once a `render` of its revision or a later one arrives
+(`chart.drawnRevision` reads the last, undefined until a frame draws; a
+change that fails to draw never renders):
+
+```ts
+chart.on("select", ({ revision }) => {
+  const stop = chart.on("render", (frame) => {
+    if (frame.revision < revision) return;
+    stop();
+    saveSnapshot(chart); // the selection is drawn
+  });
+});
+```
 
 **Inspection points.** Each point of an inspection has `mark` (the mark's
 index), `markId`, `key` (an opaque series or item key), `label`, `row`
@@ -492,7 +516,7 @@ sales.setColumn("revenue", next); // the bars, the y axis, and the rule move
 ```
 
 ```python
-chart = hg.scatter(data, "x", "y", animation_key="id", animation=hg.Animation(values=True))
+chart = hg.scatter(data, "x", "y", item_key="id", animation=hg.Animation(values=True))
 widget = chart.widget()
 widget.replace(next_data)  # points with matching ids move, even reordered
 ```
@@ -501,7 +525,7 @@ widget.replace(next_data)  # points with matching ids move, even reordered
 | --- | --- |
 | Bars (stacked, labeled, histograms') | Matched by series and position; appearing bars grow from the base, a bar changing sign passes through the baseline. |
 | Pie slices, gauges | Slices turn to new sizes, always making a whole pie; a gauge turns its dial. |
-| Points | Matched by row, or with `animationKey: "id"` by a number or category field (across `reset` and reordered data). Missing or duplicate keys show that series at once. |
+| Points | Matched by row, or with `itemKey: "id"` by a number, time, or category field (across `reset` and reordered data). Missing or duplicate keys show that series at once. |
 | Lines, areas along x | When both scenes draw every row through the same positions (no level of detail, missing values, or breaks). |
 | Error bars, candlesticks, regions, text | When both scenes draw as many at the same places along one axis. |
 | Heatmap and 2D histogram cells | Fade to new colors over the same grid. |

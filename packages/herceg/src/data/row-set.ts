@@ -5,8 +5,8 @@ import type { Schema, Table } from "./table.ts";
 
 /**
  * A set of a table's rows, such as the rows selected in a grid. Rows are
- * held by identity (`rowOffset + position`), so they stay members while
- * other rows are appended or dropped, and leave when they are dropped
+ * held by identity (`Table.identity`), so they stay members while other
+ * rows are appended or dropped, and leave when they are dropped
  * themselves. A reset starts identities again, so a set made before one is
  * empty after it. One bit per row, from the first row the set could hold.
  */
@@ -25,7 +25,8 @@ export class RowSet<S extends Schema = Schema> {
   constructor(source: Table<S>) {
     this.source = source;
     this.generation = source.generation;
-    this.#base = source.rowOffset - (source.rowOffset % 32);
+    const first = source.identity(0);
+    this.#base = first - (first % 32);
     this.#words = new Uint32Array(0);
   }
 
@@ -57,7 +58,7 @@ export class RowSet<S extends Schema = Schema> {
   /** Whether the row at `position` (an index into the table's current rows) is a member. */
   has(position: number): boolean {
     if (!this.current || !(position >= 0 && position < this.source.length)) return false;
-    const bit = this.source.rowOffset + position - this.#base;
+    const bit = this.source.identity(position) - this.#base;
     return ((this.#words[Math.floor(bit / 32)] ?? 0) & (1 << (bit & 31))) !== 0;
   }
 
@@ -70,53 +71,23 @@ export class RowSet<S extends Schema = Schema> {
   addRange(start: number, end: number): this {
     this.#check();
     this.#positions(start, end);
-    this.#trim();
-    if (end <= start) return this;
-    this.#version++;
-    const first = this.source.rowOffset + start - this.#base;
-    this.#reserve(first + (end - start));
-    for (let bit = first; bit < first + (end - start); bit++) {
-      const mask = 1 << (bit & 31);
-      const word = Math.floor(bit / 32);
-      if ((this.#words[word]! & mask) === 0) {
-        this.#words[word]! |= mask;
-        this.#count++;
-      }
-    }
-    return this;
+    return this.#add(Math.max(0, end - start), (i) => start + i);
   }
 
   /** Adds the rows at these positions, in any order: one pass, for many rows at once. */
   addAll(positions: ArrayLike<number>): this {
     this.#check();
-    this.#trim();
-    let last = -1;
     for (let i = 0; i < positions.length; i++) {
       const position = positions[i]!;
       this.#positions(position, position + 1);
-      if (position > last) last = position;
     }
-    if (last < 0) return this;
-    this.#version++;
-    const shift = this.source.rowOffset - this.#base;
-    this.#reserve(shift + last + 1);
-    const words = this.#words;
-    for (let i = 0; i < positions.length; i++) {
-      const bit = positions[i]! + shift;
-      const word = Math.floor(bit / 32);
-      const mask = 1 << (bit & 31);
-      if ((words[word]! & mask) === 0) {
-        words[word]! |= mask;
-        this.#count++;
-      }
-    }
-    return this;
+    return this.#add(positions.length, (i) => positions[i]!);
   }
 
   delete(position: number): this {
     this.#check();
     this.#positions(position, position + 1);
-    const bit = this.source.rowOffset + position - this.#base;
+    const bit = this.source.identity(position) - this.#base;
     const word = Math.floor(bit / 32);
     const mask = 1 << (bit & 31);
     if (word < this.#words.length && (this.#words[word]! & mask) !== 0) {
@@ -138,22 +109,46 @@ export class RowSet<S extends Schema = Schema> {
     if (!this.current) return new Uint32Array(0);
     this.#trim();
     const out = new Uint32Array(this.#count);
-    const shift = this.#base - this.source.rowOffset;
+    const { source, generation } = this;
     let n = 0;
     for (let word = 0; word < this.#words.length; word++) {
       let bits = this.#words[word]!;
       while (bits !== 0) {
         const low = bits & -bits;
-        out[n++] = word * 32 + (31 - Math.clz32(low)) + shift;
+        const identity = this.#base + word * 32 + (31 - Math.clz32(low));
+        out[n++] = source.positionOf(identity, generation);
         bits ^= low;
       }
     }
     return out;
   }
 
+  /** Adds `count` rows, the `i`th at position `positionAt(i)`, checked already. */
+  #add(count: number, positionAt: (i: number) => number): this {
+    this.#trim();
+    if (count === 0) return this;
+    this.#version++;
+    const { source } = this;
+    let last = -1;
+    for (let i = 0; i < count; i++) last = Math.max(last, source.identity(positionAt(i)));
+    this.#reserve(last - this.#base + 1);
+    const words = this.#words;
+    for (let i = 0; i < count; i++) {
+      const bit = source.identity(positionAt(i)) - this.#base;
+      const word = Math.floor(bit / 32);
+      const mask = 1 << (bit & 31);
+      if ((words[word]! & mask) === 0) {
+        words[word]! |= mask;
+        this.#count++;
+      }
+    }
+    return this;
+  }
+
   #empty() {
     this.#words = new Uint32Array(0);
-    this.#base = this.source.rowOffset - (this.source.rowOffset % 32);
+    const first = this.source.identity(0);
+    this.#base = first - (first % 32);
     this.#count = 0;
   }
 
@@ -180,7 +175,9 @@ export class RowSet<S extends Schema = Schema> {
 
   /** Forgets rows dropped from the table, moving the bits down. */
   #trim() {
-    const dropped = this.source.rowOffset - this.#base;
+    // Rows are dropped from the front: the first row's identity is the lowest kept.
+    const first = this.source.identity(0);
+    const dropped = first - this.#base;
     if (dropped <= 0) return;
     const words = Math.floor(dropped / 32);
     if (words >= this.#words.length) {
@@ -194,7 +191,7 @@ export class RowSet<S extends Schema = Schema> {
       this.#base += words * 32;
     }
     // Rows dropped from the first word still kept.
-    const below = this.source.rowOffset - this.#base;
+    const below = first - this.#base;
     if (below > 0) {
       const mask = (1 << below) - 1;
       this.#count -= popcount(this.#words[0]! & mask);

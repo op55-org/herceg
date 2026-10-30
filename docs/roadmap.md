@@ -18,6 +18,10 @@ in the [guides](README.md).
 
 ## Data and selections
 
+- **Items everywhere.** Clicks that pick the item under the pointer (a
+  line, a region, an axis label, a legend entry), item and series
+  selections, a tooltip pinned to an item, and every mark's value
+  transitions, all addressing items by their keys (`itemKey`).
 - **Selections through aggregates.** A chart of a derived table's groups
   (a bar per region of means) shows and writes its source's selected rows,
   so brushing raw points highlights their groups' share and clicking a

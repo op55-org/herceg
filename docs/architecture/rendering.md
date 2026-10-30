@@ -264,7 +264,7 @@ The data is current at once; what moves is a picture of the change.
 
 **Identity.** Scenes of such charts carry what identifies each item: bars
 (`BarItems`: position and pixel root and tip), points (`PointItems`: the
-table generation and row identity, or an `animationKey` field's values),
+table generation and row identity, or an `itemKey` field's values),
 pie slices (`PieSlices`), and gauge dials (`GaugeDial`). Traced polylines
 say whether they are `whole` (every row traced). Panels keep their axis
 plans (`PanelPlans`). The lazy module imports no engine code; the chart

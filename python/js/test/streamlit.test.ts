@@ -123,7 +123,7 @@ describe("Streamlit component", () => {
           },
         },
       },
-      marks: [{ type: "point", x: "x", y: "y", data: "data", animationKey: "id" }],
+      marks: [{ type: "point", x: "x", y: "y", data: "data", itemKey: "id" }],
     };
     const parent = host();
     const buffers = (ys: number[], ids: number[]) => [

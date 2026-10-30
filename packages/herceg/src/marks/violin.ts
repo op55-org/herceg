@@ -6,10 +6,12 @@ import { lineDrawing } from "../draw/line.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { rectDrawing } from "../draw/rect.ts";
 import { segmentDrawing } from "../draw/segments.ts";
+import type { PositionScale } from "../scale/scale.ts";
 import type {
   AreaGeometry,
   LineGeometry,
   PointGeometry,
+  Rect,
   RectGeometry,
   SegmentGeometry,
 } from "../scene/scene.ts";
@@ -22,6 +24,7 @@ import {
   type Stat,
   type Summary,
 } from "./distribution.ts";
+import { boxOf, distanceToCut, distanceToDisc, distanceToStroke } from "./drawn.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
@@ -66,6 +69,193 @@ interface Shape {
  * double) show only what is inside.
  */
 export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
+  /**
+   * How far a pixel is from what `clip` keeps of the violin of `row` as
+   * painted: its fill, its outline's stroke, and the inner marks
+   * `geometry` draws.
+   */
+  protected override shapeDistance(
+    s: Series,
+    row: number,
+    px: number,
+    py: number,
+    frame: Frame,
+    clip: Readonly<Rect>,
+  ): number {
+    const horizontal = this.horizontal;
+    const along = horizontal ? frame.y : frame.x;
+    const across = horizontal ? frame.x : frame.y;
+    const { offset, share } = this.placement(s, frame);
+    const split = this.spec.split ?? false;
+    const inner = this.spec.inner ?? "box";
+    const half = share * VIOLIN * (split ? 1 : 0.5);
+    const center = along.map(placeAt(s, horizontal ? "y" : "x", row)) + (split ? 0 : offset);
+    // The sides drawn out from the center: a split violin's own, else both, mirrored.
+    const side = offset < 0 ? -1 : 1;
+    const sides = split ? [side] : [1, -1];
+    /** A point `w` out from the center on `side`, at `c` across, on screen. */
+    const at = (w: number, c: number, side: number) =>
+      horizontal ? ([c, center + side * w] as const) : ([center + side * w, c] as const);
+    /** How far the pixel is from what the clip keeps of a rectangle, along from `a0` to `a1`, across from `c0` to `c1`. */
+    const toRect = (a0: number, c0: number, a1: number, c1: number) =>
+      distanceToCut(horizontal ? boxOf(c0, a0, c1, a1) : boxOf(a0, c0, a1, c1), clip, px, py);
+    // A line across the violin, from its center out `w`, butt-ended.
+    const across0 = (c: number, w: number) =>
+      Number.isFinite(c)
+        ? toRect(
+            split ? center : center - w,
+            c - STROKE / 2,
+            center + (split ? side : 1) * w,
+            c + STROKE / 2,
+          )
+        : Number.POSITIVE_INFINITY;
+    const { stats, groups } = this.summaryOf(s);
+    const shape = groups[row]!;
+    let distance = Number.POSITIVE_INFINITY;
+    if (shape.density) {
+      // The fill as kept: whether it holds the clip's point nearest the pixel.
+      const qx = Math.min(Math.max(px, clip.x), clip.x + clip.width);
+      const qy = Math.min(Math.max(py, clip.y), clip.y + clip.height);
+      const [qa, qc] = horizontal ? [qy, qx] : [qx, qy];
+      const a = split ? side * (qa - center) : Math.abs(qa - center);
+      // The outline's stroke, on each side drawn.
+      const edge = (w0: number, c0: number, w1: number, c1: number) => {
+        for (const side of sides) {
+          const [x0, y0] = at(w0, c0, side);
+          const [x1, y1] = at(w1, c1, side);
+          distance = Math.min(distance, distanceToStroke(x0, y0, x1, y1, STROKE / 2, clip, px, py));
+        }
+      };
+      let [first, c0, w0] = [Number.NaN, Number.NaN, 0];
+      let inside = false;
+      this.#edge(shape, this.#statistics(stats, row), across, half, (c, w) => {
+        if (Number.isNaN(first)) {
+          first = c;
+          edge(0, c, w, c);
+        } else {
+          edge(w0, c0, w, c);
+          if (c !== c0 && (qc - c0) * (qc - c) <= 0)
+            inside ||= a >= 0 && a <= w0 + ((w - w0) * (qc - c0)) / (c - c0);
+        }
+        [c0, w0] = [c, w];
+      });
+      if (inside) return Math.hypot(px - qx, py - qy);
+      if (!Number.isNaN(first)) {
+        edge(0, c0, w0, c0);
+        // A split violin's flat side runs along its center.
+        if (split) edge(0, first, 0, c0);
+      }
+    } else if (shape.min === shape.max) {
+      return across0(across.map(shape.min), half);
+    }
+    if (inner === "none") return distance;
+    if (inner === "quartiles") {
+      for (const value of this.#statistics(stats, row)) {
+        const c = across.map(value);
+        distance = Math.min(distance, across0(c, widthAt(shape, half, across, value, c)));
+      }
+      return distance;
+    }
+    const box = this.#box(share, half);
+    // As drawn: a split violin's inner marks in the middle of its side.
+    const middle = center + (split ? (side * half) / 2 : 0);
+    // Statistics an axis cannot draw (a log axis' nonpositive ones) are not drawn.
+    const span = (width: number, from: number, to: number) => {
+      const [p, q] = [across.map(from), across.map(to)];
+      return Number.isFinite(p) && Number.isFinite(q)
+        ? toRect(middle - width / 2, p, middle + width / 2, q)
+        : Number.POSITIVE_INFINITY;
+    };
+    const boxed = span(box, stats.q1[row]!, stats.q3[row]!);
+    const whisker = span(STROKE, stats.low[row]!, stats.high[row]!);
+    const median = across.map(stats.median[row]!);
+    const [mx, my] = horizontal ? [median, middle] : [middle, median];
+    const dot = Number.isFinite(median)
+      ? distanceToDisc(mx, my, medianRadius(box), clip, px, py)
+      : Number.POSITIVE_INFINITY;
+    return Math.min(distance, boxed, whisker, dot);
+  }
+
+  /**
+   * Half its inner box, drawn at least `BOX_MIN` wide on the center of a
+   * violin that is not split (a split one's fits in its half).
+   */
+  protected override paintedPast(
+    s: Series,
+    row: number,
+    frame: Frame,
+  ): readonly [number, number, number] {
+    const shape = this.summaryOf(s).groups[row]!;
+    const boxed =
+      (this.spec.inner ?? "box") === "box" &&
+      !this.spec.split &&
+      (shape.density !== undefined || shape.min !== shape.max);
+    if (!boxed) return [1, 1, 0];
+    const { share } = this.placement(s, frame);
+    return [1, 1, this.#box(share, share * VIOLIN * 0.5) / 2];
+  }
+
+  /** The median dot inside its inner box, which a log axis can draw past the values it places. */
+  protected override paintedDot(
+    s: Series,
+    row: number,
+    frame: Frame,
+  ): readonly [number, number] | undefined {
+    const shape = this.summaryOf(s).groups[row]!;
+    if ((this.spec.inner ?? "box") !== "box" || (!shape.density && shape.min === shape.max))
+      return undefined;
+    const at = (this.horizontal ? frame.x : frame.y).map(this.summaryOf(s).stats.median[row]!);
+    const { share } = this.placement(s, frame);
+    const half = share * VIOLIN * (this.spec.split ? 1 : 0.5);
+    return Number.isFinite(at) ? [at, medianRadius(this.#box(share, half))] : undefined;
+  }
+
+  /** A selection's violin is drawn inside the whole's outline, as wide. */
+  protected override partWidth(): number {
+    return 1;
+  }
+
+  /** The statistics quartile lines draw, which the edge passes through; none otherwise. */
+  #statistics(stats: Summary<Shape>["stats"], row: number): number[] {
+    return this.spec.inner === "quartiles"
+      ? [stats.q1[row]!, stats.median[row]!, stats.q3[row]!]
+      : [];
+  }
+
+  /** The inner box's width: a share of the violin's, within pixels, inside a split half. */
+  #box(share: number, half: number): number {
+    const box = Math.min(BOX_MAX, Math.max(BOX_MIN, share * VIOLIN * BOX));
+    return this.spec.split ? Math.min(box, half) : box;
+  }
+
+  /**
+   * Calls `vertex` with each point of a violin's edge in drawing order: the
+   * density's samples the axis places, and between them the `statistics`
+   * it places (even below the first positive sample of a log axis), so
+   * that their lines meet the edge. Each is a pixel across the value axis
+   * and a width out from the center.
+   */
+  #edge(
+    shape: Shape,
+    statistics: readonly number[],
+    across: PositionScale,
+    half: number,
+    vertex: (c: number, w: number) => void,
+  ): void {
+    const { lo, values, step } = shape.density!;
+    let next = 0;
+    for (let i = 0; i < values.length; i++) {
+      const value = lo + i * step;
+      while (next < statistics.length && statistics[next]! < value) {
+        const statistic = statistics[next++]!;
+        const c = across.map(statistic);
+        if (Number.isFinite(c)) vertex(c, widthAt(shape, half, across, statistic, c));
+      }
+      const c = across.map(value);
+      if (Number.isFinite(c)) vertex(c, half * (values[i]! / shape.peak));
+    }
+  }
+
   readonly inset = { x: 0, y: 0 };
   protected readonly noun = ["violin", "violins"] as const;
   protected readonly width = VIOLIN;
@@ -220,8 +410,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
       const { q1, median, q3, low, high } = stats;
       const half = share * VIOLIN * (split ? 1 : 0.5);
       const side = split ? (offset < 0 ? -1 : 1) : 0;
-      const boxWidth = Math.min(BOX_MAX, Math.max(BOX_MIN, share * VIOLIN * BOX));
-      const box = split ? Math.min(boxWidth, half) : boxWidth;
+      const box = this.#box(share, half);
       // The violin's two edges as an area, and its outline as one closed line each.
       const upper = frame.polyline(s.key, "violin-upper");
       const lower = frame.polyline(s.key, "violin-lower");
@@ -250,20 +439,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
         if (!ok(center)) continue;
         const shape = shapes[row]!;
         const density = shape.density;
-        const widthAt = (value: number, c: number): number => {
-          if (!density) return half;
-          const { lo, values, step } = density;
-          const i = Math.max(0, Math.min(values.length - 2, Math.floor((value - lo) / step)));
-          const v0 = lo + i * step;
-          const p0 = across.map(v0);
-          const p1 = across.map(lo + (i + 1) * step);
-          // Intersect the pixel-linear edge when both samples map. At a log
-          // boundary, interpolate the density in data units for a new vertex.
-          const t = ok(p0) && ok(p1) ? (p0 === p1 ? 0 : (c - p0) / (p1 - p0)) : (value - v0) / step;
-          return half * ((values[i]! * (1 - t) + values[i + 1]! * t) / shape.peak);
-        };
         if (density) {
-          const { lo, values, step } = density;
           upper.break();
           lower.break();
           outline.break();
@@ -280,20 +456,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
             lower.push(lx, ly);
             outline.push(ux, uy);
           };
-          const vertices = inner === "quartiles" ? [q1[row]!, median[row]!, q3[row]!] : [];
-          let vertex = 0;
-          for (let i = 0; i < values.length; i++) {
-            const value = lo + i * step;
-            // Include drawable statistics even below the first positive grid
-            // sample, so their cross-sections meet the drawn density profile.
-            while (vertex < vertices.length && vertices[vertex]! < value) {
-              const statistic = vertices[vertex++]!;
-              const c = across.map(statistic);
-              if (ok(c)) push(c, widthAt(statistic, c));
-            }
-            const c = across.map(value);
-            if (ok(c)) push(c, half * (values[i]! / shape.peak));
-          }
+          this.#edge(shape, this.#statistics(stats, row), across, half, push);
           // Back along the lower edge, closing at the first point.
           for (let i = lower.count - 1; i >= from; i--)
             outline.push(lower.coords[i * 2]!, lower.coords[i * 2 + 1]!);
@@ -324,7 +487,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
             const value = stat[row]!;
             const c = across.map(value);
             if (!ok(c)) continue;
-            const w = widthAt(value, c);
+            const w = widthAt(shape, half, across, value, c);
             path.break();
             path.push(...at(split ? center : center - w, c));
             path.push(...at(split ? center + side * w : center + w, c));
@@ -396,7 +559,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
             fill: surface(frame.theme),
             fillOpacity: 1,
             opaque: true,
-            radius: split ? Math.min(box / 2, Math.max(1, box / 2 - 1)) : Math.max(1, box / 2 - 1),
+            radius: medianRadius(box),
             symbol: "circle",
             coords: dots,
             count: medians,
@@ -497,4 +660,34 @@ export function violin<S extends Schema>(
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
   return new ViolinMark(spec, table as unknown as Table);
+}
+
+/** The median dot's radius inside a box `box` pixels wide. */
+function medianRadius(box: number): number {
+  return Math.min(box / 2, Math.max(1, box / 2 - 1));
+}
+
+/**
+ * A violin's width at `value`, which the axis places at pixel `c`: along
+ * the pixel-linear edge between the density's samples where both map, and
+ * where one does not (a log axis' boundary), the density interpolated in
+ * data units.
+ */
+function widthAt(
+  shape: Shape,
+  half: number,
+  across: PositionScale,
+  value: number,
+  c: number,
+): number {
+  const { density } = shape;
+  if (!density) return half;
+  const { lo, values, step } = density;
+  const i = Math.max(0, Math.min(values.length - 2, Math.floor((value - lo) / step)));
+  const v0 = lo + i * step;
+  const p0 = across.map(v0);
+  const p1 = across.map(lo + (i + 1) * step);
+  const ok = Number.isFinite;
+  const t = ok(p0) && ok(p1) ? (p0 === p1 ? 0 : (c - p0) / (p1 - p0)) : (value - v0) / step;
+  return half * ((values[i]! * (1 - t) + values[i + 1]! * t) / shape.peak);
 }

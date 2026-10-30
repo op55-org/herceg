@@ -32,7 +32,7 @@ import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, PointSpec } from "../spec/spec.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
-import type { Channel, Encodings, FieldCoordinate, MappedField } from "./encoding.ts";
+import type { Channel, Encodings, FieldCoordinate, ItemKeyed, MappedField } from "./encoding.ts";
 import { withoutHidden } from "./hidden.ts";
 import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
@@ -46,6 +46,7 @@ import {
   CATEGORY,
   type ChartMark,
   type ColorRamp,
+  checkItemKey,
   type Frame,
   fieldBands,
   frozen,
@@ -60,11 +61,13 @@ import {
   type Palette,
   painted,
   requireField,
+  rowBuffer,
   SeriesSplitter,
   type SummaryContext,
   seriesOf,
 } from "./mark.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
+import { extentAt, isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import { placeAt, rowOf, type Series, valueAt, visibleRange, xExtent, yExtent } from "./series.ts";
 import { offsetOf, Swarms } from "./swarm.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -139,7 +142,7 @@ export function pointSizeForm(spec: {
 
 export type PointOptions<S extends Schema> = PointStyle<S> & PointSize<S>;
 
-interface PointStyle<S extends Schema> {
+interface PointStyle<S extends Schema> extends ItemKeyed<S> {
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -165,8 +168,6 @@ interface PointStyle<S extends Schema> {
    * their row's `color`).
    */
   series?: CategoryField<S> | false;
-  /** A number, time, or category field matching points across data resets when the chart animates values. */
-  animationKey?: PositionField<S>;
   fill?: string;
   /** Opacity from 0 to 1, a number field mapped from 0.15 to 1, or a channel. */
   fillOpacity?: number | NumericField<S> | Channel<number, S> | MappedField<S>;
@@ -315,6 +316,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     if (sizeForm) throw new ChartError({ code: "invalid-option", ...sizeForm });
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "point");
+    checkItemKey(table, this.spec.itemKey, "point");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
@@ -331,8 +333,6 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     // A category color names the series, as on lines and bars.
     const series = seriesOf(spec as PointSpec as never, table, "fill");
     this.#series = series;
-    if (spec.animationKey !== undefined)
-      requireField(table, spec.animationKey, POSITION, "point animationKey");
     this.#banded = {
       x: table.kind(position.x) === "category",
       y: table.kind(position.y) === "category",
@@ -360,7 +360,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     }
     // Points in bands are in no x order.
     const xField = this.#banded.x ? undefined : position.x;
-    this.#split = new SeriesSplitter(table, xField, [position.y], series, spec.label, view);
+    this.#split = new SeriesSplitter(() => this.rows(), xField, [position.y], series, spec.label);
     this.identity = { field: series, values: [position.y] };
     const channels = pointChannels(spec, table);
     const { color, size, opacity, symbol } = channels;
@@ -437,12 +437,20 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     this.inset = size.compiled || symbol.compiled ? undefined : { x: extent, y: extent };
   }
 
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
+    return this.#rows;
+  }
+
   channelKind(axis: "x" | "y") {
     return offAxis(this.bound, axis) ? undefined : this.table.kind(this.#fields[axis]);
   }
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
-    return this.#banded[axis] ? fieldBands(this.table, this.#fields[axis], context) : undefined;
+    return this.#banded[axis] ? fieldBands(this.rows(), this.#fields[axis], context) : undefined;
   }
 
   series(
@@ -456,7 +464,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     const fields = this.#fields;
     // A category position is each row's band index on the chart's axis.
     const banded = (axis: "x" | "y") =>
-      bandIndices(table, fields[axis], bands[axis]?.keys ?? [], context);
+      bandIndices(this.rows(), fields[axis], bands[axis]?.keys ?? [], context);
     const series = buildSeries(
       table,
       this.#split.sources(),
@@ -521,7 +529,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
             width: this.#ringWidth,
           }
         : undefined;
-    const keyField = frame.keyed ? this.spec.animationKey : undefined;
+    const keyField = frame.keyed ? this.spec.itemKey : undefined;
     const keyKind = keyField === undefined ? undefined : this.table.kind(keyField);
     const keyLabels = keyKind === "category" ? this.table.categories(keyField as never) : undefined;
     const keyNumbers = keyLabels ? undefined : read(keyField);
@@ -624,7 +632,8 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
               : { ...identity, ids, key: { field: keyField, kind: keyKind as "number" | "time" } };
         }
       }
-      const attributed = frame.attributed ? new Uint32Array(length) : undefined;
+      // The row each point draws, for drawn-mark records and titles.
+      const drawnRows = rowBuffer(frame, s.key, "rows", length);
       let count = 0;
       for (let k = start; k < end; k++) {
         const row = rowOf(s, k);
@@ -663,7 +672,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         if (colorIndex) colorIndex[count] = tone;
         if (opacities) opacities[count] = alpha;
         if (symbols) symbols[count] = shape;
-        if (attributed) attributed[count] = row;
+        drawnRows[count] = row;
         if (items) {
           if (keyLabels) {
             (items.ids as (string | undefined)[])[count] =
@@ -671,7 +680,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
           } else {
             (items.ids as Float64Array)[count] = keyNumbers
               ? keyNumbers[row]!
-              : this.table.rowOffset + row;
+              : this.table.identity(row);
           }
         }
         count++;
@@ -697,7 +706,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         symbols,
         ring,
         items,
-        rows: attributed,
+        rows: drawnRows,
       });
     }
     return out;
@@ -726,12 +735,11 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
 
   /** How sizes, colors, and opacities follow their fields, with the current data. */
   #encoding(frame: Frame, looks: PointLooks | undefined): Encoding {
-    const { table } = this;
     const out: Encoding = {};
     const radius = this.#radiusScale();
     if (radius) out.radius = radius;
     if (this.#opacityField !== undefined) {
-      const [lo, hi] = table.extent(this.#opacityField as never) ?? [0, 0];
+      const [lo, hi] = extentAt(this.rows(), this.#opacityField) ?? [0, 0];
       out.opacity = (value) => {
         if (!Number.isFinite(value)) return Number.NaN;
         return MIN_OPACITY + (1 - MIN_OPACITY) * fraction(value, lo, hi);
@@ -753,7 +761,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
    */
   #radiusScale(): ((value: number) => number) | undefined {
     if (this.#sizeField === undefined) return undefined;
-    const extent = this.table.extent(this.#sizeField as never);
+    const extent = extentAt(this.rows(), this.#sizeField);
     const [lo, hi] = extent ? (extent[0] >= 0 ? [0, extent[1]] : extent) : [0, 0];
     const [r0, r1] = this.spec.radiusRange ?? RADIUS_RANGE;
     return (value) => {
@@ -767,7 +775,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   #colorScale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
     const { spec } = this;
     if (this.#toneField === undefined) return undefined;
-    const domain = spec.colorDomain ?? this.table.extent(this.#toneField as never);
+    const domain = spec.colorDomain ?? extentAt(this.rows(), this.#toneField);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
     const ramp = rampOf(spec.colors, fallback, paint, "point colors");
@@ -838,7 +846,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     if (series.length === 0) return [];
     const out: GlyphKey[] = [];
     const radius = this.#radiusScale();
-    const extent = this.#sizeField !== undefined && this.table.extent(this.#sizeField as never);
+    const extent = this.#sizeField !== undefined && extentAt(this.rows(), this.#sizeField);
     if (radius && extent) {
       // Round values nearest a quarter, half, and all of the way from the
       // smallest size's value (zero, or the least) to the largest's.
@@ -1097,7 +1105,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     }
     const jitter = this.spec.jitter;
     if (!jitter) return center;
-    const unit = jitterOf(this.table.rowOffset + row, jitter.seed ?? 0);
+    const unit = jitterOf(this.table.identity(row), jitter.seed ?? 0);
     return center + (unit - 0.5) * jitter.width * width;
   }
 
@@ -1368,7 +1376,7 @@ export function point<S extends Schema>(
     ...definedFields(options, [
       "tooltip",
       "series",
-      "animationKey",
+      "itemKey",
       "radius",
       "size",
       "fill",
@@ -1406,14 +1414,6 @@ export function point<S extends Schema>(
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
   return new PointMark(spec, table as unknown as Table, view as unknown as RowView | undefined);
-}
-
-/**
- * Whether marks' data is a row view rather than a table, told apart by
- * shape so that charts without views do not bundle the view code.
- */
-export function isRowView<S extends Schema>(data: Table<S> | RowView<S>): data is RowView<S> {
-  return "source" in data && typeof (data as RowView<S>).read === "function";
 }
 
 /** A shape for legends, about as large as the 10-pixel swatch, and how far it reaches. */

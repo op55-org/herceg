@@ -1628,6 +1628,7 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Lines through x and y columns; several value columns or a series column give
@@ -1654,6 +1655,9 @@ class Chart:
         ``continuity`` (``hg.Continuity``) says which neighbors connect, and
         ``where`` leaves rows out as gaps, meeting the line where the
         condition changes.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         places = self._places("line", {"x": x, "y": y}, axis == "right", needed=True)
         x, y = places.columns["x"], places.columns["y"]
@@ -1699,6 +1703,7 @@ class Chart:
                 "clip": _clip(clip, "line"),
                 "tooltip": self._mark_tooltip(table, tooltip, "line"),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "line"),
                 "id": id,
             },
             table,
@@ -1741,6 +1746,7 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Filled areas: down to zero, stacked, or the band between ``y1`` and ``y2``.
@@ -1769,6 +1775,9 @@ class Chart:
         ``style``, ``continuity``, and ``where`` work as for lines, with
         ``where`` shading only where its condition holds (a conditional
         band).
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         stacking = _built(stack, Stack, "area stack") if isinstance(stack, Mapping) else stack
         if isinstance(stacking, Stack):
@@ -1893,6 +1902,7 @@ class Chart:
                 "clip": _clip(clip, "area"),
                 "tooltip": self._mark_tooltip(table, tooltip, "area"),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "area"),
                 "id": id,
             },
             table,
@@ -1930,6 +1940,7 @@ class Chart:
         width: Pixels | Mapping[str, float] | None = None,
         stroke_sides: Sequence[Side] | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Bars: one band per category of x, or bars centered on number or time x.
@@ -1952,6 +1963,9 @@ class Chart:
         color). ``stack="fill"`` normalizes nonnegative values per position,
         and labels show shares. Tooltip and keyboard text also report the raw
         values.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         _check_stack(stack, "bar")
         if dodge and stack:
@@ -2051,6 +2065,7 @@ class Chart:
                     "bar stroke_sides", lambda: _sides(stroke_sides, "bar stroke_sides")
                 ),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "bar"),
                 "id": id,
             },
             table,
@@ -2077,6 +2092,7 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """One tick per observation of exactly one number or time column.
@@ -2084,6 +2100,9 @@ class Chart:
         Ticks reach ``length`` CSS pixels into the plot (default 8), from
         bottom/top for ``x`` or left/right for ``y``. Their edges stay fixed
         during zoom and pan. Missing and nonfinite values are omitted.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         if (x is not None) == (y is not None):
             raise ChartError("rug: needs exactly one of x and y")
@@ -2130,6 +2149,7 @@ class Chart:
                 "clip": _clip(clip, "rug"),
                 "tooltip": self._mark_tooltip(table, tooltip, "rug"),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "rug"),
                 "id": id,
             },
             table,
@@ -2162,6 +2182,7 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Error bars at each ``x``, from ``y1`` to ``y2`` or ``y`` ± ``y_error``; or, at each
@@ -2172,6 +2193,9 @@ class Chart:
         column side by side in each category, as grouped bars are, so each
         interval stands on its bar. Error bars of the series column of the bars
         they stand on share the bars' colors, legend entries, and places.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         vertical = y_error is not None or (y1 is not None and y2 is not None)
         horizontal = x_error is not None or (x1 is not None and x2 is not None)
@@ -2268,6 +2292,7 @@ class Chart:
                 "clip": _clip(clip, "errorbar"),
                 "tooltip": self._mark_tooltip(table, tooltip, "errorbar"),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "errorbar"),
                 "id": id,
             },
             table,
@@ -2280,7 +2305,7 @@ class Chart:
         y: str | RowPosition,
         *,
         series: str | Literal[False] | None = None,
-        animation_key: str | None = None,
+        item_key: str | None = None,
         data: Any = None,
         radius: float | None = None,
         size: str | Channel | Mapping[str, Any] | Expr | None = None,
@@ -2331,8 +2356,9 @@ class Chart:
         column named like a shape needs. ``sampling="pixel"`` draws opaque
         points whose centers share a device pixel once, which is faster for
         dense scatters.
-        ``animation_key`` names a numeric, datetime, or category column matching
-        points across live replacements when ``Animation(values=True)`` is set.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each point, matching points across live replacements when
+        ``Animation(values=True)`` is set.
 
         With a category ``x`` or ``y``, ``dodge=True`` places the series of a
         ``series`` column side by side in each category, as grouped bars are,
@@ -2412,7 +2438,6 @@ class Chart:
         self._require(table, y, (*_NUMERIC, "category"), "point y")
         # A category color names the series, as on lines and bars; series=False keeps one.
         split = self._series_of(table, series, color, encoded, fill, "fill", "point")
-        self._require(table, animation_key, (*_NUMERIC, "category"), "point animation_key")
         _check_size(radius, size if isinstance(size, str) else None, "point")
         if isinstance(size, str):
             self._require(table, size, _NUMERIC, "point size")
@@ -2459,7 +2484,6 @@ class Chart:
                 "x": places.spec("x", x),
                 "y": places.spec("y", y),
                 "series": series,
-                "animationKey": animation_key,
                 "radius": radius,
                 "size": channels.get("size", size),
                 "radiusRange": _range(radius_range, "point radius_range", minimum=0),
@@ -2487,6 +2511,7 @@ class Chart:
                 "clip": _clip(clip, "point"),
                 "tooltip": self._mark_tooltip(table, tooltip, "point"),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "point"),
                 "id": id,
             },
             table,
@@ -2715,6 +2740,7 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Open-high-low-close candles at each ``x``, as for prices.
@@ -2723,6 +2749,9 @@ class Chart:
         color, others filled in ``fall``; both default to the theme's.
         ``variant="ohlc"`` draws bars instead: a line from low to high with
         the open ticked to its left and the close to its right.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         if variant not in (None, "candlestick", "ohlc"):
             raise ChartError(
@@ -2751,6 +2780,7 @@ class Chart:
                 "clip": _clip(clip, "candlestick"),
                 "tooltip": self._mark_tooltip(table, tooltip, "candlestick"),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "candlestick"),
                 "id": id,
             },
             table,
@@ -3693,6 +3723,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         tooltip: Tooltip | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Regions of a map: each row's shape, filled by ``color``, a numeric column
@@ -3716,6 +3747,9 @@ class Chart:
         ``projection``: with facets, every layer splits its rows by the facet
         column unless ``facet="repeat"`` draws it whole in each panel (a base
         map); with panels, the layers naming a ``panel`` are its map.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         self._map_place("geoshape")
         if geojson is not None:
@@ -3789,6 +3823,7 @@ class Chart:
                 "facet": _mark_facet(facet, "geoshape"),
                 "panel": panel,
                 "tooltip": self._mark_tooltip(table, tooltip, "geoshape"),
+                "itemKey": self._item_key(table, item_key, "geoshape"),
                 "id": id,
             },
             table,
@@ -3818,6 +3853,7 @@ class Chart:
         facet: Literal["repeat"] | None = None,
         panel: str | None = None,
         tooltip: Tooltip | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Points of a map at ``longitude`` and ``latitude`` columns (degrees):
@@ -3832,6 +3868,9 @@ class Chart:
         GeoDataFrame of points, add the columns first:
         ``gdf.assign(lon=gdf.geometry.x, lat=gdf.geometry.y)``. Layers share a
         map as ``Chart.geoshape`` says, also in facets and panels.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         self._map_place("geopoint")
         table = self._mark_table(data)
@@ -3887,6 +3926,7 @@ class Chart:
                 "facet": _mark_facet(facet, "geopoint"),
                 "panel": panel,
                 "tooltip": self._mark_tooltip(table, tooltip, "geopoint"),
+                "itemKey": self._item_key(table, item_key, "geopoint"),
                 "id": id,
             },
             table,
@@ -3919,6 +3959,7 @@ class Chart:
         label: str | None = None,
         tooltip: Tooltip | None = None,
         panel: str | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Points in a 3D chart at the numeric or datetime columns ``x``, ``y``,
@@ -3931,6 +3972,9 @@ class Chart:
         category column labeling each point in tooltips. ``radius`` is the
         radius in pixels (3.5 by default). 3D marks share their chart or subplot, its
         box, and its ``camera``.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         self._check_3d("point_3d")
         table = self._mark_table(data)
@@ -3977,6 +4021,7 @@ class Chart:
                 "label": label,
                 "tooltip": self._mark_tooltip(table, tooltip, "point_3d"),
                 "panel": panel,
+                "itemKey": self._item_key(table, item_key, "point_3d"),
                 "id": id,
             },
             table,
@@ -3996,6 +4041,7 @@ class Chart:
         label: str | None = None,
         tooltip: Tooltip | None = None,
         panel: str | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Lines in a 3D chart through the numeric or datetime columns ``x``,
@@ -4006,6 +4052,9 @@ class Chart:
         missing a value breaks its path. ``stroke_width`` is in pixels (2 by
         default) and stays the same however near or far the line is. 3D marks
         share their chart or subplot, its box, and its ``camera``.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         self._check_3d("line_3d")
         table = self._mark_table(data)
@@ -4029,6 +4078,7 @@ class Chart:
                 "label": label,
                 "tooltip": self._mark_tooltip(table, tooltip, "line_3d"),
                 "panel": panel,
+                "itemKey": self._item_key(table, item_key, "line_3d"),
                 "id": id,
             },
             table,
@@ -4618,6 +4668,7 @@ class Chart:
         clip: Clip | None = None,
         legend: bool | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Reference lines: horizontal at ``y`` or vertical at ``x``.
@@ -4635,6 +4686,9 @@ class Chart:
         of the plot's view, and one at pixels or a share of the chart is drawn
         wherever it is; ``clip=False`` draws every rule, and ``"plot"`` or
         ``"chart"`` cuts them to the plot or chart.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         if (x is None) == (y is None):
             raise ChartError("rule: needs exactly one of x and y")
@@ -4669,6 +4723,7 @@ class Chart:
                 "clip": _clip(clip, "rule"),
                 "legend": self._option("rule legend", lambda: _flag(legend, "rule legend")),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "rule"),
                 "id": id,
             },
             table,
@@ -4697,6 +4752,7 @@ class Chart:
         halo: HaloOption | None = None,
         legend: bool | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Shaded regions: from ``x1`` to ``x2``, from ``y1`` to ``y2``, or both.
@@ -4714,6 +4770,9 @@ class Chart:
         ``contribute_domain=True``. Regions are cut to the plot; with
         ``clip="chart"`` or ``False``, to the chart, so a band at pixels of
         the chart above the plot shows.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         for start, end, name in ((x1, x2, "x"), (y1, y2, "y")):
             if (start is None) != (end is None):
@@ -4760,6 +4819,7 @@ class Chart:
                 "clip": _clip(clip, "region"),
                 "legend": self._option("region legend", lambda: _flag(legend, "region legend")),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "region"),
                 "id": id,
             },
             table,
@@ -4785,6 +4845,7 @@ class Chart:
         halo: HaloOption | None = None,
         legend: bool | None = None,
         z_index: float | None = None,
+        item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """Text ``label`` at ``(x, y)``, or at ``at``, an ``hg.Position``.
@@ -4805,6 +4866,9 @@ class Chart:
         plot's view, and text at pixels or a share of the chart (above the
         plot, say) is drawn wherever it is; ``clip=False`` draws all of it,
         and ``"plot"`` or ``"chart"`` cuts it to the plot or chart.
+        ``item_key`` names a numeric, datetime, or category column whose value
+        names each row's item, which selections and transitions follow across
+        replaced data.
         """
         if overlap not in (None, "show", "hide", "move"):
             raise ChartError(
@@ -4868,6 +4932,7 @@ class Chart:
                 "clip": _clip(clip, "text"),
                 "legend": self._option("text legend", lambda: _flag(legend, "text legend")),
                 "zIndex": z_index,
+                "itemKey": self._item_key(table, item_key, "text"),
                 "id": id,
             },
             table,
@@ -5595,6 +5660,20 @@ class Chart:
         if self._default is None:
             raise ChartError("Chart data: the chart has none; pass data to hg.Chart or to the mark")
         return self._default
+
+    def _item_key(self, table: int | None, item_key: str | None, mark: str) -> str | None:
+        """A mark's ``item_key``: a numeric, datetime, or category column whose
+        value names each row's item."""
+        if item_key is None:
+            return None
+        if table is None:
+            raise ChartError(
+                f"{mark} item_key: names the rows of the mark's data; "
+                "give it data, or drop item_key",
+                path=self._path(f"{mark} item_key"),
+            )
+        self._require(table, item_key, (*_NUMERIC, "category"), f"{mark} item_key")
+        return item_key
 
     def _require(
         self,
@@ -7359,7 +7438,7 @@ def _fields(spec: dict[str, Any]) -> set[str]:
         *("open", "high", "low", "close"),
         *("first", "second", "height"),
         *("q1", "median", "q3", "count"),
-        *("size", "fillOpacity", "color", "symbol", "animationKey"),
+        *("size", "fillOpacity", "color", "symbol", "itemKey"),
         *("geometry", "labelField", "longitude", "latitude", "z"),
     ):
         value = spec.get(key)
@@ -8336,6 +8415,7 @@ def line(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8367,6 +8447,7 @@ def line(
         clip=clip,
         z_index=z_index,
         tooltip=tooltip,
+        item_key=item_key,
         id=id,
     )
 
@@ -8404,6 +8485,7 @@ def area(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8447,6 +8529,7 @@ def area(
         clip=clip,
         z_index=z_index,
         tooltip=tooltip,
+        item_key=item_key,
         id=id,
     )
 
@@ -8478,6 +8561,7 @@ def bar(
     halo: HaloOption | None = None,
     stroke_sides: Sequence[Side] | None = None,
     z_index: float | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8509,6 +8593,7 @@ def bar(
         halo=halo,
         stroke_sides=stroke_sides,
         z_index=z_index,
+        item_key=item_key,
         id=id,
     )
 
@@ -8520,7 +8605,7 @@ def scatter(
     y: str | RowPosition,
     *,
     series: str | Literal[False] | None = None,
-    animation_key: str | None = None,
+    item_key: str | None = None,
     radius: float | None = None,
     size: str | Channel | Mapping[str, Any] | Expr | None = None,
     radius_range: tuple[float, float] | None = None,
@@ -8553,7 +8638,7 @@ def scatter(
         x,
         y,
         series=series,
-        animation_key=animation_key,
+        item_key=item_key,
         radius=radius,
         size=size,
         radius_range=radius_range,
@@ -8599,6 +8684,7 @@ def scatter_3d(
     fill_opacity: float | None = None,
     label: str | None = None,
     panel: str | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8622,6 +8708,7 @@ def scatter_3d(
         label=label,
         tooltip=tooltip,
         panel=panel,
+        item_key=item_key,
         id=id,
     )
 
@@ -8638,6 +8725,7 @@ def line_3d(
     stroke_width: float | None = None,
     label: str | None = None,
     panel: str | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8658,6 +8746,7 @@ def line_3d(
         label=label,
         tooltip=tooltip,
         panel=panel,
+        item_key=item_key,
         id=id,
     )
 
@@ -9349,6 +9438,7 @@ def choropleth(
     locations: str | None = None,
     feature_id_key: str = "id",
     panel: str | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9376,6 +9466,7 @@ def choropleth(
         feature_id_key=feature_id_key,
         panel=panel,
         tooltip=tooltip,
+        item_key=item_key,
         id=id,
     )
 
@@ -9401,6 +9492,7 @@ def scatter_geo(
     stroke_width: float | None = None,
     label: str | None = None,
     panel: str | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9425,6 +9517,7 @@ def scatter_geo(
         label=label,
         panel=panel,
         tooltip=tooltip,
+        item_key=item_key,
         id=id,
     )
 
@@ -9446,6 +9539,7 @@ def candlestick(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9467,6 +9561,7 @@ def candlestick(
         clip=clip,
         z_index=z_index,
         tooltip=tooltip,
+        item_key=item_key,
         id=id,
     )
 

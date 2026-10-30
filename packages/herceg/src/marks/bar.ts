@@ -27,7 +27,14 @@ import type { Halo, TextStyle } from "../spec/style.ts";
 import { dashPattern, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import { BandShares, STILL } from "./dodge.ts";
-import type { BarLabels, CssColor, Encodings, FieldCoordinate, MarkStyle } from "./encoding.ts";
+import type {
+  BarLabels,
+  CssColor,
+  Encodings,
+  FieldCoordinate,
+  ItemKeyed,
+  MarkStyle,
+} from "./encoding.ts";
 import type { ContentWriter } from "./features/content.ts";
 import { withoutHidden } from "./hidden.ts";
 import { keyLegend } from "./legend-parts.ts";
@@ -41,6 +48,7 @@ import {
   buildSeries,
   CATEGORY,
   type ChartMark,
+  checkItemKey,
   checkOption,
   type Frame,
   fieldBands,
@@ -58,20 +66,14 @@ import {
   painted,
   requireField,
   requireSeriesFields,
+  rowBuffer,
   SeriesSplitter,
   seriesOf,
 } from "./mark.ts";
 import { PositionStack } from "./position-stack.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
-import {
-  lowerPosition,
-  rowOf,
-  type Series,
-  TableCache,
-  visibleRange,
-  xExtent,
-  yExtent,
-} from "./series.ts";
+import { type MarkRows, MarkRowsCache, rowsOf } from "./rows.ts";
+import { lowerPosition, rowOf, type Series, visibleRange, xExtent, yExtent } from "./series.ts";
 import { Slots } from "./slots.ts";
 import { RowStack, type StackedLayers } from "./stack.ts";
 import {
@@ -84,7 +86,7 @@ import {
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-interface BarStyle<S extends Schema> {
+interface BarStyle<S extends Schema> extends ItemKeyed<S> {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
   halo?: Halo;
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
@@ -241,6 +243,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
   readonly bandPadding = 0.2;
   readonly featured: boolean;
   readonly identity: MarkSources;
+  readonly wide: boolean;
+  readonly itemPosition: string;
   readonly legendScales: readonly LegendScale[];
   readonly bound: RowBindings | undefined;
   /**
@@ -260,7 +264,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
   readonly #split: SeriesSplitter;
   /** Each grouped series' slot in its positions, as geometry last placed it. */
   readonly #shares = new BandShares();
-  #stacks = new TableCache<Map<string, Stack>>();
+  #stacks = new MarkRowsCache<Map<string, Stack>>();
   /** Stacks of fields over positions that never repeat, kept current as rows stream. */
   readonly #rowStack: RowStack;
   /** Stacks of series split by a field, kept current as rows stream. */
@@ -302,6 +306,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       );
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "bar");
+    checkItemKey(table, this.spec.itemKey, "bar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
@@ -389,6 +394,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       spec.series === undefined,
     );
     this.identity = { field: series, values: lengths };
+    this.wide = lengths.length > 1;
+    this.itemPosition = this.#position;
     // A field other than the series' coloring rows has a key of its colors
     // (the feature compiler's, see row-styles.ts).
     const { encode } = spec;
@@ -408,13 +415,21 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     const px = spec.width?.px;
     if (px && !this.#categorical && !this.#horizontal) this.inset = { x: px / 2, y: 0 };
     this.#split = new SeriesSplitter(
-      table,
+      () => this.rows(),
       this.#categorical ? undefined : this.#position,
       lengths,
       series,
       spec.label,
     );
     this.#dodges = (spec.dodge ?? !spec.stack) && series !== this.#position;
+  }
+
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
   }
 
   channelKind(axis: "x" | "y") {
@@ -424,7 +439,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
     return (axis === "y") === this.#horizontal && this.#categorical
-      ? fieldBands(this.table, this.#position, context)
+      ? fieldBands(this.rows(), this.#position, context)
       : undefined;
   }
 
@@ -440,7 +455,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     // Categorical positions: each row's band index is its position.
     const positions = this.#categorical
       ? bandIndices(
-          table,
+          this.rows(),
           this.#position,
           (this.#horizontal ? bands.y : bands.x)?.keys ?? [],
           context,
@@ -454,7 +469,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     // Rows facets split into panels stack within their panel (stackPanels):
     // the whole table's stacks let go of their buffers.
     if (spec.stack && split) {
-      this.#stacks = new TableCache();
+      this.#stacks = new MarkRowsCache();
       this.#rowStack.clear();
       this.#positionStack.clear();
     }
@@ -470,15 +485,16 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       let stack: Pick<StackedLayers, "tops" | "bases" | "totals">;
       // Only the stack in use keeps its buffers.
       if (rowWise) {
-        this.#stacks = new TableCache();
+        this.#stacks = new MarkRowsCache();
         this.#positionStack.clear();
         stack = this.#rowStack.update(
           table,
           series.map((s, i) => (shown[i] ? s.values : undefined)),
           signature,
         );
-      } else if (this.identity.field !== undefined) {
-        this.#stacks = new TableCache();
+      } else if (this.identity.field !== undefined && !this.rows().positions) {
+        // It follows a whole table as it streams; some of its rows stack below.
+        this.#stacks = new MarkRowsCache();
         this.#rowStack.clear();
         const { tops, bases, totals } = this.#positionStack.update(
           table,
@@ -492,10 +508,15 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       } else {
         this.#rowStack.clear();
         this.#positionStack.clear();
-        const cache = this.#stacks.get(table, () => new Map());
+        const cache = this.#stacks.get(this.rows(), () => new Map());
         let byPosition = cache.get(signature);
         if (!byPosition || byPosition.tops[0]?.length !== positions.length) {
-          byPosition = stackBars(series, shown, spec.stack === "fill");
+          byPosition = stackBars(
+            series,
+            shown,
+            spec.stack === "fill",
+            this.identity.field !== undefined,
+          );
           if (cache.size >= 4) cache.clear();
           cache.set(signature, byPosition);
         }
@@ -712,9 +733,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       const shown = items ? frame.doubles(s.key, "at", end - start) : undefined;
       const span = items ? frame.floats(s.key, "span", (end - start) * 2) : undefined;
       const counts = new Uint32Array(parts);
-      const attributed = frame.attributed
-        ? rects.map((r) => new Uint32Array(r.length / 4))
-        : undefined;
+      // The row each bar draws, for drawn-mark records and titles.
+      const drawnRows = rects.map((r, part) => rowBuffer(frame, keyOf(part), "rows", r.length / 4));
       // Bars of one look (the common case) read no arrays of looks per row.
       const one = parts === 1;
       const rects0 = rects[0]!;
@@ -748,7 +768,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
             : tip < root
               ? TOP
               : BOTTOM;
-        if (attributed) attributed[part]![count] = row;
+        drawnRows[part]![count] = row;
         if (shown) {
           shown[count] = at;
           span![count * 2] = root;
@@ -788,7 +808,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           count: counts[part]!,
           rounded: rounding && !square[part] ? { radius, ends: rounding[part]! } : undefined,
           bars: shown && { horizontal, at: shown, span: span! },
-          rows: attributed?.[part],
+          rows: drawnRows[part],
         };
         const outline = outlines[part];
         if (outline) bars.edge = outline;
@@ -1010,7 +1030,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
 
   /** Distinct x values of the table and their spacing, which bar widths follow. */
   #slotsOf(): Slots {
-    this.#slots ??= new Slots(this.table, this.#position);
+    this.#slots ??= new Slots(() => this.rows(), this.#position);
     return this.#slots;
   }
 }
@@ -1488,7 +1508,12 @@ function positionTotals(
   return totals;
 }
 
-function stackBars(series: readonly Series[], shown: readonly boolean[], fill = false): Stack {
+function stackBars(
+  series: readonly Series[],
+  shown: readonly boolean[],
+  fill: boolean,
+  split: boolean,
+): Stack {
   const totals = fill ? positionTotals(series, shown) : undefined;
   const positive = new Map<number, number>();
   const negative = new Map<number, number>();
@@ -1496,11 +1521,12 @@ function stackBars(series: readonly Series[], shown: readonly boolean[], fill = 
   const bases: Float64Array[] = [];
   const allocate = (length: number) => [nans(length), nans(length)] as const;
   // Series split by a category field cover disjoint rows of one field, so
-  // they share table-sized arrays; series of different fields need their own.
+  // they share table-sized arrays; series of different fields (which may
+  // read the same rows) need their own.
   let shared: readonly [Float64Array, Float64Array] | undefined;
   series.forEach((s, i) => {
-    if (s.rows && !shared) shared = allocate(s.values.length);
-    const [top, base] = s.rows && shared ? shared : allocate(s.values.length);
+    if (split && !shared) shared = allocate(s.values.length);
+    const [top, base] = split && shared ? shared : allocate(s.values.length);
     for (let k = 0; k < s.length; k++) {
       const row = rowOf(s, k);
       const raw = shown[i] ? s.values[row]! : 0;
@@ -1573,6 +1599,7 @@ export function bar<S extends Schema>(
       "labels",
       "halo",
       "id",
+      "itemKey",
       "axis",
       "facet",
       "panel",

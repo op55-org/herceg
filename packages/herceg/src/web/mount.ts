@@ -5,6 +5,7 @@
 
 import { type Chart, createChart } from "../dom/chart.ts";
 import { showFailure } from "../dom/errors.ts";
+import type { ChartEvents } from "../dom/events.ts";
 import { ChartError, type ChartErrorInfo, chartError, errorInfo } from "../spec/errors.ts";
 import { type LoadedSpec, loadSpec } from "../spec/load.ts";
 import {
@@ -37,7 +38,13 @@ export interface HercegEventMap {
    */
   "herceg:error": { id: string; error: ChartErrorInfo };
   /** The plot was clicked: the data under the pointer, or null off the data. */
-  "herceg:click": { id: string; panel?: string; inspection: InspectionPayload | null };
+  "herceg:click": {
+    id: string;
+    panel?: string;
+    inspection: InspectionPayload | null;
+    cause: ChartEvents["click"]["cause"];
+    revision: number;
+  };
   /** The selection changed, null once cleared, and what it belongs (or belonged) to. */
   "herceg:select": { id: string } & SelectEventPayload;
   /** The view changed: the scale instances that changed, and the panels drawing them. */
@@ -45,7 +52,8 @@ export interface HercegEventMap {
   /** A view came near an end of what `interaction.limits` lets it show. */
   "herceg:edge": { id: string } & EdgePayload;
   /** A channel `rowSelection` binds changed, whoever changed it. */
-  "herceg:rowselection": { id: string } & RowSelectionPayload;
+  "herceg:rowselection": { id: string } & RowSelectionPayload &
+    Pick<ChartEvents["rowSelection"], "cause" | "revision">;
   /** Series or items were hidden or shown. */
   "herceg:visibility": { id: string } & VisibilityPayload;
 }
@@ -172,11 +180,13 @@ async function start(
     throw signal.reason;
   }
   made(chart);
-  chart.on("click", ({ inspection }) =>
+  chart.on("click", ({ inspection, cause, revision }) =>
     dispatch(host, "herceg:click", {
       id,
       ...(inspection?.panel !== undefined && { panel: inspection.panel }),
       inspection: inspectionPayload(chart, inspection),
+      cause,
+      revision,
     }),
   );
   chart.on("select", (event) =>
@@ -191,7 +201,12 @@ async function start(
   chart.on("rowSelection", (change) => {
     const name = names.get(change.table);
     if (name !== undefined)
-      dispatch(host, "herceg:rowselection", { id, ...rowSelectionPayload(change, name) });
+      dispatch(host, "herceg:rowselection", {
+        id,
+        ...rowSelectionPayload(change, name),
+        cause: change.cause,
+        revision: change.revision,
+      });
   });
   chart.on("visibility", (event) => dispatch(host, "herceg:visibility", { id, ...event }));
   // A destroyed chart's `ready` never settles: unmounting settles this. An

@@ -17,6 +17,7 @@ import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/co
 import type { PolygonGeometry, ShapeTransform } from "../scene/scene.ts";
 import type { Frozen, GeoShapeSpec } from "../spec/spec.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import { type GeoLayer, joinLayers, type MapFrame } from "./geo.ts";
 import {
   type ItemSources,
@@ -32,6 +33,7 @@ import { definedFields } from "./line.ts";
 import {
   type ChartMark,
   type ColorRamp,
+  checkItemKey,
   DIM,
   frozen,
   type GlyphKey,
@@ -42,7 +44,7 @@ import {
 } from "./mark.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
-export interface GeoShapeOptions<S extends Schema> {
+export interface GeoShapeOptions<S extends Schema> extends ItemKeyed<S> {
   /** The geometry field; the table's only one by default. */
   geometry?: GeometryField<S>;
   /** Category field naming each region, for tooltips, keyboard reading, and the summary. */
@@ -107,6 +109,7 @@ const CURVE_REACH = 2;
 export class GeoShapeMark implements GeoLayer {
   declare readonly [MARK]: true;
   readonly layout = true;
+  readonly rowItems = true;
   readonly views = ItemViews;
   readonly geo = true;
   readonly spec: Frozen<GeoShapeSpec>;
@@ -122,6 +125,7 @@ export class GeoShapeMark implements GeoLayer {
   constructor(input: GeoShapeSpec, table: Table) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "geoshape");
+    checkItemKey(table, this.spec.itemKey, "geoshape");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     const geometries = table.fields().filter((field) => table.kind(field) === "geometry");
@@ -546,6 +550,7 @@ export function geoshape<S extends Schema>(
       "strokeWidth",
       "label",
       "id",
+      "itemKey",
       "facet",
       "panel",
     ]),

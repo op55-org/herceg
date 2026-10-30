@@ -30,6 +30,7 @@ import { pointDrawing } from "../draw/point.ts";
 import { unmappable } from "../lod/m4.ts";
 import { shareSquares } from "../marks/cell-selection.ts";
 import { STILL } from "../marks/dodge.ts";
+import { copiedFrom, drawingRows, tracing } from "../marks/drawn.ts";
 import {
   DIM,
   type Frame,
@@ -421,15 +422,17 @@ export class Highlighter {
     // pieces) by its series and layer: an area's outlines apart from its fills.
     const litKey = (g: Geometry, on = "") =>
       g.of === undefined ? g.key + on : `${g.of}${on}|${outlined(g) ? "outline" : g.kind}`;
-    if (others.size > 0)
-      for (const g of mark.geometry(
-        [...others].map((s) => masked(s, selected, along === "y")),
-        own(ON),
-        key,
-      )) {
+    if (others.size > 0) {
+      const maskedSeries = [...others].map((s) => masked(s, selected, along === "y"));
+      for (const g of mark.geometry(maskedSeries, own(ON), key)) {
+        // Picking reads which rows a path draws, and where its runs end, of the series it traced.
+        const name = g.of ?? g.key;
+        const traced = maskedSeries.find((m) => name === m.key || name.startsWith(`${m.key}|`));
+        if (traced) tracing(g, traced);
         const parts = lit.get(litKey(g)) ?? lit.set(litKey(g), []).get(litKey(g))!;
-        parts.push(...over(g));
+        parts.push(...over(g).map((copy) => (copy === g ? g : copiedFrom(copy, g))));
       }
+    }
     // A series drawn in pieces (sharing `of`: markers, style runs'): each
     // layer's selected values go once, over the last of its dimmed pieces.
     const lastPiece = new Map<string, Geometry>();
@@ -557,18 +560,21 @@ function pointsIn(
   selected: Uint8Array,
 ): [PointGeometry, PointGeometry] {
   const parts = [new Float32Array(g.count * 2), new Float32Array(g.count * 2)];
+  // Which of `g`'s points each part's is, for drawn-mark records.
+  const indices = [new Uint32Array(g.count), new Uint32Array(g.count)];
   const counts = [0, 0];
   for (let i = 0; i < g.count; i++) {
     const part = selected[rows[i]!] === 1 ? 0 : 1;
     parts[part]!.set(g.coords.subarray(i * 2, i * 2 + 2), counts[part]! * 2);
+    indices[part]![counts[part]!] = i;
     counts[part]!++;
   }
-  const part = (j: number): PointGeometry => ({
-    ...g,
-    key: `${g.key}${j ? "" : ON}`,
-    coords: parts[j]!,
-    count: counts[j]!,
-  });
+  const part = (j: number): PointGeometry =>
+    copiedFrom(
+      { ...g, key: `${g.key}${j ? "" : ON}`, coords: parts[j]!, count: counts[j]! },
+      g,
+      indices[j]!.subarray(0, counts[j]!),
+    );
   return [part(0), part(1)];
 }
 
@@ -1036,7 +1042,7 @@ function clipped(
       context.restore();
     },
   };
-  return { ...geometry, key: `${geometry.key}${part}${id}`, draw: drawing };
+  return copiedFrom({ ...geometry, key: `${geometry.key}${part}${id}`, draw: drawing }, geometry);
 }
 
 type CanvasPaint = Exclude<Drawing<Geometry>["canvas"], false>;
@@ -1154,10 +1160,10 @@ function dots(
       ? {
           table,
           generation: table.generation,
-          ids: Float64Array.from(positions, (k) => table.rowOffset + rowOf(s, k)),
+          ids: Float64Array.from(positions, (k) => table.identity(rowOf(s, k))),
         }
       : undefined;
-    out.push({
+    const dot: PointGeometry = {
       kind: "point",
       draw: pointDrawing,
       key: `${s.key}${ON}-dots`,
@@ -1171,7 +1177,13 @@ function dots(
       coords: Float32Array.from(coords),
       count,
       ...(!one && { colors: { index, palette, categorical: true as const }, opacities, radii }),
-    });
+    };
+    out.push(
+      drawingRows(
+        dot,
+        Uint32Array.from(positions, (k) => rowOf(s, k)),
+      ),
+    );
   }
   return out;
 }
@@ -1187,7 +1199,7 @@ function dim(geometry: Geometry): Geometry {
       opacities: points.opacities?.map((opacity) => opacity * DIM),
       ring: points.ring && { ...points.ring, opacity: (points.ring.opacity ?? 1) * DIM },
     };
-    return dimmed;
+    return copiedFrom(dimmed, geometry);
   }
   if (geometry.kind === "rect") {
     const rects = geometry as RectGeometry;
@@ -1197,14 +1209,14 @@ function dim(geometry: Geometry): Geometry {
       fillOpacity: rects.fillOpacity * DIM,
       ...(edge && { edge: { ...edge, opacity: edge.opacity * DIM } }),
     };
-    return dimmed;
+    return copiedFrom(dimmed, geometry);
   }
   let draw = dimmedDrawings.get(geometry.draw);
   if (!draw) {
     draw = faded(geometry.draw, DIM);
     dimmedDrawings.set(geometry.draw, draw);
   }
-  return { ...geometry, draw };
+  return copiedFrom({ ...geometry, draw }, geometry);
 }
 
 /**

@@ -124,15 +124,34 @@ export type Row<S extends Schema> = { [K in keyof S]: ValueOf<S[K]> };
 export type Batch<S extends Schema> = { [K in keyof S]: ValuesOf<S[K]> };
 
 /**
- * Describes one mutation so caches can update instead of rebuilding. Row
- * identities are `rowOffset + index`; `rowOffset` may advance by more than
- * `dropped` when an append batch is larger than `maxRows`.
+ * Describes one mutation so caches can update instead of rebuilding.
+ * Positions are the table's after the change.
+ *
+ * What every cache may rely on:
+ * 1. A change to rows already there (an update, a reset, rows inserted
+ *    before the end) increments `modifiedVersion`; a cache that extends
+ *    itself through appends and drops alone recomputes then, or follows
+ *    the change's details.
+ * 2. Row identities are read through `identity` and `positionOf`, never
+ *    computed from positions, so that tables whose rows move keep them.
+ * 3. A reset starts a new generation: row sets and identities from before
+ *    it name no row. A derived table recomputed after its source changed
+ *    is reset, so identities of its rows do not survive that.
+ * 4. One change per write; listeners run once the table is whole.
  */
 export interface TableChange {
   /** Existing rows removed from the front. */
   dropped: number;
   /** Rows added at the end (after any batch rows that never fit). */
   appended: number;
+  /**
+   * Rows a table kept in order took in before its last row: rows before
+   * `start` are those that were there (moved only by `dropped`), and every
+   * position from `start` on may hold another row than before; `count` of
+   * them are new. The length grows by `appended + count - dropped`. Absent
+   * or null for tables that only append, as every table does today.
+   */
+  inserted?: { start: number; count: number } | null;
   /** Rows changed in place, as a range of row indices after the change. */
   updated: { start: number; end: number } | null;
   /** Fields affected by an in-place update; empty for append and drop. */
@@ -252,17 +271,40 @@ export class Table<S extends Schema = Schema> {
   }
 
   /**
-   * Rows dropped (or never kept) since the table was created or reset.
-   * `rowOffset + i` is a stable identity for row `i` across drops; with
-   * `generation`, across resets too.
+   * Rows dropped (or never kept) since the table was created or reset,
+   * which caches following drops count. Read a row's identity with
+   * `identity`.
    */
   get rowOffset(): number {
     return this.#rowOffset;
   }
 
-  /** Counts resets, which start row identities (`rowOffset`) again from 0. */
+  /** Counts resets, which start row identities again from 0. */
   get generation(): number {
     return this.#generation;
+  }
+
+  /**
+   * The identity of the row at `position`: its own across appends and
+   * drops, until a reset; with `generation`, unique for the table's life.
+   * Identity 0 is in every generation, so keep the generation with it.
+   */
+  identity(position: number): number {
+    return this.#rowOffset + position;
+  }
+
+  /**
+   * Where the row of `identity` is now, or -1 once it was dropped, or when
+   * `generation` is not the table's (the identity is from before a reset).
+   */
+  positionOf(identity: number, generation: number): number {
+    const position = identity - this.#rowOffset;
+    return generation === this.#generation &&
+      Number.isInteger(position) &&
+      position >= 0 &&
+      position < this.#length
+      ? position
+      : -1;
   }
 
   /** Bytes reserved by column buffers, including unused capacity. */

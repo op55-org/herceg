@@ -103,11 +103,11 @@ def test_the_widget_state_is_the_chart_spec_with_binary_buffers():
 
 def test_point_keys_travel_through_live_replacements_and_appends():
     widget = hg.scatter(
-        data(), "t", "v", animation_key="host", animation=hg.Animation(values=True)
+        data(), "t", "v", item_key="host", animation=hg.Animation(values=True)
     ).widget()
     browser = Browser(widget)
     state, values = snapshot(widget)
-    assert state["spec"]["marks"][0]["animationKey"] == "host"
+    assert state["spec"]["marks"][0]["itemKey"] == "host"
     assert values["host"] == ["a", "b"]
     widget.replace({"t": [T0, T0 + dt.timedelta(minutes=1)], "v": [3.0, 4.0], "host": ["b", "a"]})
     content, buffers = browser.last

@@ -84,7 +84,7 @@ export class BandShares {
 }
 
 /**
- * A number in [0, 1) from a row's identity (`rowOffset + row`, which
+ * A number in [0, 1) from a row's identity (`Table.identity`, which
  * survives rows dropped before it) and a seed: the same every time, and
  * spread evenly over rows (a 32-bit integer hash, murmur3's finalizer).
  */

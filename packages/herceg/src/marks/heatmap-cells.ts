@@ -96,6 +96,14 @@ export class AxisCells {
     return [first, lowerBound(lower, to, first) - 1];
   }
 
+  /** The first and last cells reaching the values [lo, hi], edges included; first > last for none. */
+  reaching(lo: number, hi: number): [number, number] {
+    const { lower, upper } = this;
+    const [from, to] = [this.place(lo), this.place(hi)];
+    const first = lowerBound(upper, from);
+    return [first, upperBound(lower, to, first) - 1];
+  }
+
   /** The values at the edges of cells `first` to `last`. */
   extent(first: number, last: number): [number, number] {
     return [this.value(this.lower[first]!), this.value(this.upper[last]!)];

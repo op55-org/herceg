@@ -856,7 +856,7 @@ describe("points changing values", () => {
   it("match numeric keys across reordered resets, entering and exiting in destination order", () => {
     const { data, model } = scatter(
       { x: [1, 2, 3], y: [10, 20, 30], id: [-0, 2, 3] },
-      { animationKey: "id" },
+      { itemKey: "id" },
     );
     const before = centers(pointsOf(model.scene(estimateText))[0]!);
     const { tween } = change(model, () =>
@@ -880,7 +880,7 @@ describe("points changing values", () => {
       id: encodedCategory(Int32Array.from([0, 1, 2]), ["a", "b", "c"]),
     });
     const model = chart({
-      marks: [point(data, { x: "x", y: "y", animationKey: "id" })],
+      marks: [point(data, { x: "x", y: "y", itemKey: "id" })],
       x: { domain: [0, 4] },
       y: { domain: [0, 100] },
     });
@@ -917,7 +917,7 @@ describe("points changing values", () => {
       ]) {
         const { data, model } = scatter(
           { x: [1, 2, 3], y: [10, 20, 30], id: side === "before" ? bad : [1, 2, 3] },
-          { animationKey: "id" },
+          { itemKey: "id" },
         );
         expect(
           change(model, () => {
@@ -936,7 +936,7 @@ describe("points changing values", () => {
           id: category(side === "before" ? bad : ["a", "b", "c"]),
         });
         const model = chart({
-          marks: [point(data, { x: "x", y: "y", animationKey: "id" })],
+          marks: [point(data, { x: "x", y: "y", itemKey: "id" })],
           x: { domain: [0, 4] },
           y: { domain: [0, 100] },
         });
@@ -957,7 +957,7 @@ describe("points changing values", () => {
       id: [1, 1, 1, 2],
       group: ["a", "a", "b", "b"],
     });
-    const marks = [point(data, { x: "x", y: "y", series: "group", animationKey: "id" })];
+    const marks = [point(data, { x: "x", y: "y", series: "group", itemKey: "id" })];
     const fixed = chart({ marks, x: { domain: [0, 4] }, y: { domain: [0, 100] } });
     const automatic = chart({ marks });
     const old = snapshot(automatic.scene(estimateText), automatic.panels(), 0)!;
@@ -981,10 +981,7 @@ describe("points changing values", () => {
     const data = table({ x: [1, 2], y: [10, 20], id: time([100, 200]) });
     const model = chart({
       marks: [
-        new PointMark(
-          { type: "point", x: "x", y: "y", animationKey: "id" },
-          data as unknown as Table,
-        ),
+        new PointMark({ type: "point", x: "x", y: "y", itemKey: "id" }, data as unknown as Table),
       ],
     });
     expect(
@@ -997,7 +994,7 @@ describe("points changing values", () => {
   it("require both scenes to declare the same key field and kind", () => {
     const { data, model } = scatter(
       { x: [1, 2, 3], y: [10, 20, 30], id: [1, 2, 3] },
-      { animationKey: "id" },
+      { itemKey: "id" },
     );
     const { shown, tween } = change(model, () => data.setColumn("y", [30, 20, 10]));
     const scene = tween!.scene;
@@ -1028,8 +1025,8 @@ describe("points changing values", () => {
       const first = table(rows(3000, 0, 1));
       const second = table(rows(3000, 0, 1));
       const marks = [
-        point(first, { x: "x", y: "y", animationKey: "id", id: "first" }),
-        point(second, { x: "x", y: "y", animationKey: "id", id: "second" }),
+        point(first, { x: "x", y: "y", itemKey: "id", id: "first" }),
+        point(second, { x: "x", y: "y", itemKey: "id", id: "second" }),
       ];
       const fixed = chart({ marks, x: { domain: [0, 4] }, y: { domain: [0, 100] } });
       const automatic = chart({ marks });

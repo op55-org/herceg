@@ -160,6 +160,36 @@ export class CellIndex {
     return this.find(this.x[first]!, r);
   }
 
+  /**
+   * Calls `visit` with each cell of columns `c0` to `c1` in rows `r0` to
+   * `r1` holding positions, and the position drawn in it (its last), in
+   * cell order: binary searches pass over the empty cells and rows between,
+   * so a sparse grid costs what its cells there do.
+   */
+  forEachIn(
+    c0: number,
+    c1: number,
+    r0: number,
+    r1: number,
+    visit: (c: number, r: number, position: number) => void,
+  ): void {
+    const n = this.length;
+    for (let i = this.#past(c0 - 1, r0); i < n; ) {
+      const row = this.rowOf(this.positionAt(i));
+      const c = this.x[row]!;
+      const r = this.y[row]!;
+      if (r > r1) return;
+      // Before the columns, or past them: on to the columns in this row or the next.
+      if (c < c0 || c > c1) {
+        i = this.#past(c0 - 1, c < c0 ? r : r + 1);
+        continue;
+      }
+      const end = this.#past(c, r);
+      visit(c, r, this.positionAt(end - 1));
+      i = end;
+    }
+  }
+
   /** The position of the entry at `i` in cell order. */
   positionAt(i: number): number {
     return this.order ? this.order[i]! : i;

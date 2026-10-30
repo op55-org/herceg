@@ -22,6 +22,7 @@ import type { Frozen, Point3DSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { View } from "../three/camera.ts";
 import { ScreenGrid } from "../three/hit.ts";
+import type { ItemKeyed } from "./encoding.ts";
 import {
   type ItemSources,
   type LayoutFrame,
@@ -37,6 +38,7 @@ import { definedFields } from "./line.ts";
 import {
   type ChartMark,
   type ColorRamp,
+  checkItemKey,
   frozen,
   type GlyphKey,
   type LegendScale,
@@ -63,7 +65,7 @@ import {
 } from "./plot3d.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 
-export interface Point3DOptions<S extends Schema> {
+export interface Point3DOptions<S extends Schema> extends ItemKeyed<S> {
   /** Number or time fields: each point's position; z is vertical. */
   x: NumericField<S>;
   y: NumericField<S>;
@@ -134,6 +136,7 @@ const screens = new PerChart<Screen>();
 export class Point3DMark implements Layer3D {
   declare readonly [MARK]: true;
   readonly layout = true;
+  readonly rowItems = true;
   readonly views = ItemViews;
   readonly dimensions = 3;
   /** As given, but for its series field: see `withSeries`. */
@@ -154,6 +157,7 @@ export class Point3DMark implements Layer3D {
     // A category color names the series, as on points along axes.
     this.spec = frozen(withSeries(input, table)) as Frozen<Point3DSpec & { series?: string }>;
     checkTooltip(table, this.spec.tooltip, "point3d");
+    checkItemKey(table, this.spec.itemKey, "point3d");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     for (const axis of ["x", "y", "z"] as const)
@@ -598,6 +602,7 @@ export function point3d<S extends Schema>(
       "label",
       "panel",
       "id",
+      "itemKey",
     ]),
   };
   if (options.colors) spec.colors = [...options.colors];

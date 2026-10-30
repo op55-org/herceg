@@ -74,16 +74,75 @@ def test_animation_is_off_true_a_duration_or_options():
 
 
 @pytest.mark.parametrize("key", ["host", "unused", "t"])
-def test_point_animation_keys_serialize_and_send_the_key_column(key):
-    spec, buffers = hg.scatter(DATA, "p50", "p99", animation_key=key).to_spec()
-    assert spec["marks"][0]["animationKey"] == key
+def test_point_item_keys_serialize_and_send_the_key_column(key):
+    spec, buffers = hg.scatter(DATA, "p50", "p99", item_key=key).to_spec()
+    assert spec["marks"][0]["itemKey"] == key
     columns = spec["data"]["data"]["columns"]
     assert sorted(columns) == sorted(["p50", "p99", key])
     assert len(buffers) == 3
-    direct, _ = hg.Chart(DATA).point("p50", "p99", animation_key=key).to_spec()
+    direct, _ = hg.Chart(DATA).point("p50", "p99", item_key=key).to_spec()
     assert direct == spec
-    with pytest.raises(hg.ChartError, match="point animation_key.*missing"):
-        hg.scatter(DATA, "p50", "p99", animation_key="missing")
+    with pytest.raises(hg.ChartError, match="point item_key.*missing"):
+        hg.scatter(DATA, "p50", "p99", item_key="missing")
+
+
+ITEMS = {
+    "t": np.array([1.0, 2.0]),
+    "v": np.array([3.0, 4.0]),
+    "low": np.array([2.0, 3.0]),
+    "high": np.array([4.0, 5.0]),
+    "id": ["a", "b"],
+    "lon": np.array([0.0, 10.0]),
+    "lat": np.array([0.0, 5.0]),
+}
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda c: c.line("t", "v", item_key="id"),
+        lambda c: c.area("t", "v", item_key="id"),
+        lambda c: c.bar(x="id", y="v", item_key="id"),
+        lambda c: c.point("t", "v", item_key="id"),
+        lambda c: c.rug(x="t", item_key="id"),
+        lambda c: c.errorbar(x="t", y1="low", y2="high", item_key="id"),
+        lambda c: c.candlestick(
+            x="t", open="low", high="high", low="low", close="v", item_key="id"
+        ),
+        lambda c: c.rule(y="v", item_key="id"),
+        lambda c: c.region(x1="low", x2="high", item_key="id"),
+        lambda c: c.text(x="t", y="v", label=hg.Label(field="id"), item_key="id"),
+        lambda c: c.geopoint(longitude="lon", latitude="lat", item_key="id"),
+        lambda c: c.point_3d("t", "v", "low", item_key="id"),
+        lambda c: c.line_3d("t", "v", "low", item_key="id"),
+    ],
+)
+def test_item_keys_name_rows_of_every_mark_drawing_rows(make):
+    spec, _ = make(hg.Chart(ITEMS)).to_spec()
+    assert spec["marks"][0]["itemKey"] == "id"
+    assert "id" in spec["data"]["data"]["columns"]
+
+
+def test_3d_helpers_pass_item_keys():
+    for helper in (hg.scatter_3d, hg.line_3d):
+        spec, _ = helper(ITEMS, "t", "v", "low", item_key="id").to_spec()
+        assert spec["marks"][0]["itemKey"] == "id"
+
+
+def test_item_keys_are_checked_in_python_names():
+    with pytest.raises(hg.ChartError, match="bar item_key: no column 'name'"):
+        hg.Chart(ITEMS).bar(x="id", y="v", item_key="name")
+    with pytest.raises(hg.ChartError, match="rule item_key: names the rows of the mark's data"):
+        hg.Chart(ITEMS).rule(y=1, item_key="id")
+
+
+def test_express_strip_and_swarm_plots_pass_item_keys_to_their_points():
+    from herceg import express
+
+    for plot in (express.stripplot, express.swarmplot):
+        spec, _ = plot(ITEMS, x="id", y="v", item_key="id").to_spec()
+        points = [mark for mark in spec["marks"] if mark["type"] == "point"]
+        assert [mark.get("itemKey") for mark in points] == ["id"]
 
 
 def test_categories_travel_as_codes_and_dictionary():

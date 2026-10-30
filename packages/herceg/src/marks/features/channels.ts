@@ -266,8 +266,9 @@ const ONE = { count: 1, at: () => 0 };
  * them. Values an identity scale reads are checked with `check`, at `path`,
  * as a row's output is first asked for: a row without one takes the
  * fallback; one present that the channel cannot draw is refused. A number
- * field's values are counted (`counted`) by a pass over the rows, which
- * readers of appended rows alone leave out.
+ * field's values are counted (`counted`) by a pass over the rows (the
+ * `drawn` rows, where given), which readers of appended rows alone leave
+ * out.
  */
 export function rowReader<V>(
   channel: Channel<V> | undefined,
@@ -277,6 +278,7 @@ export function rowReader<V>(
   check: Check,
   path: string,
   counted = true,
+  drawn?: Uint32Array,
 ): RowReader<V> {
   // The series' names are the series': rows of one series look alike.
   if (!channel || channel.kind === "series") return { ...ONE, output: () => undefined };
@@ -292,14 +294,15 @@ export function rowReader<V>(
     const output = (row: number) => {
       const value = values[row]!;
       if (Number.isNaN(value)) return undefined;
-      check(value, `${path}.field (row ${table.rowOffset + row})`);
+      check(value, `${path}.field (row ${table.identity(row)})`);
       return value as V;
     };
     if (!counted) return { count: 0, at: (row) => values[row]!, output };
     // Each distinct value is a look of its own.
     const numbered = new Map<number, number>();
-    for (let row = 0; row < table.length; row++) {
-      const value = values[row]!;
+    const count = drawn ? drawn.length : table.length;
+    for (let k = 0; k < count; k++) {
+      const value = values[drawn ? drawn[k]! : k]!;
       if (!Number.isNaN(value) && !numbered.has(value)) numbered.set(value, numbered.size + 1);
     }
     return { count: numbered.size + 1, at: (row) => numbered.get(values[row]!) ?? 0, output };

@@ -10,12 +10,24 @@ import {
 import { rasterDrawing } from "../draw/raster.ts";
 import { CellIndex } from "../lod/cell-index.ts";
 import type { Breaks } from "../lod/m4.ts";
+import type { KeyPart } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { Geometry, RasterGeometry } from "../scene/scene.ts";
+import type { Geometry, RasterGeometry, Rect } from "../scene/scene.ts";
 import type { CellReduce, Clip, Frozen, HeatmapSpec, Weekday } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import {
+  boxOf,
+  cellsCover,
+  coverNear,
+  coverOf,
+  type DrawnMark,
+  distanceToCover,
+  type PickedItem,
+  type PickQuery,
+  pickedHit,
+} from "./drawn.ts";
 import { type Calendar, type CalendarLayout, placeCalendar } from "./heatmap-calendar.ts";
 import {
   type AxisCells,
@@ -50,7 +62,8 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
-import { type BandPlaces, placeAt, rowOf, type Series, TableCache } from "./series.ts";
+import { type MarkRows, numbersAt, rowCount, rowsOf } from "./rows.ts";
+import { type BandPlaces, placeAt, rowOf, type Series } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
@@ -298,7 +311,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    * length holds every panel's cells rather than one each.
    */
   readonly #splits = new WeakMap<Uint32Array, { buffer: Float64Array | undefined }>();
-  readonly #extent = new TableCache<readonly [number, number] | null>();
+  #extent: { rows: MarkRows; extent: readonly [number, number] | null } | undefined;
   /**
    * The cells along each axis of numbers or times, for each of the few
    * break contexts (charts sharing the mark) they were last placed for.
@@ -324,7 +337,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    */
   readonly #shared = new WeakMap<
     object,
-    { version: number; extent: readonly [number, number] | null }
+    { revision: string; extent: readonly [number, number] | null }
   >();
   /** A calendar's layout and first day of the week, for heatmaps of a date. */
   readonly #layout: { calendar: CalendarLayout; weekStart: Weekday } | undefined;
@@ -337,6 +350,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   readonly #byDays = new WeakMap<NumericArray, Calendar>();
   /** A calendar's band indices, by the chart's band keys they were remapped to. */
   readonly #remapped = new WeakMap<readonly string[], { own: Int32Array; indices: Int32Array }>();
+  /** The keys of the bands each band axis' indices index, which name cells (panels' series share the indices). */
+  readonly #bandKeys = new WeakMap<object, readonly string[]>();
   /** What the selection drawn with each series (and its copies read for tooltips) holds of its cells. */
   readonly #selected = new WeakMap<Series, HeldCells>();
   /** Each index's cells with values, as selections are counted in them. */
@@ -425,6 +440,14 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     return this.spec.date ?? this.spec[axis] ?? this.spec[`${axis}1`]!;
   }
 
+  #rows: MarkRows | undefined;
+
+  /** What the mark reads of its table now (see marks/rows.ts). */
+  rows(): MarkRows {
+    this.#rows = rowsOf(this.table, this.#rows);
+    return this.#rows;
+  }
+
   /** Band axes for categories, banded fields, and calendar days; number and time axes otherwise. */
   channelKind(axis: "x" | "y") {
     return this.#banded[axis] ? "category" : this.table.kind(this.#field(axis));
@@ -433,21 +456,22 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
     if (!this.#banded[axis]) return undefined;
     if (this.#layout) return this.#placedCalendar(context).bands[axis];
-    return fieldBands(this.table, this.#field(axis), context);
+    return fieldBands(this.rows(), this.#field(axis), context);
   }
 
-  /** Where the calendar places the table's rows, in the chart's zone and locale. */
+  /** Where the calendar places the mark's rows, in the chart's zone and locale. */
   #placedCalendar(context: Pick<BandContext, "zone" | "locale">): Calendar {
-    const { table } = this;
+    const rows = this.rows();
+    const { revision } = rows;
     const { zone, locale } = context;
     const found = this.#calendars.find((c) => c.zone === zone && c.locale === locale);
-    if (found?.version === table.version) return found.placed;
+    if (found?.revision === revision) return found.placed;
     const { calendar, weekStart } = this.#layout!;
-    const dates = table.numbers(this.spec.date as never);
+    const dates = numbersAt(rows, this.spec.date!);
     const placed = placeCalendar(dates, calendar, weekStart, zone, locale);
-    if (found) [found.version, found.placed] = [table.version, placed];
+    if (found) [found.revision, found.placed] = [revision, placed];
     else {
-      this.#calendars.unshift({ version: table.version, zone, locale, placed });
+      this.#calendars.unshift({ revision, zone, locale, placed });
       this.#calendars.length = Math.min(this.#calendars.length, 4);
     }
     if (placed.days) this.#byDays.set(placed.days, placed);
@@ -476,7 +500,9 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     bands: Bands,
     context: BandContext,
   ): Series[] {
-    const { spec, table } = this;
+    const { spec } = this;
+    const rows = this.rows();
+    const { table } = rows;
     const values = table.numbers(spec.color as never);
     // Its color, as tooltips and hover dots show it: the ramp's last, read as the cells' are.
     const ramp = rampOf(spec.colors, context.theme.sequential, context.paint, "heatmap colors");
@@ -489,7 +515,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
           ? this.#placedCalendar(context).days!
           : table.numbers(this.#field(axis) as never);
       if (this.#layout) return this.#calendarBands(axis, keys, context);
-      return bandIndices(table, this.#field(axis), keys, context);
+      return bandIndices(this.rows(), this.#field(axis), keys, context);
     };
     const whole: Series = {
       key: seriesKey(key, "cells"),
@@ -500,10 +526,12 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       y0: undefined,
       values,
       range: false,
-      rows: undefined,
-      length: table.length,
+      rows: rows.positions,
+      length: rowCount(rows),
       sorted: false,
     };
+    for (const axis of ["x", "y"] as const)
+      if (this.#banded[axis]) this.#bandKeys.set(whole[axis], bands[axis]?.keys ?? []);
     return [whole];
   }
 
@@ -519,7 +547,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   ): AxisCells {
     if (log)
       throw new Error(`heatmap: cells cannot go on a log ${axis} axis yet; use a linear one`);
-    const { spec, table } = this;
+    const { spec } = this;
     if (this.#layout) {
       if (breaks)
         throw new Error("heatmap date: calendars cannot leave out time breaks; drop x.breaks");
@@ -527,9 +555,11 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       const placed = (s && this.#byDays.get(s.x)) ?? this.#calendars[0]?.placed;
       return (placed ?? this.#placedCalendar({ zone: "local", locale: undefined })).weeks!;
     }
+    const rows = this.rows();
+    const { table, revision } = rows;
     const placed = this.#axes[axis];
     const found = placed.find((entry) => entry.breaks === breaks);
-    if (found?.version === table.version) return found.cells;
+    if (found?.revision === revision) return found.cells;
     const field = this.#field(axis);
     const step = axis === "x" ? spec.xStep : spec.yStep;
     const time = table.kind(field) === "time";
@@ -541,11 +571,11 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       );
     const cells =
       end === undefined
-        ? placeCells(table.numbers(field as never), step, time, breaks, name)
-        : boundedCells(table.numbers(field as never), table.numbers(end as never), name);
-    if (found) [found.version, found.cells] = [table.version, cells];
+        ? placeCells(numbersAt(rows, field), step, time, breaks, name)
+        : boundedCells(numbersAt(rows, field), numbersAt(rows, end), name);
+    if (found) [found.revision, found.cells] = [revision, cells];
     else {
-      placed.unshift({ version: table.version, breaks, cells });
+      placed.unshift({ revision, breaks, cells });
       placed.length = Math.min(placed.length, 4);
     }
     return cells;
@@ -750,21 +780,23 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     // Sums reach past the values; other reductions stay within them.
     if (this.spec.reduce === "sum") {
       const shared = this.#shared.get(s.rows ?? s);
-      if (shared?.version === this.table.version) return shared.extent ?? undefined;
+      if (shared?.revision === this.rows().revision) return shared.extent ?? undefined;
       return this.#sumsOf(s) ?? undefined;
     }
-    const values = this.table.numbers(this.spec.color as never);
-    return (
-      this.#extent.get(this.table, () => scanExtent(values, 0, values.length) ?? null) ?? undefined
-    );
+    const rows = this.rows();
+    if (this.#extent?.rows !== rows) {
+      const values = numbersAt(rows, this.spec.color);
+      this.#extent = { rows, extent: scanExtent(values, 0, values.length) ?? null };
+    }
+    return this.#extent.extent ?? undefined;
   }
 
-  /** The extent of the sums of the cells of `s`, kept while its table and positions are. */
+  /** The extent of the sums of the cells of `s`, kept while the mark's rows and its positions are. */
   #sumsOf(s: Series): readonly [number, number] | null {
     const key = s.rows ?? s.x;
-    const { version } = this.table;
+    const { revision } = this.rows();
     const found = this.#sums.get(key);
-    if (found?.version === version && found.x === s.x && found.y === s.y) return found.extent;
+    if (found?.revision === revision && found.x === s.x && found.y === s.y) return found.extent;
     // The series' rows that have a cell: with a value, a band (not a missing
     // category), and between edges a usable pair of them.
     const { rows } = s;
@@ -779,7 +811,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       [x[k], y[k], values[k]] = [s.x[row]!, s.y[row]!, has ? s.values[row]! : Number.NaN];
     }
     const extent = sumExtent(x, y, values);
-    this.#sums.set(key, { version, x: s.x, y: s.y, extent });
+    this.#sums.set(key, { revision, x: s.x, y: s.y, extent });
     return extent;
   }
 
@@ -801,7 +833,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
         if (extent) [min, max] = [Math.min(min, extent[0]), Math.max(max, extent[1])];
       }
     const shared = {
-      version: this.table.version,
+      revision: this.rows().revision,
       extent: min <= max ? ([min, max] as const) : null,
     };
     for (const s of series) this.#shared.set(s, shared);
@@ -1120,6 +1152,129 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   }
 
   /**
+   * Its cells are found by `pick`'s index of rows by cell, which their
+   * raster does not say. A cell may combine rows (`reduce`): it is named by
+   * its column and row, each a band's value (a category, a number, a time,
+   * or a calendar's day, weekday, or month) or a cell's.
+   */
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    const name = (s: Series, row: number, axis: "x" | "y", scale: PositionScale): KeyPart => {
+      const { cells, ordinals } = this.#resolve(s, axis, scale);
+      const at = ordinals[row]!;
+      if (cells) return at >= 0 ? cells.values[at]! : null;
+      const key = this.#bandKeys.get(s[axis])?.[at];
+      if (key === undefined) return null;
+      return key.startsWith("c:")
+        ? key.slice(2)
+        : key.startsWith("n:")
+          ? Number(key.slice(2))
+          : key;
+    };
+    // Along each axis: its band, or its cell's span.
+    const span = (s: Series, row: number, axis: "x" | "y", scale: PositionScale) => {
+      const resolved = this.#resolve(s, axis, scale);
+      if (resolved.cells) return this.#edges(resolved, scale, resolved.ordinals[row]!);
+      const center = scale.map(placeAt(s, axis, row));
+      const half = Math.abs(scale.bandwidth ?? 0) / 2;
+      return [center - half, center + half] as const;
+    };
+    const cell = (s: Series, position: number, frame: Frame) => {
+      const row = rowOf(s, position);
+      const [x0, x1] = span(s, row, "x", frame.x);
+      const [y0, y1] = span(s, row, "y", frame.y);
+      return boxOf(x0, y0, x1, y1);
+    };
+    // What its image covers, cut as it is drawn.
+    const cover = drawn.frame && cellsCover(drawn, this.spec.clip);
+    if (!cover) return undefined;
+    return pickedHit(this, drawn, query, {
+      lookup: (series, px, py, frame) => {
+        const near = coverNear(cover, px, py, query.slop);
+        const at = (s: Series, position: number) => cell(s, position, frame);
+        return this.#nearestCell(series, px, py, frame, query.slop, near, at);
+      },
+      bounds: (s, position, frame) => coverOf(cell(s, position, frame), cover),
+      group: (s, position) => {
+        const row = rowOf(s, position);
+        const { frame } = drawn;
+        return { parts: [], names: [name(s, row, "x", frame!.x), name(s, row, "y", frame!.y)] };
+      },
+    });
+  }
+
+  /**
+   * For picking: the cell nearest a pixel as drawn, of the cells holding
+   * rows within `reach` of it (`pick` finds only the cell under it),
+   * measured to the part of each in `cover`, what the drawing covers near it
+   * (`cell` gives a cell's rectangle).
+   */
+  #nearestCell(
+    series: readonly Series[],
+    px: number,
+    py: number,
+    frame: Frame,
+    reach: number,
+    cover: readonly Rect[],
+    cell: (s: Series, position: number) => Rect,
+  ): Hit | undefined {
+    const s = series[0];
+    if (!s) return undefined;
+    // The cell under it, where some of it is drawn there (not only its
+    // edge, a neighbor's), before those around it.
+    const under = this.pick(series, px, py, frame);
+    if (under && distanceToCover(cell(s, under.position), cover, px, py) === 0) return under;
+    const across = this.#resolve(s, "x", frame.x);
+    const down = this.#resolve(s, "y", frame.y);
+    const columns = this.#cellsNear(across, frame.x, px, reach);
+    const lines = this.#cellsNear(down, frame.y, py, reach);
+    if (!columns || !lines) return undefined;
+    let best: Hit | undefined;
+    this.#cellsOf(s, across, down).index.forEachIn(
+      columns.from,
+      columns.to,
+      lines.from,
+      lines.to,
+      (c, r, position) => {
+        if (columns.only?.has(c) === false || lines.only?.has(r) === false) return;
+        const [x0, x1] = this.#edges(across, frame.x, c);
+        const [y0, y1] = this.#edges(down, frame.y, r);
+        const distance = distanceToCover(boxOf(x0, y0, x1, y1), cover, px, py);
+        if (distance < (best?.distance ?? Number.POSITIVE_INFINITY))
+          best = { series: s, position, distance };
+      },
+    );
+    return best;
+  }
+
+  /**
+   * The cells along an axis within `reach` of a pixel: from the first to
+   * the last, and for bands, which a panel's places may order otherwise,
+   * `only` those; undefined for none.
+   */
+  #cellsNear(
+    axis: ResolvedAxis,
+    scale: PositionScale,
+    pixel: number,
+    reach: number,
+  ): { from: number; to: number; only?: Set<number> } | undefined {
+    // Half a pixel more, so cells at the reach's very end are not lost to rounding.
+    const [a, b] = [scale.invert(pixel - reach - 0.5), scale.invert(pixel + reach + 0.5)];
+    if (axis.cells) {
+      const [from, to] = axis.cells.reaching(Math.min(a, b), Math.max(a, b));
+      return from <= to ? { from, to } : undefined;
+    }
+    const count = scale.categories?.length ?? 0;
+    const only = new Set<number>();
+    const [from, to] = [Math.round(Math.min(a, b)), Math.round(Math.max(a, b))];
+    for (let place = Math.max(0, from); place <= Math.min(count - 1, to); place++) {
+      const band = bandOf(axis.places, place);
+      if (band >= 0) only.add(band);
+    }
+    if (only.size === 0) return undefined;
+    return { from: Math.min(...only), to: Math.max(...only), only };
+  }
+
+  /**
    * The cell under the pointer, found in an index of the rows by cell: the
    * band under it, or along a number or time axis the cell whose span holds
    * the value there, so gaps between cells hold none.
@@ -1330,7 +1485,7 @@ function sumExtent(
 
 /** The extent of the sums of a series' cells, as of its table version and positions. */
 interface Sums {
-  version: number;
+  revision: string;
   x: NumericArray;
   y: NumericArray;
   extent: readonly [number, number] | null;
@@ -1345,7 +1500,7 @@ interface ResolvedAxis {
 
 /** Where a calendar places rows, as of the table version, zone, and locale it was placed for. */
 interface PlacedCalendar {
-  version: number;
+  revision: string;
   readonly zone: string;
   readonly locale: string | undefined;
   placed: Calendar;
@@ -1353,7 +1508,7 @@ interface PlacedCalendar {
 
 /** The cells along an axis, as of the table version and breaks they were placed for. */
 interface PlacedCells {
-  version: number;
+  revision: string;
   readonly breaks: Breaks | undefined;
   cells: AxisCells;
 }

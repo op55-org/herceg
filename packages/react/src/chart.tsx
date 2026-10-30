@@ -515,12 +515,16 @@ export function Chart({
   useImperativeHandle<HercegChart | null, HercegChart | null>(ref, () => chart.current);
 
   // The chart drew its first frame as it was created, before handlers
-  // subscribed: `onRender` hears of it once the ref is set, once per chart.
+  // subscribed: `onRender` hears of it once the ref is set, once per chart,
+  // with the revision it drew. A first frame still waiting (for code it
+  // loads) reports itself when drawn.
   const told = useRef<HercegChart | null>(null);
   useLayoutEffect(() => {
-    if (!chart.current || told.current === chart.current) return;
-    told.current = chart.current;
-    render.current?.({});
+    const created = chart.current;
+    if (!created || told.current === created) return;
+    told.current = created;
+    const revision = created.drawnRevision;
+    if (revision !== undefined) render.current?.({ revision });
   });
 
   // A layout effect, so parents' layout effects and refs see the new props;

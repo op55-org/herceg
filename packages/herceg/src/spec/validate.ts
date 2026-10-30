@@ -1955,6 +1955,7 @@ const MARKS: MarkChecks = {
   line: {
     required: ["x", "y"],
     checks: {
+      itemKey: field,
       tooltip,
       ...placement,
       legend: legended,
@@ -1982,6 +1983,7 @@ const MARKS: MarkChecks = {
   area: {
     required: [],
     checks: {
+      itemKey: field,
       tooltip,
       ...placement,
       legend: legended,
@@ -2053,6 +2055,7 @@ const MARKS: MarkChecks = {
   rule: {
     required: [],
     checks: {
+      itemKey: field,
       ...placement,
       x: annotationPlace,
       y: annotationPlace,
@@ -2072,6 +2075,7 @@ const MARKS: MarkChecks = {
   region: {
     required: [],
     checks: {
+      itemKey: field,
       halo,
       ...placement,
       x1: annotationPlace,
@@ -2091,6 +2095,7 @@ const MARKS: MarkChecks = {
   text: {
     required: ["label"],
     checks: {
+      itemKey: field,
       halo,
       ...placement,
       x: annotationPlace,
@@ -2113,6 +2118,7 @@ const MARKS: MarkChecks = {
   bar: {
     required: ["x", "y"],
     checks: {
+      itemKey: field,
       halo,
       tooltip,
       ...placement,
@@ -2174,7 +2180,7 @@ const MARKS: MarkChecks = {
       x: rowPosition,
       y: rowPosition,
       series: seriesField,
-      animationKey: field,
+      itemKey: field,
       radius: positive,
       size: (v, path) => (isRecord(v) ? channel(width)(v, path) : field(v, path)),
       radiusRange: range,
@@ -2432,6 +2438,7 @@ const MARKS: MarkChecks = {
   candlestick: {
     required: ["x", "open", "high", "low", "close"],
     checks: {
+      itemKey: field,
       tooltip,
       ...placement,
       legend: legended,
@@ -2449,6 +2456,7 @@ const MARKS: MarkChecks = {
   rug: {
     required: [],
     checks: {
+      itemKey: field,
       color: string,
       tooltip,
       ...placement,
@@ -2466,6 +2474,7 @@ const MARKS: MarkChecks = {
   errorbar: {
     required: [],
     checks: {
+      itemKey: field,
       color: string,
       tooltip,
       ...placement,
@@ -2489,6 +2498,7 @@ const MARKS: MarkChecks = {
   geoshape: {
     required: [],
     checks: {
+      itemKey: field,
       tooltip,
       geometry: field,
       labelField: field,
@@ -2508,6 +2518,7 @@ const MARKS: MarkChecks = {
   geopoint: {
     required: ["longitude", "latitude"],
     checks: {
+      itemKey: field,
       tooltip,
       longitude: field,
       latitude: field,
@@ -2589,6 +2600,7 @@ const MARKS: MarkChecks = {
   point3d: {
     required: ["x", "y", "z"],
     checks: {
+      itemKey: field,
       panel: string,
       ...depthOrder,
       tooltip,
@@ -2610,6 +2622,7 @@ const MARKS: MarkChecks = {
   line3d: {
     required: ["x", "y", "z"],
     checks: {
+      itemKey: field,
       panel: string,
       ...depthOrder,
       tooltip,

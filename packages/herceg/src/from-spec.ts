@@ -2,7 +2,7 @@
 // written by other languages (the Python package) or stored as JSON.
 
 import { type Chart, createChart, MountedChart } from "./dom/chart.ts";
-import type { ChartEvents, PanelVisibility } from "./dom/events.ts";
+import type { ChartEvents, PanelVisibility, StateChange } from "./dom/events.ts";
 import { keepsKey, keyOwner } from "./marks/mark.ts";
 import { keyPlace } from "./model/identity.ts";
 import { type PdfExportOptions, renderToPDF } from "./pdf.ts";
@@ -53,7 +53,7 @@ export function carryNodePositions(from: Chart, to: Chart): void {
 }
 
 /** What a chart hides, as its `visibility` events report it (see `restoreVisibility`). */
-export type VisibilityState = ChartEvents["visibility"];
+export type VisibilityState = Omit<ChartEvents["visibility"], keyof StateChange>;
 
 /** The states `restoreVisibility` waits to restore, by chart: what those charts hide meanwhile. */
 const restoring = new WeakMap<Chart, VisibilityState>();

@@ -20,13 +20,15 @@ import {
   readsTable,
   type TextField,
 } from "./annotation.ts";
-import type { LabelPartOf } from "./encoding.ts";
+import type { DrawnMark, PartBuilders } from "./drawn.ts";
+import type { ItemKeyed, LabelPartOf } from "./encoding.ts";
 import { FollowingTextMark } from "./following.ts";
 import { labelPaint, labelsGeometry, type PlacedLabel, plainText, textGeometry } from "./labels.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
   type ChartMark,
+  checkOptionalItemKey,
   type Frame,
   frozen,
   type MARK,
@@ -137,6 +139,7 @@ export type TextOptions = TextStyle &
 
 /** Labels from a table, one per row; places may also be constants. */
 export type TextDataOptions<S extends Schema> = TextStyle &
+  ItemKeyed<S> &
   TextPlace<PositionField<S>> & { label: TextLabel<TextField<S>> };
 
 /**
@@ -151,6 +154,8 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
   readonly featured: boolean;
   readonly domainFallback: boolean;
   readonly #data: AnnotationData;
+  /** The row of each label its text geometry drew (see `partOf`). */
+  readonly #drawnRows = new WeakMap<Geometry, Uint32Array>();
   /** Its place on each axis: `at`'s, or the short forms'. */
   readonly #x: Frozen<AnnotationPosition>;
   readonly #y: Frozen<AnnotationPosition>;
@@ -187,6 +192,8 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
         y: spec.axis === "right" ? "yRight" : "y",
       },
     );
+    // Rows a constant annotation does not read have no items to name.
+    checkOptionalItemKey(this.#data.table, this.spec.itemKey, "text");
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
     this.featured =
       format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
@@ -273,11 +280,20 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     return this.#data.extent([this.#y], log, inView, rows);
   }
 
+  /** Its labels are rows (of its table, or of its places given alone); its leaders are no item's. */
+  partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+    const rows = this.#drawnRows.get(geometry);
+    return rows && index < rows.length
+      ? parts.annotation(drawn, this.table, rows[index]!)
+      : undefined;
+  }
+
   /**
    * Labels of the items of `rows` (every item without them), placed in
    * their order. Scratch is as large as the items drawn: a facet panel's,
    * not the table's.
    */
+
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
     // What the legend hides of it goes undrawn.
     const rows = this.#data.shown(frame.hidden, key, panelRows);
@@ -447,9 +463,12 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     for (const [item, label, width] of later)
       place(item, label, width, nearPlaces, nearPlaces + (RINGS - 1) * AROUND.length);
     const drawn: PlacedLabel[] = [];
+    // The row of each label drawn, for drawn-mark records.
+    const drawnRows: number[] = [];
     for (let item = 0; item < size; item++) {
       const text = texts[item];
       if (text === undefined) continue;
+      drawnRows.push(rowAt(item));
       // Placed by their middle, labels in items are drawn from their first line.
       const y = at[item * 2 + 1]! - (plain ? 0 : ((lineCount(text) - 1) * paint.lineHeight) / 2);
       drawn.push({ text, x: at[item * 2]!, y, anchor, baseline: "middle" });
@@ -473,11 +492,11 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       if (leader?.opacity !== undefined) segments.opacity = leader.opacity;
       out.push(segments);
     }
-    out.push(
-      plain
-        ? textGeometry(id, drawn, paint.color, haloOption, frame)
-        : labelsGeometry(id, drawn, paint, haloOption, frame),
-    );
+    const labels = plain
+      ? textGeometry(id, drawn, paint.color, haloOption, frame)
+      : labelsGeometry(id, drawn, paint, haloOption, frame);
+    this.#drawnRows.set(labels, Uint32Array.from(drawnRows));
+    out.push(labels);
     return out;
   }
 }
@@ -518,6 +537,7 @@ export function text<S extends Schema>(
     ...definedFields({ ...options, x: position(options.x), y: position(options.y), at }, [
       "halo",
       "id",
+      "itemKey",
       "x",
       "y",
       "at",
