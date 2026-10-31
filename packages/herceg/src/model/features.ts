@@ -104,6 +104,12 @@ export interface CompiledFeatures {
   listDomains(entries: readonly LegendEntry[], plain: boolean): LegendEntry[];
   /** The keys of the values of declared domains `mark`'s series stand for, which it owns in legends. */
   domainKeys(mark: ChartMark): string[];
+  /**
+   * An annotation's legend entries by its labels (`Mark.labelEntries`, in
+   * the mark's look): a region painted per row's in the paint of the first
+   * row holding each label; others' as they are.
+   */
+  labelLooks(mark: Mark, entries: LegendEntry[]): LegendEntry[];
   /** `frame` with the scales placing a mark's rows where `bound` binds them (marks/row-bindings.ts). */
   frame(frame: Frame, bound: RowBindings): Frame;
   /**
@@ -152,6 +158,24 @@ export interface MarkFeatures {
   readonly content?: ContentWriter | undefined;
   /** Which rows connect, where a stack of a series field breaks (marks/union-stack.ts). */
   readonly continuity?: Connections | undefined;
+  /**
+   * For marks drawing a shape per row without series (regions): each row's
+   * look, an index into `paints` (colors read), for the table's version
+   * and the channel scales' domains; undefined where no channel reads rows.
+   */
+  rowLooks?(): RowLooks | undefined;
+  /**
+   * For custom marks: a channel's output for a row of their table (a
+   * color, a width, an opacity), undefined where the row has none or the
+   * channel is not given.
+   */
+  encoded?(channel: "color" | "strokeWidth" | "opacity", row: number): string | number | undefined;
+}
+
+/** Rows' looks (see `MarkFeatures.rowLooks`). */
+export interface RowLooks {
+  readonly paints: readonly RowPaint[];
+  of(row: number): number;
 }
 
 /**
@@ -392,7 +416,9 @@ export function asksFeatures(
  */
 export function needsFeatures(config: ChartConfig): boolean {
   return (
-    Object.keys(config.scales ?? {}).some((name) => !/^(x|y|yRight)$/.test(name)) ||
-    config.marks.some((mark) => (mark as Mark).featured || (mark as Mark).bound)
+    // Scales of other names, and a position's with a range, which it refuses.
+    Object.entries(config.scales ?? {}).some(
+      ([name, scale]) => !/^(x|y|yRight)$/.test(name) || (!!scale && "range" in scale),
+    ) || config.marks.some((mark) => (mark as Mark).featured || (mark as Mark).bound)
   );
 }

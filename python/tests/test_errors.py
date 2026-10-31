@@ -111,6 +111,13 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         ),
         {},
     ),
+    "ChannelScale": (
+        "scales.w",
+        lambda o: hg.Chart(DATA, scales={"w": o}).line(
+            x="t", y="v", encode=hg.Encodings(stroke_width=hg.Channel("w", scale="w"))
+        ),
+        {"range": (1.0, 4.0)},
+    ),
     "Ticks": (
         "x.ticks",
         lambda o: hg.Chart(DATA, x=hg.AxisOptions(ticks=o)).line(x="t", y="v"),
@@ -414,6 +421,8 @@ LIST_FIELDS: dict[tuple[str, str], list[Any]] = {
     ("LegendTarget", "values"): ["a"],
     ("Scale", "domain"): [0.0, 10.0],
     ("OrdinalScale", "domain"): ["a", "b"],
+    ("ChannelScale", "range"): [1.0, 4.0],
+    ("ChannelScale", "domain"): [0.0, 10.0],
     ("Tokens", "palette"): ["#d1495b", "#00798c"],
     ("StrokeStyle", "dash"): [4.0, 2.0],
     ("Grid", "columns"): [1.0, 2.0],

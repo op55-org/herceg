@@ -50,6 +50,7 @@ export const MARK_CHANNELS: Readonly<
   area: { encode: ["color", "fill", "stroke", "opacity"] },
   bar: { encode: ["color", "fill", "stroke", "strokeWidth", "opacity"] },
   point: { encode: ["color", "fill", "stroke", "strokeWidth", "opacity", "symbol", "size"] },
+  region: { encode: ["color", "fill", "stroke", "opacity"] },
 };
 
 /** Whether `value` is a matplotlib dash style or a list of dash lengths. */

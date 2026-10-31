@@ -119,7 +119,9 @@ describe("identity scales on lines", () => {
           }),
         ],
       }),
-    ).toThrow(/encode\.color\.field: field "w" holds number values/);
+    ).toThrow(
+      /encode\.color\.field: field "w" holds numbers, which scales of categories do not map/,
+    );
   });
 
   it("read widths a number field holds, one per series", () => {

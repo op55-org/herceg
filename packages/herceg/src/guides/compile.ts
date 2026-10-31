@@ -97,7 +97,8 @@ function checkSettings(kit: GuideKit, config: ChartConfig): void {
     if (guide.type === "legend") return;
     const at = `guides[${i}]`;
     if (guide.type === "axis" && !SCALES.includes(guide.scale as ScaleName)) {
-      if (!["linear", "log", "time"].includes(config.scales?.[guide.scale]?.type as string))
+      const named = config.scales?.[guide.scale];
+      if (!["linear", "log", "time"].includes(named?.type as string) || "range" in named!)
         throw new kit.ChartError({
           code: "unknown-reference",
           path: `${at}.scale`,
@@ -153,11 +154,12 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
   // The model merged `scales` into the short forms; their settings are named where they are set.
   const { scales } = config;
   // Other scales are the feature compiler's, which loads for them and
-  // refuses those round 2 does not draw yet.
+  // refuses those round 2 does not draw yet; channel scales have a range.
   for (const [name, scale] of Object.entries(scales ?? {}))
     if (
       !SCALES.includes(name as ScaleName) &&
-      !["ordinal", "identity", "linear", "log", "time"].includes(scale?.type as string)
+      !["ordinal", "identity", "linear", "log", "time"].includes(scale?.type as string) &&
+      !(scale && "range" in scale)
     )
       throw new Error(
         `chart scales.${name}: marks place values on x, y, and yRight; name one of those, or give type: "ordinal" for a scale of categories`,

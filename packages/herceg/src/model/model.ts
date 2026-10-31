@@ -2952,7 +2952,7 @@ export class ChartModel {
       hidden: this.hidden,
       also: this.#also,
       color: this.#itemColor,
-      domains: this.#featured?.domainKeys,
+      features: this.#featured,
       // Subplots' legends list what their panels draw.
       ...(config.panels && { split, panelLegends: config.panels.panelLegends }),
     };

@@ -38,8 +38,13 @@ export function ownScales(
   path: (name: string) => string,
 ): CompiledScales | undefined {
   const own = new Map<string, ScaleSpec>();
+  // Scales with a range map channels other than position (marks/features/channel-scales.ts).
   for (const [name, spec] of Object.entries(config.scales ?? {}))
-    if (!["x", "y", "yRight"].includes(name) && TYPES.includes(spec?.type as string))
+    if (
+      !["x", "y", "yRight"].includes(name) &&
+      TYPES.includes(spec?.type as string) &&
+      !("range" in spec!)
+    )
       own.set(name, spec as ScaleSpec);
   config.marks.forEach((mark, i) => {
     for (const [at, name, value] of named(mark)) {

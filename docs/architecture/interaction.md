@@ -95,8 +95,10 @@ never geometry made again from current data.
   their own items (`Mark.pickItem`), through the lookups the picker hands
   them in the query (`marks/lookups.ts`), so their picking code loads with
   the picker rather than with every chart. Layout marks pick through
-  `LayoutResult.itemAt`. Custom marks, whose drawings name no items, pick
-  their series' nearest point within 3 px plus the slop.
+  `LayoutResult.itemAt`. Custom marks pick the items their `item` calls
+  drew by their shapes (`Mark.pickItem`, through a grid of the items'
+  boxes), or, drawing none, their series' nearest point within 3 px plus
+  the slop; ranges drawing none are not picked.
 - **Loading.** The picker is a chunk of its own, loaded by the controller
   once a `hover`, `click`, or `contextMenu` listener is added or a row
   selection taking clicks needs it; until it loads, input that needs it

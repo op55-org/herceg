@@ -1,20 +1,25 @@
 // Channels compiled against a mark's table: a constant, a category field's
 // values through an ordinal scale (by dictionary code, so reading a row is
-// an array lookup), a field's values as they are (an identity scale's,
+// an array lookup), a number field's values through a channel scale
+// (channel-scales.ts), a field's values as they are (an identity scale's,
 // checked as constants are), the series' names through a scale, or a
 // condition on each row. Every output is checked against the channel that
 // draws it (`outputProblem`, spec/channels.ts): a constant, a scale's map
-// and `unknown`, used or not, and the values an identity scale reads.
+// and `unknown`, used or not, a channel scale's range, and the values an
+// identity scale reads.
 
 import { compileExpression, type Expression } from "../../data/expression.ts";
 import type { Table } from "../../data/table.ts";
 import { type ChannelName, outputProblem } from "../../spec/channels.ts";
 import type { ChannelSpec, IdentityScaleSpec } from "../../spec/encoding.ts";
+import { ChannelScale } from "./channel-scales.ts";
 import type { CategoryScale } from "./scales.ts";
 
 export type Channel<V> =
   | { readonly kind: "value"; readonly value: V }
   | { readonly kind: "field"; readonly field: string; readonly scale: CategoryScale }
+  /** A number field's values through a channel scale, kept within what the channel takes (`limits`). */
+  | ScaledChannel
   /** A field's values as they are: a category field's by code, a number field's by row. */
   | { readonly kind: "identity"; readonly field: string; readonly numbers: boolean }
   /** The series' names through a scale (`{ series: true, scale }`). */
@@ -26,13 +31,47 @@ export type Channel<V> =
       readonly otherwise: V;
     };
 
+/** A number field's values through a channel scale. */
+export interface ScaledChannel {
+  readonly kind: "scaled";
+  readonly field: string;
+  readonly scale: ChannelScale;
+  /** What the channel takes, which outputs past the range's ends stay within. */
+  readonly limits: readonly [number, number];
+}
+
 /**
- * Finds the chart's ordinal scales by name, making the default ones as
- * marks read them; a `field` read through the default "color" scale where
- * the chart declares none takes the colors of what its values stand for.
- * An identity scale of the chart's is `IDENTITY`.
+ * Finds the chart's scales by name, making the default ones as marks read
+ * them; a `field` read through the default "color" scale where the chart
+ * declares none takes the colors of what its values stand for. An identity
+ * scale of the chart's is `IDENTITY`. A channel scale read for a `field`
+ * reads that field of the mark's rows into its domain.
  */
-export type ScaleOf = (name: string, path: string, field?: string) => CategoryScale;
+export type ScaleOf = (name: string, path: string, field?: string) => CategoryScale | ChannelScale;
+
+/**
+ * A channel's outputs by value through its channel scale: colors, or
+ * numbers within the channel's limits; undefined for none. As the scale is
+ * now: read again once its revision changes.
+ */
+export function scaledOutputs(
+  channel: ScaledChannel,
+): (value: number) => string | number | undefined {
+  const { scale, limits } = channel;
+  if (scale.colors) return scale.colorOutputs();
+  const map = scale.numberOutputs(limits);
+  return (value) => {
+    const out = map(value);
+    return Number.isNaN(out) ? undefined : out;
+  };
+}
+
+/** The sum of the revisions of the channel scales `channels` read, which changes whenever one does. */
+export function scaledRevision(channels: readonly (Channel<unknown> | undefined)[]): number {
+  let sum = 0;
+  for (const c of channels) if (c?.kind === "scaled") sum += c.scale.revision;
+  return sum;
+}
 
 /** What a scale of `{ type: "identity" }` is among the chart's scales: no mapping. */
 export const IDENTITY: CategoryScale = {
@@ -87,9 +126,11 @@ export function categoryField(
   if (held !== kind)
     throw Object.assign(
       new TypeError(
-        kind === "category"
-          ? `${path}: field "${field}" holds ${held} values; channels read categories, through a scale`
-          : `${path}: field "${field}" holds ${held} values; this channel's values are numbers, so name a number field`,
+        kind !== "category"
+          ? `${path}: field "${field}" holds ${held} values; this channel's values are numbers, so name a number field`
+          : held === "number"
+            ? `${path}: field "${field}" holds numbers, which scales of categories do not map; name a channel scale (a scale of the chart's with a range), or give a category field`
+            : `${path}: field "${field}" holds ${held} values; channels read categories, through a scale`,
       ),
       { code: "field-type" },
     );
@@ -160,9 +201,9 @@ export function compileChannel<V>(
         `${path}.scale: required, as the channel names series through a scale; give scale, the name of one of the chart's scales`,
       );
     const named = scales(spec.scale, `${path}.scale`);
-    if (named === IDENTITY)
+    if (named === IDENTITY || named instanceof ChannelScale)
       throw new TypeError(
-        `${path}.scale: "${spec.scale}" is an identity scale, which maps no series' names; name an ordinal scale`,
+        `${path}.scale: "${spec.scale}" is ${named === IDENTITY ? "an identity scale" : "a channel scale, mapping numbers"}, which maps no series' names; name an ordinal scale`,
       );
     checkOutputs(named, check, path);
     return { kind: "series", scale: named };
@@ -172,7 +213,7 @@ export function compileChannel<V>(
     // The field first: a scale reads what is there.
     if (table?.has(spec.field) && given === undefined && table.kind(spec.field) === "number")
       throw new TypeError(
-        `${path}.field: field "${spec.field}" holds numbers, which ${name} reads as they are through scale: { type: "identity" }; give that, or a category field`,
+        `${path}.field: field "${spec.field}" holds numbers, which ${name} reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: "identity" }); give scale, or a category field`,
       );
     const numbers = NUMBERS.includes(name);
     if (typeof given === "object" || !table?.has(spec.field)) {
@@ -185,6 +226,26 @@ export function compileChannel<V>(
       if (typeof given === "object") return { kind: "identity", field, numbers };
     }
     const named = scales(given ?? scale, `${path}.scale`, spec.field);
+    if (named instanceof ChannelScale) {
+      if (table?.kind(spec.field) === "category")
+        throw Object.assign(
+          new TypeError(
+            `${path}.field: field "${spec.field}" holds categories, and "${named.name}" is a channel scale, which maps numbers; give a number field, or name a scale of categories`,
+          ),
+          { code: "field-type" },
+        );
+      // Times map as their epoch milliseconds.
+      const field =
+        table?.kind(spec.field) === "time"
+          ? spec.field
+          : categoryField(table, spec.field, `${path}.field`, "number");
+      // Its outputs at the domain's ends are what the channel draws.
+      named.spec.range.forEach((output, i) => {
+        check(output, `chart ${scalePath(named.name)}.range[${i}] (read by ${path})`);
+      });
+      const fraction = name === "opacity" || name === "fillOpacity";
+      return { kind: "scaled", field, scale: named, limits: [0, fraction ? 1 : Infinity] };
+    }
     if (named === IDENTITY) {
       const field = categoryField(
         table,
@@ -289,6 +350,19 @@ export function rowReader<V>(
       at: (row) => (channel.when(row) ? 1 : 0),
       output: (row) => (channel.when(row) ? channel.then : channel.otherwise),
     };
+  if (channel.kind === "scaled") {
+    const values = table.numbers(channel.field as never);
+    const of = scaledOutputs(channel);
+    const output = (row: number) => of(values[row]!) as V | undefined;
+    // Rows' looks are their outputs (a ramp's, its steps), so a ramp's
+    // rows take at most its steps' looks.
+    const step = channel.scale.colors ? channel.scale.colorSteps() : undefined;
+    const key = step
+      ? (row: number) => step(values[row]!)
+      : (row: number) => (output(row) as number | undefined) ?? Number.NaN;
+    if (!counted) return { count: 0, at: key, output };
+    return { ...numbered(key, drawn, table.length), output };
+  }
   if (channel.kind === "identity" && channel.numbers) {
     const values = table.numbers(channel.field as never);
     const output = (row: number) => {
@@ -298,14 +372,8 @@ export function rowReader<V>(
       return value as V;
     };
     if (!counted) return { count: 0, at: (row) => values[row]!, output };
-    // Each distinct value is a look of its own.
-    const numbered = new Map<number, number>();
-    const count = drawn ? drawn.length : table.length;
-    for (let k = 0; k < count; k++) {
-      const value = values[drawn ? drawn[k]! : k]!;
-      if (!Number.isNaN(value) && !numbered.has(value)) numbered.set(value, numbered.size + 1);
-    }
-    return { count: numbered.size + 1, at: (row) => numbered.get(values[row]!) ?? 0, output };
+    // By value: outputs are checked as rows ask for them.
+    return { ...numbered((row) => values[row]!, drawn, table.length), output };
   }
   const { codes, dictionary } = table.categories(channel.field as never);
   // Each value's output, as rows first ask for it.
@@ -327,6 +395,24 @@ export function rowReader<V>(
       return outputs[code];
     },
   };
+}
+
+/**
+ * Rows numbered as looks by `by`: each distinct key one of its own (from
+ * 1; a row without one, NaN, 0), over the `drawn` rows or `length`.
+ */
+function numbered(
+  by: (row: number) => number,
+  drawn: Uint32Array | undefined,
+  length: number,
+): { count: number; at(row: number): number } {
+  const numbers = new Map<number, number>();
+  const count = drawn ? drawn.length : length;
+  for (let k = 0; k < count; k++) {
+    const key = by(drawn ? drawn[k]! : k);
+    if (!Number.isNaN(key) && !numbers.has(key)) numbers.set(key, numbers.size + 1);
+  }
+  return { count: numbers.size + 1, at: (row) => numbers.get(by(row)) ?? 0 };
 }
 
 /**

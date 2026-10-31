@@ -2,7 +2,7 @@
 // for output formats without SVG's other commands (PDF). Custom marks write
 // their shapes as SVG path data.
 
-import type { PathSink } from "../draw/markup.ts";
+import type { PathSink } from "./markup.ts";
 
 /** Path data needs no rectangles. */
 type Sink = Omit<PathSink, "rect">;
@@ -12,10 +12,12 @@ const SEPARATOR = /[\s,]*/y;
 const PARAMETERS: Record<string, number> = { m: 2, l: 2, h: 1, v: 1, c: 6, s: 4, q: 4, t: 2, a: 7 };
 
 /**
- * Sends `d` to `sink`. Quadratic curves and arcs become cubic curves. As in
- * browsers, drawing stops at the first error in the data.
+ * Sends `d` to `sink`. Quadratic curves and arcs become cubic curves:
+ * arcs of at most a quarter turn each, and with `tolerance`, of as little
+ * as keeps each within that many units of the ellipse. As in browsers,
+ * drawing stops at the first error in the data.
  */
-export function tracePath(d: string, sink: Sink): void {
+export function tracePath(d: string, sink: Sink, tolerance?: number): void {
   let at = 0;
   const skip = () => {
     SEPARATOR.lastIndex = at;
@@ -151,7 +153,7 @@ export function tracePath(d: string, sink: Sink): void {
         case "a": {
           const ex = ox + args[5]!;
           const ey = oy + args[6]!;
-          arc(sink, x, y, args[0]!, args[1]!, args[2]!, args[3]!, args[4]!, ex, ey);
+          arc(sink, x, y, args[0]!, args[1]!, args[2]!, args[3]!, args[4]!, ex, ey, tolerance);
           x = ex;
           y = ey;
           break;
@@ -163,10 +165,13 @@ export function tracePath(d: string, sink: Sink): void {
   }
 }
 
+/** Arc segments at most, however fine a tolerance asks for. */
+const MOST_SEGMENTS = 1024;
+
 /**
- * An elliptical arc as cubic curves of at most a quarter turn each, after
- * the SVG specification's endpoint-to-center conversion (implementation
- * notes, F.6.5 and F.6.6).
+ * An elliptical arc as cubic curves of at most a quarter turn each (within
+ * `tolerance`, if given), after the SVG specification's endpoint-to-center
+ * conversion (implementation notes, F.6.5 and F.6.6).
  */
 function arc(
   sink: Sink,
@@ -179,6 +184,7 @@ function arc(
   sweep: number,
   x2: number,
   y2: number,
+  tolerance?: number,
 ): void {
   if (x1 === x2 && y1 === y2) return;
   let rx = Math.abs(rxIn);
@@ -215,7 +221,13 @@ function arc(
   if (!sweep && delta > 0) delta -= 2 * Math.PI;
   else if (sweep && delta < 0) delta += 2 * Math.PI;
 
-  const segments = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 2) - 1e-9));
+  // A quarter turn's cubic strays from the ellipse by about 2.7e-4 of its
+  // radius, and a turn of a fraction f of it by f^6 of that.
+  const turn =
+    tolerance === undefined
+      ? Math.PI / 2
+      : (Math.PI / 2) * Math.min(1, (tolerance / (2.7e-4 * Math.max(rx, ry))) ** (1 / 6));
+  const segments = Math.min(MOST_SEGMENTS, Math.max(1, Math.ceil(Math.abs(delta) / turn - 1e-9)));
   const step = delta / segments;
   const k = (4 / 3) * Math.tan(step / 4);
   // A point of the ellipse at parameter t, and its derivative, in user space.

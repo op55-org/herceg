@@ -19,6 +19,7 @@ import { tracePolygon } from "../draw/polygons.ts";
 import { traceRects, traceSides } from "../draw/rect.ts";
 import { ruleLabel } from "../draw/rule.ts";
 import { MIDDLE_TO_BASELINE, shapeLines } from "../draw/shapes.ts";
+import { tracePath } from "../draw/svg-path.ts";
 import { SYMBOLS, symbolPath } from "../draw/symbols.ts";
 import { parseFont } from "../layout/text.ts";
 import { isLightColor } from "../scale/color.ts";
@@ -40,7 +41,6 @@ import { surface, type Theme } from "../theme.ts";
 import { type DocumentInfo, language, literal, num, PdfPage, PdfWriter } from "./pdf-document.ts";
 import type { PdfFontResolver } from "./pdf-font-embed.ts";
 import { encodeText, type PdfFont, standardFont, textWidth } from "./pdf-fonts.ts";
-import { tracePath } from "./svg-path.ts";
 
 /** Bézier control distance for a quarter circle of radius 1. */
 
@@ -651,6 +651,7 @@ function paintMark(
               font: textFont(page, family, bold),
               size: mark.fontSize,
               fill: shape.fill,
+              ...(shape.opacity !== undefined && { opacity: shape.opacity }),
               anchor: shape.anchor,
               baseline: "middle",
             },

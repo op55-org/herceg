@@ -66,9 +66,6 @@ const GAP_WALK = 1024;
 /** Pixels apart that distances to the query tie within (as model/nearest.ts says). */
 const TIE = 1e-3;
 
-/** Pixels a custom mark's point reaches, whatever it draws there (it names no items of its own). */
-const CUSTOM_REACH = 3;
-
 /** A geometry of a panel in paint order: its record, its mark, and its index (-1: the mark picks itself). */
 interface Painted {
   drawn: DrawnMark;
@@ -126,10 +123,8 @@ export class Picker {
         // The marks `accept` takes, else those the pointer does not pass through.
         if (!mark || (accept ? !accept(mark) : mark.spec.pick === false)) continue;
         const z = mark.spec.zIndex ?? 0;
-        // Lookups, and points through their index, pick the mark's items at once,
-        // as custom marks' points do until they draw items.
-        if (mark.pickItem || (mark.nearby && mark.reach) || mark.spec.type === "custom")
-          painted.push({ drawn, mark, g: -1, z });
+        // Lookups, and points through their index, pick the mark's items at once.
+        if (mark.pickItem || (mark.nearby && mark.reach)) painted.push({ drawn, mark, g: -1, z });
         else
           for (let g = 0; g < drawn.geometry.length; g++)
             painted.push({ drawn, mark, g, z: drawn.geometry[g]!.zIndex ?? z });
@@ -213,8 +208,7 @@ export class Picker {
   /**
    * The point of a mark with an index of its points (`nearby`) whose glyph
    * is nearest the query, within its reach plus `slop`; of glyphs as near
-   * (the query inside several), the one painted on top. A custom mark's
-   * points are scanned, each reaching `CUSTOM_REACH`.
+   * (the query inside several), the one painted on top.
    */
   #pickPoint(mark: Mark, drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
     const { frame } = drawn;
@@ -243,7 +237,7 @@ export class Picker {
         lit = 0,
         over?: (a: number, b: number) => boolean,
       ) {
-        const reach = mark.reach ? mark.reach(rowOf(series, position), series) : CUSTOM_REACH;
+        const reach = mark.reach!(rowOf(series, position), series);
         const near = Math.max(0, distance - reach);
         const { best } = found;
         if (!(near <= slop) || (best && near > best.distance + TIE)) return;
@@ -255,13 +249,7 @@ export class Picker {
         found.best = { series, position, reach, distance: near, lit };
       },
     };
-    if (mark.nearby) mark.nearby(shown, x, y, frame, found as unknown as Nearest);
-    else
-      for (const series of shown)
-        for (let position = 0; position < series.length; position++) {
-          const at = pointBox(this.#kit, series, rowOf(series, position), frame, mark);
-          if (at) found.take({ series, position, distance: Math.hypot(at.x - x, at.y - y) }, mark);
-        }
+    mark.nearby!(shown, x, y, frame, found as unknown as Nearest);
     const { best } = found;
     if (!best) return undefined;
     const { series, position, reach, distance } = best;

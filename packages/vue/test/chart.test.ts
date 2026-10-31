@@ -681,6 +681,37 @@ describe("<Chart>", () => {
     expect(drawn.at(-1)).toEqual(["b"]);
   });
 
+  it("passes channels to custom marks and regions, read through the chart's scales", async () => {
+    const { view, chart } = chartRef();
+    const spans = table({ a: [0, 2], b: [1, 3], w: [0, 1], kind: ["x", "y"] });
+    const widths: (number | undefined)[] = [];
+    const scales = {
+      widths: { type: "linear", range: [1, 5] },
+      kinds: { type: "ordinal", domain: ["x", "y"], map: { x: "#ff0000", y: "#0000ff" } },
+    };
+    const draw = ({ series, item, path, encoded }: DataDrawContext<Schema>) => {
+      widths.length = 0;
+      for (let row = 0; row < spans.length; row++) {
+        widths.push(encoded("strokeWidth", row));
+        item(series[0]!, row, () => path("M0 0L10 10", { stroke: "#000000" }));
+      }
+    };
+    mount(
+      `<Chart ref="view" renderer="svg" :scales="scales">
+        <Region :data="spans" x1="a" x2="b" :encode="{ fill: { field: 'kind', scale: 'kinds' } }" />
+        <Custom :data="spans" :x="['a', 'b']" y="w" :encode="{ strokeWidth: { field: 'w', scale: 'widths' } }" :draw="draw" />
+      </Chart>`,
+      () => ({ spans, view, draw, scales }),
+    );
+    // Channels are read by code the chart loads first.
+    await chart().loading;
+    expect(widths).toEqual([1, 5]);
+    const fills = [...host.querySelectorAll('[data-kind="rect"]')].map((shape) =>
+      shape.getAttribute("fill"),
+    );
+    expect(fills).toEqual(["#ff0000", "#0000ff"]);
+  });
+
   it("keeps custom marks given as marks only while they are the same object", async () => {
     // A custom mark's spec does not describe what it draws.
     const badge = (label: string) => custom({ draw: ({ text, x, y }) => text(x(1), y(2), label) });

@@ -92,7 +92,9 @@ A value keeps its place once it has one, so streaming never recolors.
 Under `scales.color`, every mark's colors go through the scale. A named
 scale (`"sites"`) is read by channels (`encode.color: { field, scale:
 "sites" }`, see [Encodings](marks.md#encodings)): every mark reading it gives
-a value one color and one legend entry, whatever table it reads.
+a value one color and one legend entry, whatever table it reads. Scales
+with a `range` map numbers onto widths, opacities, sizes, and colors
+instead ([Channel scales](marks.md#channel-scales)).
 
 ## Continuous color
 

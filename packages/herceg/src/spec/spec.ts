@@ -18,6 +18,7 @@ import type {
   LabelTextSpec,
   MarkAnchorSpec,
   MarkStyleSpec,
+  RowChannelSpec,
   SeriesLabelsSpec,
   StackSpec,
   SymbolName,
@@ -1462,6 +1463,17 @@ interface RegionStyle extends AnnotationBase, RowItems {
   strokeWidth?: number;
   /** Which of the outline's sides are drawn: top, right, bottom, left (all by default). */
   strokeSides?: readonly Side[];
+  /**
+   * Each row's paint, for regions of a table: `color` (the fill) or `fill`,
+   * `stroke`, and `opacity`, which scales the fill's `fillOpacity` and the
+   * outline's. Regions are drawn in row order whatever their looks.
+   */
+  encode?: {
+    color?: RowChannelSpec<string>;
+    fill?: RowChannelSpec<string>;
+    stroke?: RowChannelSpec<string>;
+    opacity?: RowChannelSpec<number>;
+  };
   /** Text drawn in every region (in its top left corner by default), constant or each row's `field`. */
   label?: string | LabelSpec;
 }

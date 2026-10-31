@@ -92,6 +92,7 @@ from ._errors import (
     shown,
 )
 from ._guides import (
+    ChannelScale,
     Format,
     GridLines,
     Guide,
@@ -1001,7 +1002,9 @@ class _SharedOptions(TypedDict, total=False):
     height: int | None
     y_right: AxisOptions | dict[str, Any] | None
     legend: bool | LegendOptions | dict[str, Any] | None
-    scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]] | None
+    scales: (
+        Mapping[str, Scale | OrdinalScale | ChannelScale | IdentityScale | Mapping[str, Any]] | None
+    )
     guides: Sequence[Guide] | None
     padding: float | Insets | None
     inspection: InspectionOptions | Literal[False] | None
@@ -1204,6 +1207,7 @@ def _check_method_options(function: Callable[_P, _R]) -> Callable[_P, _R]:
 _LINE_CHANNELS = ("color", "stroke", "dash", "stroke_width", "opacity")
 _AREA_CHANNELS = ("color", "fill", "stroke", "opacity")
 _BAR_CHANNELS = ("color", "fill", "stroke", "stroke_width", "opacity")
+_REGION_CHANNELS = ("color", "fill", "stroke", "opacity")
 _POINT_CHANNELS = ("color", "fill", "stroke", "stroke_width", "opacity", "symbol", "size")
 
 
@@ -1285,7 +1289,9 @@ class Chart:
         panels: Sequence[Panel | str] | None = None,
         layout: Grid | Mapping[str, Any] | None = None,
         legend: bool | LegendOptions | dict[str, Any] | None = None,
-        scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]]
+        scales: Mapping[
+            str, Scale | OrdinalScale | ChannelScale | IdentityScale | Mapping[str, Any]
+        ]
         | None = None,
         guides: Sequence[Guide] | None = None,
         padding: float | Insets | None = None,
@@ -4889,6 +4895,7 @@ class Chart:
         stroke: str | None = None,
         stroke_width: float | None = None,
         stroke_sides: Sequence[Side] | None = None,
+        encode: Encodings | Mapping[str, Any] | None = None,
         contribute_domain: bool | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -4913,10 +4920,13 @@ class Chart:
         ``stroke_sides`` draws only the sides it lists; edges the plot cuts
         and the sides of a span across the whole plot are never drawn. Add
         regions before the marks they highlight to draw them underneath, or
-        give ``z_index``. Regions count toward the axes' domains only with
-        ``contribute_domain=True``. Regions are cut to the plot; with
-        ``clip="chart"`` or ``False``, to the chart, so a band at pixels of
-        the chart above the plot shows.
+        give ``z_index``. Regions of the rows of ``data`` take ``encode``:
+        color, fill, stroke, and opacity per row, through the chart's
+        ``scales`` (an ``hg.ChannelScale`` for numbers), drawn in row order;
+        rows without an output keep the mark's own paint. Regions count
+        toward the axes' domains only with ``contribute_domain=True``.
+        Regions are cut to the plot; with ``clip="chart"`` or ``False``, to
+        the chart, so a band at pixels of the chart above the plot shows.
         ``item_key`` names a numeric, datetime, or category column whose value
         names each row's item, which selections and transitions follow across
         replaced data.
@@ -4943,6 +4953,27 @@ class Chart:
         table = self._annotation_table(
             data, {"x1": x1, "x2": x2, "y1": y1, "y2": y2}, label_json, "region"
         )
+        channels = self._option(
+            "region encode", lambda: encodings_spec(encode, _REGION_CHANNELS, "region")
+        )
+        if channels:
+            for name, channel in channels.items():
+                if isinstance(channel, Mapping) and "series" in channel:
+                    raise ChartError(
+                        f"region {python_path(f'encode.{name}')}: regions have no series "
+                        "whose names it could read; give hg.Channel(field=...) or value=..., "
+                        "or hg.when(...)",
+                        path=self._path("region", python_path(f"encode.{name}")),
+                    )
+            # Channels paint each row of the mark's data, or the chart's.
+            if table is None and data is None and self._default is None:
+                raise ChartError(
+                    "region encode: channels read the rows of a table; give data, or drop encode",
+                    path=self._path("region", "encode"),
+                )
+            if table is None:
+                table = self._mark_table(data)
+            self._check_colors(table, None, channels, "region")
         return self._add(
             {
                 "type": "region",
@@ -4958,6 +4989,7 @@ class Chart:
                 "strokeSides": self._option(
                     "region stroke_sides", lambda: _sides(stroke_sides, "region stroke_sides")
                 ),
+                "encode": channels or None,
                 "label": label_json,
                 "contributeDomain": _flag(contribute_domain, "region contribute_domain"),
                 "axis": axis,
@@ -6275,10 +6307,20 @@ class Chart:
                 # Through an identity scale (its own, or one of the chart's), a
                 # number field's values are widths and opacities.
                 scale = channel.get("scale")
-                identity = isinstance(scale, Mapping) or (
-                    (self._options.get("scales") or {}).get(scale, {}).get("type") == "identity"
+                named = (
+                    (self._options.get("scales") or {}).get(scale, {})
+                    if isinstance(scale, str)
+                    else {}
                 )
-                kinds = ("category", "number") if identity else ("category",)
+                identity = isinstance(scale, Mapping) or named.get("type") == "identity"
+                # A channel scale (one with a range) maps numbers and times.
+                kinds = (
+                    _NUMERIC
+                    if "range" in named
+                    else ("category", "number")
+                    if identity
+                    else ("category",)
+                )
                 self._require(table, field, kinds, f"{mark} {option}")
 
     def _check_series_style(

@@ -47,7 +47,9 @@ export const shapesDrawing: Drawing<ShapesGeometry> = {
           shape.x,
           first + baseline,
           height,
-          ` fill="${escapeXml(shape.fill)}" text-anchor="${shape.anchor}"${font}`,
+          ` fill="${escapeXml(shape.fill)}" text-anchor="${shape.anchor}"${font}${
+            (shape.opacity ?? 1) < 1 ? ` fill-opacity="${shape.opacity}"` : ""
+          }`,
         );
         continue;
       }
@@ -69,7 +71,7 @@ export const shapesDrawing: Drawing<ShapesGeometry> = {
     const baseline = mark.fontSize * MIDDLE_TO_BASELINE;
     for (const shape of mark.shapes) {
       if (isText(shape)) {
-        context.globalAlpha = 1;
+        context.globalAlpha = shape.opacity ?? 1;
         context.textAlign = ALIGN[shape.anchor];
         context.fillStyle = shape.fill;
         const { lines, first, height } = shapeLines(shape, mark.fontSize);

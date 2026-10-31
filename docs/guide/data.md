@@ -315,7 +315,7 @@ with missing values last in either direction and categories by label.
 
 Series marks take a view where they take a table: lines, areas, bars,
 points, rugs, error bars, box plots, boxen, violins, candlesticks, heatmaps,
-and histograms. A mark draws what it would draw over a table of the view's
+histograms, and custom marks (whose series hold the view's rows). A mark draws what it would draw over a table of the view's
 rows alone, and redraws as the view changes:
 
 ```ts

@@ -30,6 +30,7 @@ import type {
   AreaLabelsSpec,
   BarLabelPlaceSpec,
   BarLabelsSpec,
+  ChannelScaleSpec,
   ContinuitySpec,
   EncodingsSpec,
   IdentityScaleSpec,
@@ -1541,12 +1542,47 @@ const scaleSettings: Check = (v, path) => {
 };
 
 /**
+ * A channel scale in `scales`: a continuous map of numbers onto widths,
+ * opacities, sizes, or colors (`range`), as the feature compiler checks
+ * it (`channelScaleProblem`), which also checks each reader's outputs.
+ */
+const channelScale: Check = (v, path) => {
+  oneOf("linear", "log", "sqrt")((v as { type?: unknown }).type, `${path}.type`);
+  properties(v as Record<string, unknown>, path, {
+    type: oneOf("linear", "log", "sqrt"),
+    domain: (d, p) => {
+      numbers(d, p);
+      if ((d as unknown[]).length !== 2 || (d as number[])[0] === (d as number[])[1])
+        fail(p, "two different numbers", d);
+    },
+    range: (r, p) => {
+      if (!Array.isArray(r)) fail(p, "two numbers, or two or more colors", r);
+      if (typeof r[0] === "number") {
+        numbers(r, p);
+        if (r.length !== 2) fail(p, "two numbers", r);
+      } else {
+        strings(r, p);
+        if (r.length < 2) fail(p, "two or more colors", r);
+      }
+    },
+    clamp: boolean,
+  } satisfies ChecksOf<ChannelScaleSpec>);
+};
+
+/**
  * A scale of the chart's own: of categories ("ordinal"), of values that
- * are their own outputs ("identity"), or of positions, its `type` given.
+ * are their own outputs ("identity"), of positions, its `type` given, or
+ * for a channel other than position (with a `range`).
  */
 const namedScale: Check = (v, path) => {
   object(v, path);
+  if ("range" in (v as object)) return channelScale(v, path);
   const { type } = v as { type?: unknown };
+  if (type === "sqrt")
+    throw refusal(
+      `${path}.range`,
+      'required, as a "sqrt" scale maps numbers onto a channel; give range, its outputs at the domain\'s ends',
+    );
   if (type === "identity")
     return checkProperties(v as Record<string, unknown>, path, ["type"], {
       type: string,
@@ -1565,7 +1601,11 @@ const ordinalScale: Check = (v, path) => {
   };
   const type = (t: unknown, at: string) => {
     if (t !== "ordinal")
-      fail(at, '"ordinal", "identity", or a position scale\'s "linear", "log", or "time"', t);
+      fail(
+        at,
+        '"ordinal", "identity", a position scale\'s "linear", "log", or "time", or with a range a channel scale\'s "linear", "log", or "sqrt"',
+        t,
+      );
   };
   type((v as { type?: unknown }).type, `${path}.type`);
   properties(v as Record<string, unknown>, path, {
@@ -1914,10 +1954,18 @@ function channel(value: Check): Check {
 }
 
 /** A mark's `encode`, of the channels `names` it takes. */
-function encodings(names: readonly (keyof EncodingsSpec)[]): Check {
+function encodings(names: readonly (keyof EncodingsSpec)[], seriesless = false): Check {
   const checks = Object.fromEntries(names.map((name) => [name, channel(CHANNEL_VALUES[name])]));
   return (v, path) => {
     object(v, path);
+    // Marks without series (regions) read no series' names.
+    if (seriesless)
+      for (const [name, c] of Object.entries(v as Record<string, unknown>))
+        if (typeof c === "object" && c !== null && "series" in c)
+          throw refusal(
+            `${path}.${name}.series`,
+            "regions have no series whose names it could read; give a field, a value, or a condition",
+          );
     properties(v as Record<string, unknown>, path, checks);
   };
 }
@@ -2144,6 +2192,7 @@ const MARKS: MarkChecks = {
       stroke: string,
       strokeWidth: width,
       strokeSides: sideList,
+      encode: encodings(MARK_CHANNELS.region!.encode, true),
       label,
       contributeDomain: boolean,
       legend: boolean,
@@ -3250,6 +3299,17 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
           const at = /^[A-Za-z_$][\w$]*$/.test(name)
             ? `${path}.${name}`
             : `${path}[${JSON.stringify(name)}]`;
+          // The default scales map categories: what series and category fields read unnamed.
+          if (
+            ["color", "symbol", "dash"].includes(name) &&
+            typeof scale === "object" &&
+            scale !== null &&
+            "range" in scale
+          )
+            throw refusal(
+              at,
+              `"${name}" is the scale marks read categories through by default, which a scale with a range does not map; give the channel scale another name, and name it in encode`,
+            );
           (["x", "y", "yRight"].includes(name) ? scaleSettings : namedScale)(scale, at);
         }
       },

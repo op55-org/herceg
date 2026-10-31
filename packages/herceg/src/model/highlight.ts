@@ -157,7 +157,15 @@ export function membership(table: Table, selection: DataSelection): Uint8Array {
 /** Whether a mark draws the rows a channel selects highlighted; others draw every row as before. */
 export function highlights(mark: Mark): boolean {
   const type = mark.spec.type;
-  return ROWS.has(type) || type === "line" || type === "area" || !!mark.selectedGeometry;
+  // Custom marks dim the items their draw makes of rows a selection leaves
+  // out, themselves (see `Highlighter.geometry`).
+  return (
+    ROWS.has(type) ||
+    type === "line" ||
+    type === "area" ||
+    type === "custom" ||
+    !!mark.selectedGeometry
+  );
 }
 
 const COMPARE = new Set(["==", "!=", "<", "<=", ">", ">="]);
@@ -334,7 +342,8 @@ export class Highlighter {
     rows?: RowParts,
   ): Geometry[] | undefined {
     const type = mark.spec.type;
-    if (!highlights(mark)) return undefined;
+    // Custom marks dim their own items, reading `Frame.highlighted`.
+    if (!highlights(mark) || type === "custom") return undefined;
     const table = mark.table;
     const selected = table && this.selected(table);
     if (!selected) return undefined;

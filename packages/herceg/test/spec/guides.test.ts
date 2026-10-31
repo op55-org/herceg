@@ -81,7 +81,7 @@ describe("scales and guides", () => {
     ).not.toThrow();
     const other = { marks, scales: { temperature: { domain: [0, 1] } } } as unknown as ChartSpec;
     expect(() => validateSpec(other)).toThrow(
-      'scales.temperature.type: expected "ordinal", "identity", or a position scale\'s "linear", "log", or "time"; received undefined',
+      'scales.temperature.type: expected "ordinal", "identity", a position scale\'s "linear", "log", or "time", or with a range a channel scale\'s "linear", "log", or "sqrt"; received undefined',
     );
   });
 

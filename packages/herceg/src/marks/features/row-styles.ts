@@ -5,12 +5,13 @@
 // geometry per look its rows take.
 
 import type { Table } from "../../data/table.ts";
-import type { RowPaint } from "../../model/features.ts";
+import type { RowLooks, RowPaint } from "../../model/features.ts";
 import type { EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
 import type { MarkRows } from "../rows.ts";
 import type { Series } from "../series.ts";
+import { wholeTable } from "./channel-scales.ts";
 import {
   type Channel,
   type Check,
@@ -20,6 +21,7 @@ import {
   outputCheck,
   rowReader,
   type ScaleOf,
+  scaledRevision,
 } from "./channels.ts";
 import { subset } from "./runs.ts";
 
@@ -72,8 +74,18 @@ export class RowStyles {
   >();
   /** Kept for a table version and the rows drawn, until the theme or paint reader changes (`use`). */
   #key: { version: number; subset: string | undefined; key: GlyphKey | undefined } | undefined;
+  /** The looks `looks()` last painted, and their paints with colors read. */
+  #paintedOf: object | undefined;
+  #paintedLooks: RowPaint[] = [];
   #looks:
-    | { version: number; subset: string | undefined; of: Int32Array; paints: RowPaint[] }
+    | {
+        version: number;
+        subset: string | undefined;
+        /** The revisions of the channel scales read (`scaledRevision`). */
+        scaled: number;
+        of: Int32Array;
+        paints: RowPaint[];
+      }
     | undefined;
 
   constructor(
@@ -142,6 +154,7 @@ export class RowStyles {
       c !== undefined &&
       (c.kind === "condition" ||
         c.kind === "identity" ||
+        c.kind === "scaled" ||
         (c.kind === "field" && c.field !== spec.series));
     this.byRow =
       [this.#fill, this.#stroke, this.#width, this.#opacity].some(rowWise) ||
@@ -319,6 +332,35 @@ export class RowStyles {
   }
 
   /**
+   * For marks drawing a shape per row without series (regions): each row's
+   * look with its colors read, for the table's version and the rows drawn;
+   * one look for every row where channels are constants; undefined for no
+   * channels.
+   */
+  looks(): RowLooks | undefined {
+    const looks = this.#read();
+    if (!looks) {
+      // Channels that read no rows give every row their one look.
+      const value = <V>(c: Channel<V> | undefined) => (c?.kind === "value" ? c.value : undefined);
+      const paint = definedOf({
+        fill: value(this.#fill),
+        stroke: value(this.#stroke),
+        strokeWidth: value(this.#width),
+        opacity: value(this.#opacity),
+      });
+      return Object.keys(paint).length > 0
+        ? { paints: [this.#painted(paint)], of: () => 0 }
+        : undefined;
+    }
+    if (this.#paintedOf !== looks) {
+      this.#paintedOf = looks;
+      this.#paintedLooks = looks.paints.map((paint) => this.#painted(paint));
+    }
+    const paints = this.#paintedLooks;
+    return { paints, of: (row) => looks.of[row]! };
+  }
+
+  /**
    * Each drawn row's look, for the table's version and the rows drawn: an
    * index into `paints`. Rows the mark does not draw are not read (their
    * identity values are not checked), and keep look 0.
@@ -329,7 +371,13 @@ export class RowStyles {
     const theme = this.#theme;
     const rows = this.#drawn();
     const drawn = subset(rows);
-    if (this.#looks?.version === table.version && this.#looks.subset === drawn) return this.#looks;
+    const scaled = scaledRevision([this.#fill, this.#stroke, this.#width, this.#opacity]);
+    if (
+      this.#looks?.version === table.version &&
+      this.#looks.subset === drawn &&
+      this.#looks.scaled === scaled
+    )
+      return this.#looks;
     const palette = theme?.palette ?? [];
     const muted = theme?.muted ?? "#999999";
     const [fill, stroke, width, opacity] = this.#checks;
@@ -387,7 +435,7 @@ export class RowStyles {
       }
       of[row] = look;
     }
-    this.#looks = { version: table.version, subset: drawn, of, paints };
+    this.#looks = { version: table.version, subset: drawn, scaled, of, paints };
     return this.#looks;
   }
 
@@ -396,6 +444,36 @@ export class RowStyles {
     const { codes, dictionary } = this.#table.categories(field as never);
     return { count: dictionary.length + 1, at: (row) => codes[row]! + 1 };
   }
+}
+
+/**
+ * The looks of a mark drawing a shape per row of its table, without series
+ * (regions): its rows' channels (`encode`), read as bars' rows are.
+ */
+export function rowLooks(
+  spec: RowStyleSpec,
+  table: Table | undefined,
+  scales: ScaleOf,
+  path: string,
+  isColor: (value: string) => boolean,
+): { use(theme: Theme, paint: PaintReader): void; rowLooks(): RowLooks | undefined } {
+  if (!table)
+    throw new Error(
+      `${path} encode: channels read the rows of a table; give the mark one, or drop encode`,
+    );
+  for (const [name, channel] of Object.entries(spec.encode ?? {}))
+    if (channel && "series" in channel)
+      throw new TypeError(
+        `${path} encode.${name}: regions have no series whose names it could read; give a field, a value, or a condition`,
+      );
+  // Every row of the table, kept while its version is.
+  let rows: MarkRows | undefined;
+  const drawn = () => {
+    if (rows?.revision !== String(table.version)) rows = wholeTable(table);
+    return rows;
+  };
+  const styles = new RowStyles(spec, table, drawn, scales, path, isColor);
+  return { use: (theme, paint) => styles.use(theme, paint), rowLooks: () => styles.looks() };
 }
 
 /** A series style's or a look's paint properties it sets. */

@@ -616,6 +616,87 @@ class IdentityScale:
         return {"type": "identity"}
 
 
+_HEX = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})")
+
+
+@refuses
+@dataclass
+class ChannelScale:
+    """A continuous scale in the chart's ``scales``, mapping a number or
+    datetime column onto a channel's outputs: widths, opacities, sizes, or
+    colors. Marks read it by name, as
+    ``hg.Channel(field="age", scale="fade")``, in ``encode``.
+
+    ``range`` is the outputs at the domain's ends: two numbers, or two or
+    more colors (hex, or ``var()``) spread evenly along it. ``domain``
+    defaults to the extent of every column read through the scale, in
+    every mark. ``type`` is ``"linear"``, ``"log"`` (of positive values),
+    or ``"sqrt"`` (of values from 0). Values past the domain extend it,
+    kept within the channel's limits (opacities from 0 to 1), or with
+    ``clamp=True`` take its ends' outputs; colors stay at the ends.
+    Missing values, and values the type cannot take, have no output: the
+    mark's own paint, or for points, no point."""
+
+    range: Sequence[Any]
+    type: Literal["linear", "log", "sqrt"] = "linear"
+    domain: Sequence[float] | None = None
+    clamp: bool | None = None
+
+    def __post_init__(self) -> None:
+        _choice(self.type, ("linear", "log", "sqrt"), "ChannelScale type")
+        finite = lambda v: is_number(v) and not isinstance(v, bool) and math.isfinite(v)  # noqa: E731
+        stops = list(self.range) if listlike(self.range) else None
+        if stops and all(finite(v) for v in stops):
+            if len(stops) != 2:
+                raise ChartError(
+                    "ChannelScale range: a range of numbers is (low, high); "
+                    f"received {shown(self.range)}"
+                )
+        elif (
+            not stops
+            or len(stops) < 2
+            or any(
+                # As the engine reads stops: no space around them.
+                not (isinstance(v, str) and (_HEX.fullmatch(v) or re.search(r"\bvar\(", v)))
+                for v in stops
+            )
+        ):
+            raise ChartError(
+                "ChannelScale range: expected two numbers, or two or more colors (hex, or "
+                f'var()), such as ("#f7fbff", "#08306b"); received {shown(self.range)}'
+            )
+        if self.domain is not None:
+            low = 0 if self.type == "sqrt" else None
+            valid = (
+                listlike(self.domain)
+                and len(self.domain) == 2
+                and all(finite(v) for v in self.domain)
+                and self.domain[0] != self.domain[1]
+                and all(
+                    v > 0 if self.type == "log" else low is None or v >= low for v in self.domain
+                )
+            )
+            if not valid:
+                which = {"log": "positive ", "sqrt": "non-negative "}.get(self.type, "")
+                raise ChartError(
+                    f"ChannelScale domain: expected two different {which}finite numbers; "
+                    f"received {shown(self.domain)}"
+                )
+        if self.clamp is not None and not isinstance(self.clamp, bool):
+            raise ChartError(
+                f"ChannelScale clamp: expected True or False; received {shown(self.clamp)}"
+            )
+
+    def _spec(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"type": self.type}
+        if self.domain is not None:
+            out["domain"] = [float(v) for v in self.domain]
+        out["range"] = [float(v) if is_number(v) else v for v in self.range]
+        if self.clamp is not None:
+            out["clamp"] = self.clamp
+        return out
+
+
 def _output(value: Any, role: str = "OrdinalScale map") -> Any:
     """A scale's output: a color, a shape, a dash, or a number."""
     if isinstance(value, (list, tuple)):
@@ -633,7 +714,9 @@ def scales_spec(value: Any) -> Any:
     """A chart's ``scales`` as the spec takes them: ``hg.Scale`` for the
     positions ``"x"``, ``"y"``, and ``"y_right"``; under other names
     ``hg.OrdinalScale`` (or a dict of its options) for scales of
-    categories, ``hg.IdentityScale``, or an ``hg.Scale`` of a ``type``."""
+    categories, ``hg.ChannelScale`` (or a dict with a ``range``) for
+    channels read from numbers, ``hg.IdentityScale``, or an ``hg.Scale``
+    of a ``type``."""
     if value is None:
         return None
     if not isinstance(value, Mapping):
@@ -656,12 +739,14 @@ def _scale_spec(name: str, scale: Any) -> Any:
     """One of a chart's ``scales`` as the spec takes it (see `scales_spec`)."""
     role = f"Chart scales {name}"
     if name in ("x", "y", "y_right"):
-        if isinstance(scale, OrdinalScale):
+        if isinstance(scale, (OrdinalScale, ChannelScale)):
             raise ChartError(
                 f"{role}: places values on an axis; give an hg.Scale, or name the "
-                "OrdinalScale otherwise"
+                f"{type(scale).__name__} otherwise"
             )
         return built_spec(scale, Scale, role)
+    if isinstance(scale, ChannelScale) or (isinstance(scale, Mapping) and "range" in scale):
+        return built_spec(scale, ChannelScale, role)
     if isinstance(scale, IdentityScale) or (
         isinstance(scale, Mapping) and scale.get("type") == "identity"
     ):

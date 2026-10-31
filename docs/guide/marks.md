@@ -414,7 +414,7 @@ hg.Chart(sales).line(x="month", y="units", encode=hg.Encodings(
 
 | Channel form | Python | Means |
 | --- | --- | --- |
-| `{ field, scale? }` | `hg.Channel(field=, scale=)` | A category field through a named scale (`"color"`, `"dash"`, `"symbol"` by default). |
+| `{ field, scale? }` | `hg.Channel(field=, scale=)` | A category field through a named scale (`"color"`, `"dash"`, `"symbol"` by default), or a number or time field through a [channel scale](#channel-scales). |
 | `{ field, scale: { type: "identity" } }` | `scale=hg.IdentityScale()` | Values as they are: colors, dashes, shapes from category fields; widths, sizes, opacities from numbers. Splits no series, makes no legend entries. |
 | `{ series: true, scale }` | `hg.Channel(series=True, scale=)` | The series' names through a scale, for series that are not a field's values. |
 | `{ value }` | `hg.Channel(value=)` | A constant. |
@@ -426,9 +426,60 @@ hg.Chart(sales).line(x="month", y="units", encode=hg.Encodings(
 | Bars | `color`, `fill`, `stroke`, `strokeWidth`, `opacity` |
 | Areas | `color`, `fill`, `stroke`, `opacity` |
 | Points | `color`, `fill`, `size` (square pixels), `opacity`, `symbol` |
+| Regions over a table | `color`, `fill`, `stroke`, `opacity` |
+| Custom marks | `color`, `strokeWidth`, `opacity`, which `draw` reads ([Custom marks](#custom-marks)) |
 
 Every output is checked against the channel that draws it: a scale mapping
 shapes read as colors is refused.
+
+### Channel scales
+
+A scale of the chart's with a `range` maps a number (or time) field onto a
+channel: widths, opacities, sizes, or colors.
+
+```ts
+createChart(host, {
+  scales: {
+    widths: { type: "linear", domain: [0, 1], range: [2, 7] },
+    fade: { type: "linear", domain: [0, 30], range: [1, 0.35], clamp: true },
+    heat: { type: "linear", range: ["#f7fbff", "#08306b"] },
+  },
+  marks: [
+    point(forecasts, {
+      x: "start",
+      y: "end",
+      encode: {
+        size: { field: "confidence", scale: "widths" },
+        opacity: { field: "age", scale: "fade" },
+        color: { field: "error", scale: "heat" },
+      },
+    }),
+  ],
+});
+```
+
+```python
+hg.Chart(forecasts, scales={
+    "fade": hg.ChannelScale(domain=(0, 30), range=(1, 0.35), clamp=True),
+    "heat": hg.ChannelScale(range=("#f7fbff", "#08306b")),
+}).point(x="start", y="end", encode=hg.Encodings(
+    opacity=hg.Channel(field="age", scale="fade"),
+    color=hg.Channel(field="error", scale="heat")))
+```
+
+| Setting | Means |
+| --- | --- |
+| `type` | `"linear"`, `"log"` (positive values), or `"sqrt"` (values from 0). |
+| `range` | The outputs at the domain's ends: two numbers, or two or more colors (hex, or `var()`) spread evenly. |
+| `domain` | Optional: by default the extent of every field read through the scale, in every mark, over each mark's rows (hiding series in the legend does not move it). |
+| `clamp` | Inputs past the domain take its ends' outputs; otherwise numbers extend the range (opacities stay from 0 to 1, widths and sizes from 0) and colors stay at the ends. |
+
+Missing values, and values a log or square root scale cannot take, have no
+output: the mark draws the row in its own paint, and points leave the row
+out. Scales with a range are refused as positions and axes (`x`, `y`,
+`yRight`) and under the names marks read categories through by default
+(`color`, `symbol`, `dash`), and channels reading category fields or
+series' names cannot name them.
 
 **Looks along a line.** Bars and points read each row's look. A line or
 area stays one series while its look changes: where a channel reads rows, a
@@ -566,6 +617,21 @@ draws has no place.
 - **Legend.** `legend: true` lists an annotation by its label (a rule as a
   line, a region as a box) and its entry hides it.
 - **Outlines.** Regions take `stroke`, `strokeWidth`, and `strokeSides`.
+- **Paint per row.** Regions over a table take `encode`: `color`, `fill`,
+  `stroke`, and `opacity` from each row's fields through the chart's
+  scales, as a Marimekko's cells (one region mark, one row a cell). They
+  are drawn and picked in row order; `opacity` scales the fill's and the
+  outline's. Regions have no series, so their channels read fields,
+  values, or conditions, not series' names. With `legend: true` and a
+  label field, each entry is in the paint of the first row holding its
+  label. A constant region takes no `encode`.
+
+  ```ts
+  region(cells, {
+    x1: "start", x2: "end", y1: "bottom", y2: "top",
+    encode: { fill: { field: "segment", scale: "segments" }, opacity: { field: "share", scale: { type: "identity" } } },
+  });
+  ```
 - **Paint order.** Annotations paint in mark order: list a region first to
   shade under the data.
 - **Facets.** Annotations over a table draw each row in its own panel.
@@ -607,10 +673,13 @@ edges write series and values, not fields.
 
 When no mark fits, `custom` draws shapes with the chart's scales on every
 frame, in SVG or on a canvas, clipped to the plot, and in static SVG and
-PDF. With a table, its `x` and `y` fields count toward the axes' domains,
-and with one `x` field the `y` fields are series, as for `line`: they get
-legend entries, tooltips, events, keyboard stops, and sentences in the text
-alternative, and split by facet panel.
+PDF. With a table, its `x` and `y` fields count toward the axes' domains
+and make series: with one `x` field, the `y` fields, as for `line`;
+otherwise (ranges, such as `x: ["start", "end"]`) one series named by the
+ranged fields, or one per value of `series`. Series get legend entries and
+colors, tooltips, events, keyboard stops, and sentences in the text
+alternative, and split by facet panel. One category field on an axis
+places rows in its bands.
 
 ```ts
 custom(requests, {
@@ -639,14 +708,54 @@ custom(requests, {
 | `domain`, `bandwidth`, `plot`, `theme` | The scales' domains, band width, plot rectangle, theme. |
 | `path`, `rect`, `circle`, `line`, `text` | Shapes, each with an optional style (`fill`, `stroke`, `strokeWidth`, `opacity`, `dash`); they paint the same in SVG and on a canvas. |
 | `table`, `series` | With a table: the series to draw (hidden ones left out), each with `label`, `color`, `x` and `y` columns, `length`, `rows`, and `rowAt(k)`. |
+| `item(series, row, draw)` | The shapes `draw` makes are that row's item: picked by their shapes (inside a fill, on a stroke), read by tooltips and the keyboard, dimmed while a selection leaves the row out, and named in events by `itemKey`. |
+| `encoded(channel, row)` | The row's output of an `encode` channel (`color`, `strokeWidth`, `opacity`) through the chart's scales; undefined where the row has none. A `color` of the series' names colors series (`series.color`); widths and opacities read fields, values, or conditions. |
+| `selection(series, row)` | `"selected"`, `"unselected"`, or undefined while no selection is highlighted, for looks of the selected's own. |
+
+Range glyphs, A2's comets for example, take part as items:
+
+```ts
+custom(forecasts, {
+  x: ["start", "end"],
+  y: "id", // a category field: a band per forecast
+  series: "category",
+  itemKey: "id",
+  tooltip: { fields: ["confidence", "age"] },
+  encode: {
+    color: { field: "category", scale: "categories" },
+    strokeWidth: { field: "confidence", scale: "widths" },
+    opacity: { field: "age", scale: "fade" },
+  },
+  draw({ table, series, x, y, item, path, circle, encoded }) {
+    const end = table.numbers("end");
+    for (const s of series)
+      for (let k = 0; k < s.length; k++) {
+        const row = s.rowAt(k);
+        const style = { fill: s.color, opacity: encoded("opacity", row) };
+        item(s, row, () => {
+          path(comet(x(s.x[row]!), y(s.y[row]!), x(end[row]!), encoded("strokeWidth", row)), style);
+          circle(x(s.x[row]!), y(s.y[row]!), 3, style);
+        });
+      }
+  },
+});
+```
 
 - The y axis fits the series' values in view and the points just past its
   edges. `zero: "y"` (or `"x"`) includes zero, as bars do.
-- Glyphs drawn from several fields of a row (ranges from `low` to `high`)
-  take `series: false`: their fields only count toward the domains. Such
-  marks need `facet: "repeat"` in facets.
+- Marks of ranges are read by shape: the tooltip is the item under the
+  pointer, its values written "12 – 40" along one axis and "(1, 2) –
+  (3, 4)" along both. Marks of one `x` field are read along x, as lines
+  are. Such marks that draw no items are picked by their series' points;
+  ranges are read and picked by their items only.
+- The text alternative counts a series' ranges (or its points along
+  category y), the categories they are in, and each value axis' extent
+  over all its fields: "energy: 2 ranges in 2 categories, x from -12 to 70".
+- `series: false` shows no series: the fields only count toward the
+  domains, and such marks need `facet: "repeat"` in facets.
 - Custom marks take `tooltip: { fields }` with series.
-- **Limits.** JavaScript only (a spec cannot hold a function); found by
-  their points rather than their shapes; meant for shapes in the thousands,
-  not millions; no value animation. The built-in marks' internals (series
-  resolution, picking, layout) are not a public extension API.
+- **Limits.** JavaScript only (a spec cannot hold a function); meant for
+  shapes in the thousands, not millions (2,000 comets of three shapes each
+  draw in about 3 ms and are picked in about 30 µs); no value animation.
+  The built-in marks' internals (series resolution, layout) are not a
+  public extension API.

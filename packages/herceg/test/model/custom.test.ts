@@ -15,6 +15,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { withPicker } from "../helpers/picker.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -392,22 +393,30 @@ describe("custom marks with series", () => {
     expect(wicks.spec).toEqual({ type: "custom" });
   });
 
-  it("show no series without one x field and y fields, as before", () => {
+  it("show rows spanning several fields as one series, named by them, or none with series: false", () => {
     const spans = table({ start: [0, 2], end: [1, 3], lane: [1, 2] });
     const seen: (readonly CustomSeries[])[] = [];
-    const gantt = custom(spans, {
-      x: ["start", "end"],
-      y: "lane",
-      draw({ series }) {
-        seen.push(series);
-      },
-    });
-    const { model, scene } = build({ marks: [gantt] });
-    expect(model.series()).toEqual([]);
-    expect(seen).toEqual([[]]);
+    const gantt = (options: { series?: false } = {}) =>
+      custom(spans, {
+        x: ["start", "end"],
+        y: "lane",
+        ...options,
+        draw({ series }) {
+          seen.push(series);
+        },
+      });
+    const { model, scene } = build({ marks: [gantt()] });
+    expect(model.series().map((s) => s.label)).toEqual(["start – end"]);
+    expect(seen.at(-1)!.map((s) => [s.label, s.length])).toEqual([["start – end", 2]]);
     expect(legendOf(scene)).toEqual([]);
     expect(model.xScale()!.domain).toEqual([0, 3]);
-    expect(model.inspect(model.xScale()!.map(1), model.yScale()!.map(1))).toBeUndefined();
+    // Their items are read and picked by shape, and this draw draws none.
+    const [px, py] = [model.xScale()!.map(0), model.yScale()!.map(1)];
+    expect(model.inspect(px, py)).toBeUndefined();
+    expect(withPicker(model).picker!(px, py)).toBeUndefined();
+    const none = build({ marks: [gantt({ series: false })] });
+    expect(none.model.series()).toEqual([]);
+    expect(seen.at(-1)).toEqual([]);
     // Without series there are no rows to split into panels.
     const regions = table({ t: [0, 1], v: [1, 2], region: ["N", "S"] });
     expect(() =>
@@ -420,14 +429,11 @@ describe("custom marks with series", () => {
 
   it("refuse series options they cannot show", () => {
     expect(() => custom(prices, { y: "low", label: "Low", draw() {} })).toThrow(
-      /custom: series, label, pointText, and tooltip need one x field, y fields/,
+      /custom: series, label, pointText, and tooltip need x and y fields/,
     );
     expect(() =>
       custom(prices, { x: "time", y: "low", series: false, pointText: () => "", draw() {} }),
     ).toThrow(/y fields, and no series: false/);
-    expect(() =>
-      custom(load, { x: "time", y: ["cpu", "time"], series: "host", draw() {} }),
-    ).toThrow(/series: several y fields or a series field, not both/);
     expect(() => custom(load, { x: "time", y: "cpu", series: "cpu" as never, draw() {} })).toThrow(
       /custom series: field "cpu" holds number values; expected category/,
     );
