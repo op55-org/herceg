@@ -281,9 +281,9 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 
 ## Reading
 
-- **Nearest x**: With tooltip mode nearest-x, the pointer on a datum reads every series' point at its x: the hover event's points, their labels, rows, and texts, are the fixture's. Annotations of a table along x (rules, text) read their row at its x. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
-- **Nearest y**: With tooltip mode nearest-y, the pointer on a datum reads every series' point at its y, as the fixture lists them. Annotations of a table along y (regions, text) read their row at its y. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
-- **Nearest**: With tooltip mode nearest, the pointer on a datum, a bin, a group, a cell, an item, a merge, or an annotation of a table reads that one, as the fixture says; inside a stacked segment, the segment it is in. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
+- **Nearest x**: With inspection mode nearest-x, the pointer on a datum reads every series' point at its x: the hover event's points, their labels, rows, and texts, are the fixture's. Annotations of a table along x (rules, text) read their row at its x. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
+- **Nearest y**: With inspection mode nearest-y, the pointer on a datum reads every series' point at its y, as the fixture lists them. Annotations of a table along y (regions, text) read their row at its y. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
+- **Nearest**: With inspection mode nearest, the pointer on a datum, a bin, a group, a cell, an item, a merge, or an annotation of a table reads that one, as the fixture says; inside a stacked segment, the segment it is in. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
 - **Tooltip fields**: With tooltip fields naming a field of the table, the pointer on an item that stands for one row (a point, bar, cell, slice, stage, leaf, link, node, merge, sample, or annotation of a table) reads that field of its row too. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
 - **Keyboard**: Focused, the chart announces what the arrow keys move to, in order: the fixture's first two announcements. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
 - **Description**: The chart's accessible description names what the mark draws: its series or items and their extent, as the fixture lists. Proved in [reading.test.ts](../packages/herceg/test/browser/contracts/reading.test.ts).
@@ -335,7 +335,7 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 - ·61 Not applicable: An annotation is read through its label and the chart's description, not by the pointer or keys.
 - ·62 Not applicable: A constant annotation reads no table, so it has no row whose fields could be read.
 - ·63 Not applicable: Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.
-- ✗64 Refused: `tooltip.mode: pie reads the item under the pointer, not every series at an x; give mode: "nearest"` (for pie). Instead: Read the item under the pointer with mode "nearest".
+- ✗64 Refused: `inspection.mode: pie reads the item under the pointer, not every series at an x; give mode: "nearest"` (for pie). Instead: Read the item under the pointer with mode "nearest".
 - ✗65 Refused: `marks[0].tooltip: not a property of herceg's spec format; remove it, or load with { unknown: "warn" } or "ignore"`. Instead: Hover a node or a link: the tooltip names it.
 
 ## Rendering
