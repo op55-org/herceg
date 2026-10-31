@@ -1,6 +1,6 @@
-// Rule and region labels as requests to a panel's placer (layout/place.ts),
-// which places each as today: at the place reaching least past its bounds,
-// then moved inside them.
+// Rule and region labels as requests to a panel's placer
+// (layout/placer.ts), which places each at the place reaching least past
+// its bounds, then moved inside them, where no other label is.
 import { describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import {
@@ -8,7 +8,7 @@ import {
   type LabelRequest,
   mirrorPlaces,
   placeLabels,
-} from "../../src/layout/place.ts";
+} from "../../src/layout/placer.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import type { Mark } from "../../src/marks/mark.ts";
 import { region } from "../../src/marks/region.ts";
@@ -94,18 +94,18 @@ describe("rule and region labels", () => {
       rule(events, { x: "at", label: { field: "name" } }),
       region(events, { x1: "at", x2: "end", label: { field: "name" } }),
     ];
-    const { frame } = build({ marks, x: { domain: [0, 10] } });
+    const { frame, scene } = build({ marks, x: { domain: [0, 10] } });
     for (const [index, mark] of marks.entries()) {
       const labelled = mark as unknown as Mark & LabelledMark;
       const requests = labelled.labelRequests(frame, index);
       expect(requests).toHaveLength(2);
-      expect(requests.map((r) => [r.mark, r.index, r.overlap, r.priority])).toEqual([
+      expect(requests.map((r: LabelRequest) => [r.mark, r.index, r.overlap, r.priority])).toEqual([
         [index, 0, "show", 0],
         [index, 1, "show", 0],
       ]);
-      // Drawn from the placer's placements, they are what the mark draws.
+      // Drawn from the placer's placements, they are what the chart draws.
       const drawn = labelled.drawLabels(frame, index, undefined, placeLabels(requests, []));
-      const own = labelled.geometry([], frame, index).slice(-1);
+      const own = scene.panels[0]!.marks.filter((g) => g.key === drawn[0]!.key);
       expect(drawn).toEqual(own);
       // Moved by another placer, or left out.
       const draw = (dy: number) =>
@@ -124,7 +124,7 @@ describe("rule and region labels", () => {
       y: "at",
       label: { field: "name", place: { outside: true, attachment: "end" } },
     });
-    const { frame } = build({ marks: [mark], y: { domain: [0, 10] } });
+    const { frame, scene } = build({ marks: [mark], y: { domain: [0, 10] } });
     const labelled = mark as unknown as Mark & LabelledMark;
     const [request] = labelled.labelRequests(frame, 0);
     expect(request!.block.width).toBeGreaterThan(0);
@@ -132,8 +132,8 @@ describe("rule and region labels", () => {
     expect(request!.places).toEqual([{ dx: 0, dy: 0 }]);
     expect(request!.bounds).toBeNull();
     // Its block where it is drawn: the label's text starts at its corner.
-    const own = labelled.geometry([], frame, 0).slice(-1)[0] as LabelsGeometry | TextGeometry;
     const drawn = labelled.drawLabels(frame, 0, undefined, placeLabels([request!], []));
-    expect(drawn).toEqual([own]);
+    const own = scene.panels[0]!.marks.filter((g) => g.key === drawn[0]!.key);
+    expect(drawn).toEqual(own);
   });
 });

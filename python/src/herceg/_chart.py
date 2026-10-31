@@ -134,6 +134,7 @@ from ._layout import (
     InsetAnchor,
     InsetIndicator,
     Tracks,
+    _gap,
     _Inset,
     inset_spec,
     mosaic_cells,
@@ -1033,6 +1034,8 @@ class _LayoutOptions(TypedDict, total=False):
     facet_columns: int | None
     facet_row: str | None
     facet_column: str | None
+    facet_header: bool | None
+    facet_gap: float | tuple[float, float] | None
     panels: Sequence[Panel | str] | None
 
 
@@ -1286,6 +1289,8 @@ class Chart:
         facet_columns: int | None = None,
         facet_row: str | None = None,
         facet_column: str | None = None,
+        facet_header: bool | None = None,
+        facet_gap: float | tuple[float, float] | None = None,
         panels: Sequence[Panel | str] | None = None,
         layout: Grid | Mapping[str, Any] | None = None,
         legend: bool | LegendOptions | dict[str, Any] | None = None,
@@ -1319,6 +1324,16 @@ class Chart:
     ) -> None:
         if facet_columns is not None and facet is None:
             raise ChartError("Chart facet_columns: wraps the panels of facet; give facet")
+        for name, given in (("facet_header", facet_header), ("facet_gap", facet_gap)):
+            if given is not None and facet is None and facet_row is None and facet_column is None:
+                raise ChartError(
+                    f"Chart {name}: spaces the panels of facet; give facet, facet_row, "
+                    "or facet_column"
+                )
+        if facet_header is not None and not isinstance(facet_header, bool):
+            raise ChartError(
+                f"Chart facet_header: expected True or False; received {shown(facet_header)}"
+            )
         if facet is not None and (facet_row is not None or facet_column is not None):
             raise ChartError(
                 "Chart facet: facet, or facet_row and facet_column, not both; drop one"
@@ -1386,6 +1401,11 @@ class Chart:
         self._facet_columns = facet_columns
         self._facet_row = facet_row
         self._facet_column = facet_column
+        # Headers drawn unless False, and the gaps between panels: pixels, or (row, column).
+        self._facet_spacing = {
+            "header": facet_header,
+            "gap": _gap(facet_gap, Role("Chart facet_gap", "facet_gap")),
+        }
         # The fields that split rows into panels.
         self._facets = [f for f in (facet, facet_row, facet_column) if f is not None]
         self._panels = panel_list
@@ -5016,8 +5036,6 @@ class Chart:
         at: Position | None = None,
         from_: MarkAnchor | Mapping[str, Any] | None = None,
         data: Any = None,
-        overlap: Literal["show", "hide", "move"] | None = None,
-        style: MarkStyle | Mapping[str, Any] | None = None,
         contribute_domain: bool | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -5039,12 +5057,13 @@ class Chart:
         ``align`` its start, center, or end at the point). Column names for
         ``x`` or ``y`` draw one label per row; ``hg.Fraction``,
         ``hg.Pixels``, and ``hg.DataPosition`` mix shares of the plot,
-        pixels, and values moved by offsets. Labels that would cover an
-        earlier one of this mark, in row order, are drawn anyway
-        (``overlap="show"``), left out (``"hide"``), or, where their place is
-        taken or outside the plot, tried around their point and left out when
-        nothing fits (``"move"``), with a leader line back to it
-        (``style=hg.MarkStyle(leader=hg.StrokeStyle(...))``). Without
+        pixels, and values moved by offsets. Labels that would cover another
+        are drawn anyway (``hg.Label(overlap="show")``, the default), left
+        out (``"hide"``), or, where their place is taken or outside the plot,
+        tried around their point and left out when nothing fits (``"move"``),
+        with a line back to it (``leader=True``); ``overlap_group`` keeps them
+        apart from other marks' labels. Text ``from_`` another mark is placed
+        with that panel's series labels, as ``hg.SeriesLabels`` are. Without
         ``clip``, text at a value is left out while the value is out of the
         plot's view, and text at pixels or a share of the chart (above the
         plot, say) is drawn wherever it is; ``clip=False`` draws all of it,
@@ -5053,10 +5072,6 @@ class Chart:
         names each row's item, which selections and transitions follow across
         replaced data.
         """
-        if overlap not in (None, "show", "hide", "move"):
-            raise ChartError(
-                f'text overlap: expected "show", "hide", or "move"; received {shown(overlap)}'
-            )
         anchor: dict[str, Any] | None = None
         if from_ is not None:
             if at is not None or x is not None or y is not None:
@@ -5078,7 +5093,9 @@ class Chart:
             raise ChartError("text label: needs text or an hg.Label; give label")
         self._check_label_dict(label, "text", "label", ("content",))
         following = from_ is not None
-        label_json = self._option("text label", lambda: label_spec(label, "text", places=following))
+        label_json = self._option(
+            "text label", lambda: label_spec(label, "text", places=following, following=following)
+        )
         if following:
             # Its labels go where they follow their series, and read the source mark's columns.
             place = label_json.get("place") if isinstance(label_json, dict) else None
@@ -5106,8 +5123,6 @@ class Chart:
                 "y": coordinate_spec(y, "text y"),
                 "at": self._option("text at", at._spec) if at is not None else None,
                 "label": label_json,
-                "overlap": overlap,
-                "style": mark_style_spec(style, ("leader",), "text"),
                 "contributeDomain": _flag(contribute_domain, "text contribute_domain"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "text"),
@@ -5701,9 +5716,15 @@ class Chart:
     def _layout_spec(self) -> dict[str, Any]:
         """The spec's facet, or its panels and layout; nothing for one panel."""
         if self._facet is not None:
-            return {"facet": {"field": self._facet, "columns": self._facet_columns}}
+            return {
+                "facet": {"field": self._facet, "columns": self._facet_columns}
+                | self._facet_spacing
+            }
         if self._facets:
-            return {"facet": {"row": self._facet_row, "column": self._facet_column}}
+            return {
+                "facet": {"row": self._facet_row, "column": self._facet_column}
+                | self._facet_spacing
+            }
         if not self._panels:
             return {}
         spec: dict[str, Any] = {"panels": [p._spec() for p in self._panels]}

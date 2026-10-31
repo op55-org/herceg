@@ -8,7 +8,8 @@
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
-import { numberPattern, timePattern } from "../../format/patterns.ts";
+import { numberPattern, type TimePattern, timePattern } from "../../format/patterns.ts";
+import { LabelBoxes } from "../../layout/label-boxes.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
 import { clearDomain } from "../../model/clearance.ts";
 import type {
@@ -60,6 +61,7 @@ import {
   checkPlace,
   Drawings,
   edgeOf,
+  panelLabels,
   placing,
   recording,
   seriesLabels,
@@ -454,6 +456,7 @@ function compile(
             ),
             style: labels.style,
             place: labels.place,
+            layout: labels,
             path: `${path} labels.style`,
           },
           JSON.stringify([where.mark, "labels"]),
@@ -495,6 +498,7 @@ function compile(
       );
     },
     of: (mark) => byMark.get(mark),
+    labels: (drawings) => panelLabels(kit, drawings, (mark) => byMark.get(mark)),
     listDomains: (entries, plain) => {
       let out = [...entries];
       for (const [prefix, { scale, marks }] of listed) {
@@ -624,6 +628,7 @@ function followingText(
         style: label.style,
         halo: spec.halo,
         place: label.place,
+        layout: label,
         path: `${where.path} label.style`,
       },
       JSON.stringify([where.mark, "text"]),
@@ -1156,8 +1161,8 @@ function formatOf(
   return (format, locale, path) => {
     const pattern = format as { number?: string; time?: string };
     return pattern.time !== undefined
-      ? timePattern(kit, pattern.time, zone, locale, `${path}.time`)
-      : numberPattern(kit, pattern.number!, locale, `${path}.number`);
+      ? timePattern(kit, pattern as TimePattern, zone, locale, path)
+      : numberPattern(kit, pattern as { number: string }, locale, path);
   };
 }
 
@@ -1184,6 +1189,7 @@ function barFeatures(
   const pattern = labels?.format as { number?: string; time?: string } | undefined;
   if (pattern?.number !== undefined || pattern?.time !== undefined)
     format(labels!.format!, undefined, `${path} labels.format`);
+  if (labels) checkBarLayout(labels as Record<string, unknown>, `${path} labels`);
   // Labels of parts: a field at the bar's row, its series, its value.
   const content =
     labels?.content &&
@@ -1199,6 +1205,25 @@ function barFeatures(
   let theme: Theme | undefined;
   let paintOf: PaintReader;
   return {
+    labelBoxes: (paint, halo) => {
+      const boxes = new LabelBoxes();
+      // How far labels paint past their boxes, without a halo and with one:
+      // half the box's outline, or the halo past its padding (as
+      // `paintedReach` in marks/labels.ts, which this chunk does not import).
+      const box = paint.background;
+      const outline = box?.stroke ? (box.strokeWidth ?? 1) / 2 : 0;
+      const past = (halo?.width ?? 0) / 2 - (box ? Math.min(...paint.padding) : 0);
+      const reach = [outline, Math.max(0, outline, past)];
+      return {
+        takes(x, y, width, height, haloed) {
+          const r = reach[haloed ? 1 : 0]!;
+          const [x0, y0, x1, y1] = [x - r, y - r, x + width + r, y + height + r];
+          if (boxes.hits(x0, y0, x1, y1)) return false;
+          boxes.add(x0, y0, x1, y1);
+          return true;
+        },
+      };
+    },
     use(t, p) {
       theme = t;
       paintOf = p;
@@ -1765,6 +1790,31 @@ function pointFeatures(
       s.features = { points: styles.looks() };
     },
   };
+}
+
+/**
+ * Checks how bars' labels (`labels`, named `at` in messages) keep apart:
+ * left out where they would cover another of the mark's ("hide"), or not;
+ * they take no group and draw no leaders, staying at their bars.
+ */
+function checkBarLayout(labels: Record<string, unknown>, at: string): void {
+  if (labels.overlapGroup !== undefined)
+    throw new Error(
+      `${at}.overlapGroup: bar labels keep apart within their mark; drop overlapGroup`,
+    );
+  if (labels.leader !== undefined)
+    throw new Error(`${at}.leader: bar labels stay at their bars and draw none; drop leader`);
+  if (labels.priority !== undefined)
+    throw new Error(
+      `${at}.priority: bar labels that would cover an earlier one are left out, the later in series and row order; drop priority`,
+    );
+  const { overlap } = labels;
+  if (overlap !== undefined && overlap !== "show" && overlap !== "hide")
+    throw new Error(
+      overlap === "move"
+        ? `${at}.overlap: bar labels fit at their bar or are left out; use "show" or "hide"`
+        : `${at}.overlap: expected "show" or "hide"; received ${JSON.stringify(overlap)}`,
+    );
 }
 
 /** Whether a region's outlines draw: of a width above 0, on a side at least (all by default). */

@@ -2,9 +2,13 @@
 // points, or outside the plot in the side tracks, spread apart in columns,
 // and the room the outside ones keep; and the chart's tracks growing for
 // them within a layout.
-import { describe, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
-import { type AttachedLabel, placeAttached as place } from "../../src/layout/attached.ts";
+import {
+  type AttachedLabel,
+  type LabelOwner,
+  placeAttached as place,
+} from "../../src/layout/attached.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import type { Attachment } from "../../src/marks/attachments.ts";
@@ -16,15 +20,29 @@ import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
-import type { Geometry, LabelsGeometry, Rect, TextItem } from "../../src/scene/scene.ts";
+import type {
+  Geometry,
+  LabelsGeometry,
+  Rect,
+  SegmentGeometry,
+  TextItem,
+} from "../../src/scene/scene.ts";
 import type { TextStyle } from "../../src/spec/style.ts";
 import { resolveTheme } from "../../src/theme.ts";
 import { contractTest } from "../helpers/contracts.ts";
 
 const theme = resolveTheme("light");
-/** Places labels with the chart's code, as the feature compiler does. */
-const placeAttached = (labels: readonly AttachedLabel[], frame: Frame, key: string) =>
-  place(labels, frame, key, GUIDE_KIT);
+/** Places labels of one mark, keyed `key`, with the chart's code, as the feature compiler does. */
+const placeAttached = (labels: readonly AttachedLabel[], frame: Frame, key: string) => {
+  const owner: LabelOwner = { key, leader: undefined, room: [0, 0] };
+  const { geometry } = place(
+    labels.map((at) => ({ ...at, owner })),
+    frame,
+    GUIDE_KIT,
+  );
+  const drawn = (geometry.get(owner) ?? []).filter((g): g is LabelsGeometry => g.kind === "labels");
+  return { geometry: drawn, room: owner.room };
+};
 const plot: Rect = { x: 40, y: 10, width: 300, height: 200 };
 const frame = {
   plot,
@@ -50,6 +68,9 @@ function label(
     paint: labelPaint(theme, "#333333", style),
     place,
     halo: undefined,
+    overlap: "move",
+    priority: 0,
+    owner: { key: "labels", leader: undefined, room: [0, 0] },
   };
 }
 
@@ -132,8 +153,9 @@ describe("attached labels", () => {
       frame,
       "labels",
     );
-    const boxes = itemsOf(geometry).map(boxOf);
-    const text = itemsOf(geometry).map((item) => item.text);
+    const items = itemsOf(geometry).sort((a, b) => a.y - b.y);
+    const boxes = items.map(boxOf);
+    const text = items.map((item) => item.text);
     // In the order of their points, apart, and inside the plot.
     expect(text).toEqual(["a", "b", "c"]);
     for (let k = 1; k < boxes.length; k++)
@@ -388,5 +410,299 @@ describe("tracks for labels placed as they are drawn", () => {
       ),
     );
     expect(x + estimateText(text, paint.css)).toBeLessThanOrEqual(textStart);
+  });
+});
+
+describe("series labels keeping apart", () => {
+  /** A label of `owner` with a policy, outside the plot on the right, its point at (340, y). */
+  const series = (
+    y: number,
+    text: string,
+    overlap: AttachedLabel["overlap"],
+    owner: LabelOwner,
+    priority = 0,
+  ): AttachedLabel => ({ ...label(340, y, text, {}, { outside: true }), overlap, priority, owner });
+  const owner = (key = "labels", leader?: LabelOwner["leader"]): LabelOwner => ({
+    key,
+    leader,
+    room: [0, 0],
+  });
+  /** Each drawn label's text and the middle of its block, top to bottom. */
+  const middles = (geometry: Map<LabelOwner, Geometry[]>) =>
+    [...geometry.values()]
+      .flat()
+      .filter((g): g is LabelsGeometry => g.kind === "labels")
+      .flatMap((g) => g.items)
+      .map((item) => {
+        const box = boxOf(item);
+        return [item.text, box.y + box.height / 2] as const;
+      })
+      .sort((a, b) => a[1] - b[1]);
+  const height = theme.style.text.lineHeight;
+
+  contractTest("label.series.overlap.show", () => {
+    // A1.05: each exactly at its point, overlapping if they must.
+    const own = owner();
+    const { geometry } = place(
+      [series(100, "auth", "show", own), series(103, "api", "show", own)],
+      frame,
+      GUIDE_KIT,
+    );
+    expect(middles(geometry)).toEqual([
+      ["auth", 100],
+      ["api", 103],
+    ]);
+  });
+
+  contractTest("label.series.overlap.move", () => {
+    // A1.06: two labels a few pixels apart move apart by half the overlap
+    // each, no further; a third with room stays at its point.
+    const own = owner();
+    const { geometry } = place(
+      [
+        series(100, "auth", "move", own),
+        series(104, "api", "move", own),
+        series(160, "db", "move", own),
+      ],
+      frame,
+      GUIDE_KIT,
+    );
+    const [auth, api, db] = middles(geometry);
+    expect(auth![0]).toBe("auth");
+    expect(api![1] - auth![1]).toBeCloseTo(height, 6);
+    expect((auth![1] + api![1]) / 2).toBeCloseTo(102, 6);
+    expect(db).toEqual(["db", 160]);
+  });
+
+  it("move as little as a crowd needs, the least squared moves", () => {
+    // Three at one point: the middle stays, the others a label's height away.
+    const own = owner();
+    const { geometry } = place(
+      [series(100, "a", "move", own), series(100, "b", "move", own), series(100, "c", "move", own)],
+      frame,
+      GUIDE_KIT,
+    );
+    // Ties keep series order.
+    expect(middles(geometry)).toEqual([
+      ["a", 100 - height],
+      ["b", 100],
+      ["c", 100 + height],
+    ]);
+  });
+
+  it("keep inside the plot, moving the crowd as one", () => {
+    const own = owner();
+    const { geometry } = place(
+      [series(plot.y + 1, "a", "move", own), series(plot.y + 2, "b", "move", own)],
+      frame,
+      GUIDE_KIT,
+    );
+    const [a, b] = middles(geometry);
+    expect(a![1]).toBeCloseTo(plot.y + height / 2, 6);
+    expect(b![1]).toBeCloseTo(plot.y + height * 1.5, 6);
+  });
+
+  contractTest("label.series.overlap.hide", () => {
+    // The first in series order stays where they would cover each other;
+    // the higher priority wins over order.
+    const own = owner();
+    const hide = (priority: number) =>
+      middles(
+        place(
+          [series(100, "auth", "hide", own), series(104, "api", "hide", own, priority)],
+          frame,
+          GUIDE_KIT,
+        ).geometry,
+      ).map(([text]) => text);
+    expect(hide(0)).toEqual(["auth"]);
+    expect(hide(1)).toEqual(["api"]);
+  });
+
+  contractTest("label.series.drop", () => {
+    // A column too short for all: the lowest priority left out first, then
+    // the last in series order, until the rest fit.
+    const own = owner();
+    const rows = Math.floor(plot.height / height);
+    const labels = Array.from({ length: rows + 2 }, (_, k) =>
+      series(plot.y + 100, `s${k}`, "move", own, k === 0 ? -1 : 0),
+    );
+    const shown = middles(place(labels, frame, GUIDE_KIT).geometry).map(([text]) => text);
+    expect(shown).toHaveLength(rows);
+    expect(shown).not.toContain("s0");
+    expect(shown).not.toContain(`s${rows + 1}`);
+    expect(shown).toContain(`s${rows}`);
+  });
+
+  contractTest("label.series.leader", () => {
+    // Leaders join labels moved more than 6 pixels to their points; others draw none.
+    const own = owner("labels", {
+      stroke: undefined,
+      path: "line labels.leader.stroke",
+      strokeWidth: 1,
+    });
+    const { geometry } = place(
+      [
+        series(100, "a", "move", own),
+        series(100, "b", "move", own),
+        series(100, "c", "move", own),
+        series(180, "d", "move", own),
+      ],
+      frame,
+      GUIDE_KIT,
+    );
+    const [leaders, labels] = geometry.get(own)!;
+    expect(leaders!.kind).toBe("segments");
+    expect(labels!.kind).toBe("labels");
+    const segments = leaders as SegmentGeometry;
+    // "a" and "c" moved a line's height; "b" and "d" stayed.
+    expect(segments.count).toBe(2);
+    expect(segments.stroke).toBe(theme.muted);
+    for (let k = 0; k < segments.count; k++) {
+      // From beside the point, to the label's near edge.
+      expect(segments.coords[k * 4]!).toBeGreaterThan(340);
+      expect(Math.abs(segments.coords[k * 4 + 1]! - 100)).toBeLessThanOrEqual(2);
+      expect(segments.coords[k * 4 + 2]!).toBeCloseTo(350, 6);
+    }
+  });
+
+  it("move least where blocks meet only some of the others", () => {
+    // A meets B and C; B and C do not meet. C, tall, wants to be above A,
+    // so A and C move apart; B, whose room A leaves, stays at its point.
+    const a = label(100, 100, "aaaaaaaaaa");
+    const b = label(140, 101, "bb");
+    const c = label(60, 102, "cccccccccc\nc\nc\nc\nc\nc");
+    const items = itemsOf(placeAttached([a, b, c], frame, "labels").geometry);
+    const [ia, ib, ic] = ["aaaaaaaaaa", "bb", "cccccccccc\nc\nc\nc\nc\nc"].map(
+      (text) => items.find((item) => item.text === text)!,
+    );
+    expect(ib!.y).toBeCloseTo(101, 6);
+    const [boxA, boxC] = [boxOf(ia!), boxOf(ic!)];
+    expect(boxC.y).toBeCloseTo(boxA.y + boxA.height, 4);
+    // A and C share the move: each as far from where it wants to be.
+    const lineHeight = ia!.paint.lineHeight;
+    expect(100 - (boxA.y + lineHeight / 2)).toBeCloseTo(boxC.y + boxC.height / 2 - 102, 4);
+  });
+
+  it("place labels meeting only some of the others between the walls each meets", () => {
+    // A meets B and C, B and C do not meet; a shown label just above their
+    // points meets all three, which go below it.
+    const wall = { ...label(60, 99, "wwwwwwwwwwwwwwwwwwwwwwwww"), overlap: "show" as const };
+    const a = label(100, 100, "aaaaaaaaaa");
+    const b = label(140, 101, "bb");
+    const c = label(60, 102, "cccccccccc");
+    const items = itemsOf(placeAttached([wall, a, b, c], frame, "labels").geometry);
+    expect(items).toHaveLength(4);
+    const shown = boxOf(items.find((item) => item.text === wall.text)!);
+    for (const text of [a.text, b.text, c.text]) {
+      const box = boxOf(items.find((item) => item.text === text)!);
+      expect(box.y).toBeGreaterThanOrEqual(shown.y + shown.height - 1e-6);
+    }
+  });
+
+  it("leave a label its point where the walls and labels it meets leave room", () => {
+    // A meets B, B meets C, A and C do not meet; a shown label after A's and
+    // B's points meets only them. C, below B, stays at its point.
+    const a = label(100, 90, "aaaaaaaaaa");
+    const b = label(140, 95, "bbbbbbbbbb");
+    const c = label(180, 100, "cccccccccc");
+    const wall = { ...label(100, 99, "wwwwww"), overlap: "show" as const };
+    const items = itemsOf(placeAttached([a, b, c, wall], frame, "labels").geometry);
+    expect(items).toHaveLength(4);
+    const lineHeight = items[0]!.paint.lineHeight;
+    const middle = (text: string) => {
+      const box = boxOf(items.find((item) => item.text === text)!);
+      return box.y + box.height / 2;
+    };
+    expect(middle(c.text)).toBeCloseTo(100, 6);
+    expect(middle(b.text)).toBeLessThanOrEqual(99 - lineHeight + 1e-6);
+  });
+
+  it("keep the labels a left-out one joined, where they no longer meet", () => {
+    // Three labels in a plot room for one, the middle weakest and meeting
+    // the others, which do not meet: it is left out, and both others stay.
+    const short = { ...frame, plot: { x: 40, y: 10, width: 300, height: 20 } } as Frame;
+    const a = label(60, 20, "aaaaaaaaaa");
+    const b = { ...label(100, 20, "bbbbbbbbbbbbbbbbbbbb"), priority: -1 };
+    const c = label(200, 20, "cccccccccc");
+    const items = itemsOf(placeAttached([a, b, c], short, "labels").geometry);
+    expect(items.map(({ text }) => text)).toEqual([a.text, c.text]);
+  });
+
+  it("keep labels that move off labels shown at their points", () => {
+    const shown = { ...label(340, 100, "fixed", {}, { outside: true }), overlap: "show" as const };
+    const moving = label(340, 100, "moving", {}, { outside: true });
+    const [fixed, moved] = itemsOf(placeAttached([shown, moving], frame, "labels").geometry);
+    expect(fixed!.y).toBeCloseTo(100, 6);
+    const [boxF, boxM] = [boxOf(fixed!), boxOf(moved!)];
+    expect(boxM.y >= boxF.y + boxF.height - 1e-6 || boxM.y + boxM.height <= boxF.y + 1e-6).toBe(
+      true,
+    );
+  });
+
+  it("keep the order of their points around labels shown at theirs", () => {
+    // A label that moves, its point a little below a shown one's, goes below it.
+    const own = owner();
+    const { geometry } = place(
+      [series(100, "shown", "show", own), series(105, "moving", "move", own)],
+      frame,
+      GUIDE_KIT,
+    );
+    expect(middles(geometry)).toEqual([
+      ["shown", 100],
+      ["moving", 100 + height],
+    ]);
+  });
+
+  it("keep labels that hide where they outrank every label that moves", () => {
+    // The hider of higher priority stays at its point; the mover goes around it.
+    const own = owner();
+    const at = (priority: number) =>
+      middles(
+        place(
+          [series(100, "mover", "move", own, 0), series(100, "hider", "hide", own, priority)],
+          frame,
+          GUIDE_KIT,
+        ).geometry,
+      );
+    const [first, second] = at(100);
+    expect(second).toEqual(["hider", 100]);
+    expect(first).toEqual(["mover", 100 - height]);
+    // Of no higher priority, it hides where the mover, placed first, covers it.
+    expect(at(0)).toEqual([["mover", 100]]);
+  });
+
+  it("move continuously while their points do, and change places where points cross", () => {
+    const own = owner();
+    const at = (shift: number) =>
+      middles(
+        place(
+          [series(100, "a", "move", own), series(104 + shift, "b", "move", own)],
+          frame,
+          GUIDE_KIT,
+        ).geometry,
+      );
+    const [a0, b0] = at(0);
+    const [a1, b1] = at(0.5);
+    expect(a1![1] - a0![1]).toBeCloseTo(0.25, 6);
+    expect(b1![1] - b0![1]).toBeCloseTo(0.25, 6);
+    // Crossed: b above a.
+    expect(at(-10).map(([text]) => text)).toEqual(["b", "a"]);
+  });
+
+  it("keep apart across the marks of a panel, each drawing its own", () => {
+    const first = owner("first");
+    const second = owner("second");
+    const { geometry, boxes } = place(
+      [series(100, "auth", "move", first), series(102, "api", "move", second)],
+      frame,
+      GUIDE_KIT,
+    );
+    expect([...geometry.keys()]).toEqual([first, second]);
+    const [a, b] = middles(geometry);
+    expect(b![1] - a![1]).toBeCloseTo(height, 6);
+    // Their boxes, for annotation labels to keep off.
+    expect(boxes).toHaveLength(2);
+    expect(first.room[1]).toBeGreaterThan(0);
+    expect(second.room[1]).toBeGreaterThan(0);
   });
 });

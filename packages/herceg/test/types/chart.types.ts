@@ -1,6 +1,7 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
+import { axis } from "../../src/guides/options.ts";
 import type { ViewportEvent } from "../../src/index.ts";
 import { inset } from "../../src/layout.ts";
 import { custom } from "../../src/marks/custom.ts";
@@ -71,3 +72,30 @@ inset("zoom", { place: { at: { x: { data: 3 }, y: { px: 10 } } } });
 
 // The exported view event is what `viewport` listeners receive, revision included.
 chart.on("viewport", (event: ViewportEvent) => event.revision satisfies number);
+
+// The fiscal row of docs/guide/axes-and-legends.md: one fiscal object for ticks and format.
+const fiscal = { start: 7 };
+axis({
+  scale: "x",
+  layers: [
+    {
+      id: "quarter",
+      ticks: { every: "3 months", fiscal },
+      format: { time: "FY%y Q%q", fiscal },
+      labels: { row: 1 },
+    },
+  ],
+});
+// @ts-expect-error axes take one options object, naming their scale
+axis("x", { layers: [] });
+
+// Numbers have no fiscal year: only time patterns take one.
+axis({ scale: "x", format: { time: "FY%y", fiscal } });
+// @ts-expect-error a number format takes no fiscal year
+axis({ scale: "x", format: { number: ".0f", fiscal } });
+// @ts-expect-error nor do Intl options
+axis({ scale: "x", format: { maximumFractionDigits: 0, fiscal } });
+// @ts-expect-error nor ticks by count
+axis({ scale: "x", ticks: { count: 4, fiscal } });
+// @ts-expect-error nor ticks by values
+axis({ scale: "x", ticks: { values: [0, 1], fiscal } });

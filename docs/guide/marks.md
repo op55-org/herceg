@@ -291,11 +291,12 @@ hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"
 | --- | --- |
 | `true` | Each bar's value at its end (inside each segment of a stack). |
 | `field` | Another field's value instead. |
-| `content` | Text and parts (`{ value: true }`, `{ field }`, `{ series: true }`), each with a `format`. |
+| `content` | Text and parts (`{ value: true }`, `{ field }`, `{ series: true }`), each with a `format` and a [`style`](#parts-with-a-look-of-their-own). |
 | `format` | Intl options, or `{ number: ",.0f" }` / `{ time }` patterns. |
 | `style` | A text style. Inside bars, white or black by contrast (white wherever it reaches 3:1) unless `style.color` is set. |
 | `minLength` | Bars shorter than this many pixels get no label. |
 | `place` | `{ outside: false, attachment }` puts labels inside at `"start"`, `"center"`, or `"end"` (default). By default they go past the bar's end, just inside where that would leave the plot. |
+| `overlap` | `"show"` (default) or `"hide"`: a label that would cover an earlier one goes inside its bar, or is left out where it does not fit there. |
 
 Labels that do not fit are left out.
 
@@ -505,7 +506,6 @@ line(metrics, { x: "time", y: ["mean", "p95"], style: { by: { map: { p95: { dash
 | --- | --- |
 | `by: { field?, map }` (`hg.StyleMap`) | Looks by value (`stroke`, `strokeWidth`, `dash`, `opacity`, `fill`, `fillOpacity`, `strokeOpacity`, and for lines `marker`). Without `field`, series are named by their series value or value field. Bars read each row. |
 | `marker` (`hg.MarkerStyle`) | Line markers' `symbol`, `radius`, `fill`, `stroke`, `strokeWidth`, `opacity`. |
-| `leader` | Text labels' lines back to moved labels. |
 
 Legends with `swatches: "mark"` draw each series' look: dash, width, marker,
 fill.
@@ -554,8 +554,7 @@ text({ at: { x: { fraction: 0.03 }, y: { data: 1.7 } }, label: "Note" });
 text(peaks, {
   x: "time",
   y: { field: "value", offset: -10 },
-  label: { field: "value", format: { number: ".1f" } },
-  overlap: "move",
+  label: { field: "value", format: { number: ".1f" }, overlap: "move" },
 });
 ```
 
@@ -587,13 +586,14 @@ draws has no place.
 
 | `label` (Python `hg.Label`) | Means |
 | --- | --- |
-| `"text"`, `text`, `field`, `content` | Constant text, each row's value, or parts (`{ value: true }`, `{ field }`, `{ series: true }`, each with a `format`). |
+| `"text"`, `text`, `field`, `content` | Constant text, each row's value, or parts (`{ value: true }`, `{ field }`, `{ series: true }`, each with a `format` and a [`style`](#parts-with-a-look-of-their-own)). |
 | `format` | Intl options, or `{ number }` / `{ time }` patterns. |
 | `style` | `fontSize`, `fontWeight`, `color`, `halo`, `background` (`fill`, `stroke`, `radius`), `padding`, `align`, `verticalAlign`. |
 | `place.attachment` | Where along a rule or region side: `"start"`, `"center"`, `"end"` (default). |
 | `place.side` | The region edge the label follows (top by default). |
 | `place.outside` | A rule's label beside the axis, in room the chart keeps unless `reserve: false`. |
 | `place.offset` | Pixels away from its place. |
+| `overlap`, `overlapGroup`, `leader`, `priority` | How it keeps apart from other labels (Python `overlap_group`); see [labels that would overlap](#labels-that-would-overlap). |
 
 - **Domains.** Annotations count toward the axes' domains only with
   `contributeDomain: true`, so thresholds do not stretch the data's axes.
@@ -609,11 +609,9 @@ draws has no place.
 - **Staying inside.** Labels in the plot stay inside it in every output: a
   label at the edge flips to the rule's other side or moves in. Labels of
   rules and regions outside the plot stay inside the chart.
-- **Overlap.** Text labels that would cover an earlier label of the same
-  mark are drawn anyway by default; `overlap: "hide"` leaves them out;
-  `overlap: "move"` tries nearby places, then farther ones with a leader
-  line, and leaves out labels with no free place. Text is meant for a few
-  hundred labels.
+- **Overlap.** Labels that would cover another are drawn anyway by
+  default; see [labels that would overlap](#labels-that-would-overlap).
+  Text is meant for a few hundred labels.
 - **Legend.** `legend: true` lists an annotation by its label (a rule as a
   line, a region as a box) and its entry hides it.
 - **Outlines.** Regions take `stroke`, `strokeWidth`, and `strokeSides`.
@@ -667,7 +665,116 @@ hg.Chart(df, legend=False).line(
 ```
 
 Where the view cuts a stack split by a series field, labels at the view's
-edges write series and values, not fields.
+edges write series and values, not fields. A panel's series labels, and
+text following series, keep apart as the next section describes.
+
+### Parts with a look of their own
+
+A part of a label's `content` takes a `style` of its own: `fontSize`,
+`fontWeight`, `fontStyle`, `color`, and `opacity` over the label's style.
+`"\n"` breaks lines; each line is as tall as its tallest part, and its
+parts share one baseline. The block's font, line height, alignment, halo,
+and box stay the label's, so a part's style refuses them. Every label kind
+that takes `content` takes styled parts: bars', series', and annotations'.
+
+```ts
+bar(sales, {
+  x: "revenue",
+  y: "region",
+  labels: {
+    content: [
+      { field: "region", style: { fontWeight: 700 } },
+      "\n",
+      { value: true, format: { number: ",.0f" }, style: { opacity: 0.7 } },
+    ],
+    place: { outside: false },
+  },
+});
+```
+
+```python
+hg.Chart(sales).bar(
+    x="revenue", y="region",
+    labels=hg.BarLabels(
+        content=[
+            hg.LabelPart(field="region", style=hg.TextStyle(font_weight=700)),
+            "\n",
+            hg.LabelPart(value=True, format=hg.Format(number=",.0f"), style=hg.TextStyle(opacity=0.7)),
+        ],
+        place=hg.LabelPlace(outside=False),
+    ),
+)
+```
+
+Each part is drawn as a text of its own, the halos of all of a label's
+parts before any part's text, so one part's halo never covers its
+neighbor. A series label inside the plot that is too wide shortens the
+part that runs past the plot with an ellipsis and leaves out the parts
+after it. Tick labels take no parts.
+
+### Labels that would overlap
+
+Every label kind says what it does where it would cover another label with
+the same fields:
+
+| Field | Means |
+| --- | --- |
+| `overlap` | `"show"`: drawn at its place anyway. `"hide"`: left out. `"move"`: moved to the nearest free place its kind allows, and left out where there is none. |
+| `overlapGroup` (Python `overlap_group`) | A name: labels of every mark in a panel naming it keep apart, as one mark's labels do. |
+| `leader` | `true`, or a stroke style (`stroke`, `strokeWidth`, `dash`, `opacity`): a line from each moved label back to what it labels. Labels that did not move draw none. |
+| `priority` | A number: higher-priority labels are placed first and stay where they would meet lower ones. 0 by default. |
+
+```ts
+for (const event of events)
+  marks.push(
+    rule({
+      x: event.at,
+      dash: "--",
+      label: { text: event.name, overlap: "move", overlapGroup: "events", leader: true },
+    }),
+  );
+```
+
+```python
+for event in events:
+    chart = chart.rule(
+        x=event.at,
+        dash="--",
+        label=hg.Label(text=event.name, overlap="move", overlap_group="events", leader=True),
+    )
+```
+
+Each kind takes only the fields it can honour and refuses the others:
+
+| Label kind | `overlap` | `overlapGroup` | `leader` | `priority` | Default |
+| --- | --- | --- | --- | --- | --- |
+| Series labels (`labels` of lines and areas, text with `from`) | show, hide, move | no: a panel's series labels always meet | yes | yes | `"move"` |
+| Text, rule, and region labels (`label`) | show, hide, move | yes | yes (not regions) | yes | `"show"` |
+| Bar labels | show, hide | no | no | no | `"show"` |
+| Tick labels ([axes](axes-and-legends.md)) | show, hide, stagger, wrap | no | no | yes | `"show"`; every n-th on category axes |
+
+- **Series labels** that "move" stay in the order of their points (series
+  order for ties) and move as little as their neighbors force them,
+  inside the plot, keeping off labels that "show" and labels that "hide"
+  of higher priority than any that move. Where the plot is too short for
+  all of them, "move" leaves out the lowest priority, then the last
+  series, until the rest fit. Labels moved more than 6 pixels from their
+  point draw a leader when asked. They are placed first in a panel;
+  annotation labels keep off them.
+- **Annotation labels** are placed by priority, then mark order, then row
+  order. A rule's label that moves tries the mirror place across its rule,
+  then slides along the rule; text tries places around its point; a
+  region's label slides along its side. Places near the label are tried for
+  every label before farther ones.
+- **As painted.** Labels keep apart, and "hide" leaves out, by what they
+  paint: box outlines and halos count, on series, annotation, and bar
+  labels alike. A label that writes nothing (empty, or only line breaks)
+  takes no place and hides no other.
+- **Cost.** Series labels take O(n log n) for n labels at one column, and
+  for up to 48 labels whose columns differ, about O(n·m) for m pairs that
+  meet (O(n²(n + m)) at worst); labels that "show" add the sorting of
+  those each group meets. Annotation labels take O(n·m) for n labels
+  among m placed boxes, kept small by a spatial index.
 
 ## Custom marks
 

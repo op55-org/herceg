@@ -36,12 +36,19 @@ createChart(element, {
   facet: facet({ row: "region", column: "product" }), // a grid; either may be left out
   y: { scope: "row" }, // a y scale per row of panels
 });
+
+createChart(element, {
+  marks: [line(load, { x: "time", y: "cpu" })],
+  facet: facet("site", { columns: 1, header: false, gap: 1 }), // strips a pixel apart
+  y: { show: false },
+});
 ```
 
 ```python
 hg.Chart(sales, facet="region", facet_columns=3).line(x="week", y="units")
 hg.Chart(sales, facet_row="region", facet_column="product").line(x="week", y="units")
 hg.Chart(sales, facet="region").pie("product", "revenue")  # a pie per region
+hg.Chart(load, facet="site", facet_columns=1, facet_header=False, facet_gap=1, y=hg.AxisOptions(show=False))
 ```
 
 - **Order.** Panels follow the order values first appear. Rows without a
@@ -54,14 +61,20 @@ hg.Chart(sales, facet="region").pie("product", "revenue")  # a pie per region
 - **Per panel.** Stacks stack, histograms count, and box plots summarize
   each panel's rows apart. Heatmap colors follow one scale across panels.
   Series keep their dodge slots in every panel.
+- **Spacing.** `header: false` (Python `facet_header=False`) draws no
+  headers and keeps no room for them. `gap` (Python `facet_gap`) is the
+  whitespace between neighboring panels beyond what their labels and
+  headers take: pixels, or `{ row, column }` (Python `(row, column)`);
+  panels are spaced to their labels by default.
 - **Keys.** Panels are keyed by their value, or in a grid by both as a JSON
   array (`["North","A"]`), which inspections report as `panel`.
 - **Interaction.** Pointer, brush, and zoom act on the scales of the panel
   they start in; panels sharing them follow. Up and Down move the keyboard
   between series and on to the next panel.
-- **Limits.** A chart too small for its panels (under 20 px a side) throws,
-  naming the grid. Points over a row view, and custom marks without series,
-  repeat rather than split. 3D marks refuse facets.
+- **Limits.** A chart too small for its panels throws, naming the grid:
+  each panel keeps the least plot its labels need (see
+  [least plots](#subplots)). Points over a row view, and custom marks
+  without series, repeat rather than split. 3D marks refuse facets.
 
 ## Subplots
 
@@ -120,11 +133,17 @@ right.panel("share", title="By region").pie("region", "requests")
 - **A layout that does not fit** is refused with the room it needs
   ("layout: needs at least 280 px of width for its panels' plots, titles,
   and axes, and has 200 px; ...").
-- **Least plots.** Each panel's plot keeps at least 48 px across and 32 px
-  down, room for its ticks and for pointing at its data, so a smaller pixel
-  track is refused rather than drawn cramped: a `{ px: 25 }` row gives
-  "layout: panel "b" needs a plot of 32 px down, and its row gives it
-  25 px; make the row larger".
+- **Least plots.** A panel's plot keeps what its own tick labels need,
+  in subplots and facets alike: down, two y labels and their gap (18 px
+  at the default text size); across, 48 px for two short x labels and
+  their gap. Labels count wherever an axis writes them: above the plot,
+  on the right, or inside, at their own sizes, and not where an axis the
+  guides list has `labels: false`. Along an axis the panel does not label
+  (hidden, or labelled by the panel beside it), a pixel. A smaller pixel
+  track is refused
+  rather than drawn cramped: a `{ px: 12 }` row of a panel with y labels
+  gives "layout: panel "b" needs a plot of 18 px down, and its row gives
+  it 12 px; make the row larger".
 - **Per-panel settings.** A panel's `x`, `y`, `yRight` replace the chart's
   for its own axes (one panel can be logarithmic); its `interaction`
   replaces the chart's there, setting by setting.

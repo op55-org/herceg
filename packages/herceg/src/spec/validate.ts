@@ -8,7 +8,7 @@
 // property meant where one is close, so misspellings do not go unnoticed.
 
 import { checkBins } from "../data/bins.ts";
-import { numberPattern, timePattern } from "../format/patterns.ts";
+import { numberPattern, type TimePattern, timePattern } from "../format/patterns.ts";
 import { calendarInterval } from "../guides/ticks.ts";
 import { areaFormError } from "../marks/area.ts";
 import { boxPlotFormError } from "../marks/boxplot-input.ts";
@@ -41,6 +41,7 @@ import type {
   MarkerStyle,
   MarkStyleSpec,
   OrdinalScaleSpec,
+  PartStyle,
   SeriesStyle,
   StackSpec,
   StyleMapSpec,
@@ -635,6 +636,11 @@ const TIME_FORMAT =
 function format(type: unknown): Check {
   return (v, path) => {
     object(v, path);
+    if ("fiscal" in (v as object))
+      throw refusal(
+        `${path}.fiscal`,
+        'Intl options write no fiscal year; give { time: "%Y Q%q" } with fiscal, or drop fiscal',
+      );
     const keys = Object.keys(v as object);
     const time =
       type === "time" || (type === undefined && keys.some((key) => TIME_FORMAT.test(key)));
@@ -738,6 +744,11 @@ function ticks(type: unknown): Check {
     noFunction(v, path, "give a count, { every }, or { values }");
     if (typeof v === "number") return positive(v, path);
     if (!isRecord(v)) fail(path, "a count, or an object with count, every, or values", v);
+    if ("fiscal" in v && !("every" in v))
+      throw refusal(
+        `${path}.fiscal`,
+        "fiscal years step ticks through months and years; give every, or drop fiscal",
+      );
     if ("count" in v) return checkProperties(v, path, ["count"], { count: positive });
     if ("values" in v)
       return checkProperties(v, path, ["values"], {
@@ -785,9 +796,34 @@ function ticks(type: unknown): Check {
         if (calendar)
           fail(at, "no anchor with a calendar interval, which starts at calendar boundaries", a);
       },
+      fiscal: (f, at) => {
+        fiscal(f, at);
+        if (type === "linear" || type === "log" || typeof every === "number")
+          throw refusal(
+            at,
+            `fiscal years step through time; a ${String(type ?? "number")} axis steps by numbers; drop fiscal`,
+          );
+        if (!calendar || !/month|year/.test(calendarInterval(every as string, at).unit))
+          throw refusal(
+            at,
+            "fiscal years start months and years; step by months or years, or drop fiscal",
+          );
+      },
     });
   };
 }
+
+/** A fiscal year: the month it starts in, and the year it is named by. */
+const fiscal: Check = (v, path) => {
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["start"], {
+    start: (s, at) => {
+      if (!(Number.isInteger(s) && (s as number) >= 1 && (s as number) <= 12))
+        fail(at, "a month from 1 to 12", s);
+    },
+    name: oneOf("end", "start"),
+  });
+};
 
 /**
  * How an axis of `type` writes values: Intl options, or a pattern, `{ number }`
@@ -799,15 +835,15 @@ function axisFormat(type: unknown): Check {
     noFunction(v, path, 'give Intl options, { number: ",.2f" }, or { time: "%H:%M" }');
     if (!isRecord(v) || !("number" in v || "time" in v)) return intl(v, path);
     const key = "number" in v ? "number" : "time";
-    checkProperties(v, path, [key], { [key]: string });
+    checkProperties(v, path, [key], key === "time" ? { time: string, fiscal } : { number: string });
     if (key === "number" && type === "time")
       fail(`${path}.number`, '{ time: "..." } or Intl date options on a time axis', v.number);
     if (key === "time" && (type === "linear" || type === "log"))
       fail(`${path}.time`, '{ number: "..." } or Intl number options on a number axis', v.time);
     try {
       if (key === "number")
-        numberPattern(GUIDE_KIT, v.number as string, undefined, `${path}.number`);
-      else timePattern(GUIDE_KIT, v.time as string, "UTC", undefined, `${path}.time`);
+        numberPattern(GUIDE_KIT, { number: v.number as string }, undefined, path);
+      else timePattern(GUIDE_KIT, v as unknown as TimePattern, "UTC", undefined, path);
     } catch (error) {
       throw delegated(`${path}.${key}`, error);
     }
@@ -829,7 +865,7 @@ const angle: Check = (v, path) => {
   if (typeof v !== "number" || !(v >= -90 && v <= 90)) fail(path, "degrees from -90 to 90", v);
 };
 
-/** Tick labels: rotation, collision policy, row, priority, and repeats. */
+/** Tick labels: rotation, overlap policy, row, priority, and repeats. */
 const tickLabels: Check = (v, path) => {
   if (v === false) return;
   object(v, path);
@@ -844,7 +880,7 @@ const tickLabels: Check = (v, path) => {
         },
       });
     },
-    collision: oneOf("show", "hide", "stagger", "wrap"),
+    overlap: oneOf("show", "hide", "stagger", "wrap"),
     row: (r, at) => {
       if (!Number.isInteger(r) || (r as number) < 0) fail(at, "a row: 0, 1, 2, ...", r);
     },
@@ -957,15 +993,18 @@ const textBox: Check = (v, path) => {
   } satisfies ChecksOf<TextBox>);
 };
 
+/** A font weight: a whole number from 1 to 1000. */
+const weight: Check = (w, at) => {
+  if (typeof w !== "number" || !Number.isInteger(w) || w < 1 || w > 1000)
+    fail(at, "a whole number from 1 to 1000, such as 400 or 600", w);
+};
+
 const textStyle: Check = (v, path) => {
   object(v, path);
   properties(v as Record<string, unknown>, path, {
     font: string,
     fontSize: positive,
-    fontWeight: (w, at) => {
-      if (typeof w !== "number" || !Number.isInteger(w) || w < 1 || w > 1000)
-        fail(at, "a whole number from 1 to 1000, such as 400 or 600", w);
-    },
+    fontWeight: weight,
     fontStyle: oneOf("normal", "italic"),
     color: string,
     opacity: fraction,
@@ -1306,7 +1345,9 @@ function guideList(typeOf: (scale: unknown) => unknown): Check {
           panel: string,
           show: boolean,
         } satisfies ChecksOf<LegendGuideSpec>);
-      else if (guide.type === "colorbar")
+      else if (guide.type === "colorbar") {
+        if ("room" in guide)
+          throw refusal(`${at}.room`, "colorbars take their own room; drop room");
         properties(guide, at, {
           type: string,
           id: string,
@@ -1323,7 +1364,7 @@ function guideList(typeOf: (scale: unknown) => unknown): Check {
           show: boolean,
           style: rolesOf(["tick", "tickLabel", "legendTitle"]),
         } satisfies ChecksOf<ColorbarSpec>);
-      else fail(`${at}.type`, '"axis", "legend", or "colorbar"', guide.type);
+      } else fail(`${at}.type`, '"axis", "legend", or "colorbar"', guide.type);
     }
   };
 }
@@ -1368,6 +1409,11 @@ function axisGuide(guide: Record<string, unknown>, path: string, type: unknown):
     layers: tickLayers(type),
     show: boolean,
     repeat: labelRepeat,
+    room: (v, at) => {
+      if (typeof v === "number") return width(v, at);
+      object(v, at);
+      properties(v as Record<string, unknown>, at, { min: width, max: width });
+    },
     style: axisStyle,
   } satisfies ChecksOf<AxisGuideSpec>);
 }
@@ -1487,12 +1533,15 @@ const layoutNode: Check = (v, path) => {
         );
       }
     },
-    gap: (g, at) => {
-      if (typeof g === "number") return width(g, at);
-      object(g, at);
-      properties(g as Record<string, unknown>, at, { row: width, column: width });
-    },
+    gap: layoutGap,
   } satisfies ChecksOf<GridLayoutSpec>);
+};
+
+/** Pixels between rows and between columns: one for both, or each its own. */
+const layoutGap: Check = (g, at) => {
+  if (typeof g === "number") return width(g, at);
+  object(g, at);
+  properties(g as Record<string, unknown>, at, { row: width, column: width });
 };
 
 /** An axis' or colorbar's tick layers on a scale of `type`, each with an id of its own. */
@@ -1743,6 +1792,36 @@ const labelPlace: Check = (p, at) => {
   } satisfies ChecksOf<LabelPlaceSpec>);
 };
 
+/** A part's look over its label's: the block's halo, box, and alignment are refused. */
+const partStyle: Check = (v, path) => {
+  object(v, path);
+  const style = v as Record<string, unknown>;
+  for (const key of PART_BLOCK)
+    if (key in style)
+      throw refusal(
+        path,
+        `${key} is the label's; give it in ${path.replace(/\.content\[\d+\]\.style$/, "")}.style`,
+      );
+  properties(style, path, {
+    fontSize: positive,
+    fontWeight: weight,
+    fontStyle: oneOf("normal", "italic"),
+    color: string,
+    opacity: fraction,
+  } satisfies ChecksOf<PartStyle>);
+};
+
+/** What a label's block has once, which its parts' styles leave to it. */
+const PART_BLOCK = [
+  "halo",
+  "background",
+  "padding",
+  "align",
+  "verticalAlign",
+  "lineHeight",
+  "font",
+];
+
 /** A part of a label's text: literal text, a field's value, the series' name, or the value. */
 const labelPart: Check = (v, path) => {
   if (typeof v === "string") return;
@@ -1758,6 +1837,7 @@ const labelPart: Check = (v, path) => {
     series: yes,
     value: yes,
     format: axisFormat(undefined),
+    style: partStyle,
   } satisfies ChecksOf<Exclude<LabelPart, string>>);
   if ("series" in part && "format" in part)
     fail(`${path}.format`, "no format: a series' name is written as it is", part.format);
@@ -1793,8 +1873,33 @@ const textLabelPlace: Check = (p, at) => {
   } satisfies ChecksOf<NonNullable<TextLabelSpec["place"]>>);
 };
 
-/** A label: its text, or a label object (text, field, or content; format, style, place). */
-function labelOf(place: Check): Check {
+/** What a label does where it would cover another: "show", "hide", or "move". */
+const labelOverlap: Check = (v, path) => {
+  if (v === "stagger" || v === "wrap")
+    throw refusal(path, `"${v}" is for tick labels; use "show", "hide", or "move"`);
+  oneOf("show", "hide", "move")(v, path);
+};
+
+/** A leader from a moved label to what it labels: true, false, or its look. */
+const labelLeader: Check = (v, path) => {
+  if (typeof v !== "boolean") strokeStyle(v, path);
+};
+
+/** Leaders join labels that move to what they label: refused for others ("show" by default). */
+function movesWithLeader(l: Record<string, unknown>, path: string, fallback: string): void {
+  const overlap = (l.overlap as string | undefined) ?? fallback;
+  if (l.leader !== undefined && l.leader !== false && overlap !== "move")
+    throw refusal(
+      `${path}.leader`,
+      `labels that ${overlap} are drawn at their place and draw none; use overlap "move"`,
+    );
+}
+
+/**
+ * A label: its text, or a label object (text, field, or content; format,
+ * style, place; how it keeps apart, "show" or `overlap` by default).
+ */
+function labelOf(place: Check, overlap = "show"): Check {
   return (v, path) => {
     if (typeof v === "string") return;
     object(v, path);
@@ -1809,11 +1914,36 @@ function labelOf(place: Check): Check {
       format: axisFormat(undefined),
       style: textStyle,
       place,
+      overlap: labelOverlap,
+      overlapGroup: string,
+      leader: labelLeader,
+      priority: finite,
     } satisfies ChecksOf<LabelSpec>);
+    movesWithLeader(l, path, overlap);
   };
 }
 
 const label = labelOf(labelPlace);
+
+/** Text following a series: placed with series labels, which move by default and meet across marks. */
+const followingLabel: Check = (v, path) => {
+  if (typeof v === "object" && v !== null && "overlapGroup" in v)
+    throw refusal(
+      `${path}.overlapGroup`,
+      "series labels already keep apart across marks; drop overlapGroup",
+    );
+  labelOf(textLabelPlace, "move")(v, path);
+};
+
+/** A region's label: leaders are refused, as its labels slide along their side. */
+const regionLabel: Check = (v, path) => {
+  if (typeof v === "object" && v !== null && "leader" in v)
+    throw refusal(
+      `${path}.leader`,
+      "region labels slide along their side and draw none; drop leader",
+    );
+  label(v, path);
+};
 
 /** Which point of a series a label follows. */
 const labelAt = oneOf("first", "last", "visible-start", "visible-end");
@@ -1827,13 +1957,22 @@ function seriesLabels(band: boolean): Check {
     const spec = v as Record<string, unknown>;
     if (!band && "edge" in spec)
       fail(`${path}.edge`, "no edge: a line's labels follow the line", spec.edge);
+    if (spec.overlapGroup !== undefined)
+      throw refusal(
+        `${path}.overlapGroup`,
+        "series labels already keep apart across marks; drop overlapGroup",
+      );
     checkProperties(spec, path, ["at"], {
       at: labelAt,
       content: labelContent,
       edge: bandEdge,
       place: labelPlace,
       style: textStyle,
+      overlap: labelOverlap,
+      leader: labelLeader,
+      priority: finite,
     } satisfies ChecksOf<AreaLabelsSpec>);
+    movesWithLeader(spec, path, "move");
   };
 }
 
@@ -2193,7 +2332,7 @@ const MARKS: MarkChecks = {
       strokeWidth: width,
       strokeSides: sideList,
       encode: encodings(MARK_CHANNELS.region!.encode, true),
-      label,
+      label: regionLabel,
       contributeDomain: boolean,
       legend: boolean,
     },
@@ -2215,8 +2354,6 @@ const MARKS: MarkChecks = {
       },
       from: markAnchor,
       label: labelOf(textLabelPlace),
-      overlap: oneOf("show", "hide", "move"),
-      style: markStyle(false, "leader"),
       contributeDomain: boolean,
       legend: boolean,
     },
@@ -2262,7 +2399,23 @@ const MARKS: MarkChecks = {
         if ("content" in l && "field" in l)
           fail(`${path}.field`, "no field beside content: give it as a part, { field }", l.field);
         contentAlone(l, path);
+        if (l.overlapGroup !== undefined)
+          throw refusal(
+            `${path}.overlapGroup`,
+            "bar labels keep apart within their mark; drop overlapGroup",
+          );
+        if (l.leader !== undefined)
+          throw refusal(
+            `${path}.leader`,
+            "bar labels stay at their bars and draw none; drop leader",
+          );
+        if (l.overlap === "move")
+          throw refusal(
+            `${path}.overlap`,
+            'bar labels fit at their bar or are left out; use "show" or "hide"',
+          );
         properties(l, path, {
+          overlap: oneOf("show", "hide"),
           field,
           content: labelContent,
           format: axisFormat(undefined),
@@ -2974,7 +3127,12 @@ const mark: Check = (v, path) => {
         .join(" or "),
       spec.type,
     );
-  const checks = { ...kind.checks, data: field, id: string };
+  const checks = {
+    ...kind.checks,
+    data: field,
+    id: string,
+    ...(spec.type === "text" && spec.from !== undefined && { label: followingLabel }),
+  };
   required(spec, path, kind.required, [...Object.keys(checks), "type"]);
   properties(spec, path, checks, ["type"]);
   if (spec.type === "dendrogram" && spec.axis !== undefined)
@@ -3277,13 +3435,22 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       facet: (f, path) => {
         object(f, path);
         const spec = f as Record<string, unknown>;
+        const spacing = { header: boolean, gap: layoutGap };
         if ("field" in spec) {
-          properties(spec, path, { field, columns: count } satisfies ChecksOf<WrappedFacetSpec>);
+          properties(spec, path, {
+            field,
+            columns: count,
+            ...spacing,
+          } satisfies ChecksOf<WrappedFacetSpec>);
           if ("row" in spec || "column" in spec)
             fail(path, "a field to wrap, or row and column fields, not both", f);
           return;
         }
-        properties(spec, path, { row: field, column: field } satisfies ChecksOf<GridFacetSpec>);
+        properties(spec, path, {
+          row: field,
+          column: field,
+          ...spacing,
+        } satisfies ChecksOf<GridFacetSpec>);
         if (spec.row === undefined && spec.column === undefined)
           fail(path, "a field, or a row or column field", f);
         // A grid's columns are its column field's values.

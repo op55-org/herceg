@@ -9,15 +9,19 @@ import { aligned } from "../layout/place.ts";
 import { EDGE, GAP } from "./legend.ts";
 import {
   columnGap,
+  leastHeight,
+  leastOf,
   type PanelGrid,
   type PanelPlacement,
   rowGap,
   trackSizes,
+  yReachOf,
 } from "./panel-layout.ts";
 
 /** The placement of `count` panels in `grid`, refusing panels too small with `remedy` saying what to do. */
 export function uniformPlacement(grid: PanelGrid, count: number, remedy: string): PanelPlacement {
   const { columns, rows, header, columnHeader, rowHeader } = grid;
+  const panels = count;
   const rowOf = (i: number) => Math.floor(i / columns);
   // What placing the panels found, for their titles.
   let rowHeights: number[] = [];
@@ -28,6 +32,18 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
   let top = 0;
   // Where the lowest row's x titles go: above what the chart keeps under everything.
   let bottom = 0;
+  // Each panel's least plot across, for the x labels it writes, as placing them down found.
+  let wide: readonly number[] = [];
+  /** The least of `count` tracks (rows, or columns), the most its panels need each (see `leastOf`). */
+  const tracksLeast = (
+    count: number,
+    track: (i: number) => number,
+    need: (i: number) => number,
+  ) => {
+    const least = new Array<number>(count).fill(1);
+    for (let i = 0; i < panels; i++) least[track(i)] = Math.max(least[track(i)]!, need(i));
+    return least;
+  };
   return {
     labels(along, after, _groupOf, eligible, repeat, own) {
       // x labels under the lowest panel with axes of each column; y labels
@@ -59,18 +75,30 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
         if (rowOf(i) === 0) first = Math.max(first, room);
         else later = Math.max(later, room);
       });
-      between = Math.max(rowGap(grid, count, v.space) + v.yOver, 2 * v.yReach - header) + later;
+      // The y labels at a row's ends reach into the room between rows as
+      // painted, boxed or not (which `yOver` keeps room for only where the
+      // guides do not say how far they reach).
+      let reach = 0;
+      for (let i = 0; i < count; i++) reach = Math.max(reach, yReachOf(v, i));
+      between =
+        Math.max(
+          rowGap(grid, count, v.space) + (v.guided ? 0 : v.yOver),
+          2 * reach - header + (grid.gap?.row ?? 0),
+        ) + later;
+      wide = Array.from({ length: count }, (_, i) => leastOf(v, i).across);
       // Rows share the height left for plots equally, or by the grid's
-      // weights, and a navigator's strip goes under the x axis when they
-      // leave room for it.
+      // weights, each as tall as its y labels need at least, and a
+      // navigator's strip goes under the x axis when they leave room for it.
+      const least = tracksLeast(rows, rowOf, (i) => leastOf(v, i).down);
       let free =
         v.height - top - first - v.below - columnHeader - (rows - 1) * between - rows * header;
-      const strip = v.navigator ? v.navigator.room(free, grid.least) : 0;
+      const strip = v.navigator
+        ? v.navigator.room(free, count > 1 ? leastHeight(least, grid.rowWeights) : 0)
+        : 0;
       free -= strip;
-      bottom = v.height - v.head.lift - strip - (v.head.auto ? 2 : 0);
-      rowHeights = trackSizes(free, rows, grid.rowWeights, count, columns, v.room, remedy).map(
-        (h) => Math.max(10, h),
-      );
+      bottom = v.height - v.head.lift - strip - (v.head.auto("bottom") ? 2 : 0);
+      rowHeights = trackSizes(free, rows, grid.rowWeights, count, columns, v.room, remedy, least);
+      if (count === 1) rowHeights = rowHeights.map((h) => Math.max(10, h));
       const plotTop = top + first + columnHeader + header;
       const ys: number[] = [];
       const hs: number[] = [];
@@ -95,7 +123,7 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
         head.left +
         leftSide.room +
         (leftSide.room && leftSide.title) +
-        (head.auto ? EDGE : 0) +
+        (head.auto("left") ? EDGE : 0) +
         (beside?.left ?? 0);
       if (frozen) left = kept.left;
       else if (sameLayout) left = Math.max(left, kept.left);
@@ -105,8 +133,11 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
       let right =
         head.right +
         (rightRoom || rowHeader
-          ? rightRoom + (rowHeader && rowHeader + GAP) + rightSide.title + (head.auto ? EDGE : 0)
-          : head.auto
+          ? rightRoom +
+            (rowHeader && rowHeader + GAP) +
+            rightSide.title +
+            (head.auto("right") ? EDGE : 0)
+          : head.auto("right")
             ? 12
             : 0);
       if (frozen) right = kept.right;
@@ -130,16 +161,37 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
         room(rightSide, true) +
         (inner ? beside!.right : 0) +
         marks.reduce((sum, size) => sum + (size && size + GAP), 0);
-      let gapAcross = columns > 1 ? Math.max(16, labelRoom, sameLayout ? kept.columnGap : 0) : 0;
+      // A gap given replaces the whitespace beyond the labels' room.
+      const given = grid.gap?.column;
+      let gapAcross =
+        columns > 1
+          ? given !== undefined
+            ? Math.max(labelRoom + given, sameLayout ? kept.columnGap : 0)
+            : Math.max(16, labelRoom, sameLayout ? kept.columnGap : 0)
+          : 0;
       if (frozen) gapAcross = kept.columnGap;
       const weighted = grid.columnWeights !== undefined;
       const xs: number[] = [];
       const ws: number[] = [];
+      // Each column as wide as its x labels need at least.
+      const least = tracksLeast(
+        columns,
+        (i) => i % columns,
+        (i) => wide[i]!,
+      );
       const layoutColumns = () => {
         const free = width - left - right - (columns - 1) * gapAcross;
-        widths = trackSizes(free, columns, grid.columnWeights, count, columns, h.room, remedy).map(
-          (w) => Math.max(10, w),
+        widths = trackSizes(
+          free,
+          columns,
+          grid.columnWeights,
+          count,
+          columns,
+          h.room,
+          remedy,
+          least,
         );
+        if (count === 1) widths = widths.map((w) => Math.max(10, w));
         // Where each column starts, from `left`; equal columns a whole step apart.
         offsets = widths.map((_, c) => (weighted ? 0 : c * (widths[0]! + gapAcross)));
         for (let c = 1; weighted && c < columns; c++)
@@ -173,13 +225,17 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
           labeled = true;
           const [firstStart, lastEnd] = end;
           if (column > 0) spillLeft = Math.max(spillLeft, left - firstStart);
-          else overflowLeft = Math.max(overflowLeft, head.left + (head.auto ? 2 : 0) - firstStart);
+          else
+            overflowLeft = Math.max(
+              overflowLeft,
+              head.left + (head.auto("left") ? 2 : 0) - firstStart,
+            );
           if (column < columns - 1)
             spillRight = Math.max(spillRight, lastEnd - (left + widths[column]!));
           else
             overflowRight = Math.max(
               overflowRight,
-              lastEnd + offsets[column]! - (width - head.right - (head.auto ? 2 : 0)),
+              lastEnd + offsets[column]! - (width - head.right - (head.auto("right") ? 2 : 0)),
             );
         }
         if (!labeled) break;
@@ -192,8 +248,10 @@ export function uniformPlacement(grid: PanelGrid, count: number, remedy: string)
         const nextRight =
           overflowRight > 0.5 ? widen(right, right + Math.ceil(overflowRight)) : right;
         // Panels with their own y labels need room for those and the x
-        // labels that reach past the panel before them.
-        const nextGap = columns > 1 ? widen(gapAcross, Math.ceil(spill) + (labelRoom || 8)) : 0;
+        // labels that reach past the panel before them, and the gap given
+        // beyond both, or else some whitespace where neither takes any.
+        const beyond = given !== undefined ? labelRoom + given : labelRoom || 8;
+        const nextGap = columns > 1 ? widen(gapAcross, Math.ceil(spill) + beyond) : 0;
         if (nextLeft === left && nextRight === right && nextGap === gapAcross) break;
         left = nextLeft;
         right = nextRight;

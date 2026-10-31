@@ -5,7 +5,7 @@ import { time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { axis } from "../../src/guides/options.ts";
-import { estimateText } from "../../src/layout/text.ts";
+import { estimateText, lineCount } from "../../src/layout/text.ts";
 import { grid } from "../../src/layout.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
@@ -15,6 +15,8 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { AxisGuide, Scene, SegmentsItem, TextItem } from "../../src/scene/scene.ts";
+import { validateSpec } from "../../src/spec/validate.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { drawnLines } from "../helpers/guides.ts";
 import { setViewport } from "../helpers/views.ts";
@@ -231,7 +233,7 @@ describe("axes on other sides", () => {
           place: { side: "top" },
           ticks: { values: [4, 5] },
           format: (v) => (v === 4 ? "a" : "a much longer label for five"),
-          labels: { rotation: -5, collision: "hide" },
+          labels: { rotation: -5, overlap: "hide" },
         }),
       ],
     });
@@ -602,7 +604,7 @@ describe("tick labels", () => {
             scale: "x",
             ticks: { every: 1 },
             format: { number: ".1f" },
-            labels: { collision: "stagger" },
+            labels: { overlap: "stagger" },
           }),
         ],
       },
@@ -652,7 +654,7 @@ describe("tick labels", () => {
             scale: "y",
             ticks: { every: 10 },
             format: { number: ",.3f" },
-            labels: { collision: "hide" },
+            labels: { overlap: "hide" },
           }),
         ],
       },
@@ -783,7 +785,7 @@ describe("tick labels", () => {
             place: { side: "top" },
             ticks: { values: [0, 1, 2] },
             format: (v) => `${v} one two three four five`,
-            labels: { collision: "wrap" },
+            labels: { overlap: "wrap" },
           }),
         ],
       },
@@ -809,7 +811,7 @@ describe("tick labels", () => {
               {
                 id: "big",
                 ticks: { values: [0.6, 1] },
-                labels: { collision: "hide" },
+                labels: { overlap: "hide" },
                 style: { tickLabel: { fontSize: 80 } },
               },
             ],
@@ -835,7 +837,7 @@ describe("tick labels", () => {
             scale: "y",
             ticks: { values: [0, 0.12, 1] },
             format: (v) => `${v}\nsecond\nthird`,
-            labels: { collision: "hide" },
+            labels: { overlap: "hide" },
             style: { tickLabel: { fontSize: 20 } },
           }),
         ],
@@ -861,7 +863,7 @@ describe("tick labels", () => {
             scale: "y",
             ticks: { values: [0.5, 0.62] },
             format: (v) => (v === 0.5 ? "one" : "one\ntwo\nthree"),
-            labels: { collision: "hide" },
+            labels: { overlap: "hide" },
             style: { tickLabel: { fontSize: 20 } },
           }),
         ],
@@ -894,10 +896,10 @@ describe("tick labels", () => {
     expect(() =>
       build({
         marks,
-        guides: [axis({ scale: "x", labels: { collision: "wrap", rotation: -45 } })],
+        guides: [axis({ scale: "x", labels: { overlap: "wrap", rotation: -45 } })],
       }),
     ).toThrow(
-      'chart guides[0].labels.collision: "wrap" breaks labels that lie flat; drop rotation, or keep turned labels apart with "hide" or "stagger"',
+      'chart guides[0].labels.overlap: "wrap" breaks labels that lie flat; drop rotation, or keep turned labels apart with "hide" or "stagger"',
     );
   });
 
@@ -985,7 +987,7 @@ describe("tick labels", () => {
           axis({
             scale: "y",
             ticks: { every: 10 },
-            labels: { collision: "hide" },
+            labels: { overlap: "hide" },
             style: { tickLabel: { background: { fill: "#eeeeee" }, padding: 10 } },
           }),
         ],
@@ -1004,7 +1006,7 @@ describe("tick labels", () => {
     const { scene } = build(
       {
         marks: [line(data, { x: "x", y: "v" })],
-        guides: [axis({ scale: "x", ticks: { every: 1 }, labels: { collision: "hide" } })],
+        guides: [axis({ scale: "x", ticks: { every: 1 }, labels: { overlap: "hide" } })],
       },
       400,
     );
@@ -1012,5 +1014,422 @@ describe("tick labels", () => {
     const shown = bottom.ticks.filter((t) => t.label);
     expect(shown.length).toBeLessThan(bottom.ticks.length / 2);
     expect(shown.length).toBeGreaterThan(2);
+  });
+});
+
+describe("axis room", () => {
+  const sized = (values: number[]) => line(table({ x: [0, 1, 2], v: values }), { x: "x", y: "v" });
+  const plotX = (scene: Scene) => scene.panels[0]!.plot.x;
+
+  contractTest("axis.room.fixed", () => {
+    // Labels of different widths: a fixed room lines the plots up.
+    const narrow = [sized([1, 5, 9])];
+    const wide = [sized([100000, 500000, 900000])];
+    const fixed = axis({ scale: "y", room: 28 });
+    const a = build({ marks: narrow, guides: [fixed] }).scene;
+    const b = build({ marks: wide, guides: [fixed] }).scene;
+    expect(plotX(a)).toBe(plotX(b));
+    expect(plotX(build({ marks: narrow }).scene)).not.toBe(plotX(build({ marks: wide }).scene));
+    // Labels wider than the room are shortened, never drawn past it.
+    const left = sideOf(b, "left")!;
+    const labels = texts(left).map(({ text }) => text);
+    expect(labels.some((text) => text.endsWith("…"))).toBe(true);
+    for (const box of left.labelBoxes ?? [])
+      expect(box.box.x).toBeGreaterThanOrEqual(plotX(b) - 28 - 0.5);
+    // Bounds hold the room within them: a least room widens narrow labels'.
+    const least = build({ marks: narrow, guides: [axis({ scale: "y", room: { min: 60 } })] }).scene;
+    expect(plotX(least)).toBeGreaterThan(plotX(a) + 25);
+    const most = build({ marks: wide, guides: [axis({ scale: "y", room: { max: 28 } })] }).scene;
+    expect(plotX(most)).toBe(plotX(b));
+    // Boxes and their outlines stay in the room too; where not even an
+    // ellipsis fits, the label is left out.
+    const boxed = (room: number) =>
+      build({
+        marks: wide,
+        guides: [
+          axis({
+            scale: "y",
+            room,
+            style: {
+              tickLabel: {
+                background: { fill: "#eee", stroke: "#999", strokeWidth: 2 },
+                padding: 10,
+              },
+            },
+          }),
+        ],
+      }).scene;
+    const roomy = boxed(40);
+    for (const box of sideOf(roomy, "left")!.labelBoxes ?? [])
+      expect(box.box.x - 1).toBeGreaterThanOrEqual(plotX(roomy) - 40 - 0.5);
+    expect(texts(sideOf(boxed(24), "left")!).filter(({ text }) => text !== "")).toEqual([]);
+    // Labels of several lines none of which fit are left out whole, their
+    // boxes too, on either side.
+    for (const side of ["left", "right"] as const) {
+      const scale = side === "left" ? "y" : "yRight";
+      const { scene } = build({
+        marks: [
+          line(table({ x: [0, 1, 2], v: [100000, 500000, 900000] }), {
+            x: "x",
+            y: "v",
+            axis: side,
+          }),
+        ],
+        guides: [
+          axis({
+            scale,
+            room: 12,
+            format: (v) => `${v}\n${v}`,
+            style: {
+              tickLabel: {
+                background: { fill: "#eee", stroke: "#999", strokeWidth: 2 },
+                padding: 10,
+              },
+            },
+          }),
+        ],
+      });
+      const drawn = sideOf(scene, side)!.items.filter((item) => item.type === "text" && item.box);
+      expect(drawn).toEqual([]);
+    }
+    // Shortened before labels are chosen among: a label the room leaves
+    // out gives way to one of lower priority at its tick that fits.
+    const { scene: kept } = build({
+      marks: [sized([0, 0.5, 1])],
+      y: { domain: [0, 1] },
+      guides: [
+        axis({
+          scale: "y",
+          room: 30,
+          labels: false,
+          layers: [
+            {
+              id: "long",
+              ticks: { values: [0.5] },
+              format: () => "long\nlong",
+              labels: { priority: 10 },
+              style: { tickLabel: { background: { fill: "#eee" }, padding: 15 } },
+            },
+            { id: "short", ticks: { values: [0.5] }, format: () => "ok", labels: { priority: 0 } },
+          ],
+        }),
+      ],
+    });
+    expect(texts(sideOf(kept, "left")).map(({ text }) => text)).toContain("ok");
+    // Halos too.
+    const haloed = build({
+      marks: wide,
+      guides: [
+        axis({
+          scale: "y",
+          room: 40,
+          style: { tickLabel: { halo: { color: "#fff", width: 20 } } },
+        }),
+      ],
+    }).scene;
+    for (const box of sideOf(haloed, "left")!.labelBoxes ?? [])
+      expect(box.box.x - 10).toBeGreaterThanOrEqual(plotX(haloed) - 40 - 0.5);
+  });
+
+  it("holds a y axis on the right in its room", () => {
+    const wide = [
+      line(table({ x: [0, 1, 2], v: [100000, 500000, 900000] }), { x: "x", y: "v", axis: "right" }),
+    ];
+    const plot = (room?: number) =>
+      build({ marks: wide, guides: [axis({ scale: "yRight", ...(room && { room }) })] }).scene
+        .panels[0]!.plot;
+    const fixed = plot(30);
+    expect(800 - (fixed.x + fixed.width)).toBeLessThan(800 - (plot().x + plot().width));
+  });
+
+  it("is refused on x axes, colorbars, and below zero", () => {
+    expect(() => build({ marks, guides: [axis({ scale: "x", room: 20 })] })).toThrow(
+      "chart guides[0].room: x axes take the depth their rows of labels need, and an ellipsis shortens only y axes' labels; drop room",
+    );
+    expect(() =>
+      build({ marks, guides: [axis({ scale: "y", room: { min: 30, max: 20 } })] }),
+    ).toThrow(
+      /chart guides\[0\]\.room: expected finite pixels of at least 0, or \{ min, max \} with min no more than max/,
+    );
+    // Pixels given are finite; a most left out is no bound.
+    for (const room of [Number.POSITIVE_INFINITY, { max: Number.POSITIVE_INFINITY }, Number.NaN])
+      expect(() => build({ marks, guides: [axis({ scale: "y", room })] })).toThrow(
+        /chart guides\[0\]\.room: expected finite pixels of at least 0.*; received (Infinity|NaN|\{ min: undefined, max: Infinity \})$/,
+      );
+    expect(() => build({ marks, guides: [axis({ scale: "y", room: { min: 20 } })] })).not.toThrow();
+    // Tick marks outside the plot are not shortened: the room holds them whole.
+    expect(() =>
+      build({ marks, guides: [axis({ scale: "y", room: 10, tick: { length: 50 } })] }),
+    ).toThrow(
+      "chart guides[0].room: its tick marks reach 50 px out from the plot, past the 10 px room; give a room of at least 50 px, or shorter or inward tick marks",
+    );
+    const spec = (guide: object) => () =>
+      validateSpec({ marks: [{ type: "line", x: "t", y: "v" }], guides: [guide] } as never);
+    expect(spec({ type: "colorbar", scale: { mark: 0, channel: "color" }, room: 10 })).toThrow(
+      "guides[0].room: colorbars take their own room; drop room",
+    );
+    expect(spec({ type: "axis", scale: "y", room: -1 })).toThrow(/^guides\[0\]\.room: expected/);
+  });
+});
+
+describe("panels' least widths", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}` }));
+  const marksIn = ids.map(({ id }) => line(week, { x: "t", y: "v", panel: id }));
+  const sides = { y: { show: false }, legend: false } as const;
+  const panelled = { ...sides, marks: marksIn, panels: panels(ids, grid({ columns: 12 })) };
+  const faceted = {
+    ...sides,
+    marks: [
+      line(table({ t: ids.map((_, i) => i), v: ids.map(() => 1), id: ids.map(({ id }) => id) }), {
+        x: "t",
+        y: "v",
+      }),
+    ],
+    facet: facet("id", { columns: 12, header: false }),
+  };
+  const widths = ({ model }: ReturnType<typeof build>) =>
+    model.panels().map(({ plot }) => plot.width);
+
+  it("keep room for x labels only where an axis writes them", () => {
+    for (const config of [panelled, faceted]) {
+      // Twelve plots in a row of 300 pixels: too narrow for x labels below each.
+      expect(() => build({ ...config, x: { repeat: "all" } }, 300, 200)).toThrow(
+        /px of width|do not fit/,
+      );
+      // An x axis without labels leaves each its share of the row.
+      const bare = build(
+        { ...config, x: { repeat: "all" }, guides: [axis({ scale: "x", labels: false })] },
+        300,
+        200,
+      );
+      expect(Math.max(...widths(bare))).toBeLessThan(48);
+      // One above the plots writes labels there, which need the room too.
+      expect(() =>
+        build(
+          { ...config, guides: [axis({ scale: "x", place: { side: "top" }, repeat: "all" })] },
+          300,
+          200,
+        ),
+      ).toThrow(/px of width|do not fit/);
+    }
+  });
+});
+
+describe("panels' least heights", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}` }));
+  const stacked = {
+    marks: ids.map(({ id }) => line(week, { x: "t", y: "v", panel: id })),
+    panels: panels(ids),
+    x: { show: false },
+    legend: false,
+  } as const;
+  const heights = ({ model }: ReturnType<typeof build>) =>
+    model.panels().map(({ plot }) => plot.height);
+
+  it("keep room for y labels only where an axis writes them, on either side", () => {
+    // Twelve plots stacked in 200 pixels: too short for y labels beside each.
+    expect(() => build(stacked, 600, 200)).toThrow(/px of height/);
+    // A y axis without labels leaves each its share.
+    const bare = build({ ...stacked, guides: [axis({ scale: "y", labels: false })] }, 600, 200);
+    expect(Math.max(...heights(bare))).toBeLessThan(18);
+    // Moved to the right, it writes labels there, which need the room too.
+    expect(() =>
+      build({ ...stacked, guides: [axis({ scale: "y", place: { side: "right" } })] }, 600, 200),
+    ).toThrow(/px of height/);
+  });
+
+  it("count only the labels axes draw: on the right beside a row's last panel", () => {
+    // Side by side sharing y, the axis on the right beside the second: the
+    // first's large label style draws nothing there.
+    const pair = {
+      marks: [
+        line(week, { x: "t", y: "v", panel: "a" }),
+        line(week, { x: "t", y: "v", panel: "b" }),
+      ],
+      panels: panels(
+        [{ id: "a", y: { style: { tickLabel: { fontSize: 80 } } } }, { id: "b" }],
+        grid({ columns: 2 }),
+      ),
+      x: { show: false },
+      y: { scope: "chart" },
+      legend: false,
+      guides: [axis({ scale: "y", place: { side: "right" } })],
+    } as const;
+    expect(heights(build(pair, 400, 80))).toEqual([70, 70]);
+  });
+
+  it("count no room for boxed labels an axis does not write", () => {
+    const rows = table({ t: [0, 1, 0, 1], v: [0, 1, 0, 1], g: ["a", "a", "b", "b"] });
+    const boxed = {
+      marks: [line(rows, { x: "t", y: "v" })],
+      facet: facet("g", { columns: 1, header: false }),
+      x: { show: false },
+      y: { style: { tickLabel: { fontSize: 80, background: { fill: "#eee" }, padding: 40 } } },
+      legend: false,
+      guides: [axis({ scale: "y", labels: false })],
+    } as const;
+    expect(Math.min(...heights(build(boxed, 400, 80)))).toBeGreaterThan(20);
+  });
+
+  const rows = table({ t: [0, 1, 0, 1], v: [0, 1, 0, 1], g: ["a", "a", "b", "b"] });
+
+  it("count the layers that write labels, as each writes them", () => {
+    // The major layer writes none; the base style a layer starts from is
+    // large and boxed, the minor layer's own small and unpadded.
+    const config = (fontSize: number): ChartConfig => ({
+      marks: [line(rows, { x: "t", y: "v" })],
+      facet: facet("g", { columns: 1, header: false }),
+      x: { show: false },
+      y: { style: { tickLabel: { fontSize, background: { fill: "#eee" }, padding: 40 } } },
+      legend: false,
+      guides: [
+        axis({
+          scale: "y",
+          labels: false,
+          layers: [{ id: "minor", ticks: 4, style: { tickLabel: { fontSize: 12, padding: 0 } } }],
+        }),
+      ],
+    });
+    expect(heights(build(config(80), 400, 160))).toEqual(heights(build(config(12), 400, 160)));
+  });
+
+  it("count a halo past a box's top and bottom padding only, on automatic and listed axes", () => {
+    // 40 px of padding above and below, none beside: an 80 px halo stays
+    // inside the box up and down.
+    const padding = { top: 40, bottom: 40, left: 0, right: 0 };
+    const plain = { background: { fill: "#eee" }, padding };
+    const haloed = { ...plain, halo: { color: "#fff", width: 80 } };
+    const side = (tickLabel: typeof plain, listed: boolean) =>
+      build(
+        {
+          marks: [line(rows, { x: "t", y: "v" })],
+          facet: facet("g", { columns: 2, header: false }),
+          x: { show: false },
+          legend: false,
+          ...(listed
+            ? { guides: [axis({ scale: "y", style: { tickLabel } })] }
+            : { y: { style: { tickLabel } } }),
+        },
+        400,
+        250,
+      );
+    for (const listed of [false, true])
+      expect(heights(side(haloed, listed))).toEqual(heights(side(plain, listed)));
+  });
+
+  it("keep rows apart by y labels of several lines, as they are planned", () => {
+    const DAY = 86_400_000;
+    /** Each row's y labels: from the top of each one's first line to the bottom of its last. */
+    const blocks = (config: ChartConfig, height: number) =>
+      build(
+        {
+          facet: facet("g", { columns: 1, header: false, gap: 0 }),
+          x: { show: false },
+          legend: false,
+          ...config,
+        },
+        400,
+        height,
+      ).scene.panels.map((panel) =>
+        panel.axes
+          .filter((guide) => guide.side === "left")
+          .flatMap((guide) => guide.items)
+          .flatMap((item) => {
+            if (item.type !== "text" || !item.text) return [];
+            const { y, text, paint } = item;
+            const last = y + (lineCount(text) - 1) * paint.lineHeight;
+            return [[y - paint.size / 2, last + paint.size / 2] as const];
+          }),
+      );
+    /** How far apart the first row's lowest label and the second's highest are. */
+    const apart = ([first, second]: ReturnType<typeof blocks>) =>
+      Math.min(...second!.map(([top]) => top)) - Math.max(...first!.map(([, bottom]) => bottom));
+    // Dates of three lines at the plots' ends.
+    const dates = table({
+      t: time([0, 10 * DAY, 0, 10 * DAY]),
+      v: [0, 1, 0, 1],
+      g: ["a", "a", "b", "b"],
+    });
+    const atEnds = blocks(
+      {
+        marks: [line(dates, { x: "v", y: "t" })],
+        guides: [
+          axis({
+            scale: "y",
+            labels: false,
+            layers: [{ id: "dates", ticks: 2, format: { time: "%b\n%-d\n%Y" } }],
+          }),
+        ],
+      },
+      300,
+    );
+    expect(atEnds[0]!.some(([top, bottom]) => bottom - top > 30)).toBe(true);
+    expect(apart(atEnds)).toBeGreaterThanOrEqual(-0.5);
+    // Five lines at ticks inside the plots, which come nearer the plots'
+    // ends as the rows move apart.
+    const inside = blocks(
+      {
+        marks: [line(rows, { x: "t", y: "v" })],
+        y: { domain: [0, 1] },
+        guides: [
+          axis({
+            scale: "y",
+            labels: false,
+            layers: [
+              { id: "notes", ticks: { values: [0.1, 0.9] }, format: (v) => `${v}\na\nb\nc\nd` },
+            ],
+          }),
+        ],
+      },
+      400,
+    );
+    expect(apart(inside)).toBeGreaterThanOrEqual(-0.5);
+    // A tall label in the middle of each plot, inside it: rows keep no more room.
+    const middle = (text: string) =>
+      heights(
+        build(
+          {
+            marks: [line(rows, { x: "t", y: "v" })],
+            facet: facet("g", { columns: 1, header: false, gap: 0 }),
+            x: { show: false },
+            y: { domain: [0, 1] },
+            legend: false,
+            guides: [
+              axis({
+                scale: "y",
+                labels: false,
+                layers: [{ id: "notes", ticks: { values: [0.5] }, format: () => text }],
+              }),
+            ],
+          },
+          400,
+          180,
+        ),
+      );
+    expect(middle("a\nb\nc\nd\ne")).toEqual(middle("a"));
+    // Labels a fixed room leaves out reach nothing.
+    const roomed = (text: string) =>
+      heights(
+        build(
+          {
+            marks: [line(rows, { x: "t", y: "v" })],
+            facet: facet("g", { columns: 1, header: false, gap: 0 }),
+            x: { show: false },
+            y: { domain: [0, 1] },
+            legend: false,
+            guides: [
+              axis({
+                scale: "y",
+                room: 12,
+                labels: false,
+                layers: [{ id: "notes", ticks: { values: [0, 1] }, format: () => text }],
+              }),
+            ],
+          },
+          400,
+          180,
+        ),
+      );
+    expect(roomed("long\nlong\nlong\nlong\nlong")).toEqual(roomed(""));
   });
 });

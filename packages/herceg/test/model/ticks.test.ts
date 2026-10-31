@@ -10,8 +10,11 @@ import { line } from "../../src/marks/line.ts";
 import { GUIDE_KIT, needsGuides } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
+import { staticCompilers } from "../../src/render/compilers.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { AxisGuide, Scene } from "../../src/scene/scene.ts";
+import { loadSpec } from "../../src/spec/load.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
@@ -72,6 +75,134 @@ describe("ticks every so often", () => {
       y: { ticks: { every: 25, anchor: 5 }, nice: false, domain: [0, 100] },
     });
     expect(labels(scene, "left")).toEqual(["5", "30", "55", "80"]);
+  });
+
+  contractTest("ticks.fiscal", () => {
+    // Two years of days, in a zone whose clocks change: quarters of a year starting in February.
+    const DAY = 24 * HOUR;
+    const from = Date.UTC(2025, 0, 1);
+    const days = Array.from({ length: 730 }, (_, i) => from + i * DAY);
+    const span = table({ t: time(days), v: days.map((_, i) => i) });
+    const fiscal = { start: 2 };
+    const at = (data: typeof span, width: number) =>
+      build(
+        {
+          marks: [line(data, { x: "t", y: "v" })],
+          timeZone: "America/New_York",
+          x: {
+            ticks: { every: "3 months", fiscal },
+            format: { time: "FY%y Q%q", fiscal },
+          },
+        },
+        width,
+      );
+    const { model, scene } = at(span, 1200);
+    const wall = (t: number) => new Date(GUIDE_KIT.toWall("America/New_York", t));
+    const ticks = xTicks(model);
+    // February, May, August, and November firsts, at local midnight whatever the offset.
+    expect(ticks.map((t) => new Date(t).getUTCMonth())).toEqual([1, 4, 7, 10, 1, 4, 7, 10]);
+    for (const t of ticks) {
+      expect(wall(t).getUTCDate()).toBe(1);
+      expect(wall(t).getUTCHours()).toBe(0);
+    }
+    expect(labels(scene).slice(0, 5)).toEqual([
+      "FY26 Q1",
+      "FY26 Q2",
+      "FY26 Q3",
+      "FY26 Q4",
+      "FY27 Q1",
+    ]);
+    // Zoomed out over decades, the coarser steps are fiscal years' starts.
+    const decades = table({ t: time([Date.UTC(1900, 0, 1), from]), v: [0, 1] });
+    const sparse = xTicks(at(decades, 300).model);
+    expect(sparse.length).toBeGreaterThan(1);
+    expect(sparse.length).toBeLessThan(150);
+    for (const t of sparse) expect(wall(t).getUTCMonth()).toBe(1);
+  });
+
+  it("refuses a fiscal year on number axes and on steps shorter than a month", () => {
+    const data = table({ x: [0, 1], v: [0, 1] });
+    expect(() =>
+      build({
+        marks: [line(data, { x: "x", y: "v" })],
+        x: { ticks: { every: 1, fiscal: { start: 7 } } as never },
+      }),
+    ).toThrow(
+      "x.ticks.fiscal: fiscal years step through time; a linear axis steps by numbers; drop fiscal",
+    );
+    expect(() =>
+      build({
+        marks: [line(week, { x: "t", y: "v" })],
+        x: { ticks: { every: "day", fiscal: { start: 7 } } },
+      }),
+    ).toThrow(
+      "x.ticks.fiscal: fiscal years start months and years; step by months or years, or drop fiscal",
+    );
+    // Numbers have no fiscal year, in formats too.
+    expect(() =>
+      build({
+        marks: [line(data, { x: "x", y: "v" })],
+        x: { format: { number: ".0f", fiscal: { start: 7 } } as never },
+      }),
+    ).toThrow("x.format.fiscal: numbers have no fiscal year; give time, or drop fiscal");
+    // Elapsed time has no years to start.
+    expect(() =>
+      build({
+        marks: [line(week, { x: "t", y: "v" })],
+        x: { ticks: { every: { milliseconds: 100_000_000 }, fiscal: { start: 7 } } },
+      }),
+    ).toThrow(
+      "x.ticks.fiscal: fiscal years start months and years; step by months or years, or drop fiscal",
+    );
+    // Nor do ticks by count or values, or Intl options, axes' or labels'.
+    for (const ticks of [{ count: 4 }, { values: [0, 1] }])
+      expect(() =>
+        build({
+          marks: [line(week, { x: "t", y: "v" })],
+          x: { ticks: { ...ticks, fiscal: { start: 7 } } as never },
+        }),
+      ).toThrow(
+        "x.ticks.fiscal: fiscal years step ticks through months and years; give every, or drop fiscal",
+      );
+    const intl =
+      'Intl options write no fiscal year; give { time: "%Y Q%q" } with fiscal, or drop fiscal';
+    expect(() =>
+      build({
+        marks: [line(week, { x: "t", y: "v" })],
+        x: { format: { month: "short", fiscal: { start: 7 } } as never },
+      }),
+    ).toThrow(`x.format.fiscal: ${intl}`);
+    expect(() => {
+      const content = [{ value: true, format: { maximumFractionDigits: 0, fiscal: { start: 7 } } }];
+      const marks = [line(data, { x: "x", y: "v", labels: { at: "last", content } as never })];
+      const model = new ChartModel({ marks }, undefined, ...staticCompilers());
+      model.setSize(400, 200, 1);
+      model.scene(estimateText);
+    }).toThrow(/content\[0\]\.format\.fiscal: Intl options write no fiscal year/);
+    // A chart that would not load the guide compiler loads it to refuse
+    // them, for an axis' format or tooltip format, the chart's or a panel's.
+    const refused = { maximumFractionDigits: 0, fiscal: { start: 7 } } as never;
+    const plain = { marks: [line(week, { x: "t", y: "v" })] };
+    expect(needsGuides(plain)).toBe(false);
+    for (const config of [
+      { x: { format: refused } },
+      { y: { tooltipFormat: refused } },
+      { panels: panels([{ id: "a", y: { format: refused } }]) },
+    ])
+      expect(needsGuides({ ...plain, ...config })).toBe(true);
+    // Specs are refused where they are read.
+    const spec = (x: object) => () =>
+      loadSpec({
+        data: { t: { columns: { t: [0, 1], v: [0, 1] } } },
+        marks: [{ type: "line", x: "t", y: "v" }],
+        x,
+      });
+    expect(spec({ ticks: { count: 4, fiscal: { start: 7 } } })).toThrow(
+      "x.ticks.fiscal: fiscal years step ticks through months and years; give every, or drop fiscal",
+    );
+    expect(spec({ format: { maximumFractionDigits: 0, fiscal: { start: 7 } } })).toThrow(
+      `x.format.fiscal: ${intl}`,
+    );
   });
 
   it("keeps ticks in place as the view moves", () => {

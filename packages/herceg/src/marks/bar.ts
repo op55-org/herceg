@@ -8,6 +8,7 @@ import { type Formatter, numberFormatter } from "../format/format.ts";
 import { centeredLines, estimateText, lineCount, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import { clearDomain } from "../model/clearance.ts";
+import type { LabelBoxSet, MarkFeatures } from "../model/features.ts";
 import { asksFeatures, type RowPaint } from "../model/features.ts";
 import type { LegendPart } from "../model/legend.ts";
 import type { Nearest } from "../model/nearest.ts";
@@ -37,6 +38,7 @@ import type {
   MarkStyle,
 } from "./encoding.ts";
 import type { ContentWriter } from "./features/content.ts";
+import type { PartText } from "./features/part-text.ts";
 import { withoutHidden } from "./hidden.ts";
 import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
@@ -358,6 +360,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       throw new Error(
         "bar labels.place.outside: stacked bars' labels go inside their segments; drop outside",
       );
+
     const format = labels.format as { number?: unknown; time?: unknown } | undefined;
     this.#labelOptions = {
       ...labels,
@@ -365,11 +368,15 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     };
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "bar series");
     const series = seriesOf(spec, table, "fill");
-    // Patterns and labels of parts are written by the feature compiler.
+    // Patterns, labels of parts, and labels kept apart (checked there) are the feature compiler's.
     this.featured =
       asksFeatures(spec, FEATURES, table, series) ||
       this.#labelOptions.pattern ||
-      labels.content !== undefined;
+      labels.content !== undefined ||
+      "overlap" in labels ||
+      "overlapGroup" in labels ||
+      "leader" in labels ||
+      "priority" in labels;
     this.#rowStack = new RowStack(
       "signed",
       spec.stack === "fill" ? { offset: { resolve: fillLayers, fill: true } } : {},
@@ -679,7 +686,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           spec.halo,
           this.#labelOptions,
           this.table,
-          frame.features?.of(this)?.content,
+          frame.features?.of(this),
         )
       : undefined;
     // The closest neighboring bar centers: within a group, a share apart;
@@ -1065,15 +1072,24 @@ const LABEL_GAP = 4;
 
 /** Value labels' paint: the theme's text, the color of plain text, and the labels' style over them. */
 function labelPaint(theme: Theme, style: Frozen<TextStyle> | undefined): TextPaint {
-  return textPaint([theme.roles.text, { color: theme.text }, style as TextStyle | undefined]);
+  const paint = textPaint([
+    theme.roles.text,
+    { color: theme.text },
+    style as TextStyle | undefined,
+  ]);
+  // The style's line height, for parts of other sizes.
+  return { ...paint, lineRatio: style?.lineHeight ?? theme.roles.text.lineHeight };
 }
 
 interface LabelGroup {
   anchor: TextGeometry["anchor"];
   fill: string;
   halo: boolean;
-  items: { x: number; y: number; text: string }[];
+  items: { x: number; y: number; text: Written }[];
 }
+
+/** A label's text, or its parts where they have looks of their own. */
+type Written = string | PartText;
 
 /**
  * Value labels of one bar mark, collected per series: past each bar's end,
@@ -1099,11 +1115,15 @@ class ValueLabels {
   readonly #minLength: number;
   /** Each row's text of a `field` or of parts (`content`), instead of its value. */
   readonly #field: ((row: number, series: string, value: number) => string) | undefined;
+  /** Each row's parts, where they have looks of their own. */
+  readonly #styled: ContentWriter["styled"];
   readonly #size: number;
   /** Room a label's box adds beside its text. */
   readonly #padding: number;
   /** What text inside a bar contrasts with: the background, or a page of the theme's kind. */
   readonly #backdrop: string;
+  /** With `overlap` "hide", the labels placed so far, as painted, which later ones may not cover. */
+  readonly #placed: LabelBoxSet | undefined;
   #groups = new Map<string, LabelGroup>();
 
   constructor(
@@ -1114,7 +1134,7 @@ class ValueLabels {
     halo: Halo | undefined,
     options: LabelOptions,
     table: Table,
-    content: ContentWriter | undefined,
+    features: MarkFeatures | undefined,
   ) {
     const { theme } = frame;
     this.#format = format;
@@ -1126,7 +1146,9 @@ class ValueLabels {
     const paint = labelPaint(theme, style);
     this.#paint = paint;
     this.#color = style?.color;
+    this.#styled = features?.content?.styled;
     this.#plain =
+      !this.#styled &&
       paint.font === theme.font &&
       paint.size === theme.fontSize &&
       paint.weight === 400 &&
@@ -1142,11 +1164,18 @@ class ValueLabels {
     this.#backdrop = surface(theme);
     const field = options.field;
     if (field !== undefined) this.#field = (row) => fieldText(table, field, row, format);
-    if (content) this.#field = content;
+    if (features?.content) this.#field = features.content;
+    if (options.overlap === "hide")
+      this.#placed = features?.labelBoxes?.(paint, labelHalo(halo, frame));
   }
 
-  /** A label's text: the value written, the row's `field`, or its parts, of the series `series` names. */
-  text(value: number, row: number, series: string): string | (() => string) {
+  /**
+   * A label's text: the value written, the row's `field`, or its parts, of
+   * the series `series` names; written only once its bar can show it.
+   */
+  text(value: number, row: number, series: string): () => Written {
+    const styled = this.#styled;
+    if (styled) return () => styled(row, series, value, undefined, this.#paint, this.#frame);
     return this.#field ? () => this.#field!(row, series, value) : () => this.#format(value);
   }
 
@@ -1155,6 +1184,8 @@ class ValueLabels {
    * any label, so series that cannot are skipped without formatting.
    */
   fits(width: number, spacing: number, stacked: boolean): boolean {
+    // Labels of parts are as large as their parts: each is fitted as placed (`#thick`).
+    if (this.#styled) return true;
     if (this.#horizontal) return width >= this.#size * (stacked ? 1 : 0.9);
     const digit = this.#width("0");
     return stacked ? width >= digit + 2 : spacing >= digit + LABEL_GAP;
@@ -1166,7 +1197,7 @@ class ValueLabels {
    * bar's end.
    */
   add(
-    label: string | (() => string),
+    label: () => Written,
     middle: number,
     root: number,
     tip: number,
@@ -1198,7 +1229,7 @@ class ValueLabels {
    * rounded end, which labels inside keep clear of.
    */
   outside(
-    label: string | (() => string),
+    label: () => Written,
     middle: number,
     root: number,
     tip: number,
@@ -1211,14 +1242,14 @@ class ValueLabels {
     if (Math.abs(tip - root) < this.#minLength) return;
     if (!this.#horizontal) {
       if (!this.#inPlot(middle, tip)) return;
-      const text = written(label);
+      const text = label();
       const width = this.#width(text);
       const size = this.#height(text);
       // Wider labels would run into the neighboring bars' labels.
       if (width + LABEL_GAP > spacing) return;
       const up = tip <= root;
       const past = up ? tip - LABEL_GAP - size / 2 : tip + LABEL_GAP + size / 2;
-      if (this.#fits(middle - width / 2, past - size / 2, width, size)) {
+      if (this.#fits(middle - width / 2, past - size / 2, width, size, true)) {
         this.#add("middle", this.#color ?? this.#frame.theme.text, true, middle, past, text);
         return;
       }
@@ -1227,19 +1258,20 @@ class ValueLabels {
       const inside = up ? tip + clear + size / 2 : tip - clear - size / 2;
       if (
         Math.abs(tip - root) >= size + LABEL_GAP + clear &&
-        this.#fits(middle - width / 2, inside - size / 2, width, size)
+        this.#fits(middle - width / 2, inside - size / 2, width, size, this.#unread(fill, opacity))
       )
         this.#inside("middle", fill, opacity, middle, inside, text);
       return;
     }
     if (!this.#inPlot(tip, middle)) return;
-    const text = written(label);
+    const text = label();
     const width = this.#width(text);
     const size = this.#height(text);
+    if (!this.#thick(text, size, thickness)) return;
     const forward = tip >= root;
     const past = forward ? tip + LABEL_GAP : tip - LABEL_GAP;
     const top = middle - size / 2;
-    if (this.#fits(forward ? past : past - width, top, width, size)) {
+    if (this.#fits(forward ? past : past - width, top, width, size, true)) {
       this.#add(
         forward ? "start" : "end",
         this.#color ?? this.#frame.theme.text,
@@ -1254,7 +1286,7 @@ class ValueLabels {
     const inside = forward ? tip - clear : tip + clear;
     if (
       Math.abs(tip - root) >= width + LABEL_GAP + clear &&
-      this.#fits(forward ? inside - width : inside, top, width, size)
+      this.#fits(forward ? inside - width : inside, top, width, size, this.#unread(fill, opacity))
     )
       this.#inside(forward ? "end" : "start", fill, opacity, inside, middle, text);
   }
@@ -1264,7 +1296,7 @@ class ValueLabels {
    * root, middle, or tip (`attachment`), when it has room there.
    */
   inside(
-    label: string | (() => string),
+    label: () => Written,
     middle: number,
     root: number,
     tip: number,
@@ -1281,10 +1313,12 @@ class ValueLabels {
     const a = Math.max(min, Math.min(root, tip));
     const b = Math.min(max, Math.max(root, tip));
     const length = b - a;
-    if (length <= 0 || (!this.#horizontal && length < this.#size + 2)) return;
-    const text = written(label);
+    // Labels of parts are as large as their parts: measured once written.
+    if (length <= 0 || (!this.#horizontal && !this.#styled && length < this.#size + 2)) return;
+    const text = label();
     const textWidth = this.#width(text);
     const size = this.#height(text);
+    if (this.#horizontal && !this.#thick(text, size, width)) return;
     const room = this.#horizontal ? length - LABEL_GAP : width - 2;
     if (textWidth > room || (!this.#horizontal && length < size + 2)) return;
     // From the visible root or tip, the gap and half the text along the bar.
@@ -1297,7 +1331,7 @@ class ValueLabels {
           ? (toward > 0 ? a : b) + toward * inset
           : (toward > 0 ? b : a) - toward * inset;
     const [x, y] = this.#horizontal ? [along, middle] : [middle, along];
-    if (this.#fits(x - textWidth / 2, y - size / 2, textWidth, size))
+    if (this.#fits(x - textWidth / 2, y - size / 2, textWidth, size, this.#unread(fill, opacity)))
       this.#inside("middle", fill, opacity, x, y, text);
   }
 
@@ -1313,23 +1347,20 @@ class ValueLabels {
         : undefined;
       if (!this.#plain) {
         const paint = { ...this.#paint, color: group.fill };
-        const items = group.items.map((item) => {
-          const at = {
-            x: item.x,
-            y: item.y,
-            anchor: group.anchor,
-            baseline: "middle",
-            angle: 0,
-          } as const;
+        const items = group.items.flatMap(({ x, y, text }) => {
+          // Parts are drawn in their block, its middle at the label's place.
+          if (typeof text !== "string")
+            return text.items(text.box(x, y, group.anchor, paint), group.anchor, paint, halo);
+          const at = { x, y, anchor: group.anchor, baseline: "middle", angle: 0 } as const;
           // Placed by their middle, labels are drawn from their first line.
           const made = textItem(
-            item.text,
-            centeredLines(item.text, at, paint),
+            text,
+            centeredLines(text, at, paint),
             paint,
             frame.surface ?? surface(frame.theme),
             frame.measure,
           );
-          return halo ? { ...made, halo } : made;
+          return [halo ? { ...made, halo } : made];
         });
         const labels: LabelsGeometry = {
           kind: "labels",
@@ -1353,7 +1384,8 @@ class ValueLabels {
         anchor: group.anchor,
         halo,
         coords,
-        labels: group.items.map((item) => item.text),
+        // Labels of parts are never plain.
+        labels: group.items.map((item) => item.text as string),
         count: group.items.length,
       };
       out.push(text);
@@ -1362,13 +1394,21 @@ class ValueLabels {
     return out;
   }
 
-  #width(text: string): number {
-    return this.#frame.measure(text, this.#paint.css) + this.#padding;
+  #width(text: Written): number {
+    return (
+      (typeof text === "string" ? this.#frame.measure(text, this.#paint.css) : text.lines.width) +
+      this.#padding
+    );
   }
 
-  /** How tall a label is: its box's, or its text's, with its lines after the first. */
-  #height(text: string): number {
-    return this.#size + (lineCount(text) - 1) * this.#paint.lineHeight;
+  /**
+   * How tall a label is: its box's, or its text's, with its lines after the
+   * first; of parts, as their own sizes make them.
+   */
+  #height(text: Written): number {
+    const { lineHeight, background } = this.#paint;
+    if (typeof text === "string") return this.#size + (lineCount(text) - 1) * lineHeight;
+    return background ? text.lines.height + this.#size - lineHeight : text.size;
   }
 
   #inPlot(x: number, y: number): boolean {
@@ -1376,14 +1416,36 @@ class ValueLabels {
     return x >= plot.x && x <= plot.x + plot.width && y >= plot.y && y <= plot.y + plot.height;
   }
 
-  /** Whether a label's box lies inside the plot. */
-  #fits(x: number, y: number, width: number, height: number): boolean {
+  /**
+   * Whether a label's box lies inside the plot (and with `overlap` "hide",
+   * covers no label placed before it as painted, `halo` saying whether it
+   * draws one), which a label that fits takes.
+   */
+  #fits(x: number, y: number, width: number, height: number, halo: boolean): boolean {
+    // A label that writes nothing takes no place, so it hides no other.
+    if (width <= this.#padding) return false;
     const { plot } = this.#frame;
-    return (
+    const inside =
       x >= plot.x &&
       x + width <= plot.x + plot.width &&
       y >= plot.y &&
-      y + height <= plot.y + plot.height
+      y + height <= plot.y + plot.height;
+    return inside && (!this.#placed || this.#placed.takes(x, y, width, height, halo));
+  }
+
+  /**
+   * Whether a horizontal bar `thickness` thick carries a label `size` tall:
+   * as `fits` finds for plain labels, and for labels of parts, by their
+   * own size.
+   */
+  #thick(text: Written, size: number, thickness: number): boolean {
+    return typeof text === "string" || size * (this.#stacked ? 1 : 0.9) <= thickness;
+  }
+
+  /** Whether a label inside a bar of `fill` takes the theme's text color with a halo, its color unread. */
+  #unread(fill: string, opacity: number): boolean {
+    return (
+      this.#color === undefined && contrastingText(fill, opacity, this.#backdrop) === undefined
     );
   }
 
@@ -1398,7 +1460,7 @@ class ValueLabels {
     opacity: number,
     x: number,
     y: number,
-    text: string,
+    text: Written,
   ) {
     if (this.#color !== undefined) {
       this.#add(anchor, this.#color, false, x, y, text);
@@ -1414,7 +1476,7 @@ class ValueLabels {
     halo: boolean,
     x: number,
     y: number,
-    text: string,
+    text: Written,
   ) {
     halo &&= this.#halo !== false;
     const stage = `labels ${anchor} ${fill} ${halo}`;
@@ -1425,11 +1487,6 @@ class ValueLabels {
     }
     group.items.push({ x, y, text });
   }
-}
-
-/** A label's text, written only once its bar can show it. */
-function written(label: string | (() => string)): string {
-  return typeof label === "string" ? label : label();
 }
 
 /** A row's value of a category or number field as a label writes it. */

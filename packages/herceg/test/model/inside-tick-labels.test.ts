@@ -154,7 +154,7 @@ describe("tick labels inside the plot", () => {
     expect(labels.find((l) => l.text === "50.0")!.y).toBeGreaterThan(lineOf(bottom));
   });
 
-  contractTest("axis.tick-labels.inside.collision", () => {
+  contractTest("axis.tick-labels.inside.overlap", () => {
     const wide = table({ x: [0, 1_000_000], v: [0, 1] });
     const shown = (align: "start" | "center") =>
       labelsOf(
@@ -166,7 +166,7 @@ describe("tick labels inside the plot", () => {
                 scale: "x",
                 ticks: { values: [0, 100_000, 140_000, 600_000, 1_000_000] },
                 format: { number: ",d" },
-                labels: { inside: true, collision: "hide" },
+                labels: { inside: true, overlap: "hide" },
                 style: { tickLabel: { align } },
               }),
             ],

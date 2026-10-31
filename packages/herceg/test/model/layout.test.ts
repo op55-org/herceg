@@ -17,6 +17,7 @@ import { renderToPDF } from "../../src/pdf.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { AxisGuide, Panel, Rect, Scene, TextItem } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { drawnLines, headersOf, legendOf, titleOf } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -72,6 +73,24 @@ describe("padding", () => {
     expect(600 - (b.x + b.width) - (600 - (a.x + a.width))).toBe(20);
     // The top y label still has room above the plot with no padding.
     expect(a.y).toBeGreaterThanOrEqual(6);
+  });
+
+  contractTest("layout.padding.side", () => {
+    // Padding given on one side leaves the others their automatic spacing.
+    const marks = [line(metrics, { x: "t", y: "a" })];
+    const auto = plotOf(build({ marks }).scene);
+    const right = plotOf(build({ marks, padding: { right: 120 } }).scene);
+    expect(right.x).toBe(auto.x);
+    expect(right.y).toBe(auto.y);
+    expect(right.height).toBe(auto.height);
+    // The x labels' room comes on top of the padding, as with every side's own.
+    const none = plotOf(build({ marks, padding: { right: 0 } }).scene);
+    expect(none.x + none.width - (right.x + right.width)).toBe(120);
+    const top = plotOf(build({ marks, padding: { top: 30 } }).scene);
+    expect(top.x).toBe(auto.x);
+    expect(top.x + top.width).toBe(auto.x + auto.width);
+    expect(top.y + top.height).toBe(auto.y + auto.height);
+    expect(top.y).toBeGreaterThan(30);
   });
 
   it("is refused when negative, from specs", () => {

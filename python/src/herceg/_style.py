@@ -188,7 +188,8 @@ def _spec(value: Any) -> Any:
 
 
 class Insets(TypedDict, total=False):
-    """Pixels on each side, for paddings that differ by side."""
+    """Pixels on each side, for paddings that differ by side; a chart's
+    sides left out keep their automatic spacing."""
 
     top: float
     right: float

@@ -6,6 +6,7 @@
 // chart's formatters and zone arithmetic, handed in (see `GuideKit`).
 
 import type { GuideKit } from "../model/guides.ts";
+import type { FiscalSpec } from "../spec/guides.ts";
 import type { Formatter } from "./format.ts";
 import type { TimeZone } from "./zone.ts";
 
@@ -52,14 +53,19 @@ const PREFIXES = [
  * thousands, ".precision", "~" to trim trailing zeros, and a type: d
  * (whole numbers), f (fixed decimals), e (exponent), g (significant
  * digits), s (significant digits with an SI prefix), % (percent), or none
- * (as "~g" with 12 digits). Throws, naming `where`, for other patterns.
+ * (as "~g" with 12 digits). Throws, naming the format's path `at`, for
+ * other patterns, and for a fiscal year, which numbers have none.
  */
 export function numberPattern(
   kit: GuideKit,
-  pattern: string,
+  format: { number: string; fiscal?: unknown },
   locale: string | undefined,
-  where: string,
+  at: string,
 ): Formatter {
+  if (format.fiscal !== undefined)
+    throw new Error(`${at}.fiscal: numbers have no fiscal year; give time, or drop fiscal`);
+  const pattern = format.number;
+  const where = `${at}.number`;
   return cached(`n|${locale}|${pattern}`, () => {
     const match = NUMBER.exec(pattern);
     if (!match)
@@ -133,29 +139,61 @@ function minusSign(locale: string | undefined): string {
 
 const DIRECTIVE = /%(-?)(.?)/g;
 const NAMES = "aAbBp";
-const NUMBERS = "YymdeHIMSL";
+const NUMBERS = "YymdeHIMSLq";
+
+/** Intl options `format`, refusing a fiscal year, which they do not write; `at` names them in the message. */
+export function intlOptions<T extends object>(format: T & { fiscal?: unknown }, at: string): T {
+  if (format.fiscal !== undefined)
+    throw new Error(
+      `${at}.fiscal: Intl options write no fiscal year; give { time: "%Y Q%q" } with fiscal, or drop fiscal`,
+    );
+  return format;
+}
+
+/** A time pattern, and the fiscal year its years and quarters count in. */
+export interface TimePattern {
+  time: string;
+  fiscal?: FiscalSpec | undefined;
+}
+
+/**
+ * The month (0 to 11) a fiscal year starts in, and whether it is named by
+ * the year it ends in. Throws, naming `where`, for anything else.
+ */
+export function fiscalOf(fiscal: FiscalSpec, where: string): [shift: number, ends: boolean] {
+  const { start, name = "end" } = fiscal as { start: unknown; name?: unknown };
+  if (!(Number.isInteger(start) && (start as number) >= 1 && (start as number) <= 12))
+    throw new Error(
+      `${where}.start: expected a month from 1 to 12; received ${JSON.stringify(start)}`,
+    );
+  if (name !== "end" && name !== "start")
+    throw new Error(`${where}.name: expected "end" or "start"; received ${JSON.stringify(name)}`);
+  return [(start as number) - 1, name === "end"];
+}
 
 /**
  * Writes times as a strftime pattern says, in `zone`: %Y %y %m %d %e %H %I
- * %M %S %L (milliseconds), %p, %a %A %b %B (names in the chart's locale), %z
- * (the zone's offset, +hhmm), and %% for "%"; "-" after % drops a number's
- * padding ("%-d"). Throws, naming `where` and the directive's place, for
- * anything else.
+ * %M %S %L (milliseconds), %q (the quarter, 1 to 4), %p, %a %A %b %B
+ * (names in the chart's locale), %z (the zone's offset, +hhmm), and %% for
+ * "%"; "-" after % drops a number's padding ("%-d"). With `fiscal`, %Y,
+ * %y, and %q write the fiscal year and its quarter. Throws, naming `where`
+ * (the format's path) and the directive's place, for anything else.
  */
 export function timePattern(
   kit: GuideKit,
-  pattern: string,
+  { time: pattern, fiscal }: TimePattern,
   zone: TimeZone,
   locale: string | undefined,
   where: string,
 ): Formatter {
-  return cached(`t|${locale}|${zone}|${pattern}`, () => {
+  const [shift, ends] = fiscal ? fiscalOf(fiscal, `${where}.fiscal`) : [0, false];
+  return cached(`t|${locale}|${zone}|${shift}|${ends}|${pattern}`, () => {
     for (const { 0: whole, 1: flag, 2: directive = "", index } of pattern.matchAll(DIRECTIVE)) {
       const number = directive !== "" && NUMBERS.includes(directive);
       const known = number || (directive !== "" && `${NAMES}z%`.includes(directive));
       if (!known || (flag && !number))
         throw new Error(
-          `${where}: "${whole}" at character ${index + 1} of "${pattern}" is not a time directive herceg reads; use %Y %y %m %d %e %H %I %M %S %L %p %a %A %b %B %z, "-" for no padding (%-d), and %% for "%"`,
+          `${where}.time: "${whole}" at character ${index + 1} of "${pattern}" is not a time directive herceg reads; use %Y %y %q %m %d %e %H %I %M %S %L %p %a %A %b %B %z, "-" for no padding (%-d), and %% for "%"`,
         );
     }
     // Names read the wall time as if it were UTC, as calendar math does;
@@ -184,11 +222,15 @@ export function timePattern(
       const wall = kit.toWall(zone, t);
       const date = new Date(wall);
       const hours = date.getUTCHours();
+      const month = date.getUTCMonth();
+      // The year counted from its first month (January, or the fiscal year's), named by its start or end.
+      const year = date.getUTCFullYear() - (month < shift ? 1 : 0) + (shift > 0 && ends ? 1 : 0);
       // Each number and the width it is padded to.
       const numbers: Record<string, [number, number]> = {
-        Y: [date.getUTCFullYear(), 0],
-        y: [date.getUTCFullYear() % 100, 2],
-        m: [date.getUTCMonth() + 1, 2],
+        Y: [year, 0],
+        y: [year % 100, 2],
+        q: [Math.floor(((month - shift + 12) % 12) / 3) + 1, 1],
+        m: [month + 1, 2],
         d: [date.getUTCDate(), 2],
         e: [date.getUTCDate(), 2],
         H: [hours, 2],

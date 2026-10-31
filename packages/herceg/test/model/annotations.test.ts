@@ -332,8 +332,7 @@ describe("text", () => {
           text(crowd, {
             x: "at",
             y: { field: "v", offset: -10 },
-            label: { field: "name" },
-            ...(overlap && { overlap }),
+            label: { field: "name", ...(overlap && { overlap }) },
           }),
         ],
       });
@@ -357,8 +356,7 @@ describe("text", () => {
         text(corner, {
           x: "at",
           y: { field: "v", offset: -10 },
-          label: { field: "name" },
-          overlap: "move",
+          label: { field: "name", overlap: "move", leader: true },
         }),
       ],
       x: { domain: [0, 10] },
@@ -372,7 +370,7 @@ describe("text", () => {
     expect(label!.coords[1]).toBeLessThan(plot.y + plot.height);
   });
 
-  it("moves labels farther out with a line back to their point when the nearest places are taken", () => {
+  it("moves labels farther out with a line back to their point when the nearest places are taken, with leader", () => {
     // A tight cluster of points: labels take the places next to them first,
     // then the rest go a ring or two out, for every anchor.
     const names = Array.from({ length: 10 }, (_, i) => `p${i}`);
@@ -385,8 +383,12 @@ describe("text", () => {
           text(cluster, {
             x: "at",
             y: { field: "v", offset: -12 },
-            label: { field: "name", style: { align: anchor === "middle" ? "center" : anchor } },
-            overlap: "move",
+            label: {
+              field: "name",
+              style: { align: anchor === "middle" ? "center" : anchor },
+              overlap: "move",
+              leader: true,
+            },
           }),
         ],
         x: { domain: [0, 10] },
@@ -459,8 +461,7 @@ describe("text", () => {
         text(near, {
           x: "at",
           y: { field: "v", offset: -12 },
-          label: { field: "name" },
-          overlap: "move",
+          label: { field: "name", overlap: "move" },
         }),
       ],
       x: { domain: [0, 10] },
@@ -477,8 +478,7 @@ describe("text", () => {
         text(cluster, {
           x: "at",
           y: { field: "v", offset: -12 },
-          label: { field: "name" },
-          overlap: "move",
+          label: { field: "name", overlap: "move", leader: true },
         }),
       ],
     });
@@ -495,8 +495,7 @@ describe("text", () => {
         text(points, {
           x: "at",
           y: { field: "v", offset: -12 },
-          label: { field: "name" },
-          overlap: "move",
+          label: { field: "name", overlap: "move", leader: true },
         }),
       ],
       x: { domain: [0, 10] },
@@ -522,8 +521,7 @@ describe("text", () => {
         text(edge, {
           x: { field: "at", offset: 8 },
           y: "v",
-          label: { field: "name", style: { align: "end" } },
-          overlap: "move",
+          label: { field: "name", style: { align: "end" }, overlap: "move" },
         }),
       ],
       x: { domain: [0, 10] },
@@ -538,7 +536,7 @@ describe("text", () => {
     // An empty label before a visible one at the same point takes no room.
     const pair = table({ at: [5, 5], v: [2, 2], name: ["", "shown"] });
     const hidden = build({
-      marks: [text(pair, { x: "at", y: "v", label: { field: "name" }, overlap: "hide" })],
+      marks: [text(pair, { x: "at", y: "v", label: { field: "name", overlap: "hide" } })],
     });
     expect((of(hidden.scene, "text") as TextGeometry[])[0]!.labels).toEqual(["shown"]);
   });
@@ -554,8 +552,11 @@ describe("text", () => {
               text(pair, {
                 x: "at",
                 y: "v",
-                label: { field: "name", style: { background: { fill: "#ffffff" }, padding } },
-                overlap: "hide",
+                label: {
+                  field: "name",
+                  style: { background: { fill: "#ffffff" }, padding },
+                  overlap: "hide",
+                },
               }),
             ],
             x: { domain: [0, 10] },
@@ -579,8 +580,8 @@ describe("text", () => {
                 label: {
                   field: "name",
                   style: { background: { fill: "#ffffff" }, padding: 2, lineHeight },
+                  overlap: "hide",
                 },
-                overlap: "hide",
               }),
             ],
             x: { domain: [0, 10] },
@@ -597,7 +598,7 @@ describe("text", () => {
     // Twenty i's are wider in Times than the Helvetica estimate allows for.
     const pair = table({ at: [3, 6], v: [5, 5], name: ["i".repeat(20), "i".repeat(20)] });
     const model = new ChartModel({
-      marks: [text(pair, { x: "at", y: "v", label: { field: "name" }, overlap: "hide" })],
+      marks: [text(pair, { x: "at", y: "v", label: { field: "name", overlap: "hide" } })],
       x: { domain: [0, 9] },
       y: { domain: [0, 10] },
       theme: { style: { text: { font: "Georgia, serif" } } },
@@ -614,7 +615,7 @@ describe("text", () => {
   it("finish quickly with offsets far outside the chart", () => {
     for (const overlap of ["hide", "move"] as const) {
       const { scene } = build({
-        marks: [text({ x: { data: 5, offset: 1e20 }, y: 5, label: "far", overlap })],
+        marks: [text({ x: { data: 5, offset: 1e20 }, y: 5, label: { text: "far", overlap } })],
         x: { domain: [0, 10] },
         y: { domain: [0, 10] },
       });

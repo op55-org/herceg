@@ -42,22 +42,34 @@ export type TimeInterval = string | { unit: TimeUnit; step?: number } | { millis
  */
 export type TicksSpec =
   | number
-  | { count: number }
-  | { every: number; anchor?: number }
-  | { every: TimeInterval; anchor?: number }
-  | { values: readonly (number | string)[] };
+  | { count: number; fiscal?: never }
+  | { every: number; anchor?: number; fiscal?: never }
+  | { every: TimeInterval; anchor?: number; fiscal?: FiscalSpec }
+  | { values: readonly (number | string)[]; fiscal?: never };
+
+/**
+ * A fiscal year: it starts on the first of month `start` (1 to 12) and is
+ * named by the year it ends in ("end", the default) or starts in. Time
+ * patterns write it with %Y, %y, and %q (its quarter); month and year
+ * ticks step from its start.
+ */
+export interface FiscalSpec {
+  start: number;
+  name?: "end" | "start";
+}
 
 /**
  * How values are written: Intl.NumberFormat options (number axes) or
  * Intl.DateTimeFormat options (time axes); `{ number }`, a d3-format pattern
  * such as ",.2f" or ".1%"; or `{ time }`, a strftime pattern such as
- * "%b %d %H:%M", in the scale's time zone.
+ * "%b %d %H:%M", in the scale's time zone, with years and quarters of a
+ * `fiscal` year if given.
  */
 export type FormatSpec =
-  | Intl.NumberFormatOptions
-  | Intl.DateTimeFormatOptions
-  | { number: string }
-  | { time: string };
+  | (Intl.NumberFormatOptions & { fiscal?: never })
+  | (Intl.DateTimeFormatOptions & { fiscal?: never })
+  | { number: string; fiscal?: never }
+  | { time: string; fiscal?: FiscalSpec };
 
 /**
  * Tick marks: out from the plot (the default), in over it, or across the
@@ -75,7 +87,7 @@ export interface TickMarkSpec {
  * `priority` last; "stagger" moves every other one to a second row; "wrap"
  * breaks labels into lines.
  */
-export type Collision = "show" | "hide" | "stagger" | "wrap";
+export type TickOverlap = "show" | "hide" | "stagger" | "wrap";
 
 /** How a layer's tick labels are written and placed. */
 export interface TickLabelsSpec {
@@ -84,8 +96,8 @@ export interface TickLabelsSpec {
    * angles tried in order, the first at which the labels fit.
    */
   rotation?: number | { candidates: readonly number[] };
-  /** Overlapping labels: drawn all ("show"), the default for number and time axes, or as `Collision` says. */
-  collision?: Collision;
+  /** Overlapping labels: drawn all ("show"), the default for number and time axes, or as `TickOverlap` says. */
+  overlap?: TickOverlap;
   /** The row of labels, 0 by the axis line and 1 beyond it. */
   row?: number;
   /** Which labels stay where labels collide, the higher; 0 by default. */
@@ -234,6 +246,13 @@ export interface AxisGuideSpec {
    * lined up with each other ("outer", the default), or on every panel ("all").
    */
   repeat?: "outer" | "all";
+  /**
+   * Pixels a y axis' tick marks and labels take beside the plot: a fixed
+   * room, so that the plots of charts and panels line up, or bounds on the
+   * room its labels need. Labels wider than it are shortened with an
+   * ellipsis. Y axes only.
+   */
+  room?: number | { min?: number; max?: number };
   style?: AxisStyles;
 }
 

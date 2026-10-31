@@ -5,16 +5,44 @@
 
 import type { Table } from "../../data/table.ts";
 import type { Formatter } from "../../format/format.ts";
-import { numberPattern, timePattern } from "../../format/patterns.ts";
+import {
+  intlOptions,
+  numberPattern,
+  type TimePattern,
+  timePattern,
+} from "../../format/patterns.ts";
 import type { FeatureKit } from "../../model/features.ts";
-import type { LabelContent, LabelPart } from "../../spec/encoding.ts";
+import type { LabelContent, LabelPart, PartStyle } from "../../spec/encoding.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
+import type { TextPaint } from "../../style/style.ts";
+import type { Frame } from "../mark.ts";
+import { type PartText, partText } from "./part-text.ts";
 
 /**
  * A label's text at row `row` of the series named `series`, where the
- * value drawn is `value`, a time where `time` says.
+ * value drawn is `value`, a time where `time` says; with parts in looks of
+ * their own, `styled` writes it in `paint`, each part in its look, its
+ * colors read as `frame` reads styles (without `read`, for measuring only;
+ * see `PartText`).
  */
-export type ContentWriter = (row: number, series: string, value: number, time?: boolean) => string;
+export type ContentWriter = ((
+  row: number,
+  series: string,
+  value: number,
+  time?: boolean,
+) => string) & {
+  readonly styled?: (
+    row: number,
+    series: string,
+    value: number,
+    time: boolean | undefined,
+    paint: TextPaint,
+    frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
+  ) => PartText;
+};
+
+/** What a label's block has once, which its parts' styles leave to it. */
+const BLOCK = ["halo", "background", "padding", "align", "verticalAlign", "lineHeight", "font"];
 
 /** How times are written where a part gives no format: date and time, in the chart's zone. */
 const TIME = { dateStyle: "medium", timeStyle: "short" } as const;
@@ -41,22 +69,40 @@ export function writeContent(
   const format = (spec: FormatSpec | undefined, at: string, time: boolean): Formatter => {
     const pattern = spec as { number?: string; time?: string } | undefined;
     if (pattern?.time !== undefined)
-      return timePattern(kit, pattern.time, zone, locale, `${at}.format.time`);
+      return timePattern(kit, pattern as TimePattern, zone, locale, `${at}.format`);
     if (pattern?.number !== undefined)
-      return numberPattern(kit, pattern.number, locale, `${at}.format.number`);
+      return numberPattern(kit, pattern as { number: string }, locale, `${at}.format`);
     // Intl options: a date's for times, in the chart's zone, else a number's.
     if (spec)
       return time
-        ? kit.timeFormatter(spec as Intl.DateTimeFormatOptions, zone, locale)
-        : kit.numberFormatter(spec as Intl.NumberFormatOptions, locale);
+        ? kit.timeFormatter(
+            intlOptions(spec as Intl.DateTimeFormatOptions, `${at}.format`),
+            zone,
+            locale,
+          )
+        : kit.numberFormatter(
+            intlOptions(spec as Intl.NumberFormatOptions, `${at}.format`),
+            locale,
+          );
     return time ? kit.timeFormatter(TIME, zone, locale) : (v) => kit.formatNumber(v, locale);
   };
+  const styles: (PartStyle | undefined)[] = [];
   const writers = content.map((part: LabelPart, i): ContentWriter => {
     const at = path(i);
     if (typeof part === "string") return () => part;
     const kinds = ["field", "series", "value"].filter((key) => key in (part ?? {}));
     if (typeof part !== "object" || part === null || kinds.length !== 1)
       refuse(kit, at, "expected text, { field }, { series: true }, or { value: true }");
+    if (part.style) {
+      for (const key of BLOCK)
+        if (key in part.style)
+          refuse(
+            kit,
+            `${at}.style`,
+            `${key} is the label's; give it in ${at.replace(/\.content\[\d+\]$/, "")}.style`,
+          );
+      styles[i] = part.style;
+    }
     if (part.series) {
       if (!has.series)
         refuse(
@@ -106,7 +152,36 @@ export function writeContent(
       return read === null ? "" : typeof read === "number" ? write(read) : String(read);
     };
   });
-  return (row, series, v, time) => writers.map((write) => write(row, series, v, time)).join("");
+  const write: ContentWriter = (row, series, v, time) =>
+    writers.map((part) => part(row, series, v, time)).join("");
+  if (styles.length === 0) return write;
+  // Parts' styles as the last frame read them: a frame is a panel's in one scene.
+  let readIn: object | undefined;
+  let read = styles;
+  return Object.assign(write, {
+    styled: (
+      row: number,
+      series: string,
+      v: number,
+      time: boolean | undefined,
+      paint: TextPaint,
+      frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
+    ) => {
+      if (frame.read && readIn !== frame) {
+        readIn = frame;
+        read = styles.map((style, i) => style && frame.read!(style, `${path(i)}.style`));
+      }
+      return partText(
+        kit,
+        writers.map((part, i) => ({
+          text: part(row, series, v, time),
+          style: frame.read ? read[i] : styles[i],
+        })),
+        paint,
+        frame.measure,
+      );
+    },
+  });
 }
 
 function refuse(kit: FeatureKit, at: string, why: string): never {

@@ -291,9 +291,12 @@ describe("text styles", () => {
         text(peaks, {
           x: "x",
           y: "y",
-          label: { field: "v", format: { maximumFractionDigits: 0 } },
-          style: { leader: { stroke: "#999999" } },
-          overlap: "move",
+          label: {
+            field: "v",
+            format: { maximumFractionDigits: 0 },
+            overlap: "move",
+            leader: { stroke: "#999999" },
+          },
         }),
       ],
     });

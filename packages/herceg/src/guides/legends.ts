@@ -5,7 +5,7 @@
 // rest.
 
 import { symbolReach } from "../draw/symbol-shapes.ts";
-import { numberPattern, timePattern } from "../format/patterns.ts";
+import { numberPattern, type TimePattern, timePattern } from "../format/patterns.ts";
 import { markerPath } from "../marks/features/markers.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
 import type { LegendScale, RowParts } from "../marks/mark.ts";
@@ -277,10 +277,10 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
     const keys = new Set(entries.map(({ key }) => key));
     // Annotations' entries, written as their labels are, of their rows drawn in a panel or all.
     const pattern = (format: object, locale: string | undefined, path: string) => {
-      const { number, time } = format as { number?: string; time?: string };
-      return time !== undefined
-        ? timePattern(kit, time, planned.zone, locale, `${path}.time`)
-        : numberPattern(kit, number!, locale, `${path}.number`);
+      const pattern = format as { number?: string; time?: string };
+      return pattern.time !== undefined
+        ? timePattern(kit, pattern as TimePattern, planned.zone, locale, path)
+        : numberPattern(kit, pattern as { number: string }, locale, path);
     };
     const labelEntries = (mark: MarkSeries["mark"], rows?: RowParts) =>
       mark.labelEntries!(places.get(mark)!, text.locale, rows, pattern);

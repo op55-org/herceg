@@ -350,19 +350,16 @@ class StyleMap:
 @refuses
 @dataclass
 class MarkStyle:
-    """How a mark's parts look: looks by value (``by``), its markers
-    (lines), and its leader lines (text that moves away from its point).
-    The mark's body takes its own options (``stroke``, ``fill``,
+    """How a mark's parts look: looks by value (``by``) and its markers
+    (lines). The mark's body takes its own options (``stroke``, ``fill``,
     ``stroke_width``, ...)."""
 
     by: StyleMap | Mapping[str, Any] | None = None
     marker: MarkerStyle | Mapping[str, Any] | None = None
-    leader: StrokeStyle | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self.by = _built(self.by, StyleMap, "MarkStyle by")
         self.marker = _built(self.marker, MarkerStyle, "MarkStyle marker")
-        self.leader = _built(self.leader, StrokeStyle, "MarkStyle leader")
 
 
 def mark_style_spec(value: Any, parts: Sequence[str], role: str) -> Any:
@@ -373,9 +370,8 @@ def mark_style_spec(value: Any, parts: Sequence[str], role: str) -> Any:
     built: MarkStyle = _built(value, MarkStyle, f"{role} style")
     if built.by is not None and "by" not in parts:
         raise ChartError(f"{role} style by: draws one look, not looks by value; drop by")
-    for name in ("marker", "leader"):
-        if getattr(built, name) is not None and name not in parts:
-            raise ChartError(f"{role} style: has no {name}; give {listed(parts)}")
+    if built.marker is not None and "marker" not in parts:
+        raise ChartError(f"{role} style: has no marker; give {listed(parts)}")
     return _spec(built)
 
 
@@ -746,12 +742,24 @@ class LabelPart:
     there (``value=True``, written with ``format``)::
 
         content=["Peak ", hg.LabelPart(value=True, format=hg.Format(number=".1f"))]
+
+    ``style`` (an ``hg.TextStyle``) gives the part a look of its own: its
+    ``font_size``, ``font_weight``, ``font_style``, ``color``, and
+    ``opacity``. The label's block (its font, line height, alignment, halo,
+    and box) stays the label's style's::
+
+        content=[
+            hg.LabelPart(field="name", style=hg.TextStyle(font_weight=700)),
+            "\n",
+            hg.LabelPart(value=True, style=hg.TextStyle(opacity=0.7)),
+        ]
     """
 
     field: str | None = None
     series: bool | None = None
     value: bool | None = None
     format: Format | Mapping[str, Any] | None = None
+    style: TextStyle | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         given = [name for name in ("field", "series", "value") if getattr(self, name) is not None]
@@ -769,6 +777,14 @@ class LabelPart:
             )
         if self.series and self.format is not None:
             raise ChartError("LabelPart format: a series' name is written as it is; drop format")
+        if self.style is not None:
+            style = _built(self.style, TextStyle, "LabelPart style")
+            for name in _PART_BLOCK:
+                if getattr(style, name) is not None:
+                    raise ChartError(
+                        f"LabelPart style: {name} is the label's; give it in the label's style"
+                    )
+            object.__setattr__(self, "style", style)
 
     def _spec(self) -> dict[str, Any]:
         spec: dict[str, Any] = (
@@ -780,7 +796,13 @@ class LabelPart:
         )
         if self.format is not None:
             spec["format"] = format_spec(self.format, "LabelPart format")
+        if self.style is not None:
+            spec["style"] = _spec(self.style)
         return spec
+
+
+#: What a label's block has once, which its parts' styles leave to it.
+_PART_BLOCK = ("font", "line_height", "align", "vertical_align", "halo", "background", "padding")
 
 
 def content_spec(value: Any, role: str) -> Any:
@@ -856,6 +878,53 @@ def _content_problem(content: Any) -> tuple[str, str] | None:
     return None
 
 
+#: What a label does where it would cover another.
+Overlap = Literal["show", "hide", "move"]
+_OVERLAPS: tuple[str, ...] = get_args(Overlap)
+
+
+def _label_layout(owner: Any, role: str) -> None:
+    """Checks how a label keeps apart from others: its ``overlap``,
+    ``leader``, and ``priority``."""
+    if owner.overlap in ("stagger", "wrap"):
+        raise ChartError(
+            f'{role} overlap: "{owner.overlap}" is for tick labels; use "show", "hide", or "move"'
+        )
+    if owner.overlap is not None:
+        _choice(owner.overlap, _OVERLAPS, f"{role} overlap")
+    if owner.leader is not None and not isinstance(owner.leader, bool):
+        owner.leader = _built(owner.leader, StrokeStyle, f"{role} leader")
+    if owner.priority is not None and (
+        isinstance(owner.priority, bool)
+        or not is_number(owner.priority)
+        or not math.isfinite(owner.priority)
+    ):
+        raise ChartError(f"{role} priority: expected a number; received {shown(owner.priority)}")
+
+
+def _moves_with_leader(owner: Any, role: str, default: str) -> None:
+    """Refuses a leader on labels that do not move (``default`` unless
+    ``overlap`` says): only moved labels draw one."""
+    overlap = owner.overlap or default
+    if owner.leader is not None and owner.leader is not False and overlap != "move":
+        raise ChartError(
+            f"{role} leader: labels that {overlap} are drawn at their place and draw none; "
+            'use overlap="move"'
+        )
+
+
+def _layout_spec(owner: Any) -> dict[str, Any]:
+    """A label's ``overlap``, ``overlapGroup``, ``leader``, and ``priority``
+    as the spec takes them."""
+    leader = owner.leader
+    return {
+        "overlap": owner.overlap,
+        "overlapGroup": getattr(owner, "overlap_group", None),
+        "leader": _spec(leader) if isinstance(leader, StrokeStyle) else leader,
+        "priority": owner.priority,
+    }
+
+
 @refuses
 @dataclass
 class SeriesLabels:
@@ -864,13 +933,23 @@ class SeriesLabels:
     leaves the view, ``"visible-start"`` or ``"visible-end"``), saying
     ``content`` (the series' name by default; see ``hg.LabelPart``), placed
     by ``place`` (an ``hg.LabelPlace``) and styled by ``style``. A band
-    (``y1`` and ``y2``) follows the edge ``edge`` names."""
+    (``y1`` and ``y2``) follows the edge ``edge`` names.
+
+    A panel's series labels keep apart across its marks: ``overlap="move"``
+    (the default) moves them along their column as little as they need, and
+    leaves out the lowest ``priority`` (then the last series) where the plot
+    is too short for all; ``"hide"`` leaves out those that would cover
+    another; ``"show"`` draws them at their points. ``leader=True`` (or an
+    ``hg.StrokeStyle``) joins labels moved away to their points."""
 
     at: LabelAt
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
     edge: Literal["y1", "y2", "x1", "x2"] | None = None
     place: LabelPlace | Mapping[str, Any] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
+    overlap: Overlap | None = None
+    leader: bool | StrokeStyle | Mapping[str, Any] | None = None
+    priority: float | None = None
 
     def __post_init__(self) -> None:
         _choice(self.at, _LABEL_AT, "SeriesLabels at")
@@ -885,6 +964,8 @@ class SeriesLabels:
                     f"drop {name}"
                 )
         self.style = _built(self.style, TextStyle, "SeriesLabels style")
+        _label_layout(self, "SeriesLabels")
+        _moves_with_leader(self, "SeriesLabels", "move")
 
     def _spec(self) -> dict[str, Any]:
         spec = {
@@ -893,6 +974,7 @@ class SeriesLabels:
             "edge": self.edge,
             "place": _spec(self.place) if self.place is not None else None,
             "style": _spec(self.style) if self.style is not None else None,
+            **_layout_spec(self),
         }
         return {key: value for key, value in spec.items() if value is not None}
 
@@ -926,7 +1008,15 @@ class Label:
     """A label: constant ``text``, each row's ``field`` (numbers written
     with ``format``, an ``hg.Format`` or Intl options), or ``content`` made
     of parts (see ``hg.LabelPart``), styled by ``style`` (an
-    ``hg.TextStyle``) and placed by ``place`` (an ``hg.LabelPlace``)."""
+    ``hg.TextStyle``) and placed by ``place`` (an ``hg.LabelPlace``).
+
+    Where it would cover another label of its mark, or of every mark naming
+    the same ``overlap_group`` in its panel, it is drawn anyway
+    (``overlap="show"``, the default), left out (``"hide"``), or moved to the
+    nearest free place (``"move"``: along its rule, around its point) and left
+    out where none is; higher ``priority`` labels are placed first.
+    ``leader=True`` (or an ``hg.StrokeStyle``) joins moved labels to what
+    they label."""
 
     text: str | None = None
     field: str | None = None
@@ -934,6 +1024,10 @@ class Label:
     format: Format | Mapping[str, Any] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
     place: LabelPlace | Mapping[str, Any] | None = None
+    overlap: Overlap | None = None
+    overlap_group: str | None = None
+    leader: bool | StrokeStyle | Mapping[str, Any] | None = None
+    priority: float | None = None
 
     def __post_init__(self) -> None:
         if sum(value is not None for value in (self.text, self.field, self.content)) != 1:
@@ -943,6 +1037,14 @@ class Label:
         content_spec(self.content, "Label content")
         self.style = _built(self.style, TextStyle, "Label style")
         self.place = _built(self.place, LabelPlace, "Label place")
+        if self.overlap_group is not None and (
+            not isinstance(self.overlap_group, str) or not self.overlap_group
+        ):
+            raise ChartError(
+                "Label overlap_group: expected a group's name; "
+                f"received {shown(self.overlap_group)}"
+            )
+        _label_layout(self, "Label")
 
     def _spec(self) -> dict[str, Any]:
         spec = {
@@ -952,17 +1054,30 @@ class Label:
             "format": format_spec(self.format, "Label format"),
             "style": _spec(self.style) if self.style is not None else None,
             "place": _spec(self.place) if self.place is not None else None,
+            **_layout_spec(self),
         }
         return {key: value for key, value in spec.items() if value is not None}
 
 
-def label_spec(value: Any, role: str, *, places: bool = True) -> Any:
-    """A ``label`` option as the spec takes it: text, or an ``hg.Label``."""
+def label_spec(value: Any, role: str, *, places: bool = True, following: bool = False) -> Any:
+    """A ``label`` option as the spec takes it: text, or an ``hg.Label``.
+    Text ``following`` a series is placed with its series labels ("move" by
+    default, kept apart across marks without a group)."""
     if value is None or isinstance(value, str):
         return value
     built: Label = _built(value, Label, f"{role} label")
     if not places and built.place is not None:
         raise ChartError(f"{role} label: text goes where at says; drop place")
+    if role == "region" and built.leader is not None:
+        raise ChartError(
+            "region label leader: region labels slide along their side and draw none; drop leader"
+        )
+    if following and built.overlap_group is not None:
+        raise ChartError(
+            f"{role} label overlap_group: series labels already keep apart across marks; "
+            "drop overlap_group"
+        )
+    _moves_with_leader(built, f"{role} label", "move" if following else "show")
     return placed(f"{role} label", built._spec)
 
 
@@ -977,7 +1092,8 @@ class BarLabels:
     an ``hg.LabelPlace`` with ``outside=False`` puts them inside the bars at
     their ``attachment`` (``"start"``, ``"center"``, or ``"end"``, the
     default); by default they go past each bar's end, and inside stacked
-    bars' segments."""
+    bars' segments. ``overlap="hide"`` leaves out those that would cover an
+    earlier one's; ``"show"`` (the default) draws them all."""
 
     field: str | None = None
     content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
@@ -985,6 +1101,7 @@ class BarLabels:
     style: TextStyle | Mapping[str, Any] | None = None
     min_length: float | None = None
     place: LabelPlace | Mapping[str, Any] | None = None
+    overlap: Literal["show", "hide"] | None = None
 
     def __post_init__(self) -> None:
         if self.content is not None and (self.field is not None or self.format is not None):
@@ -1003,6 +1120,13 @@ class BarLabels:
                     raise ChartError(
                         f"BarLabels place: bars' labels take attachment and outside; drop {name}"
                     )
+        if self.overlap == "move":
+            raise ChartError(
+                "BarLabels overlap: bar labels fit at their bar or are left out; "
+                'use "show" or "hide"'
+            )
+        if self.overlap is not None:
+            _choice(self.overlap, ("show", "hide"), "BarLabels overlap")
 
     def _spec(self) -> dict[str, Any]:
         spec = {
@@ -1012,6 +1136,7 @@ class BarLabels:
             "style": _spec(self.style) if self.style is not None else None,
             "minLength": self.min_length,
             "place": _spec(self.place) if self.place is not None else None,
+            "overlap": self.overlap,
         }
         return {key: value for key, value in spec.items() if value is not None}
 

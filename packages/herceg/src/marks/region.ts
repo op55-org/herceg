@@ -1,4 +1,5 @@
 import type { PositionField, Schema, Table } from "../data/table.ts";
+import { labelHalo } from "../draw/label-halo.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
@@ -6,12 +7,13 @@ import {
   type LabelledMark,
   type LabelPlacement,
   type LabelRequest,
-  placeLabels,
-} from "../layout/place.ts";
+  placePanel,
+  slidesAlong,
+} from "../layout/placer.ts";
 import { lineCount, type MeasureText, textLines } from "../layout/text.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, LabelsGeometry, RectGeometry } from "../scene/scene.ts";
-import type { LabelPlaceSpec } from "../spec/encoding.ts";
+import type { LabelLayoutSpec, LabelPlaceSpec } from "../spec/encoding.ts";
 import type { Side } from "../spec/place.ts";
 import type { AnnotationPosition, Clip, Frozen, RegionRange, RegionSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
@@ -28,12 +30,15 @@ import {
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
 import type { ItemKeyed, RowChannel } from "./encoding.ts";
+import type { PartText } from "./features/part-text.ts";
 import {
+  grown,
   labelBox,
   labelPaint,
   labelsGeometry,
   movedLabel,
   type PlacedLabel,
+  paintedReach,
   plainText,
   textGeometry,
 } from "./labels.ts";
@@ -96,7 +101,7 @@ interface RegionStyle {
 export type RegionOptions = RegionStyle &
   RegionRange<PlaceOption<never>> & {
     /** Text drawn in the region (its top left corner by default): its text, or a label object. */
-    label?: RuleLabel<never>;
+    label?: RuleLabel<never, RegionLabelLayout>;
   };
 
 /** Regions from a table, one per row; places may also be constants. */
@@ -104,7 +109,7 @@ export type RegionDataOptions<S extends Schema> = RegionStyle &
   ItemKeyed<S> &
   RegionRange<PlaceOption<PositionField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
-    label?: RuleLabel<TextField<S>>;
+    label?: RuleLabel<TextField<S>, RegionLabelLayout>;
     /**
      * Each row's paint: `color` (the fill) or `fill`, `stroke`, and
      * `opacity`, which scales the fill's `fillOpacity` and the outline's;
@@ -118,6 +123,9 @@ export type RegionDataOptions<S extends Schema> = RegionStyle &
       opacity?: RowChannel<number, S>;
     };
   };
+
+/** Region labels slide along their side and draw no leaders. */
+type RegionLabelLayout = LabelLayoutSpec & { leader?: never };
 
 /** Pixels between a region's edge and its label. */
 const PADDING = 4;
@@ -154,6 +162,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   readonly #drawnRows = new WeakMap<Geometry, Uint32Array>();
   /** The label drawn as regions always draw theirs: plain text, in the top left corner. */
   readonly #plain: boolean;
+  /**
+   * Its labels, kept from drawing its regions to drawing the labels in one
+   * panel and frame, so the panel's placer reads its rows once.
+   */
+  #kept:
+    | { frame: Frame; key: MarkKey; rows: RowParts | undefined; labels: RegionLabel[] }
+    | undefined;
+  readonly placer = placePanel;
 
   constructor(input: RegionSpec, table?: Table) {
     // Outlines well formed first, as the validator checks a spec before what it draws.
@@ -305,19 +321,21 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     return this.#data.extent(this.#pair("y"), log, overlaps, rows);
   }
 
+  /** Its regions; the panel's placer places their labels (`labelRequests`). */
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
     const { fills, labels } = this.#regions(frame, key, panelRows);
-    if (labels.length === 0) return fills;
-    const placed = placeLabels(
-      labels.map(({ request }) => request),
-      [],
-    );
-    return [...fills, ...this.#drawLabels(frame, key, labels, placed)];
+    // The panel's placer asks for their labels next.
+    this.#kept = this.#data.label ? { frame, key, rows: panelRows, labels } : undefined;
+    return fills;
   }
 
   /** Its labels, for a panel's placer (see `LabelledMark`). */
   labelRequests(frame: Frame, key: MarkKey, panelRows?: RowParts): readonly LabelRequest[] {
-    return this.#regions(frame, key, panelRows).labels.map(({ request }) => request);
+    if (!this.#data.label) return [];
+    const labels = this.#labelsIn(frame, key, panelRows);
+    // Asked for none, it is not asked to draw: let the frame go.
+    if (labels.length === 0) this.#kept = undefined;
+    return labels.map(({ request }) => request);
   }
 
   /** Its labels at their placements, in request order. */
@@ -327,7 +345,18 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     panelRows: RowParts | undefined,
     placements: readonly LabelPlacement[],
   ): Geometry[] {
-    return this.#drawLabels(frame, key, this.#regions(frame, key, panelRows).labels, placements);
+    const labels = this.#labelsIn(frame, key, panelRows);
+    this.#kept = undefined;
+    return this.#drawLabels(frame, key, labels, placements);
+  }
+
+  /** Its labels in `frame`'s panel: as just drawn there, or afresh. */
+  #labelsIn(frame: Frame, key: MarkKey, rows: RowParts | undefined): RegionLabel[] {
+    const kept = this.#kept;
+    if (kept?.frame === frame && kept.key === key && kept.rows === rows) return kept.labels;
+    const { labels } = this.#regions(frame, key, rows);
+    this.#kept = { frame, key, rows, labels };
+    return labels;
   }
 
   /**
@@ -368,7 +397,13 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     const sides = outlined ? frame.bytes(id, "sides", size) : undefined;
     const given = sideMask(this.spec.strokeSides ?? ["top", "right", "bottom", "left"]);
     const labels: RegionLabel[] = [];
+    const side = label?.place?.side;
+    const along = side === "left" || side === "right" ? "y" : "x";
     const paint = label && this.#paint(frame);
+    // Labels keep apart as painted: outlines and halos too.
+    const reach = paint
+      ? paintedReach(paint, labelHalo(label.style?.halo ?? this.spec.halo, frame))
+      : 0;
     let count = 0;
     // Regions are cut to the plot, or to the chart with a clip of "chart" or false.
     const clip = this.spec.clip;
@@ -398,32 +433,42 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
         sides[count] =
           given & (((across[2] & 1) << 3) | (across[2] & 2) | (down[2] & 1) | ((down[2] & 2) << 1));
       if (paint) {
-        const text = data.text(i, frame.locale, write, frame.features?.of(this)?.content);
-        const label: PlacedLabel =
-          this.#plain && paint.verticalAlign === undefined
-            ? {
-                text,
-                x: across[0] + PADDING,
-                y: down[0] + PADDING + paint.size / 2,
-                anchor: "start",
-                baseline: "middle",
-              }
-            : this.#place(text, across, down, paint, frame.measure);
-        // Its box stays inside the region's where the visible part is too small for it.
-        const block = labelBox(label, paint, frame.measure);
-        const request: LabelRequest = {
-          mark: key,
-          index: labels.length,
-          group: undefined,
-          overlap: "show",
-          priority: 0,
-          anchor: { x: block.x, y: block.y },
-          block: { width: block.width, height: block.height },
-          places: [{ dx: 0, dy: 0 }],
-          leader: false,
-          bounds: box,
-        };
-        labels.push({ row: i, at: label, request });
+        const content = frame.features?.of(this)?.content;
+        const text = data.text(i, frame.locale, write, content);
+        const parts = content?.styled?.(i, "", Number.NaN, undefined, paint, frame);
+        // A label that writes nothing takes no place, so it hides no other.
+        if (parts ? parts.lines.width > 0 : /[^\n]/.test(text)) {
+          const label: PlacedLabel =
+            this.#plain && paint.verticalAlign === undefined && !parts
+              ? {
+                  text,
+                  x: across[0] + PADDING,
+                  y: down[0] + PADDING + paint.size / 2,
+                  anchor: "start",
+                  baseline: "middle",
+                }
+              : this.#place(text, across, down, paint, frame.measure, parts);
+          // Its box stays inside the region's where the visible part is too small for it.
+          const block = grown(labelBox(label, paint, frame.measure), reach);
+          const request: LabelRequest = {
+            mark: key,
+            index: labels.length,
+            ...this.#data.layout,
+            leader: false,
+            anchor: { x: block.x, y: block.y },
+            block: { width: block.width, height: block.height },
+            places: [{ dx: 0, dy: 0 }],
+            // Moved labels slide along their side, within its visible part.
+            moves: slidesAlong(along, block),
+            bounds:
+              this.#data.layout.overlap === "move"
+                ? along === "x"
+                  ? { ...box, x: across[0], width: across[1] - across[0] }
+                  : { ...box, y: down[0], height: down[1] - down[0] }
+                : box,
+          };
+          labels.push({ row: i, at: label, request });
+        }
       }
       count++;
     });
@@ -484,8 +529,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     const paint = this.#paint(frame);
     const labelKey = seriesKey(key, "region label");
     const halo = this.#data.label?.style?.halo ?? this.spec.halo;
+    const owners: number[] = [];
     const geometry =
-      this.#plain || plainText(paint, theme)
+      !frame.features?.of(this)?.content?.styled && (this.#plain || plainText(paint, theme))
         ? textGeometry(
             labelKey,
             // Placed by their first lines, drawn by their middles.
@@ -497,8 +543,13 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
             halo,
             frame,
           )
-        : labelsGeometry(labelKey, placed, paint, halo, frame);
-    this.#drawnRows.set(geometry, Uint32Array.from(rows));
+        : labelsGeometry(labelKey, placed, paint, halo, frame, owners);
+    this.#drawnRows.set(
+      geometry,
+      geometry.kind === "labels"
+        ? Uint32Array.from(owners, (k) => rows[k]!)
+        : Uint32Array.from(rows),
+    );
     return [geometry];
   }
 
@@ -539,6 +590,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     [top, bottom]: readonly [number, number, ...number[]],
     paint: TextPaint,
     measure: MeasureText,
+    parts: PartText | undefined,
   ): PlacedLabel {
     const place: Frozen<LabelPlaceSpec> = this.#data.label?.place ?? {};
     const side = place.side ?? "top";
@@ -548,20 +600,19 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     const { size, lineHeight, verticalAlign } = paint;
     // The block's lines after the first.
     const rest = (lineCount(text) - 1) * lineHeight;
-    /** The label from `x` as `anchor` says, its block at `y` as its style aligns it. */
-    const block = (x: number, y: number, anchor: PlacedLabel["anchor"]): PlacedLabel => {
+    /** The label from `x` as `anchor` says, its block at `y` as `align` (its style's) says. */
+    const block = (
+      x: number,
+      y: number,
+      anchor: PlacedLabel["anchor"],
+      align: NonNullable<TextPaint["verticalAlign"]>,
+    ): PlacedLabel => {
       const { at, box } = anchorBlock(
-        textLines(text, paint, measure),
-        {
-          x,
-          y,
-          align: anchor === "middle" ? "center" : anchor,
-          verticalAlign: verticalAlign!,
-          angle: 0,
-        },
+        parts?.lines ?? textLines(text, paint, measure),
+        { x, y, align: anchor === "middle" ? "center" : anchor, verticalAlign: align, angle: 0 },
         paint,
       );
-      return { text, x: at.x, y: at.y, anchor, baseline: "middle", box };
+      return { text, x: at.x, y: at.y, anchor, baseline: "middle", box, parts };
     };
     if (side === "top" || side === "bottom") {
       const [x, anchor]: [number, PlacedLabel["anchor"]] =
@@ -571,11 +622,14 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
             ? [right - PADDING, "end"]
             : [(left + right) / 2, "middle"];
       const edge = side === "top" ? top : bottom;
-      if (verticalAlign)
+      // A label of parts goes inside the region from its side, or outside away from it.
+      const align = verticalAlign ?? (parts && ((side === "top") === out > 0 ? "top" : "bottom"));
+      if (align)
         return block(
           x,
-          verticalAlign === "top" ? edge + gap : verticalAlign === "bottom" ? edge - gap : edge,
+          align === "top" ? edge + gap : align === "bottom" ? edge - gap : edge,
           anchor,
+          align,
         );
       const y =
         side === "top"
@@ -583,7 +637,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
           : bottom - out * (gap + size / 2) - (out > 0 ? rest : 0);
       return { text, x, y, anchor, baseline: "middle" };
     }
-    if (verticalAlign)
+    if (verticalAlign || parts)
       return block(
         side === "left" ? left + out * gap : right - out * gap,
         attachment === "start"
@@ -592,6 +646,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
             ? bottom - PADDING
             : (top + bottom) / 2,
         (side === "left") === !place.outside ? "start" : "end",
+        verticalAlign ??
+          (attachment === "start" ? "top" : attachment === "end" ? "bottom" : "middle"),
       );
     const y =
       attachment === "start"

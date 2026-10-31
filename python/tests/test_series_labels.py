@@ -75,12 +75,18 @@ def test_text_follows_another_marks_series():
     assert spec["marks"][1]["from"] == {"mark": "sales", "at": "last"}
 
 
-def test_text_following_a_series_is_placed_by_it_alone():
+def test_text_following_a_series_is_placed_with_its_series_labels():
     chart = hg.Chart(DATA).line(x="t", y="v", color="region", id="sales")
-    with pytest.raises(hg.ChartError) as raised:
-        chart.text(label="x", from_=hg.MarkAnchor(mark="sales", at="last"), overlap="hide").to_svg()
-    assert raised.value.code == "invalid-option"
-    assert "drop overlap" in str(raised.value)
+    anchor = hg.MarkAnchor(mark="sales", at="last")
+    # They move by default, as series labels do, so a leader needs no overlap.
+    followed = chart.text(label=hg.Label(text="x", leader=True), from_=anchor)
+    assert followed.to_spec()[0]["marks"][1]["label"] == {"text": "x", "leader": True}
+    with pytest.raises(
+        hg.ChartError,
+        match="^text label overlap_group: series labels already keep apart across marks; "
+        "drop overlap_group$",
+    ):
+        chart.text(label=hg.Label(text="x", overlap_group="notes"), from_=anchor)
     with pytest.raises(hg.ChartError) as raised:
         hg.Chart(DATA).text(label="x", from_=hg.MarkAnchor(mark="none", at="last")).to_svg()
     assert raised.value.code == "unknown-reference"

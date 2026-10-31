@@ -17,7 +17,7 @@ import type { MarkRows } from "../marks/rows.ts";
 import type { Series } from "../marks/series.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { FacetSpec, ScaleScope } from "../spec/spec.ts";
+import type { FacetLayoutSpec, FacetSpec, ScaleScope } from "../spec/spec.ts";
 import type { TextPaint } from "../style/style.ts";
 import type { MarkSeries } from "./inspect.ts";
 import {
@@ -33,7 +33,6 @@ import {
   headerGuides,
   instanceIn,
   type LayoutConfig,
-  leastHeight,
   type PanelAxis,
   PanelBands,
   type PanelChart,
@@ -48,7 +47,7 @@ import {
 import { type ScaledConfig, type Scopes, scopesOf } from "./scales.ts";
 import { uniformPlacement } from "./uniform-grid.ts";
 
-export interface FacetOptions {
+export interface FacetOptions extends FacetLayoutSpec {
   /** Panels per row; by default about as many columns as rows. */
   columns?: number;
 }
@@ -69,13 +68,13 @@ export interface FacetGrid {
  * ```ts
  * createChart(element, { marks: [line(sales, { x: "week", y: "units" })], facet: facet("region") });
  * createChart(element, { marks, facet: facet({ row: "region", column: "product" }) });
+ * createChart(element, { marks, facet: facet("site", { columns: 1, header: false, gap: 1 }) });
  * ```
  */
 export function facet(field: string, options?: FacetOptions): Facet;
-export function facet(grid: FacetGrid): Facet;
+export function facet(grid: FacetGrid, options?: FacetLayoutSpec): Facet;
 export function facet(by: string | FacetGrid, options: FacetOptions = {}): Facet {
-  if (typeof by !== "string") return new Facet(by);
-  return new Facet(options.columns === undefined ? { field: by } : { field: by, ...options });
+  return new Facet(typeof by === "string" ? { field: by, ...options } : { ...by, ...options });
 }
 
 /**
@@ -91,8 +90,25 @@ export class Facet implements PanelLayout {
   /** The fields of a grid's rows and columns. */
   readonly row: string | undefined;
   readonly column: string | undefined;
+  /** Whether panels have headers naming them, and the gaps given between them. */
+  readonly header: boolean;
+  readonly gap: { row?: number | undefined; column?: number | undefined };
 
   constructor(spec: FacetSpec) {
+    const { header = true, gap } = spec;
+    if (typeof header !== "boolean")
+      throw new TypeError(
+        `facet header: expected true or false; received ${JSON.stringify(header)}`,
+      );
+    this.header = header;
+    this.gap = typeof gap === "number" ? { row: gap, column: gap } : { ...gap };
+    for (const side of ["row", "column"] as const) {
+      const pixels = this.gap[side];
+      if (pixels !== undefined && !(Number.isFinite(pixels) && pixels >= 0))
+        throw new RangeError(
+          `facet gap${typeof gap === "number" ? "" : `.${side}`}: expected pixels of at least 0; received ${typeof pixels === "number" ? pixels : JSON.stringify(pixels)}`,
+        );
+    }
     if ("field" in spec) {
       const { columns } = spec;
       if (columns !== undefined && !(Number.isInteger(columns) && columns >= 1))
@@ -300,15 +316,17 @@ export class Facet implements PanelLayout {
       for (const text of texts) lines = Math.max(lines, lineCount(text));
       return lineHeight + (lines - 1) * step + 4;
     };
-    const wrapped = this.field !== undefined;
+    // Without headers, a facet keeps no room for them.
+    const wrapped = this.field !== undefined && this.header;
+    const grid = this.field === undefined && this.header;
     const { values, dimensions } = split;
     return {
       columns,
       rows,
       header: wrapped ? header(values.map((named) => named.join(", "))) : 0,
-      columnHeader: !wrapped && this.column !== undefined ? header(dimensions.at(-1) ?? []) : 0,
-      rowHeader: !wrapped && this.row !== undefined ? header(dimensions[0] ?? []) : 0,
-      least: leastHeight(rows, undefined, split.keys.length),
+      columnHeader: grid && this.column !== undefined ? header(dimensions.at(-1) ?? []) : 0,
+      rowHeader: grid && this.row !== undefined ? header(dimensions[0] ?? []) : 0,
+      gap: this.gap,
     };
   }
 

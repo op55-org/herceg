@@ -31,8 +31,7 @@
     },
     "mark * python style": {
       "only": {
-        "marker": "Python's one hg.MarkStyle serves every mark; a mark refuses what it does not take (`area style: has no marker; give \"by\"`).",
-        "leader": "As marker."
+        "marker": "Python's one hg.MarkStyle serves every mark; a mark refuses what it does not take (`area style: has no marker; give \"by\"`)."
       }
     },
     "mark rule python": {
@@ -115,11 +114,6 @@
         }
       }
     },
-    "mark text python style": {
-      "only": {
-        "by": "Python's text takes hg.MarkStyle, the class every mark takes, and refuses its by when the mark is made (`text style by: draws one look, not looks by value; drop by`), as the spec's validator does."
-      }
-    },
     "chart typescript": {
       "without": {
         "version": "The spec format's version, which specs carry and charts made in TypeScript do not need.",
@@ -179,7 +173,9 @@
             "field": "facet",
             "columns": "facet_columns",
             "row": "facet_row",
-            "column": "facet_column"
+            "column": "facet_column",
+            "header": "facet_header",
+            "gap": "facet_gap"
           },
           "reason": "Python names the facet's field with facet= and its other settings beside it, as Plotly's facet_col and facet_col_wrap."
         }
@@ -191,7 +187,8 @@
         }
       },
       "untyped": {
-        "data": "Python takes each table as a data frame, an Arrow table, NumPy arrays, or a mapping of columns, which it writes as the spec's tables."
+        "data": "Python takes each table as a data frame, an Arrow table, NumPy arrays, or a mapping of columns, which it writes as the spec's tables.",
+        "facet.gap": "As a layout grid's gap: Python takes the gaps between rows and between columns as a pair, (row, column), where the spec writes { row, column }."
       }
     },
     "chart update": {
@@ -1057,11 +1054,17 @@
     "settings GuideSpec hg.AxisGuide|hg.Colorbar|hg.LegendGuide": {
       "without": {
         "type": "Python's hg.AxisGuide, hg.Colorbar, and hg.LegendGuide are the guide's type."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
       }
     },
     "settings GuideOptions hg.AxisGuide|hg.Colorbar|hg.LegendGuide": {
       "without": {
         "type": "Python's hg.AxisGuide, hg.Colorbar, and hg.LegendGuide are the guide's type."
+      },
+      "untyped": {
+        "room": "Python takes a room as pixels or a (least, most) tuple, which it writes as { min, max }."
       }
     },
     "settings PanelSpec hg.Panel": {
@@ -1399,6 +1402,22 @@
         "field": "Python's hg.Pixels serves places too; within refuses a place's settings (`InspectionOptions within: a length is pixels alone; drop field, frame, and offset`).",
         "frame": "As field.",
         "offset": "As field."
+      }
+    },
+    "mark region python label": {
+      "untyped": {
+        "leader": "Python's one hg.Label serves rules, regions, and text; a region refuses its leader as it is made (`region label leader: region labels slide along their side and draw none; drop leader`), as the spec's validator does."
+      }
+    },
+    "settings PartStyle hg.TextStyle": {
+      "only": {
+        "font": "Python's parts take hg.TextStyle, the class labels take, and refuse what is the label's block as they are made (`LabelPart style: font is the label's; give it in the label's style`).",
+        "line_height": "As font.",
+        "align": "As font.",
+        "vertical_align": "As font.",
+        "halo": "As font.",
+        "background": "As font.",
+        "padding": "As font."
       }
     }
   }

@@ -71,6 +71,30 @@ describe("format patterns", () => {
     const mixed = { marks, y: { format: { number: ".1f", maximumFractionDigits: 1 } } };
     expect(checkSpec(mixed as unknown as ChartSpec)).toEqual(["y.format.maximumFractionDigits"]);
   });
+
+  it("takes a fiscal year beside time patterns and calendar month and year steps", () => {
+    const fiscal = { start: 7, name: "start" as const };
+    expect(
+      valid({
+        x: {
+          type: "time",
+          ticks: { every: "3 months", fiscal },
+          format: { time: "FY%y Q%q", fiscal },
+        },
+      }),
+    ).not.toThrow();
+    expect(valid({ x: { type: "time", format: { time: "%Y", fiscal: { start: 13 } } } })).toThrow(
+      "x.format.fiscal.start: expected a month from 1 to 12; received 13",
+    );
+    const numbers = { marks, y: { format: { number: ".1f", fiscal } } } as unknown as ChartSpec;
+    expect(checkSpec(numbers)).toEqual(["y.format.fiscal"]);
+    expect(valid({ y: { ticks: { every: 5, fiscal } as never } })).toThrow(
+      "y.ticks.fiscal: fiscal years step through time; a number axis steps by numbers; drop fiscal",
+    );
+    expect(valid({ x: { ticks: { every: "6 hours", fiscal } } })).toThrow(
+      "x.ticks.fiscal: fiscal years start months and years; step by months or years, or drop fiscal",
+    );
+  });
 });
 
 describe("scales and guides", () => {
@@ -94,7 +118,7 @@ describe("scales and guides", () => {
             type: "axis",
             scale: "y",
             tick: { direction: "in", length: 4 },
-            labels: { rotation: { candidates: [0, 45] }, collision: "hide" },
+            labels: { rotation: { candidates: [0, 45] }, overlap: "hide" },
             layers: [{ id: "minor", ticks: { every: 5 }, labels: false }],
           },
           { type: "legend", columns: 3, place: { side: "bottom" } },

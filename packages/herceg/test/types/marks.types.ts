@@ -571,6 +571,13 @@ text({ from: { mark: "m", at: "last" }, label: "peak" });
 text({ x: 1, y: 2, label: { field: "cpu" } });
 // @ts-expect-error following text takes no table of its own
 text(dots, { from: { mark: "m", at: "last" }, label: "peak" });
+// @ts-expect-error a label is one of text, field, and content
+text({ from: { mark: "m", at: "last" }, label: {} });
+// @ts-expect-error a label is one of text, field, and content
+text({ from: { mark: "m", at: "last" }, label: { text: "a", field: "b" } });
+// @ts-expect-error following text keeps apart across marks with series labels, in no group
+text({ from: { mark: "m", at: "last" }, label: { text: "a", overlapGroup: "events" } });
+text({ from: { mark: "m", at: "last" }, label: { text: "a", leader: true, priority: 1 } });
 
 // Values as coordinates read number or time fields, as fields do.
 line(dots, { x: "at", y: { field: "cpu", offset: 2 } });

@@ -177,8 +177,7 @@ describe("annotations over a table in facets", () => {
           text(crowded, {
             x: "at",
             y: "v",
-            label: { field: "note" },
-            overlap,
+            label: { field: "note", overlap },
           }),
         ],
         facet: facet("region"),
@@ -216,8 +215,7 @@ describe("annotations over a table in facets", () => {
         text(many, {
           x: "at",
           y: { field: "v", offset: -12 },
-          label: { field: "note" },
-          overlap: "move",
+          label: { field: "note", overlap: "move", leader: true },
         }),
       ],
       facet: facet("region"),
@@ -253,8 +251,7 @@ describe("annotations over a table in facets", () => {
           text(big, {
             x: "at",
             y: "v",
-            label: { field: "note" },
-            overlap: "hide",
+            label: { field: "note", overlap: "hide" },
           }),
         ],
         facet: facet("region", { columns: 5 }),

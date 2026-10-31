@@ -229,6 +229,21 @@ describe("labels following series", () => {
     expect(texts(chart.scene(estimateText))).toEqual(["b"]);
   });
 
+  it("give back the room outside the plot when their series are hidden", () => {
+    const long = { at: "last", place: { outside: true }, content: ["a very long name"] } as const;
+    const width = (chart: ChartModel) => chart.scene(estimateText).panels[0]!.plot.width;
+    const chart = model({ marks: [line(rows, { x: "t", y: "v", labels: long })] });
+    const labelled = width(chart);
+    // Hidden, drawn, then laid out anew: no labels, so no room for them.
+    for (const series of chart.series()) chart.hidden.add(series.key);
+    chart.scene(estimateText);
+    chart.setSize(401, 200, 1);
+    const fresh = model({ marks: [line(rows, { x: "t", y: "v", labels: long })] }, 401);
+    for (const series of fresh.series()) fresh.hidden.add(series.key);
+    expect(width(chart)).toBe(width(fresh));
+    expect(width(chart)).toBeGreaterThan(labelled + 50);
+  });
+
   contractTest("labels.attach.no-rows", () => {
     const plain = model({ marks: [line(rows, { x: "t", y: "v", series: "g", id: "l" })] });
     const labeled = model({

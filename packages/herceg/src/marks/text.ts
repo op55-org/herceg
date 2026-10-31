@@ -1,20 +1,25 @@
 import type { PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
-import { guideSegmentDrawing } from "../draw/segments.ts";
 import type { Formatter } from "../format/format.ts";
-import { LabelBoxes, segmentMeetsBox, segmentsMeet } from "../layout/label-boxes.ts";
+import {
+  type LabelledMark,
+  type LabelPlacement,
+  type LabelRequest,
+  placePanel,
+} from "../layout/placer.ts";
 import { lineCount } from "../layout/text.ts";
-import type { Geometry, Rect, SegmentGeometry } from "../scene/scene.ts";
-import type { MarkAnchorSpec } from "../spec/encoding.ts";
+import type { Geometry, Rect } from "../scene/scene.ts";
+import type { LabelLayoutSpec, MarkAnchorSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { AnnotationPosition, Clip, Frozen, TextLabelSpec, TextSpec } from "../spec/spec.ts";
-import type { Halo, StrokeStyle, TextStyle as TextStyleSpec } from "../spec/style.ts";
-import { dashPattern } from "../style/style.ts";
+import type { Halo, TextStyle as TextStyleSpec } from "../spec/style.ts";
+import type { TextPaint } from "../style/style.ts";
 import {
   AnnotationData,
   inView,
   labelOf,
+  leadersGeometry,
   type PlaceOption,
   position,
   readsTable,
@@ -22,8 +27,16 @@ import {
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
 import type { ItemKeyed, LabelPartOf } from "./encoding.ts";
+import type { PartText } from "./features/part-text.ts";
 import { FollowingTextMark } from "./following.ts";
-import { labelPaint, labelsGeometry, type PlacedLabel, plainText, textGeometry } from "./labels.ts";
+import {
+  labelPaint,
+  labelsGeometry,
+  type PlacedLabel,
+  paintedReach,
+  plainText,
+  textGeometry,
+} from "./labels.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -34,7 +47,6 @@ import {
   type MARK,
   type Mark,
   type MarkKey,
-  painted,
   type RowParts,
   seriesKey,
 } from "./mark.ts";
@@ -55,17 +67,6 @@ interface TextStyle {
   clip?: Clip;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
-  /**
-   * Labels that would cover an earlier one of this mark, in row order:
-   * drawn anyway ("show", the default), left out ("hide"), or moved
-   * ("move"): kept where they are put when that is free and in the plot,
-   * else tried above, below, beside, and at the corners of their point,
-   * then farther out with a line back to it, off the other rows' points,
-   * and left out when nothing fits.
-   */
-  overlap?: "show" | "hide" | "move";
-  /** How the lines from moved labels back to their points look. */
-  style?: { leader?: StrokeStyle };
   /** `true` lists the text in the chart's legends by its label; it is left out by default. */
   legend?: boolean;
   /** Where the text is drawn among the panel's marks: higher above lower; 0 by default. */
@@ -79,17 +80,28 @@ interface TextStyle {
   id?: string;
 }
 
-/** Text's label: its text, or each row's `field`, styled (`style`: color, font, size, box, `align`). */
+/**
+ * Text's label: its text, or each row's `field`, styled (`style`: color,
+ * font, size, box, `align`), and kept apart from other labels as its
+ * layout says: those that would cover one of its overlap group (by
+ * default, the mark's own labels) drawn anyway ("show", the default), left
+ * out ("hide"), or moved ("move"): kept where they are put when that is
+ * free and in the plot, else tried above, below, beside, and at the
+ * corners of their point, then farther out, off the other labels' points,
+ * and left out when nothing fits; the higher `priority` placed first, and
+ * a `leader` from each label moved away from its point.
+ */
 export type TextLabel<F extends string = string> =
   | string
   | ((
       | { text: string; field?: never; content?: never }
       | { field: F; text?: never; content?: never }
       | { content: readonly LabelPartOf<F>[]; text?: never; field?: never; format?: never }
-    ) & {
-      format?: FormatSpec;
-      style?: TextStyleSpec;
-    });
+    ) &
+      LabelLayoutSpec & {
+        format?: FormatSpec;
+        style?: TextStyleSpec;
+      });
 
 /** Where text is: `at`, or its short forms `x` and `y`. */
 type TextPlace<F extends string> =
@@ -111,9 +123,13 @@ type FollowingText = {
 
 /**
  * Following text's label: as text's, placed as series' labels are
- * (`place`: outside the plot, keeping room or not, and its offset).
+ * (`place`: outside the plot, keeping room or not, and its offset; moved
+ * apart from the panel's other series labels by default), so in no
+ * overlap group.
  */
-type FollowingLabel = string | (Exclude<TextLabel, string> & Pick<TextLabelSpec, "place">);
+type FollowingLabel =
+  | string
+  | (Exclude<TextLabel, string> & { overlapGroup?: never } & Pick<TextLabelSpec, "place">);
 
 /** Room kept around each label against others, in pixels, at least: a default halo reaches 1.5. */
 const LABEL_GAP = 2;
@@ -151,7 +167,7 @@ export type TextDataOptions<S extends Schema> = TextStyle &
  * without a clip, left out while their point in data is out of view; meant
  * for annotations, not for labeling every point of a large series.
  */
-export class TextMark implements Mark<Frozen<TextSpec>> {
+export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
   declare readonly [MARK]: true;
   readonly spec: Frozen<TextSpec>;
   readonly tooltip = "x";
@@ -160,6 +176,11 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
   readonly #data: AnnotationData;
   /** The row of each label its text geometry drew (see `partOf`). */
   readonly #drawnRows = new WeakMap<Geometry, Uint32Array>();
+  /** Its labels as last asked for by the panel's placer (see `labelRequests`). */
+  #asked:
+    | { frame: Frame; key: MarkKey; rows: RowParts | undefined; labels: TextLabels }
+    | undefined;
+  readonly placer = placePanel;
   /** Its place on each axis: `at`'s, or the short forms'. */
   readonly #x: Frozen<AnnotationPosition>;
   readonly #y: Frozen<AnnotationPosition>;
@@ -293,18 +314,127 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
   }
 
   /**
-   * Labels of the items of `rows` (every item without them), placed in
-   * their order. Scratch is as large as the items drawn: a facet panel's,
-   * not the table's.
+   * Its labels, unless the panel's placer places them (`labelRequests`):
+   * those of the items of `rows` (every item without them) the legend
+   * leaves shown, each at its place.
    */
-
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
+    if (this.#placed) return [];
+    const labels = this.#labels(frame, key, panelRows);
+    const drawn: PlacedLabel[] = [];
+    const rows: number[] = [];
+    for (const item of labels.items) {
+      drawn.push(labels.at(item, item.cx - item.shift, item.cy));
+      rows.push(item.row);
+    }
+    return this.#drawn(frame, key, labels, drawn, rows, []);
+  }
+
+  /**
+   * Its labels as requests to the panel's placer, where they keep apart
+   * from others (`overlap` "hide" or "move", or an `overlapGroup`); none
+   * otherwise, its geometry drawing them where they are.
+   */
+  labelRequests(frame: Frame, key: MarkKey, panelRows?: RowParts): readonly LabelRequest[] {
+    if (!this.#placed) return [];
+    const labels = this.#labels(frame, key, panelRows);
+    // Asked for none, it is not asked to draw: keep no frame.
+    this.#asked = labels.items.length > 0 ? { frame, key, rows: panelRows, labels } : undefined;
+    return labels.items.map((item, index) => this.#request(labels, item, index, key));
+  }
+
+  /** Its labels at their placements, in request order, with leaders from those placed far. */
+  drawLabels(
+    frame: Frame,
+    key: MarkKey,
+    panelRows: RowParts | undefined,
+    placements: readonly LabelPlacement[],
+  ): Geometry[] {
+    // As just asked for, in the same frame and panel; otherwise afresh.
+    const asked = this.#asked;
+    this.#asked = undefined;
+    const labels =
+      asked?.frame === frame && asked.key === key && asked.rows === panelRows
+        ? asked.labels
+        : this.#labels(frame, key, panelRows);
+    const drawn: PlacedLabel[] = [];
+    const rows: number[] = [];
+    const leaders: number[] = [];
+    labels.items.forEach((item, k) => {
+      const placement = placements[k];
+      if (!placement) return;
+      // Its middle, placed from its point.
+      drawn.push(labels.at(item, item.px + placement.dx - item.shift, item.py + placement.dy));
+      rows.push(item.row);
+      if (placement.leader) leaders.push(...placement.leader);
+    });
+    return this.#drawn(frame, key, labels, drawn, rows, leaders);
+  }
+
+  /** Whether the panel's placer places its labels. */
+  get #placed(): boolean {
+    const { overlap, group } = this.#data.layout;
+    return overlap !== "show" || group !== undefined;
+  }
+
+  /**
+   * Item `index`'s label as a request: its block at its place (with the
+   * room kept around it), the places around its point it may move to, ring
+   * by ring (the first ring near), and the box it stays in when moving: the
+   * plot, or the chart for a point outside it.
+   */
+  #request(labels: TextLabels, item: TextItemLabel, index: number, key: MarkKey): LabelRequest {
+    const { group, overlap, priority, leader } = this.#data.layout;
+    const { cx, cy, px, py, width } = item;
+    const reach = width / 2 + labels.room;
+    const tall = labels.halfOf(item);
+    // Offsets are from the block centered on the point, which stay precise
+    // however far the author's place is from it.
+    const anchor = { x: px - reach, y: py - tall };
+    const moving = overlap === "move";
+    const { plot } = labels;
+    const inPlot =
+      px >= plot.x && px <= plot.x + plot.width && py >= plot.y && py <= plot.y + plot.height;
+    return {
+      mark: key,
+      index,
+      group,
+      overlap,
+      priority,
+      anchor,
+      block: { width: 2 * reach, height: 2 * tall },
+      places: [{ dx: cx - px, dy: cy - py }],
+      moves: moving
+        ? {
+            count: RINGS * AROUND.length,
+            near: AROUND.length,
+            at(k) {
+              const ring = Math.floor(k / AROUND.length) + 1;
+              const [ax, ay] = AROUND[k % AROUND.length]!;
+              const gap = POINT_GAP + (ring - 1) * 2 * tall;
+              return { dx: ax! * (gap + reach), dy: ay! * (gap + tall) };
+            },
+          }
+        : undefined,
+      point: { x: px, y: py, size: POINT_SIZE },
+      inset: labels.room,
+      hold: false,
+      leader,
+      bounds: moving ? (inPlot ? plot : labels.chart) : null,
+    };
+  }
+
+  /**
+   * The labels of the items of `rows` (every item without them) the legend
+   * leaves shown and whose points are in view, in their order, each with
+   * its text, its row, its point, and its box's middle at its place.
+   */
+  #labels(frame: Frame, key: MarkKey, panelRows: RowParts | undefined): TextLabels {
     // What the legend hides of it goes undrawn.
     const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { spec } = this;
     const { plot, theme } = frame;
     const data = this.#data;
-    const id = seriesKey(key, "text");
     const x = data.place(this.#x);
     const y = data.place(this.#y);
     const label = data.label!;
@@ -313,19 +443,17 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       theme.text,
       label.style && frame.read(label.style, "text label.style"),
     );
-    const plain = plainText(paint, theme);
+    const content = frame.features?.of(this)?.content;
+    const styled = content?.styled;
+    const plain = !styled && plainText(paint, theme);
     const align = label.style?.align;
     const anchor = align === "start" ? "start" : align === "end" ? "end" : "middle";
     const write = data.writer(frame.locale, frame.features?.of(this)?.format);
-    const content = frame.features?.of(this)?.content;
-    const overlap = spec.overlap ?? "show";
-    const placed = overlap === "show" ? undefined : new LabelBoxes();
-    const moving = overlap === "move";
     const font = paint.css;
     const haloOption = label.style?.halo ?? this.spec.halo;
     const halo = labelHalo(haloOption, frame);
-    // Room around each label, which wider halos reach past.
-    const room = Math.max(LABEL_GAP, (halo?.width ?? 0) / 2 + 0.5);
+    // Room around each label, which wider halos and box outlines reach past.
+    const room = Math.max(LABEL_GAP, paintedReach(paint, halo) + 0.5);
     // Half a label's height, with the room kept around it: of a box (its
     // line height and padding) for labels in boxes.
     const [top, right, bottom, left] = paint.background ? paint.padding : [0, 0, 0, 0];
@@ -333,20 +461,17 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
       Math.ceil(
         paint.background ? paint.lineHeight / 2 + Math.max(top, bottom) : paint.size * 0.6,
       ) + room;
-    // A label of several lines is as much taller as its lines after the first.
-    const halfOf = (label: string) => half + ((lineCount(label) - 1) * paint.lineHeight) / 2;
     // From its point to its block's middle (its box's, which labels in
     // boxes are placed by): the block's top, middle (by default), or bottom
     // at the point, as its style's verticalAlign says.
     const { verticalAlign } = paint;
-    const lift = (label: string) => {
-      const block = (lineCount(label) * paint.lineHeight + top + bottom) / 2;
+    const lift = (lines: number) => {
+      const block = (lines + top + bottom) / 2;
       return verticalAlign === "top" ? block : verticalAlign === "bottom" ? -block : 0;
     };
-    const chart = frame.chart ?? plot;
-    const inside = (box: Rect, x0: number, y0: number, x1: number, y1: number) =>
-      x0 >= box.x && x1 <= box.x + box.width && y0 >= box.y && y1 <= box.y + box.height;
-    const inPlot = (x0: number, y0: number, x1: number, y1: number) => inside(plot, x0, y0, x1, y1);
+    // How much taller than a line a label's lines are.
+    const more = ({ text, parts }: Pick<TextItemLabel, "text" | "parts">) =>
+      parts ? parts.lines.height - paint.lineHeight : (lineCount(text) - 1) * paint.lineHeight;
     // Without a clip of its own, text shows while its places in data are in view.
     const shown = (px: number, py: number) =>
       Number.isFinite(px) &&
@@ -355,154 +480,133 @@ export class TextMark implements Mark<Frozen<TextSpec>> {
     // The points labels belong to, which must be in view; their places' offsets move the labels.
     const dx = x.coordinate.offset ?? 0;
     const dy = y.coordinate.offset ?? 0;
-    const [px, py] = [
+    const [px0, py0] = [
       { ...x, coordinate: { ...x.coordinate, offset: 0 } },
       { ...y, coordinate: { ...y.coordinate, offset: 0 } },
     ];
-    const pointAt = (row: number) => [
-      data.pixel(px, "x", row, frame.x, frame) ?? Number.NaN,
-      data.pixel(py, "y", row, frame.y, frame) ?? Number.NaN,
-    ];
-    // Scratch is indexed by each item's place among those drawn, whose row
-    // `rowAt` gives: a panel's rows are one part, read as they are.
-    const size = data.size(rows);
-    const items = rows?.length === 1 ? rows[0]! : rows && new Uint32Array(size);
-    if (items && items !== rows![0]) data.each(rows, (row, place) => (items[place] = row));
-    const rowAt = (place: number) => (items ? items[place]! : place);
-    // Moved labels keep off the points of the other rows in view.
-    const dots = moving ? new LabelBoxes() : undefined;
-    const dotOf = new Int32Array(dots ? size : 0).fill(-1);
-    if (dots) {
-      for (let place = 0; place < size; place++) {
-        const [px, py] = pointAt(rowAt(place)) as [number, number];
-        const s = POINT_SIZE;
-        if (inPlot(px, py, px, py)) dotOf[place] = dots.add(px - s, py - s, px + s, py + s);
-      }
-    }
-    // Each item's label and where it goes, kept in order whichever pass places it.
-    const texts: (string | undefined)[] = new Array(size);
-    const at = new Float64Array(size * 2);
-    const add = (place: number, label: string, lx: number, ly: number) => {
-      texts[place] = label;
-      at[place * 2] = lx;
-      at[place * 2 + 1] = ly;
-    };
-    // Lines from labels moved past the first ring back to their points.
-    const leaders: number[] = [];
-    /** Whether some line passes through the box, or with a segment given, meets it. */
-    const meetsLeader = (test: (sx: number, sy: number, ex: number, ey: number) => boolean) => {
-      for (let k = 0; k < leaders.length; k += 4)
-        if (test(leaders[k]!, leaders[k + 1]!, leaders[k + 2]!, leaders[k + 3]!)) return true;
-      return false;
-    };
-    // Places are boxes' centers: the author's (place 0), then, when moving,
-    // the spots around the point, ring by ring, nearest sides first.
-    const nearPlaces = moving ? 1 + AROUND.length : 1;
-    /** Puts an item's label at the first free spot in [from, to); false if none is. */
-    const place = (item: number, label: string, width: number, from: number, to: number) => {
-      const [px, py] = pointAt(rowAt(item)) as [number, number];
-      // Moved labels stay in the plot, or in the chart when put outside it.
-      const bounds = inPlot(px, py, px, py) ? plot : chart;
-      // From the anchor to the label's center, and half its box's width and height.
+    const placed = this.#placed;
+    const items: TextItemLabel[] = [];
+    data.each(rows, (row) => {
+      const px = data.pixel(px0, "x", row, frame.x, frame) ?? Number.NaN;
+      const py = data.pixel(py0, "y", row, frame.y, frame) ?? Number.NaN;
+      if (!shown(px, py)) return;
+      const text = data.text(row, frame.locale, write, content);
+      // Labels that write nothing (none, or only breaks) take no room.
+      if (placed && !/[^\n]/.test(text)) return;
+      const parts = styled?.(row, "", Number.NaN, undefined, paint, frame);
+      const width =
+        parts || placed ? (parts?.lines.width ?? frame.measure(text, font)) + left + right : 0;
+      // From the anchor to the label's middle.
       const shift = anchor === "start" ? width / 2 : anchor === "end" ? -width / 2 : 0;
-      const reach = width / 2 + room;
-      const tall = halfOf(label);
-      for (let p = from; p < to; p++) {
-        const ring = Math.ceil(p / AROUND.length);
-        const [ax, ay] = AROUND[(p - 1) % AROUND.length] ?? [0, 0];
-        const gap = POINT_GAP + (ring - 1) * 2 * tall;
-        const [cx, cy] =
-          p === 0
-            ? [px + dx + shift, py + dy + lift(label)]
-            : [px + ax * (gap + reach), py + ay * (gap + tall)];
-        const [x0, y0, x1, y1] = [cx - reach, cy - tall, cx + reach, cy + tall];
-        // Moving labels stay in their bounds, and moved ones off other points
-        // and the lines leading to other labels.
-        if (moving && !inside(bounds, x0, y0, x1, y1)) continue;
-        // Labels before dots: in a crowded plot labels refuse most places,
-        // and there are fewer of them to check.
-        if (placed!.hits(x0, y0, x1, y1)) continue;
-        if (p > 0 && dots!.hits(x0, y0, x1, y1, dotOf[item])) continue;
-        if (meetsLeader((sx, sy, ex, ey) => segmentMeetsBox(sx, sy, ex, ey, x0, y0, x1, y1)))
-          continue;
-        if (ring > 1) {
-          // A line from the dot's edge to the nearest point of the text's
-          // box, clear of other labels (so none from a point under one),
-          // other rows' dots, and other lines.
-          const ex = Math.min(Math.max(px, cx - width / 2), cx + width / 2);
-          const ey = Math.min(Math.max(py, y0 + room), y1 - room);
-          const length = Math.hypot(ex - px, ey - py);
-          const sx = px + ((ex - px) / length) * POINT_SIZE;
-          const sy = py + ((ey - py) / length) * POINT_SIZE;
-          if (placed!.crosses(sx, sy, ex, ey)) continue;
-          if (dots!.crosses(sx, sy, ex, ey, dotOf[item])) continue;
-          if (meetsLeader((ax, ay, bx, by) => segmentsMeet(sx, sy, ex, ey, ax, ay, bx, by)))
-            continue;
-          leaders.push(sx, sy, ex, ey);
-        }
-        placed!.add(x0, y0, x1, y1);
-        add(item, label, cx - shift, cy);
-        return true;
-      }
-      return false;
+      items.push({
+        row,
+        text,
+        px,
+        py,
+        width,
+        shift,
+        cx: px + dx + shift,
+        cy: py + dy + lift(paint.lineHeight + more({ text, parts })),
+        parts,
+      });
+    });
+    return {
+      items,
+      plot,
+      chart: frame.chart ?? plot,
+      room,
+      // Labels of parts are as tall as their lines and their box's padding,
+      // whatever the base text's size.
+      halfOf: ({ text, parts }) =>
+        parts
+          ? Math.ceil(parts.lines.height / 2 + (paint.background ? Math.max(top, bottom) : 0)) +
+            room
+          : half + more({ text, parts }) / 2,
+      paint,
+      plain,
+      haloOption,
+      // Placed by their middle, labels in items are drawn from their first
+      // line; labels of parts, in their box.
+      at: ({ text, parts }, lx, ly) => {
+        const label: PlacedLabel = {
+          text,
+          x: lx,
+          y: ly - (plain ? 0 : more({ text, parts }) / 2),
+          anchor,
+          baseline: "middle",
+        };
+        return parts ? { ...label, parts, box: parts.box(lx, ly, anchor, paint) } : label;
+      },
     };
-    // Labels that found no place near their point: item, text, and width.
-    const later: [number, string, number][] = [];
-    for (let item = 0; item < size; item++) {
-      const row = rowAt(item);
-      const [px, py] = pointAt(row) as [number, number];
-      if (!shown(px, py)) continue;
-      const label = data.text(row, frame.locale, write, content);
-      if (!placed) {
-        add(item, label, px + dx, py + dy + lift(label));
-        continue;
-      }
-      // Empty labels draw nothing, so they take no room.
-      if (label === "") continue;
-      const width = frame.measure(label, font) + left + right;
-      if (!place(item, label, width, 0, nearPlaces) && moving) later.push([item, label, width]);
-    }
-    // Then those go farther out, once every label that fits near its point
-    // has its place, so lines never take a nearer label's room.
-    for (const [item, label, width] of later)
-      place(item, label, width, nearPlaces, nearPlaces + (RINGS - 1) * AROUND.length);
-    const drawn: PlacedLabel[] = [];
-    // The row of each label drawn, for drawn-mark records.
-    const drawnRows: number[] = [];
-    for (let item = 0; item < size; item++) {
-      const text = texts[item];
-      if (text === undefined) continue;
-      drawnRows.push(rowAt(item));
-      // Placed by their middle, labels in items are drawn from their first line.
-      const y = at[item * 2 + 1]! - (plain ? 0 : ((lineCount(text) - 1) * paint.lineHeight) / 2);
-      drawn.push({ text, x: at[item * 2]!, y, anchor, baseline: "middle" });
-    }
+  }
+
+  /** The geometry of `drawn`, labels of `rows`, and their `leaders`. */
+  #drawn(
+    frame: Frame,
+    key: MarkKey,
+    { paint, plain, haloOption }: TextLabels,
+    drawn: PlacedLabel[],
+    rows: number[],
+    leaders: number[],
+  ): Geometry[] {
     if (drawn.length === 0) return [];
+    const id = seriesKey(key, "text");
     const out: Geometry[] = [];
-    if (leaders.length > 0) {
-      const leader = spec.style?.leader;
-      const strokeWidth = leader?.strokeWidth ?? 1;
-      const segments: SegmentGeometry = {
-        kind: "segments",
-        draw: guideSegmentDrawing,
-        key: `${id}|leaders`,
-        stroke: painted(frame.paint, leader?.stroke, "text style.leader.stroke") ?? theme.muted,
-        strokeWidth,
-        coords: Float32Array.from(leaders),
-        count: leaders.length / 4,
-      };
-      const dash = dashPattern(leader?.dash, strokeWidth);
-      if (dash) segments.dash = dash;
-      if (leader?.opacity !== undefined) segments.opacity = leader.opacity;
-      out.push(segments);
-    }
+    if (leaders.length > 0)
+      out.push(
+        leadersGeometry(
+          `${id}|leaders`,
+          leaders,
+          this.#data.layout.look,
+          frame,
+          "text label.leader",
+        ),
+      );
+    const owners: number[] = [];
     const labels = plain
       ? textGeometry(id, drawn, paint.color, haloOption, frame)
-      : labelsGeometry(id, drawn, paint, haloOption, frame);
-    this.#drawnRows.set(labels, Uint32Array.from(drawnRows));
+      : labelsGeometry(id, drawn, paint, haloOption, frame, owners);
+    this.#drawnRows.set(
+      labels,
+      plain ? Uint32Array.from(rows) : Uint32Array.from(owners, (k) => rows[k]!),
+    );
     out.push(labels);
     return out;
   }
+}
+
+/**
+ * A text mark's labels in a panel (`TextMark.#labels`): each item's, the
+ * plot and chart, the room kept around each, half a label's height with
+ * it, their paint, and where a label goes when its middle is at (x, y).
+ */
+interface TextLabels {
+  readonly items: readonly TextItemLabel[];
+  readonly plot: Rect;
+  readonly chart: Rect;
+  readonly room: number;
+  halfOf(item: TextItemLabel): number;
+  readonly paint: TextPaint;
+  readonly plain: boolean;
+  readonly haloOption: Halo | undefined;
+  at(item: TextItemLabel, x: number, y: number): PlacedLabel;
+}
+
+/**
+ * An item's label: its row, text (and its parts, where they have looks of
+ * their own), point, width (measured where placed, and for parts), how
+ * far its middle is from its anchor along x, and its middle at its place.
+ */
+interface TextItemLabel {
+  readonly row: number;
+  readonly text: string;
+  readonly parts: PartText | undefined;
+  readonly px: number;
+  readonly py: number;
+  readonly width: number;
+  readonly shift: number;
+  readonly cx: number;
+  readonly cy: number;
 }
 
 /**
@@ -547,8 +651,6 @@ export function text<S extends Schema>(
       "at",
       "from",
       "label",
-      "overlap",
-      "style",
       "contributeDomain",
       "legend",
       "zIndex",
