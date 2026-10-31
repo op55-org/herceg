@@ -8,6 +8,7 @@ pivoting rows without copying them.
 - [Tables](#tables)
 - [Field kinds](#field-kinds)
 - [Changing data and streaming](#changing-data-and-streaming)
+- [Rows that arrive late](#rows-that-arrive-late)
 - [Derived tables](#derived-tables)
 - [Row views](#row-views)
 - [Row sets and selection stores](#row-sets-and-selection-stores)
@@ -111,15 +112,22 @@ Tables are mutable. Charts reading a table draw again on the next animation
 frame, once however many changes arrive.
 
 ```ts
-const live = table({ time: time([]), cpu: [] as number[] }, { maxRows: 3_000 });
-live.append({ time: [Date.now()], cpu: [0.42] }); // keeps the newest 3,000 rows
-live.appendRow({ time: "2026-01-21T09:32:00Z", cpu: 0.4 });
+const live = table(
+  { time: time([]), cpu: [] as number[], mem: [] as number[] },
+  { maxRows: 3_000 },
+);
+live.append({ time: [Date.now()], cpu: [0.42], mem: [3.1] }); // keeps the newest 3,000 rows
+live.appendRow({ time: "2026-01-21T09:32:00Z", cpu: 0.4, mem: 3.2 });
 live.set("cpu", 0, 0.5); // one value
-live.replace("cpu", 0, [0.1, 0.2]); // rows 0 and 1
+live.replace(0, { cpu: [0.1, 0.2], mem: [3.5, 3.6] }); // rows 0 and 1 of two fields
 live.setColumn("cpu", newValues); // every value of a field
 live.dropFirst(10);
 live.dropBefore("time", Date.now() - 60_000);
-live.reset({ time: newTimes, cpu: newValues }); // all data, same fields
+live.reset({ time: newTimes, cpu: newValues, mem: newMem }); // all data, same fields
+live.transaction(() => {
+  live.append(batch);
+  live.dropBefore("time", Date.now() - 60_000);
+}); // charts and listeners hear one change
 ```
 
 | Method | Does |
@@ -128,6 +136,7 @@ live.reset({ time: newTimes, cpu: newValues }); // all data, same fields
 | `set`, `replace`, `setColumn` | Changes values in place. |
 | `dropFirst(n)`, `dropBefore(field, value)` | Drops rows from the front. |
 | `reset(columns)` | Replaces all rows; fields keep their kinds. |
+| `transaction(change)` | Runs `change`; its writes are reported as one change when it returns. |
 | `subscribe(listener)` | Called after each change, with what changed. |
 | `byteLength` | Bytes the table holds. |
 
@@ -137,6 +146,15 @@ live.reset({ time: newTimes, cpu: newValues }); // all data, same fields
 - A write that fails changes nothing: `append` and `replace` check every
   value (numbers, times that parse, category labels) before writing, and a
   value of the wrong kind throws with its row.
+- `replace(start, values)` writes every field it is given as one change, so
+  nothing reading the table sees some fields written and others not.
+- A transaction batches what listeners hear; it does not roll back. If
+  `change` throws, the writes it made stay, one change reports them, and
+  the error is thrown on. A transaction inside another joins it. One made
+  inside a listener is reported when it returns, as a write made there is:
+  listeners after that one hear it before the change they were about to
+  hear. Reads inside a transaction, of the table or of a view of it, see
+  its writes so far.
 - In a rolling window, a category dictionary stays bounded: once it holds
   more than twice as many entries as there are rows (and 64 more), unused
   values leave and codes are renumbered in order.
@@ -144,6 +162,47 @@ live.reset({ time: newTimes, cpu: newValues }); // all data, same fields
 
 How a streaming chart stays fast (min/max indexes, incremental stacks,
 frame coalescing) is described in [Large data](large-data.md).
+
+## Rows that arrive late
+
+Feeds deliver some rows late: a sensor reconnects, a batch is held back. An
+**ordered table** keeps its rows in ascending order of a number or time
+field and merges rows that arrive late into place:
+
+```ts
+import { category, orderedTable, time } from "herceg";
+
+const readings = orderedTable(
+  { time: time([]), pump: category([]), value: new Float64Array(0) },
+  { orderBy: "time", maxRows: 180_000 },
+);
+readings.append({ time: [t2, t0, t1], pump: ["a", "b", "a"], value: [1, 2, 3] }); // any order
+```
+
+- Rows at or after the last row append as in any table; earlier rows go
+  into place, one merge per batch. Ties keep the order rows came in: after
+  rows of the same value already there, and in the batch's order.
+- `maxRows` and `dropBefore` drop from the first row in order, so a late row
+  earlier than every row `maxRows` keeps is not kept.
+- Every row needs its order value: `append "time": row 3: is missing; an
+  ordered table needs every row's time`. `replace` and `set` refuse the
+  order field, since its rows would move; drop and append them instead.
+  `reset` sorts what it is given.
+- Rows keep their identity as late rows move them, so row sets, selections,
+  and highlights stay on their observations (see [Row
+  sets](#row-sets-and-selection-stores)).
+- Every mark follows a merge from the first row it moved: lines, stacks, and
+  series redo that part, not the whole table.
+- An ordered table holds 8 bytes a row more than a table, for the rows'
+  identities. A late row costs moving the rows after it once per field; a
+  feed of ten series at 10 Hz in a 180,000-row window, one row in 150 late
+  by up to two minutes, merges and redraws lines and a stack in about 4 ms
+  a tick (`npm run bench:core`).
+
+In a spec, `orderBy` makes a columns entry an ordered table:
+`{ "columns": { ... }, "orderBy": "time", "maxRows": 180000 }` (`maxRows`
+alone keeps the newest rows of an ordinary table). In Python, pass
+`hg.ordered(df, by="time", max_rows=180_000)` as a chart's data.
 
 ## Derived tables
 
@@ -254,22 +313,50 @@ order, rows that left a rolling window are dropped, and a change to a field
 the view filters or sorts by re-sorts the changed rows. Sorts are stable,
 with missing values last in either direction and categories by label.
 
-Point marks take a view where they take a table (`point(view, { x, y })`)
-and draw only its rows, redrawing as the view changes. Limits:
+Series marks take a view where they take a table: lines, areas, bars,
+points, rugs, error bars, box plots, boxen, violins, candlesticks, heatmaps,
+and histograms. A mark draws what it would draw over a table of the view's
+rows alone, and redraws as the view changes:
 
-- Other marks take tables only.
+```ts
+const slow = rowView(requests, { filter: col("latency").gt(250) });
+histogram(slow, { x: "latency" }); // bins, scales, and stacks of the view's rows
+line(rowView(requests, { filter: col("service").eq("api") }), { x: "time", y: "latency" });
+```
+
+- Lines and areas connect rows in the view's order, so a view sorted by
+  something other than x draws as rows out of x order do.
+- Histograms, box plots, and binned heatmaps aggregate the view's rows.
+- Scales and stacks span the view's rows; category colors and legend
+  entries are the table's, so filtering never recolors a series. Give an
+  axis a `domain` to keep it still as the filter changes.
+- Facets split a view's rows into their panels (`facet: "repeat"` repeats
+  them).
+- The mark's table is the view's table, so row selections and selection
+  stores bind the table, not the view.
+- A mark copies the view's positions it draws: 4 bytes a row shown.
+
+Limits:
+
+- Annotation marks (rules, text, regions), layout marks (pies, treemaps,
+  graphs), and custom marks take tables only.
 - Points of a view are drawn on the CPU, not with WebGL.
-- Size and color scales span the whole table.
-- Facets repeat a view's points in every panel rather than splitting them.
-- Portable specs have no row views.
 - Sorting runs on the main thread: about 0.13 s for a million rows by a
   number, 0.25 s by a category and a number.
+
+In a spec, a view is a data entry naming its table:
+`{ "source": "requests", "view": { "filter": [">", ["field", "latency"], 250] } }`,
+with `sort` as `[{ "field": "latency", "order": "descending" }]`. In
+Python, `hg.view(requests, filter=hg.col("latency") > 250, sort="time")`.
 
 ## Row sets and selection stores
 
 A `RowSet` is a set of a table's rows by identity, one bit per row, such as
-the rows picked in a grid. Its rows stay members as others are appended and
-dropped; a reset of the table empties it.
+the rows picked in a grid. Its rows stay members as others are appended,
+dropped, or merged before them; a reset of the table empties it. Over an
+ordered table a set holds only the 32-row words that have a member (12
+bytes each), so it stays bounded however long a row that arrived early
+stays in the window.
 
 A `SelectionStore` keeps one table's selections by **channel**. Each
 channel is set and cleared by its owner, either as a condition
@@ -461,6 +548,10 @@ first time a mark uses it, without building Python objects per value:
   of shape `(len(y), len(x))` (or flattened in that order). Live widgets'
   `append` and `replace` refuse matrices.
 
-Row views, selection stores, row groups, and pivots are TypeScript only.
+- `hg.ordered(data, by=, max_rows=)` is [an ordered table](#rows-that-arrive-late),
+  and `hg.view(data, filter=, sort=, descending=)` a [row view](#row-views)
+  for series marks; both pass where a chart or mark takes data.
+
+Selection stores, row groups, and pivots are TypeScript only.
 Live notebook charts stream rows from Python (see
 [Notebooks and Streamlit](python/notebooks-and-streamlit.md)).

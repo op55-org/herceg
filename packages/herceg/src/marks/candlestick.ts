@@ -1,4 +1,5 @@
 import type { NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { rectDrawing } from "../draw/rect.ts";
 import { segmentDrawing } from "../draw/segments.ts";
@@ -37,7 +38,7 @@ import {
   type SummaryContext,
   valueKind,
 } from "./mark.ts";
-import { type MarkRows, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, visibleRange, xExtent } from "./series.ts";
 import { boxOf } from "./shapes.ts";
 import { FILL, Slots } from "./slots.ts";
@@ -134,6 +135,8 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<CandlestickSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly tooltip = "x";
   /** Its one series, named by its label, though it stands for no field. */
   readonly legendScales = ["series"] as const;
@@ -143,13 +146,14 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
   /** Scratch for one candle's prices. */
   readonly candle = new Float64Array(4);
 
-  constructor(input: CandlestickSpec, table: Table<Schema>) {
+  constructor(input: CandlestickSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "candlestick");
     checkItemKey(table, this.spec.itemKey, "candlestick");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     requireField(table, spec.x, [...NUMERIC, ...CATEGORY], "candlestick x");
     for (const name of ["open", "high", "low", "close"] as const)
       requireField(table, spec[name], NUMERIC, `candlestick ${name}`);
@@ -168,7 +172,7 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -582,7 +586,9 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     let count = 0;
     let low = Infinity;
     let high = -Infinity;
-    // The latest candle by x, then by row, as merged columns take their close.
+    // The latest candle by x, then by the mark's order (a view's), as merged
+    // columns take their close; on category axes, by that order alone.
+    const rank = this.rows().rank ?? ((row: number) => row);
     let latest = -1;
     let latestAt = Number.NEGATIVE_INFINITY;
     for (const part of parts) {
@@ -595,8 +601,8 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
         count++;
         low = Math.min(low, candle[2]!);
         high = Math.max(high, candle[1]!);
-        const at = this.categorical ? row : part.x[row]!;
-        if (at > latestAt || (at === latestAt && row > latest)) {
+        const at = this.categorical ? rank(row) : part.x[row]!;
+        if (at > latestAt || (at === latestAt && rank(row) > rank(latest))) {
           latest = row;
           latestAt = at;
         }
@@ -632,9 +638,11 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
  * ```
  */
 export function candlestick<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: CandlestickOptions<S>,
 ): ChartMark<Frozen<CandlestickSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   refuseColor(options, "candlestick");
   const spec: CandlestickSpec = {
     type: "candlestick",
@@ -663,7 +671,7 @@ export function candlestick<S extends Schema>(
   };
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new CandlestickMark(spec, table as unknown as Table);
+  return new CandlestickMark(spec, table as unknown as Table, view as RowView | undefined);
 }
 
 /**

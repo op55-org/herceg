@@ -4,9 +4,11 @@
 // (RowStack in stack.ts) instead.
 
 import type { NumericArray } from "../data/column.ts";
+import type { MovingRows } from "../data/ordered.ts";
 import { lowerBound, type Table, upperBound } from "../data/table.ts";
 import { MinMaxIndex, type RangeIndex } from "../lod/minmax-index.ts";
-import type { AreaStack, StackGaps, StackOrder } from "../spec/spec.ts";
+import type { AreaStack, StackGaps, StackOrder, StackSupport } from "../spec/spec.ts";
+import type { MarkRows } from "./rows.ts";
 import type { LayerEdges } from "./series.ts";
 import { capacityFor, makeRoom, shrunk } from "./stack.ts";
 import { offsetLayers } from "./stack-offset.ts";
@@ -32,8 +34,105 @@ export interface UnionLayers {
   edges: (LayerEdges | undefined)[];
 }
 
-/** What a stack reads of its table: where its rows are, and what changed. */
-type Rows = Pick<Table, "rowOffset" | "length" | "version" | "modifiedVersion" | "generation">;
+/**
+ * Which rows of a layer are drawn and which neighbors connect, as a mark's
+ * `continuity` says (marks/features/continuity.ts).
+ */
+export interface Connections {
+  drawn(row: number): boolean;
+  joins(a: number, xa: number, b: number, xb: number): boolean;
+}
+
+/** What layers count as where they have no row (`gaps`), where the stack stands, and which rows connect. */
+export interface StackRules {
+  gaps: StackGaps;
+  support: StackSupport;
+  continuity?: Connections | undefined;
+}
+
+/**
+ * What a stack reads of its table: where its rows are, and what changed,
+ * with where an ordered table moved rows.
+ */
+type Rows = Pick<Table, "rowOffset" | "length" | "version" | "modifiedVersion" | "generation"> &
+  Partial<MovingRows>;
+
+/** What stacks follow of a view's rows, one per answer: rows the stack takes anew. */
+const answers = new WeakMap<MarkRows, Rows>();
+
+/** A view's rows in table order as stacks follow them: its table's changes, generations by query. */
+interface Followed {
+  readonly rows: Rows;
+  query: number;
+  table: number;
+  generation: number;
+}
+
+/** What stacks follow of views' rows in table order, by view. */
+const followed = new WeakMap<object, Followed>();
+
+/** The rows stacks follow of `view`, a view of `table` in table order. */
+function followedRows(view: object, table: Table, query: number): Followed {
+  const moving = table as Partial<MovingRows>;
+  const state: Followed = {
+    rows: {
+      get rowOffset() {
+        return table.rowOffset;
+      },
+      get length() {
+        return table.length;
+      },
+      get version() {
+        return table.version;
+      },
+      get modifiedVersion() {
+        return table.modifiedVersion;
+      },
+      get generation() {
+        return state.generation;
+      },
+      changedFrom: (version) => moving.changedFrom?.(version),
+    },
+    query,
+    table: table.generation,
+    generation: 0,
+  };
+  followed.set(view, state);
+  return state;
+}
+
+/**
+ * What a stack of a mark's rows follows: their table; for a view whose
+ * rows are in table order (no sort), the table's changes, in a generation
+ * a new query, restriction, or reset ends; for a sorted view's rows, a
+ * state of their own, so the stack is made again whenever they change, as
+ * a table of those rows would be.
+ */
+export function stackedRows(rows: MarkRows): Rows {
+  const { view, table } = rows;
+  if (!view) return table;
+  if (!view.query.sort?.length) {
+    const state = followed.get(view) ?? followedRows(view, table as Table, view.queryRevision);
+    if (state.query !== view.queryRevision || state.table !== table.generation) {
+      state.query = view.queryRevision;
+      state.table = table.generation;
+      state.generation++;
+    }
+    return state.rows;
+  }
+  let state = answers.get(rows);
+  if (!state) {
+    state = {
+      rowOffset: 0,
+      length: rows.table.length,
+      version: 0,
+      modifiedVersion: 0,
+      generation: 0,
+    };
+    answers.set(rows, state);
+  }
+  return state;
+}
 
 /**
  * Shown layers stacked on every x any of them has a row at, in layer order
@@ -46,9 +145,17 @@ type Rows = Pick<Table, "rowOffset" | "length" | "version" | "modifiedVersion" |
  * with fewer holds its last one. Layers whose x does not ascend (or is
  * missing at some row) are stacked through their rows sorted by x.
  *
+ * The stack has no support (its edges are missing in every layer) where a
+ * layer's run of connected rows breaks (between rows its `continuity`
+ * does not connect, and at rows it leaves out), and with "intersection"
+ * support before a layer's first row and after its last. Where a layer's
+ * run ends at one position and another starts at the next, an entry with
+ * missing edges follows the first, at its x: drawing, inspection, and
+ * extents read the gap as they read missing values.
+ *
  * As the table streams, appended rows restack the positions from where
- * they change the stack (their first x, or with "interpolate" their
- * layer's previous last x) to the end, and rows a rolling window drops
+ * they change the stack (their first x, or their layer's previous last x
+ * with "interpolate", "intersection", or `continuity`) to the end, and rows a rolling window drops
  * restack the positions up to the first x their layers keep; positions in
  * between stay. Anything else (values replaced in place, a reset, layers
  * shown, hidden, or added, rows out of order, or both ends overlapping)
@@ -62,7 +169,7 @@ export class UnionStack {
   #generation = -1;
   #signature = "";
   #places: object | undefined;
-  #gaps: StackGaps = "zero";
+  #rules: StackRules = { gaps: "zero", support: "union" };
   readonly #mode: AreaStack;
   readonly #order: StackOrder;
   #layerOrder: number[] = [];
@@ -77,12 +184,16 @@ export class UnionStack {
   }
   /** Every shown layer's rows ascend in x, with every x present: changes can restack in part. */
   #direct = false;
+  /**
+   * Per shown layer whose rows do not ascend in x: its rows in x order,
+   * which it stacked through, kept for pickers until the next build.
+   */
+  #sorted: (Uint32Array | undefined)[] = [];
   /** Row identities of the live rows at the last update: from `#offset` up to `#end`. */
   #offset = 0;
   #end = 0;
-  /** Per shown layer: its first row's identity and its last row's x, at the last update. */
+  /** Per shown layer: its first row's identity, at the last update. */
   #first = new Float64Array(0);
-  #lastX = new Float64Array(0);
 
   /** Union x, layer tops, and bases (ordinary stacks omit the first); fill adds totals. */
   #buffers: Float64Array[] = [];
@@ -112,11 +223,11 @@ export class UnionStack {
     x: NumericArray,
     y: NumericArray,
     layers: readonly StackLayer[],
-    gaps: StackGaps,
+    rules: StackRules,
     places?: object,
   ): UnionLayers {
     try {
-      return this.#update(table, x, y, layers, gaps, places);
+      return this.#update(table, x, y, layers, rules, places);
     } catch (error) {
       this.clear();
       throw error;
@@ -128,17 +239,29 @@ export class UnionStack {
     x: NumericArray,
     y: NumericArray,
     layers: readonly StackLayer[],
-    gaps: StackGaps,
+    rules: StackRules,
     places?: object,
   ): UnionLayers {
-    const signature = JSON.stringify([gaps, layers.map(({ name, shown }) => [name, shown])]);
+    const signature = JSON.stringify([
+      rules.gaps,
+      rules.support,
+      layers.map(({ name, shown }) => [name, shown]),
+    ]);
     const shown = layers.filter((layer) => layer.shown).map((layer) => layer.rows);
+    // The first row identity that is not a row stacked before: past the
+    // last, or where an ordered table moved rows since; -1 when unknown.
+    let changed = this.#end;
+    if (this.#modified !== table.modifiedVersion) {
+      const from = table.changedFrom?.(this.#version);
+      changed = from === undefined ? -1 : Math.min(changed, table.rowOffset + from);
+    }
     const current =
       this.#table === table &&
       this.#signature === signature &&
       this.#places === places &&
+      this.#rules.continuity === rules.continuity &&
       this.#generation === table.generation &&
-      this.#modified === table.modifiedVersion;
+      changed >= 0;
     // Layers stacked in a sorted order of their own restack whenever rows change.
     if (
       !current ||
@@ -147,10 +270,10 @@ export class UnionStack {
           this.#direct &&
           this.#mode !== "wiggle" &&
           this.#order === "input" &&
-          this.#follow(table, x, y, shown)
+          this.#follow(table, x, y, shown, changed)
         ))
     )
-      this.#rebuild(table, x, y, shown, signature, gaps);
+      this.#rebuild(table, x, y, shown, signature, rules);
     this.#places = places;
     return this.#output(table, layers);
   }
@@ -168,6 +291,7 @@ export class UnionStack {
     if (!this.#table) return;
     this.#table = undefined;
     this.#buffers = [];
+    this.#sorted = [];
     this.#rowTops = new Float64Array(0);
     this.#rowBases = new Float64Array(0);
     this.#rowTotals = undefined;
@@ -182,7 +306,7 @@ export class UnionStack {
     y: NumericArray,
     shown: readonly Uint32Array[],
     signature: string,
-    gaps: StackGaps,
+    rules: StackRules,
   ) {
     // The same layers stack again in the buffers they had, when those fit,
     // so stacks whose values change every tick do not allocate every tick.
@@ -191,10 +315,11 @@ export class UnionStack {
     const reuse = this.#table === table && this.#signature === signature;
     this.#table = table;
     this.#signature = signature;
-    this.#gaps = gaps;
+    this.#rules = rules;
     this.#shown = shown.length;
-    this.#direct = shown.every((rows) => ascends(x, rows));
-    const orders = this.#direct ? shown : shown.map((rows) => sortedByX(x, rows));
+    this.#sorted = shown.map((rows) => (ascends(x, rows) ? undefined : sortedByX(x, rows)));
+    this.#direct = this.#sorted.every((order) => order === undefined);
+    const orders = shown.map((rows, l) => this.#sorted[l] ?? rows);
     const length = table.length;
     if (!reuse || !fits(this.#rowTops.length, length)) {
       this.#rowTops = new Float64Array(capacityFor(length));
@@ -206,7 +331,7 @@ export class UnionStack {
     this.#rowTotals?.fill(Number.NaN, 0, length);
     this.#rowStart = 0;
     this.#stackAll(x, y, orders, reuse);
-    this.#remember(table, x, shown);
+    this.#remember(table, shown);
   }
 
   /**
@@ -219,7 +344,7 @@ export class UnionStack {
     x: NumericArray,
     y: NumericArray,
     layers: readonly StackLayer[],
-    gaps: StackGaps,
+    rules: StackRules,
     tops: Float64Array,
     bases: Float64Array,
     mode: AreaStack = true,
@@ -227,14 +352,17 @@ export class UnionStack {
     totals?: Float64Array,
   ): (LayerEdges | undefined)[] {
     const stack = new UnionStack(mode, order);
-    stack.#gaps = gaps;
+    stack.#rules = rules;
     stack.#rowTops = tops;
     stack.#rowBases = bases;
     stack.#rowTotals = totals;
-    const orders = layers
-      .filter((layer) => layer.shown)
-      .map(({ rows }) => (ascends(x, rows) ? rows : sortedByX(x, rows)));
-    stack.#stackAll(x, y, orders);
+    const shown = layers.filter((layer) => layer.shown).map(({ rows }) => rows);
+    stack.#sorted = shown.map((rows) => (ascends(x, rows) ? undefined : sortedByX(x, rows)));
+    stack.#stackAll(
+      x,
+      y,
+      shown.map((rows, l) => stack.#sorted[l] ?? rows),
+    );
     return stack.#edges(layers, false);
   }
 
@@ -269,39 +397,50 @@ export class UnionStack {
    * last update, restacking only the positions they change; false when it
    * cannot, and every row must be stacked again.
    */
-  #follow(table: Rows, x: NumericArray, y: NumericArray, shown: readonly Uint32Array[]): boolean {
+  #follow(
+    table: Rows,
+    x: NumericArray,
+    y: NumericArray,
+    shown: readonly Uint32Array[],
+    changed: number,
+  ): boolean {
     const offset = table.rowOffset;
     const end = offset + table.length;
     // Identities only move forward, and some rows from before must remain.
-    if (offset < this.#offset || end < this.#end || offset >= this.#end) return false;
-    const zero = this.#gaps === "zero";
+    if (offset < this.#offset || end < this.#end || offset >= changed) return false;
+    const { gaps, support, continuity } = this.#rules;
+    // Rows reach back to their layer's previous last x where they bridge the positions since.
+    const back = gaps === "interpolate" || support === "intersection" || continuity !== undefined;
     // Positions from `from` on change with appended rows; up to `until`, with dropped ones.
     let from = Number.POSITIVE_INFINITY;
     let until = Number.NEGATIVE_INFINITY;
     for (const [l, rows] of shown.entries()) {
-      const first = lowerBound(rows, this.#end - offset);
+      // Each layer's rows from the first changed on, ascending from the last before.
+      const first = lowerBound(rows, changed - offset);
       if (first === 0) return false;
-      let previous = this.#lastX[l]!;
+      let previous = x[rows[first - 1]!]!;
       for (let k = first; k < rows.length; k++) {
         const value = x[rows[k]!]!;
         if (!(value >= previous && Number.isFinite(value))) return false;
         previous = value;
       }
-      if (first < rows.length) from = Math.min(from, x[rows[zero ? first : first - 1]!]!);
+      if (first < rows.length) from = Math.min(from, x[rows[back ? first - 1 : first]!]!);
       if (this.#first[l]! < offset) until = Math.max(until, x[rows[0]!]!);
     }
     if (until >= from) return false;
-    this.#followRows(offset - this.#offset, table.length);
+    this.#followRows(offset - this.#offset, changed - offset, table.length);
     if (until > Number.NEGATIVE_INFINITY && !this.#restackHead(x, y, shown, until)) return false;
     if (from < Number.POSITIVE_INFINITY) this.#restackTail(x, y, shown, from);
-    this.#remember(table, x, shown);
+    this.#remember(table, shown);
     return true;
   }
 
-  /** Drops `dropped` rows from the front of the row buffers and makes room up to `length`, unstacked. */
-  #followRows(dropped: number, length: number) {
+  /**
+   * Drops `dropped` rows from the front of the row buffers, keeps the
+   * `kept` after them, and makes room up to `length`, unstacked.
+   */
+  #followRows(dropped: number, kept: number, length: number) {
     this.#rowStart += dropped;
-    const kept = this.#end - this.#offset - dropped;
     const buffers = [this.#rowTops, this.#rowBases, ...(this.#rowTotals ? [this.#rowTotals] : [])];
     const room =
       shrunk(buffers, this.#rowStart, kept, length - kept) ??
@@ -379,19 +518,15 @@ export class UnionStack {
     });
   }
 
-  #remember(table: Rows, x: NumericArray, shown: readonly Uint32Array[]) {
+  #remember(table: Rows, shown: readonly Uint32Array[]) {
     this.#version = table.version;
     this.#modified = table.modifiedVersion;
     this.#generation = table.generation;
     this.#offset = table.rowOffset;
     this.#end = table.rowOffset + table.length;
-    if (this.#first.length !== shown.length) {
-      this.#first = new Float64Array(shown.length);
-      this.#lastX = new Float64Array(shown.length);
-    }
+    if (this.#first.length !== shown.length) this.#first = new Float64Array(shown.length);
     shown.forEach((rows, l) => {
       this.#first[l] = rows.length > 0 ? table.rowOffset + rows[0]! : Number.POSITIVE_INFINITY;
-      this.#lastX[l] = rows.length > 0 ? x[rows[rows.length - 1]!]! : Number.NEGATIVE_INFINITY;
     });
   }
 
@@ -421,10 +556,15 @@ export class UnionStack {
       cursor[l] = lo === Number.NEGATIVE_INFINITY ? 0 : rowBound(x, order, lo, false);
       stop[l] = hi === Number.POSITIVE_INFINITY ? order.length : rowBound(x, order, hi, true);
     });
-    const interpolate = this.#gaps === "interpolate";
+    const { gaps, support, continuity } = this.#rules;
+    const interpolate = gaps === "interpolate";
+    const shifted = this.#shifted;
     const rowTops = this.#rowTops;
     const rowBases = this.#rowBases;
     const rowStart = this.#rowStart;
+    // Entries without support, by place among those written: offsets give
+    // them bases, which are taken away again.
+    const unsupported: number[] = [];
     let written = 0;
     for (;;) {
       // The next x, and how many rows each layer has there.
@@ -434,18 +574,58 @@ export class UnionStack {
       }
       if (at === Number.POSITIVE_INFINITY) break;
       let occurrences = 0;
+      // Whether layers without rows here leave support, and whether a layer's run ends here and goes on later.
+      let supported = true;
+      let ends = false;
       for (let l = 0; l < layers; l++) {
         const order = orders[l]!;
-        let k = cursor[l]!;
+        const first = cursor[l]!;
+        let k = first;
         while (k < stop[l]! && x[order[k]!] === at) k++;
-        count[l] = k - cursor[l]!;
+        count[l] = k - first;
         occurrences = Math.max(occurrences, count[l]!);
+        if (k > first) {
+          const next = order[k];
+          if (
+            continuity &&
+            next !== undefined &&
+            !continuity.joins(order[k - 1]!, at, next, x[next]!)
+          )
+            ends = true;
+        } else if (first === 0 || first === order.length) {
+          if (support === "intersection") supported = false;
+        } else if (continuity) {
+          const [a, b] = [order[first - 1]!, order[first]!];
+          if (!continuity.joins(a, x[a]!, b, x[b]!)) supported = false;
+        }
       }
-      this.#reserve(written, occurrences);
+      // An entry per occurrence, a break before one its layer's rows here do not join, and one after.
+      this.#reserve(written, 2 * occurrences + 1);
       const buffers = this.#buffers;
       const xs = buffers[0]!;
+      let held = false;
       for (let j = 0; j < occurrences; j++) {
-        const p = this.#start + this.#length + written++;
+        // Each occurrence's rows: every layer's j-th here (a layer with fewer, its last).
+        let drawn = supported;
+        let broken = false;
+        if (continuity && supported)
+          for (let l = 0; l < layers; l++) {
+            const rows = count[l]!;
+            if (rows === 0) continue;
+            const r = cursor[l]! + Math.min(j, rows - 1);
+            const order = orders[l]!;
+            if (!continuity.drawn(order[r]!)) drawn = false;
+            else if (j > 0 && j < rows && !continuity.joins(order[r - 1]!, at, order[r]!, at))
+              broken = true;
+          }
+        if (broken && held && drawn) {
+          if (shifted) unsupported.push(written);
+          this.#blank(this.#start + this.#length + written++, at, layers);
+        }
+        held = drawn;
+        if (!drawn && shifted) unsupported.push(written);
+        const w = written++;
+        const p = this.#start + this.#length + w;
         xs[p] = at;
         let total = 0;
         for (let l = 0; l < layers; l++) {
@@ -457,29 +637,32 @@ export class UnionStack {
             // A layer with fewer rows here holds its last.
             row = order[cursor[l]! + Math.min(j, rows - 1)]!;
             value = y[row]!;
-          } else if (interpolate) {
+          } else if (interpolate && drawn) {
             value = between(x, y, order, cursor[l]!, at);
           }
-          const base = total;
+          const base = drawn ? total : Number.NaN;
           let top = Number.NaN;
-          if (this.#shifted) {
-            top = Number.isFinite(value) ? value : Number.NaN;
-          } else if (Number.isFinite(value)) {
-            total += value;
-            top = total;
+          if (drawn && Number.isFinite(value)) {
+            if (!shifted) total += value;
+            top = shifted ? value : total;
           }
           buffers[1 + l]![p] = top;
-          if (this.#shifted) buffers[1 + layers + l]![p] = 0;
+          if (shifted) buffers[1 + layers + l]![p] = 0;
           else if (l > 0) buffers[layers + l]![p] = base;
           if (j < rows) {
-            rowTops[rowStart + row] = top;
+            // Shifted stacks read their rows' edges from this entry once offsets are made.
+            rowTops[rowStart + row] = shifted ? w : top;
             rowBases[rowStart + row] = base;
           }
         }
       }
+      if (held && ends) {
+        if (shifted) unsupported.push(written);
+        this.#blank(this.#start + this.#length + written++, at, layers);
+      }
       for (let l = 0; l < layers; l++) cursor[l]! += count[l]!;
     }
-    if (this.#shifted && written > 0) {
+    if (shifted && written > 0) {
       const start = this.#start + this.#length;
       const view = (buffer: Float64Array) => buffer.subarray(start, start + written);
       this.#layerOrder = offsetLayers(
@@ -490,19 +673,17 @@ export class UnionStack {
         view(this.#buffers[0]!),
         this.#mode === "fill" ? view(this.#buffers[1 + 2 * layers]!) : undefined,
       );
-      // Map the aligned boundaries back to observed rows. Synthetic
-      // positions stay in the edges and never become tooltip rows.
+      for (const j of unsupported)
+        for (let l = 0; l < layers; l++) this.#buffers[1 + layers + l]![start + j] = Number.NaN;
+      // Map the aligned boundaries back to observed rows, from the entries
+      // their tops held. Synthetic positions stay in the edges and never
+      // become tooltip rows.
       for (let l = 0; l < layers; l++) {
         const rows = orders[l]!;
-        let nth = 0;
-        let previous = Number.NaN;
         for (let k = rowBound(x, rows, lo, false); k < rows.length; k++) {
           const row = rows[k]!;
-          const at = x[row]!;
-          if (at > hi) break;
-          nth = at === previous ? nth + 1 : 0;
-          previous = at;
-          const p = lowerBound(this.#buffers[0]!, at, start, start + written) + nth;
+          if (x[row]! > hi) break;
+          const p = start + rowTops[rowStart + row]!;
           rowTops[rowStart + row] = this.#buffers[1 + l]![p]!;
           rowBases[rowStart + row] = this.#buffers[1 + layers + l]![p]!;
           if (this.#rowTotals) this.#rowTotals[rowStart + row] = this.#buffers[1 + 2 * layers]![p]!;
@@ -510,6 +691,17 @@ export class UnionStack {
       }
     }
     return written;
+  }
+
+  /** Writes a break at `p`: an entry at x `at` with missing edges in every layer. */
+  #blank(p: number, at: number, layers: number) {
+    const buffers = this.#buffers;
+    buffers[0]![p] = at;
+    for (let l = 0; l < layers; l++) {
+      buffers[1 + l]![p] = Number.NaN;
+      if (this.#shifted) buffers[1 + layers + l]![p] = 0;
+      else if (l > 0) buffers[layers + l]![p] = Number.NaN;
+    }
   }
 
   /** Makes room for `count` positions after the live ones and the `written` past them. */
@@ -553,8 +745,9 @@ export class UnionStack {
           }
         : undefined;
       const order = this.#layerOrder.indexOf(l);
+      const positionOrder = this.#sorted[l];
       l++;
-      return { order, x, top: view(top), bottom: bottom && view(bottom), indexes };
+      return { order, x, top: view(top), bottom: bottom && view(bottom), indexes, positionOrder };
     });
   }
 
@@ -646,7 +839,13 @@ function ascends(x: NumericArray, rows: Uint32Array): boolean {
   return true;
 }
 
-/** The rows with a finite x, sorted by x, ties in row order: the series' own rows keep theirs. */
+/**
+ * The rows with a finite x, sorted by x, ties in the order given: a
+ * view's rows keep its order, which need not be the table's.
+ */
 function sortedByX(x: NumericArray, rows: Uint32Array): Uint32Array {
-  return rows.filter((row) => Number.isFinite(x[row]!)).sort((a, b) => x[a]! - x[b]! || a - b);
+  const kept = rows.filter((row) => Number.isFinite(x[row]!));
+  const order = Uint32Array.from(kept.keys());
+  order.sort((i, j) => x[kept[i]!]! - x[kept[j]!]! || i - j);
+  return order.map((k) => kept[k]!);
 }

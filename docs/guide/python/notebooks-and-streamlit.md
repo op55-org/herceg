@@ -51,6 +51,12 @@ live.selection = (start, end)  # brush an x range; None clears it
   `replace`, keeps its views and hidden series where it still draws them.
 - [Express charts](express.md#new-data) compute again on `append` and
   `replace`.
+- Over [ordered data](../data.md#rows-that-arrive-late)
+  (`hg.ordered(df, by="time")`), `append` takes rows in any order and
+  merges late ones into place, in the browser and in Python's copy alike;
+  `max_rows` keeps the last rows in time order. Rows keep their identity
+  as late rows move them, so selections stay on their observations, and
+  `RowSelection.rows` counts positions in order.
 
 ## Views, selections, and events
 

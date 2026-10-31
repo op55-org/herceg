@@ -87,7 +87,7 @@ describe("stacks over streaming tables", () => {
     const model = new ChartModel({ marks: [bar(data, { x: "t", y: ["a", "b"], stack: true })] });
     model.setSize(600, 300, 1);
     model.scene(estimateText);
-    data.replace("t", 2, [1]);
+    data.replace(2, { t: [1] });
     model.scene(estimateText);
     // The rows at 1 now stack on each other.
     expect(Array.from(model.series()[1]!.y)).toEqual([5, 10, 16]);

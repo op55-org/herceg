@@ -16,12 +16,13 @@ from typing import Any, TypedDict, TypeVar
 
 import numpy as np
 
-from ._data import Table, listlike
+from ._data import Column, Table, listlike
 from ._errors import (
     ChartError,
     ChartErrorCode,
     Role,
     check_hints,
+    checks_hints,
     hints_of,
     is_number,
     keys_shown,
@@ -476,6 +477,8 @@ class Derived:
 
     Build one with ``hg.derive(data)`` and pass it as a chart's or mark's
     data. Every step checks the columns it reads against those before it.
+    ``source`` and ``steps`` are its lineage: the data it is computed from
+    and its transform steps in order, as the spec writes them.
     """
 
     def __init__(
@@ -483,7 +486,7 @@ class Derived:
         source: Any,
         steps: Sequence[dict[str, Any]],
         kinds: _Kinds,
-        table: Table | None = None,
+        table: Table | _InOrder | None = None,
     ) -> None:
         self.source = source
         self.steps: tuple[dict[str, Any], ...] = tuple(steps)
@@ -671,28 +674,34 @@ class Derived:
         """Columns of the source the steps read, and those of ``used`` (columns read
         from the derived rows) that come from the source unchanged. A column read
         after a step made or replaced it is not the source's."""
-        if (
-            isinstance(used, (str, bytes, Mapping))
-            or not isinstance(used, Iterable)
-            or (isinstance(used, np.ndarray) and used.ndim != 1)
-        ):
-            raise ChartError(
-                f"source_columns used: expected column names; received {shown(used)}",
-                path="used",
-            )
-        used = list(used)
-        for i, name in enumerate(used):
-            if not isinstance(name, str):
-                raise ChartError(
-                    f"source_columns used[{i}]: expected a column's name; received {shown(name)}",
-                    path=f"used[{i}]",
-                )
+        used = _names_used(used)
         needs: set[str] = set()
         made: set[str] = set()
         for step in self.steps:
             needs |= _reads(step) - made
             made |= _writes(step)
         return needs | ({name for name in used if name in self._kinds} - made)
+
+
+def _names_used(used: Any) -> list[str]:
+    """``source_columns``'s ``used``, checked: column names."""
+    if (
+        isinstance(used, (str, bytes, Mapping))
+        or not isinstance(used, Iterable)
+        or (isinstance(used, np.ndarray) and used.ndim != 1)
+    ):
+        raise ChartError(
+            f"source_columns used: expected column names; received {shown(used)}",
+            path="used",
+        )
+    used = list(used)
+    for i, name in enumerate(used):
+        if not isinstance(name, str):
+            raise ChartError(
+                f"source_columns used[{i}]: expected a column's name; received {shown(name)}",
+                path=f"used[{i}]",
+            )
+    return used
 
 
 def _reads(step: dict[str, Any]) -> set[str]:
@@ -736,5 +745,187 @@ def derive(data: Any) -> Derived:
     """Starts transforms of a data source (or of another derived table)."""
     if isinstance(data, Derived):
         return Derived(data, [], data._kinds)
-    table = located("data", lambda: Table(data))
+    if isinstance(data, View):
+        raise ChartError(
+            "derive data: a view; derive from its data, with its filter as a step", path="data"
+        )
+    table = data.table if isinstance(data, Ordered) else located("data", lambda: Table(data))
     return Derived(data, [], _Kinds(table.names, {}, lambda name: table.column(name).kind), table)
+
+
+class View:
+    """The rows of a data source that ``filter`` keeps, in the order ``sort``
+    gives (the data's own without), which series marks (lines, areas, bars,
+    points, heatmaps, rugs, error bars, candlesticks, histograms, box plots,
+    boxen, and violins) draw as they would a table of those rows.
+
+    Build one with ``hg.view(data, filter=..., sort=...)`` and pass it as a
+    mark's data. The chart sends the data's columns once and the view as a
+    question about them, answered in the browser as rows change: views of
+    one table cost no copies. Colors, legends, and row selections stay the
+    data's; a row selection binds the data itself.
+    """
+
+    def __init__(
+        self, source: Any, query: dict[str, Any], kinds: _Kinds, table: Table | _InOrder | None
+    ) -> None:
+        self.source = source
+        #: The view as the spec writes it: ``{"filter": ..., "sort": [...]}``.
+        self.query = query
+        self._kinds = kinds
+        self._table = table
+
+    @property
+    def columns(self) -> dict[str, str]:
+        """The view's columns, the data's, and their kinds."""
+        return {name: self._kinds[name] for name in self._kinds}
+
+    def source_columns(self, used: Iterable[str] = ()) -> set[str]:
+        """Columns of the data the filter and sort read, with those of ``used``."""
+        reads = _fields_of(self.query["filter"]) if "filter" in self.query else set()
+        reads |= {key["field"] for key in self.query.get("sort", [])}
+        return reads | {name for name in _names_used(used) if name in self._kinds}
+
+
+@checks_hints("view")
+def view(
+    data: Any,
+    *,
+    filter: Expr | None = None,
+    sort: str | Sequence[str] | None = None,
+    descending: bool | Sequence[bool] = False,
+) -> View:
+    """The rows of ``data`` (a data source or a derived table) where
+    ``filter`` holds, ordered by the ``sort`` columns (each ``descending``
+    or not), for series marks to draw: ``hg.view(flights, filter=hg.col(
+    "delay") >= -20)``."""
+    if isinstance(data, View):
+        raise ChartError(
+            "view data: already a view; give its data, and join the filters with &", path="data"
+        )
+    checked = derive(data)
+    query: dict[str, Any] = {}
+    if filter is not None:
+        if not isinstance(filter, Expr):
+            raise ChartError(
+                "view filter: expected an expression, such as hg.col(...) > 1; "
+                f"received {shown(filter)}",
+                path="filter",
+            )
+        checked = located("filter", lambda: checked.filter(filter))
+        query["filter"] = checked.steps[-1]["filter"]
+    keys = [] if sort is None else [sort] if isinstance(sort, str) else sort
+    if not listlike(keys) or not all(isinstance(key, str) for key in keys):
+        raise ChartError(
+            f"view sort: expected a column's name or a list of them; received {shown(sort)}",
+            path="sort",
+        )
+    if not isinstance(descending, bool) and not listlike(descending):
+        raise ChartError(
+            "view descending: expected True or False, or one for each sort column; "
+            f"received {shown(descending)}",
+            path="descending",
+        )
+    downs = [descending] * len(keys) if isinstance(descending, bool) else list(descending)
+    if len(downs) != len(keys):
+        raise ChartError(
+            f"view descending: one for each of the {len(keys)} sort columns; received {len(downs)}",
+            path="descending",
+        )
+    order = []
+    for key, down in zip(keys, downs, strict=True):
+        located("sort", functools.partial(checked.sort, key, descending=down))
+        order.append({"field": key, "order": "descending" if down else "ascending"})
+    if order:
+        query["sort"] = order
+    return View(data, query, checked._kinds, checked._table)
+
+
+class Ordered:
+    """Rows kept in ascending order of a number or time column, ties in the
+    order they came: ``hg.ordered(df, by="time", max_rows=180_000)``.
+
+    Pass it as a chart's or mark's data. Live charts (``widget.append``)
+    merge rows that arrive late into place, in the browser and in Python's
+    copy alike, and keep the last ``max_rows`` in order, so a late row
+    earlier than every row kept is not kept. Rows keep their identity as
+    others move in front of them: selections stay on their observations.
+    Positions (``RowSelection.rows``, ``selection=``) count rows in order,
+    as ``df.sort_values(by, kind="stable")`` has them.
+    """
+
+    def __init__(self, data: Any, by: str, max_rows: int | None) -> None:
+        if isinstance(data, (Derived, View, Ordered)):
+            raise ChartError(
+                "ordered data: give a data source; its rows are put in order as given",
+                path="data",
+            )
+        if max_rows is not None and (
+            not isinstance(max_rows, int) or isinstance(max_rows, bool) or max_rows < 1
+        ):
+            raise ChartError(
+                "ordered max_rows: expected a whole number of at least 1; "
+                f"received {shown(max_rows)}",
+                path="max_rows",
+            )
+        given = located("data", lambda: Table(data))
+        if not isinstance(by, str) or by not in given.names:
+            available = ", ".join(repr(name) for name in given.names)
+            raise ChartError(
+                f"ordered by: no column {by!r}; the data has {available}",
+                code="unknown-field",
+                path="by",
+            )
+        column = located("by", lambda: given.column(by))
+        if column.kind not in ("number", "time"):
+            raise ChartError(
+                f"ordered by: column {by!r} holds {column.kind} values; "
+                "give a number or time column",
+                code="field-type",
+                path="by",
+            )
+        missing = np.flatnonzero(np.isnan(column.values))
+        if missing.size:
+            raise ChartError(
+                f"ordered by: row {int(missing[0])} is missing; an ordered table needs every "
+                f"row's {by}",
+                path="by",
+            )
+        self.data = data
+        self.by = by
+        self.max_rows = max_rows
+        order = np.argsort(column.values, kind="stable")
+        #: Each row kept, in order, by its position in the data given: what numbers it.
+        self.order = order if max_rows is None else order[-max_rows:]
+        #: How many rows the data given has.
+        self.given = len(column)
+        #: The rows in order, as charts read them.
+        self.table = _InOrder(given, self.order)
+
+
+class _InOrder:
+    """A table's columns with their rows taken in ``order``, each column
+    converted and taken only when first read, as tables read them."""
+
+    def __init__(self, table: Table, order: np.ndarray) -> None:
+        self.names = table.names
+        self._source = table
+        self._order = order
+        self._columns: dict[str, Column] = {}
+
+    def column(self, name: str) -> Column:
+        """The converted column in order; KeyError for unknown names."""
+        column = self._columns.get(name)
+        if column is None:
+            given = self._source.column(name)
+            column = Column(given.kind, given.values[self._order], given.dictionary, given.shapes)
+            self._columns[name] = column
+        return column
+
+
+@checks_hints("ordered")
+def ordered(data: Any, *, by: str, max_rows: int | None = None) -> Ordered:
+    """``data``'s rows in ascending order of ``by``, a number or time column
+    (ties in the order given), keeping the last ``max_rows`` in order: data
+    whose late rows live charts merge into place."""
+    return Ordered(data, by, max_rows)

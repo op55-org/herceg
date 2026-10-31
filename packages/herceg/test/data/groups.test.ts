@@ -230,9 +230,9 @@ describe("row groups following their view", () => {
     const summary = groups.table as unknown as Table;
     const written: number[] = [];
     const replace = summary.replace.bind(summary);
-    summary.replace = ((field: never, start: number, values: ArrayLike<number>) => {
-      written.push(start, values.length);
-      replace(field, start, values as never);
+    summary.replace = ((start: number, values: Record<string, ArrayLike<number>>) => {
+      written.push(start, Object.values(values)[0]!.length);
+      replace(start, values as never);
     }) as typeof summary.replace;
     t.append({ k: ["k0", "k999"], v: [1, 1] });
     expect(written).toEqual([0, 1, 999, 1]);
@@ -308,7 +308,7 @@ describe("row groups following their view", () => {
     const groups = groupRows(rowView(t), { by: ["host"], ops: OPS });
     t.set("host", 5, "web");
     expect(rows(groups.table)).toEqual(fresh(t));
-    t.replace("ms", 0, [100, 200]);
+    t.replace(0, { ms: [100, 200] });
     expect(rows(groups.table)).toEqual(fresh(t));
   });
 

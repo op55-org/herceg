@@ -843,7 +843,7 @@ describe.skipIf(!hasWebGL2())("point clouds on the GPU", () => {
     append(1e6, 1);
     expect(whole.mock.calls.length).toBeGreaterThan(uploads);
     const after = whole.mock.calls.length;
-    rolling.replace("y", 0, [2]);
+    rolling.replace(0, { y: [2] });
     chart.render();
     expect(whole.mock.calls.length).toBeGreaterThan(after);
     whole.mockRestore();
@@ -899,7 +899,7 @@ describe.skipIf(!hasWebGL2())("point clouds on the GPU", () => {
     // The window dropped the lone point at (5, 5).
     expect(pixel(chart, 5, 5)[3]).toBe(0);
     // Values replaced in place upload again.
-    rolling.replace("y", 0, [2]);
+    rolling.replace(0, { y: [2] });
     chart.render();
     expect(whole.mock.calls.length).toBeGreaterThan(uploads);
     whole.mockRestore();

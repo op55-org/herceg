@@ -15,6 +15,7 @@ import type { ChartMark, Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts
 import type { RowBindings } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
 import type { TraceFrame } from "../marks/trace.ts";
+import type { Connections } from "../marks/union-stack.ts";
 import type { Geometry } from "../scene/scene.ts";
 import type { ChannelSpec, SymbolName } from "../spec/encoding.ts";
 import type { FormatSpec, SwatchSpec } from "../spec/guides.ts";
@@ -149,6 +150,8 @@ export interface MarkFeatures {
   room?(): [number, number];
   /** How labels of parts (`content`: a bar's, an annotation's) are written (marks/features/content.ts). */
   readonly content?: ContentWriter | undefined;
+  /** Which rows connect, where a stack of a series field breaks (marks/union-stack.ts). */
+  readonly continuity?: Connections | undefined;
 }
 
 /**

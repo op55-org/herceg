@@ -985,6 +985,56 @@ describe("notebook widget", () => {
     expect(band(second!)!.getAttribute("visibility")).toBe("visible");
   });
 
+  it("reports rows of an ordered table by the identities Python gave them", async () => {
+    const base = snapshot();
+    const model = new MockModel({
+      _chart: {
+        ...base,
+        spec: {
+          ...base.spec,
+          data: { data: { ...base.spec.data!.data!, orderBy: "t" } } as never,
+          rowSelection: { channel: "focus" },
+        },
+        // Python's identities of the rows sent (in order), in buffer 3; the next is 7.
+        buffers: [...base.buffers, new DataView(new Float64Array([4, 6, 2]).buffer)],
+        rows: { data: [0, 0, 3, 7] },
+        rowSelections: [{ table: "data", channel: "focus", selection: null }],
+      } satisfies Snapshot,
+      _listening: [],
+    });
+    const [view] = mount(model, 1);
+    await frame();
+    await vi.dynamicImportSettled();
+    // A late row: Python numbers it 7, and both put it at position 2.
+    model.receive(
+      {
+        type: "append",
+        revision: 1,
+        table: "data",
+        columns: {
+          t: number(0),
+          v: number(1),
+          host: { type: "category", codes: 2, dictionary: ["a"] },
+        },
+      },
+      [new Float64Array([1.5]), new Float64Array([9]), new Int32Array([0])],
+    );
+    await frame();
+    const root = figure(view!) as HTMLElement;
+    root.focus();
+    const key = (name: string) =>
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+    const reported = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const last = model.messages("rowSelection").at(-1) as { buffers: ArrayBuffer[] };
+      return Array.from(new Float64Array(last.buffers[0]!));
+    };
+    for (const name of ["ArrowRight", "ArrowRight", "ArrowRight", " "]) key(name);
+    expect(await reported()).toEqual([7]);
+    for (const name of ["ArrowLeft", " "]) key(name);
+    expect(await reported()).toEqual([6]);
+  });
+
   it("keeps the brush a view drew last over another view's, with its rows", async () => {
     const base = snapshot({ interaction: { brush: "x" } });
     const model = new MockModel({

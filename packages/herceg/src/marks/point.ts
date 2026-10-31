@@ -995,7 +995,9 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     const used = new Uint8Array(bandY ? (bands.y?.keys.length ?? 0) : 0);
     let [points, categories, low, high] = [0, 0, Infinity, -Infinity];
     // The last value is a part's last drawn point (a view's rows may run in
-    // any order), of the part whose last point is the table's latest row.
+    // any order), of the part whose last point is the latest row in the
+    // mark's order (a view's).
+    const rank = this.rows().rank ?? ((row: number) => row);
     let [last, lastRow] = [Number.NaN, -1];
     for (const s of parts) {
       let [partLast, partRow] = [Number.NaN, -1];
@@ -1018,7 +1020,8 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         partLast = value;
         partRow = row;
       }
-      if (partRow > lastRow) [last, lastRow] = [partLast, partRow];
+      if (partRow >= 0 && (lastRow < 0 || rank(partRow) > rank(lastRow)))
+        [last, lastRow] = [partLast, partRow];
     }
     if (points === 0) return `${name}: no data`;
     const count = `${points} point${points === 1 ? "" : "s"}`;

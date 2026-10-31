@@ -29,6 +29,7 @@ from ._chart import (
     table_name,
 )
 from ._data import UNTYPED, Column, Table
+from ._derive import Ordered
 from ._errors import ChartError, UnknownOption, key_path, located, shown
 from ._guides import guides_spec
 from ._rows import bound_tables
@@ -62,6 +63,18 @@ class LiveChart:
         self._subplots = len(chart._panels)
         # Current columns by table name: only those marks read, as in the spec.
         self._tables = chart._used_columns()
+        self._ordered = {
+            name: spec for name, spec in chart._ordered_specs().items() if name in self._tables
+        }
+        #: Per ordered table, each row's identity as the browser numbers it
+        #: (the ordinal it took as it arrived, since the table was last
+        #: replaced), and the next row's: selections follow rows by them.
+        self.ordinals: dict[str, np.ndarray] = {}
+        self.next_ordinal: dict[str, int] = {}
+        for source, name in chart._table_names():
+            if isinstance(source, Ordered) and name in self._ordered:
+                self.ordinals[name] = source.order.astype(np.int64)
+                self.next_ordinal[name] = source.given
         self._derived = chart._derived_specs()
         self._matrices = chart._matrices()
         self._sources = chart._table_names()
@@ -159,7 +172,13 @@ class LiveChart:
         if self._row_selection is not None:
             options = {**options, "rowSelection": self._row_selection}
         return assemble_spec(
-            options, self._layout, self._tables, self._marks, self._derived, self._matrices
+            options,
+            self._layout,
+            self._tables,
+            self._marks,
+            self._derived,
+            self._matrices,
+            ordered=self._ordered,
         )
 
     def columns(self, name: str) -> set[str]:
@@ -186,6 +205,8 @@ class LiveChart:
         count = _length(batch)
         if count == 0:
             return None
+        if name in self.ordinals:
+            return self._merge(name, batch, max_rows)
         if max_rows is not None and count > max_rows:
             # Rows that would be dropped at once are not sent.
             batch = {field: _tail(column, max_rows) for field, column in batch.items()}
@@ -223,11 +244,114 @@ class LiveChart:
         buffers: list[bytes] = []
         # The message is made first, so rows it cannot carry change nothing.
         columns = columns_spec(batch, buffers)
-        self._tables[name] = batch
+        if name in self.ordinals:
+            # Rows as given, numbered as given, then put in order.
+            order = self._order(name, batch, None, "widget.replace")
+            self._tables[name] = {field: _taken(column, order) for field, column in batch.items()}
+            self.ordinals[name] = np.arange(_length(batch), dtype=np.int64)[order]
+            self.next_ordinal[name] = _length(batch)
+        else:
+            self._tables[name] = batch
         # The browser resets the table: rows are numbered from its first again.
         self.dropped[name] = 0
         self.generation[name] += 1
         return {"type": "replace", "table": name, "columns": columns}, buffers
+
+    def _merge(self, name: str, batch: dict[str, Column], max_rows: int | None) -> Message:
+        """Rows appended to an ordered table, merged into place as the browser
+        merges them (after rows of their value already there, in the order
+        given among themselves), keeping the last rows in order. The batch is
+        sent as given, so both number its rows alike."""
+        buffers: list[bytes] = []
+        message: dict[str, Any] = {
+            "type": "append",
+            "table": name,
+            "columns": columns_spec(batch, buffers),
+        }
+        if max_rows is not None:
+            message["maxRows"] = max_rows
+        current = self._tables[name]
+        count = _length(batch)
+        before = _length(current)
+        by = self._ordered[name]["orderBy"]
+        # Batch rows the table's own window would drop at once are not taken
+        # in, as the browser's table takes none of them (their labels join
+        # no dictionary), but each is numbered as it arrived. `max_rows`
+        # trims after, as the browser's widget does.
+        order = self._order(
+            name, {by: _concatenate(current[by], batch[by])}, None, "widget.append", before
+        )
+        placed = np.arange(before + count)[order]
+        taken = np.sort(placed[placed >= before]) - before
+        if len(taken) < count:
+            batch = {field: _taken(column, taken) for field, column in batch.items()}
+        joined = {field: _concatenate(current[field], column) for field, column in batch.items()}
+        order = self._order(name, joined, max_rows, "widget.append", before)
+        for field, column in joined.items():
+            current[field] = _taken(column, order)
+        first = self.next_ordinal[name]
+        ordinals = np.concatenate([self.ordinals[name], first + taken.astype(np.int64)])
+        self.ordinals[name] = ordinals[order]
+        self.next_ordinal[name] = first + count
+        self.dropped[name] += len(ordinals) - len(self.ordinals[name])
+        return message, buffers
+
+    def _order(
+        self,
+        name: str,
+        columns: dict[str, Column],
+        max_rows: int | None,
+        method: str,
+        kept: int = 0,
+    ) -> np.ndarray | slice:
+        """The positions of an ordered table's rows in order of its column
+        (ties as they are), the last of them that the table's `maxRows` and
+        `max_rows` keep: a slice where they are in order already. Rows from
+        `kept` on are new: each needs a value."""
+        by = self._ordered[name]["orderBy"]
+        values = columns[by].values
+        missing = np.flatnonzero(np.isnan(values[kept:]))
+        if missing.size:
+            raise ChartError(
+                f"{method} rows: column {by!r}: row {int(missing[0])} is missing; an ordered "
+                f"table needs every row's {by}",
+                path=key_path("rows", by),
+            )
+        limits = [n for n in (max_rows, self._ordered[name].get("maxRows")) if n is not None]
+        start = max(0, len(values) - min(limits)) if limits else 0
+        # Rows arriving in order (most of a feed) keep their places: a slice, not a sort.
+        if not np.any(values[max(0, kept - 1) + 1 :] < values[max(0, kept - 1) : -1]):
+            return slice(start, len(values))
+        order = np.argsort(values, kind="stable")
+        return order[start:]
+
+    def numbering(self) -> dict[str, tuple[int, np.ndarray | None]]:
+        """How each table's rows are numbered now, for `follow`: the rows
+        dropped from its front since it was replaced, and an ordered table's
+        identities."""
+        return {name: (self.dropped[name], self.ordinals.get(name)) for name in self._tables}
+
+    def follow(
+        self, name: str, rows: np.ndarray, before: tuple[int, np.ndarray | None]
+    ) -> np.ndarray:
+        """Where the rows at positions `rows`, as the table was numbered
+        `before`, are now; rows dropped since are gone."""
+        dropped, ordinals = before
+        if ordinals is None or name not in self.ordinals:
+            shifted = rows - (self.dropped[name] - dropped)
+            return shifted[shifted >= 0]
+        return self.positions(name, ordinals[rows])
+
+    def positions(self, name: str, identities: np.ndarray) -> np.ndarray:
+        """The positions now of an ordered table's rows of `identities`,
+        ascending; rows dropped since are gone."""
+        ordinals = self.ordinals[name]
+        if len(ordinals) == 0:
+            return np.empty(0, dtype=np.int64)
+        index = np.argsort(ordinals)
+        known = ordinals[index]
+        at = np.minimum(np.searchsorted(known, identities), len(known) - 1)
+        return np.sort(index[at[known[at] == identities]])
 
     def update(self, changes: Mapping[str, Any]) -> Message | None:
         """Changes chart options; the message holds the changed spec options, None
@@ -573,3 +697,8 @@ def _concatenate(current: Column, new: Column) -> Column:
 
 def _tail(column: Column, count: int) -> Column:
     return Column(column.kind, column.values[-count:], column.dictionary)
+
+
+def _taken(column: Column, order: np.ndarray | slice) -> Column:
+    """`column`'s rows at `order`, in turn (a slice takes a view of them)."""
+    return Column(column.kind, column.values[order], column.dictionary, column.shapes)

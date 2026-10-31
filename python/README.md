@@ -65,7 +65,9 @@ state = hst.chart(chart, key="latency", on_select="rerun")
   multiples, subplots, and insets.
 - **Data** travels as binary columns beside the chart's portable spec, not
   as JSON lists or Python objects per value. `hg.derive` filters and
-  aggregates in the browser.
+  aggregates in the browser, `hg.view` filters and sorts rows for series
+  marks without a copy, and `hg.ordered` keeps rows in time order as late
+  ones stream in.
 - **Output**: notebooks (Jupyter, JupyterLab, VS Code), HTML, SVG, PNG,
   JPEG, WebP, and PDF; live widgets (anywidget); Streamlit; fragments for
   Flask, Django, and FastAPI pages.

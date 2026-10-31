@@ -95,6 +95,22 @@ export class RowsIndex {
     this.#summarize(values, rows, cut, Math.min(cut + 1, end), before, end);
   }
 
+  /**
+   * Forgets the rows from logical position `from` on, which changed: the
+   * next update summarizes them again, with the rows after them.
+   */
+  forget(from: number): void {
+    if (from >= this.#end) return;
+    // Their lowest blocks' gaps leave the count; summarized again, they return.
+    const level = this.#levels[0];
+    if (level)
+      for (let s = Math.max(0, Math.floor(from / BLOCK) - level.base); s < level.count; s++) {
+        this.#gaps -= level.gap[s]!;
+        level.gap[s] = 0;
+      }
+    this.#end = from;
+  }
+
   /** Extremes of rows `[from, to)` of the list, by position in it. */
   query(
     values: NumericArray,

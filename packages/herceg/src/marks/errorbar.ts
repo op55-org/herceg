@@ -1,4 +1,5 @@
 import type { NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -36,7 +37,7 @@ import {
   valueKind,
 } from "./mark.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
-import { type MarkRows, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, TableCache, visibleRange, xExtent } from "./series.ts";
 import { boxOf, clipBox, distanceToCut, paintedLater } from "./shapes.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -187,6 +188,8 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   readonly clearDomain = clearDomain;
   readonly spec: Frozen<ErrorBarSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
   readonly inset: { x: number; y: number };
@@ -202,13 +205,14 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   /** With `dodge`, each series' share of the bands. */
   readonly #shares: BandShares | undefined;
 
-  constructor(input: ErrorBarSpec, table: Table<Schema>) {
+  constructor(input: ErrorBarSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(colored(input, table, "stroke"));
     checkTooltip(table, this.spec.tooltip, "errorbar");
     checkItemKey(table, this.spec.itemKey, "errorbar");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     const { fields, bound } = bindRows(spec, table, "errorbar", ENDS.slice(0, 6));
     this.bound = bound;
     const form = errorBarForm(spec);
@@ -272,7 +276,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -620,9 +624,11 @@ function swap(s: Series): Series {
  * ```
  */
 export function errorbar<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: ErrorBarOptions<S>,
 ): ChartMark<Frozen<ErrorBarSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const spec = {
     type: "errorbar",
     ...definedFields(options as Partial<Record<keyof ErrorBarSpec, unknown>>, [
@@ -656,7 +662,7 @@ export function errorbar<S extends Schema>(
   } as ErrorBarSpec;
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new ErrorBarMark(spec, table as unknown as Table);
+  return new ErrorBarMark(spec, table as unknown as Table, view as RowView | undefined);
 }
 
 /** What its lookup reads of this module (see marks/lookups.ts). */

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { category } from "../../src/data/column.ts";
+import { orderedTable } from "../../src/data/ordered.ts";
 import { type Table, table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import type { RangeIndex } from "../../src/lod/minmax-index.ts";
@@ -152,7 +153,7 @@ describe("row groups", () => {
     const again = groups.groups().find(({ name }) => name === "a")!;
     expect([again.stream.dropped, again.stream.key === a!.stream.key]).toEqual([0, false]);
     // A change to values in place groups the table again.
-    t.replace("kind", 0, ["b"]);
+    t.replace(0, { kind: ["b"] });
     expect(seen(groups)).toEqual(regrouped(t));
     expect(groups.groups().every(({ stream }) => stream.dropped === 0)).toBe(true);
   });
@@ -273,6 +274,72 @@ describe("row groups", () => {
     expect(seen(groups)).toEqual(regrouped(t));
     // Every "kept" row but those still in the window has left.
     expect(kept.stream.dropped + kept.rows.length).toBe(31);
+  });
+
+  it("file late rows of an ordered table again from the first that moved", () => {
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const t = orderedTable(
+      { x: new Float64Array(0), kind: category([]) },
+      { orderBy: "x", maxRows: 400 },
+    );
+    const groups = new SplitRows(t as unknown as Table, "kind", "x");
+    let x = 0;
+    for (let tick = 0; tick < 150; tick++) {
+      const count = 1 + Math.floor(random() * 20);
+      t.append({
+        // Some rows arrive up to 30 late; one in fifty, earlier than any kept.
+        x: Float64Array.from({ length: count }, () =>
+          random() < 0.02 ? x - 1000 : random() < 0.2 ? x - random() * 30 : ++x,
+        ),
+        kind: Array.from({ length: count }, () => `k${Math.floor(random() * 5)}`),
+      });
+      expect(seen(groups)).toEqual(
+        regrouped(t as unknown as Table<{ x: "number"; kind: "category" }>),
+      );
+      // Each group's index answers as a scan over its rows does.
+      for (const { rows, stream } of groups.groups()) {
+        const index = stream.minMaxIndex("x");
+        const out = index.query(t.numbers("x"), 0, rows.length, { low: -1, high: -1, gap: false });
+        const values = Array.from(rows, (row) => t.numbers("x")[row]!);
+        expect([values[out.low], values[out.high]]).toEqual([
+          Math.min(...values),
+          Math.max(...values),
+        ]);
+      }
+    }
+  });
+
+  it("keep the key of a group late rows leave alone", () => {
+    const t = orderedTable({ x: [1, 2, 3, 4], kind: ["a", "a", "b", "b"] }, { orderBy: "x" });
+    const groups = new SplitRows(t as unknown as Table, "kind", "x");
+    const [a, b] = groups.groups();
+    t.append({ x: [3.5], kind: ["b"] });
+    const [a2, b2] = groups.groups();
+    expect(a2!.stream.key).toBe(a!.stream.key);
+    expect(b2!.stream.key).not.toBe(b!.stream.key);
+    expect(Array.from(b2!.rows)).toEqual([2, 3, 4]);
+    // Rows given out before stay as they were.
+    expect(Array.from(b!.rows)).toEqual([2, 3]);
+  });
+
+  it("file rows again from a series changed before a merge in the same transaction", () => {
+    const t = orderedTable(
+      { x: [1, 2, 3, 4, 5], kind: ["a", "a", "b", "b", "b"] },
+      { orderBy: "x" },
+    );
+    const groups = new SplitRows(t as unknown as Table, "kind", "x");
+    groups.groups();
+    t.transaction(() => {
+      t.replace(0, { kind: ["b"] });
+      t.append({ x: [3.5], kind: ["a"] });
+    });
+    expect(seen(groups)).toEqual(
+      regrouped(t as unknown as Table<{ x: "number"; kind: "category" }>),
+    );
   });
 
   it("count a missing x as not ascending, as regrouping does", () => {

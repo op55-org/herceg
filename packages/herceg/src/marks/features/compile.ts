@@ -1204,7 +1204,68 @@ function labelFeatures(
   return { use() {}, palette: (base) => base, attach() {}, format, content };
 }
 
-/** Areas' looks by series, and continuity for areas that do not stack. */
+/**
+ * As `SeriesFeatures.pathEnds`, for a layer of a series field's stack: its
+ * path stops where its edges have a gap between a row and the layer's next
+ * along the stack (its own missing value, or a break or a position without
+ * support, which every layer's edges have). Undefined over category bands.
+ */
+function stackEnds(
+  series: Series,
+  along: "x" | "y",
+): ((row: number, way: 1 | -1) => boolean) | undefined {
+  const edges = series.edges;
+  if (!edges || series.places?.[along]) return undefined;
+  const values = series[along];
+  const { x: positions, top } = edges;
+  // The layer's rows in order along the stack.
+  const order = edges.positionOrder ?? series.rows;
+  const count = order ? order.length : series.length;
+  const rowAt = (k: number) => (order ? order[k]! : k);
+  // The first of `length` places from which `before` is false.
+  const search = (length: number, before: (k: number) => boolean) => {
+    let lo = 0;
+    let hi = length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (before(mid)) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const from = (value: number) => search(positions.length, (e) => positions[e]! < value);
+  // Each row's own top, which its entry holds too.
+  const tops = along === "x" ? series.y : series.x;
+  // The entry of the layer's `k`th row: the entries at its position hold
+  // its rows there in turn, and a row with a top is at the next entry with
+  // one, past breaks between them.
+  const entryOf = (k: number) => {
+    const value = values[rowAt(k)]!;
+    let first = k;
+    while (first > 0 && values[rowAt(first - 1)] === value) first--;
+    let e = from(value);
+    for (let j = first; ; j++, e++) {
+      if (Number.isFinite(tops[rowAt(j)]!))
+        while (e < positions.length && Number.isNaN(top[e]!)) e++;
+      if (j === k) return e;
+    }
+  };
+  return (row, way) => {
+    const value = values[row]!;
+    let k = search(count, (j) => values[rowAt(j)]! < value);
+    while (k < count && rowAt(k) !== row && values[rowAt(k)] === value) k++;
+    if (k >= count || rowAt(k) !== row) return false;
+    const next = k + way;
+    if (next < 0 || next >= count) return true;
+    // Any entry without a top between the two rows' entries breaks the path.
+    const end = entryOf(Math.max(k, next));
+    for (let e = entryOf(Math.min(k, next)) + 1; e < end; e++)
+      if (Number.isNaN(top[e]!)) return true;
+    return false;
+  };
+}
+
+/** Areas' looks by series, and continuity: traced, or for a series field's stack, its breaks. */
 function areaFeatures(
   kit: FeatureKit,
   mark: Mark,
@@ -1234,17 +1295,25 @@ function areaFeatures(
     throw new Error(
       `${path} continuity: monotone bands cannot break yet; give a linear or step curve`,
     );
-  if (asks && spec.stack)
-    throw new Error(
-      `${path} ${spec.where !== undefined ? "where" : "continuity"}: stacked areas cannot leave rows out yet; drop it or the stack`,
-    );
+  if (spec.where !== undefined && spec.stack)
+    throw new Error(`${path} where: stacked areas cannot leave rows out yet; drop it or the stack`);
 
   const along = mark.tooltip as "x" | "y";
   const field = positionField(spec[along]);
-  const topology = asks ? new Topology(kit, table, spec, { field, log }, zone, path) : undefined;
-  topology?.check(table.kind(field), typeof spec.continuity?.maxGap === "object", path);
+  const continuity = asks ? new Topology(kit, table, spec, { field, log }, zone, path) : undefined;
+  continuity?.check(table.kind(field), typeof spec.continuity?.maxGap === "object", path);
+  // A series field's stack (its series given, or its color's field, as the
+  // mark resolved it) breaks its layers' edges where their runs do; stacks
+  // of fields share rows, so trace their runs as single areas do.
+  const unioned =
+    spec.stack &&
+    spec.y1 === undefined &&
+    spec.x1 === undefined &&
+    mark.identity?.field !== undefined;
+  const topology = unioned ? undefined : continuity;
   let theme: Theme | undefined;
   return {
+    continuity: unioned ? continuity : undefined,
     use(t, p) {
       theme = t;
       styles.use(t, p);
@@ -1303,6 +1372,8 @@ function areaFeatures(
           return [area];
         },
       };
+      // A layer of a series field's stack stops where the stack's edges break.
+      if (unioned && continuity) features.pathEnds = (series) => stackEnds(series, along);
       if (runs)
         features.lookAt = (series) => {
           const ends = tracedEnds(s, series, runs.ends);

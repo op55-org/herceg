@@ -340,9 +340,8 @@ export interface ProjectionSpec {
  */
 export type ThemeName = "light" | "dark" | "high-contrast" | "high-contrast-dark" | "auto";
 
-/** Columnar data: every column has the same length. */
-/** A table: its columns, or rows derived from another table of the spec. */
-export type DataSpec = ColumnsSpec | DerivedSpec;
+/** A table: its columns, rows derived from another table of the spec, or a view of another's rows. */
+export type DataSpec = ColumnsSpec | DerivedSpec | ViewSpec;
 
 export interface ColumnsSpec {
   columns: Record<Field, ColumnSpec>;
@@ -360,6 +359,29 @@ export interface ColumnsSpec {
    * and j-th y at j × number of x values + i).
    */
   matrix?: { x: Field; y: Field };
+  /**
+   * A number or time field the rows are kept in ascending order of, ties
+   * in the order they arrived (`orderedTable`): rows appended later merge
+   * into place. Every row needs a value of it.
+   */
+  orderBy?: Field;
+  /** Keep at most this many rows: appends drop the first. A whole number of at least 1. */
+  maxRows?: number;
+}
+
+/**
+ * The rows of the table `source` that `view` shows: those its filter
+ * keeps, in the order its sort gives (table order without), read from the
+ * table without a copy, and following it as it changes (`rowView`). Every
+ * mark that draws series takes a view; annotation and layout marks take
+ * tables.
+ */
+export interface ViewSpec {
+  source: string;
+  view: {
+    filter?: Expression;
+    sort?: readonly { field: Field; order?: "ascending" | "descending" }[];
+  };
 }
 
 /**
@@ -1280,6 +1302,9 @@ interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
  * either side (zero beyond its first and last rows).
  */
 export type StackGaps = "zero" | "interpolate";
+
+/** Where a stack of a series field stands: where any shown series has a row, or every one does. */
+export type StackSupport = "union" | "intersection";
 
 /** Nonnegative shares, or ordinary positive/negative stacks. */
 export type BarStack = boolean | "fill";

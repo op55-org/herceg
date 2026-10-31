@@ -145,7 +145,7 @@ describe("geoshape", () => {
     const world = fromGeoJSON(countries());
     const { model, scene } = build({ marks: [geoshape(world, { color: "gdp" })] });
     const first = polygons(scene).shapes[0];
-    world.replace("gdp", 0, [35]);
+    world.replace(0, { gdp: [35] });
     const next = polygons(model.scene(estimateText));
     expect(next.shapes[0]).toBe(first);
     expect(next.colorIndex[0]).not.toBe(polygons(scene).colorIndex[0]);

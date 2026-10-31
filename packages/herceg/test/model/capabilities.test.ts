@@ -618,11 +618,14 @@ describe("capabilities: facets", () => {
     },
   );
 
-  it("points split tables, but a row view needs an explicit repeat", () => {
+  it("points split tables and row views, and repeat in every panel", () => {
     const view = rowView(samples, {});
-    expect(() =>
-      build({ marks: [point(view, { x: "x", y: "y" })], facet: facet("group") }),
-    ).toThrow('point facet: a row view cannot split into facets yet; give it facet: "repeat"');
+    expect(
+      build({ marks: [point(view, { x: "x", y: "y" })], facet: facet("group") }).scene.panels,
+    ).toHaveLength(
+      build({ marks: [point(samples, { x: "x", y: "y" })], facet: facet("group") }).scene.panels
+        .length,
+    );
     const { model, scene } = build({
       marks: [line(samples, { x: "x", y: "y" }), point(view, { x: "x", y: "y", facet: "repeat" })],
       facet: facet("group"),

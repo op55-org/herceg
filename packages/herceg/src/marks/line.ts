@@ -1,3 +1,4 @@
+import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { lineDrawing } from "../draw/line.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -48,7 +49,7 @@ import {
   untranspose,
 } from "./orient.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
-import { type MarkRows, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import { type Series, xExtent, yExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { IndexUse, tracePath, unionExtent } from "./trace.ts";
@@ -176,6 +177,8 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<LineSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly tooltip: "x" | "y";
   readonly featured: boolean;
   readonly identity: MarkSources;
@@ -187,13 +190,14 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
   /** With `dodge`, each series' slot in the bands, as last drawn. */
   readonly #shares: BandShares | undefined;
 
-  constructor(input: LineSpec, table: Table<Schema>) {
+  constructor(input: LineSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "line");
     checkItemKey(table, this.spec.itemKey, "line");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     const { fields, bound } = bindRows(spec, table, "line", ["x", "y"]);
     this.bound = bound;
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "line series");
@@ -230,7 +234,7 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -382,9 +386,11 @@ export class LineMark implements Mark<Frozen<LineSpec>> {
  * ```
  */
 export function line<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: LineOptions<S>,
 ): ChartMark<Frozen<LineSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const spec: LineSpec = {
     type: "line",
     ...definedFields(options, [
@@ -415,7 +421,7 @@ export function line<S extends Schema>(
   } as LineSpec;
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new LineMark(spec, table as unknown as Table);
+  return new LineMark(spec, table as unknown as Table, view as RowView | undefined);
 }
 
 /** Copies only the options that are set, so specs stay free of undefined. */

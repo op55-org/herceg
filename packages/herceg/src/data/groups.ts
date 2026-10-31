@@ -569,7 +569,10 @@ export class RowGroups<
     // A read inside an earlier listener caught up with it already.
     if (this.#source.version === this.#seen.version) return;
     this.#heard++;
-    if (change.updated) {
+    // Rows inserted before others move them, and every row's slot after them:
+    // the groups are computed again (rows keep their groups).
+    if (change.inserted) this.#recompute = true;
+    else if (change.updated) {
       const query = this.view.query;
       // A view keeps its filter as an expression.
       const reads = new Set<string>([

@@ -110,21 +110,21 @@ export function markBuilder(type: unknown): ((props: unknown) => ChartMark) | un
 /** Lines through x and y fields of `data`. */
 export const Line = /* @__PURE__ */ markElement(
   "Line",
-  ({ data, ...options }: WithData<LineOptions<Schema>, Schema>) => line(data, options),
-) as unknown as <S extends Schema>(props: WithData<LineOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<LineOptions<Schema>, Schema>) => line(data, options),
+) as unknown as <S extends Schema>(props: WithRows<LineOptions<S>, S>) => null;
 
 /** Filled areas: to zero, stacked, or a band between two fields. */
 export const Area = /* @__PURE__ */ markElement(
   "Area",
-  ({ data, ...options }: WithData<AreaOptions<Schema>, Schema>) =>
+  ({ data, ...options }: WithRows<AreaOptions<Schema>, Schema>) =>
     area(data, options as AreaOptions<Schema>),
-) as unknown as <S extends Schema>(props: WithData<AreaOptions<S>, S>) => null;
+) as unknown as <S extends Schema>(props: WithRows<AreaOptions<S>, S>) => null;
 
 /** Bars: vertical, or horizontal when `y` is a category. */
 export const Bar = /* @__PURE__ */ markElement(
   "Bar",
-  ({ data, ...options }: WithData<BarOptions<Schema>, Schema>) => bar(data, options),
-) as unknown as <S extends Schema>(props: WithData<BarOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<BarOptions<Schema>, Schema>) => bar(data, options),
+) as unknown as <S extends Schema>(props: WithRows<BarOptions<S>, S>) => null;
 
 /** Scatter points. */
 export const Point = /* @__PURE__ */ markElement(
@@ -135,14 +135,14 @@ export const Point = /* @__PURE__ */ markElement(
 /** Individual observations as short ticks at a plot edge. */
 export const Rug = /* @__PURE__ */ markElement(
   "Rug",
-  ({ data, ...options }: WithData<RugOptions<Schema>, Schema>) => rug(data, options),
-) as unknown as <S extends Schema>(props: WithData<RugOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<RugOptions<Schema>, Schema>) => rug(data, options),
+) as unknown as <S extends Schema>(props: WithRows<RugOptions<S>, S>) => null;
 
 /** Error bars: `x`, `y1`, `y2` (vertical) or `y`, `x1`, `x2` (horizontal). */
 export const ErrorBar = /* @__PURE__ */ markElement(
   "ErrorBar",
-  ({ data, ...options }: WithData<ErrorBarOptions<Schema>, Schema>) => errorbar(data, options),
-) as unknown as <S extends Schema>(props: WithData<ErrorBarOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<ErrorBarOptions<Schema>, Schema>) => errorbar(data, options),
+) as unknown as <S extends Schema>(props: WithRows<ErrorBarOptions<S>, S>) => null;
 
 /** A pie, or with `innerRadius` a donut; it has its chart, each facet panel, or its `panel` to itself. */
 export const Pie = /* @__PURE__ */ markElement(
@@ -153,20 +153,20 @@ export const Pie = /* @__PURE__ */ markElement(
 /** Box plots: a category field on `x` or `y` and the values on the other. */
 export const BoxPlot = /* @__PURE__ */ markElement(
   "BoxPlot",
-  ({ data, ...options }: WithData<BoxPlotOptions<Schema>, Schema>) => boxplot(data, options),
-) as unknown as <S extends Schema>(props: WithData<BoxPlotOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<BoxPlotOptions<Schema>, Schema>) => boxplot(data, options),
+) as unknown as <S extends Schema>(props: WithRows<BoxPlotOptions<S>, S>) => null;
 
 /** Letter-value plots: a category field on `x` or `y` and the values on the other. */
 export const Boxen = /* @__PURE__ */ markElement(
   "Boxen",
-  ({ data, ...options }: WithData<BoxenOptions<Schema>, Schema>) => boxen(data, options),
-) as unknown as <S extends Schema>(props: WithData<BoxenOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<BoxenOptions<Schema>, Schema>) => boxen(data, options),
+) as unknown as <S extends Schema>(props: WithRows<BoxenOptions<S>, S>) => null;
 
 /** Violins: a category field on `x` or `y` and the values on the other. */
 export const Violin = /* @__PURE__ */ markElement(
   "Violin",
-  ({ data, ...options }: WithData<ViolinOptions<Schema>, Schema>) => violin(data, options),
-) as unknown as <S extends Schema>(props: WithData<ViolinOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<ViolinOptions<Schema>, Schema>) => violin(data, options),
+) as unknown as <S extends Schema>(props: WithRows<ViolinOptions<S>, S>) => null;
 
 /** A treemap of a tree given by `path` fields, or `node` and `parent`; it has its chart, each facet panel, or its `panel` to itself. */
 export const Treemap = /* @__PURE__ */ markElement(
@@ -257,15 +257,15 @@ export const Surface = /* @__PURE__ */ markElement(
 /** Open-high-low-close candles: `x`, `open`, `high`, `low`, `close`. */
 export const Candlestick = /* @__PURE__ */ markElement(
   "Candlestick",
-  ({ data, ...options }: WithData<CandlestickOptions<Schema>, Schema>) =>
+  ({ data, ...options }: WithRows<CandlestickOptions<Schema>, Schema>) =>
     candlestick(data, options),
-) as unknown as <S extends Schema>(props: WithData<CandlestickOptions<S>, S>) => null;
+) as unknown as <S extends Schema>(props: WithRows<CandlestickOptions<S>, S>) => null;
 
 /** Counts of a number or time field, `x` or `y`, in shared bins; of both, a 2D histogram's cells. */
 export const Histogram = /* @__PURE__ */ markElement(
   "Histogram",
-  ({ data, ...options }: WithData<HistogramOptions<Schema>, Schema>) => histogram(data, options),
-) as unknown as <S extends Schema>(props: WithData<HistogramOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<HistogramOptions<Schema>, Schema>) => histogram(data, options),
+) as unknown as <S extends Schema>(props: WithRows<HistogramOptions<S>, S>) => null;
 
 /** Linkage trees whose leaves stand on category bands. */
 export const Dendrogram = /* @__PURE__ */ markElement(
@@ -282,8 +282,8 @@ export const Contour = /* @__PURE__ */ markElement(
 /** A grid of colored cells. */
 export const Heatmap = /* @__PURE__ */ markElement(
   "Heatmap",
-  ({ data, ...options }: WithData<HeatmapOptions<Schema>, Schema>) => heatmap(data, options),
-) as unknown as <S extends Schema>(props: WithData<HeatmapOptions<S>, S>) => null;
+  ({ data, ...options }: WithRows<HeatmapOptions<Schema>, Schema>) => heatmap(data, options),
+) as unknown as <S extends Schema>(props: WithRows<HeatmapOptions<S>, S>) => null;
 
 /** Horizontal (`y`) or vertical (`x`) reference lines, constant or one per row of `data`. */
 export const Rule = /* @__PURE__ */ markElement(

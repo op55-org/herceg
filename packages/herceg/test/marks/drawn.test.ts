@@ -2365,13 +2365,13 @@ describe("axis ticks", () => {
 
 describe("stack support", () => {
   // Unsupported positions have NaN edges in every layer; a break between
-  // supported ones is an extra NaN entry at the later position.
+  // supported ones is an extra NaN entry after the earlier position, at its x.
   const layer = (top: number[], bottom: number[]): Series =>
     ({
       key: "layer",
       label: "layer",
       color: "#000",
-      x: Float64Array.of(0, 1, 2, 2, 3),
+      x: Float64Array.of(0, 1, 1, 2, 3),
       y: Float64Array.from(top),
       y0: Float64Array.from(bottom),
       values: Float64Array.from(top),

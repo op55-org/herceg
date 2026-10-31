@@ -303,14 +303,15 @@ export class ValueAnimation {
     const now = performance.now();
     const { config } = this.#model;
     const duration = durationOf(config.animation);
-    // Rows streaming in or out, and changes while values move or soon after,
+    // Rows streaming in, out, or into place, and changes while values move or soon after,
     // show at once until the data has been still for a change's duration.
     const busy =
       this.#tween !== undefined ||
       now < this.#quiet ||
       !change ||
       change.appended > 0 ||
-      change.dropped > 0;
+      change.dropped > 0 ||
+      !!change.inserted;
     if (busy) this.#quiet = now + duration;
     this.#tween = undefined;
     const current = drawnWith(this.#model);

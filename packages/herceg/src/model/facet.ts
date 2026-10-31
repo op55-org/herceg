@@ -717,9 +717,20 @@ export class Splitter {
     const { revision } = answer;
     const kept = this.#drawn.get(shown);
     if (kept?.panels === panels && kept.revision === revision) return kept.rows;
-    const drawn = new Uint8Array(mark.table!.length);
-    for (let k = 0; k < shown.length; k++) drawn[shown[k]!] = 1;
-    const rows = panels.map((panel) => panel.filter((row) => drawn[row] === 1));
+    // Each panel's rows in the order the mark reads them (a sorted view's).
+    const panelOf = new Int32Array(mark.table!.length).fill(-1);
+    panels.forEach((panel, p) => {
+      for (const row of panel) panelOf[row] = p;
+    });
+    const counts = new Uint32Array(panels.length);
+    for (let k = 0; k < shown.length; k++)
+      if (panelOf[shown[k]!]! >= 0) counts[panelOf[shown[k]!]!]!++;
+    const rows = Array.from(counts, (count) => new Uint32Array(count));
+    counts.fill(0);
+    for (let k = 0; k < shown.length; k++) {
+      const p = panelOf[shown[k]!]!;
+      if (p >= 0) rows[p]![counts[p]!++] = shown[k]!;
+    }
     this.#drawn.set(shown, { panels, revision, rows });
     return rows;
   }

@@ -70,7 +70,7 @@ from ._chart import (
     violin,
 )
 from ._data import Matrix
-from ._derive import Derived, Expr, col, derive, when
+from ._derive import Derived, Expr, Ordered, View, col, derive, ordered, view, when
 from ._encoding import (
     BarLabels,
     CalendarBreak,
@@ -267,6 +267,8 @@ __all__ = [
     "MoveItemAction",
     "Navigator",
     "OrbitAction",
+    "Ordered",
+    "ordered",
     "OrdinalScale",
     "PageScrollAction",
     "PanAction",
@@ -325,6 +327,8 @@ __all__ = [
     "TooltipField",
     "TooltipStyle",
     "treemap",
+    "View",
+    "view",
     "ViewEdge",
     "ViewLimits",
     "Viewport",

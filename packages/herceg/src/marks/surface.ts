@@ -911,7 +911,6 @@ export class SurfaceMark implements Layer3D {
     const z = table.numbers(spec.z as never);
     const tones = spec.color === undefined ? undefined : table.numbers(spec.color as never);
     const scale = this.#scale(frame.theme, frame.paint);
-    const offset = table.rowOffset;
     const out = new Float64Array(2);
     /** Where a read grid point is on screen: at its place, or (outside the box) its anchor's. */
     const screen = (p: number): [number, number] => {
@@ -947,7 +946,7 @@ export class SurfaceMark implements Layer3D {
       }
       const [px, py] = screen(p);
       return {
-        key: JSON.stringify([id, offset + row]),
+        key: JSON.stringify([id, table.identity(row)]),
         label: this.measure,
         color: scale ? scale.color((tones ?? z)[row]!) : frame.theme.muted,
         value: z[row]!,
@@ -967,8 +966,8 @@ export class SurfaceMark implements Layer3D {
       indexOf(key) {
         const identity = identityIn(key, id);
         if (identity === undefined) return -1;
-        for (let k = 0; k < count; k++)
-          if (rowAt(grid, pointAt(readable, k)) === identity - offset) return k;
+        const row = table.positionOf(identity, table.generation);
+        for (let k = 0; k < count; k++) if (rowAt(grid, pointAt(readable, k)) === row) return k;
         return -1;
       },
       itemOfCell(a, px, py) {

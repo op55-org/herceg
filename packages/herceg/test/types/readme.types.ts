@@ -16,9 +16,11 @@ import {
   heatmap,
   histogram,
   line,
+  orderedTable,
   point,
   region,
   renderToSVG,
+  rowView,
   rule,
   type Selection,
   table,
@@ -39,6 +41,7 @@ declare const userCpu: Float64Array;
 declare const systemCpu: Float64Array;
 declare const newTimes: Float64Array;
 declare const newValues: Float64Array;
+declare const newMem: Float64Array;
 declare const deployTime: number;
 declare const element: HTMLElement;
 
@@ -70,13 +73,38 @@ fromRows([{ at: 0, status: 200 }], { types: { at: "time", status: "category" } }
 const encoded = table({ host: encodedCategory(new Int32Array([0, -1]), ["web"]), v: [1, 2] });
 line(encoded, { x: "v", y: "v", series: "host" });
 
-const live = table({ time: time([]), cpu: [] as number[] }, { maxRows: 3_000 });
-live.append({ time: [Date.now()], cpu: [0.42] });
-live.appendRow({ time: Date.now(), cpu: 0.4 });
+const live = table(
+  { time: time([]), cpu: [] as number[], mem: [] as number[] },
+  { maxRows: 3_000 },
+);
+live.append({ time: [Date.now()], cpu: [0.42], mem: [3.1] });
+live.appendRow({ time: Date.now(), cpu: 0.4, mem: 3.2 });
 live.set("cpu", 0, 0.5);
-live.replace("cpu", 0, [0.1, 0.2]);
+live.replace(0, { cpu: [0.1, 0.2], mem: [3.5, 3.6] });
 live.dropBefore("time", Date.now() - 60_000);
-live.reset({ time: newTimes, cpu: newValues });
+live.reset({ time: newTimes, cpu: newValues, mem: newMem });
+live.transaction(() => {
+  live.append({ time: [Date.now()], cpu: [0.42], mem: [3.1] });
+  live.dropBefore("time", Date.now() - 60_000);
+});
+// @ts-expect-error replace names its fields
+live.replace(0, { disk: [1] });
+
+// Rows that arrive late
+const readings = orderedTable(
+  { time: time([]), pump: category([]), value: new Float64Array(0) },
+  { orderBy: "time", maxRows: 180_000 },
+);
+readings.append({ time: [3, 1, 2], pump: ["a", "b", "a"], value: [1, 2, 3] });
+// @ts-expect-error the order field is a number or time field
+orderedTable({ time: time([]), pump: category([]) }, { orderBy: "pump" });
+
+// Row views
+{
+  const slow = rowView(requests, { filter: col("latency").gt(250) });
+  histogram(slow, { x: "latency" });
+  line(rowView(requests, { filter: col("service").eq("api") }), { x: "time", y: "latency" });
+}
 
 // Animation
 {
@@ -110,6 +138,15 @@ area(responses, {
   series: "status",
   stack: { gaps: "interpolate" },
 });
+area(responses, {
+  x: "minute",
+  y: "count",
+  series: "status",
+  continuity: { maxGap: { milliseconds: 300_000 } },
+  stack: { gaps: "interpolate", support: "intersection" },
+});
+// @ts-expect-error support is "union" or "intersection"
+area(responses, { x: "minute", y: "count", series: "status", stack: { support: "all" } });
 area(metrics, { x: "time", y1: "p50", y2: "p99" });
 rule({ y: 250, label: "SLO" });
 rule({ x: deployTime });

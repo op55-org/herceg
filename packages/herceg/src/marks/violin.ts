@@ -1,5 +1,6 @@
 import { type Density, kde, partDensity, silverman } from "../data/density.ts";
 import type { BoxStats } from "../data/quantile.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
 import { areaDrawing } from "../draw/area.ts";
 import { lineDrawing } from "../draw/line.ts";
@@ -26,6 +27,7 @@ import {
 } from "./distribution.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
+import { isRowView } from "./rows.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
 import { boxOf, distanceToCut, distanceToDisc, distanceToStroke } from "./shapes.ts";
 import { refuseValues } from "./still.ts";
@@ -252,7 +254,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
   protected readonly noun = ["violin", "violins"] as const;
   protected readonly width = VIOLIN;
 
-  constructor(spec: ViolinSpec, table: Table) {
+  constructor(spec: ViolinSpec, table: Table, view?: RowView) {
     const { bandwidth, split, inner } = spec;
     if (bandwidth !== undefined && !(bandwidth > 0 && Number.isFinite(bandwidth)))
       throw new RangeError(`violin bandwidth: expected a positive number; received ${bandwidth}`);
@@ -266,7 +268,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
       );
     if (split && spec.series === undefined)
       throw new TypeError("violin split: needs a series field; give one");
-    super(spec, table);
+    super(spec, table, undefined, view);
     this.#checkSplit();
   }
 
@@ -624,9 +626,11 @@ function within(whole: Density, values: Float64Array): Density | undefined {
  * ```
  */
 export function violin<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: ViolinOptions<S>,
 ): ChartMark<Frozen<ViolinSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const spec: ViolinSpec = {
     type: "violin",
     x: options.x,
@@ -653,7 +657,7 @@ export function violin<S extends Schema>(
   };
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new ViolinMark(spec, table as unknown as Table);
+  return new ViolinMark(spec, table as unknown as Table, view as RowView | undefined);
 }
 
 /** The median dot's radius inside a box `box` pixels wide. */

@@ -473,7 +473,7 @@ export class Point3DMark implements Layer3D {
       );
       const [px, py] = [Math.fround(out[0]!), Math.fround(out[1]!)];
       return {
-        key: JSON.stringify([id, offset + row]),
+        key: JSON.stringify([id, table.identity(row)]),
         label: name ?? group ?? `${spec.label ?? "Point"} ${offset + row + 1}`,
         color:
           tones && scale
@@ -494,7 +494,9 @@ export class Point3DMark implements Layer3D {
       item,
       indexOf(key) {
         const identity = identityIn(key, id);
-        return identity === undefined ? -1 : findRow(rows, count, identity - offset);
+        return identity === undefined
+          ? -1
+          : findRow(rows, count, table.positionOf(identity, table.generation));
       },
       summary: () => {
         if (count === 0) return "3D chart with no points to show.";

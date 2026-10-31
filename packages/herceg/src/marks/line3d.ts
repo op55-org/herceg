@@ -375,7 +375,6 @@ export class Line3DMark implements Layer3D {
     const groups = this.#groups();
     const palette = this.#palette(frame);
     const series = spec.series === undefined ? undefined : table.categories(spec.series as never);
-    const offset = table.rowOffset;
     const radius = (spec.strokeWidth ?? WIDTH) / 2 + 2;
     const out = new Float64Array(2);
     const item = (index: number): LayoutItem => {
@@ -392,7 +391,7 @@ export class Line3DMark implements Layer3D {
       this.#screen(frame, paths, i, out);
       const [px, py] = [Math.fround(out[0]!), Math.fround(out[1]!)];
       return {
-        key: JSON.stringify([id, offset + row]),
+        key: JSON.stringify([id, table.identity(row)]),
         label: groups[g]!.label,
         color: palette[g]!,
         value: values[2]!,
@@ -411,8 +410,8 @@ export class Line3DMark implements Layer3D {
       indexOf(key) {
         const identity = identityIn(key, id);
         if (identity === undefined) return -1;
-        const row = identity - offset;
-        if (!(row >= 0 && row < table.length)) return -1;
+        const row = table.positionOf(identity, table.generation);
+        if (row < 0) return -1;
         // Its path's samples are in row order.
         const code = series ? series.codes[row]! : 0;
         const g = groups.findIndex((group) => Math.max(0, group.code) === code);

@@ -153,8 +153,11 @@ arrows, second x scale (`twiny`), formatter callbacks (write an
 - A point's `row` is its position when the browser reported it; with
   `max_rows`, rows dropped before the callback runs renumber the rest.
 - Express plots drawn in a panel of another chart do not compute again in
-  a live chart.
+  a live chart. They take tables, not `hg.ordered` or `hg.view`, which go
+  to `hg.Chart`.
 - In Streamlit, a chart that changes between runs is sent whole, engine
   included (about 430 KiB gzipped); unchanged charts are not resent. Hover
   is not reported, nor pan and zoom without `on_viewport`.
-- Row views, row groups, pivots, and grids are TypeScript only.
+- Row groups, pivots, and grids are TypeScript only. `hg.view` sends a
+  filter and sort for the browser to apply; Python does not compute the
+  view's rows.

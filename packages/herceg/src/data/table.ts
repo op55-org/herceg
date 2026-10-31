@@ -137,7 +137,8 @@ export type Batch<S extends Schema> = { [K in keyof S]: ValuesOf<S[K]> };
  * 3. A reset starts a new generation: row sets and identities from before
  *    it name no row. A derived table recomputed after its source changed
  *    is reset, so identities of its rows do not survive that.
- * 4. One change per write; listeners run once the table is whole.
+ * 4. One change per write or transaction; listeners run once the table
+ *    is whole.
  */
 export interface TableChange {
   /** Existing rows removed from the front. */
@@ -145,11 +146,11 @@ export interface TableChange {
   /** Rows added at the end (after any batch rows that never fit). */
   appended: number;
   /**
-   * Rows a table kept in order took in before its last row: rows before
-   * `start` are those that were there (moved only by `dropped`), and every
-   * position from `start` on may hold another row than before; `count` of
-   * them are new. The length grows by `appended + count - dropped`. Absent
-   * or null for tables that only append, as every table does today.
+   * Rows an ordered table (`orderedTable`) took in before what was its
+   * last row: rows before `start` are those that were there (moved only by
+   * `dropped`), and every position from `start` on may hold another row
+   * than before; `count` of them are new. The length grows by `appended +
+   * count - dropped`. Absent or null for ordinary tables, which only append.
    */
   inserted?: { start: number; count: number } | null;
   /** Rows changed in place, as a range of row indices after the change. */
@@ -180,6 +181,36 @@ export interface TableOptions {
 
 type Listener = (change: TableChange) => void;
 
+/**
+ * What a transaction has done so far: the rows there when it began, and
+ * the span of rows it updated, by slot (`rowOffset` plus position, which
+ * drops leave in place), and their fields.
+ */
+interface Pending {
+  offset: number;
+  length: number;
+  from: number;
+  to: number;
+  fields: string[];
+  reset: boolean;
+  changed: boolean;
+}
+
+/**
+ * Tells `table` that its rows from `start` on were written in other places
+ * through the arrays `numbers` and `categories` give, values unchanged:
+ * how ordered tables (ordered.ts) merge late rows into place. `modified`:
+ * rows that were there before the change moved.
+ */
+export let moved: (table: Table, start: number, modified: boolean) => void;
+
+/**
+ * How many writes `table` has taken: each of a transaction's, which
+ * listeners hear of together once it returns, so that what reads the
+ * table between them (row views) can tell.
+ */
+export let writesOf: (table: Table) => number;
+
 const GROWTH = 1.5;
 const MIN_CAPACITY = 64;
 
@@ -207,6 +238,8 @@ function requireCount(value: number, name: string): void {
 export class Table<S extends Schema = Schema> {
   readonly name: string | undefined;
   readonly maxRows: number;
+  /** Rows appends keep: `maxRows`, which ordered tables apply themselves once rows are in place. */
+  #limit: number;
   #columns = new Map<string, Column>();
   #start = 0;
   #length: number;
@@ -229,12 +262,16 @@ export class Table<S extends Schema = Schema> {
   #replaced = 0;
   /** Version of the last change to existing values: a replace or a reset. */
   #modified = 0;
+  /** Counts writes, which a transaction reports together, so readers of an index can tell. */
+  #writes = 0;
+  #pending: Pending | undefined;
+  #depth = 0;
 
   constructor(columns: Record<string, ColumnInput>, options: TableOptions = {}) {
     this.name = options.name;
     const { origin } = options;
     if (origin) setOrigin(this as unknown as Table, origin, (field) => origin.has(field));
-    this.maxRows = options.maxRows ?? Number.POSITIVE_INFINITY;
+    this.maxRows = this.#limit = options.maxRows ?? Number.POSITIVE_INFINITY;
     if (
       !(
         this.maxRows === Number.POSITIVE_INFINITY ||
@@ -257,7 +294,12 @@ export class Table<S extends Schema = Schema> {
     }
     this.#length = length ?? 0;
     this.#capacity = this.#length;
-    if (this.#length > this.maxRows) this.#dropFront(this.#length - this.maxRows);
+    if (this.#length > this.#limit) this.#dropFront(this.#length - this.#limit);
+  }
+
+  static {
+    moved = (table, start, modified) => table.#moved(start, modified);
+    writesOf = (table) => table.#writes;
   }
 
   /** Number of live rows. */
@@ -265,7 +307,7 @@ export class Table<S extends Schema = Schema> {
     return this.#length;
   }
 
-  /** Increments on every mutation. */
+  /** Increments on every change: a write, or the writes of a transaction together. */
   get version(): number {
     return this.#version;
   }
@@ -422,12 +464,12 @@ export class Table<S extends Schema = Schema> {
     }
     const covered = index;
     const start = this.#start;
-    const version = this.#version;
+    const writes = this.#writes;
     view = {
       length: this.#length,
       gapShare: covered.gapShare,
       query: (_values, from, to, out) => {
-        if (this.#version !== version)
+        if (this.#writes !== writes)
           throw new Error(`The min/max index of "${field}" was read before the table changed`);
         covered.query(buffer, start + from, start + to, out);
         if (out.low >= 0) out.low -= start;
@@ -469,7 +511,7 @@ export class Table<S extends Schema = Schema> {
     }
     const count = entries[0]?.[1].length ?? 0;
     // Batch rows beyond maxRows never enter the table.
-    const skip = Math.max(0, count - this.maxRows);
+    const skip = Math.max(0, count - this.#limit);
     for (const [field, values] of entries) {
       const column = this.#column(field);
       if (values.length !== count)
@@ -483,7 +525,7 @@ export class Table<S extends Schema = Schema> {
     // Existing rows that would be evicted are dropped before compaction so
     // they are not copied.
     const kept = count - skip;
-    const dropped = Math.min(Math.max(0, this.#length + kept - this.maxRows), this.#length);
+    const dropped = Math.min(Math.max(0, this.#length + kept - this.#limit), this.#length);
     this.#dropFront(dropped);
     this.#reserve(kept);
 
@@ -528,39 +570,51 @@ export class Table<S extends Schema = Schema> {
 
   /** Sets one value in place. */
   set<K extends FieldName<S>>(field: K, row: number, value: ValueOf<S[K]>): void {
-    this.replace(field, row, [value] as unknown as ValuesOf<S[K]>);
+    this.replace(row, { [field]: [value] } as unknown as Partial<Batch<S>>);
   }
 
-  /** Overwrites rows `[start, start + values.length)` of one field. */
-  replace<K extends FieldName<S>>(field: K, start: number, values: ValuesOf<S[K]>): void {
-    const column = this.#column(field);
-    let input = values as ArrayLike<unknown>;
-    const count = input.length;
+  /**
+   * Overwrites rows `[start, start + n)` of every field given, each with `n`
+   * values, as one change: readers never see some fields written and
+   * others not.
+   */
+  replace(start: number, values: Partial<Batch<S>>): void {
+    const entries = Object.entries(values) as [string, ArrayLike<unknown>][];
+    const count = entries[0]?.[1].length ?? 0;
     requireCount(start, "replace() start");
     if (start + count > this.#length) throw new RangeError("replace() range is out of bounds");
-    if (count === 0) return;
-    check(column, input, 0, "replace", field);
-    input = this.#apart(input);
-    if (!column.owned) own(column);
-    writeValues(column, this.#start + start, input, 0);
-    // Updating an index costs as much as rebuilding it for large ranges, and
-    // data replaced in bulk is often replaced again before it pays off.
-    if (count * 4 >= this.#length) {
-      this.#indexes.delete(field);
-      this.#replaced = this.#version + 1;
-    } else {
-      this.#indexes
-        .get(field)
-        ?.update(column.buffer, this.#start + start, this.#start + start + count);
+    // Values are checked, and taken apart from the table's storage, before anything changes.
+    for (const entry of entries) {
+      const [field, input] = entry;
+      if (input.length !== count)
+        throw new RangeError(`replace "${field}": has ${input.length} values, expected ${count}`);
+      check(this.#column(field), input, 0, "replace", field);
+      entry[1] = this.#apart(input);
     }
-    this.#sorted.delete(field);
-    this.#extents.delete(field);
+    if (count === 0) return;
+    for (const [field, input] of entries) {
+      const column = this.#column(field);
+      if (!column.owned) own(column);
+      writeValues(column, this.#start + start, input, 0);
+      // Updating an index costs as much as rebuilding it for large ranges, and
+      // data replaced in bulk is often replaced again before it pays off.
+      if (count * 4 >= this.#length) {
+        this.#indexes.delete(field);
+        this.#replaced = this.#version + 1;
+      } else {
+        this.#indexes
+          .get(field)
+          ?.update(column.buffer, this.#start + start, this.#start + start + count);
+      }
+      this.#sorted.delete(field);
+      this.#extents.delete(field);
+    }
     this.#modified = this.#version + 1;
     this.#changed({
       dropped: 0,
       appended: 0,
       updated: { start, end: start + count },
-      fields: [field],
+      fields: entries.map(([field]) => field),
       reset: false,
     });
   }
@@ -570,7 +624,7 @@ export class Table<S extends Schema = Schema> {
     if ((values as ArrayLike<unknown>).length !== this.#length) {
       throw new RangeError(`setColumn() needs ${this.#length} values`);
     }
-    this.replace(field, 0, values);
+    this.replace(0, { [field]: values } as unknown as Partial<Batch<S>>);
   }
 
   /**
@@ -606,11 +660,41 @@ export class Table<S extends Schema = Schema> {
     this.#indexes.clear();
     this.#replaced = this.#version + 1;
     this.#modified = this.#version + 1;
-    if (this.#length > this.maxRows) this.#dropFront(this.#length - this.maxRows);
+    if (this.#length > this.#limit) this.#dropFront(this.#length - this.#limit);
     this.#changed({ dropped: 0, appended: 0, updated: null, fields: [], reset: true });
   }
 
-  /** Calls `listener` after every mutation. Returns an unsubscribe function. */
+  /**
+   * Runs `change`, whose writes (appends, drops, replaces) listeners hear
+   * as one change once it returns, so they never see a state half made.
+   * It does not roll back: if `change` throws, the writes made before stay,
+   * are reported, and the error is thrown on. A transaction inside one
+   * joins it; one inside a listener is told when it returns, as a write
+   * there is.
+   */
+  transaction(change: () => void): void {
+    if (this.#depth++ === 0)
+      this.#pending = {
+        offset: this.#rowOffset,
+        length: this.#length,
+        from: Number.POSITIVE_INFINITY,
+        to: 0,
+        fields: [],
+        reset: false,
+        changed: false,
+      };
+    try {
+      change();
+    } finally {
+      if (--this.#depth === 0) {
+        const pending = this.#pending!;
+        this.#pending = undefined;
+        if (pending.changed) this.#tell(this.#settle(pending));
+      }
+    }
+  }
+
+  /** Calls `listener` after every change. Returns an unsubscribe function. */
   subscribe(listener: Listener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -769,11 +853,65 @@ export class Table<S extends Schema = Schema> {
     );
   }
 
+  /** Rows from `start` on moved (see `moved`). */
+  #moved(start: number, modified: boolean) {
+    for (const [field, index] of this.#indexes)
+      index.update(
+        this.#columns.get(field)!.buffer,
+        this.#start + start,
+        this.#start + this.#length,
+      );
+    this.#sorted.clear();
+    this.#indexViews.clear();
+    this.#writes++;
+    if (modified) this.#modified = this.#version + 1;
+  }
+
   #changed(change: TableChange) {
-    this.#version++;
     this.#views.clear();
     this.#indexViews.clear();
+    this.#writes++;
+    const pending = this.#pending;
+    if (!pending) {
+      this.#tell(change);
+      return;
+    }
+    // Recorded by slot, which later drops leave in place.
+    const offset = this.#rowOffset;
+    pending.changed = true;
+    pending.reset ||= change.reset;
+    if (change.updated) {
+      pending.from = Math.min(pending.from, offset + change.updated.start);
+      pending.to = Math.max(pending.to, offset + change.updated.end);
+      for (const field of change.fields)
+        if (!pending.fields.includes(field)) pending.fields.push(field);
+    }
+  }
+
+  #tell(change: TableChange) {
+    this.#version++;
     for (const listener of this.#listeners) listener(change);
+  }
+
+  /**
+   * One change for a transaction's writes: the rows it found and kept
+   * stay where they were, less those dropped, with the updates among them;
+   * every row after them is new.
+   */
+  #settle(pending: Pending): TableChange {
+    if (pending.reset) return { dropped: 0, appended: 0, updated: null, fields: [], reset: true };
+    const offset = this.#rowOffset;
+    const length = this.#length;
+    const dropped = Math.min(offset - pending.offset, pending.length);
+    const from = Math.max(0, pending.from - offset);
+    const to = Math.min(length, pending.to - offset);
+    return {
+      dropped,
+      appended: length - pending.length + dropped,
+      updated: from < to ? { start: from, end: to } : null,
+      fields: from < to ? pending.fields : [],
+      reset: false,
+    };
   }
 }
 

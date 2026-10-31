@@ -162,12 +162,16 @@ export interface ContinuitySpec {
  * "inside-out", the largest in the middle), and what a series of a series
  * field counts as at a position other series have rows at but it has not
  * (`gaps`): zero, or the straight line between its rows on either side
- * ("interpolate"; zero beyond its first and last rows).
+ * ("interpolate"; zero beyond its first and last rows), and where the
+ * stack stands (`support`): wherever any series has a row ("union"), or
+ * only where every shown series has one or runs across ("intersection").
+ * A series' run that its `continuity` breaks is a gap of the whole stack.
  */
 export interface StackSpec {
   offset?: "zero" | "fill" | "center" | "wiggle";
   order?: "input" | "inside-out";
   gaps?: "zero" | "interpolate";
+  support?: "union" | "intersection";
 }
 
 /**

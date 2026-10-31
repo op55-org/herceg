@@ -117,7 +117,7 @@ describe("position stacks", () => {
       check(stack, data);
       data.append(batch(1));
       check(stack, data);
-      data.replace("v", 2, [100]);
+      data.replace(2, { v: [100] });
       check(stack, data);
       data.reset({ p: [1, 1], v: [2, 3], s: ["a", "b"] });
       check(stack, data);

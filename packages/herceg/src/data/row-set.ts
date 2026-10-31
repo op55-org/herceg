@@ -4,19 +4,40 @@ import type { Schema, Table } from "./table.ts";
 // indexes divide rather than shift, which would wrap.
 
 /**
+ * Members of a row set of an ordered table (data/ordered.ts), by identity:
+ * words of 32 bits only where a member is, since those tables drop rows
+ * by order, not by identity.
+ */
+export interface SparseRows {
+  has(identity: number): boolean;
+  /** Adds the rows of these identities; how many were not members. */
+  add(identities: Float64Array): number;
+  /** Whether the row of `identity` was a member. */
+  delete(identity: number): boolean;
+  /** Members still in the table. */
+  size(): number;
+  /** The members' positions, ascending. */
+  positions(): Uint32Array;
+  readonly byteLength: number;
+}
+
+/**
  * A set of a table's rows, such as the rows selected in a grid. Rows are
  * held by identity (`Table.identity`), so they stay members while other
- * rows are appended or dropped, and leave when they are dropped
- * themselves. A reset starts identities again, so a set made before one is
- * empty after it. One bit per row, from the first row the set could hold.
+ * rows are appended, dropped, or inserted before them, and leave when they
+ * are dropped themselves. A reset starts identities again, so a set made
+ * before one is empty after it. One bit per row, from the first row the set
+ * could hold; over an ordered table, words only where members are.
  */
 export class RowSet<S extends Schema = Schema> {
   readonly source: Table<S>;
   /** The table's generation the set belongs to. */
   readonly generation: number;
   /** Identity of bit 0, a multiple of 32. */
-  #base: number;
-  #words: Uint32Array;
+  #base = 0;
+  #words = new Uint32Array(0);
+  /** Members of an ordered table's set. */
+  #sparse: SparseRows | undefined;
   /** Set bits, including those of rows dropped since and not trimmed yet. */
   #count = 0;
   /** Counts the changes of membership: adding, deleting, and clearing rows. */
@@ -25,9 +46,7 @@ export class RowSet<S extends Schema = Schema> {
   constructor(source: Table<S>) {
     this.source = source;
     this.generation = source.generation;
-    const first = source.identity(0);
-    this.#base = first - (first % 32);
-    this.#words = new Uint32Array(0);
+    this.#empty();
   }
 
   /** Whether the set is for the table's current rows, not from before a reset. */
@@ -38,13 +57,14 @@ export class RowSet<S extends Schema = Schema> {
   /** Members still in the table. */
   get size(): number {
     if (!this.current) return 0;
+    if (this.#sparse) return this.#sparse.size();
     this.#trim();
     return this.#count;
   }
 
   /** Bytes of the bits. */
   get byteLength(): number {
-    return this.#words.byteLength;
+    return this.#sparse?.byteLength ?? this.#words.byteLength;
   }
 
   /**
@@ -58,6 +78,7 @@ export class RowSet<S extends Schema = Schema> {
   /** Whether the row at `position` (an index into the table's current rows) is a member. */
   has(position: number): boolean {
     if (!this.current || !(position >= 0 && position < this.source.length)) return false;
+    if (this.#sparse) return this.#sparse.has(this.source.identity(position));
     const bit = this.source.identity(position) - this.#base;
     return ((this.#words[Math.floor(bit / 32)] ?? 0) & (1 << (bit & 31))) !== 0;
   }
@@ -87,6 +108,10 @@ export class RowSet<S extends Schema = Schema> {
   delete(position: number): this {
     this.#check();
     this.#positions(position, position + 1);
+    if (this.#sparse) {
+      if (this.#sparse.delete(this.source.identity(position))) this.#version++;
+      return this;
+    }
     const bit = this.source.identity(position) - this.#base;
     const word = Math.floor(bit / 32);
     const mask = 1 << (bit & 31);
@@ -107,6 +132,7 @@ export class RowSet<S extends Schema = Schema> {
   /** The positions of the members, ascending. */
   positions(): Uint32Array {
     if (!this.current) return new Uint32Array(0);
+    if (this.#sparse) return this.#sparse.positions();
     this.#trim();
     const out = new Uint32Array(this.#count);
     const { source, generation } = this;
@@ -125,10 +151,17 @@ export class RowSet<S extends Schema = Schema> {
 
   /** Adds `count` rows, the `i`th at position `positionAt(i)`, checked already. */
   #add(count: number, positionAt: (i: number) => number): this {
+    const { source } = this;
+    if (this.#sparse) {
+      if (count > 0) this.#version++;
+      this.#sparse.add(
+        Float64Array.from({ length: count }, (_, i) => source.identity(positionAt(i))),
+      );
+      return this;
+    }
     this.#trim();
     if (count === 0) return this;
     this.#version++;
-    const { source } = this;
     let last = -1;
     for (let i = 0; i < count; i++) last = Math.max(last, source.identity(positionAt(i)));
     this.#reserve(last - this.#base + 1);
@@ -146,8 +179,10 @@ export class RowSet<S extends Schema = Schema> {
   }
 
   #empty() {
+    const { source } = this;
+    this.#sparse = (source as { sparseRows?(): SparseRows }).sparseRows?.();
     this.#words = new Uint32Array(0);
-    const first = this.source.identity(0);
+    const first = this.#sparse ? 0 : source.identity(0);
     this.#base = first - (first % 32);
     this.#count = 0;
   }
@@ -200,7 +235,7 @@ export class RowSet<S extends Schema = Schema> {
   }
 }
 
-function popcount(word: number): number {
+export function popcount(word: number): number {
   let n = word - ((word >>> 1) & 0x55555555);
   n = (n & 0x33333333) + ((n >>> 2) & 0x33333333);
   return (((n + (n >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;

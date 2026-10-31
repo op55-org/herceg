@@ -1,4 +1,5 @@
 import type { NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { areaDrawing } from "../draw/area.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -15,6 +16,7 @@ import type {
   StackGaps,
   StackOrder,
   StackSpec,
+  StackSupport,
 } from "../spec/spec.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type {
@@ -66,7 +68,7 @@ import {
   withBands,
 } from "./orient.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
-import { type MarkRows, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, rowsOf } from "./rows.ts";
 import {
   isSortedSubset,
   type LayerEdges,
@@ -90,7 +92,13 @@ import {
   tracePath,
   unionExtent,
 } from "./trace.ts";
-import { type StackLayer, UnionStack } from "./union-stack.ts";
+import {
+  type Connections,
+  type StackLayer,
+  type StackRules,
+  stackedRows,
+  UnionStack,
+} from "./union-stack.ts";
 
 interface AreaCommon<S extends Schema> extends ItemKeyed<S> {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -248,22 +256,24 @@ export type AreaOptions<S extends Schema> = AreaCommon<S> & {
  * not take (`stack.gaps` without a series field, `dodge` without
  * series, or stacked), if it does.
  */
-/** How layers of an area stack: how they pile (`mode`), their order, and what gaps count as. */
+/** How layers of an area stack: how they pile (`mode`), their order, what gaps count as, and where it stands. */
 interface Stacking {
   mode: AreaStack | undefined;
   order: StackOrder | undefined;
   gaps: StackGaps | undefined;
+  support: StackSupport | undefined;
 }
 
 /** A `stack` option's parts: `true` and modes are the short forms of `{ offset }`. */
 export function stackingOf(stack: AreaStack | StackSpec | Frozen<StackSpec> | undefined): Stacking {
   if (typeof stack !== "object" || stack === null)
-    return { mode: stack, order: undefined, gaps: undefined };
+    return { mode: stack, order: undefined, gaps: undefined, support: undefined };
   const offset = stack.offset;
   return {
     mode: offset === undefined || offset === "zero" ? true : offset,
     order: stack.order,
     gaps: stack.gaps as StackGaps | undefined,
+    support: stack.support as StackSupport | undefined,
   };
 }
 
@@ -280,7 +290,7 @@ export function areaFormError(spec: {
   dodge?: unknown;
 }): string | undefined {
   const stacking = stackingOf(spec.stack as AreaStack | StackSpec | undefined);
-  const { mode, order, gaps } = stacking;
+  const { mode, order, gaps, support } = stacking;
   const stackProblem = stackError(mode, true);
   if (stackProblem) return stackProblem;
   if (order !== undefined) {
@@ -291,6 +301,8 @@ export function areaFormError(spec: {
   }
   if (gaps !== undefined && gaps !== "zero" && gaps !== "interpolate")
     return `area stack.gaps: expected "zero" or "interpolate"; received ${JSON.stringify(gaps)}`;
+  if (support !== undefined && support !== "union" && support !== "intersection")
+    return `area stack.support: expected "union" or "intersection"; received ${JSON.stringify(support)}`;
   const along = spec.y1 !== undefined || spec.y2 !== undefined;
   const across = spec.x1 !== undefined || spec.x2 !== undefined;
   if (along && across) return "area: a band along x (y1, y2) or along y (x1, x2), not both";
@@ -332,6 +344,8 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<AreaSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly tooltip: "x" | "y";
   readonly pointText?: (s: Series, row: number, format: AxisFormat) => string;
   readonly #roles: Roles;
@@ -357,8 +371,11 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       totals: Float64Array | undefined;
       edges: (LayerEdges | undefined)[][];
       orders: number[][];
+      rules: StackRules | undefined;
     }
   >();
+  /** What a series field's stack breaks by: the mark's `continuity`, as last compiled. */
+  #continuity: Connections | undefined;
   readonly #indexes = new IndexUse();
   /** With `dodge`, each series' slot in the bands, as last drawn. */
   readonly #shares: BandShares | undefined;
@@ -370,13 +387,14 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   /** How layers stack: `stack`, as `true`, a mode, or an object of its parts. */
   readonly #stacking: Stacking;
 
-  constructor(input: AreaSpec, table: Table<Schema>) {
+  constructor(input: AreaSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "area");
     checkItemKey(table, this.spec.itemKey, "area");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     this.#stacking = stackingOf(spec.stack as AreaStack | StackSpec | undefined);
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "area series");
     const series = seriesOf(spec, table, "fill");
@@ -458,8 +476,11 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       if (this.#stacking.mode && series !== undefined)
         this.#union = new UnionStack(this.#stacking.mode, this.#stacking.order);
     }
-    if (this.#stacking.gaps !== undefined && series === undefined)
-      throw new Error("area stack.gaps: for stacks by a series field; give series, or drop gaps");
+    for (const option of ["gaps", "support"] as const)
+      if (this.#stacking[option] !== undefined && series === undefined)
+        throw new Error(
+          `area stack.${option}: for stacks by a series field; give series, or drop ${option}`,
+        );
     if (spec.dodge && series === undefined)
       throw new Error("area dodge: places series side by side; give a series field");
     this.identity = { field: series, values: this.#roles.values };
@@ -483,7 +504,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -508,6 +529,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
   ) {
     const { spec, table } = this;
     const { orient, position, values, banded } = this.#roles;
+    this.#continuity = _context?.features?.of(this)?.continuity;
     // A category position is each row's band index on the chart's axis.
     const positions = banded
       ? categoryIndices(this.rows(), position, bands[orient]?.keys ?? [])
@@ -567,6 +589,12 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     return series;
   }
 
+  /** How a series field's stack counts layers without rows, where it stands, and where it breaks. */
+  #rules(): StackRules {
+    const { gaps = "zero", support = "union" } = this.#stacking;
+    return { gaps, support, continuity: this.#continuity };
+  }
+
   /** Stacks the series of a series field, or of several fields row by row, as `stack` says. */
   #stackSeries(
     series: Series[],
@@ -584,11 +612,11 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
         return;
       }
       const stack = this.#union.update(
-        this.table,
+        stackedRows(this.rows()),
         positions,
         series[0]!.values,
         layersOf(series, hidden),
-        this.#stacking.gaps ?? "zero",
+        this.#rules(),
         places,
       );
       for (const s of series) s.stackTotals = stack.totals;
@@ -597,14 +625,18 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       if (split && typeof this.#stacking.mode === "string") return;
       // Hidden layers drop out of the stack, so the layers above settle down.
       const shown = series.map((s) => !hidden.has(s.key));
+      // Offsets over a view's rows take those alone, and follow them.
+      const rows = this.rows();
+      const viewed = rows.view && typeof this.#stacking.mode === "string";
       const layers = this.#stack.update(
-        this.table,
+        viewed ? stackedRows(rows) : this.table,
         series.map((s, i) => (shown[i] ? s.values : undefined)),
         shown.map(Number).join(""),
         this.#roles.banded && typeof this.#stacking.mode === "string"
           ? Float64Array.from(positions, (p) => (p < 0 ? Number.NaN : p))
           : positions,
         places,
+        viewed ? rows.positions : undefined,
       );
       this.#stackIndexes.clear();
       series.forEach((s, i) => {
@@ -711,10 +743,12 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       .map((series) => series.map((s) => Number(!hidden.has(s.key))).join(""))
       .join(";");
     const rows = panels.flatMap((series) => series.map((s) => s.rows));
+    const rules = this.#union && this.#rules();
     let stacks = this.#panelStacks.get(scope);
     const kept =
       stacks &&
       stacks.version === table.version &&
+      stacks.rules?.continuity === rules?.continuity &&
       stacks.signature === signature &&
       stacks.positions === positions &&
       stacks.rows.length === rows.length &&
@@ -734,6 +768,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
           totals: this.#stacking.mode === "fill" ? new Float64Array(table.length) : undefined,
           edges: [],
           orders: [],
+          rules,
         };
       }
       for (const top of stacks.tops) top.fill(Number.NaN);
@@ -747,7 +782,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
             x,
             y,
             layersOf(series, hidden),
-            this.#stacking.gaps ?? "zero",
+            rules!,
             stacks!.tops[0]!,
             stacks!.bases[0]!,
             this.#stacking.mode,
@@ -778,7 +813,7 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
           );
         }
       }
-      Object.assign(stacks, { version: table.version, signature, rows, positions });
+      Object.assign(stacks, { version: table.version, signature, rows, positions, rules });
       this.#panelStacks.set(scope, stacks);
     }
     panels.forEach((series, p) => {
@@ -1113,9 +1148,11 @@ function atLow(
  * ```
  */
 export function area<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: AreaOptions<S>,
 ): ChartMark<Frozen<AreaSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const { x, y } = options;
   // Every option is kept, so the mark refuses forms mixed by casts or JavaScript.
   const spec = {
@@ -1157,5 +1194,5 @@ export function area<S extends Schema>(
   } as unknown as AreaSpec;
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new AreaMark(spec, table as unknown as Table);
+  return new AreaMark(spec, table as unknown as Table, view as RowView | undefined);
 }

@@ -803,7 +803,7 @@ describe("points changing values", () => {
     expect(end.radii![2]).toBe(0);
     expect(pointsOf(tween!.scene)[0]!.count).toBe(2);
     // B comes back where its new value is, from nothing; A moves to its own.
-    const back = change(model, () => data.replace("y", 0, [50, 60])).tween!;
+    const back = change(model, () => data.replace(0, { y: [50, 60] })).tween!;
     const first = pointsOf(frameAt(back, 0))[0]!;
     expect(Array.from(first.radii!)).toEqual([2.5, 0, 2.5]);
     const [a, b] = centers(pointsOf(frameAt(back, 100))[0]!);

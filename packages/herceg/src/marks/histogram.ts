@@ -11,6 +11,7 @@ import {
   NO_RANGE,
 } from "../data/bins.ts";
 import type { NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumberField, NumericField, Schema, Table } from "../data/table.ts";
 import { areaDrawing } from "../draw/area.ts";
 import { lineDrawing } from "../draw/line.ts";
@@ -62,7 +63,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
-import { type MarkRows, rowAt, rowCount, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, rowAt, rowCount, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
 
 interface HistogramStyle<S extends Schema> {
@@ -218,6 +219,8 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<Histogram1DSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
   readonly summarizes = true;
@@ -254,11 +257,12 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
    */
   readonly #flats = new WeakMap<NumericArray, Uint8Array>();
 
-  constructor(input: Histogram1DSpec, table: Table<Schema>) {
+  constructor(input: Histogram1DSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(colored(input, table, "fill"));
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     const problem = histogramFormError(spec);
     if (problem) throw new TypeError(problem);
     this.#horizontal = spec.y !== undefined;
@@ -286,7 +290,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -1307,9 +1311,11 @@ function calendarEdges(min: number, max: number, count: number, zone: TimeZone):
  * ```
  */
 export function histogram<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: HistogramOptions<S>,
 ): ChartMark<Frozen<HistogramSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   if (options.x !== undefined && options.y !== undefined) {
     // Options the spec leaves out are refused rather than dropped.
     const problem = histogramFormError(options as unknown as Record<string, unknown>);
@@ -1338,7 +1344,7 @@ export function histogram<S extends Schema>(
     if (colors) spec.colors = [...colors];
     if (colorDomain) spec.colorDomain = [...colorDomain];
     if (table.name !== undefined) spec.data = table.name;
-    return new Histogram2DMark(spec, table as unknown as Table);
+    return new Histogram2DMark(spec, table as unknown as Table, view as RowView | undefined);
   }
   const spec = {
     type: "histogram",
@@ -1371,5 +1377,5 @@ export function histogram<S extends Schema>(
   } as unknown as Histogram1DSpec;
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new HistogramMark(spec, table as unknown as Table);
+  return new HistogramMark(spec, table as unknown as Table, view as RowView | undefined);
 }

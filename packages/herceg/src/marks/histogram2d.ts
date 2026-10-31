@@ -16,6 +16,7 @@ import {
   NO_RANGE,
 } from "../data/bins.ts";
 import type { NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { NumberField, NumericField, Schema, Table } from "../data/table.ts";
 import { rasterDrawing } from "../draw/raster.ts";
 import { formatNumber } from "../format/format.ts";
@@ -186,6 +187,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<Histogram2DSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly tooltip = "cell";
   readonly legendScales = ["ramp"] as const;
   readonly summarizes = true;
@@ -203,10 +206,11 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   /** What the selection drawn with each series holds of its cells, for tooltips. */
   readonly #selected = new WeakMap<Series, Picked>();
 
-  constructor(input: Histogram2DSpec, table: Table<Schema>) {
+  constructor(input: Histogram2DSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     const problem = histogramFormError(spec as Record<string, unknown>);
     if (problem) throw new TypeError(problem);
     requireField(table, spec.x, NUMERIC, "histogram x");
@@ -242,7 +246,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 

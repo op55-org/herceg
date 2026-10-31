@@ -190,18 +190,23 @@ export function partReader(kit: PartKit): PartReader {
     const ends = traced.features?.pathEnds?.(traced, frame);
     let positions: Int32Array | undefined;
     let worked = !unsorted;
+    // A stack's layer whose rows do not ascend stacked through them in order.
+    const order = s.edges?.positionOrder;
+    const placeOf = (row: number) => (order ? order.indexOf(row) : positionIn(s, row));
+    const rowAt = (k: number) => (order ? order[k]! : rowOf(s, k));
     return {
       kind: "trace",
       series: s,
       along,
+      order,
       eligible,
       sameRun(a, b) {
-        let from = positionIn(s, a);
-        let to = positionIn(s, b);
+        let from = placeOf(a);
+        let to = placeOf(b);
         if (from < 0 || to < 0) return false;
         if (from > to) [from, to] = [to, from];
         for (let k = from; k <= to; k++) {
-          const row = rowOf(s, k);
+          const row = rowAt(k);
           // Tracing passes over rows breaks hide, joining their neighbors.
           if (hidden(row)) continue;
           if (!eligible(row)) return false;

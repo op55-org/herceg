@@ -565,7 +565,7 @@ describe("categories resolved per panel", () => {
     expect(categories(model)).toEqual([["b", "d"], ["c"]]);
     // Values changing in place move no category.
     const before = panel("S");
-    data.replace("units", 0, [9]);
+    data.replace(0, { units: [9] });
     model.scene(estimateText);
     expect(panel("S").xGroup).toBe(before.xGroup);
     expect(panel("S").x.categories).toBe(before.x.categories);

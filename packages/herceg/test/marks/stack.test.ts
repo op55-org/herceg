@@ -79,7 +79,7 @@ describe("row stacks", () => {
       data.dropFirst(20);
       check(kind, update(), asArrays());
       // Values replaced in place, a hidden layer, and a reset rebuild.
-      data.replace("b", 3, [1, 2, 3]);
+      data.replace(3, { b: [1, 2, 3] });
       check(kind, update(), asArrays());
       check(kind, update([true, false, true]), asArrays([true, false, true]));
       check(kind, update(), asArrays());

@@ -3615,11 +3615,6 @@ function validate(config: ChartConfig): [Mark[], LayoutMark[], number[]] {
     // (marks of cells refuse it themselves).
     if (sideOf(mark) === "right" && mark.tooltip === "y")
       throw new Error(`${mark.spec.type} axis: marks along y cannot use the right axis; drop axis`);
-    // Facet panels come from whole tables; a view's rows would split by them wrongly.
-    if (config.facet && mark.view && mark.spec.facet !== "repeat")
-      throw new Error(
-        `${mark.spec.type} facet: a row view cannot split into facets yet; give it facet: "repeat"`,
-      );
   }
   const duration = typeof config.animation === "object" ? config.animation.duration : undefined;
   if (duration !== undefined && !(Number.isFinite(duration) && duration >= 0))
