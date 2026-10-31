@@ -1,6 +1,7 @@
 // Reading values in each placement: the pointer's tooltip reads the panel
 // it is over (an inset over its parent), and the keyboard's cursor reads
 // one panel at a time, moving between them.
+import "../interactive.ts";
 import { describe, expect } from "vitest";
 import type { Chart } from "../../../src/dom/chart.ts";
 import type { Inspection } from "../../../src/model/model.ts";

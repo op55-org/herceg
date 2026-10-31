@@ -6,9 +6,17 @@
 
 import type { Selection } from "../dom/brushed.ts";
 import { MountedChart } from "../dom/chart.ts";
-import type { ChangeCause, ChartEvents, PanelViewport } from "../dom/events.ts";
+import type {
+  Box,
+  ChangeCause,
+  ChartEvents,
+  InputEvent,
+  PanelViewport,
+  Pointer,
+  Target,
+} from "../dom/events.ts";
 import type { Axis, AxisInfo, Chart, ScaleInstance, SelectionOwner } from "../dom/handle.ts";
-import type { Inspection, Viewport, ViewSet } from "../model/model.ts";
+import type { DrawnPanel, Inspection, Viewport, ViewSet } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Expression } from "../spec/spec.ts";
@@ -138,6 +146,56 @@ export interface RowSelectionPayload {
     | { kind: "rows"; rows: number[]; generation: number }
     | null;
 }
+
+/**
+ * An input event (`hover`, `click`, `contextMenu`): where the pointer is,
+ * what it is on, what the inspection read there, what made it, and the
+ * revision on screen.
+ */
+export interface InputEventPayload {
+  pointer: PointerPayload | null;
+  target: TargetPayload | null;
+  inspection: InspectionPayload | null;
+  cause: InputEvent["cause"];
+  revision: number;
+}
+
+/** The pointer: its values on the panel's axes, times named in `time`. */
+export interface PointerPayload {
+  x: number;
+  y: number;
+  panel: string | null;
+  inPlot: boolean;
+  values: Pointer["values"];
+  categories: Pointer["categories"];
+  time: ("x" | "y" | "yRight")[];
+}
+
+/** What input is on; an axis label's value is a time where `time` says. */
+export type TargetPayload =
+  | {
+      kind: "item";
+      mark: number;
+      markId: string | null;
+      item: string;
+      series: string | null;
+      row: number | null;
+      panel: string;
+      box: Box;
+    }
+  | {
+      kind: "axisLabel";
+      panel: string;
+      scale: string;
+      layer: string;
+      value: number;
+      time: boolean;
+      category: string | null;
+      text: string;
+      box: Box;
+    }
+  | { kind: "legendEntry"; key: string; label: string; panel: string | null }
+  | { kind: "plot"; panel: string };
 
 /** A `visibility` event, which is JSON as it is. */
 export type VisibilityPayload = ChartEvents["visibility"];
@@ -561,13 +619,18 @@ function categoriesOf(chart: Chart): Categories | undefined {
   return [x?.categories ? [...x.categories] : null, y?.categories ? [...y.categories] : null];
 }
 
+/** What writing events reads of a panel: the types and categories of its axes. */
+type PanelAxes = { readonly key: string } & {
+  readonly [axis in Axis]?: Pick<AxisInfo, "type" | "categories"> | undefined;
+};
+
 export function inspectionPayload(
   chart: Chart,
   inspection: Inspection | undefined,
+  panels: readonly PanelAxes[] = chart.getPanels(),
 ): InspectionPayload | null {
   if (!inspection) return null;
   // The panel's axes, which may differ from other panels'.
-  const panels = chart.getPanels();
   const panel = panels.find(({ key }) => key === inspection.panel) ?? panels[0];
   const scale = inspection.axis === "item" ? undefined : panel?.[inspection.axis];
   const categories = scale?.type === "band" ? scale.categories : undefined;
@@ -589,6 +652,91 @@ export function inspectionPayload(
     })),
     ...(inspection.axis === "item" && inspection.values && { values: inspection.values }),
   };
+}
+
+/**
+ * Where the chart's controller keeps the panels drawn as it captured an
+ * input event (interaction.ts): a listener of an event before it may have
+ * changed them since.
+ */
+const FRAME = Symbol.for("herceg.inputFrame");
+
+/**
+ * An input event as JSON (see `InputEventPayload`), its axes as they were
+ * as it was captured; its item's row is read now.
+ */
+export function inputEventPayload(chart: Chart, event: InputEvent): InputEventPayload {
+  const { pointer, target } = event;
+  const drawn = (event as { [FRAME]?: readonly DrawnPanel[] })[FRAME];
+  const panels: readonly PanelAxes[] = drawn
+    ? drawn.map(({ key, x, y, yRight, drawsY }) => ({ key, x, y: drawsY ? y : undefined, yRight }))
+    : chart.getPanels();
+  return {
+    pointer: pointer
+      ? {
+          x: pointer.x,
+          y: pointer.y,
+          panel: pointer.panel ?? null,
+          inPlot: pointer.inPlot,
+          values: { ...pointer.values },
+          categories: { ...pointer.categories },
+          time: (["x", "y", "yRight"] as const).filter(
+            (axis) =>
+              pointer.values[axis] !== undefined && axisOf(panels, pointer.panel, axis) === "time",
+          ),
+        }
+      : null,
+    target: target ? targetPayload(target, panels) : null,
+    inspection: inspectionPayload(chart, event.inspection, panels),
+    cause: event.cause,
+    revision: event.revision,
+  };
+}
+
+function targetPayload(target: Target, panels: readonly PanelAxes[]): TargetPayload {
+  switch (target.kind) {
+    case "item":
+      return {
+        kind: "item",
+        mark: target.mark,
+        markId: target.markId ?? null,
+        item: target.item,
+        series: target.series ?? null,
+        row: target.row ?? null,
+        panel: target.panel,
+        box: { ...target.box },
+      };
+    case "axisLabel":
+      return {
+        kind: "axisLabel",
+        panel: target.panel,
+        scale: target.scale,
+        layer: target.layer,
+        value: target.value,
+        time: axisOf(panels, target.panel, target.scale as Axis) === "time",
+        category: target.category ?? null,
+        text: target.text,
+        box: { ...target.box },
+      };
+    case "legendEntry":
+      return {
+        kind: "legendEntry",
+        key: target.key,
+        label: target.label,
+        panel: target.panel ?? null,
+      };
+    case "plot":
+      return { kind: "plot", panel: target.panel };
+  }
+}
+
+/** The type of a panel's axis (`undefined` for none). */
+function axisOf(
+  panels: readonly PanelAxes[],
+  panel: string | undefined,
+  axis: Axis,
+): AxisInfo["type"] | undefined {
+  return (panels.find(({ key }) => key === (panel ?? "")) ?? panels[0])?.[axis]?.type;
 }
 
 /** A range's ends as Python reads them: on category axes, labels. */

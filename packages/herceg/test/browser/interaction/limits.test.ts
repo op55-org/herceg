@@ -1,6 +1,7 @@
 // View limits and edge events in panels: limits bound each instance's
 // views (a subplot's own over the chart's), panels sharing an instance
 // agree on them, and an edge event names the instance that came near.
+import "../interactive.ts";
 import { describe, expect } from "vitest";
 import type { Chart, ChartOptions } from "../../../src/dom/chart.ts";
 import { columns, panel } from "../../../src/layout.ts";

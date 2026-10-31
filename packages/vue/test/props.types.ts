@@ -15,6 +15,7 @@ import type {
   boxplot,
   ChartError,
   ChartEvents,
+  ChartListener,
   ChartOptions,
   CustomDataOptions,
   CustomOptions,
@@ -156,13 +157,22 @@ true satisfies Takes<PropsOf<typeof Legend>, Omit<LegendGuideOptions, "type">>;
  */
 type Props = InstanceType<typeof Chart>["$props"];
 type Options = Omit<ChartOptions, "marks" | "renderTooltip" | "onError">;
-// Vue's emits make listeners returning any.
+// Vue's emits make listeners returning any; input listeners are props, so
+// that the chart knows whether it is listened to.
 type Listener<E> = (_: E) => ReturnType<NonNullable<Props["onRender"]>>;
+type Input = "hover" | "click" | "contextMenu";
 type Listeners = {
-  [E in Exclude<keyof ChartEvents, "error"> as `on${Capitalize<E>}`]?: Listener<ChartEvents[E]>;
-} & { onError?: Listener<ChartError> };
+  [E in Exclude<keyof ChartEvents, "error" | Input> as `on${Capitalize<E>}`]?: Listener<
+    ChartEvents[E]
+  >;
+} & {
+  onError?: Listener<ChartError>;
+  onHover?: ChartListener<"hover">;
+  onClick?: ChartListener<"click">;
+  onContextMenu?: ChartListener<"contextMenu">;
+};
 /** Options whose props default to undefined, so that a bare `<Chart legend>` is true and an absent one unset. */
-type Defaulted = "legend" | "tooltip" | "animation";
+type Defaulted = "legend" | "inspection" | "tooltip" | "animation";
 // Vue's instances' props are read only, but for those with a default.
 true satisfies Takes<
   Pick<Props, keyof Options | "marks" | "initial" | keyof Listeners>,

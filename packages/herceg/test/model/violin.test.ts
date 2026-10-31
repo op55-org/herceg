@@ -102,7 +102,7 @@ describe("violin", () => {
   it("lays violins along y when the categories are on y", () => {
     const { scene, model } = build({ marks: [violin(latency, { x: "ms", y: "region" })] });
     expect(model.yScale()!.type).toBe("band");
-    expect(model.tooltipMode()).toBe("nearest-y");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     const { upper, lower } = geometry<AreaGeometry>(scene, "area")[0]! as AreaGeometry & {
       lower: Polyline;
     };

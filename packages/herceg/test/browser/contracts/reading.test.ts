@@ -1,12 +1,13 @@
 // Proofs of the matrix's reading (test/contracts/), one per row: the
-// pointer on a known datum reads it in each tooltip mode, with the fields
+// pointer on a known datum reads it in each inspection mode, with the fields
 // asked for; the arrow keys announce data in order; the description names
 // what the chart draws. Items read under the pointer refuse the modes that
 // read along an axis. Expectations are rows.json's `reading`.
 
+import "../interactive.ts";
 import { describe, expect } from "vitest";
 import type { Chart } from "../../../src/dom/chart.ts";
-import type { Inspection, TooltipMode } from "../../../src/model/inspect.ts";
+import type { Inspection, InspectionMode } from "../../../src/model/inspect.ts";
 import { cellsOf, defaultsOf, fixtureOf, markOf } from "../../contracts/matrix.ts";
 import { contractTest } from "../../helpers/contracts.ts";
 import { dateTimes } from "../helpers.ts";
@@ -70,7 +71,7 @@ function descriptionOf(chart: Chart): string {
  * names what it draws, without promising the keys read values.
  */
 async function expectDescribedOnly(row: string): Promise<void> {
-  const chart = await mount({ marks: [markOf(row)], tooltip: { mode: "nearest" } });
+  const chart = await mount({ marks: [markOf(row)], inspection: { mode: "nearest" } });
   const { plot } = chart.getPanels()[0] ?? { plot: chart.root.getBoundingClientRect() };
   for (const [fx, fy] of [
     [0.25, 0.5],
@@ -87,8 +88,8 @@ async function expectDescribedOnly(row: string): Promise<void> {
 }
 
 /** A row read under the pointer but not along an axis: in `mode`, the pointer on it reads nothing. */
-async function expectNotAlong(row: string, mode: TooltipMode): Promise<void> {
-  const chart = await mount({ marks: [markOf(row)], tooltip: { mode } });
+async function expectNotAlong(row: string, mode: InspectionMode): Promise<void> {
+  const chart = await mount({ marks: [markOf(row)], inspection: { mode } });
   expect(pointsOf(await hover(chart, targetOf(chart, readingOf(row).at!)))).toEqual([]);
 }
 
@@ -103,7 +104,7 @@ for (const [capability, [mode, key]] of Object.entries(MODES))
     for (const cell of cellsOf(capability))
       contractTest(`${cell.row}.${capability}`, async () => {
         const reading = readingOf(cell.row);
-        const spec = { marks: [markOf(cell.row)], tooltip: { mode } };
+        const spec = { marks: [markOf(cell.row)], inspection: { mode } };
         if (cell.state === "refused") return expectChartRefused(spec, cell);
         if (cell.state === "na")
           return reading.points ? expectNotAlong(cell.row, mode) : expectDescribedOnly(cell.row);
@@ -125,7 +126,7 @@ describe("reading.fields", () => {
       const { field, at, fields, fieldsAt, fieldsMark } = readingOf(cell.row);
       const spec = {
         marks: [markOf(cell.row, { ...fieldsMark, tooltip: { fields: [field] } })],
-        tooltip: { mode: "nearest" as const },
+        inspection: { mode: "nearest" as const },
       };
       if (cell.state === "refused") return expectChartRefused(spec, cell);
       if (cell.state === "na") return expectDescribedOnly(cell.row);

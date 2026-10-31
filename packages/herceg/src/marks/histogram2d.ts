@@ -25,20 +25,10 @@ import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, niceTimeDomain, timeTicks } from "../scale/time.ts";
-import type { Geometry, RasterGeometry, Rect } from "../scene/scene.ts";
+import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { BinSpec, Clip, Frozen, Histogram2DSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
-import {
-  boxOf,
-  cellsCover,
-  coverNear,
-  coverOf,
-  type DrawnMark,
-  distanceToCover,
-  type PickedItem,
-  type PickQuery,
-  pickedHit,
-} from "./drawn.ts";
+import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
 import { paint, rasterAxes } from "./heatmap-raster.ts";
 import { histogramFormError, perAxisBins } from "./histogram-input.ts";
@@ -100,6 +90,10 @@ export interface Histogram2DOptions<S extends Schema> {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** The subplot to draw in, or "*" for every panel. */
   panel?: string;
   id?: string;
@@ -493,7 +487,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   }
 
   /** The cells a series of this mark counted. */
-  #cellsOf(s: Series): Cells | undefined {
+  cellsOf(s: Series): Cells | undefined {
     return this.#cells.get(s.values);
   }
 
@@ -557,7 +551,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
    */
   selectedGeometry(series: readonly Series[], frame: Frame, drawing: SelectionDrawing): Geometry[] {
     const s = series[0];
-    const cells = s && this.#cellsOf(s);
+    const cells = s && this.cellsOf(s);
     if (!s || !cells || s.length === 0 || frame.hidden.has(s.key)) return [];
     const colors = this.#colorScale(cells, frame.theme, frame.paint);
     if (!colors) return [];
@@ -624,7 +618,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   ): LegendPart[] {
     const s = series[0];
     if (!s) return [];
-    const cells = this.#cellsOf(s) ?? this.#rosterCells(s);
+    const cells = this.cellsOf(s) ?? this.#rosterCells(s);
     const scale = this.#colorScale(cells, theme, paint);
     if (!scale) return [];
     const { domain, midpoint } = scale;
@@ -634,7 +628,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   /** For a split chart's roster series, the cells of the first panel counted for it. */
   #rosterCells(roster: Series): Cells | undefined {
     const panels = this.#rosters.get(roster);
-    return panels?.[0] && this.#cellsOf(panels[0]);
+    return panels?.[0] && this.cellsOf(panels[0]);
   }
 
   /** Cells are colored by what they measure, so the legend shows the ramp instead of series. */
@@ -663,7 +657,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     let lo = Infinity;
     let hi = -Infinity;
     for (const s of series) {
-      const cells = this.#cellsOf(s);
+      const cells = this.cellsOf(s);
       if (!cells || s.length === 0) continue;
       const edges = axis === "x" ? cells.xEdges : cells.yEdges;
       lo = Math.min(lo, edges[0]!);
@@ -676,7 +670,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const s = series[0];
     // Series are kept between scenes: drawn so, no selection is drawn with it.
     if (s) this.#selected.delete(s);
-    const cells = s && this.#cellsOf(s);
+    const cells = s && this.cellsOf(s);
     if (!s || !cells || s.length === 0 || frame.hidden.has(s.key)) return [];
     const colors = this.#colorScale(cells, frame.theme, frame.paint);
     if (!colors) return [];
@@ -782,86 +776,12 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     ];
   }
 
-  /** Its cells are found by `pick`, and named and bounded by their bins along x and y. */
-  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-    const bins = (s: Series, position: number) => {
-      const cells = this.#cellsOf(s);
-      if (!cells) return undefined;
-      const [c, r] = [cells.columns[position]!, cells.rows[position]!];
-      return [
-        [cells.xEdges[c]!, cells.xEdges[c + 1]!],
-        [cells.yEdges[r]!, cells.yEdges[r + 1]!],
-      ] as const;
-    };
-    const cell = (s: Series, position: number, frame: Frame) => {
-      const [x, y] = bins(s, position) ?? [];
-      return x && y
-        ? boxOf(frame.x.map(x[0]), frame.y.map(y[0]), frame.x.map(x[1]), frame.y.map(y[1]))
-        : undefined;
-    };
-    // What its image covers, cut as it is drawn.
-    const cover = drawn.frame && cellsCover(drawn, this.spec.clip);
-    if (!cover) return undefined;
-    return pickedHit(this, drawn, query, {
-      lookup: (series, px, py, frame) => {
-        const near = coverNear(cover, px, py, query.slop);
-        const at = (s: Series, position: number) => cell(s, position, frame);
-        return this.#nearestBin(series, px, py, frame, query.slop, near, at);
-      },
-      bounds: (s, position, frame) => {
-        const drawnCell = cell(s, position, frame);
-        return drawnCell && coverOf(drawnCell, cover);
-      },
-      group: (s, position) => {
-        const [x, y] = bins(s, position) ?? [];
-        return x && y && { parts: [], names: [x, y] };
-      },
-    });
-  }
-
   /**
-   * For picking: the cell nearest a pixel as drawn, of the cells holding
-   * something within `reach` of it (`pick` finds only the cell under it),
-   * measured to the part of each in `cover`, what the drawing covers near it
-   * (`cell` gives a cell's rectangle).
+   * Its cells are found under the pointer where its image draws them, else
+   * the nearest within reach; named and bounded by their bins (marks/lookups.ts).
    */
-  #nearestBin(
-    series: readonly Series[],
-    px: number,
-    py: number,
-    frame: Frame,
-    reach: number,
-    cover: readonly Rect[],
-    cell: (s: Series, position: number) => Rect | undefined,
-  ): Hit | undefined {
-    const s = series[0];
-    const cells = s && this.#cellsOf(s);
-    if (!cells) return undefined;
-    // The cell under it, where some of it is drawn there (not only its
-    // edge, a neighbor's), before those around it.
-    const under = this.pick(series, px, py, frame);
-    const drawnCell = under && cell(s, under.position);
-    if (drawnCell && distanceToCover(drawnCell, cover, px, py) === 0) return under;
-    const near = (axis: AxisCells, scale: PositionScale, pixel: number) => {
-      // Half a pixel more, so cells at the reach's very end are not lost to rounding.
-      const [a, b] = [scale.invert(pixel - reach - 0.5), scale.invert(pixel + reach + 0.5)];
-      return axis.reaching(Math.min(a, b), Math.max(a, b));
-    };
-    const [c0, c1] = near(cells.xCells, frame.x, px);
-    const [r0, r1] = near(cells.yCells, frame.y, py);
-    let best: Hit | undefined;
-    cells.index.forEachIn(c0, c1, r0, r1, (c, r, position) => {
-      const drawn = boxOf(
-        frame.x.map(cells.xEdges[c]!),
-        frame.y.map(cells.yEdges[r]!),
-        frame.x.map(cells.xEdges[c + 1]!),
-        frame.y.map(cells.yEdges[r + 1]!),
-      );
-      const distance = distanceToCover(drawn, cover, px, py);
-      if (distance < (best?.distance ?? Number.POSITIVE_INFINITY))
-        best = { series: s, position, distance };
-    });
-    return best;
+  pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
+    return query.lookups.histogram2d(this, drawn, query);
   }
 
   /** The cell under a pixel: in the bins its x and y fall in, if it holds something. */
@@ -874,7 +794,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
 
   /** The position of the cell of `s` drawn under a pixel, or -1. Clicks read it. */
   binAt(s: Series, px: number, py: number, frame: Pick<Frame, "x" | "y">): number {
-    const cells = this.#cellsOf(s);
+    const cells = this.cellsOf(s);
     if (!cells) return -1;
     const c = cells.xCells.find(frame.x.invert(px));
     const r = cells.yCells.find(frame.y.invert(py));
@@ -890,12 +810,12 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
 
   /** The color a cell is drawn in. */
   pointColor(s: Series, row: number, theme: Theme, paint: PaintReader): string {
-    return this.#colorScale(this.#cellsOf(s), theme, paint)?.color(s.values[row]!) ?? s.color;
+    return this.#colorScale(this.cellsOf(s), theme, paint)?.color(s.values[row]!) ?? s.color;
   }
 
   /** A cell's bins, by field. */
   pointLabel(s: Series, row: number, format: AxisFormat): string {
-    const cells = this.#cellsOf(s)!;
+    const cells = this.cellsOf(s)!;
     const [c, r] = [cells.columns[row]!, cells.rows[row]!];
     const { x, y } = this.spec;
     return (
@@ -912,7 +832,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const f = format.value;
     const all = picked.all[row]!;
     const weight = this.spec.weight;
-    return `${text}; ${f(picked.rows[row]!)} of ${f(all)} ${all === 1 ? "row" : "rows"} selected${weight === undefined ? "" : `, ${weight} ${f(picked.weights[row]!)} of ${f(this.#cellsOf(s)!.counts[row]!)}`}`;
+    return `${text}; ${f(picked.rows[row]!)} of ${f(all)} ${all === 1 ? "row" : "rows"} selected${weight === undefined ? "" : `, ${weight} ${f(picked.weights[row]!)} of ${f(this.cellsOf(s)!.counts[row]!)}`}`;
   }
 
   stepCell(
@@ -922,13 +842,13 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     rows: number,
     frame: { x: PositionScale; y: PositionScale },
   ): number | undefined {
-    const cells = this.#cellsOf(s);
+    const cells = this.cellsOf(s);
     return cells && stepCell(cells.index, position, columns, rows, frame);
   }
 
   /** Whether a row is counted in the cell at `position`: its x and y in the cell's bins, and a usable weight. */
   summarized(s: Series, position: number): (row: number) => boolean {
-    const cells = this.#cellsOf(s)!;
+    const cells = this.cellsOf(s)!;
     const [c, r] = [cells.columns[position]!, cells.rows[position]!];
     const xs = this.#numbers("x");
     const ys = this.#numbers("y");
@@ -959,7 +879,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     let shared = true;
     let fullest: { cells: Cells; k: number; count: number } | undefined;
     for (const part of parts) {
-      const cells = this.#cellsOf(part);
+      const cells = this.cellsOf(part);
       if (!cells) continue;
       values += cells.inBins;
       outside += cells.size - cells.inBins;

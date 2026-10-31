@@ -275,12 +275,12 @@ export class ItemViews {
     const refuse = (path: string, message: string) =>
       new ChartError({ code: "unsupported", path, message: `${type} ${message}` });
     // Items are read under the pointer; leaving the mode out reads them so too.
-    const mode = typeof config.tooltip === "object" ? config.tooltip.mode : undefined;
+    const mode = config.inspection ? config.inspection.mode : undefined;
     if (!axes && (mode === "nearest-x" || mode === "nearest-y"))
       throw new ChartError({
         code: "unsupported",
-        path: "tooltip.mode",
-        message: `tooltip.mode: ${type} reads the item under the pointer, not every series at ${mode === "nearest-x" ? "an x" : "a y"}; give mode: "nearest"`,
+        path: "inspection.mode",
+        message: `inspection.mode: ${type} reads the item under the pointer, not every series at ${mode === "nearest-x" ? "an x" : "a y"}; give mode: "nearest"`,
       });
     if (pan && !axes && !(plane && (pan === true || pan === "xy")))
       throw refuse(
@@ -759,7 +759,7 @@ export class ItemViews {
       : hiddenWhole(mark, id, frame);
     const result = hidden ? drawnHidden(laid) : laid;
     this.#drew = true;
-    // Its items are picked through `itemAt` (layout-mark.ts's `pickItem`).
+    // Its items are picked through `itemAt` (model/pick.ts, `pickLayout`).
     this.records.push({
       mark: id,
       panel: panel.key,

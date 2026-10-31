@@ -22,7 +22,7 @@ export const SETTINGS = {
   locale: "en-US",
   timeZone: "UTC",
   height: 400,
-  tooltip: { mode: "nearest" },
+  inspection: { mode: "nearest" },
 } as const;
 
 /** A mark option every row refuses, where, and the end of the message it is refused with. */

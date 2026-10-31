@@ -27,6 +27,7 @@ export interface ThemeStyles {
   grid: StrokePaint;
   axisLine: StrokePaint;
   tick: StrokePaint;
+  crosshair: StrokePaint;
   line: { strokeWidth: number };
   bar: { radius: number };
   tooltip: { fill: string; stroke: string };
@@ -261,6 +262,7 @@ function baseRoles(base: Base, { text, muted, grid, axis }: Required<ThemeTokens
     grid: line(grid),
     axisLine: line(axis),
     tick: line(axis),
+    crosshair: line(axis),
     line: { strokeWidth: base.lineWidth },
     bar: { radius: base.barRadius },
     tooltip: { ...base.tooltip },
@@ -311,6 +313,7 @@ const ROLES = [
   "grid",
   "axisLine",
   "tick",
+  "crosshair",
   "line",
   "bar",
   "tooltip",
@@ -538,7 +541,7 @@ function paints({ tokens, roles: resolved }: ResolvedTokens): Theme {
   // The base text, then the text roles over it.
   for (const role of ROLES.slice(0, 7) as ("text" | TextRole)[])
     style[role] = textPaint([resolved.text, resolved[role]]);
-  for (const role of ["grid", "axisLine", "tick"] as const)
+  for (const role of ["grid", "axisLine", "tick", "crosshair"] as const)
     style[role] = strokePaint([resolved[role]]);
   return {
     ...tokens,

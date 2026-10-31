@@ -37,6 +37,7 @@
     onselect,
     onhover,
     onclick,
+    oncontextmenu,
     onrowselection,
     oncamera,
     ondrill,
@@ -214,6 +215,7 @@
   listen("select", () => onselect);
   listen("hover", () => onhover);
   listen("click", () => onclick);
+  listen("contextMenu", () => oncontextmenu);
   listen("rowSelection", () => onrowselection);
   listen("camera", () => oncamera);
   listen("drill", () => ondrill);

@@ -45,14 +45,12 @@ import { type DataSelection, selectRows, selectWhere } from "../data/selection.t
 import type { Table } from "../data/table.ts";
 import type { BarMark } from "../marks/bar.ts";
 import { STILL } from "../marks/dodge.ts";
-import type { HistogramMark } from "../marks/histogram.ts";
 import type { LayoutResult } from "../marks/layout-mark.ts";
 import type { BandList, Frame, Mark } from "../marks/mark.ts";
 import { rowField } from "../marks/row-bindings.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "../marks/series.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { ChartModel, DrawnPanel, ScaleInstance } from "./model.ts";
-import { settle } from "./nearest.ts";
 
 /**
  * What a brush selected, in data values (as the chart keeps it: see
@@ -103,20 +101,6 @@ const SELECTS = new Set([
 
 /** Marks whose drawing summarizes their rows (a contour's bands, of a grid), which clicks select none of. */
 const UNCLICKED = new Set(["contour"]);
-
-/** Marks drawing areas of the plot, whose rows are clicked inside them. */
-const REGIONS = new Set([
-  "bar",
-  "histogram",
-  "boxplot",
-  "boxen",
-  "violin",
-  "heatmap",
-  "candlestick",
-]);
-
-/** Pixels from a point's edge a click may land and still select it. */
-const CLICK_SLOP = 4;
 
 /** A series a panel draws, with the scales it is drawn with. */
 interface Drawn {
@@ -722,10 +706,11 @@ function itemRows(layout: LayoutResult, tables: ReadonlySet<Table>, key: string)
 }
 
 /**
- * The rows of the point drawn under a pixel, among marks over `tables`:
- * the topmost mark's, inside a bar, bin, box, violin, or cell, or within a
- * few pixels of a point or vertex. Undefined over none; null over a layout
- * mark's item that stands for none of their rows.
+ * The rows of the item drawn under a pixel, among marks over `tables`, as
+ * the chart picks it (model/pick.ts): the topmost, inside a bar, bin, box,
+ * violin, or cell, or within reach of a point or a line's observation.
+ * Undefined over none; null over a layout mark's item that stands for none
+ * of their rows.
  */
 export function clickedRows(
   model: ChartModel,
@@ -738,79 +723,25 @@ export function clickedRows(
     const inspection = model.inspect(px, py);
     return inspection?.axis === "item" ? itemRows(layout, tables, inspection.key) : undefined;
   }
-  // The topmost panel there: an inset over its parent.
-  const panel = model
-    .panels()
-    .find(({ key, plot }) => contains(plot, px, py) && !model.coveredAt(key, px, py));
-  if (!panel) return undefined;
-  const drawn = drawnIn(model, [panel]).filter(
-    (d) =>
-      !d.hidden && d.mark.table && tables.has(d.mark.table) && !UNCLICKED.has(d.mark.spec.type),
+  const picked = model.picker?.(
+    px,
+    py,
+    (mark) =>
+      mark.spec.pick !== false &&
+      !!mark.table &&
+      tables.has(mark.table) &&
+      !UNCLICKED.has(mark.spec.type),
   );
-  // Marks painted later are on top: by zIndex, ties as declared.
-  const z = ({ mark }: MarkParts) => mark.spec.zIndex ?? 0;
-  for (const entry of byMark(drawn)
-    .reverse()
-    .sort((a, b) => z(b) - z(a))) {
-    const { mark, series, frame } = entry;
-    let found: { series: Series; position: number } | undefined;
-    const type = mark.spec.type;
-    if (type === "bar") found = barHit(mark as unknown as BarMark, entry, px, py);
-    else if (type === "histogram") found = binHit(mark as unknown as HistogramMark, entry, px, py);
-    else if (REGIONS.has(type)) {
-      // Boxes, violins, candles, and cells pick what is under the pointer at distance 0.
-      const hit = mark.pick?.(series, px, py, frame);
-      if (hit?.distance === 0) found = hit;
-    } else if (type === "rug") {
-      // A tick is clicked anywhere along it, measured as its mark picks it.
-      const hit = mark.pick?.(series, px, py, frame);
-      if (hit && hit.distance <= CLICK_SLOP) found = hit;
-    } else {
-      const reach = Math.max(mark.inset?.x ?? 0, mark.inset?.y ?? 0, 3) + CLICK_SLOP;
-      found = nearest(entry, px, py, reach);
-    }
-    if (found) return rowsOf(model, mark, found.series, found.position, panel);
-  }
-  return undefined;
-}
-
-/**
- * The point of a mark's series nearest a pixel, within `reach` pixels of
- * it (glyphs sized by a field, within their own size); of points tying
- * with it, the one on top (model/nearest.ts).
- */
-function nearest(
-  entry: MarkParts,
-  px: number,
-  py: number,
-  reach: number,
-): { series: Series; position: number } | undefined {
-  const { mark } = entry;
-  const glyph = mark.reach;
-  const lit = mark.table && entry.frame.highlighted?.(mark.table);
-  return settle((found) => {
-    for (const d of entry.parts) {
-      const s = d.series;
-      let [start, end] = [0, s.length];
-      // Sorted series need only the points within reach along x (marks
-      // drawing along one axis place theirs themselves).
-      if (s.sorted && d.x.type !== "band" && !mark.place) {
-        const [a, b] = [d.x.invert(px - reach), d.x.invert(px + reach)];
-        start = lower(s, Math.min(a, b));
-        end = lower(s, Math.max(a, b), true);
-      }
-      const over = mark.paintsOver?.(entry.series, s, entry.frame);
-      for (let k = start; k < end; k++) {
-        const row = rowOf(s, k);
-        const point = anchorOf(entry, d, row);
-        if (!point) continue;
-        const away = Math.hypot(point[0] - px, point[1] - py);
-        const within = glyph ? Math.min(reach, glyph.call(mark, row, s) + CLICK_SLOP) : reach;
-        if (away <= within)
-          found.take({ series: s, position: k, distance: away }, mark, lit?.[row] ?? 0, over);
-      }
-    }
-  });
+  const panel = picked && model.panels().find(({ key }) => key === picked.drawn.panel);
+  if (!panel) return undefined;
+  const { part } = picked.item;
+  const point = part.kind === "row" ? part.series : part.point;
+  // An annotation's row is no series point.
+  if (!point)
+    return part.kind === "row"
+      ? { table: part.table, rows: Uint32Array.of(part.position) }
+      : undefined;
+  return rowsOf(model, model.markOf(point.series)!, point.series, point.position, panel);
 }
 
 /** The scales a bar mark's bars are placed along and measured across, and the shown series. */
@@ -838,82 +769,6 @@ function barAnchor(
   const { width, offset } = mark.placement(visible, along);
   const middle = ends.center + offset(s) + width / 2;
   return horizontal ? [ends.tip, middle] : [middle, ends.tip];
-}
-
-/** The bar under a pixel: the topmost, as later series and rows are drawn over earlier ones. */
-function barHit(
-  mark: BarMark,
-  entry: MarkParts,
-  px: number,
-  py: number,
-): { series: Series; position: number } | undefined {
-  const { horizontal, along, across, visible } = barAxes(mark, entry);
-  const [pa, pc] = horizontal ? [py, px] : [px, py];
-  const { width, offset } = mark.placement(visible, along);
-  // Bars wider than their places may overlap: the last painted is on top,
-  // highlighted rows over the others, then by series, a series' looks in
-  // turn (a geometry each), and rows.
-  const { table } = mark;
-  const lit = table && entry.frame.highlighted?.(table);
-  const hit = (want?: number) => {
-    for (let group = visible.length - 1; group >= 0; group--) {
-      const s = visible[group]!;
-      const from = offset(s);
-      const looks = s.features?.rows;
-      const lookOf = (row: number) => ((looks?.paints.length ?? 1) > 1 ? looks!.of(row) : 0);
-      const [start, end] = mark.range(s, entry.frame);
-      let top: { position: number; look: number } | undefined;
-      for (let k = end - 1; k >= start; k--) {
-        const row = rowOf(s, k);
-        if (want !== undefined && (lit![row] ?? 0) !== want) continue;
-        const look = lookOf(row);
-        if (top && look <= top.look) continue;
-        const ends = mark.ends(s, row, along, across);
-        if (!ends) continue;
-        const { center, tip, root } = ends;
-        if (
-          pa >= center + from &&
-          pa <= center + from + width &&
-          pc >= Math.min(tip, root) &&
-          pc <= Math.max(tip, root)
-        )
-          top = { position: k, look };
-      }
-      if (top) return { series: s, position: top.position };
-    }
-    return undefined;
-  };
-  return lit ? (hit(1) ?? hit(0)) : hit();
-}
-
-/** The histogram bin under a pixel, inside what its series draws: the topmost series'. */
-function binHit(
-  mark: HistogramMark,
-  entry: MarkParts,
-  px: number,
-  py: number,
-): { series: Series; position: number } | undefined {
-  const { frame } = entry;
-  for (let i = entry.series.length - 1; i >= 0; i--) {
-    const s = entry.series[i]!;
-    if (frame.hidden.has(s.key)) continue;
-    const position = mark.binAt(s, px, py, frame);
-    if (position >= 0) return { series: s, position };
-  }
-  return undefined;
-}
-
-/** The first position whose x is at least (`past`: more than) `value`, in a sorted series. */
-function lower(s: Series, value: number, past = false): number {
-  let lo = 0;
-  let hi = s.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    const x = s.x[rowOf(s, mid)]!;
-    if (x < value || (past && x === value)) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
 }
 
 function contains(plot: DrawnPanel["plot"], px: number, py: number): boolean {

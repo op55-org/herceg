@@ -34,6 +34,7 @@ import type {
   SegmentGeometry,
 } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>, options?: { maxRows?: number }): Table =>
@@ -892,7 +893,7 @@ describe("candlesticks and rugs with a selection", () => {
     const prices = { x: "x", open: "open", high: "high", low: "low", close: "close" } as const;
     const model = new ChartModel({
       marks: [candlestick(twice, prices)],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       rowSelection: bound,
     });
     bound.highlight(model);
@@ -901,7 +902,7 @@ describe("candlesticks and rugs with a selection", () => {
     const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(15)];
     const picked = () => [
       model.inspect(px, py)?.points.map(({ row }) => row),
-      clickedRows(model, new Set([twice]), px, py)?.rows,
+      clickedRows(withPicker(model), new Set([twice]), px, py)?.rows,
     ];
     // The later row is drawn over the earlier one...
     expect(picked()).toEqual([[1], Uint32Array.of(1)]);

@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from ._data import listlike
 from ._errors import Role, hinted, is_number, listed, shown
@@ -530,8 +530,10 @@ def limits_spec(value: Mapping[str, ViewLimits] | None, role: Role) -> dict[str,
 # Sync ----------------------------------------------------------------------
 
 
-CursorSnap = Literal["nearest", "previous", "next"]
-_SNAPS = ("nearest", "previous", "next")
+#: Which point of each series an inspection along an axis reads (see
+#: ``hg.InspectionOptions``).
+Snap = Literal["shared", "each", "previous", "next"]
+SNAPS = get_args(Snap)
 
 
 @hinted
@@ -540,26 +542,28 @@ class SyncChannel:
     """A sync channel: the ``group`` of charts it is shared with, and the chart's
     ``scale`` that carries it ("x" by default; for selections, "xy", all of
     them, by default). The cursor's channel says how the chart shows the
-    cursors it receives: ``snap`` reads the data's x "nearest" the shared value
-    and each series' point there (the default, as the pointer reads), each
-    series' last point at or before it ("previous", for readings at other
-    frequencies: an hourly series' 10:00 for 10:37), or its first at or after
-    it ("next"), along x; ``tooltip=True`` shows the chart's tooltip
-    there too. ``panel`` names the panel whose scale carries the channel (a
-    subplot's id, or a facet panel's key); by default, the scale every panel
-    shares. Given as ``hg.Sync(panels=...)``, without a group, it says the
-    same of the cursor across the chart's own panels."""
+    cursors it receives: ``snap`` says which point of each series it reads,
+    as ``hg.InspectionOptions`` says (by default, as the chart's inspection
+    reads): the data's x nearest the shared value and each series' point
+    there ("shared"), each series' own nearest point ("each"), its last
+    point at or before it ("previous", for readings at other frequencies: an
+    hourly series' 10:00 for 10:37), or its first at or after it ("next");
+    ``tooltip=True`` shows the chart's tooltip there too. ``panel`` names the
+    panel whose scale carries the channel (a subplot's id, or a facet
+    panel's key); by default, the scale every panel shares. Given as
+    ``hg.Sync(panels=...)``, without a group, it says the same of the cursor
+    across the chart's own panels."""
 
     group: str | None = None
     scale: Literal["x", "y", "xy"] | None = None
     tooltip: bool | None = None
-    snap: CursorSnap | None = None
+    snap: Snap | None = None
     panel: str | None = None
 
     def _show(self, role: Role) -> dict[str, Any]:
         return _clean(
             {
-                "snap": _choice(self.snap, _SNAPS, role.field("snap")),
+                "snap": _choice(self.snap, SNAPS, role.field("snap")),
                 "tooltip": None
                 if self.tooltip is None
                 else _flag(self.tooltip, role.field("tooltip")),

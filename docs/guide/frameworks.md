@@ -113,11 +113,17 @@ Every mark has a component, named as its function: `Line`, `Area`, `Bar`,
 
 | | React | Vue | Svelte |
 | --- | --- | --- | --- |
-| Events | `onViewport`, `onSelect`, `onHover`, `onClick`, `onEdge`, `onRowSelection`, `onCamera`, `onDrill`, `onItemMove`, `onVisibility`, `onRender`, `onError` | `@viewport`, `@select`, `@hover`, `@click`, `@edge`, `@row-selection`, `@camera`, `@drill`, `@item-move`, `@visibility`, `@render`, `@error` | `onviewport`, `onselect`, `onhover`, `onclick`, `onedge`, `onrowselection`, `oncamera`, `ondrill`, `onitemmove`, `onvisibility`, `onrender`, `onerror` |
+| Events | `onViewport`, `onSelect`, `onHover`, `onClick`, `onContextMenu`, `onEdge`, `onRowSelection`, `onCamera`, `onDrill`, `onItemMove`, `onVisibility`, `onRender`, `onError` | `@viewport`, `@select`, `@hover`, `@click`, `@context-menu`, `@edge`, `@row-selection`, `@camera`, `@drill`, `@item-move`, `@visibility`, `@render`, `@error` | `onviewport`, `onselect`, `onhover`, `onclick`, `oncontextmenu`, `onedge`, `onrowselection`, `oncamera`, `ondrill`, `onitemmove`, `onvisibility`, `onrender`, `onerror` |
 | The chart handle | `ref` | template ref's `.chart` (null until mounted) | `bind:chart` (null until mounted) |
 
 The events are the engine's ([Events](interaction.md#events)); the latest
-handler is called, so inline functions do not resubscribe. The handle is
+handler is called, so inline functions do not resubscribe. A chart listens
+for `hover`, `click`, and `contextMenu` only while a handler is given: only
+then does it load what reads what input is on, and, for `contextMenu`, keep
+the browser's menu off its plots. In Vue these three are props
+(`@hover`, `@click`, and `@context-menu` pass `onHover`, `onClick`, and
+`onContextMenu`), so event modifiers such as `.once` do not apply to them.
+The handle is
 herceg's `Chart`, for `setViewport`, `select`, `toPixel`, `setVisibility`,
 `toSVG`, `toPNG`, `renderToPDF(chart)`, `renderToImage(chart)`, and the
 rest ([Getting started](getting-started.md#the-chart-handle)).

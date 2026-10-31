@@ -62,9 +62,18 @@ live.hidden_keys  # what the legends hide
 live.on_select(lambda selection: print(selection))
 live.on_viewport(lambda event: print(event.cause, event.views[""].x))
 live.on_visibility(lambda state: print(state.hidden_keys))
-live.on_hover(lambda inspection: print(inspection))  # None when the pointer leaves
-live.on_click(lambda inspection: print(df.iloc[inspection.points[0].row]))
-live.on_click(callback, remove=True)  # stop calling it
+live.on_hover(lambda event: print(event.target, event.inspection))
+live.on_context_menu(lambda event: add_annotation(event.pointer.values))
+
+
+def show_row(event):
+    # A row of the data, not an aggregate (a bin), an axis label, or the plot.
+    if isinstance(event.target, hg.ItemTarget) and event.target.row is not None:
+        print(df.iloc[event.target.row])
+
+
+live.on_click(show_row)
+live.on_click(show_row, remove=True)  # stop calling it
 live.on_edge(lambda edge: print(edge.side, edge.bound))  # near an end of `limits`
 live.on_error(lambda error: print(error))  # what a browser refused
 live.show_cursor(x=when)  # hide_cursor() hides it
@@ -76,7 +85,8 @@ live.show_cursor(x=when)  # hide_cursor() hides it
 | `hg.Selection` | Brushed `x` and `y` ranges, a `lasso` outline, and the `panels` it is in. |
 | `hg.ViewportEvent` | One change of view: `scales` changed, every panel's `views` (by panel key, `""` for one panel), `cause` (`"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, `"options"`), and `panel`. |
 | `hg.ViewEdge` | `scale`, `side`, `domain`, `bound`, `panels`, `cause`. |
-| `hg.Inspection` | What the tooltip shows: `axis`, `value`, `label`, `panel`, and `points` (`hg.InspectedPoint`: `label`, `value`, `text`, `fields`, `row`, `mark`, `mark_id`, `key`). |
+| `hg.InputEvent` | What `on_hover`, `on_click`, and `on_context_menu` hear: `pointer` (`hg.Pointer`: `x`, `y`, `panel`, `in_plot`, its `values` by axis, datetimes on time axes, and `categories`; None for the keyboard), `target` (`hg.ItemTarget`, `hg.AxisLabelTarget`, `hg.LegendEntryTarget`, or `hg.PlotTarget`, by `kind`; None over nothing), `inspection`, `cause`, and `revision`. |
+| `hg.Inspection` | What the inspection reads: `axis`, `value`, `label`, `panel`, and `points` (`hg.InspectedPoint`: `label`, `value`, `text`, `fields`, `row`, `mark`, `mark_id`, `key`). |
 
 - Values are Python values: datetimes on time axes (naive, in UTC),
   category labels on category axes, numbers otherwise.
@@ -199,14 +209,14 @@ state = hst.chart(chart, key="latency", on_select="rerun", on_click="rerun")
 if state.selection and state.selection.x:
     start, end = state.selection.x
     st.dataframe(df[df["time"].between(start, end)])
-if state.click:
-    st.write(state.click.label, state.click.points)
+if state.click and state.click.inspection:
+    st.write(state.click.inspection.label, state.click.inspection.points)
 ```
 
 | Reaction | State | Reports |
 | --- | --- | --- |
 | `on_select` | `state.selection` (`hg.Selection`) | Brushing |
-| `on_click` | `state.click` (`hg.Inspection`, this run only) | Clicks on data |
+| `on_click` | `state.click` (`hg.InputEvent`, this run only) | Clicks |
 | `on_viewport` | `state.viewport`, `state.panel_viewports` | Pan and zoom |
 | `on_row_selection` | `state.row_selection` (`hg.RowSelection`) | Rows of one `row_selection` binding |
 | `on_drill` | `state.drill_root`, `state.panel_drill_roots` | Tree navigation |

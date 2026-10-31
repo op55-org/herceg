@@ -573,19 +573,26 @@ export class RowLink {
   }
 
   /**
-   * A click at a pixel: selects the rows of the point under it (Shift
-   * adds them, Ctrl or Cmd adds or removes them), or clears what clicks
-   * select when it is over none. The changes made, for the `click` event;
-   * undefined when no binding takes clicks, and null on an item that stands
-   * for none of the bound tables' rows (a map layer of another table),
-   * where nothing changes, the chart's brush neither.
+   * A click at a pixel: what it selects, found now, written when the
+   * returned function is called: the rows of the point under it (Shift
+   * adds them, Ctrl or Cmd adds or removes them), or a clear of what clicks
+   * select when it is over none. The function returns the changes made,
+   * for the `click` event, and null on an item that stands for none of
+   * the bound tables' rows (a map layer of another table), where nothing
+   * changes, the chart's brush neither. Undefined when no binding takes
+   * clicks. Rows are kept by identity meanwhile, so a listener that drops
+   * rows before the write never makes it select others.
    */
-  clicked(px: number, py: number, keys: Modifiers): Written | null | undefined {
+  clicked(px: number, py: number, keys: Modifiers): (() => Written | null) | undefined {
     const clickable = this.#bound.filter((b) => b.events.has("click"));
     if (clickable.length === 0) return undefined;
     const tables = new Set(clickable.map((b) => b.table));
     const found = clickedRows(this.#model, tables, px, py);
-    return found === null ? null : { rows: this.#pick(clickable, found, modeOf(keys), "pointer") };
+    const mode = modeOf(keys);
+    if (found === null) return () => null;
+    const kept = found && new RowSet(found.table).addAll(found.rows);
+    const rows = () => found && { table: found.table, rows: kept!.positions() };
+    return () => ({ rows: this.#pick(clickable, rows(), mode, "pointer") });
   }
 
   /**

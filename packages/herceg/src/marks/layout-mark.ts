@@ -9,7 +9,6 @@ import type { RowView } from "../data/row-view.ts";
 import type { Table } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { ItemViews } from "../model/item-views.ts";
-import type { KeyPart } from "../model/items.ts";
 import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -17,7 +16,6 @@ import type { Geometry, Rect } from "../scene/scene.ts";
 import type { CameraSpec, InteractionSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
-import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import type { MovedNodes, NodeMoves } from "./graph.ts";
 import { markKey } from "./hidden.ts";
 import { type ChartMark, type LegendScale, type Mark, type MarkKey, seriesOf } from "./mark.ts";
@@ -359,38 +357,6 @@ export function insidePolygon(
     if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) odd = !odd;
   }
   return odd;
-}
-
-/**
- * What layout marks pick (their records' `layout`): the item `itemAt` finds
- * under the query, as tooltips find items, at the point its tooltip points
- * to: a row of a mark whose items are rows (of the layer it is in, for a
- * map's or a 3D box's layers), else named by its key's parts after its
- * mark's. `itemAt` tests the items' own shapes (points within a few
- * pixels, as their tooltips find them), so the distance is 0: a panel
- * holds one layout mark, so no distance ranks its items against another
- * mark's.
- */
-export function pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-  const item = drawn.layout?.itemAt(query.x, query.y);
-  const mark = drawn.layoutMark;
-  if (!item || !mark) return undefined;
-  const box = { x: item.px, y: item.py, width: 0, height: 0 };
-  // A map or 3D box of one layer gives its items no layer.
-  const k = item.layer ?? (mark.layers?.length === 1 ? 0 : undefined);
-  const layer = k === undefined ? mark : mark.layers?.[k];
-  if (layer?.rowItems && layer.table && item.row !== undefined) {
-    const key = k === undefined ? undefined : (layer.spec.id ?? mark.indices?.[k] ?? k);
-    return {
-      part: { kind: "row", table: layer.table, position: item.row },
-      names: undefined,
-      box,
-      distance: 0,
-      ...(key !== undefined && key !== drawn.mark && { mark: key }),
-    };
-  }
-  const names = (JSON.parse(item.key) as KeyPart[]).slice(1);
-  return { part: { kind: "group", key: item.key }, names, box, distance: 0 };
 }
 
 export function isLayoutMark(mark: object): mark is LayoutMark {

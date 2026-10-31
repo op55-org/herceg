@@ -603,10 +603,12 @@ describe("the keyboard", () => {
     }
   });
 
-  it("stops once at lines, which report every series at their x, and at each series of points", async () => {
+  it("stops once at lines, which report every series at their x, and at each series of points, along x", async () => {
     const both = table({ x: [0, 1, 2], a: [1, 2, 3], b: [4, 5, 6], c: [7, 8, 9] });
+    // Lines and points read the point nearest by default, each series a stop of its own.
     const chart = mount({
       marks: [line(both, { x: "x", y: ["a", "b"] }), point(both, { x: "x", y: "c" })],
+      inspection: { mode: "nearest-x" },
       locale: "en-US",
     });
     await chart.loading;

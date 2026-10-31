@@ -1,3 +1,4 @@
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { category } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";

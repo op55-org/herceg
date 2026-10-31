@@ -14,6 +14,7 @@ import type { RasterGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { rampsOf } from "../helpers/guides.ts";
 import { cellOf, positionOf } from "../helpers/keyboard.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -101,7 +102,9 @@ describe("2D histograms", () => {
       row: undefined,
     });
     expect(
-      Array.from(clickedRows(model, new Set([pairs as unknown as Table]), px, py)!.rows),
+      Array.from(
+        clickedRows(withPicker(model), new Set([pairs as unknown as Table]), px, py)!.rows,
+      ),
     ).toEqual([0, 1, 2]);
     // Brushes along x, along y, or both select the rows whose values they cover.
     const brushed = (brush: Parameters<typeof brushedRows>[2]) => {

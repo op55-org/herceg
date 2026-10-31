@@ -37,6 +37,7 @@ import type {
   RectGeometry,
   ShapesGeometry,
 } from "../../src/scene/scene.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>): Table => typed(columns) as unknown as Table;
@@ -587,7 +588,9 @@ describe("layout marks with a selection", () => {
     const item = model.items!.result()!.item(1);
     expect(item.text).toBe("40 (40%); 1 of 2 rows selected, revenue 30 of 40");
     const tables = new Set([sales]);
-    expect(clickedRows(model, tables, item.px, item.py)?.rows).toEqual(Uint32Array.of(0, 1));
+    expect(clickedRows(withPicker(model), tables, item.px, item.py)?.rows).toEqual(
+      Uint32Array.of(0, 1),
+    );
   });
 
   it("keep a thin slice's sides in its selected part, and share what the slice paints", () => {
@@ -629,7 +632,9 @@ describe("layout marks with a selection", () => {
     );
     const tables = new Set([sales]);
     const item = model.items!.result()!.item(0);
-    expect(clickedRows(model, tables, item.px, item.py)?.rows).toEqual(Uint32Array.of(0, 2));
+    expect(clickedRows(withPicker(model), tables, item.px, item.py)?.rows).toEqual(
+      Uint32Array.of(0, 2),
+    );
   });
 
   it("fill each treemap leaf's selected share from its left edge, and each sunburst node's out from its inner edge", () => {
@@ -701,7 +706,9 @@ describe("layout marks with a selection", () => {
     ]);
     const link = result.item(keys.indexOf(JSON.stringify([0, "a", "c"])));
     expect(link.text).toBe("4; 1 of 2 rows selected, value 1 of 4");
-    expect(clickedRows(model, tables, link.px, link.py)?.rows).toEqual(Uint32Array.of(0, 1));
+    expect(clickedRows(withPicker(model), tables, link.px, link.py)?.rows).toEqual(
+      Uint32Array.of(0, 1),
+    );
   });
 
   it("count a Sankey node's rows over the links it draws, leaving out those closing cycles", () => {

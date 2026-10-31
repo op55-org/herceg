@@ -132,6 +132,10 @@ interface BarStyle<S extends Schema> extends ItemKeyed<S> {
   width?: { px: number };
   /** Where the bars are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** From 0 to 1: the bars', fill and edges. */
   opacity?: number;
   /**
@@ -1593,6 +1597,8 @@ export function bar<S extends Schema>(
       "strokeSides",
       "width",
       "zIndex",
+      "pick",
+      "inspect",
       "opacity",
       "label",
       "legend",

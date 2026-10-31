@@ -193,7 +193,7 @@ How a chart shows a cursor that is not its pointer's:
 
 | Option | Does |
 | --- | --- |
-| `snap` | `"nearest"` (default): the nearest x and each series' point there. `"previous"`: each series' last point at or before the value (a 10:37 cursor shows an hourly chart's 10:00 reading). `"next"`: the first at or after. |
+| `snap` | Which point of each series it reads, as [`inspection.snap`](#inspection) says; by default the chart's own. `"previous"` suits charts at other frequencies: a 10:37 cursor shows an hourly chart's 10:00 reading. |
 | `tooltip` | `true` shows the chart's tooltip at the crosshair. |
 
 ```ts
@@ -232,6 +232,64 @@ createChart(month, { marks: [line(hours, { x: "at", y: "load" })], interaction: 
   share nor follow an x cursor; linking them by category needs
   `scale: "y"`. Charts with panels of their own categories refuse synced
   selections and cursors along y.
+- **Hover events.** A chart showing a cursor another chart shares, or one
+  `showCursor` shows, reports a `hover` with cause `"sync"` or `"api"`
+  once it has drawn it.
+
+## Inspection
+
+`inspection` says what the pointer reads: the points the tooltip lists,
+the crosshair, and the `inspection` of hover and click events.
+
+```ts
+createChart(element, {
+  marks: [
+    line(metrics, { x: "time", y: ["auth", "api"] }),
+    point(annotations, { x: "time", y: "value", inspect: false, pick: false }), // decoration
+  ],
+  inspection: { mode: "nearest-x", snap: "each", within: { milliseconds: 30_000 } },
+});
+```
+
+```python
+chart = hg.Chart(metrics, inspection=hg.InspectionOptions(
+    mode="nearest-x", snap="each", within=timedelta(seconds=30)))
+chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
+```
+
+| Option | Does |
+| --- | --- |
+| `mode` | `"nearest-x"` reads each series along x, `"nearest-y"` along y (bars along y), `"nearest"` the one point nearest the pointer on screen. Left out, the marks choose: `"nearest-y"` for marks along y, `"nearest"` for points, else `"nearest-x"`. Charts of items alone (pies, trees, maps, networks, 3D) refuse the axis modes. |
+| `snap` | Along an axis, which point of each series is read (table below). |
+| `within` | How far from the pointer a point read may be, in the mode's units: a number in the axis' units, `{ milliseconds }` on a time axis (Python: a `timedelta`), or for `"nearest"`, `{ px }` (Python: `hg.Pixels(n)`). No limit by default. |
+
+| `snap` | Each series reads | The crosshair |
+| --- | --- | --- |
+| `"shared"` (default) | its point at the value nearest the pointer that any series has | at that value |
+| `"each"` | its own point nearest the pointer, ties to the earlier | at the pointer |
+| `"previous"` | its last point at or before the pointer | at the latest point read |
+| `"next"` | its first point at or after the pointer | at the earliest point read |
+
+- **`within`** is measured from the pointer's value: with `"shared"` the
+  shared value must be within it, with the others each series' point.
+- **Gaps.** A series reads nothing at a value inside a gap its
+  `continuity` leaves, under every `snap`.
+- **Unsorted series** are read by a scan; `"previous"` and `"next"` leave
+  them out. Heatmap cells and layout items are read under the pointer
+  whatever `snap` says.
+- **`inspection: false`** has the pointer read nothing: no tooltip, no
+  crosshair, and hover and click events without an `inspection` (their
+  `pointer` and `target` remain). The keyboard still reads and announces
+  points, so hiding inspection never removes keyboard access.
+- **Marks that stay out.** `inspect: false` keeps a mark's points out of
+  what inspection reads; `pick: false` keeps its items from being event
+  targets (and from `clickedRows`), so a click passes through decoration
+  to what is under it.
+- **Errors.** `within` needs a `mode`, whose units it is in. `"nearest"`
+  takes `{ px }` and no `snap`; the axis modes take a number or
+  `{ milliseconds }`, which needs a time axis (reported once the chart
+  draws: `inspection.within: the x axis is not a time axis; give a
+  number`).
 
 ## Tooltips
 
@@ -241,7 +299,7 @@ written as the axis' `format` writes it.
 
 | Option | Does |
 | --- | --- |
-| `tooltip` | `true` (default), `false`, or `{ mode, axisLabels }`. Modes: `"nearest-x"` (every series at the nearest x), `"nearest-y"`, `"nearest"` (the closest point on screen). Left out, the mode suits the marks. Charts of items alone (pies, trees, maps, networks, 3D) refuse the axis modes. |
+| `tooltip` | `true` (default), `false`, or `{ axisLabels }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw; inspection goes on for hover and click events. |
 | `tooltip.axisLabels` | Labels the crosshair on the axes. |
 | axis `tooltipFormat` | How tooltips, the keyboard, and crosshair labels write values, without changing ticks. |
 | mark `tooltip: { fields }` | More of the row: field names, or `{ field, label?, format? }`. |
@@ -293,17 +351,21 @@ report changes only.
 ```ts
 const stop = chart.on("select", ({ x }) => x && detail.setViewport(x));
 chart.on("viewport", ({ views, cause }) => cause !== "sync" && save(views));
-chart.on("click", ({ inspection }) => {
-  const point = inspection?.points[0];
-  if (point?.markId === "orders" && point.row !== undefined) openOrder(orders.value("id", point.row));
+chart.on("click", ({ target }) => {
+  if (target?.kind === "item" && target.markId === "orders" && target.row !== undefined)
+    openOrder(orders.value("id", target.row));
+  if (target?.kind === "axisLabel" && target.layer === "major") zoomToDay(target.value);
 });
+chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer.values));
 ```
 
 | Event | Reports |
 | --- | --- |
 | `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`). A map's or network's view is its plane's ranges. |
 | `select` | The selection (`x`, `y`, `lasso`), its `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table. |
-| `hover`, `click` | An `inspection` ([below](#panels-and-pixels)), `cause`, and the `revision` of the frame acted on; with `rowSelection`, `click` carries `rows`. |
+| `hover` | What the pointer or keyboard cursor is on, or what inspection reads there, changed: an input event (below). A cursor another chart shares (cause `"sync"`) or `showCursor` shows (`"api"`) reports once drawn. |
+| `click` | A press released without moving on a plot, an item, an axis label, or a legend entry, or Enter on the keyboard cursor (cause `"keyboard"`): an input event; with `rowSelection`, `rows`. |
+| `contextMenu` | A secondary press (a right click, a long press): an input event with its `pointer`. While a listener listens, the browser's own menu stays off the plots and items (not off axes or legends). |
 | `edge` | A view near an end of its extent: `scale`, `instance`, `panels`, `side`, `domain`, `bound`, `cause`. |
 | `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`, `cause` (this chart's gesture, click, or key, or `"sync"` for another writer), and `revision`. |
 | `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, and `panels` for panels' own legends. |
@@ -335,6 +397,42 @@ chart.on("select", ({ revision }) => {
 });
 ```
 
+**Input events** carry `pointer`, `target`, `inspection`, `cause`, and
+`revision`:
+
+- `pointer`: `x` and `y` in the chart's pixels, the `panel` it is over,
+  `inPlot`, and its `values` on the panel's axes (epoch ms on time axes,
+  through breaks; a fractional band index on category axes, whose
+  `categories` name the band). Undefined for the keyboard and for cursors
+  other charts share.
+- `target`: the topmost thing drawn there that input addresses, by `kind`:
+
+  | `kind` | Fields |
+  | --- | --- |
+  | `"item"` | `mark` (its index), `markId`, `item` (a key that stays the item's from frame to frame), `series`, `row`, `panel`, `box` |
+  | `"axisLabel"` | `panel`, `scale`, `layer` (`"major"` or a tick layer's id), `value`, `category`, `text`, `box` |
+  | `"legendEntry"` | `key`, `label`, `panel` (a subplot's legend) |
+  | `"plot"` | `panel`: a plot where no item is |
+
+- `inspection`: what [`inspection`](#inspection) reads there; undefined
+  where it reads nothing, and for the pointer with `inspection: false`.
+- `revision`: the frame the input acted on, what the user saw.
+
+Items are picked as the frame on screen drew them, in paint order
+(`zIndex`, then as listed), the topmost within reach: inside bars, bins,
+boxes, cells, candles, regions, areas, and text; within a point's radius
+plus 4 px (8 px for touch); within half a line's stroke plus 4 px of a
+segment drawn; within 4 px of a rule. Nothing outside a mark's clip is
+picked, and strokes are reached only where the clip shows them; lines
+and rules of no width draw nothing and are not reached, though a rule's
+label is. A line's item is the observation it draws nearest the pointer
+along its axis, also where it is drawn reduced or stepped. Input that
+arrives after the data changed and before the next frame waits for that
+frame, and names what it drew; a target's `row` follows the row picked.
+Marks with `pick: false` are passed over. Picking loads with the first
+listener of `hover`, `click`, or `contextMenu`, or a row selection taking
+clicks.
+
 **Inspection points.** Each point of an inspection has `mark` (the mark's
 index), `markId`, `key` (an opaque series or item key), `label`, `row`
 (the position of the row in the mark's table, which `table.value(field,
@@ -345,7 +443,9 @@ in the listener that receives it.
 
 **Keyboard selections.** Shift with the arrow keys selects a range along
 the axis the keys step along; Enter zooms to it where zoom is on; Escape
-clears. Selections are announced.
+clears. Selections are announced. Without a selection to zoom to, Enter
+is a `click` on the keyboard cursor's point (cause `"keyboard"`, no
+`pointer`).
 
 ## Selected rows
 

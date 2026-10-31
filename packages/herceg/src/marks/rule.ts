@@ -85,6 +85,10 @@ interface RuleStyle {
   legend?: boolean;
   /** Where the rules are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   id?: string;
 }
 
@@ -612,6 +616,8 @@ export function rule<S extends Schema>(
         "contributeDomain",
         "legend",
         "zIndex",
+        "pick",
+        "inspect",
         "axis",
         "facet",
         "panel",

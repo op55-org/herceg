@@ -195,7 +195,7 @@ describe("limits and sync in specs", () => {
     ).not.toThrow();
     expect(() => validateSpec(spec({ panels: false }))).not.toThrow();
     expect(() => validateSpec(spec({ cursor: { group: "a", snap: "later" } }))).toThrow(
-      'interaction.sync.cursor.snap: expected "nearest", "previous", or "next"',
+      'interaction.sync.cursor.snap: expected "shared", "each", "previous", or "next"',
     );
     expect(() => validateSpec(spec({ viewport: { group: "a", snap: "previous" } }))).toThrow(
       "interaction.sync.viewport",

@@ -55,6 +55,8 @@ type BoxPlotStyleOptions<S extends Schema> = Pick<
   | "panel"
   | "clip"
   | "zIndex"
+  | "pick"
+  | "inspect"
   | "id"
 >;
 
@@ -450,7 +452,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
   }
 
   /** Outlier dots at an end of the span reach their radius past it. */
-  protected override paintedPast(series: Series, row: number): readonly [number, number, number] {
+  override paintedPast(series: Series, row: number): readonly [number, number, number] {
     if (this.spec.outliers === false) return [1, 1, 0];
     const outliers = this.summaryOf(series).groups[row]!;
     const [low, high] = this.span(series, row);
@@ -509,6 +511,8 @@ export function boxplot<S extends Schema>(
       "panel",
       "clip",
       "zIndex",
+      "pick",
+      "inspect",
       "id",
     ]),
   } as unknown as BoxPlotSpec;

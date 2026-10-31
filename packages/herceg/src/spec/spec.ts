@@ -139,6 +139,14 @@ export interface ChartSpec {
    * few pixels on each side, more where text tends to reach.
    */
   padding?: Insets;
+  /**
+   * How the pointer, the keyboard, and cursors other charts share find the
+   * data the tooltip, hover and click events, and announcements read
+   * (see `InspectionSpec`); `false` has the pointer read nothing, while the
+   * keyboard still reads and announces points.
+   */
+  inspection?: InspectionSpec | false;
+  /** The tooltip box: `false` hides it (inspection goes on, for hover listeners). */
   tooltip?: boolean | TooltipSpec;
   interaction?: InteractionSpec;
   /**
@@ -607,14 +615,41 @@ export type TimeBreakSpec =
   | { dates: readonly string[] }
   | { from: number; to: number };
 
+/**
+ * How inspection reads the data at the pointer or the keyboard's cursor.
+ * Along an axis ("nearest-x", "nearest-y"), `snap` says which point of each
+ * series is read and `within` how far along the axis from the pointer's
+ * value it may be: a number in the axis' units, or `{ milliseconds }` on a
+ * time axis. "nearest" reads the one point nearest the pointer on screen,
+ * within `{ px }`. Without `mode`, the marks choose: "nearest-y" for marks
+ * along y (horizontal bars), "nearest" for points, else "nearest-x"; a
+ * `within` names its mode, whose units it is in. Panels of cells only
+ * (heatmaps) read the cell under the pointer whatever the mode.
+ */
+export type InspectionSpec =
+  | { mode?: "nearest-x" | "nearest-y"; snap?: Snap; within?: never }
+  | { mode: "nearest-x" | "nearest-y"; snap?: Snap; within?: number | { milliseconds: number } }
+  | { mode: "nearest"; snap?: never; within?: { px: number } };
+
+/** How inspection finds data: along x, along y, or the nearest point on screen. */
+export type InspectionMode = "nearest-x" | "nearest-y" | "nearest";
+
+/**
+ * Which point of each series an inspection along an axis reads:
+ * "shared" (the default), the value nearest the pointer that any series
+ * has, and every series' point there; "each", each series' own point
+ * nearest the pointer (ties to the earlier), the crosshair at the
+ * pointer; "previous", each series' last point at or before the pointer
+ * (an hourly series' 10:00 for 10:37), the crosshair at the latest read;
+ * "next", each series' first point at or after it, the crosshair at the
+ * earliest read. A series reads nothing inside a gap its `continuity`
+ * leaves, nor past `within`. "previous" and "next" read series sorted
+ * along the axis; series drawn in another order read nothing.
+ */
+export type Snap = "shared" | "each" | "previous" | "next";
+
+/** The tooltip's presentation; what it reads is the chart's `inspection`. */
 export interface TooltipSpec {
-  /**
-   * "nearest-x": every series at the x position nearest the pointer.
-   * "nearest-y": every series at the y position nearest the pointer (the
-   * default for horizontal bars).
-   * "nearest": the single nearest point.
-   */
-  mode?: "nearest-x" | "nearest-y" | "nearest";
   /**
    * Label the crosshair on the axes, as financial charts do: the inspected
    * value on the axis the crosshair follows, and the pointer's position on
@@ -861,20 +896,10 @@ export interface SyncChannelSpec {
   panel?: string;
 }
 
-/**
- * Which points a cursor at a shared value reads: the data's x nearest to it
- * across the series, and each series' point there ("nearest", the default,
- * as the pointer reads); each series' last point at or before it
- * ("previous", for readings at other frequencies: an hourly series' 10:00
- * for 10:37); or its first at or after it ("next"). Series with no point
- * there in view show none. "previous" and "next" read along x; cursors
- * along y (horizontal bars, lines along y) read the nearest.
- */
-export type CursorSnap = "nearest" | "previous" | "next";
-
 /** How a chart shows a cursor that is not its own pointer's: which points, and whether with its tooltip. */
 export interface CursorShowSpec {
-  snap?: CursorSnap;
+  /** Which point of each series it reads (see `Snap`); by default, as the chart's `inspection` reads. */
+  snap?: Snap;
   /** The chart's tooltip shows at the cursor too; off by default. */
   tooltip?: boolean;
 }
@@ -1061,6 +1086,10 @@ interface MarkBase {
    * default; grid lines are at -1. Any finite number.
    */
   zIndex?: number;
+  /** `false`: the pointer passes through the mark to what is under it (decorations). */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the mark out. */
+  inspect?: boolean;
 }
 
 /**

@@ -7,10 +7,13 @@
 // selections, and their events) stays in chart.ts, which the controller
 // changes through its host.
 
-import type { AxisFormat } from "../marks/mark.ts";
-import type { lowerPosition, placeAt, rowOf, Series, samePositions, xAt } from "../marks/series.ts";
+import type { Table } from "../data/table.ts";
+import type { MeasureText } from "../layout/text.ts";
+import type { AxisFormat, Mark, MarkKey } from "../marks/mark.ts";
+import type { Series, samePositions, xAt } from "../marks/series.ts";
 import type { AxisPlan } from "../model/axis.ts";
 import { type Binding, Bindings } from "../model/bindings.ts";
+import type { ItemResolver } from "../model/items.ts";
 import {
   cursorAxis,
   inspectPosition,
@@ -19,19 +22,35 @@ import {
   stepPoint,
 } from "../model/keyboard.ts";
 import type { ChartModel, DrawnPanel, Inspection, Viewport } from "../model/model.ts";
+import type { Picked, Picker, PickKit } from "../model/pick.ts";
 import type { RowLink } from "../model/row-selection.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
-import { inspectSnapped } from "../model/snap.ts";
 import { padded, unpadded } from "../model/view-padding.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { PlotRect, Scene, tickLabelGap } from "../scene/scene.ts";
-import type { BrushSpec, CursorShowSpec, CursorSnap, ZoomSpec } from "../spec/spec.ts";
+import type {
+  AxisGuide,
+  LabelBox,
+  PlotRect,
+  Scene,
+  TextItem,
+  tickLabelGap,
+} from "../scene/scene.ts";
+import type { BrushSpec, CursorShowSpec, Snap, ZoomSpec } from "../spec/spec.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
 import type { Selection } from "./brushed.ts";
 import type { ChartOptions } from "./chart.ts";
-import type { ChangeCause, Emitter, InputEvent } from "./events.ts";
+import type {
+  AxisLabelTarget,
+  ChangeCause,
+  Emitter,
+  InputEvent,
+  ItemTarget,
+  LegendEntryTarget,
+  Pointer,
+  Target,
+} from "./events.ts";
 import type { CursorPosition } from "./handle.ts";
 import type { svgElement } from "./svg-layer.ts";
 import { describeInspection, Tooltip } from "./tooltip.ts";
@@ -41,15 +60,29 @@ import { describeInspection, Tooltip } from "./tooltip.ts";
 // of its own, it would be one more round trip before the first input.
 export { Bindings };
 
+/** Picking's module, loaded when needed (see `Interaction.needPicking`). */
+type PickModule = typeof import("../model/pick.ts");
+
+/** Picking's module, once a chart on the page has loaded it: charts after that take it at once. */
+let picking: PickModule | undefined;
+
+/** Loads picking for the charts on the page: as the first that needs it does, and for this package's tests. */
+export const loadPicking = (): Promise<PickModule> =>
+  import("../model/pick.ts").then((module) => (picking = module));
+
+/**
+ * Where an input event keeps the panels drawn as it was captured, which
+ * writing it as JSON reads (web/events.ts): listeners of events before it
+ * may change them.
+ */
+const FRAME = Symbol.for("herceg.inputFrame");
+
 /**
  * Code the controller shares with the chart, handed to it so that loading
  * the controller moves none of it out of the chart's bundle.
  */
-export interface InteractionKit {
+export interface InteractionKit extends PickKit {
   svgElement: typeof svgElement;
-  placeAt: typeof placeAt;
-  rowOf: typeof rowOf;
-  lowerPosition: typeof lowerPosition;
   xAt: typeof xAt;
   samePositions: typeof samePositions;
   surface: typeof surface;
@@ -82,8 +115,12 @@ export interface InteractionHost {
   drawnRevision(): number;
   /** Draws the overlay again on the next frame. */
   schedule(): void;
-  /** Tells of code the controller could not load, as the chart tells of what fails. */
-  report(error: unknown): void;
+  /**
+   * Tells of code the controller could not load (phase "load"), or of
+   * options it refuses once a frame shows what they apply to ("compile"),
+   * as the chart tells of what fails.
+   */
+  report(error: unknown, phase: "load" | "compile"): void;
   /** Draws the scene again on the next frame. */
   invalidate(): void;
   /** Ends the frame without drawing the data: keeps the selection, then draws the overlay. */
@@ -144,6 +181,15 @@ export interface KeyboardCursor {
   /** What it last announced: where the cursor was, should its series go (hidden) before the next key. */
   last?: Inspection;
 }
+
+/**
+ * What the keyboard's cursor is on, kept so that data changes do not move
+ * it: a table row by identity (see `Table.identity`), or where an
+ * aggregate or a cell is (see `Interaction.#placeOf`).
+ */
+type KeyedItem =
+  | { table: Table; identity: number; generation: number }
+  | { place: readonly (number | string | undefined)[] };
 
 /**
  * A primary-button press on a plot until release: where it started, the
@@ -261,6 +307,47 @@ export class Interaction {
   /** Whether the tooltip shows tooltip fields and `renderTooltip`'s content. */
   #content: Promise<void> | undefined;
   #pointer: { x: number; y: number } | null = null;
+  /** Whether the pointer is a touch, which reaches further (see `#slop`). */
+  #touch = false;
+  /** The reach of the press being resolved, for what picks for it (see `#pressing`). */
+  #pressReach: number | undefined;
+  /** The element the pointer last moved over, which says the legend entry it is on. */
+  #over: EventTarget | null = null;
+  /**
+   * Picking (model/pick.ts): what input is on, tested against what frames
+   * drew. Loaded once events or row selections need it (`needPicking`);
+   * null if it failed to load, tried again as options change.
+   */
+  #picking: { module: PickModule; picker: Picker } | null | undefined;
+  #pickingLoad: Promise<void> | undefined;
+  /** Names items in events, for the configuration it was made of. */
+  #resolver: { marks: readonly unknown[]; resolver: ItemResolver } | undefined;
+  /**
+   * Clicks, secondary presses, and Enter on the keyboard cursor that came
+   * while what the frame on screen drew had changed, or picking loaded:
+   * picked once a frame draws the change (`resolve`); legend clicks read
+   * meanwhile, reported in their turn.
+   */
+  #pending: (
+    | {
+        type: "click" | "contextMenu";
+        x: number;
+        y: number;
+        event: MouseEvent;
+        label?: boolean | undefined;
+      }
+    | { type: "key"; keyboard: KeyboardCursor; item: KeyedItem | undefined }
+    | { type: "legend"; click: InputEvent }
+  )[] = [];
+  /** Input events captured as a frame drew, emitted when the controller next draws. */
+  #due: (() => void)[] = [];
+  /**
+   * What the pointer was on as the last frame drew, captured before any
+   * listener could change it: hover reports it whatever they change.
+   */
+  #captured: { scene: Scene; event: InputEvent } | null = null;
+  /** The inspection options last reported for a reach in milliseconds off a time axis (see `draw`). */
+  #checked: ChartOptions["inspection"];
   /** What the pointer read last, of a scene, which sharing it and drawing it read once (`#read`). */
   #reading: { x: number; y: number; scene: Scene; inspection: Inspection | undefined } | null =
     null;
@@ -269,8 +356,12 @@ export class Interaction {
   /** Where each touch is, for pinches. */
   readonly #touches = new Map<number, { x: number; y: number }>();
   #pinch: Pinch | null = null;
-  /** A press in a chart of a layout mark, which has nothing to drag: a click if released in place. */
-  #tap: { pointer: number; x: number; y: number; moved: boolean } | null = null;
+  /**
+   * A press with nothing to drag (on a layout mark's items, or off the
+   * panels): a click if released in place. Off the panels (`label`), only
+   * on an axis label.
+   */
+  #tap: { pointer: number; x: number; y: number; moved: boolean; label?: boolean } | null = null;
   /** Where a keyboard selection (Shift + arrows) started: a value along the cursor's axis and its label. */
   #brushAnchor: { value: number; label: string; axis: "x" | "y" } | null = null;
   /** What the last hover event reported, to emit only changes. */
@@ -361,9 +452,11 @@ export class Interaction {
     return (panel && this.#own.get(panel.key)) ?? this.#bindings;
   }
 
-  /** Pending while the crosshair labels or the tooltip's content load. */
+  /** Pending while the crosshair labels, the tooltip's content, or picking load. */
   get loading(): Promise<unknown>[] {
-    return [this.#crosshairLoading, this.#content].filter((loading) => loading !== undefined);
+    return [this.#crosshairLoading, this.#content, this.#pickingLoad].filter(
+      (loading) => loading !== undefined,
+    );
   }
 
   /** Throws for bindings of `options` it would refuse, as `configure` does, changing nothing. */
@@ -396,12 +489,60 @@ export class Interaction {
     if (typeof options.tooltip === "object" && options.tooltip.axisLabels) this.#loadCrosshair();
     if (options.renderTooltip || options.marks.some((mark) => mark.spec.tooltip))
       this.#loadContent();
+    // Picking that failed to load is tried again.
+    if (this.#picking === null) this.#picking = undefined;
+    this.needPicking();
+  }
+
+  /**
+   * Loads picking once what input is on is asked for: by listeners of
+   * hover, click, or contextMenu, or a row selection taking clicks
+   * (checked as options change, as listeners are added, and as input
+   * comes); at once if a chart on the page loaded it. Input it would read
+   * waits for it (`#fresh`), and is resolved once it is here.
+   */
+  needPicking(): void {
+    const host = this.#host;
+    if (
+      this.#picking !== undefined ||
+      this.#pickingLoad ||
+      (!host.rows() &&
+        !(["hover", "click", "contextMenu"] as const).some((t) => host.events.has(t)))
+    )
+      return;
+    if (picking) {
+      this.#usePicking(picking);
+      return;
+    }
+    this.#pickingLoad = loadPicking().then(
+      (module) => {
+        this.#pickingLoad = undefined;
+        if (this.#disposed) return;
+        this.#usePicking(module);
+        this.resolve(host.drawnRevision());
+        this.draw();
+      },
+      (error: unknown) => {
+        // Input that waited for it is dropped; new options try again.
+        this.#pickingLoad = undefined;
+        this.#picking = null;
+        this.#pending = [];
+        host.report(error, "load");
+      },
+    );
+  }
+
+  #usePicking(module: PickModule): void {
+    this.#picking = { module, picker: new module.Picker(this.#kit) };
+    // Clicks that select rows pick as events do (model/selected-rows.ts).
+    this.#host.model.picker = (x, y, accept) => this.#pick(x, y, accept);
   }
 
   /**
    * Plays input the chart held while this loaded, in order. Presses, wheels,
    * and double clicks on a layout mark's panels are its controls', which
-   * were not there to take them: those are dropped, as hovers are not.
+   * were not there to take them: those are dropped, as hovers and context
+   * menus are not.
    */
   play(held: readonly Event[]): void {
     // Read only for input held: measuring lays out the chart just drawn.
@@ -409,7 +550,8 @@ export class Interaction {
     const controlled = !!this.#host.model.items?.asked().length;
     const rect = this.#host.root.getBoundingClientRect();
     for (const event of held) {
-      const gesture = event instanceof MouseEvent && event.type !== "pointermove";
+      const gesture =
+        event instanceof MouseEvent && event.type !== "pointermove" && event.type !== "contextmenu";
       if (
         controlled &&
         gesture &&
@@ -422,7 +564,359 @@ export class Interaction {
 
   dispose(): void {
     this.#disposed = true;
+    this.#pending = [];
+    this.#due = [];
+    this.#captured = null;
     for (const stop of this.#cleanup) stop();
+  }
+
+  /**
+   * Resolves input against the frame just drawn, before any listener of
+   * the frame can change the chart: clicks and secondary presses that
+   * waited for it, and what the pointer at rest is on. Their events are
+   * emitted after, as the controller draws (`#due`), with what was
+   * captured here: rows named by their identities, read when asked.
+   */
+  resolve(revision: number): void {
+    const host = this.#host;
+    const scene = host.scene();
+    if (!scene || !this.#fresh()) return;
+    const pending = this.#pending;
+    this.#pending = [];
+    // Each is captured before any acts: what one click writes runs listeners.
+    for (const input of pending)
+      this.#due.push(
+        input.type === "legend"
+          ? () => host.events.emit("click", input.click)
+          : input.type === "key"
+            ? this.#enter(revision, this.#itemNow(input.keyboard, input.item))
+            : input.type === "click"
+              ? this.#clicked(input, input.event, revision, input.label)
+              : this.#menu(input.x, input.y, input.event, revision),
+      );
+    const pointer = this.#pointer;
+    this.#captured =
+      pointer && host.events.has("hover")
+        ? {
+            scene,
+            event: this.#stamped({
+              pointer: this.#pointerAt(pointer.x, pointer.y),
+              target: this.#targetAt(pointer.x, pointer.y, this.#over),
+              inspection: this.#inspection(),
+              cause: "pointer",
+              revision,
+            }),
+          }
+        : null;
+  }
+
+  /**
+   * Whether what the frame on screen drew is what the chart shows now:
+   * no change of options, data, or size since, which input waits for
+   * (`resolve`).
+   */
+  #fresh(): boolean {
+    const host = this.#host;
+    this.needPicking();
+    return (
+      (this.#picking !== undefined || !this.#pickingLoad) &&
+      !host.stale() &&
+      host.model.drawnMarks().every((drawn) => drawn.current())
+    );
+  }
+
+  /**
+   * Pixels past a shape the pointer may be and still pick it: more for a
+   * finger. A press resolved later reaches as its own pointer did.
+   */
+  #slop(): number {
+    return this.#pressReach ?? (this.#touch ? 8 : 4);
+  }
+
+  /**
+   * What `read` gives while what picks reaches as `event`'s pointer does,
+   * leaving the reach of the pointer now as it is.
+   */
+  #pressing<T>(event: MouseEvent, read: () => T): T {
+    const before = this.#pressReach;
+    this.#pressReach = (event as PointerEvent).pointerType === "touch" ? 8 : 4;
+    try {
+      return read();
+    } finally {
+      this.#pressReach = before;
+    }
+  }
+
+  /**
+   * The topmost item drawn within reach of (x, y), of marks `accept` takes
+   * (every one by default), of `series` only when it names one.
+   */
+  #pick(
+    x: number,
+    y: number,
+    accept?: (mark: Mark) => boolean,
+    series?: string,
+  ): Picked | undefined {
+    const query = { x, y, slop: this.#slop(), series };
+    return this.#picking?.picker.pick(this.#host.model, query, accept);
+  }
+
+  /** Where (x, y) is: its panel, whether in its plot, and its values on the panel's axes. */
+  #pointerAt(x: number, y: number): Pointer {
+    const { model } = this.#host;
+    const panels = model.panels();
+    const over = this.#panelAt(x, y);
+    // Off the plots of a chart of one panel, its axes still read.
+    const panel =
+      over ?? (panels.length === 1 && model.allPanels().length === 1 ? panels[0] : undefined);
+    const values: Record<string, number> = {};
+    const categories: Record<string, string> = {};
+    if (panel)
+      for (const axis of ["x", "y", "yRight"] as const) {
+        const scale = axis === "y" && !panel.drawsY ? undefined : panel[axis];
+        if (!scale) continue;
+        const value = scale.invert(axis === "x" ? x : y);
+        if (!Number.isFinite(value)) continue;
+        values[axis] = value;
+        const category = scale.categories?.[Math.round(value)];
+        if (category !== undefined) categories[axis] = category;
+      }
+    const all = model.allPanels();
+    const inItems = over
+      ? undefined
+      : all.find((p) => p.items && holds(p.plot, x, y) && !model.coveredAt(p.key, x, y));
+    // A layout mark's panel, off its plot too in a chart of one panel.
+    const items = inItems ?? (!panel && all.length === 1 && all[0]!.items ? all[0] : undefined);
+    // A map's or network's plane, in its units.
+    const plane = items
+      ? model.drawnMarks().find((drawn) => drawn.panel === items.key && drawn.layout?.plane)?.layout
+          ?.plane
+      : undefined;
+    if (plane) {
+      values.x = plane.x.invert(x);
+      values.y = plane.y.invert(y);
+    }
+    return {
+      x,
+      y,
+      panel: panel?.key ?? items?.key,
+      inPlot: !!over || !!inItems,
+      values,
+      categories,
+    };
+  }
+
+  /**
+   * What (x, y) is on: a legend entry (`element` the event's target), an
+   * item, an axis label, or a plot; undefined over nothing input addresses.
+   */
+  #targetAt(x: number, y: number, element?: EventTarget | null): Target | undefined {
+    const entry = this.#legendEntry(element);
+    if (entry !== undefined) return entry ?? undefined;
+    if (!this.#picking) return undefined;
+    const picked = this.#pick(x, y);
+    if (picked) return this.#itemTarget(picked);
+    const label = this.#axisLabel(x, y);
+    if (label) return label;
+    const { model } = this.#host;
+    const panel = model
+      .allPanels()
+      .find(({ key, plot }) => holds(plot, x, y) && !model.coveredAt(key, x, y));
+    return panel && { kind: "plot", panel: panel.key };
+  }
+
+  /** The item target of what was picked, its row named by identity until read. */
+  #itemTarget({ drawn, key, item, series }: Picked): ItemTarget {
+    const marks = this.#host.model.config.marks;
+    const mark = typeof key === "number" ? key : marks.findIndex(({ spec }) => spec.id === key);
+    const { part } = item;
+    return this.#target(
+      mark,
+      part.kind === "group"
+        ? part.key
+        : this.#items().keyOfRow(key, {
+            table: part.table,
+            position: part.position,
+            series,
+          }),
+      part.kind === "row" ? part : undefined,
+      series?.key,
+      drawn.panel,
+      item.box,
+    );
+  }
+
+  /**
+   * An item target: of mark `mark` (its index), keyed `item`, of the table
+   * row `row` names (its identity taken now, its position read when asked).
+   */
+  #target(
+    mark: number,
+    item: string,
+    row: { table: Table; position: number } | undefined,
+    series: string | undefined,
+    panel: string,
+    box: ItemTarget["box"],
+  ): ItemTarget {
+    const markId = this.#host.model.config.marks[mark]?.spec.id;
+    const table = row?.table;
+    const identity = row && table!.identity(row.position);
+    const generation = table?.generation;
+    return {
+      kind: "item",
+      mark,
+      markId,
+      item,
+      series,
+      get row() {
+        const position = table ? table.positionOf(identity!, generation!) : -1;
+        return position >= 0 ? position : undefined;
+      },
+      panel,
+      box,
+    };
+  }
+
+  /** Item keys of the chart's marks (model/items.ts), for its configuration. */
+  #items(): ItemResolver {
+    const { marks } = this.#host.model.config;
+    if (this.#resolver?.marks !== marks)
+      this.#resolver = {
+        marks,
+        resolver: this.#picking!.module.itemResolver(
+          marks.map((mark, i) => ({ mark: mark as Mark, key: (mark.spec.id ?? i) as MarkKey })),
+        ),
+      };
+    return this.#resolver.resolver;
+  }
+
+  /**
+   * The legend entry `element` is in: undefined outside the legend, null
+   * on the legend between its entries.
+   */
+  #legendEntry(element: EventTarget | null | undefined): LegendEntryTarget | null | undefined {
+    const legend = this.#host.legend;
+    if (!(element instanceof Node) || !legend.contains(element)) return undefined;
+    const button = (element instanceof Element ? element : element.parentElement)?.closest(
+      "button",
+    );
+    const scene = this.#host.scene();
+    if (!button || !scene) return null;
+    // Buttons are in the order of the legends' entries (dom/legend.ts).
+    const at = [...legend.querySelectorAll("button")].indexOf(button);
+    let k = 0;
+    for (const guide of scene.guides) {
+      if (guide.kind !== "legend") continue;
+      for (const { key, label } of guide.entries)
+        if (k++ === at) return { kind: "legendEntry", key, label, panel: guide.panel };
+    }
+    return null;
+  }
+
+  /**
+   * The tick label at (x, y): of axes the guides list, the boxes their
+   * guide laid out; of automatic axes, those of their labels as drawn.
+   */
+  #axisLabel(x: number, y: number): AxisLabelTarget | undefined {
+    const host = this.#host;
+    const scene = host.scene();
+    // Labels are measured as the chart measures text (as its frames do).
+    const measure = host.model.drawnMarks().find(({ frame }) => frame)?.frame?.measure;
+    if (!scene || !measure || !this.#picking) return undefined;
+    for (const panel of scene.panels) {
+      const drawn = host.model.panels().find(({ key }) => key === panel.key);
+      for (const axis of panel.axes) {
+        const scale = drawn?.[axis.scale as "x" | "y" | "yRight"];
+        const boxes =
+          axis.labelBoxes ?? (axis.layers ? [] : labelBoxes(axis, measure, this.#picking!.module));
+        for (const { layer, value, category, text, box } of boxes)
+          if (holds(box, x, y))
+            return {
+              kind: "axisLabel",
+              panel: panel.key,
+              scale: axis.scale,
+              layer,
+              value,
+              category: category ?? scale?.categories?.[value],
+              text,
+              box,
+            };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The keyboard cursor's item: a layout mark's item it is on, a row of its
+   * series, or an aggregate (a bin, a box) or a cell, the item drawn at its
+   * point in `inspection`.
+   */
+  #keyboardTarget(
+    inspection: Inspection | undefined,
+    keyboard = this.#keyboard,
+  ): ItemTarget | undefined {
+    const { model } = this.#host;
+    if (!keyboard || !this.#picking) return undefined;
+    const marks = model.config.marks;
+    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
+    const mark = series && model.markOf(series);
+    if (!series || !mark) {
+      // A layout mark's item: the one keyed, as its panel's record drew it.
+      const drawn = model.drawnMarks().find((d) => d.layout && d.panel === keyboard.panel);
+      const layout = drawn?.layout;
+      const at = layout ? layout.indexOf(keyboard.key) : -1;
+      const item = at < 0 ? undefined : this.#picking.module.layoutItem(drawn!, layout!.item(at));
+      return (
+        item &&
+        this.#itemTarget({ drawn: drawn!, key: item.mark ?? drawn!.mark, item, series: undefined })
+      );
+    }
+    const index = marks.indexOf(mark);
+    // Its series' point: grouped aggregates read several of one mark at a place.
+    const point = inspection?.points.find((p) => p.key === series.key);
+    if (!mark.table || mark.summarizes || mark.tooltip === "cell") {
+      // Picked at its point, moved into the plot: a bin or a box the view
+      // cuts off is picked where it shows.
+      const plot = model.panels().find(({ key }) => key === keyboard.panel)?.plot;
+      if (!point || !plot) return undefined;
+      const x = Math.min(Math.max(point.px, plot.x), plot.x + plot.width);
+      const y = Math.min(Math.max(point.py, plot.y), plot.y + plot.height);
+      // The cursor's series' own, whatever other series draw over it there.
+      const picked = this.#pick(x, y, (m) => m === mark, series.key);
+      const part = picked?.item.part;
+      const at = part?.kind === "group" ? part.point : undefined;
+      // Only the cursor's own: what shows where its point moved to may be another.
+      const own = at
+        ? at.series.key === series.key && at.position === keyboard.position
+        : x === point.px && y === point.py;
+      return picked && own ? this.#itemTarget(picked) : undefined;
+    }
+    const row = this.#kit.rowOf(series, keyboard.position);
+    return this.#target(
+      index,
+      this.#items().keyOfRow((mark.spec.id ?? index) as MarkKey, {
+        table: mark.table,
+        position: row,
+        series,
+      }),
+      { table: mark.table, position: row },
+      series.key,
+      keyboard.panel,
+      { x: point?.px ?? 0, y: point?.py ?? 0, width: 0, height: 0 },
+    );
+  }
+
+  /** Emits `event` as a hover, when what it is on, reads, or where the pointer is changed. */
+  #hover(event: InputEvent): void {
+    const { pointer, target, inspection, cause } = event;
+    // Nothing, as before anything was hovered, is "". A pointer that stays
+    // where it is on a view that moved is at other values.
+    const key =
+      pointer || target || inspection ? JSON.stringify([pointer, target, inspection]) : "";
+    if (key === this.#hovered) return;
+    this.#hovered = key;
+    this.#cursorCause = cause;
+    this.#host.events.emit("hover", event);
   }
 
   /**
@@ -448,8 +942,35 @@ export class Interaction {
       this.#edgesDue = false;
       this.#reportEdges();
     }
+    // A reach in milliseconds needs a time axis, which only the scene drawn
+    // tells: reported once for the options, until the axes it reads change.
+    const asked = host.options().inspection;
+    const within = asked ? asked.within : undefined;
+    const axis = asked && asked.mode === "nearest-y" ? "y" : "x";
+    const untimed =
+      typeof within === "object" &&
+      "milliseconds" in within &&
+      host.model.panels().some((panel) => panel[axis] && panel[axis].type !== "time");
+    if (!untimed) this.#checked = undefined;
+    else if (asked !== this.#checked) {
+      this.#checked = asked;
+      host.report(
+        new Error(`inspection.within: the ${axis} axis is not a time axis; give a number`),
+        "compile",
+      );
+    }
     const scene = host.scene();
     if (!scene) return;
+    // Input resolved as a frame drew is reported now, whatever listeners changed since.
+    const due = this.#due;
+    this.#due = [];
+    // A listener may destroy the chart: what is left of the input goes with it.
+    for (const emit of due) if (!this.#disposed) emit();
+    if (this.#disposed) return;
+    const captured = this.#captured;
+    this.#captured = null;
+    const resolved = captured?.scene === scene;
+    if (resolved) this.#hover(captured.event);
     // New data may move what a pointer at rest reads, and so its cursor.
     if (frame && this.#pointer) this.#sharePointer(this.#pointer.x, this.#pointer.y, true);
     // Listeners of what this frame reported: edges, the cursor shared.
@@ -470,8 +991,9 @@ export class Interaction {
     const inspects = showTooltip || hovering;
     const active = inspects ? this.#inspection() : undefined;
     this.#shareKeyboard(active);
-    // Over a plot where it reads nothing, the pointer's cursor is a line alone.
-    const bare = inspects && !active ? this.#sharing() : undefined;
+    // Over a plot where it reads nothing, the pointer's cursor is a line
+    // alone; with `inspection: false`, the pointer draws none here.
+    const bare = inspects && !active && options.inspection !== false ? this.#sharing() : undefined;
     const own = active ?? bare;
     // The cursor shows in the chart's other panels too (`sync.panels`). A
     // cursor another chart shares, or `showCursor` shows, shows in every
@@ -493,25 +1015,12 @@ export class Interaction {
             : []
         : [],
     );
-    if (hovering) {
-      // A cursor crossing a plot where no point is reads nothing, and the
-      // pointer's reads only what is under it.
-      const read = own ? active : shown.find(reads);
-      const key = inspectionKey(read);
-      if (key !== this.#hovered) {
-        this.#hovered = key;
-        // Read by the pointer or keyboard, else by a cursor shown here, or
-        // nothing since what read last went (Escape, the pointer leaving).
-        const cause = own
-          ? this.#pointer
-            ? "pointer"
-            : "keyboard"
-          : (host.cursor()?.cause ??
-            (this.#pointer ? "pointer" : this.#keyboard ? "keyboard" : this.#cursorCause));
-        this.#cursorCause = cause;
-        host.events.emit("hover", { inspection: read, cause, revision: host.drawnRevision() });
-        if (changed()) return;
-      }
+    // What the pointer or keyboard is on and reads (a cursor shown here is reported once drawn).
+    // Once what it is on can be read (`needPicking`).
+    const mine = !!(this.#pointer || this.#keyboard);
+    if (hovering && mine && !resolved && (this.#picking || !this.#pickingLoad)) {
+      this.#hover(this.#inputEvent(active));
+      if (changed()) return;
     }
     const { svgElement, tickLabelGap, surface } = this.#kit;
     const document = host.root.ownerDocument;
@@ -561,7 +1070,12 @@ export class Interaction {
       line.setAttribute("x2", vertical ? at : String(plot.x + plot.width));
       line.setAttribute("y1", vertical ? String(plot.y) : at);
       line.setAttribute("y2", vertical ? String(plot.y + plot.height) : at);
-      line.setAttribute("stroke", theme.axis);
+      const { stroke, strokeWidth, opacity, dash } = theme.style.crosshair;
+      line.setAttribute("stroke", stroke);
+      line.setAttribute("stroke-width", String(strokeWidth));
+      line.setAttribute("stroke-opacity", String(opacity));
+      if (dash.length > 0) line.setAttribute("stroke-dasharray", dash.join(" "));
+      else line.removeAttribute("stroke-dasharray");
       line.setAttribute("visibility", "visible");
       // A bar may end outside the plot; its marker would land on the axes.
       const inside = (point: { px: number; py: number }) =>
@@ -613,6 +1127,37 @@ export class Interaction {
     }
     // Tooltips not shown this frame hide: the chart's own first, then those of other panels.
     for (const tip of [this.#tooltip, ...this.#tips].slice(tipped)) tip.hide();
+    // A cursor another chart shares, or `showCursor` shows, once drawn; or
+    // nothing since what read last went (Escape, the pointer leaving).
+    if (hovering && !mine)
+      this.#hover(
+        this.#stamped({
+          pointer: undefined,
+          target: undefined,
+          inspection: shown.find(reads),
+          cause: host.cursor()?.cause ?? this.#cursorCause,
+          revision: host.drawnRevision(),
+        }),
+      );
+  }
+
+  /** What the pointer or the keyboard's cursor is on now, reading `inspection` there. */
+  #inputEvent(inspection: Inspection | undefined): InputEvent {
+    const pointer = this.#pointer;
+    return this.#stamped({
+      pointer: pointer ? this.#pointerAt(pointer.x, pointer.y) : undefined,
+      target: pointer
+        ? this.#targetAt(pointer.x, pointer.y, this.#over)
+        : this.#keyboardTarget(inspection),
+      inspection,
+      cause: pointer ? "pointer" : "keyboard",
+      revision: this.#host.drawnRevision(),
+    });
+  }
+
+  /** `event`, keeping the panels drawn now with it (see `FRAME`). */
+  #stamped<Event extends InputEvent>(event: Event): Event {
+    return Object.defineProperty(event, FRAME, { value: this.#host.model.panels() });
   }
 
   /**
@@ -772,15 +1317,18 @@ export class Interaction {
     if (!this.#host.scene()) return undefined;
     // A chart being turned, panned, or dragged shows no tooltip.
     if (model.items?.busy) return undefined;
-    // The model applies the configured tooltip mode.
-    if (this.#pointer) return this.#read(this.#pointer.x, this.#pointer.y);
-    const keyboard = this.#keyboard;
-    if (keyboard)
-      return (
-        model.inspectItem(keyboard.key, keyboard.panel) ??
-        inspectPosition(model, keyboard.key, keyboard.position, keyboard.panel, this.#kit)
-      );
-    return undefined;
+    // The model applies the chart's inspection; with `inspection: false`, the pointer reads nothing.
+    if (this.#pointer)
+      return this.#host.options().inspection === false
+        ? undefined
+        : this.#read(this.#pointer.x, this.#pointer.y);
+    return this.#keyboard ? this.#keyed(this.#keyboard) : undefined;
+  }
+
+  /** What the keyboard's cursor at `keyboard` reads: an item, or the points at its position. */
+  #keyed({ key, panel, position }: KeyboardCursor): Inspection | undefined {
+    const { model } = this.#host;
+    return model.inspectItem(key, panel) ?? inspectPosition(model, key, position, panel, this.#kit);
   }
 
   /**
@@ -794,7 +1342,7 @@ export class Interaction {
     const panel = pointer && this.#panelAt(pointer.x, pointer.y);
     const value = panel ? this.#valueAt(panel, axis, pointer.x, pointer.y) : null;
     if (!panel || value === null) return undefined;
-    const [line] = this.#cursorAt(value, axis, "nearest", [panel], true);
+    const [line] = this.#cursorAt(value, axis, undefined, [panel], true);
     return line && (this.#host.cursorScale() === axis || this.#across(line).length > 0)
       ? line
       : undefined;
@@ -816,7 +1364,7 @@ export class Interaction {
     const all = model.panels();
     const of = all.find(({ key }) => key === cursor.panel)?.[group];
     const panels = all.filter((panel) => cursor.panel === undefined || panel[group] === of);
-    return this.#cursorAt(value, axis, this.#showing(cursor).snap ?? "nearest", panels, true);
+    return this.#cursorAt(value, axis, this.#showing(cursor).snap, panels, true);
   }
 
   /** How a cursor the chart did not make shows: as `showCursor` said, else as its cursor channel says. */
@@ -829,13 +1377,14 @@ export class Interaction {
 
   /**
    * Each of `panels`' points at `value` along `axis` (a category by name on
-   * category axes), read as `snap` says: none where the value is out of a
-   * panel's view or in a break its axis leaves out.
+   * category axes), read as `snap` says (by default, as the chart's
+   * inspection reads): none where the value is out of a panel's view or in
+   * a break its axis leaves out.
    */
   #cursorAt(
     value: number | string,
     axis: "x" | "y",
-    snap: CursorSnap,
+    snap: Snap | undefined,
     panels: readonly DrawnPanel[],
     bare = false,
   ): Inspection[] {
@@ -855,11 +1404,9 @@ export class Interaction {
       if (!(px >= from && px <= from + length)) return [];
       const inspection = !reads
         ? undefined
-        : (snap === "previous" || snap === "next") && axis === "x" && !scale.categories
-          ? inspectSnapped(model, panel.key, at, snap, this.#kit)
-          : axis === "x"
-            ? model.inspect(px, plot.y + plot.height / 2, "nearest-x", panel.key)
-            : model.inspect(plot.x + plot.width / 2, px, "nearest-y", panel.key);
+        : axis === "x"
+          ? model.inspect(px, plot.y + plot.height / 2, "nearest-x", panel.key, snap)
+          : model.inspect(plot.x + plot.width / 2, px, "nearest-y", panel.key, snap);
       if (inspection) return [inspection];
       // A cursor shown, with no point under it, crosses the plot alone.
       const label = named ? value : model.formatsOf(undefined, panel.key)[axis](at);
@@ -890,9 +1437,7 @@ export class Interaction {
     );
     const { categories } = from[axis];
     const value = categories ? categories[active.value] : active.value;
-    return value === undefined
-      ? []
-      : this.#cursorAt(value, axis, show.snap ?? "nearest", others, true);
+    return value === undefined ? [] : this.#cursorAt(value, axis, show.snap, others, true);
   }
 
   /** The axis the chart's data is placed along, which its cursor follows (see `cursorAxis`). */
@@ -926,7 +1471,10 @@ export class Interaction {
    * (a line's nearest point, a calendar's cell), else the pointer's value.
    */
   #sharedAt(panel: DrawnPanel, axis: "x" | "y", x: number, y: number): number | string | null {
-    const read = this.#host.model.items?.busy ? undefined : this.#read(x, y);
+    const read =
+      this.#host.model.items?.busy || this.#host.options().inspection === false
+        ? undefined
+        : this.#read(x, y);
     if (read?.axis !== axis || (read.panel ?? "") !== panel.key)
       return this.#valueAt(panel, axis, x, y);
     const { categories } = panel[axis];
@@ -996,6 +1544,8 @@ export class Interaction {
       // Inspection reads the new values: they show first.
       host.showValues();
       this.#pointer = local(event);
+      this.#touch = event.pointerType === "touch";
+      this.#over = event.target;
       this.#keyboard = null;
       this.#brushAnchor = null;
       const press = this.#press;
@@ -1031,7 +1581,7 @@ export class Interaction {
       this.#sharePointer(x, y);
     });
     on("pointerleave", (event) => {
-      this.#pointer = this.#reading = this.#pointerShared = null;
+      this.#pointer = this.#reading = this.#pointerShared = this.#over = null;
       // A captured drag leaves only when released; any other press ends here.
       this.#press = null;
       if (this.#tap?.pointer === event.pointerId) this.#tap = null;
@@ -1087,9 +1637,15 @@ export class Interaction {
         else if (event.button === 0) this.#tap = { pointer: event.pointerId, x, y, moved: false };
         return;
       }
-      // Presses on the axes, titles, gaps, or legend are not on the data.
+      // Presses on the axes, titles, gaps, or legend are not on the data:
+      // released in place on an axis label, they click it (which, while
+      // picking loads, it tells once loaded).
       const panel = this.#panelAt(x, y);
-      if (!panel) return;
+      if (!panel) {
+        if (event.button === 0 && (!this.#picking || this.#axisLabel(x, y)))
+          this.#tap = { pointer: event.pointerId, x, y, moved: false, label: true };
+        return;
+      }
       const action = this.#bindingsIn(panel).match("drag", event, OWN)?.action;
       const type = action?.type;
       const mode = type === "pan" || type === "brush" || type === "cursor" ? type : "click";
@@ -1114,7 +1670,7 @@ export class Interaction {
       if (tap) {
         if (tap.pointer !== event.pointerId) return;
         this.#tap = null;
-        if (!tap.moved) this.#click(local(event), event);
+        if (!tap.moved) this.#click(local(event), event, tap.label);
         return;
       }
       const press = this.#press;
@@ -1186,6 +1742,43 @@ export class Interaction {
       if (action?.type === "reset") this.#reset(panel);
       else if (action?.type === "zoom" && panel)
         this.#zoomAt(this.#shown(panel), { x, y }, 1 / (action.factor ?? 2), action.axes);
+    });
+
+    // A secondary press reports where it is and what it is on; while it is
+    // listened to, the browser's own menu stays off the plots.
+    on("contextmenu", (event) => {
+      if (!host.scene() || !host.events.has("contextMenu")) return;
+      const { x, y } = local(event);
+      if (this.#panelAt(x, y) || this.#onItems(x, y)) event.preventDefault();
+      if (this.#fresh()) this.#menu(x, y, event)();
+      else this.#pending.push({ type: "contextMenu", x, y, event });
+    });
+    // A legend entry's button clicked, by the pointer or a key, is a click
+    // on its entry: read before the legend acts on it (as the event goes
+    // down to the button), reported after (as it comes back up). One the
+    // chart held before this loaded is read as it is played.
+    const legendClick = (event: MouseEvent): InputEvent | undefined => {
+      const target = host.events.has("click") ? this.#legendEntry(event.target) : undefined;
+      if (!target) return undefined;
+      const { x, y } = local(event);
+      // A button pressed from the keyboard clicks with no count.
+      const keyboard = event.detail === 0;
+      return this.#stamped({
+        pointer: keyboard ? undefined : this.#pointerAt(x, y),
+        target,
+        inspection: undefined,
+        cause: keyboard ? "keyboard" : "pointer",
+        revision: host.drawnRevision(),
+      });
+    };
+    let read: { event: Event; click: InputEvent | undefined } | undefined;
+    on("click", (event) => (read = { event, click: legendClick(event) }), { capture: true });
+    on("click", (event) => {
+      const click = read?.event === event ? read.click : legendClick(event);
+      read = undefined;
+      // After input still waiting to be read, in order.
+      if (click && this.#pending.length) this.#pending.push({ type: "legend", click });
+      else if (click) host.events.emit("click", click);
     });
 
     on("keydown", (event) => this.#key(event));
@@ -1520,21 +2113,149 @@ export class Interaction {
 
   /**
    * A press released without dragging: selects the rows there (with
-   * `rowSelection`), clears the brushed selection, and reports the data there.
+   * `rowSelection`), clears the brushed selection, and reports what it is
+   * on; while what the frame on screen drew has changed, once a frame
+   * draws the change (`resolve`), so that it picks what the user saw.
    */
-  #click(point: { x: number; y: number }, event: MouseEvent) {
+  #click(point: { x: number; y: number }, event: MouseEvent, label?: boolean) {
+    if (this.#fresh()) this.#clicked(point, event, undefined, label)();
+    else this.#pending.push({ type: "click", ...point, event, label });
+  }
+
+  /**
+   * A click: what it is on, what the inspection reads there, and the rows
+   * it selects, captured now; returns what it does with them (selects the
+   * rows, clears the brush, reports the click), which runs listeners. A
+   * `label` click (off the panels) is one only on an axis label.
+   */
+  #clicked(
+    { x, y }: { x: number; y: number },
+    event: MouseEvent,
+    revision = this.#host.drawnRevision(),
+    label?: boolean,
+  ): () => void {
     const host = this.#host;
-    const written = host.rows()?.clicked(point.x, point.y, event);
-    // A click on an item standing for none of the bound rows keeps the brush too.
-    const panel = this.#panelAt(point.x, point.y);
-    if (host.model.interactionOf(panel?.key)?.brush && written !== null) host.select(null);
-    if (host.events.has("click"))
-      host.events.emit("click", {
-        inspection: host.model.inspect(point.x, point.y),
-        cause: "pointer",
-        revision: host.drawnRevision(),
-        ...written,
-      });
+    // A press off the panels clicks an axis label, or nothing.
+    if (label && !this.#axisLabel(x, y)) return () => {};
+    const payload = host.events.has("click") ? this.#pressed(x, y, event, revision) : undefined;
+    // Row selections pick with the reach of its pointer, as its event does.
+    const select = this.#pressing(event, () => host.rows()?.clicked(x, y, event));
+    const brushed = !!host.model.interactionOf(this.#panelAt(x, y)?.key)?.brush;
+    return () => {
+      const written = select?.();
+      // A click on an item standing for none of the bound rows keeps the brush too.
+      if (brushed && written !== null) host.select(null);
+      // Onto the event captured, which keeps the panels it was captured with.
+      if (payload) host.events.emit("click", Object.assign(payload, written));
+    };
+  }
+
+  /** A secondary press's event, captured now, to emit. */
+  #menu(x: number, y: number, event: MouseEvent, revision?: number): () => void {
+    const host = this.#host;
+    const payload = this.#pressed(x, y, event, revision) as InputEvent & { pointer: Pointer };
+    return () => host.events.emit("contextMenu", payload);
+  }
+
+  /** What the keyboard's cursor is on (see `KeyedItem`); undefined for layout marks', which keys name. */
+  #keyedItem(keyboard: KeyboardCursor): KeyedItem | undefined {
+    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
+    const mark = series && this.#host.model.markOf(series);
+    if (!series || !mark) return undefined;
+    const table = mark.table;
+    if (!table || mark.summarizes || mark.tooltip === "cell")
+      return { place: this.#placeOf(mark, series, keyboard.position, keyboard.panel) };
+    const row = this.#kit.rowOf(series, keyboard.position);
+    return { table, identity: table.identity(row), generation: table.generation };
+  }
+
+  /**
+   * Where the aggregate or cell at `position` of `series` is: its values
+   * along the axes that place it (the axis the mark reads along, or both),
+   * by name on category axes, whose indices data changes move.
+   */
+  #placeOf(
+    mark: Mark,
+    series: Series,
+    position: number,
+    panel: string,
+  ): (number | string | undefined)[] {
+    const drawn = this.#host.model.panels().find(({ key }) => key === panel);
+    const row = this.#kit.rowOf(series, position);
+    const along = mark.tooltip === "x" || mark.tooltip === "y" ? mark.tooltip : undefined;
+    return (["x", "y"] as const).map((axis) => {
+      if (along && along !== axis) return undefined;
+      // Its place on the panel's axis, whose categories may be the panel's own.
+      const value = this.#kit.placeAt(series, axis, row);
+      const scale = axis === "x" ? drawn?.x : mark.spec.axis === "right" ? drawn?.yRight : drawn?.y;
+      return scale?.categories?.[value] ?? value;
+    });
+  }
+
+  /**
+   * `keyboard` on what it was on (`item`), wherever data changes since
+   * have moved it in its series; null once it is gone, or its mark reads
+   * another table.
+   */
+  #itemNow(keyboard: KeyboardCursor, item: KeyedItem | undefined): KeyboardCursor | null {
+    if (!item) return keyboard;
+    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
+    const mark = series && this.#host.model.markOf(series);
+    if (!series || !mark) return null;
+    const row =
+      "table" in item && mark.table === item.table
+        ? item.table.positionOf(item.identity, item.generation)
+        : -1;
+    if ("table" in item && row < 0) return null;
+    for (let position = 0; position < series.length; position++) {
+      const found =
+        "table" in item
+          ? this.#kit.rowOf(series, position) === row
+          : this.#placeOf(mark, series, position, keyboard.panel).every(
+              (value, i) => value === item.place[i],
+            );
+      if (found) return { ...keyboard, position };
+    }
+    return null;
+  }
+
+  /**
+   * Enter on the keyboard cursor (as it was when pressed): a click on what
+   * it is on, captured now, to emit; nothing for a row gone since.
+   */
+  #enter(revision = this.#host.drawnRevision(), keyboard = this.#keyboard): () => void {
+    const host = this.#host;
+    if (!keyboard) return () => {};
+    const inspection = this.#keyed(keyboard) ?? keyboard.last;
+    const payload = this.#stamped({
+      pointer: undefined,
+      target: this.#keyboardTarget(inspection, keyboard),
+      inspection,
+      cause: "keyboard",
+      revision,
+    });
+    return () => host.events.emit("click", payload);
+  }
+
+  /**
+   * What a press at (x, y) reports: where, what it is on (picked with the
+   * reach of its pointer, which picks for row selections too), and what
+   * the inspection reads there.
+   */
+  #pressed(
+    x: number,
+    y: number,
+    event: MouseEvent,
+    revision = this.#host.drawnRevision(),
+  ): InputEvent {
+    const host = this.#host;
+    return this.#stamped({
+      pointer: this.#pointerAt(x, y),
+      target: this.#pressing(event, () => this.#targetAt(x, y, event.target)),
+      inspection: host.options().inspection === false ? undefined : host.model.inspect(x, y),
+      cause: "pointer",
+      revision,
+    });
   }
 
   /**
@@ -1570,7 +2291,18 @@ export class Interaction {
       const selection = host.selection();
       const owner = host.owner();
       const at = owner?.plane ? undefined : panels.find(({ key }) => owner?.panels.includes(key));
-      if (!selection || !at || !this.#zooms(selection, at)) return;
+      if (!selection || !at || !this.#zooms(selection, at)) {
+        // Else Enter on the keyboard cursor clicks what it is on, as the pointer would.
+        if (this.#keyboard && host.events.has("click")) {
+          event.preventDefault();
+          if (this.#fresh()) this.#enter()();
+          else {
+            const keyboard = this.#keyboard;
+            this.#pending.push({ type: "key", keyboard, item: this.#keyedItem(keyboard) });
+          }
+        }
+        return;
+      }
       event.preventDefault();
       this.#brushAnchor = null;
       host.select(null, undefined, "keyboard");
@@ -1793,7 +2525,7 @@ export class Interaction {
       })
       // Without it, the crosshair has no labels, until the options ask again.
       .catch((error: unknown) => {
-        this.#host.report(error);
+        this.#host.report(error, "load");
         return null;
       })
       .then((labels) => {
@@ -1824,7 +2556,7 @@ export class Interaction {
         );
       })
       // Without it, tooltips show the built-in content, and inspections no fields.
-      .catch((error: unknown) => this.#host.report(error))
+      .catch((error: unknown) => this.#host.report(error, "load"))
       .then(() => {
         this.#content = undefined;
         // Inspections read the fields from the next frame on.
@@ -1888,7 +2620,29 @@ function holds(plot: PlotRect, x: number, y: number): boolean {
   return x >= plot.x && x <= plot.x + plot.width && y >= plot.y && y <= plot.y + plot.height;
 }
 
-/** What a hover event reports, as a key that changes when any of it does. */
-function inspectionKey(inspection: Inspection | undefined): string {
-  return inspection ? JSON.stringify(inspection) : "";
+/**
+ * The boxes of an automatic axis' tick labels, as drawn: its text items in
+ * the order of its ticks (its title after them), measured as picking
+ * measures text.
+ */
+function labelBoxes(
+  axis: AxisGuide,
+  measure: MeasureText,
+  { textBox }: PickModule,
+): readonly LabelBox[] {
+  const texts = axis.items.filter((item): item is TextItem => item.type === "text");
+  return axis.ticks.flatMap(({ value, label }, k) => {
+    const item = texts[k];
+    return item && label
+      ? [
+          {
+            layer: "major",
+            value,
+            category: undefined,
+            text: label,
+            box: textBox(item, { measure }),
+          },
+        ]
+      : [];
+  });
 }

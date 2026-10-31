@@ -42,8 +42,10 @@ const metrics = table({ time: time(timestamps), p50, p99 });
 - **Live data.** Keep the table in a plain `const`, `shallowRef`, or
   `markRaw` (deep proxies cannot reach its private fields) and change it
   directly: `data.appendRow(...)` draws on the next frame.
-- **Events** are Vue events (`@select`, `@viewport`, `@hover`, `@click`,
-  ...); a template ref's `chart` is herceg's chart handle.
+- **Events** are Vue events (`@select`, `@viewport`, ...); input events
+  (`@hover`, `@click`, `@context-menu`) are listener props, which the chart
+  listens for only while given. A template ref's `chart` is herceg's chart
+  handle.
 - **Tooltips** of your own render in the `renderTooltip` slot.
 - **Errors** show in the chart's place, or with `error-mode="throw"` are
   thrown for `onErrorCaptured` or the app's `errorHandler`.

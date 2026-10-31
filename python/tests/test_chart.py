@@ -1951,7 +1951,7 @@ def test_option_types_list_every_option():
 
 def test_tooltip_fields_belong_to_marks():
     data = {"t": [0, 1], "p99": [210.0, 304.0], "requests": [9800, 12480], "host": ["a", "b"]}
-    chart = hg.Chart(data, tooltip=hg.Tooltip(mode="nearest")).line(
+    chart = hg.Chart(data, tooltip=hg.Tooltip(axis_labels=True)).line(
         "t",
         "p99",
         tooltip=hg.Tooltip(
@@ -1962,7 +1962,7 @@ def test_tooltip_fields_belong_to_marks():
         ),
     )
     spec, _ = chart.to_spec()
-    assert spec["tooltip"] == {"mode": "nearest"}
+    assert spec["tooltip"] == {"axisLabels": True}
     # Columns only the tooltip shows travel with the others.
     (table,) = spec["data"].values()
     assert set(table["columns"]) == {"t", "p99", "requests", "host"}
@@ -1974,9 +1974,9 @@ def test_tooltip_fields_belong_to_marks():
     }
     # A one-call helper's tooltip is its chart's, and its fields its mark's.
     spec, _ = hg.line(
-        data, "t", "p99", tooltip=hg.Tooltip(mode="nearest", fields=["requests"])
+        data, "t", "p99", tooltip=hg.Tooltip(axis_labels=True, fields=["requests"])
     ).to_spec()
-    assert spec["tooltip"] == {"mode": "nearest"}
+    assert spec["tooltip"] == {"axisLabels": True}
     assert spec["marks"][0]["tooltip"] == {"fields": ["requests"]}
     spec, _ = hg.line(data, "t", "p99", tooltip=hg.Tooltip(fields=["requests"])).to_spec()
     assert "tooltip" not in spec
@@ -1990,12 +1990,107 @@ def test_tooltip_fields_belong_to_marks():
     assert spec["y"] == {"tooltipFormat": {"style": "unit", "unit": "millisecond"}}
 
 
+def test_inspection_options():
+    data = {"t": [dt.datetime(2024, 1, 1), dt.datetime(2024, 1, 2)], "v": [1.0, 2.0]}
+    each = hg.InspectionOptions(mode="nearest-x", snap="each", within=dt.timedelta(seconds=30))
+    spec, _ = (
+        hg.Chart(data, inspection=each)
+        .line(x="t", y="v")
+        .point(x="t", y="v", pick=False, inspect=False)
+        .to_spec()
+    )
+    assert spec["inspection"] == {
+        "mode": "nearest-x",
+        "snap": "each",
+        "within": {"milliseconds": 30000.0},
+    }
+    assert "pick" not in spec["marks"][0]
+    assert spec["marks"][1]["pick"] is False
+    assert spec["marks"][1]["inspect"] is False
+    near = hg.InspectionOptions(mode="nearest", within=hg.Pixels(20))
+    assert hg.Chart(data, inspection=near).line(x="t", y="v").to_spec()[0]["inspection"] == {
+        "mode": "nearest",
+        "within": {"px": 20.0},
+    }
+    numbers = hg.InspectionOptions(mode="nearest-y", snap="previous", within=0.5)
+    assert numbers._spec() == {"mode": "nearest-y", "snap": "previous", "within": 0.5}
+    # False: the pointer inspects nothing; the tooltip is still the chart's.
+    spec, _ = hg.Chart(data, inspection=False).line(x="t", y="v").to_spec()
+    assert spec["inspection"] is False
+    assert spec["tooltip"] is True
+    # Helpers and express charts take it as the chart's.
+    assert hg.line(data, "t", "v", inspection=each).to_spec()[0]["inspection"]["snap"] == "each"
+    channel = hg.SyncChannel("ops", snap="each")
+    spec, _ = hg.Chart(data, sync=hg.Sync(cursor=channel)).line(x="t", y="v").to_spec()
+    assert spec["interaction"]["sync"]["cursor"] == {"group": "ops", "snap": "each"}
+    theme = hg.Theme(style=hg.Style(crosshair=hg.StrokeStyle(stroke="#888", dash="--")))
+    spec, _ = hg.Chart(data, theme=theme).line(x="t", y="v").to_spec()
+    assert spec["theme"]["style"]["crosshair"]["stroke"] == "#888"
+
+
+def test_inspection_reach_may_be_zero_as_a_duration_too():
+    for within in (0, dt.timedelta(0), np.timedelta64(0, "s")):
+        options = hg.InspectionOptions(mode="nearest-x", within=within)
+        assert options._spec()["within"] in (0, {"milliseconds": 0})
+    with pytest.raises(hg.ChartError, match="expected a duration of at least 0"):
+        hg.InspectionOptions(mode="nearest-x", within=dt.timedelta(seconds=-1))
+    with pytest.raises(hg.ChartError, match="Continuity max_gap: expected a positive duration"):
+        hg.Continuity(max_gap=dt.timedelta(0))
+
+
+@pytest.mark.parametrize(
+    ("make", "message"),
+    [
+        (
+            lambda: hg.InspectionOptions(mode="nearest", within=dt.timedelta(seconds=3)),
+            r'^InspectionOptions within: "nearest" measures on screen; give hg\.Pixels\(n\)$',
+        ),
+        (
+            lambda: hg.InspectionOptions(mode="nearest-x", within=hg.Pixels(3)),
+            r'^InspectionOptions within: "nearest-x" measures along its axis; give a number',
+        ),
+        (
+            lambda: hg.InspectionOptions(within=3),
+            r"^InspectionOptions within: its units are the mode's; give mode=",
+        ),
+        (
+            lambda: hg.InspectionOptions(mode="nearest", snap="each"),
+            r'^InspectionOptions snap: "nearest" reads one point; drop snap',
+        ),
+        (
+            lambda: hg.InspectionOptions(snap="nearest"),  # type: ignore[arg-type]
+            r'^InspectionOptions snap: expected "shared", "each", "previous", or "next"',
+        ),
+        (
+            lambda: hg.InspectionOptions(mode="nearest-x", within=-1),
+            r"^InspectionOptions within: expected a number of at least 0; received -1$",
+        ),
+        (
+            lambda: hg.Chart({"t": [1]}, tooltip="nearest").to_spec(),  # type: ignore[arg-type]
+            r"^Chart tooltip: the mode is the inspection's; give "
+            r'inspection=hg\.InspectionOptions\(mode="nearest"\)$',
+        ),
+        (
+            lambda: hg.Chart({"t": [1]}, inspection=True).to_spec(),  # type: ignore[arg-type]
+            r"^Chart inspection: expected an hg\.InspectionOptions, or False; received True$",
+        ),
+        (
+            lambda: hg.Chart({"t": [1], "v": [2]}).line("t", "v", pick="none"),  # type: ignore[arg-type]
+            r'^line pick: expected True or False; received "none"$',
+        ),
+    ],
+)
+def test_inspection_options_are_refused(make, message):
+    with pytest.raises(hg.ChartError, match=message):
+        make()
+
+
 def test_tooltip_fields_are_refused_where_they_do_not_belong():
     data = {"t": [0, 1], "p99": [210.0, 304.0], "host": ["a", "b"]}
     with pytest.raises(ValueError, match=r"^Chart tooltip fields: belong to the marks"):
         hg.Chart(data, tooltip=hg.Tooltip(fields=["host"])).line("t", "p99").to_spec()
-    with pytest.raises(ValueError, match=r"^line tooltip mode: is the chart's"):
-        hg.Chart(data).line("t", "p99", tooltip=hg.Tooltip(mode="nearest"))
+    with pytest.raises(ValueError, match=r"^line tooltip axis_labels: is the chart's"):
+        hg.Chart(data).line("t", "p99", tooltip=hg.Tooltip(axis_labels=True))
     with pytest.raises(hg.ChartError, match=r"^line tooltip fields\[0\]: no column 'hots'"):
         hg.Chart(data).line("t", "p99", tooltip=hg.Tooltip(fields=["hots"]))
     with pytest.raises(hg.ChartError, match=r"^line tooltip fields\[0\]: expected a column name"):

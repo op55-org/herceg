@@ -76,7 +76,7 @@ describe("boxplot", () => {
     const [box] = geometry<RectGeometry>(scene, "rect");
     // Wider than tall: the box spans values along x.
     expect(box!.rects[2]!).toBeGreaterThan(box!.rects[3]!);
-    expect(model.tooltipMode()).toBe("nearest-y");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-y");
   });
 
   it("draws what a log axis can place, and nothing of a box it cannot", () => {
@@ -109,7 +109,7 @@ describe("boxplot", () => {
     });
     const grouped = build({
       marks: [boxplot(pair, { x: "g", y: "v", series: "s" })],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
     });
     const [, second] = geometry<RectGeometry>(grouped.scene, "rect");
     const [bx, by, bw, bh] = Array.from(second!.rects.subarray(0, 4)) as number[];

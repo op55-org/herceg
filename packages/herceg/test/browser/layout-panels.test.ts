@@ -1,5 +1,6 @@
 // Layout marks in facet panels and subplots in the browser: tooltips, clicks,
 // keyboard reading, the legend, and the wheel, panel by panel.
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";

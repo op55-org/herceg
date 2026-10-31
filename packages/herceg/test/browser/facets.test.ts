@@ -1,4 +1,5 @@
 // Charts with facets in the browser: pointer, brush, keyboard, and synced cursors per panel.
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";

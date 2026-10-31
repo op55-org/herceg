@@ -2,6 +2,7 @@
 // real pointer and keyboard input: facet panels move together, each subplot
 // alone, and the pointer and keys act in the panel they are in.
 
+import "./interactive.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { userEvent } from "vitest/browser";
 import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";

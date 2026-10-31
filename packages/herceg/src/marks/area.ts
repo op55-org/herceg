@@ -148,6 +148,10 @@ interface AreaCommon<S extends Schema> extends ItemKeyed<S> {
   legend?: false;
   /** Where the areas are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   id?: string;
 }
 
@@ -1144,6 +1148,8 @@ export function area<S extends Schema>(
       "panel",
       "clip",
       "zIndex",
+      "pick",
+      "inspect",
     ]),
     // Lists of fields are copied; a field or a coordinate is kept as given.
     ...(x !== undefined && { x: Array.isArray(x) ? [...x] : x }),

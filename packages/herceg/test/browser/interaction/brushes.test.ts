@@ -1,6 +1,7 @@
 // Brushes and lassos in every placement: a selection of the instances of
 // the panel it is drawn in, along its axes, which belongs to the panels
 // drawing all of them, leaving every view as it was.
+import "../interactive.ts";
 import { describe, expect } from "vitest";
 import type { Chart } from "../../../src/dom/chart.ts";
 import type { Axis } from "../../../src/dom/handle.ts";

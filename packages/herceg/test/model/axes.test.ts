@@ -191,7 +191,7 @@ describe("right y axis", () => {
       marks: [line(pair, { x: "t", y: "a" }), line(pair, { x: "t", y: "b", axis: "right" })],
       y: { domain: [0, 10] },
       yRight: { domain: [0, 1000] },
-      tooltip: { mode: "nearest-y" },
+      inspection: { mode: "nearest-y" },
     });
     const left = model.yScale()!;
     // b is 5 on the right axis, far below the pointer; only left values count.
@@ -201,7 +201,7 @@ describe("right y axis", () => {
     // With every series on the right, the right axis is the one followed.
     const only = build({
       marks: [line(pair, { x: "t", y: "b", axis: "right" })],
-      tooltip: { mode: "nearest-y" },
+      inspection: { mode: "nearest-y" },
     }).model;
     const right = only.yRightScale()!;
     const along = only.inspect(only.xScale()!.map(1), right.map(500)) as AxisInspection;

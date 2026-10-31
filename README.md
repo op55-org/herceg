@@ -17,8 +17,9 @@ whose data is large or changes often.
 - **Large data.** Level-of-detail reduction for lines and areas, Canvas for
   dense marks, and WebGL for large point clouds and 3D, chosen per chart.
 - **Interaction.** Zoom, pan, brushes and lassos, gesture bindings, synced
-  cursors and views across charts, tooltips, keyboard navigation, and
-  animated changes.
+  cursors and views across charts, tooltips that read each series as the
+  chart's inspection says, events naming the item, axis label, or legend
+  entry under the pointer, keyboard navigation, and animated changes.
 - **Output.** SVG, PNG, JPEG, WebP, and PDF, server rendering with
   hydration, a portable JSON spec with binary columns, and page fragments
   for server-rendered sites.

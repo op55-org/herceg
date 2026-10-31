@@ -40,6 +40,7 @@ from ._encoding import (
     Continuity,
     Coordinate,
     DataPosition,
+    Duration,
     Encodings,
     Fraction,
     Label,
@@ -59,6 +60,7 @@ from ._encoding import (
     dash_spec,
     encodings_spec,
     fraction_option,
+    gap_spec,
     label_dict_problem,
     label_spec,
     length_spec,
@@ -112,7 +114,9 @@ from ._guides import (
 )
 from ._guides import _instant as _domain_end
 from ._interaction import (
+    SNAPS,
     Binding,
+    Snap,
     Sync,
     ViewLimits,
     bindings_spec,
@@ -168,7 +172,7 @@ else:
 if TYPE_CHECKING:
     from .widget import ChartWidget
 
-TooltipMode = Literal["nearest-x", "nearest-y", "nearest"]
+InspectionMode = Literal["nearest-x", "nearest-y", "nearest"]
 Dash = Sequence[float] | Literal["-", "--", ":", "-."]
 Curve = Literal["linear", "step", "step-before", "step-after", "monotone"]
 BarStack = bool | Literal["fill"]
@@ -704,10 +708,10 @@ class TooltipField:
 @refuses
 @dataclass
 class Tooltip:
-    """Tooltip options: ``mode`` ("nearest-x", "nearest-y", or "nearest"; by
-    default one suited to the marks) and ``axis_labels``, which labels the
-    crosshair on the axes, as financial charts do: the inspected value on the
-    axis it follows and the pointer's position on the other.
+    """Tooltip options: ``axis_labels`` labels the crosshair on the axes, as
+    financial charts do: the inspected value on the axis it follows and the
+    pointer's position on the other. What the tooltip reads is the chart's
+    ``inspection`` (see ``hg.InspectionOptions``).
 
     ``fields`` are columns of the row a tooltip is at that it shows besides a
     mark's values, such as a count that is not plotted: column names or
@@ -720,7 +724,6 @@ class Tooltip:
     takes them. The keyboard's announcements and hover events read them too.
     """
 
-    mode: TooltipMode | None = None
     axis_labels: bool = False
     fields: Sequence[str | TooltipField] | None = None
 
@@ -731,8 +734,6 @@ class Tooltip:
                 "them to a mark, as in chart.line(..., tooltip=hg.Tooltip(fields=[...]))"
             )
         spec: dict[str, Any] = {}
-        if self.mode is not None:
-            spec["mode"] = choice_option(self.mode, get_args(TooltipMode), "Tooltip mode")
         if _flag(self.axis_labels, "Tooltip axis_labels"):
             spec["axisLabels"] = True
         return spec
@@ -740,9 +741,8 @@ class Tooltip:
     def _mark_spec(self, mark: str) -> dict[str, Any]:
         """The tooltip of mark ``mark``: its fields."""
         role = Role(mark).field("tooltip")
-        if self.mode is not None or self.axis_labels:
-            option = "mode" if self.mode is not None else "axis_labels"
-            raise role.field(option).error("is the chart's; give it to the chart's tooltip")
+        if self.axis_labels:
+            raise role.field("axis_labels").error("is the chart's; give it to the chart's tooltip")
         if self.fields is None:
             return {}
         at = role.field("fields")
@@ -759,6 +759,74 @@ class Tooltip:
                     f"expected a column name or an hg.TooltipField; received {shown(entry)}"
                 )
         return {"fields": fields}
+
+
+@refuses
+@dataclass
+class InspectionOptions:
+    """How the chart inspects: what the pointer reads, for the tooltip, the
+    crosshair, and hover and click events (the chart's ``inspection``).
+
+    ``mode`` "nearest-x" reads each series along x, "nearest-y" along y, and
+    "nearest" the one point nearest the pointer on screen; by default one
+    suited to the marks ("nearest-y" for bars along y, "nearest" for points,
+    else "nearest-x"). Along an axis, ``snap`` says which point of each
+    series is read: "shared" (the default), the value nearest the pointer
+    that any series has, and every series' point there; "each", each
+    series' own nearest point, the crosshair at the pointer; "previous",
+    each series' last point at or before the pointer (an hourly series'
+    10:00 for 10:37); "next", its first at or after it. ``within`` is how far
+    from the pointer a point read may be, in the mode's units: along the
+    axis, a number in its units or on a time axis a ``timedelta`` (or
+    ``hg.Duration``); for "nearest", ``hg.Pixels(n)`` on screen. A series
+    reads nothing inside a gap its ``continuity`` leaves. Cells (heatmaps)
+    are read under the pointer whatever the mode::
+
+        hg.Chart(metrics, inspection=hg.InspectionOptions(
+            mode="nearest-x", snap="each", within=timedelta(seconds=30)))
+
+    ``Chart(inspection=False)`` has the pointer read nothing; hover and click
+    events still say what is under it, and the keyboard still reads and
+    announces points.
+    """
+
+    mode: InspectionMode | None = None
+    snap: Snap | None = None
+    within: float | _dt.timedelta | np.timedelta64 | Duration | Pixels | None = None
+
+    def __post_init__(self) -> None:
+        choice_option(self.mode, get_args(InspectionMode), "InspectionOptions mode")
+        choice_option(self.snap, SNAPS, "InspectionOptions snap")
+        if self.mode == "nearest" and self.snap is not None:
+            raise ChartError(
+                'InspectionOptions snap: "nearest" reads one point; drop snap, or use '
+                '"nearest-x" or "nearest-y"'
+            )
+        self._within()
+
+    def _within(self) -> Any:
+        role = "InspectionOptions within"
+        if self.within is None:
+            return None
+        if self.mode is None:
+            raise ChartError(
+                f'{role}: its units are the mode\'s; give mode="nearest-x", "nearest-y", '
+                'or "nearest"'
+            )
+        if self.mode == "nearest":
+            if not isinstance(self.within, Pixels):
+                raise ChartError(f'{role}: "nearest" measures on screen; give hg.Pixels(n)')
+            return length_spec(self.within, role)
+        if isinstance(self.within, Pixels):
+            raise ChartError(
+                f"{role}: {shown(self.mode)} measures along its axis; give a number, or a "
+                "timedelta on a time axis"
+            )
+        return gap_spec(self.within, role, positive=False)
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {"mode": self.mode, "snap": self.snap, "within": self._within()}
+        return {key: value for key, value in spec.items() if value is not None}
 
 
 @refuses
@@ -928,7 +996,8 @@ class _SharedOptions(TypedDict, total=False):
     scales: Mapping[str, Scale | OrdinalScale | IdentityScale | Mapping[str, Any]] | None
     guides: Sequence[Guide] | None
     padding: float | Insets | None
-    tooltip: bool | TooltipMode | Tooltip | None
+    inspection: InspectionOptions | Literal[False] | None
+    tooltip: bool | Tooltip | None
     zoom: bool | Literal["x", "y", "xy"] | None
     pan: bool | Literal["x", "y", "xy"] | None
     brush: Literal["x", "y", "xy", "lasso"] | None
@@ -1212,7 +1281,8 @@ class Chart:
         | None = None,
         guides: Sequence[Guide] | None = None,
         padding: float | Insets | None = None,
-        tooltip: bool | TooltipMode | Tooltip | None = True,
+        inspection: InspectionOptions | Literal[False] | None = None,
+        tooltip: bool | Tooltip | None = True,
         zoom: bool | Literal["x", "y", "xy"] | None = False,
         pan: bool | Literal["x", "y", "xy"] | None = None,
         brush: Literal["x", "y", "xy", "lasso"] | None = None,
@@ -1339,6 +1409,7 @@ class Chart:
             "scales": scales,
             "guides": guides,
             "padding": padding,
+            "inspection": inspection,
             "tooltip": tooltip,
             "zoom": zoom,
             "pan": pan,
@@ -1628,6 +1699,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -1703,6 +1776,8 @@ class Chart:
                 "clip": _clip(clip, "line"),
                 "tooltip": self._mark_tooltip(table, tooltip, "line"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "line"),
                 "id": id,
             },
@@ -1746,6 +1821,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -1902,6 +1979,8 @@ class Chart:
                 "clip": _clip(clip, "area"),
                 "tooltip": self._mark_tooltip(table, tooltip, "area"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "area"),
                 "id": id,
             },
@@ -1940,6 +2019,8 @@ class Chart:
         width: Pixels | Mapping[str, float] | None = None,
         stroke_sides: Sequence[Side] | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2065,6 +2146,8 @@ class Chart:
                     "bar stroke_sides", lambda: _sides(stroke_sides, "bar stroke_sides")
                 ),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "bar"),
                 "id": id,
             },
@@ -2092,6 +2175,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2149,6 +2234,8 @@ class Chart:
                 "clip": _clip(clip, "rug"),
                 "tooltip": self._mark_tooltip(table, tooltip, "rug"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "rug"),
                 "id": id,
             },
@@ -2182,6 +2269,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2292,6 +2381,8 @@ class Chart:
                 "clip": _clip(clip, "errorbar"),
                 "tooltip": self._mark_tooltip(table, tooltip, "errorbar"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "errorbar"),
                 "id": id,
             },
@@ -2332,6 +2423,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """Scatter points.
@@ -2511,6 +2604,8 @@ class Chart:
                 "clip": _clip(clip, "point"),
                 "tooltip": self._mark_tooltip(table, tooltip, "point"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "point"),
                 "id": id,
             },
@@ -2546,6 +2641,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """Counts of a number or time field in bins: of ``x`` (vertical bars) or
@@ -2628,6 +2725,8 @@ class Chart:
                     "panel": panel,
                     "clip": _clip(clip, "histogram"),
                     "zIndex": z_index,
+                    "pick": pick,
+                    "inspect": inspect,
                     "id": id,
                 },
                 table,
@@ -2714,6 +2813,8 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "histogram"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "id": id,
             },
             table,
@@ -2740,6 +2841,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2780,6 +2883,8 @@ class Chart:
                 "clip": _clip(clip, "candlestick"),
                 "tooltip": self._mark_tooltip(table, tooltip, "candlestick"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "candlestick"),
                 "id": id,
             },
@@ -2965,6 +3070,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """Box plots of a number column's values per category.
@@ -3049,6 +3156,8 @@ class Chart:
                 "legend": _mark_legend(legend, "boxplot"),
                 "clip": _clip(clip, "boxplot"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
             },
             x,
             y,
@@ -3085,6 +3194,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """Letter-value ("boxen") plots of a number column's values per category.
@@ -3143,6 +3254,8 @@ class Chart:
                 "legend": _mark_legend(legend, "boxen"),
                 "clip": _clip(clip, "boxen"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
             },
             x,
             y,
@@ -3177,6 +3290,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """Violins of a number column's values per category.
@@ -3221,6 +3336,8 @@ class Chart:
                 "legend": _mark_legend(legend, "violin"),
                 "clip": _clip(clip, "violin"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
             },
             x,
             y,
@@ -4224,6 +4341,8 @@ class Chart:
         clip: Clip | None = None,
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """A grid of cells colored by the numeric column ``color``: cells at ``x`` and ``y``, or the
@@ -4303,6 +4422,8 @@ class Chart:
             "clip": _clip(clip, "heatmap"),
             "tooltip": self._mark_tooltip(table, tooltip, "heatmap"),
             "zIndex": z_index,
+            "pick": pick,
+            "inspect": inspect,
             "id": id,
         }
         if date is not None:
@@ -4447,6 +4568,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """Contours of a field sampled on a grid: lines where it crosses each
@@ -4535,6 +4658,8 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "contour"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "id": id,
             },
             table,
@@ -4557,6 +4682,8 @@ class Chart:
         panel: str | None = None,
         clip: Clip | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
         """A SciPy-layout linkage tree with leaves on category bands.
@@ -4643,6 +4770,8 @@ class Chart:
                 "panel": panel,
                 "clip": _clip(clip, "dendrogram"),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "id": id,
             },
             table,
@@ -4668,6 +4797,8 @@ class Chart:
         clip: Clip | None = None,
         legend: bool | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -4723,6 +4854,8 @@ class Chart:
                 "clip": _clip(clip, "rule"),
                 "legend": self._option("rule legend", lambda: _flag(legend, "rule legend")),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "rule"),
                 "id": id,
             },
@@ -4752,6 +4885,8 @@ class Chart:
         halo: HaloOption | None = None,
         legend: bool | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -4819,6 +4954,8 @@ class Chart:
                 "clip": _clip(clip, "region"),
                 "legend": self._option("region legend", lambda: _flag(legend, "region legend")),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "region"),
                 "id": id,
             },
@@ -4845,6 +4982,8 @@ class Chart:
         halo: HaloOption | None = None,
         legend: bool | None = None,
         z_index: float | None = None,
+        pick: bool | None = None,
+        inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -4932,6 +5071,8 @@ class Chart:
                 "clip": _clip(clip, "text"),
                 "legend": self._option("text legend", lambda: _flag(legend, "text legend")),
                 "zIndex": z_index,
+                "pick": pick,
+                "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "text"),
                 "id": id,
             },
@@ -7033,7 +7174,7 @@ _CHART = Role("Chart")
 OPTIONS = (
     *("title", "description", "width", "height", "x", "y", "y_right", "legend", "padding"),
     *("scales", "guides"),
-    "tooltip",
+    *("inspection", "tooltip"),
     *("zoom", "pan", "brush", "bindings", "limits", "sync", "animation"),
     *("renderer", "theme"),
     *("locale", "time_zone", "projection", "z", "camera", "box_aspect", "rotate", "navigator"),
@@ -7183,14 +7324,20 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
     animation = settings["animation"]
     for name in ("width", "height"):
         _size(settings[name], f"Chart {name}")
-    if not (
-        tooltip is None
-        or isinstance(tooltip, (bool, Tooltip))
-        or (isinstance(tooltip, str) and tooltip in get_args(TooltipMode))
-    ):
+    if isinstance(tooltip, str) and tooltip in get_args(InspectionMode):
         raise ChartError(
-            'Chart tooltip: expected True, False, "nearest-x", "nearest-y", "nearest", or an '
-            f"hg.Tooltip; received {shown(tooltip)}"
+            "Chart tooltip: the mode is the inspection's; give "
+            f"inspection=hg.InspectionOptions(mode={shown(tooltip)})"
+        )
+    if not (tooltip is None or isinstance(tooltip, (bool, Tooltip))):
+        raise ChartError(
+            f"Chart tooltip: expected True, False, or an hg.Tooltip; received {shown(tooltip)}"
+        )
+    inspection = settings.get("inspection")
+    if not (inspection is None or inspection is False or isinstance(inspection, InspectionOptions)):
+        raise ChartError(
+            "Chart inspection: expected an hg.InspectionOptions, or False; received "
+            f"{shown(inspection)}"
         )
     choice_option(settings["renderer"], ("auto", "svg", "canvas"), "Chart renderer")
     if isinstance(settings["theme"], str):
@@ -7243,11 +7390,12 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
         "scales": located("scales", lambda: scales_spec(settings.get("scales"))),
         "guides": located("guides", lambda: guides_spec(settings.get("guides"))),
         "padding": insets(settings.get("padding"), _CHART.field("padding")),
-        "tooltip": tooltip
-        if tooltip is None or isinstance(tooltip, bool)
-        else located("tooltip", tooltip._spec, "Tooltip", "Chart tooltip")
+        "inspection": located("inspection", inspection._spec, "InspectionOptions")
+        if isinstance(inspection, InspectionOptions)
+        else inspection,
+        "tooltip": located("tooltip", tooltip._spec, "Tooltip", "Chart tooltip")
         if isinstance(tooltip, Tooltip)
-        else {"mode": tooltip},
+        else tooltip,
         "interaction": interaction or None,
         "animation": located("animation", lambda: _animation(animation), "Animation"),
         "renderer": settings["renderer"],
@@ -8372,8 +8520,7 @@ def _rows_chart_of(data: Any, options: HelperOptions) -> tuple[Chart, Tooltip | 
     if not (isinstance(tooltip, Tooltip) and tooltip.fields is not None):
         return _chart_of(data, options), None
     # The chart keeps the rest, or its default tooltip without any.
-    rest = tooltip.mode is not None or tooltip.axis_labels
-    shared = Tooltip(mode=tooltip.mode, axis_labels=tooltip.axis_labels) if rest else None
+    shared = Tooltip(axis_labels=True) if tooltip.axis_labels else None
     chart = _chart_of(data, {**options, "tooltip": shared})
     return chart, Tooltip(fields=tooltip.fields)
 
@@ -8415,6 +8562,8 @@ def line(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -8446,6 +8595,8 @@ def line(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
         id=id,
@@ -8485,6 +8636,8 @@ def area(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -8528,6 +8681,8 @@ def area(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
         id=id,
@@ -8561,6 +8716,8 @@ def bar(
     halo: HaloOption | None = None,
     stroke_sides: Sequence[Side] | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -8593,6 +8750,8 @@ def bar(
         halo=halo,
         stroke_sides=stroke_sides,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         item_key=item_key,
         id=id,
     )
@@ -8628,6 +8787,8 @@ def scatter(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8661,6 +8822,8 @@ def scatter(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         tooltip=tooltip,
         id=id,
     )
@@ -8823,6 +8986,8 @@ def heatmap(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8853,6 +9018,8 @@ def heatmap(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         tooltip=tooltip,
         id=id,
     )
@@ -8877,6 +9044,8 @@ def contour(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -8898,6 +9067,8 @@ def contour(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         id=id,
     )
 
@@ -9005,6 +9176,8 @@ def histogram(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9033,6 +9206,8 @@ def histogram(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         id=id,
     )
 
@@ -9144,6 +9319,8 @@ def boxplot(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9169,6 +9346,8 @@ def boxplot(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         id=id,
     )
 
@@ -9193,6 +9372,8 @@ def boxen(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9214,6 +9395,8 @@ def boxen(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         id=id,
     )
 
@@ -9236,6 +9419,8 @@ def violin(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
@@ -9255,6 +9440,8 @@ def violin(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         id=id,
     )
 
@@ -9539,6 +9726,8 @@ def candlestick(
     panel: str | None = None,
     clip: Clip | None = None,
     z_index: float | None = None,
+    pick: bool | None = None,
+    inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9560,6 +9749,8 @@ def candlestick(
         panel=panel,
         clip=clip,
         z_index=z_index,
+        pick=pick,
+        inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
         id=id,

@@ -114,6 +114,10 @@ interface LineStyle<S extends Schema> extends ItemKeyed<S> {
   labels?: SeriesLabels<S>;
   /** Where the lines are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
@@ -404,6 +408,8 @@ export function line<S extends Schema>(
       "clip",
       "color",
       "zIndex",
+      "pick",
+      "inspect",
       ...FEATURES,
     ]),
   } as LineSpec;

@@ -10,24 +10,13 @@ import {
 import { rasterDrawing } from "../draw/raster.ts";
 import { CellIndex } from "../lod/cell-index.ts";
 import type { Breaks } from "../lod/m4.ts";
-import type { KeyPart } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { Geometry, RasterGeometry, Rect } from "../scene/scene.ts";
+import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { CellReduce, Clip, Frozen, HeatmapSpec, Weekday } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
-import {
-  boxOf,
-  cellsCover,
-  coverNear,
-  coverOf,
-  type DrawnMark,
-  distanceToCover,
-  type PickedItem,
-  type PickQuery,
-  pickedHit,
-} from "./drawn.ts";
+import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { type Calendar, type CalendarLayout, placeCalendar } from "./heatmap-calendar.ts";
 import {
   type AxisCells,
@@ -105,6 +94,10 @@ interface HeatmapCommon<S extends Schema> {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
@@ -351,7 +344,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   /** A calendar's band indices, by the chart's band keys they were remapped to. */
   readonly #remapped = new WeakMap<readonly string[], { own: Int32Array; indices: Int32Array }>();
   /** The keys of the bands each band axis' indices index, which name cells (panels' series share the indices). */
-  readonly #bandKeys = new WeakMap<object, readonly string[]>();
+  readonly bandKeys = new WeakMap<object, readonly string[]>();
   /** What the selection drawn with each series (and its copies read for tooltips) holds of its cells. */
   readonly #selected = new WeakMap<Series, HeldCells>();
   /** Each index's cells with values, as selections are counted in them. */
@@ -531,7 +524,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       sorted: false,
     };
     for (const axis of ["x", "y"] as const)
-      if (this.#banded[axis]) this.#bandKeys.set(whole[axis], bands[axis]?.keys ?? []);
+      if (this.#banded[axis]) this.bandKeys.set(whole[axis], bands[axis]?.keys ?? []);
     return [whole];
   }
 
@@ -595,7 +588,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   }
 
   /** Row ordinals and placement shared by painting, indexing, and interaction. */
-  #resolve(s: Series, axis: "x" | "y", scale?: PositionScale): ResolvedAxis {
+  resolve(s: Series, axis: "x" | "y", scale?: PositionScale): ResolvedAxis {
     if (this.#banded[axis]) {
       const places = s.places?.[axis];
       return {
@@ -682,10 +675,10 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   ): number | undefined {
     // The index holds chart bands, or cells; a panel's own categories are
     // read at their places, as the panel draws them.
-    const { index } = this.#cellsOf(
+    const { index } = this.cellsOf(
       series,
-      this.#resolve(series, "x", frame.x),
-      this.#resolve(series, "y", frame.y),
+      this.resolve(series, "x", frame.x),
+      this.resolve(series, "y", frame.y),
     );
     return stepCell(index, position, columns, rows, frame, {
       x: this.#banded.x ? series.places?.x : undefined,
@@ -712,7 +705,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     };
     const [columns, rows] = [count("x"), count("y")];
     const resolved = parts.map((s) =>
-      this.#cellsOf(s, this.#resolve(s, "x"), this.#resolve(s, "y"), columns, rows),
+      this.cellsOf(s, this.resolve(s, "x"), this.resolve(s, "y"), columns, rows),
     );
     const usedColumns = new Uint8Array(columns);
     const usedRows = new Uint8Array(rows);
@@ -871,10 +864,10 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     const colors = s && this.#colorScale(frame.theme, frame.paint, s);
     if (!s || s.length === 0 || frame.hidden.has(s.key) || !colors) return [];
     const whole = this.geometry(series, frame).flatMap(drawing.dim);
-    const across = this.#resolve(s, "x", frame.x);
-    const down = this.#resolve(s, "y", frame.y);
+    const across = this.resolve(s, "x", frame.x);
+    const down = this.resolve(s, "y", frame.y);
     // Every row of each cell, which combining its values leaves one of.
-    const { values } = this.#cellsOf(s, across, down);
+    const { values } = this.cellsOf(s, across, down);
     const runs = this.#runsOf(this.#indexOf(s, across, down), values);
     const held = this.#heldOf(runs, drawing.selected);
     this.#selected.set(s, held);
@@ -888,8 +881,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
         held: held.lit.length,
         size: [this.#smallest(across, frame.x), this.#smallest(down, frame.y)],
         box: (k) => {
-          const [x0, x1] = this.#edges(across, frame.x, columns[k]!);
-          const [y0, y1] = this.#edges(down, frame.y, lines[k]!);
+          const [x0, x1] = this.edges(across, frame.x, columns[k]!);
+          const [y0, y1] = this.edges(down, frame.y, lines[k]!);
           return [x0, y0, x1, y1];
         },
         share: (k) => held.selected[k]! / sizes[k]!,
@@ -901,7 +894,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   }
 
   /** The pixels a cell spans along an axis: its band, or between its edges. */
-  #edges(
+  edges(
     { cells, places }: ResolvedAxis,
     scale: PositionScale,
     cell: number,
@@ -1025,8 +1018,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     held?: HeldCells,
   ): RasterGeometry[] {
     const { x, y, plot } = frame;
-    const acrossAxis = this.#resolve(s, "x", x);
-    const downAxis = this.#resolve(s, "y", y);
+    const acrossAxis = this.resolve(s, "x", x);
+    const downAxis = this.resolve(s, "y", y);
     const inputs = [
       this,
       held?.lit,
@@ -1067,7 +1060,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       const [across, down] = axes;
       const count = across.size * down.size;
       pixels = frame.bytes(key, "raster", count * 4);
-      const { index, values } = this.#cellsOf(s, acrossAxis, downAxis);
+      const { index, values } = this.cellsOf(s, acrossAxis, downAxis);
       // With `held`, only the rows of the cells holding selected rows are painted.
       const rows = held ? held.lit : s.rows;
       const source = {
@@ -1152,126 +1145,11 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   }
 
   /**
-   * Its cells are found by `pick`'s index of rows by cell, which their
-   * raster does not say. A cell may combine rows (`reduce`): it is named by
-   * its column and row, each a band's value (a category, a number, a time,
-   * or a calendar's day, weekday, or month) or a cell's.
+   * Its cells are found under the pointer where its image draws them, else
+   * the nearest within reach (marks/lookups.ts).
    */
   pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-    const name = (s: Series, row: number, axis: "x" | "y", scale: PositionScale): KeyPart => {
-      const { cells, ordinals } = this.#resolve(s, axis, scale);
-      const at = ordinals[row]!;
-      if (cells) return at >= 0 ? cells.values[at]! : null;
-      const key = this.#bandKeys.get(s[axis])?.[at];
-      if (key === undefined) return null;
-      return key.startsWith("c:")
-        ? key.slice(2)
-        : key.startsWith("n:")
-          ? Number(key.slice(2))
-          : key;
-    };
-    // Along each axis: its band, or its cell's span.
-    const span = (s: Series, row: number, axis: "x" | "y", scale: PositionScale) => {
-      const resolved = this.#resolve(s, axis, scale);
-      if (resolved.cells) return this.#edges(resolved, scale, resolved.ordinals[row]!);
-      const center = scale.map(placeAt(s, axis, row));
-      const half = Math.abs(scale.bandwidth ?? 0) / 2;
-      return [center - half, center + half] as const;
-    };
-    const cell = (s: Series, position: number, frame: Frame) => {
-      const row = rowOf(s, position);
-      const [x0, x1] = span(s, row, "x", frame.x);
-      const [y0, y1] = span(s, row, "y", frame.y);
-      return boxOf(x0, y0, x1, y1);
-    };
-    // What its image covers, cut as it is drawn.
-    const cover = drawn.frame && cellsCover(drawn, this.spec.clip);
-    if (!cover) return undefined;
-    return pickedHit(this, drawn, query, {
-      lookup: (series, px, py, frame) => {
-        const near = coverNear(cover, px, py, query.slop);
-        const at = (s: Series, position: number) => cell(s, position, frame);
-        return this.#nearestCell(series, px, py, frame, query.slop, near, at);
-      },
-      bounds: (s, position, frame) => coverOf(cell(s, position, frame), cover),
-      group: (s, position) => {
-        const row = rowOf(s, position);
-        const { frame } = drawn;
-        return { parts: [], names: [name(s, row, "x", frame!.x), name(s, row, "y", frame!.y)] };
-      },
-    });
-  }
-
-  /**
-   * For picking: the cell nearest a pixel as drawn, of the cells holding
-   * rows within `reach` of it (`pick` finds only the cell under it),
-   * measured to the part of each in `cover`, what the drawing covers near it
-   * (`cell` gives a cell's rectangle).
-   */
-  #nearestCell(
-    series: readonly Series[],
-    px: number,
-    py: number,
-    frame: Frame,
-    reach: number,
-    cover: readonly Rect[],
-    cell: (s: Series, position: number) => Rect,
-  ): Hit | undefined {
-    const s = series[0];
-    if (!s) return undefined;
-    // The cell under it, where some of it is drawn there (not only its
-    // edge, a neighbor's), before those around it.
-    const under = this.pick(series, px, py, frame);
-    if (under && distanceToCover(cell(s, under.position), cover, px, py) === 0) return under;
-    const across = this.#resolve(s, "x", frame.x);
-    const down = this.#resolve(s, "y", frame.y);
-    const columns = this.#cellsNear(across, frame.x, px, reach);
-    const lines = this.#cellsNear(down, frame.y, py, reach);
-    if (!columns || !lines) return undefined;
-    let best: Hit | undefined;
-    this.#cellsOf(s, across, down).index.forEachIn(
-      columns.from,
-      columns.to,
-      lines.from,
-      lines.to,
-      (c, r, position) => {
-        if (columns.only?.has(c) === false || lines.only?.has(r) === false) return;
-        const [x0, x1] = this.#edges(across, frame.x, c);
-        const [y0, y1] = this.#edges(down, frame.y, r);
-        const distance = distanceToCover(boxOf(x0, y0, x1, y1), cover, px, py);
-        if (distance < (best?.distance ?? Number.POSITIVE_INFINITY))
-          best = { series: s, position, distance };
-      },
-    );
-    return best;
-  }
-
-  /**
-   * The cells along an axis within `reach` of a pixel: from the first to
-   * the last, and for bands, which a panel's places may order otherwise,
-   * `only` those; undefined for none.
-   */
-  #cellsNear(
-    axis: ResolvedAxis,
-    scale: PositionScale,
-    pixel: number,
-    reach: number,
-  ): { from: number; to: number; only?: Set<number> } | undefined {
-    // Half a pixel more, so cells at the reach's very end are not lost to rounding.
-    const [a, b] = [scale.invert(pixel - reach - 0.5), scale.invert(pixel + reach + 0.5)];
-    if (axis.cells) {
-      const [from, to] = axis.cells.reaching(Math.min(a, b), Math.max(a, b));
-      return from <= to ? { from, to } : undefined;
-    }
-    const count = scale.categories?.length ?? 0;
-    const only = new Set<number>();
-    const [from, to] = [Math.round(Math.min(a, b)), Math.round(Math.max(a, b))];
-    for (let place = Math.max(0, from); place <= Math.min(count - 1, to); place++) {
-      const band = bandOf(axis.places, place);
-      if (band >= 0) only.add(band);
-    }
-    if (only.size === 0) return undefined;
-    return { from: Math.min(...only), to: Math.max(...only), only };
+    return query.lookups.heatmap(this, drawn, query, PICKING);
   }
 
   /**
@@ -1282,12 +1160,12 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
     const s = series[0];
     if (!s || frame.hidden.has(s.key)) return undefined;
-    const across = this.#resolve(s, "x", frame.x);
-    const down = this.#resolve(s, "y", frame.y);
+    const across = this.resolve(s, "x", frame.x);
+    const down = this.resolve(s, "y", frame.y);
     const c = this.#cellAt(across, frame.x, px);
     const r = this.#cellAt(down, frame.y, py);
     if (c < 0 || r < 0) return undefined;
-    const position = this.#cellsOf(s, across, down).index.find(c, r);
+    const position = this.cellsOf(s, across, down).index.find(c, r);
     return position < 0 ? undefined : { series: s, position, distance: 0 };
   }
 
@@ -1298,10 +1176,10 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    */
   readSeries(series: readonly Series[], frame: Frame): Series[] {
     return series.map((s) => {
-      const { values } = this.#cellsOf(
+      const { values } = this.cellsOf(
         s,
-        this.#resolve(s, "x", frame.x),
-        this.#resolve(s, "y", frame.y),
+        this.resolve(s, "x", frame.x),
+        this.resolve(s, "y", frame.y),
       );
       if (values === s.values) return s;
       const read = { ...s, values };
@@ -1317,7 +1195,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    * an index of them (`#indexOf`'s, of the rows, when no rows share a cell).
    * A series read for tooltips (see `readSeries`) holds the values already.
    */
-  #cellsOf(
+  cellsOf(
     s: Series,
     across: ResolvedAxis,
     down: ResolvedAxis,
@@ -1491,7 +1369,7 @@ interface Sums {
   extent: readonly [number, number] | null;
 }
 
-interface ResolvedAxis {
+export interface ResolvedAxis {
   cells: AxisCells | undefined;
   ordinals: NumericArray;
   places: BandPlaces | undefined;
@@ -1562,6 +1440,8 @@ export function heatmap<S extends Schema>(
     "panel",
     "clip",
     "zIndex",
+    "pick",
+    "inspect",
     "colorMidpoint",
     "reduce",
   ]);
@@ -1599,3 +1479,7 @@ export function heatmap<S extends Schema>(
   // Field names were checked against S above; marks work on the erased schema.
   return new HeatmapMark(spec, table as unknown as Table);
 }
+
+/** What its lookup reads of this module (see marks/lookups.ts). */
+const PICKING = { bandOf };
+export type HeatmapPicking = typeof PICKING;

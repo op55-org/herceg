@@ -1,6 +1,7 @@
 // Sync channels scoped to a panel: a channel naming a panel carries that
 // panel's instance of its scale, and only changes of that instance; what a
 // synced chart sends lands on it alone. Same-realm sync is synchronous.
+import "../interactive.ts";
 import { describe, expect, it, vi } from "vitest";
 import { time } from "../../../src/data/column.ts";
 import { table } from "../../../src/data/table.ts";

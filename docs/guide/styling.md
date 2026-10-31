@@ -192,6 +192,7 @@ subplot's axis.
 | `axisTitle`, `tickLabel` (`axis_title`, `tick_label`) | text | Axis titles; tick labels and color legends' values. |
 | `legendLabel`, `legendTitle` | text | Legend entries; titles of color and size legends. |
 | `grid`, `axisLine`, `tick` | line | Grid lines, axis lines, tick marks. |
+| `crosshair` | line | The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. |
 | `plot` | plot | `fill` behind the plot, `stroke` and `strokeWidth` around it. |
 | `line`, `bar`, `tooltip` | marks | Lines' default `strokeWidth`, bars' corner `radius`, the tooltip's `fill` and `stroke`. |
 

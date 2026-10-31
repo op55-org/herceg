@@ -6,8 +6,8 @@ import type { DrillRoot } from "../marks/tree-data.ts";
 import type {
   DrawnPanel,
   Inspection,
+  InspectionMode,
   ScaleInstance,
-  TooltipMode,
   ViewChange,
   Viewport,
 } from "../model/model.ts";
@@ -101,8 +101,8 @@ export interface LegendEntry {
 export type ItemPositions = Readonly<Record<string, Readonly<{ x: number; y: number }>>>;
 
 export interface InspectOptions extends PanelTarget {
-  /** How to find the data; by default the chart's tooltip mode. */
-  mode?: TooltipMode;
+  /** How to find the data; by default the chart's `inspection` mode, read with its `snap` and `within`. */
+  mode?: InspectionMode;
 }
 
 /**

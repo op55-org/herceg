@@ -198,17 +198,22 @@ describe("Streamlit component", () => {
     press(parent, "pointerdown", 0.5);
     press(parent, "pointerup", 0.5);
     expect(state.at(-1)).toEqual(["selection", null]);
-    expect(triggers).toEqual([
+    expect(triggers).toMatchObject([
       [
         "click",
         {
-          axis: "x",
-          value: 1,
-          time: false,
-          label: "1",
-          points: [
-            { mark: 0, markId: null, key: '[0,"y"]', label: "y", row: 1, value: 3, text: "3" },
-          ],
+          cause: "pointer",
+          pointer: { panel: "", inPlot: true, time: [] },
+          target: { kind: "plot", panel: "" },
+          inspection: {
+            axis: "x",
+            value: 1,
+            time: false,
+            label: "1",
+            points: [
+              { mark: 0, markId: null, key: '[0,"y"]', label: "y", row: 1, value: 3, text: "3" },
+            ],
+          },
         },
       ],
     ]);
@@ -804,7 +809,10 @@ describe("Streamlit component with panels' own x scales", () => {
     press(parent, "pointerdown", 0.8);
     press(parent, "pointerup", 0.8);
     expect(triggers).toHaveLength(1);
-    expect(triggers[0]![1]).toMatchObject({ panel: "series", time: true });
+    expect(triggers[0]![1]).toMatchObject({
+      pointer: { panel: "series", time: ["x"] },
+      inspection: { panel: "series", time: true },
+    });
   });
 });
 

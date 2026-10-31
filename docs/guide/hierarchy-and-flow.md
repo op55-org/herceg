@@ -329,7 +329,8 @@ settling after a move reaches at most 1,000 nodes.
   draw their selected share ([Selected rows](interaction.md#selected-rows)).
   Gauges and radars refuse one.
 - **Tooltips** read the item under the pointer; charts of items alone refuse
-  `"nearest-x"` and `"nearest-y"` tooltips. `tooltip.fields` show more of an
+  the [inspection](interaction.md#inspection) modes `"nearest-x"` and
+  `"nearest-y"`. `tooltip.fields` show more of an
   item's row where the item is one row (slices, stages, nodes, links of one
   row); items summing several rows show none.
 - **Animation.** Pies and gauges animate changed values; the others show

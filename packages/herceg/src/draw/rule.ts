@@ -1,5 +1,5 @@
 import { shiftInside } from "../layout/place.ts";
-import type { Drawing, RuleGeometry } from "../scene/scene.ts";
+import type { Drawing, Rect, RuleGeometry } from "../scene/scene.ts";
 import { cssFont } from "../style/style.ts";
 import { dashAttribute, escapeXml, n } from "./markup.ts";
 import { paintLines } from "./text-items.ts";
@@ -38,7 +38,10 @@ export function ruleLine(rule: RuleGeometry): { axis: "x" | "y"; at: number } {
 }
 
 /** Reference lines, with their label at the top (vertical) or right end (horizontal). */
-export const ruleDrawing: Drawing<RuleGeometry> = {
+export const ruleDrawing: Drawing<RuleGeometry> & {
+  /** Its label's box, as `ruleLabel` places it, which picking reaches; undefined without one. */
+  labelBox(rule: RuleGeometry, fontSize: number): Rect | undefined;
+} = {
   canvas(context, rule, { theme }) {
     context.save();
     context.beginPath();
@@ -69,6 +72,12 @@ export const ruleDrawing: Drawing<RuleGeometry> = {
     context.restore();
   },
   defaultClip: false,
+  labelBox(rule, fontSize) {
+    if (!rule.label || !rule.labelIn) return undefined;
+    const { x, y, anchor } = ruleLabel(rule, fontSize);
+    const { width } = rule.labelIn;
+    return { x: anchor === "end" ? x - width : x, y: y - fontSize, width, height: fontSize * 1.25 };
+  },
   size: () => 0,
   svg(rule, { theme }) {
     const opacity = rule.opacity === undefined ? "" : ` stroke-opacity="${rule.opacity}"`;

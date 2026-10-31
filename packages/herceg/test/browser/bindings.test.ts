@@ -1,6 +1,7 @@
 // Gesture bindings in the browser: the presets' page-friendly defaults,
 // bindings of a chart's own, cancellation, pinches, and keys.
 
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fromGeoJSON } from "../../src/data/geojson.ts";
 import { table } from "../../src/data/table.ts";

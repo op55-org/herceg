@@ -22,6 +22,7 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderToSVG, type StaticOptions } from "../../src/render/static.ts";
 import type { PointGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 const values = table({ x: [0, 1, 2], y: [1, 3, 2] });
 const chart = (
@@ -205,7 +206,8 @@ describe("paint order", () => {
       model.setSize(300, 200, 1);
       model.scene(estimateText);
       const tables = new Set([first, second] as unknown as Table[]);
-      return clickedRows(model, tables, model.xScale()!.map(1), model.yScale()!.map(2))?.table;
+      return clickedRows(withPicker(model), tables, model.xScale()!.map(1), model.yScale()!.map(2))
+        ?.table;
     };
     expect(clicked()).toBe(second);
     expect(clicked(1)).toBe(first);
@@ -241,7 +243,7 @@ describe("paint order", () => {
     const [px, py] = [colored.xScale()!.map(1), colored.yScale()!.map(2)];
     expect(colored.inspect(px, py, "nearest")!.points[0]!.row).toBe(top);
     // A click selects the row on top too.
-    const clicked = clickedRows(colored, new Set([toned as unknown as Table]), px, py);
+    const clicked = clickedRows(withPicker(colored), new Set([toned as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([top]);
   });
 
@@ -326,7 +328,7 @@ describe("paint order", () => {
     model.scene(estimateText);
     const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(1.5)];
     expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(1);
-    const clicked = clickedRows(model, new Set([two as unknown as Table]), px, py);
+    const clicked = clickedRows(withPicker(model), new Set([two as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([1]);
   });
 
@@ -358,7 +360,7 @@ describe("paint order", () => {
     const rects = scene.panels[0]!.marks.filter((g) => g.kind === "rect");
     expect(rects.map((g) => (g as RectGeometry).count)).toEqual([2, 1]);
     const [px, py] = [model.xScale()!.map(2), model.yScale()!.map(2)];
-    const clicked = clickedRows(model, new Set([three as unknown as Table]), px, py);
+    const clicked = clickedRows(withPicker(model), new Set([three as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([1]);
   });
 
@@ -381,7 +383,7 @@ describe("paint order", () => {
       model.scene(estimateText);
       const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(2)];
       expect(model.inspect(px, py, "nearest")!.points[0]!.row, series).toBe(0);
-      const clicked = clickedRows(model, new Set([both as unknown as Table]), px, py);
+      const clicked = clickedRows(withPicker(model), new Set([both as unknown as Table]), px, py);
       expect(Array.from(clicked!.rows), series).toEqual([0]);
     }
     // Bars wider than their places overlap: a click takes the highlighted one, on top.
@@ -399,7 +401,7 @@ describe("paint order", () => {
     pairStore.set("focus", selectRows(new RowSet(pair).add(0)));
     bars.scene(estimateText);
     const [bx, by] = [bars.xScale()!.map(1.5), bars.yScale()!.map(2)];
-    const onTop = clickedRows(bars, new Set([pair as unknown as Table]), bx, by);
+    const onTop = clickedRows(withPicker(bars), new Set([pair as unknown as Table]), bx, by);
     expect(Array.from(onTop!.rows)).toEqual([0]);
     // A line's highlighted observation is found over a coincident one.
     const walk = table({ x: [1, 1, 2], y: [5, 5, 0] });
@@ -431,7 +433,7 @@ describe("paint order", () => {
     model.scene(estimateText);
     const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(2)];
     expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(1);
-    const clicked = clickedRows(model, new Set([toned as unknown as Table]), px, py);
+    const clicked = clickedRows(withPicker(model), new Set([toned as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([1]);
   });
 });

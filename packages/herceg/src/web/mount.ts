@@ -11,8 +11,8 @@ import { type LoadedSpec, loadSpec } from "../spec/load.ts";
 import {
   type EdgePayload,
   edgePayload,
-  type InspectionPayload,
-  inspectionPayload,
+  type InputEventPayload,
+  inputEventPayload,
   type RowSelectionPayload,
   rowSelectionPayload,
   type SelectEventPayload,
@@ -37,14 +37,12 @@ export interface HercegEventMap {
    * console. The host shows it either way.
    */
   "herceg:error": { id: string; error: ChartErrorInfo };
-  /** The plot was clicked: the data under the pointer, or null off the data. */
-  "herceg:click": {
-    id: string;
-    panel?: string;
-    inspection: InspectionPayload | null;
-    cause: ChartEvents["click"]["cause"];
-    revision: number;
-  };
+  /**
+   * A plot, item, axis label, or legend entry was clicked, or Enter pressed
+   * on the keyboard cursor: where, what it is on, and the data the
+   * inspection reads there (null off the data).
+   */
+  "herceg:click": { id: string; panel?: string } & InputEventPayload;
   /** The selection changed, null once cleared, and what it belongs (or belonged) to. */
   "herceg:select": { id: string } & SelectEventPayload;
   /** The view changed: the scale instances that changed, and the panels drawing them. */
@@ -180,13 +178,11 @@ async function start(
     throw signal.reason;
   }
   made(chart);
-  chart.on("click", ({ inspection, cause, revision }) =>
+  chart.on("click", (event) =>
     dispatch(host, "herceg:click", {
       id,
-      ...(inspection?.panel !== undefined && { panel: inspection.panel }),
-      inspection: inspectionPayload(chart, inspection),
-      cause,
-      revision,
+      ...(event.inspection?.panel !== undefined && { panel: event.inspection.panel }),
+      ...inputEventPayload(chart, event),
     }),
   );
   chart.on("select", (event) =>

@@ -1544,8 +1544,12 @@ describe("notebook widget", () => {
       label: "1",
       points: [{ mark: 0, markId: null, key: '[0,"v"]', label: "v", row: 1, value: 3, text: "3" }],
     };
-    expect(model.messages("hover")).toEqual([{ type: "hover", inspection }]);
-    expect(model.messages("click")).toEqual([{ type: "click", inspection }]);
+    // Each the input event as JSON: where the pointer is, what it is on, what it reads.
+    const event = { cause: "pointer", target: { kind: "plot", panel: "" }, inspection };
+    expect(model.messages("hover")).toMatchObject([{ type: "hover", event }]);
+    expect(model.messages("click")).toMatchObject([{ type: "click", event }]);
+    const { pointer } = (model.messages("click")[0] as { event: { pointer: unknown } }).event;
+    expect(pointer).toMatchObject({ panel: "", inPlot: true, time: [] });
   });
 
   it("sends a 3D chart's camera and its points' values when Python listens", async () => {

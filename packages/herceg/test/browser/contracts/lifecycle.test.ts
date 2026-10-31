@@ -5,6 +5,7 @@
 // the server is hydrated (its nodes adopted, not written again), answers
 // the pointer, takes updates, and leaves the page when destroyed.
 
+import "../interactive.ts";
 import { afterEach, describe, expect, vi } from "vitest";
 import type { Table } from "../../../src/data/table.ts";
 import type { Chart } from "../../../src/dom/chart.ts";
@@ -331,9 +332,11 @@ describe("lifecycle.cursor-sync", () => {
       const shown = crosshairOf(b, axis);
       expect(shown, "the peer shows the cursor").toBeDefined();
       expect(Math.abs(shown! - pixel(b, value, axis))).toBeLessThanOrEqual(1.5);
-      // No echo: the first chart's cursor stays at the pointer, reported once where it reads something.
+      // No echo: the first chart's cursor stays at the pointer, reported once, reading what is there.
       expect(Math.abs(crosshairOf(a, axis)! - pixel(a, value, axis))).toBeLessThanOrEqual(1.5);
-      expect(hovers).toHaveLength(readingOf(cell.row).points ? 1 : 0);
+      const reads = (hover: unknown) =>
+        !!(hover as { inspection?: Inspection }).inspection?.points.length;
+      expect(hovers.map(reads)).toEqual([!!readingOf(cell.row).points]);
     });
 
   contractTest("lifecycle.cursor-sync.panel", async () => {

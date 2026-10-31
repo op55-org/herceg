@@ -860,6 +860,19 @@ export interface AxisPlacement {
   };
 }
 
+/** A tick label as its axis laid it out, for input to pick. */
+export interface LabelBox {
+  /** The tick layer: "major", or the id of a layer an axis the guides list adds. */
+  readonly layer: string;
+  /** The tick's value: epoch ms on time axes, a band index on category axes. */
+  readonly value: number;
+  /** On category axes, the category. */
+  readonly category: string | undefined;
+  readonly text: string;
+  /** The box it was laid out in, in CSS pixels of the chart. */
+  readonly box: Rect;
+}
+
 /** An axis of a panel: its scale's ticks along one side of the plot, and its title. */
 export interface AxisGuide extends GuideBase, AxisPlacement {
   readonly kind: "axis";
@@ -871,6 +884,11 @@ export interface AxisGuide extends GuideBase, AxisPlacement {
   /** The scale it shows: "x", "y", or "yRight". */
   readonly scale: string;
   readonly ticks: readonly AxisTick[];
+  /**
+   * For an axis the guides list, the boxes its guide laid its tick labels
+   * out in, which input picks; automatic axes' are their labels' as drawn.
+   */
+  readonly labelBoxes?: readonly LabelBox[] | undefined;
   /** Its title: at (x, y), the side of the text `anchor` says (its middle by default). */
   readonly title:
     | { text: string; x: number; y: number; anchor?: TextItem["anchor"] | undefined }

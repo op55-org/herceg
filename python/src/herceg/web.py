@@ -14,9 +14,9 @@ route that returns ``payload(chart)``. The script mounts every fragment, also
 those inserted later (HTMX), and tells the page what the user does with DOM
 events (``herceg:click``, ``herceg:select``, ``herceg:viewport``,
 ``herceg:edge``, ``herceg:visibility``, ``herceg:rowselection``,
-``herceg:ready``, ``herceg:error``); ``selection``, ``inspection``,
-``viewport``, ``select_event``, ``viewport_event``, ``edge``, and
-``visibility`` read what a page posts back of them. Fragments work under a
+``herceg:ready``, ``herceg:error``); ``selection``, ``input_event``,
+``inspection``, ``viewport``, ``select_event``, ``viewport_event``,
+``edge``, and ``visibility`` read what a page posts back of them. Fragments work under a
 strict Content Security Policy: they hold no script, and the nonce goes on
 the script and on the style element that reserves each chart's size.
 ``herceg.flask`` wires this into a Flask app.
@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from ._errors import ChartError, shown
 from ._events import (
+    InputEvent,
     Inspection,
     SelectEvent,
     Selection,
@@ -46,6 +47,7 @@ from ._events import (
     VisibilityState,
     checked,
     decode_edge,
+    decode_input_event,
     decode_inspection,
     decode_select_event,
     decode_selection,
@@ -255,6 +257,13 @@ def selection(value: str | Mapping[str, Any] | None) -> Selection | None:
     """A selection a page posts back: a ``herceg:select`` event's
     ``detail.selection``, as JSON text or parsed; None for none."""
     return _read("web.selection", lambda value: decode_selection(checked("select", value)), value)
+
+
+def input_event(value: str | Mapping[str, Any]) -> InputEvent:
+    """A click as a page posts it back: a ``herceg:click`` event's ``detail``
+    (where the pointer was, what it was on, and the data there), as JSON text
+    or parsed."""
+    return _read("web.input_event", decode_input_event, value)
 
 
 def inspection(value: str | Mapping[str, Any] | None) -> Inspection | None:

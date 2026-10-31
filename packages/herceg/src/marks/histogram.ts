@@ -109,6 +109,10 @@ interface HistogramStyle<S extends Schema> {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** The subplot to draw in, or "*" for every panel. */
   panel?: string;
   /** `false` leaves the mark out of the chart's legends. */
@@ -395,7 +399,9 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
         range: false,
         rows: undefined,
         length: bins,
+        // Bins are in order along the axis they lie on.
         sorted: !this.#horizontal,
+        ySorted: this.#horizontal,
       };
     });
   }
@@ -548,16 +554,34 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   /**
    * Its bars are its bins, each recorded as drawn (a selection's parts
    * draw some bins only), named by its edges (and, with a series field,
-   * its series' value). Its outlines (`element`) are no bin's.
+   * its series' value); inside a polygon or steps, the bin whose edges
+   * hold the point picked (`at`). A selection's outline is no bin's.
    */
-  partOf(drawn: DrawnMark, geometry: Geometry, index: number, parts: PartBuilders) {
+  partOf(
+    drawn: DrawnMark,
+    geometry: Geometry,
+    index: number,
+    parts: PartBuilders,
+    at?: { x: number; y: number },
+  ) {
     const bins = this.#drawnBins.get(geometry);
     const s = parts.seriesOf(drawn, geometry);
-    if (!bins || !s || !(index < (geometry as RectGeometry).count)) return undefined;
+    if (!s) return undefined;
     const { edges } = this.#binsOf(s);
-    const bin = bins[index]!;
+    let bin = -1;
+    if (bins) bin = index < (geometry as RectGeometry).count ? bins[index]! : -1;
+    else if (geometry.kind === "area" && at && drawn.frame) {
+      const along = this.#horizontal ? drawn.frame.y : drawn.frame.x;
+      const value = along.invert(this.#horizontal ? at.y : at.x);
+      for (let b = 0; b < s.length && bin < 0; b++)
+        if (value >= edges[b]! && value <= edges[b + 1]!) bin = b;
+    }
+    if (bin < 0) return undefined;
     const source = this.spec.series === undefined ? [] : [(JSON.parse(s.key) as string[])[1]!];
-    return parts.group(drawn, source, [[edges[bin]!, edges[bin + 1]!]]);
+    return parts.group(drawn, source, [[edges[bin]!, edges[bin + 1]!]], {
+      series: s,
+      position: bin,
+    });
   }
 
   /**
@@ -1305,6 +1329,8 @@ export function histogram<S extends Schema>(
         "panel",
         "clip",
         "zIndex",
+        "pick",
+        "inspect",
         "id",
       ]),
     } as Histogram2DSpec;
@@ -1338,6 +1364,8 @@ export function histogram<S extends Schema>(
       "panel",
       "clip",
       "zIndex",
+      "pick",
+      "inspect",
       "id",
     ]),
   } as unknown as Histogram1DSpec;

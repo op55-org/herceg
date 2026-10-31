@@ -9,17 +9,7 @@ import { ChartError } from "../spec/errors.ts";
 import type { Clip, ErrorBarSpec, Frozen } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
-import {
-  boxOf,
-  clipBox,
-  cut,
-  type DrawnMark,
-  distanceToCut,
-  type PickedItem,
-  type PickQuery,
-  paintedLater,
-  pickedHit,
-} from "./drawn.ts";
+import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import type { CssColor, FieldCoordinate, ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -48,6 +38,7 @@ import {
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { type MarkRows, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, TableCache, visibleRange, xExtent } from "./series.ts";
+import { boxOf, clipBox, distanceToCut, paintedLater } from "./shapes.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
@@ -83,6 +74,10 @@ interface ErrorBarStyle<S extends Schema> extends ItemKeyed<S> {
   cap?: number;
   /** Where the error bars are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   label?: string;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
@@ -196,7 +191,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
   readonly tooltip: "x" | "y";
   readonly inset: { x: number; y: number };
   readonly bound: RowBindings | undefined;
-  readonly #horizontal: boolean;
+  readonly horizontal: boolean;
   /** The field intervals stand at: x for vertical bars, y for horizontal ones. */
   readonly #position: string;
   readonly #ends: Ends;
@@ -219,7 +214,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     const form = errorBarForm(spec);
     if (typeof form === "string") throw new Error(form);
     const { horizontal, symmetric } = form;
-    this.#horizontal = horizontal;
+    this.horizontal = horizontal;
     const [along, across] = horizontal ? (["y", "x"] as const) : (["x", "y"] as const);
     // A symmetric interval's center is a field, as its error is.
     if (symmetric && typeof spec[across] !== "string")
@@ -283,13 +278,13 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
 
   channelKind(axis: "x" | "y") {
     if (offAxis(this.bound, axis)) return undefined;
-    if ((axis === "y") === this.#horizontal) return this.table.kind(this.#position);
+    if ((axis === "y") === this.horizontal) return this.table.kind(this.#position);
     const ends = this.#ends;
     return valueKind(this.table, "center" in ends ? [ends.center] : [ends.low, ends.high]);
   }
 
   bands(axis: "x" | "y", context: BandContext): BandList | undefined {
-    return (axis === "y") === this.#horizontal && this.#categorical
+    return (axis === "y") === this.horizontal && this.#categorical
       ? fieldBands(this.rows(), this.#position, context)
       : undefined;
   }
@@ -306,7 +301,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
       ? bandIndices(
           this.rows(),
           this.#position,
-          (this.#horizontal ? bands.y : bands.x)?.keys ?? [],
+          (this.horizontal ? bands.y : bands.x)?.keys ?? [],
           context,
         )
       : table.numbers(this.#position as never);
@@ -318,28 +313,29 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
       s.values = high;
       s.range = true;
       // Series are built with positions on x; horizontal bars swap them onto
-      // y, where binary search over x no longer applies.
-      if (this.#horizontal) {
+      // y, where binary search over x no longer applies, and over y does
+      // where they were sorted.
+      if (this.horizontal) {
         [s.x, s.y, s.x0, s.y0] = [s.y, s.x, s.y0, undefined];
-        s.sorted = false;
+        [s.sorted, s.ySorted] = [false, s.sorted];
       }
     }
     return series;
   }
 
   xExtent(series: readonly Series[], log: boolean) {
-    if (this.#horizontal) return unionExtent(series.map((s) => this.#interval(s, log)));
+    if (this.horizontal) return unionExtent(series.map((s) => this.#interval(s, log)));
     return this.#categorical ? undefined : unionExtent(series.map((s) => xExtent(s, log)));
   }
 
   yExtent(series: readonly Series[], x0: number, x1: number, log: boolean, breaks?: Breaks) {
-    if (!this.#horizontal)
+    if (!this.horizontal)
       return unionExtent(series.map((s) => this.#interval(s, log, x0, x1, breaks)));
     return this.#categorical ? undefined : unionExtent(series.map((s) => xExtent(swap(s), log)));
   }
 
   geometry(series: readonly Series[], frame: Frame): SegmentGeometry[] {
-    const horizontal = this.#horizontal;
+    const horizontal = this.horizontal;
     const along = horizontal ? frame.y : frame.x;
     const across = horizontal ? frame.x : frame.y;
     const half = (this.spec.cap ?? CAP) / 2;
@@ -347,7 +343,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     this.#shares?.split(series, frame, true);
     for (const s of series) {
       if (frame.hidden.has(s.key)) continue;
-      const shift = this.#shift(s, along);
+      const shift = this.shift(s, along);
       const [start, end] = horizontal
         ? [0, s.length]
         : visibleRange(s, along.domain[0], along.domain[1]);
@@ -398,41 +394,10 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
 
   /**
    * Its bars are found as `pick` finds them, measured to their painted
-   * strokes, the one painted last of those as near; bounded by what the
-   * mark's clip keeps of their stems and caps.
+   * strokes; bounded by what its clip keeps of them (marks/lookups.ts).
    */
   pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-    const stroke = this.spec.strokeWidth ?? 1.5;
-    return pickedHit(this, drawn, query, {
-      lookup: (series, px, py, frame) => this.#find(series, px, py, frame, stroke, true),
-      bounds: (s, position, frame) => {
-        const horizontal = this.#horizontal;
-        const along = horizontal ? frame.y : frame.x;
-        const across = horizontal ? frame.x : frame.y;
-        const { positions, lows, highs } = columns(s, horizontal);
-        const row = rowOf(s, position);
-        const band = positions[row]!;
-        const places = s.places?.[horizontal ? "y" : "x"];
-        const p = along.map(places && band >= 0 ? places.at(band) : band) + this.#shift(s, along);
-        const [a, b] = [across.map(lows[row]!), across.map(highs[row]!)];
-        // What the clip keeps of the stem and caps the lookup measures.
-        const box = clipBox(this.spec.clip, frame);
-        let bounds: Rect | undefined;
-        for (const [u1, v1, u2, v2] of this.#pieces(p, a, b, stroke)) {
-          const piece = cut(horizontal ? boxOf(v1, u1, v2, u2) : boxOf(u1, v1, u2, v2), box);
-          if (piece)
-            bounds = bounds
-              ? boxOf(
-                  Math.min(bounds.x, piece.x),
-                  Math.min(bounds.y, piece.y),
-                  Math.max(bounds.x + bounds.width, piece.x + piece.width),
-                  Math.max(bounds.y + bounds.height, piece.y + piece.height),
-                )
-              : piece;
-        }
-        return bounds;
-      },
-    });
+    return query.lookups.errorbar(this, drawn, query, PICKING);
   }
 
   /**
@@ -442,7 +407,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
    * best match.
    */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
-    return this.#find(series, px, py, frame, 0, false);
+    return this.find(series, px, py, frame, 0, false);
   }
 
   /**
@@ -452,7 +417,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
    * near, the one painted last (a highlight's selected rows over the
    * others, as tooltips rank them).
    */
-  #find(
+  find(
     series: readonly Series[],
     px: number,
     py: number,
@@ -460,7 +425,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     stroke: number,
     top: boolean,
   ): Hit | undefined {
-    const horizontal = this.#horizontal;
+    const horizontal = this.horizontal;
     const along = horizontal ? frame.y : frame.x;
     const across = horizontal ? frame.x : frame.y;
     const pointer = horizontal ? py : px;
@@ -475,7 +440,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     let bestAt = [-1, -1, -1];
     series.forEach((s, i) => {
       const { positions, lows, highs } = columns(s, horizontal);
-      const shift = this.#shift(s, along);
+      const shift = this.shift(s, along);
       const places = s.places?.[horizontal ? "y" : "x"];
       // The positions geometry draws, for picking: vertical intervals in view and beside it.
       const [start, end] =
@@ -495,7 +460,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
         const b = across.map(highs[row]!);
         if (!(Number.isFinite(a) && Number.isFinite(b))) return offset;
         const order = [lit?.[row] ?? 0, i, k];
-        for (const [u1, v1, u2, v2] of this.#pieces(p, a, b, stroke)) {
+        for (const [u1, v1, u2, v2] of this.pieces(p, a, b, stroke)) {
           const [x1, y1, x2, y2] = horizontal ? [v1, u1, v2, u2] : [u1, v1, u2, v2];
           // Picking measures what is painted, nothing where only an edge is
           // kept; tooltips also reach stems of no width.
@@ -529,7 +494,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
    * The stem from `a` to `b` at `p` and the caps where drawn, each a
    * rectangle `stroke` wide (butt ends square), as [along, across] corners.
    */
-  #pieces(p: number, a: number, b: number, stroke: number): [number, number, number, number][] {
+  pieces(p: number, a: number, b: number, stroke: number): [number, number, number, number][] {
     const half = (this.spec.cap ?? CAP) / 2;
     const width = stroke / 2;
     const pieces: [number, number, number, number][] = [[p - width, a, p + width, b]];
@@ -543,12 +508,12 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
 
   /** Where a row is drawn, from where its values place it: dodged within its band. */
   displace(s: Series, _row: number, frame: Frame): readonly [number, number] {
-    const shift = this.#shift(s, this.#horizontal ? frame.y : frame.x);
-    return this.#horizontal ? [0, shift] : [shift, 0];
+    const shift = this.shift(s, this.horizontal ? frame.y : frame.x);
+    return this.horizontal ? [0, shift] : [shift, 0];
   }
 
   /** How far a series stands from its bands' centers along the position axis, in pixels. */
-  #shift(s: Series, along: PositionScale): number {
+  shift(s: Series, along: PositionScale): number {
     return this.#shares ? this.#shares.of(s, along.bandwidth ?? 0).center : 0;
   }
 
@@ -564,7 +529,7 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
     to = Number.POSITIVE_INFINITY,
     breaks?: Breaks,
   ): [number, number] | undefined {
-    const { positions, lows, highs } = columns(s, this.#horizontal);
+    const { positions, lows, highs } = columns(s, this.horizontal);
     const lo = this.#categorical ? 0 : Math.min(from, to);
     const hi = this.#categorical ? Number.POSITIVE_INFINITY : Math.max(from, to);
     const [start, end] = s.sorted ? visibleRange(s, lo, hi) : [0, s.length];
@@ -677,6 +642,8 @@ export function errorbar<S extends Schema>(
       "strokeWidth",
       "cap",
       "zIndex",
+      "pick",
+      "inspect",
       "label",
       "legend",
       "id",
@@ -691,3 +658,7 @@ export function errorbar<S extends Schema>(
   // Field names were checked against S above; marks work on the erased schema.
   return new ErrorBarMark(spec, table as unknown as Table);
 }
+
+/** What its lookup reads of this module (see marks/lookups.ts). */
+const PICKING = { columns };
+export type ErrorBarPicking = typeof PICKING;

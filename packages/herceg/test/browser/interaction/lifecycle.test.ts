@@ -2,6 +2,7 @@
 // controller loads plays in the panel it was made over, steps faster than
 // frames add up as if drawn between them, and a listener changing a view
 // as it hears of one makes the next change, heard after the first by all.
+import "../interactive.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { table } from "../../../src/data/table.ts";
 import { type ChartOptions, forgetInteraction } from "../../../src/dom/chart.ts";

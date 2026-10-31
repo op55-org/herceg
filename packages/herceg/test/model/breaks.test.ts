@@ -369,7 +369,7 @@ describe("rules of breaks at their limits", () => {
     const data = table({ t: time(t), v: t.map((_, i) => i % 7) });
     const breaks = weekend();
     const { model, scene } = build({
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       marks: [line(data, { x: "t", y: "v" })],
       x: { breaks },
     });
@@ -415,7 +415,7 @@ describe("breaks with more than one x scale, and nearest points", () => {
     const near = table({ t: time([80]), v: [0] });
     const far = table({ t: time([0, 100]), v: [0, 0] });
     const { model, scene } = build({
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       marks: [line(near, { x: "t", y: "v" }), line(far, { x: "t", y: "v" })],
       x: { breaks: timeBreaks([{ from: 1, to: 49 }]), domain: [0, 100] },
       y: { domain: [-1, 1] },

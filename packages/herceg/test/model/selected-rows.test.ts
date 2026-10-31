@@ -33,6 +33,7 @@ import {
 import { staticCompilers } from "../../src/render/compilers.ts";
 import type { AreaGeometry, PointGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>, options?: TableOptions): Table =>
@@ -201,7 +202,9 @@ describe("brushes as conditions", () => {
     const week = brushedRows(model, days, { x: [at(5), at(12) - 1], y: [0, 1], lasso: null }, null);
     expect(rowsOf(week, days)).toEqual([0, 1, 2]);
     const [px, py] = pixel(model, at(5, 12), 0);
-    expect(Array.from(clickedRows(model, new Set([days]), px, py)!.rows)).toEqual([0, 1]);
+    expect(Array.from(clickedRows(withPicker(model), new Set([days]), px, py)!.rows)).toEqual([
+      0, 1,
+    ]);
     // A cell is at its center: the week's middle, Thursday the 8th at noon.
     const middle = brushedRows(model, days, { x: [at(8), at(9)], y: [0, 0], lasso: null }, null);
     expect(rowsOf(middle, days)).toEqual([0, 1]);
@@ -450,7 +453,7 @@ describe("lassos and clicks as rows", () => {
       return [left.x.map(x), left.y.map(y)] as const;
     };
     const clicked = (model: ChartModel) =>
-      clickedRows(model, new Set([points]), ...at(model, 1, 1))?.rows;
+      clickedRows(withPicker(model), new Set([points]), ...at(model, 1, 1))?.rows;
     const brushed = (model: ChartModel) => {
       const left = model.panels().find(({ key }) => key === "left")!;
       const scales = [model.instance(`x ${left.xGroup}`), model.instance(`y ${left.yGroup}`)];
@@ -478,9 +481,11 @@ describe("lassos and clicks as rows", () => {
   it("select the point clicked, within a few pixels of it", () => {
     const model = drawn({ marks: [point(points, { x: "x", y: "y" })] });
     const [px, py] = pixel(model, 3, 3);
-    expect(Array.from(clickedRows(model, new Set([points]), px + 3, py)!.rows)).toEqual([2]);
-    expect(clickedRows(model, new Set([points]), px + 40, py + 40)).toBeUndefined();
-    expect(clickedRows(model, new Set(), px, py)).toBeUndefined();
+    expect(Array.from(clickedRows(withPicker(model), new Set([points]), px + 3, py)!.rows)).toEqual(
+      [2],
+    );
+    expect(clickedRows(withPicker(model), new Set([points]), px + 40, py + 40)).toBeUndefined();
+    expect(clickedRows(withPicker(model), new Set(), px, py)).toBeUndefined();
   });
 
   it("select only points drawn, each within its own size", () => {
@@ -491,7 +496,7 @@ describe("lassos and clicks as rows", () => {
     const tables = new Set([sized]);
     // Row 0 has no size: it is not drawn, so neither clicked nor lassoed.
     const [x0, y0] = pixel(model, 1, 1);
-    expect(clickedRows(model, tables, x0, y0)).toBeUndefined();
+    expect(clickedRows(withPicker(model), tables, x0, y0)).toBeUndefined();
     const all = [
       [0, 0],
       [4, 0],
@@ -502,9 +507,9 @@ describe("lassos and clicks as rows", () => {
     expect(rowsOf(lassoed, sized)).toEqual([1, 2]);
     // The big point is clicked well away from its center; the small one is not.
     const [x2, y2] = pixel(model, 3, 1);
-    expect(Array.from(clickedRows(model, tables, x2, y2 - 15)!.rows)).toEqual([2]);
+    expect(Array.from(clickedRows(withPicker(model), tables, x2, y2 - 15)!.rows)).toEqual([2]);
     const [x1, y1] = pixel(model, 2, 1);
-    expect(clickedRows(model, tables, x1, y1 - 15)).toBeUndefined();
+    expect(clickedRows(withPicker(model), tables, x1, y1 - 15)).toBeUndefined();
   });
 
   it("select the bar clicked inside, among grouped bars", () => {
@@ -514,11 +519,13 @@ describe("lassos and clicks as rows", () => {
     const center = panel!.x.map(1);
     const low = panel!.y.map(2);
     // Bars of S: a on the left of its slot, b on the right.
-    const left = clickedRows(model, new Set([sales]), center - 10, low);
-    const right = clickedRows(model, new Set([sales]), center + 10, low);
+    const left = clickedRows(withPicker(model), new Set([sales]), center - 10, low);
+    const right = clickedRows(withPicker(model), new Set([sales]), center + 10, low);
     expect([left?.rows[0], right?.rows[0]]).toEqual([1, 1]);
     // Above S's short b bar there is nothing.
-    expect(clickedRows(model, new Set([sales]), center + 10, panel!.y.map(15))).toBeUndefined();
+    expect(
+      clickedRows(withPicker(model), new Set([sales]), center + 10, panel!.y.map(15)),
+    ).toBeUndefined();
   });
 
   it("select the rows a histogram bin counts, by its exact edges", () => {
@@ -526,10 +533,20 @@ describe("lassos and clicks as rows", () => {
     const model = drawn({ marks: [histogram(values, { x: "v", bins: { step: 1 } })] });
     const [panel] = model.panels();
     // Bin [1, 2) counts 1 and 1.5, not 2.
-    const found = clickedRows(model, new Set([values]), panel!.x.map(1.5), panel!.y.map(0.5));
+    const found = clickedRows(
+      withPicker(model),
+      new Set([values]),
+      panel!.x.map(1.5),
+      panel!.y.map(0.5),
+    );
     expect(Array.from(found!.rows)).toEqual([2, 3]);
     // The last bin, [2, 3], includes its right edge.
-    const last = clickedRows(model, new Set([values]), panel!.x.map(2.5), panel!.y.map(0.5));
+    const last = clickedRows(
+      withPicker(model),
+      new Set([values]),
+      panel!.x.map(2.5),
+      panel!.y.map(0.5),
+    );
     expect(Array.from(last!.rows)).toEqual([4, 5, 6]);
   });
 
@@ -541,7 +558,7 @@ describe("lassos and clicks as rows", () => {
     });
     const [panel] = model.panels();
     const at = (x: number, y: number) =>
-      clickedRows(model, new Set([values]), panel!.x.map(x), panel!.y.map(y));
+      clickedRows(withPicker(model), new Set([values]), panel!.x.map(x), panel!.y.map(y));
     // Left of the first center is outside the polygon; under it past the
     // shared edge, the second bin's row.
     expect(at(0.25, 5)).toBeUndefined();
@@ -554,7 +571,8 @@ describe("lassos and clicks as rows", () => {
       y: { type: "log", domain: [100, 1] },
     });
     const [sp] = steps.panels();
-    const step = (y: number) => clickedRows(steps, new Set([tens]), sp!.x.map(0.5), sp!.y.map(y));
+    const step = (y: number) =>
+      clickedRows(withPicker(steps), new Set([tens]), sp!.x.map(0.5), sp!.y.map(y));
     expect(Array.from(step(50)!.rows)).toHaveLength(10);
     expect(step(5)).toBeUndefined();
     const [outline] = steps.scene(estimateText).panels[0]!.marks as AreaGeometry[];
@@ -577,7 +595,12 @@ describe("lassos and clicks as rows", () => {
     });
     const panel = model.panels().find(({ key }) => key === "y")!;
     // Stacked: a below, b above; one row of each in the panel.
-    const top = clickedRows(model, new Set([values]), panel.x.map(1.5), panel.y.map(1.5));
+    const top = clickedRows(
+      withPicker(model),
+      new Set([values]),
+      panel.x.map(1.5),
+      panel.y.map(1.5),
+    );
     expect(Array.from(top!.rows)).toEqual([3]);
   });
 
@@ -597,7 +620,7 @@ describe("lassos and clicks as rows", () => {
       marks: [point(tips, { x: "day", y: "v", series: "sex", dodge: true })],
     });
     const m = at(dodged, "point", 1).coords;
-    expect(Array.from(clickedRows(dodged, tables, m[0]!, m[1]!)!.rows)).toEqual([1]);
+    expect(Array.from(clickedRows(withPicker(dodged), tables, m[0]!, m[1]!)!.rows)).toEqual([1]);
     // A bar of a table made from the points' rows stands in its value's slot.
     const onlyM = table({ day: ["thu"], sex: ["m"], v: [3] }, { origin: tips });
     const grouped = drawn({
@@ -607,9 +630,9 @@ describe("lassos and clicks as rows", () => {
       ],
     });
     const [x, y, w] = Array.from(at(grouped, "rect", 0).rects);
-    expect(Array.from(clickedRows(grouped, new Set([onlyM]), x! + w! / 2, y! + 2)!.rows)).toEqual([
-      0,
-    ]);
+    expect(
+      Array.from(clickedRows(withPicker(grouped), new Set([onlyM]), x! + w! / 2, y! + 2)!.rows),
+    ).toEqual([0]);
     // Dodged and horizontal bins, and a cumulative bin's rows up to its right edge.
     for (const horizontal of [false, true]) {
       const bins = drawn({
@@ -625,7 +648,7 @@ describe("lassos and clicks as rows", () => {
       });
       // m's second bin: its rows at or below 4.
       const [bx, by, bw, bh] = Array.from(at(bins, "rect", 1).rects.slice(4, 8));
-      const found = clickedRows(bins, tables, bx! + bw! / 2, by! + bh! / 2);
+      const found = clickedRows(withPicker(bins), tables, bx! + bw! / 2, by! + bh! / 2);
       expect(Array.from(found!.rows)).toEqual([1, 3]);
     }
   });
@@ -666,7 +689,9 @@ describe("lassos and clicks as rows", () => {
               (m as RectGeometry).rects[1]! + 2,
             ];
       expect(model.inspect(px, py, "nearest")!.points[0]!.px).toBeCloseTo(px, 3);
-      expect(Array.from(clickedRows(model, new Set([tips]), px, py)!.rows)).toEqual([1]);
+      expect(Array.from(clickedRows(withPicker(model), new Set([tips]), px, py)!.rows)).toEqual([
+        1,
+      ]);
     }
   });
 
@@ -682,23 +707,28 @@ describe("lassos and clicks as rows", () => {
     const [panel] = model.panels();
     const bottom = panel!.plot.y + panel!.plot.height - 2;
     expect(
-      Array.from(clickedRows(model, new Set([values]), panel!.x.map(2), bottom)!.rows),
+      Array.from(clickedRows(withPicker(model), new Set([values]), panel!.x.map(2), bottom)!.rows),
     ).toEqual([1]);
     // Anywhere along a long tick.
     const long = drawn({ marks: [rug(values, { x: "v", length: 40 })] });
     const [tall] = long.panels();
     const end = tall!.plot.y + tall!.plot.height - 38;
-    expect(Array.from(clickedRows(long, new Set([values]), tall!.x.map(2), end)!.rows)).toEqual([
-      1,
-    ]);
+    expect(
+      Array.from(clickedRows(withPicker(long), new Set([values]), tall!.x.map(2), end)!.rows),
+    ).toEqual([1]);
     // Along y, at the left edge; and the keyboard selects ticks whatever the unused axis.
     const sideways = drawn({ marks: [rug(values, { y: "v" })] });
     const [left] = sideways.panels();
-    const tick = clickedRows(sideways, new Set([values]), left!.plot.x + 2, left!.y.map(2));
+    const tick = clickedRows(
+      withPicker(sideways),
+      new Set([values]),
+      left!.plot.x + 2,
+      left!.y.map(2),
+    );
     expect(Array.from(tick!.rows)).toEqual([1]);
     const wide = drawn({ marks: [rug(values, { y: "v", length: 40 })] });
     const [far] = wide.panels();
-    const reach = clickedRows(wide, new Set([values]), far!.plot.x + 38, far!.y.map(2));
+    const reach = clickedRows(withPicker(wide), new Set([values]), far!.plot.x + 38, far!.y.map(2));
     expect(Array.from(reach!.rows)).toEqual([1]);
     const negative = table({ v: [-1, 2] });
     const logged = drawn({ marks: [rug(negative, { x: "v" })], y: { type: "log" } });
@@ -711,11 +741,21 @@ describe("lassos and clicks as rows", () => {
     const values = table({ g: ["a", "b", "a", "b", "a"], v: [1, 2, 3, Number.NaN, 5] });
     const model = drawn({ marks: [boxplot(values, { x: "g", y: "v" })] });
     const [panel] = model.panels();
-    const found = clickedRows(model, new Set([values]), panel!.x.map(1), panel!.y.map(2));
+    const found = clickedRows(
+      withPicker(model),
+      new Set([values]),
+      panel!.x.map(1),
+      panel!.y.map(2),
+    );
     expect(Array.from(found!.rows)).toEqual([1]);
     const violins = drawn({ marks: [violin(values, { x: "g", y: "v" })] });
     const [area] = violins.panels();
-    const group = clickedRows(violins, new Set([values]), area!.x.map(0), area!.y.map(3));
+    const group = clickedRows(
+      withPicker(violins),
+      new Set([values]),
+      area!.x.map(0),
+      area!.y.map(3),
+    );
     expect(Array.from(group!.rows)).toEqual([0, 2, 4]);
   });
 
@@ -734,7 +774,12 @@ describe("lassos and clicks as rows", () => {
       ],
     });
     const [panel] = model.panels();
-    const found = clickedRows(model, new Set([stats]), panel!.x.map(0), panel!.y.map(12));
+    const found = clickedRows(
+      withPicker(model),
+      new Set([stats]),
+      panel!.x.map(0),
+      panel!.y.map(12),
+    );
     expect(Array.from(found!.rows)).toEqual([1]);
   });
 
@@ -742,7 +787,12 @@ describe("lassos and clicks as rows", () => {
     const cells = table({ x: ["a", "a", "b"], y: ["p", "p", "p"], v: [1, 2, 3] });
     const model = drawn({ marks: [heatmap(cells, { x: "x", y: "y", color: "v" })] });
     const [panel] = model.panels();
-    const found = clickedRows(model, new Set([cells]), panel!.x.map(0), panel!.y.map(0));
+    const found = clickedRows(
+      withPicker(model),
+      new Set([cells]),
+      panel!.x.map(0),
+      panel!.y.map(0),
+    );
     expect(Array.from(found!.rows)).toEqual([0, 1]);
   });
 
@@ -758,7 +808,12 @@ describe("lassos and clicks as rows", () => {
     const lassoed = brushedRows(model, cells, { x: [0, 1], y: [0, 0], lasso: all }, null);
     expect(rowsOf(lassoed, cells)).toEqual([0, 2]);
     const [panel] = model.panels();
-    const clicked = clickedRows(model, new Set([cells]), panel!.x.map(1), panel!.y.map(0));
+    const clicked = clickedRows(
+      withPicker(model),
+      new Set([cells]),
+      panel!.x.map(1),
+      panel!.y.map(0),
+    );
     expect(Array.from(clicked!.rows)).toEqual([2]);
   });
 
@@ -788,7 +843,9 @@ describe("lassos and clicks as rows", () => {
     });
     const [bp] = bars.panels();
     const [e] = bars.panelSeries("");
-    expect(clickedRows(bars, new Set([ranges]), bp!.x.map(0), bp!.y.map(1))).toBeUndefined();
+    expect(
+      clickedRows(withPicker(bars), new Set([ranges]), bp!.x.map(0), bp!.y.map(1)),
+    ).toBeUndefined();
     const reached = (position: number) =>
       cursorRows(bars, new Set([ranges]), { panel: "", key: e!.key, position });
     expect(reached(0)).toBeUndefined();
@@ -802,7 +859,7 @@ describe("lassos and clicks as rows", () => {
       });
     const zeros = stacks(["a"]);
     const [zp] = zeros.panels();
-    const zero = clickedRows(zeros, new Set([parts]), zp!.x.map(1), zp!.y.map(0.1));
+    const zero = clickedRows(withPicker(zeros), new Set([parts]), zp!.x.map(1), zp!.y.map(0.1));
     expect(Array.from(zero!.rows)).toEqual([1]);
     const lassoed = brushedRows(zeros, parts, { x: [0.5, 1.5], y: [0.1, 0.2], lasso: null }, null);
     expect(rowsOf(lassoed, parts)).toEqual([1]);
@@ -812,7 +869,7 @@ describe("lassos and clicks as rows", () => {
       x: { type: "log", domain: [0.1, 10] },
     });
     const [ap] = along.panels();
-    const across = clickedRows(along, new Set([parts]), ap!.x.map(0.1), ap!.y.map(1));
+    const across = clickedRows(withPicker(along), new Set([parts]), ap!.x.map(0.1), ap!.y.map(1));
     expect(Array.from(across!.rows)).toEqual([1]);
     const brushed = brushedRows(along, parts, { x: [0.1, 0.2], y: [0.5, 1.5], lasso: null }, null);
     expect(rowsOf(brushed, parts)).toEqual([1]);

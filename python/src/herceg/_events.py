@@ -12,7 +12,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any, Literal, TypeVar
+from typing import Any, ClassVar, Literal, TypeVar
 
 from ._data import _time_ms, listlike
 from ._errors import (
@@ -175,6 +175,222 @@ class Inspection:
     #: A 3D chart's point by column: numbers (datetimes as epoch milliseconds)
     #: and category labels; None for other charts.
     values: dict[str, float | str] | None = None
+
+
+@dataclass(frozen=True)
+class Box:
+    """A box in CSS pixels from the chart's top left corner."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
+class Pointer:
+    """Where the pointer is, unsnapped: ``x`` and ``y`` in CSS pixels from the
+    chart's top left corner, the ``panel`` it is over (its key, ``""`` in a
+    chart of one panel; None over none), and whether it is ``in_plot``.
+    ``values`` holds its place on the panel's axes ("x", "y", "y_right"):
+    numbers, datetimes on time axes, and on category axes a fractional band
+    position, whose category ``categories`` names. Axes the panel lacks are
+    left out."""
+
+    x: float
+    y: float
+    panel: str | None
+    in_plot: bool
+    values: Mapping[str, float | _dt.datetime]
+    categories: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class ItemTarget:
+    """A mark's item under the pointer or keyboard cursor: a bar, a point, a
+    line's observation, a cell, a slice. ``mark`` is the mark's index among
+    the chart's marks (``mark_id`` its id), ``item`` the item's key, the same
+    in every frame while its name lasts, ``series`` its series' key, and
+    ``row`` its row in its mark's data (None for items of no one row)."""
+
+    kind: ClassVar[Literal["item"]] = "item"
+    mark: int
+    mark_id: str | None
+    item: str
+    series: str | None
+    row: int | None
+    #: The panel it is drawn in (``""`` in a chart of one panel).
+    panel: str
+    #: Where it is drawn: its box, or a line's observation's point.
+    box: Box
+
+
+@dataclass(frozen=True)
+class AxisLabelTarget:
+    """A tick label of an axis: its ``scale`` ("x", "y", or "y_right"), its
+    tick ``layer`` ("major", or a listed axis' layer), the tick's ``value``
+    (a datetime on time axes, a band position on category axes, whose
+    ``category`` it names), and its ``text``."""
+
+    kind: ClassVar[Literal["axisLabel"]] = "axisLabel"
+    panel: str
+    scale: ScaleName
+    layer: str
+    value: float | _dt.datetime
+    category: str | None
+    text: str
+    box: Box
+
+
+@dataclass(frozen=True)
+class LegendEntryTarget:
+    """An entry of a legend: what it names (``key``, as ``hidden_keys`` name
+    it), its ``label``, and the subplot whose legend it is in (None for the
+    chart's)."""
+
+    kind: ClassVar[Literal["legendEntry"]] = "legendEntry"
+    key: str
+    label: str
+    panel: str | None
+
+
+@dataclass(frozen=True)
+class PlotTarget:
+    """A plot where no item is."""
+
+    kind: ClassVar[Literal["plot"]] = "plot"
+    panel: str
+
+
+#: What input is on: the topmost thing drawn there that input addresses.
+Target = ItemTarget | AxisLabelTarget | LegendEntryTarget | PlotTarget
+
+
+@dataclass(frozen=True)
+class InputEvent:
+    """What hover, clicks, and secondary presses report (``widget.on_hover``,
+    ``on_click``, ``on_context_menu``): where the ``pointer`` is (None for
+    the keyboard and for cursors other charts share), the ``target`` it is
+    on (None over nothing input addresses), the data the chart's inspection
+    reads there (None where it reads none), what made it (``cause``:
+    "pointer", "keyboard", "sync", or "api"), and the chart's ``revision``
+    on screen."""
+
+    pointer: Pointer | None
+    target: Target | None
+    inspection: Inspection | None
+    cause: str
+    revision: int
+
+
+def decode_input_event(payload: Any) -> InputEvent:
+    """An input event as the browser writes it (``inputEventPayload``),
+    checked; raises ValueError for one of another shape."""
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected an object, not {payload!r}")
+    cause, revision = payload.get("cause"), payload.get("revision")
+    if cause not in ("pointer", "keyboard", "sync", "api") or not (
+        isinstance(revision, int) and not isinstance(revision, bool)
+    ):
+        raise ValueError(f"expected a cause and a revision, not {cause!r} and {revision!r}")
+    inspection = payload.get("inspection")
+    return InputEvent(
+        pointer=_pointer(payload.get("pointer")),
+        target=_target(payload.get("target")),
+        inspection=decode_inspection(_checked_inspection(inspection)) if inspection else None,
+        cause=cause,
+        revision=revision,
+    )
+
+
+def _pointer(payload: Any) -> Pointer | None:
+    if payload is None:
+        return None
+    if not (
+        isinstance(payload, dict)
+        and _finite(payload.get("x"))
+        and _finite(payload.get("y"))
+        and isinstance(payload.get("inPlot"), bool)
+        and (payload.get("panel") is None or isinstance(payload["panel"], str))
+    ):
+        raise ValueError(f"expected a pointer's place, panel, and inPlot, not {payload!r}")
+    time = payload.get("time", [])
+    values = payload.get("values") or {}
+    categories = payload.get("categories") or {}
+    if not (
+        isinstance(values, dict)
+        and all(axis in _SCALES and _finite(v) for axis, v in values.items())
+        and isinstance(categories, dict)
+        and all(axis in _SCALES and isinstance(c, str) for axis, c in categories.items())
+    ):
+        raise ValueError(f"expected values and categories by axis, not {payload!r}")
+    return Pointer(
+        x=payload["x"],
+        y=payload["y"],
+        panel=payload.get("panel"),
+        in_plot=payload["inPlot"],
+        values=MappingProxyType(
+            {_SCALES[axis]: _time(v, axis in time) for axis, v in values.items()}
+        ),
+        categories=MappingProxyType({_SCALES[axis]: c for axis, c in categories.items()}),
+    )
+
+
+def _box(payload: Any) -> Box:
+    if not (
+        isinstance(payload, dict)
+        and all(_finite(payload.get(k)) for k in ("x", "y", "width", "height"))
+    ):
+        raise ValueError(f"expected a box, not {payload!r}")
+    return Box(payload["x"], payload["y"], payload["width"], payload["height"])
+
+
+def _target(payload: Any) -> Target | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected a target, not {payload!r}")
+    kind = payload.get("kind")
+
+    def text(name: str, optional: bool = False) -> Any:
+        value = payload.get(name)
+        if not (isinstance(value, str) or (optional and value is None)):
+            raise ValueError(f"{kind} target {name}: expected text, not {value!r}")
+        return value
+
+    if kind == "item":
+        mark, row = payload.get("mark"), payload.get("row")
+        if not (isinstance(mark, int) and (row is None or isinstance(row, int))):
+            raise ValueError(f"item target: expected a mark index and a row, not {payload!r}")
+        return ItemTarget(
+            mark=mark,
+            mark_id=text("markId", True),
+            item=text("item"),
+            series=text("series", True),
+            row=row,
+            panel=text("panel"),
+            box=_box(payload.get("box")),
+        )
+    if kind == "axisLabel":
+        scale, value = payload.get("scale"), payload.get("value")
+        if scale not in _SCALES or not _finite(value) or value is None:
+            raise ValueError(f"axisLabel target: expected a scale and a value, not {payload!r}")
+        return AxisLabelTarget(
+            panel=text("panel"),
+            scale=_SCALES[scale],
+            layer=text("layer"),
+            value=_time(value, payload.get("time") is True),
+            category=text("category", True),
+            text=text("text"),
+            box=_box(payload.get("box")),
+        )
+    if kind == "legendEntry":
+        return LegendEntryTarget(key=text("key"), label=text("label"), panel=text("panel", True))
+    if kind == "plot":
+        return PlotTarget(panel=text("panel"))
+    raise ValueError(
+        f'target kind: expected "item", "axisLabel", "legendEntry", or "plot", not {kind!r}'
+    )
 
 
 def decode_viewport(payload: Any) -> Viewport:

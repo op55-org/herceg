@@ -320,6 +320,10 @@ export interface MarkIdentity {
   readonly tooltip?: Frozen<MarkTooltipSpec> | undefined;
   /** Where the mark is drawn among the others of its panel (see `MarkBase.zIndex`). */
   readonly zIndex?: number | undefined;
+  /** `false`: the pointer passes through the mark (see `MarkBase.pick`). */
+  readonly pick?: boolean | undefined;
+  /** `false`: tooltips, hover, and the keyboard leave the mark out (see `MarkBase.inspect`). */
+  readonly inspect?: boolean | undefined;
 }
 
 /** A scale of a mark that guides may name (see `Mark.legendScales`). */
@@ -636,13 +640,15 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * paints (itself or as copies), stands for, for geometry that does not
    * say it itself (bars and points record their rows): an aggregate's
    * group, an annotation's row, built with `parts` (see drawn-parts.ts).
-   * Undefined for primitives of no item.
+   * `at` is the point picked, for primitives whose index alone does not
+   * say it (a histogram's outline). Undefined for primitives of no item.
    */
   partOf?(
     drawn: DrawnMark,
     geometry: Geometry,
     index: number,
     parts: PartBuilders,
+    at?: { x: number; y: number },
   ): DrawnPart | undefined;
   /**
    * The topmost item at `query`, for marks whose own lookup finds it better

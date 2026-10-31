@@ -39,7 +39,7 @@ import {
   type DrillPayload,
   drillPayload,
   type ItemPositionsPayload,
-  inspectionPayload,
+  inputEventPayload,
   MOVES,
   PLANES,
   positionsValue,
@@ -297,10 +297,11 @@ function mount(component: Component, data: Uint8Array, previous: Instance | unde
     for (const { selection } of rows ?? []) if (selection) brushed.add(selection);
     if (!instance.waiting) reportSelection(instance);
   });
-  chart.on("click", ({ inspection }) => {
-    if (!inspection || !instance.events.includes("click")) return;
-    instance.component.setTriggerValue("click", inspectionPayload(chart, inspection));
-  });
+  // Listened to only for a script that reacts to clicks: a chart listened to reads what input is on.
+  if (instance.events.includes("click"))
+    chart.on("click", (event) =>
+      instance.component.setTriggerValue("click", inputEventPayload(chart, event)),
+    );
   chart.on("camera", () => reportCamera(instance));
   chart.on("viewport", () => {
     if (!instance.waiting) reportViewport(instance);

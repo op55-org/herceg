@@ -29,6 +29,7 @@ import { rowSelection } from "../../src/model/row-selection.ts";
 import { brushedRows, clickedRows, cursorRows } from "../../src/model/selected-rows.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { TextGeometry } from "../../src/scene/scene.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 function build(config: ChartConfig, width = 800, height = 400) {
   const model = new ChartModel({ locale: "en-US", ...config });
@@ -148,7 +149,7 @@ describe("trees in facet panels", () => {
     const france = (panel: string) =>
       items(model, panel).find((item) => item.points[0]!.label === "Europe / France")!;
     const { px, py } = france("2024").points[0]!;
-    expect(clickedRows(model, tables, px, py)?.rows).toEqual(Uint32Array.of(3));
+    expect(clickedRows(withPicker(model), tables, px, py)?.rows).toEqual(Uint32Array.of(3));
     expect(
       cursorRows(model, tables, { panel: "2023", key: france("2023").key, position: 0 })?.rows,
     ).toEqual(Uint32Array.of(0));
@@ -502,7 +503,9 @@ describe("networks in facet panels", () => {
     expect(model.items!.positions("2023")).toEqual(model.items!.positions("2024"));
     const tables = new Set([links as unknown as Table]);
     const ab = model.inspectItem('[0,"a","b"]', "2024")!.points[0]!;
-    expect(clickedRows(model, tables, ab.px, ab.py)?.rows).toEqual(Uint32Array.of(3, 4));
+    expect(clickedRows(withPicker(model), tables, ab.px, ab.py)?.rows).toEqual(
+      Uint32Array.of(3, 4),
+    );
   });
 
   it("move a node only a later panel draws, there or without naming a panel", () => {

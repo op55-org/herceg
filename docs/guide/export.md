@@ -372,7 +372,7 @@ Fragments report through DOM events that bubble and cross shadow roots
 | --- | --- |
 | `herceg:ready` | `{ id }` |
 | `herceg:error` | `{ id, error }`; `preventDefault()` keeps it out of the console |
-| `herceg:click` | `{ id, panel?, inspection, cause, revision }` |
+| `herceg:click` | `{ id, panel?, pointer, target, inspection, cause, revision }`: an input event ([Events](interaction.md#events)), its axis values in `pointer.time` and an axis label's in `target.time` marked as times |
 | `herceg:select` | `{ id, owner, selection, cause, revision }` |
 | `herceg:viewport` | `{ id, viewRevision, revision, cause, panel?, scales, views }` |
 | `herceg:edge` | `{ id, scale, instance, time, panels, side, domain, bound, cause }` |

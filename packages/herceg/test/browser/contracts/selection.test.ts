@@ -5,6 +5,7 @@
 // reaches the chart, which draws the rows it holds as they are and dims
 // the others.
 
+import "../interactive.ts";
 import { describe, expect } from "vitest";
 import { compileExpression } from "../../../src/data/expression.ts";
 import { RowSet } from "../../../src/data/row-set.ts";

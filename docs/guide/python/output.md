@@ -147,9 +147,10 @@ web.fragment(requests_chart(), id="requests", data_url="/charts/requests.bin")
 `herceg:rowselection`, and `herceg:visibility`, with JSON details
 ([details](../export.md#payloads-and-page-fragments)). Python reads what a
 page posts back: `web.selection`, `web.inspection`, and `web.viewport` give
-`hg.Selection`, `hg.Inspection`, and `hg.Viewport`; `web.select_event`,
-`web.viewport_event`, `web.edge`, and `web.visibility` read a whole
-`detail` as a widget's callbacks hear it. Each raises `ValueError` for
+`hg.Selection`, `hg.Inspection`, and `hg.Viewport`; `web.input_event`
+(a `herceg:click`), `web.select_event`, `web.viewport_event`, `web.edge`,
+and `web.visibility` read a whole `detail` as a widget's callbacks hear
+it. Each raises `ValueError` for
 anything else.
 
 With HTMX, a form posts a chart's selection; a capture-phase listener fills

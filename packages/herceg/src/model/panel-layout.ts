@@ -293,7 +293,7 @@ export function trackSizes(
 }
 
 /** The chart options a layout checks; the x axis as panels read it, breaks aside. */
-export type LayoutOptions = Pick<ChartSpec, "interaction" | "tooltip"> & {
+export type LayoutOptions = Pick<ChartSpec, "interaction" | "inspection" | "tooltip"> & {
   x?: (ChartAxisOptions & Pick<XAxisSpec, "seams">) | undefined;
   y?: ChartAxisOptions | undefined;
   yRight?: ChartAxisOptions | undefined;
@@ -1116,7 +1116,8 @@ export class PanelBands {
           series: series.map((s) => {
             let copy = copied.get(s);
             if (!copy) {
-              copy = { ...s, places, sorted: false };
+              const placesSorted = s.sorted && (!places.x || placesHold(s, places.x));
+              copy = { ...s, places, sorted: false, placesSorted };
               copied.set(s, copy);
             }
             return copy;
@@ -1300,4 +1301,16 @@ export function columnGap(
       shows && (right ? i % columns < columns - 1 && i !== labeled.length - 1 : i % columns > 0),
   );
   return room && inner ? room + (right ? 0 : 8) + title : 0;
+}
+
+/**
+ * Whether the panel's places hold every band of `s` along x: then a series
+ * sorted by band is sorted by place too (its bands keep their order).
+ */
+function placesHold(s: Series, places: BandPlaces): boolean {
+  for (let k = 0; k < s.length; k++) {
+    const band = s.x[rowOf(s, k)]!;
+    if (band >= 0 && places.at(band) < 0) return false;
+  }
+  return true;
 }

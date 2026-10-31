@@ -1209,11 +1209,11 @@ describe("capabilities: brushes", () => {
       ["nearest-x", "an x"],
       ["nearest-y", "a y"],
     ] as const)
-      expect(() => build({ marks: [c.make()], tooltip: { mode } })).toThrow(
-        `tooltip.mode: ${typeOf(c)} reads the item under the pointer, not every series at ${at}; give mode: "nearest"`,
+      expect(() => build({ marks: [c.make()], inspection: { mode } })).toThrow(
+        `inspection.mode: ${typeOf(c)} reads the item under the pointer, not every series at ${at}; give mode: "nearest"`,
       );
-    build({ marks: [c.make()], tooltip: { mode: "nearest" } });
-    if (c.facets) build(besideLine(c, { tooltip: { mode: "nearest-x" } }));
+    build({ marks: [c.make()], inspection: { mode: "nearest" } });
+    if (c.facets) build(besideLine(c, { inspection: { mode: "nearest-x" } }));
   });
 
   it.each(layouts)("$name takes interaction.drag only if it moves items", (c) => {

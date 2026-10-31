@@ -188,10 +188,6 @@
         "panels": {
           "takes": ["*"],
           "reason": "Python takes a panel's id alone for a panel of its defaults: panels=['a', 'b']."
-        },
-        "tooltip": {
-          "takes": ["nearest", "nearest-x", "nearest-y"],
-          "reason": "Python takes a tooltip's mode alone for hg.Tooltip(mode=...): tooltip='nearest-x', as Plotly's hovermode."
         }
       },
       "untyped": {
@@ -212,12 +208,6 @@
       "spread": {
         "interaction": {
           "reason": "Python takes the interaction settings as keywords of their own, as Chart does."
-        }
-      },
-      "choices": {
-        "tooltip": {
-          "takes": ["nearest", "nearest-x", "nearest-y"],
-          "reason": "Python takes a tooltip's mode alone, as Chart does."
         }
       },
       "untyped": {
@@ -875,7 +865,8 @@
         "legend_title": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "settings AxisSpec hg.AxisOptions": {
@@ -888,8 +879,7 @@
     },
     "settings MarkTooltipSpec hg.Tooltip": {
       "only": {
-        "mode": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip mode: is the chart's; give it to the chart's tooltip`).",
-        "axis_labels": "As mode."
+        "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`)."
       }
     },
     "settings ContinuitySpec hg.Continuity": {
@@ -1145,7 +1135,8 @@
         "plot": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "settings LegendStyles hg.Style": {
@@ -1160,7 +1151,8 @@
         "tick": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "chart python guides style": {
@@ -1171,7 +1163,8 @@
         "plot": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "chart update guides style": {
@@ -1182,7 +1175,8 @@
         "plot": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "chart python guides layers style": {
@@ -1198,7 +1192,8 @@
         "axis_line": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "chart update guides layers style": {
@@ -1214,7 +1209,8 @@
         "axis_line": "As text.",
         "line": "As text.",
         "bar": "As text.",
-        "tooltip": "As text."
+        "tooltip": "As text.",
+        "crosshair": "As text."
       }
     },
     "settings TickLabelsSpec hg.TickLabels": {
@@ -1346,6 +1342,45 @@
       },
       "only": {
         "field": "Python's hg.Pixels serves places too; a length refuses a place's settings (`padding: a length is pixels alone; drop field, frame, and offset`).",
+        "frame": "As field.",
+        "offset": "As field."
+      }
+    },
+    "events vue": {
+      "without": {
+        "hover": "Vue takes its listener as the onHover prop, which @hover passes, not as an emitted event: the chart listens, and loads what reads what input is on, only while a parent listens, which an emitted event cannot tell it.",
+        "click": "Vue takes its listener as the onClick prop, which @click passes, not as an emitted event: the chart listens, and loads what reads what input is on, only while a parent listens, which an emitted event cannot tell it.",
+        "contextMenu": "Vue takes its listener as the onContextMenu prop, which @context-menu passes, not as an emitted event: the chart listens, and keeps the browser's own menu off its plots, only while a parent listens, which an emitted event cannot tell it."
+      }
+    },
+    "chart python inspection within": {
+      "spelled": {
+        "px": {
+          "as": "value",
+          "reason": "Python's hg.Pixels takes its number as value (`{ px: 8 }` is `hg.Pixels(8)`)."
+        }
+      },
+      "only": {
+        "seconds": "hg.Duration adds seconds, minutes, and hours to the spec's milliseconds, and writes their sum.",
+        "minutes": "As seconds.",
+        "hours": "As seconds.",
+        "field": "Python's hg.Pixels serves places too; within refuses a place's settings (`InspectionOptions within: a length is pixels alone; drop field, frame, and offset`).",
+        "frame": "As field.",
+        "offset": "As field."
+      }
+    },
+    "chart update inspection within": {
+      "spelled": {
+        "px": {
+          "as": "value",
+          "reason": "Python's hg.Pixels takes its number as value (`{ px: 8 }` is `hg.Pixels(8)`)."
+        }
+      },
+      "only": {
+        "seconds": "hg.Duration adds seconds, minutes, and hours to the spec's milliseconds, and writes their sum.",
+        "minutes": "As seconds.",
+        "hours": "As seconds.",
+        "field": "Python's hg.Pixels serves places too; within refuses a place's settings (`InspectionOptions within: a length is pixels alone; drop field, frame, and offset`).",
         "frame": "As field.",
         "offset": "As field."
       }

@@ -12,8 +12,10 @@ import {
   type ChartOptions,
   createChart,
   type DataSelection,
+  type InputEvent,
   RowSet,
   type SelectionStore,
+  type Snap,
   selectRows,
   selectWhere,
   showFailure,
@@ -43,7 +45,7 @@ import {
   drillPayload,
   edgePayload,
   type ItemPositionsPayload,
-  inspectionPayload,
+  inputEventPayload,
   MOVES,
   namesCategories,
   PLANES,
@@ -187,7 +189,7 @@ interface CursorMessage {
   type: "cursor";
   position: { x: number | string } | { y: number | string } | null;
   broadcast: boolean;
-  snap?: "nearest" | "previous" | "next";
+  snap?: Snap;
   tooltip?: boolean;
 }
 
@@ -215,6 +217,8 @@ interface View {
   positions: Map<string, ItemPositionsPayload>;
   /** The last error shown above the chart. */
   error: HTMLElement | undefined;
+  /** What stops its chart's input listeners (see `#listenToInput`). */
+  input?: (() => void)[] | undefined;
   /**
    * While its chart takes the views agreed on (see `#follow`): the changes
    * of view it made meanwhile, which go to no one, and Python's requests
@@ -293,6 +297,9 @@ class Widget {
       model.send(rest, undefined, buffers);
     });
     this.#load(model.get("_chart") as Snapshot);
+    model.on("change:_listening", () => {
+      for (const view of this.#views) this.#listenToInput(view);
+    });
     model.on("change:_chart", () => {
       const snapshot = model.get("_chart") as Snapshot;
       // Python sends the chart to every browser when one asks; a browser
@@ -615,17 +622,7 @@ class Widget {
         },
         () => {},
       );
-    chart.on("hover", ({ inspection }) => {
-      if (!this.#listening("hover")) return;
-      this.#outbox.post("hover", {
-        type: "hover",
-        inspection: inspectionPayload(chart, inspection),
-      });
-    });
-    chart.on("click", ({ inspection }) => {
-      if (!inspection || !this.#listening("click")) return;
-      this.#model.send({ type: "click", inspection: inspectionPayload(chart, inspection) });
-    });
+    this.#listenToInput(view);
     chart.on("edge", (edge) => {
       if (this.#listening("edge")) this.#model.send({ type: "edge", edge: edgePayload(edge) });
     });
@@ -772,6 +769,27 @@ class Widget {
     const { width, height } = this.#config ?? {};
     element.style.width = width === undefined ? "100%" : `${width}px`;
     element.style.height = `${height ?? DEFAULT_HEIGHT}px`;
+  }
+
+  /**
+   * Listens for the input Python listens for (hover, clicks, secondary
+   * presses), only while it does: a chart listened to for them reads what
+   * input is on, and keeps the browser's menu off its plots.
+   */
+  #listenToInput(view: View) {
+    for (const stop of view.input ?? []) stop();
+    const { chart } = view;
+    if (!chart) return;
+    view.input = (["hover", "click", "contextMenu"] as const)
+      .filter((type) => this.#listening(type))
+      .map((type) =>
+        chart.on(type, (event: InputEvent) => {
+          const content = { type, event: inputEventPayload(chart, event) };
+          // Hovers are many: Python hears the latest, at most once a throttle interval.
+          if (type === "hover") this.#outbox.post("hover", content);
+          else this.#model.send(content);
+        }),
+      );
   }
 
   #listening(event: string): boolean {

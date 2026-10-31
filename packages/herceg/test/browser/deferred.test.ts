@@ -121,6 +121,56 @@ describe("the interaction controller", () => {
     chart.destroy();
   });
 
+  it("keeps the browser's menu off a chart listening for context menus, and plays them once loaded", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
+    const menu = (x = 300, y = 150) => {
+      const rect = chart.root.getBoundingClientRect();
+      const event = new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: rect.left + x,
+        clientY: rect.top + y,
+      });
+      chart.root.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(menu()).toBe(false);
+    const menus: { pointer: { inPlot: boolean } }[] = [];
+    chart.on("contextMenu", (event) => menus.push(event));
+    expect(menu()).toBe(true);
+    // Off the plot, the browser's menu shows, and the chart's is reported too.
+    expect(menu(3, 3)).toBe(false);
+    attach(module);
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    await frame();
+    expect(menus.map(({ pointer }) => pointer.inPlot)).toEqual([true, false]);
+    chart.destroy();
+  });
+
+  it("reports a legend entry clicked while it loaded, which the legend acted on at once", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const two = table({ t: [0, 1], a: [1, 2], b: [3, 4] });
+    const chart = createChart(host, { marks: [line(two, { x: "t", y: ["a", "b"] })] });
+    const clicks: { target: unknown }[] = [];
+    chart.on("click", (event) => clicks.push(event));
+    const button = [...chart.root.querySelectorAll("button")].find((b) => b.textContent === "b")!;
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+    chart.render();
+    expect(chart.getHiddenKeys()).toHaveLength(1);
+    attach(module);
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    expect(clicks.map(({ target }) => target)).toMatchObject([{ kind: "legendEntry", label: "b" }]);
+    // Played, the click hid nothing more.
+    expect(chart.getHiddenKeys()).toHaveLength(1);
+    chart.destroy();
+  });
+
   it("loads after the first frame, which draws without it", async () => {
     const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
     expect(chart.root.querySelectorAll("svg path[clip-path]")).toHaveLength(1);
@@ -273,7 +323,7 @@ describe("the interaction controller", () => {
     chart.destroy();
   });
 
-  it("drops presses on a layout mark's panels, whose controls were not there to take them", async () => {
+  it("drops presses on a layout mark's panels, whose controls were not there to take them, not menus", async () => {
     const chart = createChart(host, {
       marks: [
         point3d(table({ x: [0, 1, 2], y: [0, 1, 2], z: [0, 1, 2] }), { x: "x", y: "y", z: "z" }),
@@ -281,12 +331,26 @@ describe("the interaction controller", () => {
     });
     const clicks: unknown[] = [];
     chart.on("click", (event) => clicks.push(event));
+    const menus: unknown[] = [];
+    chart.on("contextMenu", (event) => menus.push(event));
     const camera = chart.getCamera();
     pointer(chart, "pointerdown", 300, 150, { button: 0 });
     pointer(chart, "pointermove", 340, 150);
     pointer(chart, "pointerup", 340, 150, { button: 0 });
-    await chart.loading;
+    const rect = chart.root.getBoundingClientRect();
+    const menu = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      clientX: rect.left + 300,
+      clientY: rect.top + 150,
+    });
+    chart.root.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    await frame();
     expect(clicks).toEqual([]);
+    expect(menus).toHaveLength(1);
     expect(chart.getCamera()).toEqual(camera);
     chart.destroy();
   });

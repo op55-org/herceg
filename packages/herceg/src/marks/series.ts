@@ -1,3 +1,4 @@
+import { bisect } from "../data/bisect.ts";
 import type { NumericArray } from "../data/column.ts";
 import { scanExtent, type Table } from "../data/table.ts";
 import type { Breaks, Mapping } from "../lod/m4.ts";
@@ -59,6 +60,12 @@ export interface Series {
    * ascending over the series' points, which they are traced and reduced by.
    */
   ySorted?: boolean | undefined;
+  /**
+   * For a series sorted along x whose x bands are a panel's own (`places`),
+   * and so no longer `sorted` by value: whether its places along x ascend,
+   * which inspection searches it by.
+   */
+  placesSorted?: boolean | undefined;
   /** For `rows` grouped from a whole table as it streams. */
   stream?: SeriesStream | undefined;
   /**
@@ -236,14 +243,7 @@ export function isSortedSubset(x: NumericArray, rows: Uint32Array): boolean {
 /** First position whose x (or y, `axis`) is >= value (series sorted along it only). */
 export function lowerPosition(series: Series, value: number, axis: "x" | "y" = "x"): number {
   const values = series[axis];
-  let lo = 0;
-  let hi = series.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if (values[rowOf(series, mid)]! < value) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
+  return bisect(series.length, (k) => values[rowOf(series, k)]! < value);
 }
 
 /**

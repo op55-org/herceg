@@ -65,6 +65,7 @@ import {
   type InsetIndicatorSpec,
   type InsetSpec,
   type InsidePlace,
+  type InspectionSpec,
   type InteractionSpec,
   type LayoutCellSpec,
   type LegendEntrySpec,
@@ -448,8 +449,51 @@ const scaleLimits: Check = (v, path) => {
   } satisfies ChecksOf<ScaleLimitsSpec>);
 };
 
+/** How each series is read along an axis (see `Snap`). */
+const SNAPS = ["shared", "each", "previous", "next"] as const;
+
+/**
+ * How the chart inspects (`InspectionSpec`), or `false`: "nearest" reads one
+ * point within pixels; modes along an axis read each series by `snap`,
+ * within a distance in the axis' units.
+ */
+const inspection: Check = (v, path) => {
+  if (v === false) return;
+  if (!isRecord(v)) fail(path, "an object, or false", v);
+  const { mode, snap } = v;
+  properties(v, path, {
+    mode: oneOf("nearest-x", "nearest-y", "nearest"),
+    snap: oneOf(...SNAPS),
+    within: (w, at) => {
+      if (mode === undefined)
+        throw refusal(
+          at,
+          'its units are the mode\'s; give mode: "nearest-x", "nearest-y", or "nearest"',
+        );
+      if (mode === "nearest") {
+        if (!isRecord(w) || w.px === undefined)
+          throw refusal(at, '"nearest" measures on screen; give { px }');
+        checkProperties(w, at, ["px"], { px: width });
+      } else if (typeof w !== "number") {
+        if (isRecord(w) && w.px !== undefined)
+          throw refusal(
+            at,
+            `${JSON.stringify(mode)} measures along its axis; give a number, or { milliseconds } on a time axis`,
+          );
+        if (!isRecord(w)) fail(at, "a number, or { milliseconds } on a time axis", w);
+        checkProperties(w, at, ["milliseconds"], { milliseconds: width });
+      } else width(w, at);
+    },
+  } satisfies ChecksOf<InspectionSpec>);
+  if (mode === "nearest" && snap !== undefined)
+    throw refusal(
+      `${path}.snap`,
+      '"nearest" reads one point; drop snap, or use "nearest-x" or "nearest-y"',
+    );
+};
+
 const cursorShow = {
-  snap: oneOf("nearest", "previous", "next"),
+  snap: oneOf(...SNAPS),
   tooltip: boolean,
 } satisfies ChecksOf<CursorShowSpec>;
 
@@ -964,6 +1008,7 @@ const ROLES = {
   grid: strokeStyle,
   axisLine: strokeStyle,
   tick: strokeStyle,
+  crosshair: strokeStyle,
   line: (v, path) => {
     object(v, path);
     properties(v as Record<string, unknown>, path, { strokeWidth: positive });
@@ -1569,7 +1614,15 @@ const clip: Check = (v, path) => {
  * here though their specs leave it out, so that their marks refuse the
  * right axis with why.
  */
-const placement = { axis: side, facet: repeat, panel: string, clip, zIndex: finite };
+const placement = {
+  axis: side,
+  facet: repeat,
+  panel: string,
+  clip,
+  zIndex: finite,
+  pick: boolean,
+  inspect: boolean,
+};
 /**
  * A 3D mark's `zIndex`, which its spec leaves out: read, so that its mark
  * refuses any but 0 with why (checkDepthOrder).
@@ -2035,6 +2088,8 @@ const MARKS: MarkChecks = {
       panel: string,
       clip,
       zIndex: finite,
+      pick: boolean,
+      inspect: boolean,
       first: field,
       second: field,
       height: field,
@@ -3171,11 +3226,17 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
         return scales?.[name]?.type ?? (short as { type?: unknown } | undefined)?.type;
       }),
       padding: insets,
+      inspection,
       tooltip: (t, path) => {
         if (typeof t === "boolean") return;
         object(t, path);
+        const { mode } = t as { mode?: unknown };
+        if (mode !== undefined)
+          throw refusal(
+            `${path}.mode`,
+            `the mode is the inspection's; use inspection: { mode: ${typeof mode === "string" ? JSON.stringify(mode) : '"nearest-x"'} }`,
+          );
         properties(t as Record<string, unknown>, path, {
-          mode: oneOf("nearest-x", "nearest-y", "nearest"),
           axisLabels: boolean,
         } satisfies ChecksOf<TooltipSpec>);
       },
