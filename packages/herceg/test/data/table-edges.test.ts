@@ -61,7 +61,7 @@ describe("validation", () => {
     const t = table({ x: [1, 2, 3] });
     expect(() => t.dropFirst(Number.NaN)).toThrow(RangeError);
     expect(() => t.dropFirst(1.5)).toThrow(RangeError);
-    expect(() => t.replace("x", 0.5, [1])).toThrow(RangeError);
+    expect(() => t.replace(0.5, { x: [1] })).toThrow(RangeError);
     expect(() => t.set("x", Number.NaN, 1)).toThrow(RangeError);
     expect(t.length).toBe(3);
     expect(t.version).toBe(0);

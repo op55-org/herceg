@@ -40,8 +40,8 @@ the generated [capability matrix](../capabilities.md).
   3D charts also draw with WebGL. Every mark has a React, Vue, and Svelte
   component, and every mark but `custom` (JavaScript only) a Python
   builder.
-- **Facets.** Points over a row view and custom marks without series
-  repeat in every panel instead of splitting; dendrograms repeat
+- **Facets.** Custom marks without series repeat in every panel instead
+  of splitting; dendrograms repeat
   (`facet: "repeat"`); 3D facets are refused (use subplots).
   [Layout](layout.md)
 - **Right axis.** Marks placed along y (horizontal bars, box plots, boxen,

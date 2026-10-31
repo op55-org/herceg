@@ -5,6 +5,8 @@ import type { Series } from "./series.ts";
 
 export function stackError(stack: unknown, area: boolean): string | undefined {
   if (stack === undefined || typeof stack === "boolean" || stack === "fill") return;
+  if (!area && typeof stack === "object" && stack !== null && "support" in stack)
+    return "bar stack support: bars stack at their positions; drop support";
   if (area && (stack === "center" || stack === "wiggle")) return;
   return `${area ? "area" : "bar"} stack: expected true, false, or "fill"${area ? ', "center", or "wiggle"; choose a supported stack' : '; use an area for "center" or "wiggle"'}`;
 }
@@ -81,26 +83,27 @@ export function offsetLayers(
       }
       return sum;
     });
+    // Each layer's first highest value (at the first position on ties), as
+    // an index into the rows, so ties keep their order (a view's).
     const peaks = tops.map((values) => {
-      let peak = rows?.[0] ?? 0;
+      let peak = 0;
       let max = -Infinity;
       for (let i = 0; i < length; i++) {
         const p = rows?.[i] ?? i;
         if (
           values[p]! > max ||
-          (values[p] === max && positions && positions[p]! < positions[peak]!)
+          (values[p] === max && positions && positions[p]! < positions[rows?.[peak] ?? peak]!)
         ) {
           max = values[p]!;
-          peak = p;
+          peak = i;
         }
       }
       return peak;
     });
+    const at = (l: number) => rows?.[peaks[l]!] ?? peaks[l]!;
     layers.sort(
       (a, b) =>
-        (positions ? positions[peaks[a]!]! - positions[peaks[b]!]! : 0) ||
-        peaks[a]! - peaks[b]! ||
-        a - b,
+        (positions ? positions[at(a)]! - positions[at(b)]! : 0) || peaks[a]! - peaks[b]! || a - b,
     );
     const bottom: number[] = [];
     const top: number[] = [];
@@ -126,9 +129,10 @@ export function offsetLayers(
       const p = rows?.[i] ?? i;
       const at = positions[p]!;
       if (!Number.isFinite(at) || at < previous) {
+        // A stable sort: rows at one position keep their order (a view's).
         points = Array.from({ length }, (_, i) => rows?.[i] ?? i)
           .filter((i) => Number.isFinite(positions[i]!))
-          .sort((a, b) => positions[a]! - positions[b]! || a - b);
+          .sort((a, b) => positions[a]! - positions[b]!);
         break;
       }
       previous = at;

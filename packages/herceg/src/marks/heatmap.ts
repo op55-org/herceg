@@ -1,4 +1,5 @@
 import type { NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import {
   type NumericField,
   type PositionField,
@@ -51,7 +52,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
-import { type MarkRows, numbersAt, rowCount, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, numbersAt, rowCount, rowsOf } from "./rows.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -279,6 +280,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<HeatmapSpec>;
   readonly table: Table<Schema>;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly tooltip = "cell";
   readonly legendScales = ["ramp"] as const;
   readonly bandPadding = 0;
@@ -350,12 +353,13 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   /** Each index's cells with values, as selections are counted in them. */
   readonly #runs = new WeakMap<CellIndex, CellRuns>();
 
-  constructor(input: HeatmapSpec, table: Table<Schema>) {
+  constructor(input: HeatmapSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(input);
     checkTooltip(table, this.spec.tooltip, "heatmap");
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
     this.table = table;
+    this.view = view;
     const form = heatmapFormError(spec);
     if (form) throw new TypeError(form);
     if (spec.date === undefined) {
@@ -437,7 +441,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -1428,9 +1432,11 @@ function lastBand(places: BandPlaces | undefined, count: number): number {
  * ```
  */
 export function heatmap<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: HeatmapOptions<S>,
 ): ChartMark<Frozen<HeatmapSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const shared = definedFields(options, [
     "tooltip",
     "label",
@@ -1477,7 +1483,7 @@ export function heatmap<S extends Schema>(
   if (options.sampling) spec.sampling = { ...options.sampling };
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new HeatmapMark(spec, table as unknown as Table);
+  return new HeatmapMark(spec, table as unknown as Table, view as RowView | undefined);
 }
 
 /** What its lookup reads of this module (see marks/lookups.ts). */

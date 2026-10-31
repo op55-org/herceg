@@ -32,8 +32,16 @@ function valueRange(series: Series): [number, number, number, number] | undefine
   return [min, max, last, lastRow];
 }
 
-/** A series' points, range, and last value, over its parts in every panel. */
-function summarize(parts: readonly Series[], name: string, locale: string | undefined): string {
+/**
+ * A series' points, range, and last value, over its parts in every panel:
+ * the last by `rank`, a row's place in the mark's order (a view's).
+ */
+function summarize(
+  parts: readonly Series[],
+  name: string,
+  locale: string | undefined,
+  rank: (row: number) => number = (row) => row,
+): string {
   let points = 0;
   let min = Infinity;
   let max = -Infinity;
@@ -46,7 +54,7 @@ function summarize(parts: readonly Series[], name: string, locale: string | unde
     min = Math.min(min, range[0]);
     max = Math.max(max, range[1]);
     // Parts keep their rows in order, so the latest row holds the last value.
-    if (range[3] > lastRow) [last, lastRow] = [range[2], range[3]];
+    if (lastRow < 0 || rank(range[3]) > rank(lastRow)) [last, lastRow] = [range[2], range[3]];
   }
   if (lastRow < 0) return `${name}: no data`;
   const f = (v: number) => formatNumber(v, locale);
@@ -103,7 +111,7 @@ export function describeChart(model: ChartModel): string {
           locale: config.locale,
           log: y?.type === "log",
           bands: model.bands,
-        }) ?? summarize(drawn, name(s), config.locale);
+        }) ?? summarize(drawn, name(s), config.locale, mark?.rows?.().rank);
       parts.push(`${sentence}.`);
     }
     if (series.length > MAX_SERIES) parts.push(`${series.length - MAX_SERIES} more series.`);

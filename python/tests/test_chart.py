@@ -221,6 +221,25 @@ def test_unused_columns_are_never_converted():
     assert sorted(spec["data"]["data"]["columns"]) == ["x", "y"]
 
 
+def test_stacks_of_a_series_column_take_support_and_continuity():
+    data = {
+        "t": [0, 1, 2, 3, 4, 2, 3, 4, 8],
+        "v": [1, 1, 1, 1, 1, 10, 10, 10, 90],
+        "s": ["a"] * 5 + ["b"] * 4,
+    }
+    chart = hg.Chart(data).area(
+        x="t",
+        y="v",
+        series="s",
+        continuity=hg.Continuity(max_gap=2),
+        stack=hg.Stack(gaps="interpolate", support="intersection"),
+    )
+    mark = chart.to_spec()[0]["marks"][0]
+    assert mark["stack"] == {"gaps": "interpolate", "support": "intersection"}
+    assert mark["continuity"] == {"maxGap": 2}
+    assert "<path" in chart.to_svg()
+
+
 def test_area_and_series_options_are_checked_like_the_spec_loader():
     with pytest.raises(ValueError, match="area y: y, or y1 and y2, not both"):
         hg.Chart(DATA).area(x="t", y="p50", y1="p50", y2="p99")
@@ -236,6 +255,12 @@ def test_area_and_series_options_are_checked_like_the_spec_loader():
         hg.Chart(DATA).area(x="t", y="p50", series="host", stack=hg.Stack(gaps="linear"))  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="Stack order: inside-out orders nonnegative stacks"):
         hg.Stack(order="inside-out")
+    with pytest.raises(
+        ValueError, match="area stack support: for stacks by a series column; give series"
+    ):
+        hg.Chart(DATA).area(x="t", y=["p50", "p99"], stack=hg.Stack(support="intersection"))
+    with pytest.raises(ValueError, match='Stack support: expected "union" or "intersection"'):
+        hg.Stack(support="all")  # type: ignore[arg-type]
     with pytest.raises(
         ValueError, match="line series: several value columns or a series column, not both"
     ):

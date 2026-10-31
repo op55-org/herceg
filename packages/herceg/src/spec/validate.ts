@@ -101,6 +101,7 @@ import {
   type TitleSpec,
   type TooltipSpec,
   type ViewLimitsSpec,
+  type ViewSpec,
   type WrappedFacetSpec,
   type XAxisSpec,
 } from "./spec.ts";
@@ -2055,13 +2056,14 @@ const MARKS: MarkChecks = {
             offset: oneOf("zero", "fill", "center", "wiggle"),
             order: oneOf("input", "inside-out"),
             gaps: oneOf("zero", "interpolate"),
+            support: oneOf("union", "intersection"),
           } satisfies ChecksOf<StackSpec>);
           return;
         }
         if (typeof v !== "boolean" && v !== "fill" && v !== "center" && v !== "wiggle")
           throw refusal(
             path,
-            'expected true, false, "fill", "center", "wiggle", or { offset, order, gaps }; choose a supported stack',
+            'expected true, false, "fill", "center", "wiggle", or { offset, order, gaps, support }; choose a supported stack',
           );
       },
       fill: string,
@@ -2182,6 +2184,8 @@ const MARKS: MarkChecks = {
       y: rowPositions,
       series: seriesField,
       stack: (v, path) => {
+        if (isRecord(v) && "support" in v)
+          throw refusal(path, "bars stack at their positions; drop support");
         if (typeof v !== "boolean" && v !== "fill")
           throw refusal(
             path,
@@ -3124,17 +3128,47 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
           const at = `${path}.${name}`;
           object(table, at);
           const entry = table as Record<string, unknown>;
-          if (entry.source !== undefined) {
+          if (entry.source !== undefined && entry.view !== undefined) {
+            checkProperties(entry, at, ["view"], {
+              source: string,
+              view: (v, where) => {
+                object(v, where);
+                properties(v as Record<string, unknown>, where, {
+                  filter: expression,
+                  sort: (keys, path) => {
+                    if (!Array.isArray(keys)) fail(path, "a list of sort keys", keys);
+                    for (const [i, key] of keys.entries()) {
+                      object(key, `${path}[${i}]`);
+                      checkProperties(key as Record<string, unknown>, `${path}[${i}]`, ["field"], {
+                        field,
+                        order: oneOf("ascending", "descending"),
+                      });
+                    }
+                  },
+                } satisfies ChecksOf<ViewSpec["view"]>);
+              },
+            } satisfies ChecksOf<ViewSpec>);
+          } else if (entry.source !== undefined) {
             checkProperties(entry, at, ["transform"], {
               source: string,
               transform: transforms,
             } satisfies ChecksOf<DerivedSpec>);
           } else {
-            required(entry, at, ["columns"], ["columns", "matrix", "origin"]);
+            required(entry, at, ["columns"], ["columns", "matrix", "origin", "orderBy", "maxRows"]);
             object(entry.columns, `${at}.columns`);
             const fields = Object.keys(entry.columns as object);
             properties(entry, at, {
               columns: () => {},
+              orderBy: (v, where) => {
+                field(v, where);
+                if (!fields.includes(v as string))
+                  fail(
+                    where,
+                    `a column of the table (${fields.map((f) => `"${f}"`).join(", ")})`,
+                    v,
+                  );
+              },
+              maxRows: count,
               origin: (v, where) => {
                 if (typeof v !== "string" || !Object.hasOwn(data as object, v) || v === name)
                   fail(where, "the name of another table in data", v);

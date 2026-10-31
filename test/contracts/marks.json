@@ -5577,7 +5577,9 @@
       "col": "an expression over a field",
       "when": "an expression's condition",
       "derive": "a table computed from another",
-      "matrix": "a table of a matrix"
+      "matrix": "a table of a matrix",
+      "ordered": "a table kept in order of a field",
+      "view": "rows of a table a filter and sort choose"
     },
     "react": {
       "Chart": "the chart the marks are drawn in"

@@ -137,12 +137,12 @@ describe("append", () => {
     expect(() => t.append({ t: [2], v: ["3" as never], c: ["c"] })).toThrow(
       'append "v": row 0: expected a number; received "3"',
     );
-    expect(() => t.replace("t", 0, ["2026-13-45"])).toThrow(/^replace "t": row 0: expected/);
+    expect(() => t.replace(0, { t: ["2026-13-45"] })).toThrow(/^replace "t": row 0: expected/);
     // Categories take strings and numbers only.
     expect(() => t.append({ t: [2], v: [3], c: [Object.create(null)] })).toThrow(
       'append "c": row 0: expected a string or number; received {}',
     );
-    expect(() => t.replace("c", 0, [true as never])).toThrow(
+    expect(() => t.replace(0, { c: [true as never] })).toThrow(
       /^replace "c": row 0: expected a string/,
     );
     expect(t.categories("c").dictionary).toEqual(["a", "b"]);
@@ -230,11 +230,11 @@ describe("drops and updates", () => {
 
   it("replaces ranges and whole columns", () => {
     const t = table({ x: [1, 2, 3, 4] });
-    t.replace("x", 1, [20, 30]);
+    t.replace(1, { x: [20, 30] });
     expect(Array.from(t.numbers("x"))).toEqual([1, 20, 30, 4]);
     t.setColumn("x", [5, 6, 7, 8]);
     expect(Array.from(t.numbers("x"))).toEqual([5, 6, 7, 8]);
-    expect(() => t.replace("x", 3, [1, 2])).toThrow(/out of bounds/);
+    expect(() => t.replace(3, { x: [1, 2] })).toThrow(/out of bounds/);
     expect(() => t.setColumn("x", [1])).toThrow(/needs 4/);
   });
 

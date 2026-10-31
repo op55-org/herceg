@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { category } from "../../src/data/column.ts";
 import { col, when } from "../../src/data/expr.ts";
+import { orderedTable } from "../../src/data/ordered.ts";
 import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { table } from "../../src/data/table.ts";
@@ -128,7 +129,7 @@ describe("row views", () => {
         if (next() < 0.5) t.set("x", row, value());
         else t.set("tag", row, step % 13 === 0 ? `new ${step}` : tag());
       }
-      if (step % 4 === 1) t.replace("x", Math.floor(next() * (t.length - 5)), [1, 60, 2, 59, 3]);
+      if (step % 4 === 1) t.replace(Math.floor(next() * (t.length - 5)), { x: [1, 60, 2, 59, 3] });
       if (step % 5 === 2) t.append({ x: [value(), value()], tag: [tag(), tag()] });
       if (step % 6 === 4) t.dropFirst(3);
       // Read on most steps, so several changes sometimes catch up at once.
@@ -268,6 +269,54 @@ describe("row views", () => {
     expect(shown(view)).toEqual([1, 2, 0]);
     t.set("x", 0, 0);
     expect(seen).toEqual([0, 1, 2]);
+  });
+
+  it("show the rows as they are when read between a transaction's writes, and after", () => {
+    const filter = col("v").gt(2);
+    const sort = [{ field: "v" as const, order: "descending" as const }];
+    const plain = table({ t: [1, 3], v: [1, 3] });
+    const ordered = orderedTable({ t: [1, 3], v: [1, 3] }, { orderBy: "t" });
+    for (const t of [plain, ordered as unknown as typeof plain]) {
+      const views = [rowView(t, { filter }), rowView(t, { filter, sort })];
+      const known = views.map((view) => view.markRows(undefined));
+      // Each read as a view made afresh reads it.
+      const check = () => {
+        for (const view of views)
+          expect(shown(view)).toEqual(shown(rowView(t, view.query as never)));
+      };
+      check();
+      t.transaction(() => {
+        t.append({ t: [2], v: [4] });
+        check();
+        views.forEach((view, i) => {
+          expect(view.markRows(known[i]!)).not.toBe(known[i]);
+        });
+        // Past the buffers' room, which the table moves to new ones.
+        t.append({ t: Array.from({ length: 80 }, (_, i) => 4 + i), v: new Array(80).fill(5) });
+        check();
+        t.replace(0, { v: [9] });
+        check();
+        t.dropFirst(2);
+        check();
+      });
+      check();
+      t.transaction(() => {
+        t.append({ t: [0], v: [6] });
+        check();
+        t.reset({ t: [5, 6], v: [3, 1] });
+        check();
+      });
+      check();
+      t.append({ t: [7], v: [8] });
+      check();
+      // Told of a change, then first read in a transaction that moves rows it placed.
+      t.dropFirst(1);
+      t.transaction(() => {
+        t.append({ t: [0], v: [7] });
+        check();
+      });
+      check();
+    }
   });
 
   it("keep their own copy of the sort keys", () => {

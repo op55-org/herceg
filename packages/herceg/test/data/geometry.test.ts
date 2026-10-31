@@ -66,7 +66,7 @@ describe("geometry columns", () => {
     const version = t.version;
     expect(() => t.append({ value: [4], shape: [3] })).toThrow(/code 3/);
     expect(() => t.append({ value: [4], shape: [0.5] })).toThrow(/code 0.5/);
-    expect(() => t.replace("shape", 0, [7])).toThrow(/code 7/);
+    expect(() => t.replace(0, { shape: [7] })).toThrow(/code 7/);
     expect(t.version).toBe(version);
     expect(t.length).toBe(3);
     t.set("shape", 0, -1);

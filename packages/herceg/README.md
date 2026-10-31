@@ -81,7 +81,7 @@ WebGL, and other features loads when a chart needs it.
 | Guide | Covers |
 | --- | --- |
 | [Getting started](https://github.com/op55-org/herceg/blob/main/docs/guide/getting-started.md) | Options, the chart handle, updates, errors |
-| [Data](https://github.com/op55-org/herceg/blob/main/docs/guide/data.md) | Tables, streaming, derived tables, row views, selections, groups, pivots |
+| [Data](https://github.com/op55-org/herceg/blob/main/docs/guide/data.md) | Tables, streaming, late rows, derived tables, row views, selections, groups, pivots |
 | [Marks](https://github.com/op55-org/herceg/blob/main/docs/guide/marks.md), [Statistical charts](https://github.com/op55-org/herceg/blob/main/docs/guide/statistical-charts.md), [Hierarchy and flow](https://github.com/op55-org/herceg/blob/main/docs/guide/hierarchy-and-flow.md), [Maps](https://github.com/op55-org/herceg/blob/main/docs/guide/maps.md), [3D](https://github.com/op55-org/herceg/blob/main/docs/guide/three-dimensional.md), [Financial](https://github.com/op55-org/herceg/blob/main/docs/guide/financial-charts.md) | Every mark |
 | [Layout](https://github.com/op55-org/herceg/blob/main/docs/guide/layout.md), [Axes and legends](https://github.com/op55-org/herceg/blob/main/docs/guide/axes-and-legends.md), [Styling](https://github.com/op55-org/herceg/blob/main/docs/guide/styling.md) | Panels, guides, themes |
 | [Interaction](https://github.com/op55-org/herceg/blob/main/docs/guide/interaction.md), [Accessibility](https://github.com/op55-org/herceg/blob/main/docs/guide/accessibility.md) | Zoom, brush, sync, inspection and tooltips, events and what they pick, selections, keyboard |

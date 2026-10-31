@@ -4,6 +4,7 @@
 
 import { category, type NumericArray } from "../data/column.ts";
 import { type BoxStats, boxStats } from "../data/quantile.ts";
+import type { RowView } from "../data/row-view.ts";
 import {
   type CategoryField,
   type NumericField,
@@ -158,6 +159,8 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   readonly clearDomain = clearDomain;
   readonly spec: Frozen<T>;
   readonly table: Table;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
   readonly summarizes = true;
@@ -199,7 +202,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   /** The summary of the selection drawn with each series, for its tooltips. */
   readonly #selected = new WeakMap<Series, Summary<G>>();
 
-  constructor(input: T, table: Table, axes?: { x: string; y: string }) {
+  constructor(input: T, table: Table, axes?: { x: string; y: string }, view?: RowView) {
     this.spec = frozen(colored(input, table, "fill"));
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -219,6 +222,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
     requireField(table, this.value, NUMERIC, `${type} ${this.horizontal ? "x" : "y"}`);
     if (spec.series !== undefined) requireField(table, spec.series, CATEGORY, `${type} series`);
     this.table = table;
+    this.view = view;
     this.tooltip = this.horizontal ? "y" : "x";
     // Shapes stand for their series field's values, or for the value field.
     this.identity = { field: spec.series, values: [this.value] };
@@ -596,7 +600,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 

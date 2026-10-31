@@ -302,6 +302,16 @@ describe("the accessibility tree", () => {
     expect(await accessibilityTree()).toContain('    button "a" (Show a) pressed=false');
   });
 
+  it("describes a view's rows again when only its query changes", async () => {
+    const view = rowView(metrics);
+    const chart = mount({ marks: [line(view, { x: "t", y: "a" })], locale: "en-US" });
+    await chart.loading;
+    const description = document.getElementById(chart.root.getAttribute("aria-describedby")!)!;
+    expect(description.textContent).toContain("a: 48 points");
+    view.setQuery({ filter: false });
+    await expect.poll(() => description.textContent, { timeout: 3000 }).toContain("a: no data");
+  });
+
   it("tells of the arrow keys only where they read something", async () => {
     const described = (chart: Chart) =>
       document.getElementById(chart.root.getAttribute("aria-describedby")!)!.textContent;

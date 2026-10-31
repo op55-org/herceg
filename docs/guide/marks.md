@@ -143,6 +143,13 @@ area(responses, { x: "minute", y: "count", series: "status", stack: true }); // 
 area(metrics, { x: "time", y1: "p50", y2: "p99" }); // a band between two fields
 area(casts, { y: "depth", x1: "low", x2: "high" }); // a band along y
 area(usage, { x: "time", y: ["user", "system"], stack: { offset: "wiggle", order: "inside-out" } });
+area(pumps, {
+  x: "time",
+  y: "flow",
+  series: "pump",
+  continuity: { maxGap: { milliseconds: 300_000 } },
+  stack: { gaps: "interpolate", support: "intersection" },
+}); // stops where any pump has no data
 bar(sales, { x: "region", y: ["q1", "q2"], stack: "fill", labels: { format: { style: "percent" } } });
 ```
 
@@ -150,6 +157,8 @@ bar(sales, { x: "region", y: ["q1", "q2"], stack: "fill", labels: { format: { st
 hg.area(df, x="time", y=["user", "system"], stack=True)
 hg.area(df, x="time", y1="p25", y2="p75")
 hg.area(cpu, x="time", y="load", series="host", stack=hg.Stack(gaps="interpolate"))
+hg.area(pumps, x="time", y="flow", series="pump", continuity=hg.Continuity(max_gap=hg.Duration(minutes=5)),
+        stack=hg.Stack(gaps="interpolate", support="intersection"))
 hg.area(usage, x="time", y=["user", "system"], stack=hg.Stack(offset="wiggle", order="inside-out"))
 ```
 
@@ -164,7 +173,7 @@ and turns it on; `line: false` or a width of 0 turns it off.
 | `"fill"` | ✓ | ✓ | Shares of each position's visible total, on a 0–1 axis. Set the axis' `format: { style: "percent" }` for percents. |
 | `"center"` | ✓ | | Symmetric about zero (silhouette). |
 | `"wiggle"` | ✓ | | The Byron–Wattenberg stream baseline, as d3's wiggle offset. |
-| `{ offset, order, gaps }` | ✓ | | `offset` is `"zero"` or one of the above; `order: "inside-out"` balances layers by their peaks (fill, center, wiggle); `gaps` below. |
+| `{ offset, order, gaps, support }` | ✓ | | `offset` is `"zero"` or one of the above; `order: "inside-out"` balances layers by their peaks (fill, center, wiggle); `gaps` and `support` below. |
 
 - **Order.** The first layer is at the bottom: fields in the order given,
   series in legend order. `"inside-out"` keeps legend order and colors.
@@ -177,6 +186,15 @@ and turns it on; `line: false` or a width of 0 turns it off.
   `gaps: "interpolate"`, the line between its neighbors (right for series
   sampled at different times). Interpolation does not bridge explicit
   missing values.
+- **Support.** `support: "union"` (the default) stacks at every x any shown
+  series has. `support: "intersection"` draws the stack only where every
+  shown series has support: before a series' first row or after its last,
+  the whole stack stops, so a total never counts a series that has not
+  started. With either, the whole stack breaks where a shown series'
+  `continuity` breaks its line (a `maxGap`, a `breakBy`, a `defined`
+  condition). Tooltips, labels, and the value axis' domain skip the
+  positions a stack leaves out. Stacks of several fields share their rows
+  and break as one area does.
 - **Readings.** Tooltips and the keyboard read each series' own rows; fill
   shows the share and the raw value. Bar labels show shares for fill.
 - **Visibility.** Hiding a legend layer restacks the visible ones. Zoom
@@ -184,8 +202,9 @@ and turns it on; `line: false` or a width of 0 turns it off.
   on their own.
 - **Log axes.** Stacks stand on the axis' low end. Center and wiggle refuse
   log axes. Bands and stacks on log y are drawn straight.
-- **Limits.** Bars take only `true` and `"fill"`. Stacked areas refuse
-  `where` and `continuity`.
+- **Limits.** Bars take only `true` and `"fill"`, and no `gaps` or
+  `support`, since they stack at their positions. Stacked areas refuse
+  `where`; `gaps` and `support` need a `series` field.
 
 Histograms take `stack: "fill"` with the same meaning (see
 [Statistical charts](statistical-charts.md#histograms)).

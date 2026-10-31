@@ -7,7 +7,13 @@ import { Expr } from "./expr.ts";
 import { compileExpression, type Expression } from "./expression.ts";
 import { rowComparator, type SortKey } from "./order.ts";
 import type { RowSet } from "./row-set.ts";
-import type { PositionField, Schema, Table, TableChange } from "./table.ts";
+import {
+  type PositionField,
+  type Schema,
+  type Table,
+  type TableChange,
+  writesOf,
+} from "./table.ts";
 
 export interface RowQuery<S extends Schema = Schema> {
   /** Shows the rows where this is true; every row without it. */
@@ -33,6 +39,12 @@ export interface MarkRows<S extends Schema = Schema> {
   readonly revision: string;
   /** The view the rows are of; undefined for a table's. */
   readonly view?: RowView<S> | undefined;
+  /**
+   * A view's row's place in its order (-1 for rows it does not show), for
+   * readers comparing rows of different panels; undefined for a table's,
+   * whose rows are in table order.
+   */
+  readonly rank?: ((row: number) => number) | undefined;
 }
 
 /** What a view shows, as of one version of its table. */
@@ -65,8 +77,8 @@ export class RowView<S extends Schema = Schema> {
   #filter: Expression | undefined;
   #sort: readonly SortKey[] = [];
   #query: Readonly<RowQuery<S>> = {};
-  /** The comparator of #sort for one version of the table: it holds that version's arrays. */
-  #compare: { version: number; compare: (a: number, b: number) => number } | undefined;
+  /** The comparator of #sort for the table after a number of writes: it holds their arrays. */
+  #compare: { writes: number; compare: (a: number, b: number) => number } | undefined;
   #restriction: RowSet<S> | null = null;
   /** Fields the filter and sort read; updates to others keep rows and order. */
   #reads = new Set<string>();
@@ -75,22 +87,30 @@ export class RowView<S extends Schema = Schema> {
   /** A second buffer, merges write into it and swap. */
   #spare: Uint32Array | undefined;
   #length = 0;
-  /** The table's state the positions describe. */
+  /** The table's state the positions describe, and how many writes it had taken. */
   #version = -1;
+  #writes = -1;
   #generation = -1;
   #offset = 0;
-  /** Identity past the last row the positions have considered. */
+  /**
+   * The slot past the last row the positions have considered: a row's slot
+   * is `rowOffset` plus its position, which drops leave in place.
+   */
   #end = 0;
   #rebuild = true;
   /**
-   * Rows updated in fields the view reads since it was last brought up to
-   * date, as ranges of row identities (start, end, ...), and how many rows
-   * they cover at most.
+   * Rows updated in fields the view reads, or moved by rows inserted
+   * before them, since it was last brought up to date, as ranges of slots
+   * (start, end, ...), and how many rows they cover at most.
    */
   #moved: number[] = [];
   #movedRows = 0;
-  /** The table's version as of the last change the view was told about. */
+  /**
+   * The table's version and writes as of the last change the view was told
+   * about; the version is NaN once the view has read writes not yet told.
+   */
   #told: number;
+  #toldWrites: number;
   #revision = 0;
   #queryRevision = 0;
   #listeners = new Set<() => void>();
@@ -99,6 +119,7 @@ export class RowView<S extends Schema = Schema> {
   constructor(source: Table<S>, query: RowQuery<S> = {}) {
     this.source = source;
     this.#told = source.version;
+    this.#toldWrites = writesOf(source as unknown as Table);
     this.#apply(query);
     // The table holds the view weakly, so a view no one keeps stops following it.
     const ref = new WeakRef(this);
@@ -197,9 +218,27 @@ export class RowView<S extends Schema = Schema> {
     // Reading catches the view up with its table, which may change its revision.
     const { indices } = this.read();
     const revision = `${this.source.version} ${this.#revision}`;
-    return known?.view === this && known.revision === revision
-      ? known
-      : { table: this.source, positions: indices?.slice(), revision, view: this };
+    if (known?.view === this && known.revision === revision) return known;
+    const positions = indices?.slice();
+    // Made on first use, kept with the answer: a map where the view shows
+    // few of its table's rows, an array of places where it shows many.
+    let place: ((row: number) => number) | undefined;
+    const rank = (row: number) => {
+      if (!positions) return row;
+      if (!place) {
+        if (positions.length * 8 < this.source.length) {
+          const places = new Map<number, number>();
+          for (let k = 0; k < positions.length; k++) places.set(positions[k]!, k);
+          place = (at) => places.get(at) ?? -1;
+        } else {
+          const places = new Int32Array(this.source.length).fill(-1);
+          for (let k = 0; k < positions.length; k++) places[positions[k]!] = k;
+          place = (at) => places[at] ?? -1;
+        }
+      }
+      return place(row);
+    };
+    return { table: this.source, positions, revision, view: this, rank };
   }
 
   /** The rows the view shows now, brought up to date with the table. */
@@ -267,27 +306,35 @@ export class RowView<S extends Schema = Schema> {
     // the change was described: what it updated is no longer where it says.
     if (this.source.version !== this.#told + 1) this.#rebuild = true;
     this.#told = this.source.version;
+    this.#toldWrites = writesOf(this.source as unknown as Table);
     // It holds the table's old arrays.
     this.#compare = undefined;
-    if (change.reset) this.#rebuild = true;
-    else if (
-      !this.#rebuild &&
-      change.updated &&
-      change.fields.some((field) => this.#reads.has(field))
-    ) {
-      const { start, end } = change.updated;
+    const { inserted, updated } = change;
+    // Rows an ordered table took in from its first on leave nothing in place.
+    if (change.reset || inserted?.start === 0) this.#rebuild = true;
+    else if (!this.#rebuild) {
       const offset = this.source.rowOffset;
-      this.#moved.push(offset + start, offset + end);
-      this.#movedRows += end - start;
-      // Past an eighth of the rows (a rough crossover), rebuilding costs
-      // about as little as merging them back and keeps no record of them.
-      if (this.#movedRows > this.source.length / 8) {
-        this.#rebuild = true;
-        this.#moved = [];
-      }
+      // Every row from where rows were inserted on may be another: those the
+      // view placed are merged back as updated rows are, the rest as appended.
+      if (inserted) this.#move(offset + inserted.start, this.#end);
+      if (updated && change.fields.some((field) => this.#reads.has(field)))
+        this.#move(offset + updated.start, offset + updated.end);
     }
     // Appends, drops, and updated rows are caught up on the next read.
     this.#invalidate();
+  }
+
+  /** Records that rows of slots `[start, end)` may have moved, unless rebuilding costs less. */
+  #move(start: number, end: number) {
+    if (end <= start) return;
+    this.#moved.push(start, end);
+    this.#movedRows += end - start;
+    // Past an eighth of the rows (a rough crossover), rebuilding costs
+    // about as little as merging them back and keeps no record of them.
+    if (this.#movedRows > this.source.length / 8) {
+      this.#rebuild = true;
+      this.#moved = [];
+    }
   }
 
   #invalidate() {
@@ -302,10 +349,18 @@ export class RowView<S extends Schema = Schema> {
 
   #maintain() {
     const source = this.source;
-    if (!this.#rebuild && this.#version === source.version) return;
+    const writes = writesOf(source as unknown as Table);
+    if (!this.#rebuild && this.#version === source.version && this.#writes === writes) return;
     // A change the view has not been told about yet (read by a listener of
     // the table that runs first) may have been anything.
     if (this.#told !== source.version) this.#rebuild = true;
+    // So may the writes of a transaction not yet told: the view builds again
+    // now, and once it is told.
+    if (writes !== this.#toldWrites) {
+      this.#rebuild = true;
+      this.#told = Number.NaN;
+      this.#revision++;
+    }
     if (this.#identity) {
       this.#indices = undefined;
       this.#spare = undefined;
@@ -323,6 +378,7 @@ export class RowView<S extends Schema = Schema> {
     this.#movedRows = 0;
     this.#rebuild = false;
     this.#version = source.version;
+    this.#writes = writes;
     this.#generation = source.generation;
     this.#offset = source.rowOffset;
     this.#end = source.rowOffset + source.length;
@@ -428,10 +484,10 @@ export class RowView<S extends Schema = Schema> {
 
   /** The sort's comparator for the table as it is now. */
   #comparator(): (a: number, b: number) => number {
-    const version = this.source.version;
-    if (this.#compare?.version !== version)
+    const writes = writesOf(this.source as unknown as Table);
+    if (this.#compare?.writes !== writes)
       this.#compare = {
-        version,
+        writes,
         compare: rowComparator(this.source as unknown as Table, this.#sort),
       };
     return this.#compare.compare;

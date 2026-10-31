@@ -256,7 +256,7 @@ describe("heatmaps split by facets", () => {
     expect(painted(model, next, 1)).toEqual({ "b p": 2, "d p": 4 });
     expect(picked(model, 1, "d", "p")).toMatchObject({ value: 4, row: 3 });
     // A value replaced in place keeps every category and repaints its cell.
-    data.replace("cpu", 3, [8]);
+    data.replace(3, { cpu: [8] });
     next = model.scene(estimateText);
     expect(painted(model, next, 1)).toEqual({ "b p": 2, "d p": 8 });
     // The front row dropped takes N's a.

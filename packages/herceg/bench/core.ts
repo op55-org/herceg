@@ -2,11 +2,12 @@
 //   npm run bench -w herceg
 // Reports the median and median absolute deviation over repeated runs.
 
-import { category } from "../src/data/column.ts";
+import { category, time } from "../src/data/column.ts";
 import { count, derive, mean } from "../src/data/derive.ts";
 import { col } from "../src/data/expr.ts";
 import { fromGeoJSON } from "../src/data/geojson.ts";
 import { fromMatrix } from "../src/data/matrix.ts";
+import { orderedTable } from "../src/data/ordered.ts";
 import { type RowQuery, rowView } from "../src/data/row-view.ts";
 import { selectionStore, selectWhere } from "../src/data/selection.ts";
 import { type Table, table } from "../src/data/table.ts";
@@ -16,6 +17,7 @@ import { grid } from "../src/layout.ts";
 import { m4 } from "../src/lod/m4.ts";
 import { MinMaxIndex } from "../src/lod/minmax-index.ts";
 import { Polyline } from "../src/lod/polyline.ts";
+import { area } from "../src/marks/area.ts";
 import { type BarMark, bar } from "../src/marks/bar.ts";
 import { boxplot } from "../src/marks/boxplot.ts";
 import { contour } from "../src/marks/contour.ts";
@@ -42,6 +44,7 @@ import { ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
 import { panels } from "../src/model/panels.ts";
 import { rowSelection } from "../src/model/row-selection.ts";
+import { staticCompilers } from "../src/render/compilers.ts";
 import { timeBreaks } from "../src/scale/breaks.ts";
 import { LinearScale } from "../src/scale/scale.ts";
 
@@ -264,7 +267,10 @@ const bars = new PositionStack();
 const areas = new UnionStack();
 const stackSeries = (layers = groupsOf()) => {
   bars.update(long, long.numbers("t"), long.numbers("v"), layers, false, undefined);
-  areas.update(long, long.numbers("t"), long.numbers("v"), layers, "zero");
+  areas.update(long, long.numbers("t"), long.numbers("v"), layers, {
+    gaps: "zero",
+    support: "union",
+  });
 };
 stackSeries();
 let position = POSITIONS;
@@ -278,7 +284,10 @@ measure("stack: bars of 10 series, append a position, 100k rows", () => {
 });
 measure("stack: areas of 10 series, append a position, 100k rows", () => {
   const layers = appendPosition();
-  areas.update(long, long.numbers("t"), long.numbers("v"), layers, "zero");
+  areas.update(long, long.numbers("t"), long.numbers("v"), layers, {
+    gaps: "zero",
+    support: "union",
+  });
 });
 measure("stack: bars of 10 series, 100k rows again", () => {
   long.set("v", 0, long.numbers("v")[0]! + 1);
@@ -286,7 +295,10 @@ measure("stack: bars of 10 series, 100k rows again", () => {
 });
 measure("stack: areas of 10 series, 100k rows again", () => {
   long.set("v", 0, long.numbers("v")[0]! + 1);
-  areas.update(long, long.numbers("t"), long.numbers("v"), groupsOf(), "zero");
+  areas.update(long, long.numbers("t"), long.numbers("v"), groupsOf(), {
+    gaps: "zero",
+    support: "union",
+  });
 });
 // Row views over a million rows: positions only, no column copies.
 const hosts = Array.from({ length: 200 }, (_, i) => `host-${(i * 7919) % 1000}`);
@@ -335,6 +347,92 @@ measure(
     sorted.read();
   },
   { warmup: 5, samples: 30 },
+);
+
+// A live feed of ten series at 10 Hz in one table ordered by time, over a
+// 30-minute window (180,000 rows). Each tick brings a tenth of a second's rows;
+// one row in 150 arrives 5 s to 2 min late and merges into place. Rows leaving
+// the window drop, and two charts draw again: lines by series, and an
+// intersection stack of three series over a view of the table. As in the
+// study's feed, s3 has a 7-minute gap and s4 starts 4 minutes late, which
+// break the lines and the stack.
+const FEED = 10;
+const FEED_WINDOW = 18_000;
+const feedNames = Array.from({ length: FEED }, (_, s) => `s${s}`);
+const reading = (at: number, s: number) => 70 + 95 * s + 32 * Math.sin(at / (60_000 + 9000 * s));
+const history = { time: [] as number[], series: [] as number[], value: [] as number[] };
+for (let k = 0; k < FEED_WINDOW; k++)
+  for (let s = 0; s < FEED; s++) {
+    if ((s === 3 && k >= 6000 && k < 10_200) || (s === 4 && k < 2400)) continue;
+    history.time.push(k * 100 + s * 9);
+    history.series.push(s);
+    history.value.push(reading(k * 100 + s * 9, s));
+  }
+const feed = orderedTable(
+  {
+    time: time(history.time),
+    series: history.series.map((s) => feedNames[s]!),
+    value: Float64Array.from(history.value),
+  },
+  { orderBy: "time" },
+);
+// The feature compiler applies continuity, as charts load it.
+const feedModel = (marks: ConstructorParameters<typeof ChartModel>[0]["marks"]) => {
+  const model = new ChartModel({ marks, legend: false }, undefined, ...staticCompilers());
+  model.setSize(1100, 400, 1);
+  model.scene(estimateText);
+  return model;
+};
+const gap = { maxGap: { milliseconds: 300_000 } };
+const feedLines = feedModel([
+  line(feed, { x: "time", y: "value", series: "series", continuity: gap }),
+]);
+const feedStack = feedModel([
+  area(rowView(feed, { filter: col("series").isIn("s2", "s3", "s4") }), {
+    x: "time",
+    y: "value",
+    series: "series",
+    continuity: gap,
+    stack: { gaps: "interpolate", support: "intersection" },
+  }),
+]);
+let feedTick = FEED_WINDOW;
+let late: { due: number; at: number; s: number }[] = [];
+const feedOnce = () => {
+  const k = feedTick++;
+  const rows = { time: [] as number[], series: [] as string[], value: [] as number[] };
+  const deliver = (at: number, s: number) => {
+    rows.time.push(at);
+    rows.series.push(feedNames[s]!);
+    rows.value.push(reading(at, s));
+  };
+  for (let s = 0; s < FEED; s++) {
+    const draw = (Math.imul(k * FEED + s, 2654435761) >>> 0) / 2 ** 32;
+    if (draw < 1 / 150)
+      late.push({ due: k + 50 + Math.floor(draw * 150 * 1150), at: k * 100 + s * 9, s });
+    else deliver(k * 100 + s * 9, s);
+  }
+  for (const row of late) if (row.due <= k) deliver(row.at, row.s);
+  late = late.filter((row) => row.due > k);
+  feed.transaction(() => {
+    feed.append(rows);
+    feed.dropBefore("time", (k - FEED_WINDOW) * 100);
+  });
+  feedLines.scene(estimateText);
+  feedStack.scene(estimateText);
+};
+measure("ordered: feed tick, 10 series, 1 in 150 late, 180k rows", feedOnce, {
+  warmup: 600,
+  samples: 300,
+});
+const feedPlot = feedLines.scene(estimateText).panels[0]!.plot;
+measure(
+  "ordered: inspect 10 series of the feed along x, 180k rows",
+  () => {
+    for (const px of [300, 520, 740, 960])
+      feedLines.inspect(px, feedPlot.y + 200, "nearest-x", undefined, "each");
+  },
+  { repeat: 25 },
 );
 
 // Small multiples of a layout mark: a pie of eight products per region, 50

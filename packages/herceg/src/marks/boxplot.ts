@@ -1,4 +1,5 @@
 import { type BoxStats, boxStats } from "../data/quantile.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumberField, NumericField, Schema, Table } from "../data/table.ts";
 import { areaDrawing } from "../draw/area.ts";
 import { pointDrawing } from "../draw/point.ts";
@@ -30,6 +31,7 @@ import {
   type SelectionDrawing,
   valueKind,
 } from "./mark.ts";
+import { isRowView } from "./rows.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
 import { refuseValues } from "./still.ts";
 
@@ -94,7 +96,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
   protected readonly noun = ["box", "boxes"] as const;
   protected readonly width = BOX;
 
-  constructor(spec: BoxPlotSpec, table: Table) {
+  constructor(spec: BoxPlotSpec, table: Table, view?: RowView) {
     const problem = boxPlotFormError(spec);
     if (problem) throw new TypeError(problem);
     const precomputed = spec.median !== undefined;
@@ -107,6 +109,7 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
             y: spec.y ?? spec.median!,
           }
         : undefined,
+      view,
     );
     if (this.horizontal && spec.axis === "right")
       throw new TypeError('boxplot axis: horizontal boxes have no right axis; drop axis: "right"');
@@ -165,12 +168,11 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
       if (categories[row]! >= 0 && (!series || series.codes[row]! >= 0) && this.acceptsRow(row))
         first.push(row);
     }
-    // Match raw summaries' category/series order, keeping repeated boxes as separate rows.
+    // Match raw summaries' category/series order, keeping repeated boxes as
+    // separate rows in the order read (a view's), as the sort is stable.
     first.sort(
       (a, b) =>
-        categories[a]! - categories[b]! ||
-        (series ? series.codes[a]! - series.codes[b]! : 0) ||
-        a - b,
+        categories[a]! - categories[b]! || (series ? series.codes[a]! - series.codes[b]! : 0),
     );
     const columns = Object.fromEntries(
       STATS.map((stat) => [stat, new Float64Array(first.length)]),
@@ -483,9 +485,11 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
  * ```
  */
 export function boxplot<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: BoxPlotOptions<S>,
 ): ChartMark<Frozen<BoxPlotSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const spec = {
     type: "boxplot",
     ...definedFields(options, [
@@ -518,5 +522,5 @@ export function boxplot<S extends Schema>(
   } as unknown as BoxPlotSpec;
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new BoxPlotMark(spec, table as unknown as Table);
+  return new BoxPlotMark(spec, table as unknown as Table, view as RowView | undefined);
 }

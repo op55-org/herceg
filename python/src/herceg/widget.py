@@ -238,12 +238,13 @@ class ChartWidget(anywidget.AnyWidget):
                 self._callbacks[key](_decoded(key[0], self._states[key]))
             return
         with self._lock:
-            before = dict(self._live.dropped)
+            before = self._live.numbering()
             message = self._live.append(rows, data, max_rows)
             self._push(message)
-            # Rows added take no node from a network; rows dropped may.
-            shrank = message is not None and self._live.dropped[message[0]["table"]] > before.get(
-                message[0]["table"], 0
+            # Rows added take no node from a network; rows dropped or moved may.
+            name = message[0]["table"] if message is not None else None
+            shrank = name is not None and (
+                self._live.dropped[name] > before[name][0] or name in self._live.ordinals
             )
             moved = self._follow_positions(message) if shrank else []
             self._follow_rows(before)
@@ -261,7 +262,7 @@ class ChartWidget(anywidget.AnyWidget):
                 self._callbacks[key](_decoded(key[0], self._states[key]))
             return
         with self._lock:
-            before = dict(self._live.dropped)
+            before = self._live.numbering()
             generations = dict(self._live.generation)
             message = self._live.replace(rows, data)
             self._push(message)
@@ -294,7 +295,7 @@ class ChartWidget(anywidget.AnyWidget):
         if not self._live.drawn_alike(live):
             cameras = self._replace_live(live)
             return [*cameras, *self._release_moves(None)]
-        before = dict(self._live.dropped)
+        before = self._live.numbering()
         generations = dict(self._live.generation)
         message = self._live.adopt(live)
         self._push(message)
@@ -382,19 +383,21 @@ class ChartWidget(anywidget.AnyWidget):
         return moved
 
     def _follow_rows(
-        self, dropped: dict[str, int], generations: dict[str, int] | None = None
+        self,
+        before: dict[str, tuple[int, np.ndarray | None]],
+        generations: dict[str, int] | None = None,
     ) -> None:
         """Keeps selected rows' positions on their rows as rows are dropped from
-        the front of their table, and lets them go when it is replaced, as the
-        browser's row sets do. Called with the lock held."""
+        the front of their table (or move, in an ordered table), and lets them
+        go when it is replaced, as the browser's row sets do. `before` is how
+        rows were numbered (`LiveChart.numbering`). Called with the lock held."""
         for (name, channel), current in self._rows.items():
             if current.rows is None:
                 continue
             if generations is not None and generations[name] != self._live.generation[name]:
                 self._rows[(name, channel)] = RowSelection(channel, current.data)
                 continue
-            shifted = current.rows - (self._live.dropped[name] - dropped[name])
-            rows = shifted[shifted >= 0]
+            rows = self._live.follow(name, current.rows, before[name])
             self._rows[(name, channel)] = RowSelection(channel, current.data, rows=rows)
 
     def update(self, **options: Unpack[ChartUpdate]) -> None:
@@ -952,6 +955,15 @@ class ChartWidget(anywidget.AnyWidget):
     def _snapshot(self) -> dict[str, Any]:
         with self._lock:
             spec, buffers = self._live.to_spec()
+            # Python's numbering of bound tables' rows: drops and replaces,
+            # and for an ordered table, its rows' identities as Python holds
+            # them (a buffer) and the next one's.
+            numbering: dict[str, list[int]] = {}
+            for name, _, _ in self._live.bound:
+                numbering[name] = [self._live.dropped[name], self._live.generation[name]]
+                if name in self._live.ordinals:
+                    numbering[name] += [len(buffers), self._live.next_ordinal[name]]
+                    buffers = [*buffers, self._live.ordinals[name].astype("<f8").tobytes()]
             # What the bound channels hold, rows as buffers after the columns'.
             held = []
             for (name, channel), current in self._rows.items():
@@ -982,12 +994,7 @@ class ChartWidget(anywidget.AnyWidget):
                 "item_positions": own["itemMove"],
                 "camera": own["camera"],
                 "panel_states": panels,
-                # Python numbers a table's rows from its first since it was last
-                # replaced: how many have dropped since, and how many replaces.
-                "rows": {
-                    name: [self._live.dropped[name], self._live.generation[name]]
-                    for name, _, _ in self._live.bound
-                },
+                "rows": numbering,
                 "rowSelections": held,
             }
 
@@ -1164,6 +1171,9 @@ class ChartWidget(anywidget.AnyWidget):
                         self._live.dropped[name],
                         self._live.generation[name],
                         self._live.length(name),
+                        (lambda rows: self._live.positions(name, rows))
+                        if name in self._live.ordinals
+                        else None,
                     )
                 except ValueError:
                     return

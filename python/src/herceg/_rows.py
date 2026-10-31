@@ -10,7 +10,7 @@ condition they meet, which rows appended later meet too.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -171,13 +171,15 @@ def decode(
     base: int,
     generation: int,
     length: int,
+    ordered: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> RowSelection:
     """A browser's report of a channel: ``{"channel", "selection"}``, where a
     selection of rows carries the generation of the table it is of and, in
     ``buffers[0]``, the rows' identities (float64, Python's row numbers
-    since the table's last reset). Rows dropped since are not in the data
-    now. Raises ValueError for another shape, and for rows of data replaced
-    since."""
+    since the table's last reset, or for an ordered table the identities
+    `ordered` finds the positions of). Rows dropped since are not in the
+    data now. Raises ValueError for another shape, and for rows of data
+    replaced since."""
     channel = payload.get("channel")
     selection = payload.get("selection")
     if not isinstance(channel, str):
@@ -193,6 +195,8 @@ def decode(
     identities = np.frombuffer(memoryview(buffers[0]).cast("B"), dtype="<f8")
     if selection.get("generation") != generation:
         raise ValueError("rows of data replaced since")
+    if ordered is not None:
+        return RowSelection(channel, data, rows=ordered(identities.astype(np.int64)))
     positions = identities.astype(np.int64) - base
     return RowSelection(channel, data, rows=positions[(positions >= 0) & (positions < length)])
 

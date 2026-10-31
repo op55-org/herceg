@@ -90,7 +90,11 @@ Every mark has a component, named as its function: `Line`, `Area`, `Bar`,
 
 - Each takes the table it reads as `data`, so the type checker (tsc,
   vue-tsc, svelte-check) checks field names against its columns. `Graph`
-  takes links as `data` and nodes as `nodes`.
+  takes links as `data` and nodes as `nodes`. Series marks (`Line`,
+  `Area`, `Bar`, `Point`, `Rug`, `Heatmap`, `ErrorBar`, `Candlestick`,
+  `Histogram`, `BoxPlot`, `Boxen`, `Violin`) also take a
+  [row view](data.md#row-views) of a table, checked against its columns
+  alike: `<Histogram data={rowView(flights, { filter })} x="distance" />`.
 - Annotations (`Rule`, `Region`, `Text`) take `data` only when they draw
   an item per row: `<Rule data={deploys} x="time" label={{ field: "version" }} />`.
 - Marks built with herceg's functions can be passed as a `marks` prop.

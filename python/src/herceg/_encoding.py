@@ -1049,13 +1049,18 @@ class Stack:
     ``"fill"`` for shares of each position's total, ``"center"`` or
     ``"wiggle"`` for streams), the layers' ``order`` (``"input"``, or
     ``"inside-out"``, the largest in the middle, for the nonnegative
-    offsets), and ``gaps``: what a series of a ``series`` column counts as
+    offsets), ``gaps``: what a series of a ``series`` column counts as
     where others have rows and it has none, ``"zero"`` or ``"interpolate"``
-    (the straight line between its rows on either side)."""
+    (the straight line between its rows on either side), and ``support``:
+    where the stack stands, wherever any series has rows (``"union"``, the
+    default) or only where every shown series has a row or runs across
+    (``"intersection"``). A series' run that its ``continuity`` breaks is a
+    gap in the whole stack."""
 
     offset: Literal["zero", "fill", "center", "wiggle"] | None = None
     order: Literal["input", "inside-out"] | None = None
     gaps: Literal["zero", "interpolate"] | None = None
+    support: Literal["union", "intersection"] | None = None
 
     def __post_init__(self) -> None:
         if self.offset is not None:
@@ -1069,3 +1074,5 @@ class Stack:
                 )
         if self.gaps is not None:
             _choice(self.gaps, ("zero", "interpolate"), "Stack gaps")
+        if self.support is not None:
+            _choice(self.support, ("union", "intersection"), "Stack support")

@@ -47,11 +47,11 @@ type Column =
   | { kind: "category"; codes: Int32Array; dictionary: readonly string[]; owned: boolean }
   | { kind: "geometry"; codes: Int32Array; set: GeometrySet; owned: boolean };
 
-/** Rows between steps: columns of one length, and each row's source row identity. */
+/** Rows between steps: columns of one length, and each row's source row slot. */
 class Rows implements Fields {
   readonly length: number;
   readonly columns: Map<string, Column>;
-  /** Source row identity (`Table.identity`) of each row, while rows map to source rows. */
+  /** Each row's source row slot (`rowOffset` plus its position), while rows map to source rows. */
   readonly ids: Float64Array | undefined;
 
   constructor(length: number, columns: Map<string, Column>, ids: Float64Array | undefined) {
@@ -146,7 +146,7 @@ function rowsOf(source: Table, from = 0): Rows {
     }
   }
   const ids = new Float64Array(n);
-  for (let i = 0; i < n; i++) ids[i] = source.identity(from + i);
+  for (let i = 0; i < n; i++) ids[i] = source.rowOffset + from + i;
   return new Rows(n, columns, ids);
 }
 
@@ -688,6 +688,24 @@ function passesThrough(transforms: readonly TransformSpec[]): (field: string) =>
  * source changes. The derived table keeps its source alive; the source holds
  * the derived table only weakly, so one no longer referenced stops following.
  */
+/** How a derived table was made: its source, and the transform steps it ran, in order. */
+export interface Lineage {
+  readonly source: Table;
+  readonly steps: readonly TransformSpec[];
+}
+
+/** Derived tables' lineage, kept as long as they are (the steps are the caller's own). */
+const lineages = new WeakMap<Table, Lineage>();
+
+/**
+ * How `table` was derived (`deriveTable`, `derive(...).table()`, a spec's
+ * `{ source, transform }`), or undefined for a table that was not: what
+ * provenance rewrites conditions through.
+ */
+export function lineageOf(table: Table): Lineage | undefined {
+  return lineages.get(table);
+}
+
 /** Stops a collected derived table's subscription to its source. */
 const followers = new FinalizationRegistry<() => void>((stop) => stop());
 
@@ -701,7 +719,8 @@ export function deriveTable(
     inputsOf(first),
     options.name === undefined ? {} : { name: options.name },
   ) as unknown as Table;
-  // Identities of the source rows behind the derived rows, while every step works row by row.
+  // Slots of the source rows behind the derived rows (`rowOffset` plus their
+  // positions, which drops leave in place), while every step works row by row.
   const incremental = transforms.every(rowwise);
   let ids: number[] = incremental ? Array.from(first.ids ?? []) : [];
   let idStart = 0;
@@ -709,39 +728,59 @@ export function deriveTable(
   // hold together; the source's subscription holds the derived table weakly
   // and ends when it is collected.
   setOrigin(derived, source, passesThrough(transforms));
+  lineages.set(derived, { source, steps: transforms });
   const ref = new WeakRef(derived);
+  // The source's version the derived rows hold. A change made in another
+  // listener is heard before the one that listener was told of: one heard
+  // out of turn is computed again from the source, and then the earlier one
+  // is held already.
+  let held = source.version;
+  // The source slot after the last row read. A table made inside a
+  // transaction has read rows that the transaction's change counts as appended.
+  let read = source.rowOffset + source.length;
   const stop = source.subscribe((change: TableChange) => {
     const target = ref.deref();
     if (!target) {
       stop();
       return;
     }
-    if (incremental && !change.reset && change.updated === null) {
-      // Drop rows whose source rows left, then append those of new rows.
-      let dropped = 0;
-      while (idStart + dropped < ids.length && ids[idStart + dropped]! < source.rowOffset)
-        dropped++;
-      if (dropped > 0) {
-        target.dropFirst(dropped);
-        idStart += dropped;
-        if (idStart > 1024 && idStart * 2 > ids.length) {
-          ids = ids.slice(idStart);
-          idStart = 0;
+    if (source.version === held) return;
+    const inTurn = source.version === held + 1;
+    held = source.version;
+    // Rows an ordered source inserted move the rows after them: computed again.
+    if (inTurn && incremental && !change.reset && change.updated === null && !change.inserted) {
+      // Drop rows whose source rows left, then append those of new rows, as
+      // one change: its listeners, which may write to the source, hear it
+      // once the rows and their source identities agree.
+      target.transaction(() => {
+        let dropped = 0;
+        while (idStart + dropped < ids.length && ids[idStart + dropped]! < source.rowOffset)
+          dropped++;
+        if (dropped > 0) {
+          target.dropFirst(dropped);
+          idStart += dropped;
+          if (idStart > 1024 && idStart * 2 > ids.length) {
+            ids = ids.slice(idStart);
+            idStart = 0;
+          }
         }
-      }
-      if (change.appended > 0) {
-        const added = run(source, transforms, source.length - change.appended);
-        if (added.length > 0) {
-          target.append(batchOf(added) as never);
-          for (let i = 0; i < added.length; i++) ids.push(added.ids![i]!);
+        const from = Math.max(0, read - source.rowOffset);
+        read = source.rowOffset + source.length;
+        if (from < source.length) {
+          const added = run(source, transforms, from);
+          if (added.length > 0) {
+            target.append(batchOf(added) as never);
+            for (let i = 0; i < added.length; i++) ids.push(added.ids![i]!);
+          }
         }
-      }
+      });
       return;
     }
     const rows = run(source, transforms);
-    target.reset(inputsOf(rows) as never);
     ids = incremental ? Array.from(rows.ids ?? []) : [];
     idStart = 0;
+    read = source.rowOffset + source.length;
+    target.reset(inputsOf(rows) as never);
   });
   followers.register(derived, stop);
   return derived;

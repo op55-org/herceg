@@ -119,7 +119,7 @@ describe("3D subplots", () => {
     expect(describeChart(chart)).toContain("Fit");
     expect(describeChart(chart)).toContain("azimuth 40°");
     expect(describeChart(chart)).toContain("azimuth 90°");
-    data.replace("z", 0, [0.5]);
+    data.replace(0, { z: [0.5] });
     expect(chart.scene(estimateText).panels[2]!.marks).not.toBe(second.panels[2]!.marks);
   });
 

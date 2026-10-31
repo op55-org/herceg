@@ -1,3 +1,4 @@
+import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, Schema, Table } from "../data/table.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -26,7 +27,7 @@ import {
   SeriesSplitter,
   type SummaryContext,
 } from "./mark.ts";
-import { type MarkRows, MarkRowsCache, rowsOf } from "./rows.ts";
+import { isRowView, type MarkRows, MarkRowsCache, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, xExtent } from "./series.ts";
 import { boxOf, clipBox, distanceToCut, paintedLater } from "./shapes.ts";
 import { refuseValues } from "./still.ts";
@@ -81,6 +82,8 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
   declare readonly [MARK]: true;
   readonly spec: Frozen<RugSpec>;
   readonly table: Table;
+  /** The view of `table` whose rows the mark draws, when it draws only some (see `rowsOf`). */
+  readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
   readonly #field: string;
@@ -89,11 +92,12 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
   /** Repeated parts count a value when any panel's scale can show it. */
   readonly #positive = new WeakMap<Series, boolean>();
 
-  constructor(input: RugSpec, table: Table) {
+  constructor(input: RugSpec, table: Table<Schema>, view?: RowView) {
     this.spec = frozen(colored(input, table, "stroke"));
     checkTooltip(table, this.spec.tooltip, "rug");
     checkItemKey(table, this.spec.itemKey, "rug");
     this.table = table;
+    this.view = view;
     const spec = this.spec;
     if ((spec.x !== undefined) === (spec.y !== undefined))
       throw new TypeError("rug: needs exactly one of x and y");
@@ -131,7 +135,7 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
 
   /** What the mark reads of its table now (see marks/rows.ts). */
   rows(): MarkRows {
-    this.#rows = rowsOf(this.table, this.#rows);
+    this.#rows = rowsOf(this.view ?? this.table, this.#rows);
     return this.#rows;
   }
 
@@ -380,9 +384,11 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
 
 /** Short ticks for each observation of one number or time field. */
 export function rug<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: RugOptions<S>,
 ): ChartMark<Frozen<RugSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const spec = {
     type: "rug",
     ...definedFields(options as Partial<Record<keyof RugSpec, unknown>>, [
@@ -409,5 +415,5 @@ export function rug<S extends Schema>(
     ]),
   } as RugSpec;
   if (table.name !== undefined) spec.data = table.name;
-  return new RugMark(spec, table as unknown as Table);
+  return new RugMark(spec, table as unknown as Table, view as RowView | undefined);
 }

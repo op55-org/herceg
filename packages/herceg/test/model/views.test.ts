@@ -86,12 +86,12 @@ describe("marks over row views", () => {
     expect(Array.from(rows)).toEqual([1, 2, 3]);
   });
 
-  it("refuse to be split by facets, which come from whole tables, but repeat in every panel", () => {
+  it("split by facets into their own rows, or repeat in every panel", () => {
     const view = rowView(requests, { filter: col("ms").gt(100) });
-    expect(() =>
-      scene({ marks: [point(view, { x: "size", y: "ms" })], facet: facet("host") }),
-    ).toThrow(/point facet: a row view cannot split into facets yet/);
-    // Panels come from marks split over whole tables; the view's points repeat in each.
+    const split = scene({ marks: [point(view, { x: "size", y: "ms" })], facet: facet("host") });
+    const shown = view.read().length;
+    expect(split.model.series().reduce((sum, s) => sum + s.length, 0)).toBe(shown);
+    // Repeated, the view's points are in each panel.
     const repeated = scene({
       marks: [
         point(requests, { x: "size", y: "ms" }),

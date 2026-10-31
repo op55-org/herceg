@@ -9,6 +9,7 @@ import {
   distinct,
   first,
   last,
+  lineageOf,
   max,
   mean,
   median,
@@ -21,6 +22,7 @@ import {
 } from "../../src/data/derive.ts";
 import { col, when } from "../../src/data/expr.ts";
 import { compileExpression, type Expression } from "../../src/data/expression.ts";
+import { orderedTable } from "../../src/data/ordered.ts";
 import { quantile } from "../../src/data/quantile.ts";
 import { type Schema, type Table, table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
@@ -628,12 +630,104 @@ describe("following the source", () => {
     expect(values(doubled, "w")).toEqual([8]);
   });
 
+  it("hold every row once when a listener before them writes as it hears a change", () => {
+    // The listener's write reaches the derived table before the change it answers.
+    const answered = (source: Table, write: (source: Table) => void) => {
+      let once = true;
+      source.subscribe(() => {
+        if (!once) return;
+        once = false;
+        write(source);
+      });
+      return deriveTable(source, []);
+    };
+    const plain = table({ t: [1, 3] }) as unknown as Table;
+    const copy = answered(plain, (t) => t.append({ t: [5] }));
+    plain.append({ t: [4] });
+    expect(values(copy, "t")).toEqual([1, 3, 4, 5]);
+    const ordered = orderedTable({ t: [1, 3] }, { orderBy: "t" }) as unknown as Table;
+    const merged = answered(ordered, (t) => t.append({ t: [2] }));
+    ordered.transaction(() => ordered.append({ t: [4] }));
+    expect(values(merged, "t")).toEqual([1, 2, 3, 4]);
+    // Later changes follow as before.
+    plain.append({ t: [6] });
+    expect(values(copy, "t")).toEqual([1, 3, 4, 5, 6]);
+  });
+
+  it("keep their rows' sources when their own listeners write to the source", () => {
+    const source = table({ t: [1, 2] }) as unknown as Table;
+    const copy = deriveTable(source, []);
+    let once = true;
+    copy.subscribe(() => {
+      if (!once) return;
+      once = false;
+      source.append({ t: [4] });
+    });
+    source.append({ t: [3] });
+    expect([values(source, "t"), values(copy, "t")]).toEqual([
+      [1, 2, 3, 4],
+      [1, 2, 3, 4],
+    ]);
+    source.dropFirst(3);
+    expect(values(copy, "t")).toEqual([4]);
+  });
+
+  it("hold every row once when made inside a transaction", () => {
+    const source = table({ t: [1] }, { maxRows: 3 }) as unknown as Table;
+    let copy: Table | undefined;
+    source.transaction(() => {
+      source.append({ t: [2] });
+      copy = deriveTable(source, []);
+      source.append({ t: [3] });
+    });
+    expect(values(copy!, "t")).toEqual([1, 2, 3]);
+    source.append({ t: [4] });
+    expect(values(copy!, "t")).toEqual([2, 3, 4]);
+    // An ordered source moves rows the table read.
+    const ordered = orderedTable({ t: [1] }, { orderBy: "t" }) as unknown as Table;
+    let late: Table | undefined;
+    ordered.transaction(() => {
+      ordered.append({ t: [3] });
+      late = deriveTable(ordered, []);
+      ordered.append({ t: [2] });
+    });
+    expect(values(late!, "t")).toEqual([1, 2, 3]);
+  });
+
   it("does not share storage with its source", () => {
     const source = table({ v: Float64Array.of(1, 2, 3) });
     const copy = derive(source).sort("v").table();
     source.set("v", 0, 99);
     // The derived table changed only through its own recomputation.
     expect(values(copy, "v")).toEqual([2, 3, 99]);
+  });
+});
+
+describe("lineage", () => {
+  it("records each derived table's source and the steps that made it", () => {
+    const sales = table({ day: [0, 1, 2], region: ["N", "S", "N"], amount: [5, 6, 7] });
+    const north = derive(sales).filter(col("region").eq("N"));
+    const daily = derive(north.table()).aggregate({ by: ["day"], ops: { total: sum("amount") } });
+    const totals = daily.table();
+    const lineage = (of: object) => lineageOf(of as Table);
+    const near = lineage(totals)!;
+    expect(near.steps).toEqual(daily.transforms);
+    expect(lineage(near.source)).toEqual({ source: sales, steps: north.transforms });
+    expect(lineage(sales)).toBeUndefined();
+    // A table made elsewhere from another, by steps of its own, has none.
+    expect(lineage(table({ day: [0] }, { origin: sales as unknown as Table }))).toBeUndefined();
+  });
+
+  it("records a spec's derived tables with their transform", () => {
+    const transform = [{ filter: [">", ["field", "v"], 1] }] as const;
+    const { tables } = loadSpec({
+      data: {
+        raw: { columns: { v: [1, 2, 3] } },
+        big: { source: "raw", transform },
+      },
+      marks: [],
+    } as unknown as ChartSpec);
+    expect(lineageOf(tables.get("big")!)).toEqual({ source: tables.get("raw"), steps: transform });
   });
 });
 

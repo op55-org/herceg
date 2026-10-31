@@ -4,6 +4,7 @@
 // charts without a series field carry none of it.
 
 import type { NumericArray } from "../data/column.ts";
+import type { MovingRows } from "../data/ordered.ts";
 import type { Table } from "../data/table.ts";
 import { rowsM4 } from "../lod/m4-rows.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
@@ -19,8 +20,11 @@ interface Group {
   dropped: number;
   /** x ascends over the rows. */
   sorted: boolean;
-  /** One object per group while it follows its table, as streamed GPU uploads key them. */
-  readonly key: object;
+  /**
+   * One object per group while it follows its table by appends and drops,
+   * as streamed GPU uploads key them: a new one once rows move.
+   */
+  key: object;
   /**
    * Min/max indexes of fields over the rows, by field, from the first time
    * a chart asks for one; brought up to date when asked again.
@@ -41,8 +45,10 @@ export interface CategoryRows {
  * A table's rows grouped by a category field, in dictionary order, kept
  * current as rows are appended and dropped from the front (a rolling window)
  * instead of grouped again: appends cost the new rows, and drops a search
- * per group plus a pass over the rows that stay. Other changes regroup.
- * Groups are keyed by name, since a rolling window may renumber codes.
+ * per group plus a pass over the rows that stay. Rows an ordered table
+ * moves (`MovingRows`) are filed again from the first that moved; other
+ * changes regroup. Groups are keyed by name, since a rolling window may
+ * renumber codes.
  */
 export class SplitRows {
   readonly #table: Table;
@@ -80,15 +86,22 @@ export class SplitRows {
     const table = this.#table;
     const dropped = table.rowOffset - this.#offset;
     const kept = this.#length - dropped;
+    // Rows from `moved` on are not those grouped before, where an ordered table moved them.
+    const moved =
+      table.modifiedVersion === this.#modified
+        ? kept
+        : (table as Partial<MovingRows>).changedFrom?.(this.#version);
     const follows =
       table.generation === this.#generation &&
-      table.modifiedVersion === this.#modified &&
+      moved !== undefined &&
       dropped >= 0 &&
       kept >= 0 &&
       table.length >= kept;
     if (follows) {
       if (dropped > 0) this.#drop(dropped);
-      this.#append(kept, table.length);
+      const from = Math.min(kept, moved);
+      if (from < kept) this.#cut(from);
+      this.#append(from, table.length);
     } else {
       this.#groups = new Map();
       this.#append(0, table.length);
@@ -110,13 +123,7 @@ export class SplitRows {
     for (const [name, group] of this.#groups) {
       const { buffer, count: before } = group;
       // Positions ascend, so the dropped ones lead.
-      let lo = 0;
-      let hi = before;
-      while (lo < hi) {
-        const mid = (lo + hi) >>> 1;
-        if (buffer[mid]! < count) lo = mid + 1;
-        else hi = mid;
-      }
+      const lo = firstFrom(buffer, before, count);
       const kept = before - lo;
       if (kept === 0) {
         this.#groups.delete(name);
@@ -129,6 +136,33 @@ export class SplitRows {
       group.dropped += lo;
       // A drop can remove the inversion that left x unsorted.
       if (!group.sorted && x) group.sorted = ascends(x, moved, 0, kept);
+    }
+  }
+
+  /**
+   * Takes rows from position `from` on out of every group, to be filed
+   * again: kept rows move to a new buffer (rows given out before stay as
+   * they were), indexes forget them, and the group takes a new key.
+   */
+  #cut(from: number): void {
+    for (const [name, group] of this.#groups) {
+      const { buffer, count } = group;
+      const lo = firstFrom(buffer, count, from);
+      if (lo === count) continue;
+      if (lo === 0) {
+        this.#groups.delete(name);
+        continue;
+      }
+      group.buffer = new Uint32Array(capacityFor(count));
+      group.buffer.set(buffer.subarray(0, lo));
+      group.count = lo;
+      group.key = {};
+      for (const index of group.indexes?.values() ?? []) index.forget(group.dropped + lo);
+      // Rows taken out may have been the ones out of order.
+      if (!group.sorted) {
+        const x = this.#xs();
+        group.sorted = x !== undefined && ascends(x, group.buffer, 0, lo);
+      }
     }
   }
 
@@ -241,6 +275,22 @@ class GroupRows implements SeriesStream {
 }
 
 /** Room for a group of `count` rows and the appends to come. */
+/**
+ * Where a group's rows from position `from` start among its first `count`.
+ * Its own search, not data/bisect.ts: the line chart's entry holds that, and
+ * this module, loaded later, would split it into a chunk of its own.
+ */
+function firstFrom(buffer: Uint32Array, count: number, from: number): number {
+  let lo = 0;
+  let hi = count;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (buffer[mid]! < from) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 function capacityFor(count: number): number {
   return Math.max(16, Math.ceil(count * 1.5));
 }

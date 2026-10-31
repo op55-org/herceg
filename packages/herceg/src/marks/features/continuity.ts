@@ -255,6 +255,22 @@ export class Topology {
     return this.#rowFlags()[row] === DRAWN;
   }
 
+  /**
+   * Whether rows `a` and `b`, neighbors in a series at positions `xa` and
+   * `xb`, connect: both drawn, and no gap or boundary between them.
+   */
+  joins(a: number, xa: number, b: number, xb: number): boolean {
+    const flags = this.#rowFlags();
+    if (flags[a] !== DRAWN || flags[b] !== DRAWN) return false;
+    if (this.#maxGap !== undefined && Math.abs(xb - xa) > this.#maxGap) return false;
+    if (this.#unit !== undefined) {
+      const [start, end] = this.#span(xa);
+      if (!(xb >= start && xb < end)) return false;
+    }
+    const codes = this.#codes?.();
+    return !codes || (codes[a]! >= 0 && codes[a] === codes[b]);
+  }
+
   /** The series' drawn observations, as a series of those rows, found once per data version. */
   shown(series: Series): Series {
     const flags = this.#rowFlags();

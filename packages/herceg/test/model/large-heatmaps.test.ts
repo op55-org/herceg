@@ -207,7 +207,7 @@ describe("reduced heatmaps", () => {
     const after = rasterOf(model);
     expect(write).not.toHaveBeenCalled();
     expect(after.pixels).toEqual(before.pixels);
-    data.replace("v", 0, [1]);
+    data.replace(0, { v: [1] });
     rasterOf(model);
     expect(write).toHaveBeenCalled();
     write.mockClear();

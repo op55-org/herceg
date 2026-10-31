@@ -12,8 +12,10 @@ import {
 import { deriveTable } from "../data/derive.ts";
 import { geometry } from "../data/geometry.ts";
 import { fromMatrix } from "../data/matrix.ts";
+import { orderedTable } from "../data/ordered.ts";
 import { setOrigin } from "../data/origin.ts";
 import { RowSet } from "../data/row-set.ts";
+import { type RowView, rowView } from "../data/row-view.ts";
 import {
   type DataSelection,
   type SelectionStore,
@@ -89,6 +91,8 @@ export interface LoadedSpec {
   config: ChartConfig & { width?: number; height?: number };
   /** The spec's tables by name; changing them updates charts built from the spec. */
   tables: Map<string, Table>;
+  /** The spec's views of tables' rows (`{ source, view }` entries) by name; changing their queries updates charts. */
+  views: Map<string, RowView>;
   /** The selection stores `rowSelection` binds, by table name: those given in `stores`, or new ones. */
   stores: Map<string, SelectionStore>;
   /** Paths of the properties this herceg does not know, such as `marks[0].strokeWidht`. */
@@ -166,8 +170,9 @@ export function loadSpec(
       `herceg spec: ignoring properties the format does not have: ${found.map(describeUnknown).join(", ")}`,
     );
   const unknown = found.map(({ path }) => path);
-  const tables = loadTables(spec.data ?? {}, buffers, byName(options.tables));
-  const marks = spec.marks.map((mark, index) => loadMark(mark, index, tables));
+  const views = new Map<string, RowView>();
+  const tables = loadTables(spec.data ?? {}, buffers, byName(options.tables), views);
+  const marks = spec.marks.map((mark, index) => loadMark(mark, index, tables, views));
   const {
     data: _data,
     marks: _marks,
@@ -182,7 +187,8 @@ export function loadSpec(
   } = spec;
   const stores = new Map<string, SelectionStore>();
   const rows =
-    bindings && loadRowSelection(bindings, tables, marks, buffers, byName(options.stores), stores);
+    bindings &&
+    loadRowSelection(bindings, tables, views, marks, buffers, byName(options.stores), stores);
   const facet = split && new Facet(split);
   const subplots = panels && new Panels(panels, layout);
   const navigator = strip ? rangeNavigator(strip === true ? {} : strip) : undefined;
@@ -200,6 +206,7 @@ export function loadSpec(
       ...(rows && { rowSelection: rows }),
     },
     tables,
+    views,
     stores,
     unknown,
   };
@@ -218,6 +225,7 @@ function byName<T>(values: ByName<T> | undefined): ReadonlyMap<string, T> | unde
 function loadRowSelection(
   spec: RowSelectionSpec | readonly RowSelectionSpec[],
   tables: ReadonlyMap<string, Table>,
+  views: ReadonlyMap<string, RowView>,
   marks: readonly ChartMark[],
   buffers: readonly SpecBuffer[],
   given: ReadonlyMap<string, SelectionStore> | undefined,
@@ -235,6 +243,11 @@ function loadRowSelection(
         name = [...tables].find(([, table]) => table === read[0])?.[0];
       }
       const table = name === undefined ? undefined : tables.get(name);
+      const view = name === undefined ? undefined : views.get(name);
+      if (view)
+        throw new Error(
+          `${path}.data: "${name}" is a view of "${nameOf(view.source, tables)}"; bind the store of "${nameOf(view.source, tables)}"`,
+        );
       if (!table)
         throw new Error(
           `${path}.data: no table ${JSON.stringify(name)} in data; name one of ${names(tables)}`,
@@ -296,10 +309,18 @@ function loadSelection(
 function loadTables(
   data: Record<string, DataSpec>,
   buffers: readonly SpecBuffer[],
-  given?: ReadonlyMap<string, Table>,
+  given: ReadonlyMap<string, Table> | undefined,
+  views: Map<string, RowView>,
 ): Map<string, Table> {
   const tables = new Map<string, Table>();
   const loading = new Set<string>();
+  /** Table `of`, as `at` names it: tables and views are made from tables, never from views. */
+  const tableAt = (at: string, of: string): Table => {
+    const entry = data[of];
+    if (entry && "view" in entry)
+      throw new Error(`${at}: "${of}" is a view of "${entry.source}"; name "${entry.source}"`);
+    return load(of);
+  };
   const load = (name: string): Table => {
     const done = tables.get(name) ?? given?.get(name);
     if (done) {
@@ -308,6 +329,19 @@ function loadTables(
     }
     const entry = data[name];
     if (!entry) throw new Error(`data: no table "${name}"`);
+    if ("view" in entry) {
+      if (!Object.hasOwn(data, entry.source))
+        throw new Error(
+          `data.${name}.source: no table "${entry.source}" in data; name one of ${names(data)}`,
+        );
+      const of = tableAt(`data.${name}.source`, entry.source);
+      try {
+        views.set(name, rowView(of, entry.view as never));
+      } catch (error) {
+        throw within(`data.${name}.view`, error);
+      }
+      return of;
+    }
     if (!("source" in entry)) {
       const loaded = loadTable(name, entry, buffers);
       tables.set(name, loaded);
@@ -330,7 +364,7 @@ function loadTables(
             );
           seen.add(at);
         }
-        const source = load(origin);
+        const source = tableAt(`data.${name}.origin`, origin);
         setOrigin(loaded, source, (field) => source.has(field));
       }
       return loaded;
@@ -342,7 +376,7 @@ function loadTables(
       throw new Error(
         `data.${name}.source: no table "${entry.source}" in data; name one of ${names(data)}`,
       );
-    const source = load(entry.source);
+    const source = tableAt(`data.${name}.source`, entry.source);
     let derived: Table;
     try {
       derived = deriveTable(source, entry.transform, { name });
@@ -353,6 +387,8 @@ function loadTables(
     return derived;
   };
   for (const name of Object.keys(data)) load(name);
+  // A view names no table.
+  for (const name of views.keys()) if (!given?.has(name)) tables.delete(name);
   return tables;
 }
 
@@ -366,10 +402,19 @@ function loadTable(name: string, data: ColumnsSpec, buffers: readonly SpecBuffer
       throw within(`data.${name}.columns.${field}`, error);
     }
   }
+  const { matrix, orderBy, maxRows } = data;
+  for (const [option, given] of [
+    ["orderBy", orderBy],
+    ["maxRows", maxRows],
+  ] as const)
+    if (matrix && given !== undefined)
+      throw new Error(`data.${name}.${option}: a matrix's rows are its cells; drop ${option}`);
   try {
-    return data.matrix
-      ? fromMatrix(columns, { x: data.matrix.x, y: data.matrix.y }, { name })
-      : table(columns, { name });
+    return matrix
+      ? fromMatrix(columns, { x: matrix.x, y: matrix.y }, { name })
+      : orderBy !== undefined
+        ? orderedTable(columns, { name, orderBy, ...(maxRows !== undefined && { maxRows }) })
+        : table(columns, { name, ...(maxRows !== undefined && { maxRows }) });
   } catch (error) {
     throw within(`data.${name}`, error);
   }
@@ -537,8 +582,34 @@ function swapped(Typed: (typeof TYPED)[BinaryType], bytes: Uint8Array): NumericA
   return new Typed(copy.buffer, 0, copy.length / size);
 }
 
-function loadMark(spec: MarkSpec, index: number, tables: Map<string, Table>): Mark | LayoutMark {
+/** Marks that draw series of a table, which take a view of its rows too. */
+const SERIES = new Set([
+  "line",
+  "area",
+  "bar",
+  "point",
+  "heatmap",
+  "rug",
+  "errorbar",
+  "candlestick",
+  "histogram",
+  "boxplot",
+  "boxen",
+  "violin",
+]);
+
+function loadMark(
+  spec: MarkSpec,
+  index: number,
+  tables: Map<string, Table>,
+  views: ReadonlyMap<string, RowView>,
+): Mark | LayoutMark {
   try {
+    const view = spec.data === undefined ? undefined : views.get(spec.data);
+    if (view && !SERIES.has(spec.type))
+      throw new Error(
+        `data: "${spec.data}" is a view; a ${spec.type} mark takes a table, so name "${nameOf(view.source, tables)}", or derive one`,
+      );
     // Annotations read a table only when a position or their text is a field.
     switch (spec.type) {
       case "rule":
@@ -558,40 +629,40 @@ function loadMark(spec: MarkSpec, index: number, tables: Map<string, Table>): Ma
           annotationTable(spec, spec.at ? [spec.at.x, spec.at.y] : [spec.x, spec.y], tables),
         );
     }
-    const source = tableFor(spec.data, tables);
+    const source = view?.source ?? tableFor(spec.data, tables);
     switch (spec.type) {
       case "line":
-        return new LineMark(spec, source);
+        return new LineMark(spec, source, view);
       case "area":
-        return new AreaMark(spec, source);
+        return new AreaMark(spec, source, view);
       case "bar":
-        return new BarMark(spec, source);
+        return new BarMark(spec, source, view);
       case "point":
-        return new PointMark(withScheme(spec), source);
+        return new PointMark(withScheme(spec), source, view);
       case "dendrogram":
         return new DendrogramMark(spec, source);
       case "heatmap":
-        return new HeatmapMark(withScheme(spec), source);
+        return new HeatmapMark(withScheme(spec), source, view);
       case "contour":
         return new ContourMark(withScheme(spec), source);
       case "rug":
-        return new RugMark(spec, source);
+        return new RugMark(spec, source, view);
       case "errorbar":
-        return new ErrorBarMark(spec, source);
+        return new ErrorBarMark(spec, source, view);
       case "candlestick":
-        return new CandlestickMark(spec, source);
+        return new CandlestickMark(spec, source, view);
       case "histogram":
         return spec.x !== undefined && spec.y !== undefined
-          ? new Histogram2DMark(withScheme(spec as Histogram2DSpec), source)
-          : new HistogramMark(spec as Histogram1DSpec, source);
+          ? new Histogram2DMark(withScheme(spec as Histogram2DSpec), source, view)
+          : new HistogramMark(spec as Histogram1DSpec, source, view);
       case "pie":
         return new PieMark(spec, source);
       case "boxplot":
-        return new BoxPlotMark(spec, source);
+        return new BoxPlotMark(spec, source, view);
       case "boxen":
-        return new BoxenMark(spec, source);
+        return new BoxenMark(spec, source, view);
       case "violin":
-        return new ViolinMark(spec, source);
+        return new ViolinMark(spec, source, view);
       case "treemap":
         return new TreemapMark(spec, source);
       case "sunburst":
@@ -653,6 +724,12 @@ function annotationTable(
   tables: Map<string, Table>,
 ): Table | undefined {
   return readsTable(positions, spec.label) ? tableFor(spec.data, tables) : undefined;
+}
+
+/** The name `table` has among `tables`. */
+function nameOf(table: Table, tables: ReadonlyMap<string, Table>): string | undefined {
+  for (const [name, of] of tables) if (of === table) return name;
+  return table.name;
 }
 
 function tableFor(name: string | undefined, tables: Map<string, Table>): Table {

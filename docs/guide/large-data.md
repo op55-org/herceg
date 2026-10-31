@@ -105,7 +105,10 @@ What stays incremental as rows arrive and leave a rolling window:
   `order: "inside-out"` recompute the window);
 - GPU point uploads, which write only new points;
 - derived tables of filters, calculations, and fixed bins; row views; row
-  groups; pivots.
+  groups; pivots;
+- late rows of an [ordered table](data.md#rows-that-arrive-late): min/max
+  indexes, series grouping, and areas stacked by series redo the rows from
+  the first one a merge moved.
 
 A million-point rolling window takes about 1.5 ms per 10,000-point tick in
 Chrome, and a 15-series, 3,000-point line chart about 1.2 ms per tick (see

@@ -1,9 +1,9 @@
 <!-- Individual observations as short ticks at a plot edge. -->
 <script lang="ts" generics="S extends Schema">
   import { type RugOptions, rug, type Schema } from "herceg";
-  import { built, markAnchor, panelled, plain, type WithData } from "./marks.js";
+  import { built, markAnchor, panelled, plain, type WithRows } from "./marks.js";
 
-  let { data, ...options }: WithData<RugOptions<S>, S> = $props();
+  let { data, ...options }: WithRows<RugOptions<S>, S> = $props();
   const inPanel = panelled("Rug");
   const mark = $derived(built(() => rug(data, inPanel(plain(options)) as RugOptions<S>)));
   const anchor = markAnchor("Rug", () => mark);

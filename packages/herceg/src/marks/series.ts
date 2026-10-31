@@ -120,6 +120,8 @@ export interface LayerEdges {
   bottom: Float64Array | undefined;
   /** Min/max indexes of the edges, for long stacks. */
   indexes: { top: RangeIndex; bottom: RangeIndex | undefined } | undefined;
+  /** The layer's table rows in order along the stack's positions, where its own rows do not ascend there. */
+  positionOrder?: Uint32Array | undefined;
 }
 
 /**

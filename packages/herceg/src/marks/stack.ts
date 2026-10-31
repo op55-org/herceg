@@ -27,7 +27,7 @@ export interface StackedLayers {
 }
 
 /** What a stack reads of its table: where its rows are, and what changed. */
-type Rows = Pick<Table, "rowOffset" | "length" | "version" | "modifiedVersion">;
+type Rows = Pick<Table, "rowOffset" | "length" | "version" | "modifiedVersion" | "generation">;
 
 const GROWTH = 1.5;
 const MIN_CAPACITY = 64;
@@ -121,6 +121,7 @@ export class RowStack {
   #layerOrder: number[] = [];
   #table: Rows | undefined;
   #version = -1;
+  #generation = -1;
   #signature = "";
   #places: object | undefined;
   /** Table row identity (`rowOffset`) of the first live row. */
@@ -158,7 +159,9 @@ export class RowStack {
   /**
    * The stack of `layers` (each a field's values for the table's live rows;
    * undefined for a hidden layer, which stacks as zero) as of the table's
-   * current version. `signature` names which layers are shown.
+   * current version. `signature` names which layers are shown. Offsets
+   * over a view's `rows` take those rows alone, in their order: rows a
+   * view leaves out neither count nor stand.
    */
   update(
     table: Rows,
@@ -166,9 +169,10 @@ export class RowStack {
     signature: string,
     positions?: NumericArray,
     places?: object,
+    rows?: Uint32Array,
   ): StackedLayers {
     try {
-      return this.#update(table, layers, signature, positions, places);
+      return this.#update(table, layers, signature, positions, places, rows);
     } catch (error) {
       this.clear();
       throw error;
@@ -181,17 +185,21 @@ export class RowStack {
     signature: string,
     positions?: NumericArray,
     places?: object,
+    rows?: Uint32Array,
   ): StackedLayers {
     const end = table.rowOffset + table.length;
     const current =
-      this.#table === table && this.#signature === signature && this.#places === places;
+      this.#table === table &&
+      this.#signature === signature &&
+      this.#places === places &&
+      this.#generation === table.generation;
     if (
       !current ||
       table.modifiedVersion > this.#version ||
       layers.length !== this.#tops.length ||
-      (table.version !== this.#version && this.#offset?.global)
+      (table.version !== this.#version && (this.#offset?.global || rows))
     ) {
-      this.#rebuild(table, layers, signature, positions);
+      this.#rebuild(table, layers, signature, positions, rows);
     } else if (this.#version !== table.version) {
       // Rows before the table's first are gone; rows past the stack's last are new.
       const dropped = Math.min(this.#length, Math.max(0, table.rowOffset - this.#rowOffset));
@@ -273,6 +281,7 @@ export class RowStack {
     layers: readonly (NumericArray | undefined)[],
     signature: string,
     positions?: NumericArray,
+    rows?: Uint32Array,
   ) {
     const length = table.length;
     const capacity = capacityFor(length);
@@ -294,10 +303,41 @@ export class RowStack {
     this.#table = table;
     this.#signature = signature;
     this.#version = table.version;
+    this.#generation = table.generation;
     this.#rowOffset = table.rowOffset;
     this.#start = 0;
     this.#length = length;
-    this.#stack(layers, 0, length, 0, positions);
+    if (rows && this.#offset) this.#offsetRows(layers, rows, positions);
+    else this.#stack(layers, 0, length, 0, positions);
+  }
+
+  /**
+   * Offsets a view's `rows` among themselves: their values gathered in the
+   * view's order, offset, and put back by row; other rows have no place.
+   */
+  #offsetRows(
+    layers: readonly (NumericArray | undefined)[],
+    rows: Uint32Array,
+    positions?: NumericArray,
+  ) {
+    const gather = (values: NumericArray | undefined) =>
+      Float64Array.from(rows, (row) => {
+        const value = values ? values[row]! : 0;
+        return Number.isFinite(value) ? value : Number.NaN;
+      });
+    const tops = layers.map(gather);
+    const bases = layers.map(() => new Float64Array(rows.length));
+    const totals = this.#totals && new Float64Array(rows.length);
+    this.#layerOrder = this.#offset!.resolve(tops, bases, positions && gather(positions), totals);
+    const put = (into: Float64Array, from: Float64Array) => {
+      into.fill(Number.NaN, 0, this.#length);
+      rows.forEach((row, i) => {
+        into[row] = from[i]!;
+      });
+    };
+    for (const [l, top] of tops.entries()) put(this.#tops[l]!, top);
+    for (const [l, base] of bases.entries()) put(this.#bases[l]!, base);
+    if (totals) put(this.#totals!, totals);
   }
 
   /** Moves the live rows into smaller buffers once drops leave them less than a quarter full. */

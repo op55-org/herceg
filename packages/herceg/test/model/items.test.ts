@@ -148,7 +148,7 @@ describe("item keys", () => {
     const fallback = items.keyOfRow("dots", { table: rows, position: 0 });
     expect(Array.from(items.rowsOf(fallback, rows))).toEqual([0]);
     // Named 7, as row 1 is: one item of both, which the old key no longer names.
-    rows.replace("id", 0, [7]);
+    rows.replace(0, { id: [7] });
     expect(items.keyOfRow("dots", { table: rows, position: 0 })).toBe('["dots",7]');
     expect(Array.from(items.rowsOf(fallback, rows))).toEqual([]);
     expect(Array.from(items.rowsOf('["dots",7]', rows))).toEqual([0, 1]);
@@ -162,7 +162,7 @@ describe("item keys", () => {
       series: series("bars", "v"),
     });
     expect(Array.from(byPosition.rowsOf(unnamed, bars))).toEqual([0]);
-    bars.replace("c", 0, ["b"]);
+    bars.replace(0, { c: ["b"] });
     expect(Array.from(byPosition.rowsOf(unnamed, bars))).toEqual([]);
   });
 

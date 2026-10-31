@@ -1,5 +1,6 @@
 import { type LetterDepth, letterDepth, letterValues } from "../data/letter-values.ts";
 import { type BoxStats, quantile } from "../data/quantile.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { rectDrawing } from "../draw/rect.ts";
@@ -15,6 +16,7 @@ import {
 } from "./distribution.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
+import { isRowView } from "./rows.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
 import { refuseValues } from "./still.ts";
 
@@ -52,10 +54,10 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
   protected readonly noun = ["box", "boxes"] as const;
   protected readonly width = WIDTH;
 
-  constructor(spec: BoxenSpec, table: Table) {
+  constructor(spec: BoxenSpec, table: Table, view?: RowView) {
     const problem = boxenOptionError(spec);
     if (problem) throw new TypeError(problem);
-    super(spec, table);
+    super(spec, table, undefined, view);
     const room = spec.outliers === false ? 0 : RADIUS + 1;
     this.inset = this.horizontal ? { x: room, y: 0 } : { x: 0, y: room };
   }
@@ -300,9 +302,11 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
  * ```
  */
 export function boxen<S extends Schema>(
-  table: Table<S>,
+  data: Table<S> | RowView<S>,
   options: BoxenOptions<S>,
 ): ChartMark<Frozen<BoxenSpec>> {
+  const view = isRowView(data) ? data : undefined;
+  const table = view ? view.source : (data as Table<S>);
   const spec: BoxenSpec = {
     type: "boxen",
     x: options.x,
@@ -331,5 +335,5 @@ export function boxen<S extends Schema>(
   };
   if (table.name !== undefined) spec.data = table.name;
   // Field names were checked against S above; marks work on the erased schema.
-  return new BoxenMark(spec, table as unknown as Table);
+  return new BoxenMark(spec, table as unknown as Table, view as RowView | undefined);
 }

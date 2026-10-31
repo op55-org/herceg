@@ -32,7 +32,7 @@ import numpy as np
 from . import _geo, _render
 from ._colors import is_color
 from ._data import UNTYPED, Column, Matrix, Table, listlike
-from ._derive import BinSpec, Derived, Expr, _fields_of, bin_spec
+from ._derive import BinSpec, Derived, Expr, Ordered, View, _fields_of, bin_spec
 from ._encoding import (
     SYMBOLS,
     BarLabels,
@@ -265,6 +265,14 @@ class HeatmapSampling(TypedDict, total=False):
 
 
 _NUMERIC = ("number", "time")
+
+#: Marks that draw a view's rows (``hg.view``); others take a table.
+_VIEW_MARKS = frozenset(
+    (
+        *("line", "area", "bar", "point", "heatmap", "rug", "errorbar", "candlestick"),
+        *("histogram", "boxplot", "boxen", "violin"),
+    )
+)
 # Columns a label part writes: numbers, times, and categories.
 _ANY = ("category", "number", "time")
 
@@ -1834,8 +1842,11 @@ class Chart:
         or the series of a ``series`` column on every position any of them
         has. There, a series counts as zero at a position where it has no
         row, or with ``stack=hg.Stack(gaps="interpolate")`` as the straight
-        line between its rows on either side. On a category axis,
-        ``dodge=True`` places unstacked series side by side in each band.
+        line between its rows on either side; ``hg.Stack(support=
+        "intersection")`` stands the stack only where every shown series has
+        a row or runs across, and a series' run that ``continuity`` breaks
+        is a gap in the whole stack. On a category axis, ``dodge=True``
+        places unstacked series side by side in each band.
 
         ``stack="fill"`` shows shares of each position's visible total.
         ``"center"`` centers raw thickness around zero; ``"wiggle"`` uses
@@ -1851,7 +1862,7 @@ class Chart:
         it); a ``series`` column splits bands too. ``encode``,
         ``style``, ``continuity``, and ``where`` work as for lines, with
         ``where`` shading only where its condition holds (a conditional
-        band).
+        band; not on stacks).
         ``item_key`` names a numeric, datetime, or category column whose value
         names each row's item, which selections and transitions follow across
         replaced data.
@@ -1860,10 +1871,10 @@ class Chart:
         if isinstance(stacking, Stack):
             offset = stacking.offset or "zero"
             spread: Any = True if offset == "zero" else offset
-            gaps = stacking.gaps
+            gaps, support = stacking.gaps, stacking.support
         else:
             _check_stack(stack, "area")
-            spread, gaps = stack, None
+            spread, gaps, support = stack, None, None
         if stroke_width is not None and not (_finite(stroke_width) and stroke_width >= 0):
             raise ChartError(
                 f"area stroke_width: expected 0 or more pixels; received {shown(stroke_width)}"
@@ -1935,14 +1946,15 @@ class Chart:
         positions = x_spec if runs == "x" else y_spec
         style_spec = mark_style_spec(style, ("by",), "area")
         self._check_series_style(table, split, style_spec, "area", positions)
-        if gaps is not None and split is None:
+        for option, given in (("gaps", gaps), ("support", support)):
+            if given is not None and split is None:
+                raise ChartError(
+                    f"area stack {option}: for stacks by a series column; give series, "
+                    f"or drop {option}"
+                )
+        if spread and where is not None:
             raise ChartError(
-                "area stack gaps: for stacks by a series column; give series, or drop gaps"
-            )
-        if spread and (where is not None or continuity is not None):
-            option = "where" if where is not None else "continuity"
-            raise ChartError(
-                f"area {option}: stacked areas cannot leave rows out yet; drop it or the stack"
+                "area where: stacked areas cannot leave rows out yet; drop it or the stack"
             )
         return self._add(
             {
@@ -5102,6 +5114,7 @@ class Chart:
                 for table, origin in self._origins.items()
                 if table_name(table) in columns and table_name(origin) in columns
             },
+            self._ordered_specs(),
         )
         _check_axes(spec)
         _check_legend_keys(spec)
@@ -5566,7 +5579,7 @@ class Chart:
             return
         for mark, table in self._marks:
             kind = mark["type"]
-            if table is None or table_name(table) != name:
+            if table is None or table_name(self._selected(table)) != name:
                 continue
             if brush == "lasso" and kind in ("histogram", "boxplot", "boxen", "violin"):
                 raise ChartError(
@@ -5607,16 +5620,21 @@ class Chart:
         """The name of the table a binding selects rows of."""
         return table_name(self._bound_index(binding))
 
+    def _selected(self, table: int) -> int:
+        """The table selections of a table's rows hold rows of: a view's data."""
+        return self._derived[table] if isinstance(self._tables[table][0], View) else table
+
     def _bound_index(self, binding: SelectionBinding) -> int:
         """The table a binding selects rows of: its ``data``, or else the chart's
-        data, or the one table the marks read."""
+        data, or the one table the marks read (a view's data, for views)."""
         read = sorted(
-            {table for _, table in self._marks if table is not None}
+            {self._selected(table) for _, table in self._marks if table is not None}
             | set(self._node_tables.values())
         )
         if binding.data is None:
-            if self._default is not None and self._default in read:
-                return self._default
+            default = self._default
+            if default is not None and self._selected(default) in read:
+                return self._selected(default)
             if len(read) != 1:
                 raise ChartError(
                     "SelectionBinding data: the chart has no data of its own and its marks "
@@ -5628,6 +5646,11 @@ class Chart:
             (index for index, (source, _) in enumerate(self._tables) if source is binding.data),
             None,
         )
+        if found is not None and isinstance(binding.data, View):
+            raise ChartError(
+                "SelectionBinding data: a view; selections hold rows of its data, so bind that",
+                path=self._binding_path(binding, "data"),
+            )
         if found is None or found not in read:
             raise ChartError(
                 "SelectionBinding data: expected an object given to one of the chart's marks",
@@ -5721,6 +5744,10 @@ class Chart:
             # survive. Derived tables compute their rows whatever is read.
             if source not in self._derived and columns.names and not needs & set(columns.names):
                 needs.add(_convertible(columns))
+        # Ordered tables keep their rows in order of a column the browser needs.
+        for table in used:
+            if isinstance(source := self._tables[table][0], Ordered):
+                used[table].add(source.by)
         return used
 
     def _used_columns(self) -> dict[str, dict[str, Column]]:
@@ -5755,10 +5782,26 @@ class Chart:
         return {
             table_name(table): {
                 "source": table_name(source),
-                "transform": list(self._tables[table][0].steps),
+                **(
+                    {"view": data.query}
+                    if isinstance(data := self._tables[table][0], View)
+                    else {"transform": list(data.steps)}
+                ),
             }
             for table, source in sorted(self._derived.items())
             if table in used
+        }
+
+    def _ordered_specs(self) -> dict[str, dict[str, Any]]:
+        """What ordered tables sent add to their columns: the column their rows
+        are kept in order of, and how many they keep."""
+        return {
+            table_name(table): {
+                "orderBy": source.by,
+                **({"maxRows": source.max_rows} if source.max_rows is not None else {}),
+            }
+            for table, (source, _) in enumerate(self._tables)
+            if isinstance(source, Ordered)
         }
 
     def _mark_specs(self) -> list[dict[str, Any]]:
@@ -5787,6 +5830,13 @@ class Chart:
             source = self._table(data.source, data._table)
             self._tables.append((data, _DerivedColumns(data)))
             self._derived[len(self._tables) - 1] = source
+        elif isinstance(data, View):
+            # A view's columns are its data's: marks check fields against them.
+            source = self._table(data.source, data._table)
+            self._tables.append((data, self._tables[source][1]))
+            self._derived[len(self._tables) - 1] = source
+        elif isinstance(data, Ordered):
+            self._tables.append((data, data.table))
         elif isinstance(data, Matrix):
             self._tables.append((data, data))
         else:
@@ -6529,6 +6579,18 @@ class Chart:
             )
         if self._unchecked is not None:
             check_hints(*self._unchecked)
+        if (
+            table is not None
+            and isinstance(self._tables[table][0], View)
+            and spec["type"] not in _VIEW_MARKS
+        ):
+            role = _method(spec["type"])
+            raise ChartError(
+                f"{role} data: a view; {role} marks take a table, so give the view's data, "
+                "or derive one with its filter",
+                path=f"marks[{len(self._marks)}].data",
+                mark=len(self._marks),
+            )
         mark_id = spec.get("id")
         if mark_id is not None and any(mark.get("id") == mark_id for mark, _ in self._marks):
             raise ChartError(
@@ -7421,10 +7483,12 @@ def assemble_spec(
     derived: dict[str, dict[str, Any]] | None = None,
     matrices: dict[str, dict[str, str]] | None = None,
     origins: dict[str, str] | None = None,
+    ordered: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[bytes]]:
     """A spec and its buffers from chart options, columns by table name, mark
-    specs, derived tables by name, the coordinates of matrix tables, and the
-    tables others are made from (`origin`), by name."""
+    specs, derived tables by name, the coordinates of matrix tables, the
+    tables others are made from (`origin`), and ordered tables' `orderBy`
+    and `maxRows`, by name."""
     buffers: list[bytes] = []
     spec: dict[str, Any] = {"version": _SPEC_VERSION, **options}
     for key, value in layout.items():
@@ -7437,6 +7501,7 @@ def assemble_spec(
                 "columns": columns_spec(columns, buffers),
                 **({"matrix": matrices[name]} if matrices and name in matrices else {}),
                 **({"origin": origins[name]} if origins and name in origins else {}),
+                **(ordered.get(name, {}) if ordered else {}),
             }
             for name, columns in tables.items()
         }

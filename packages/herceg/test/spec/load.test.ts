@@ -899,3 +899,128 @@ describe("text styles", () => {
     );
   });
 });
+
+describe("views and ordered tables in specs", () => {
+  const flights: ChartSpec = {
+    data: {
+      flights: {
+        columns: { distance: [100, 900, 400, 2500, 1200], delay: [-30, 5, 12, 60, -5] },
+      },
+      brushed: { source: "flights", view: { filter: [">=", ["field", "delay"], -20] } },
+    },
+    marks: [{ type: "histogram", data: "brushed", x: "distance", bins: { start: 0, step: 500 } }],
+  };
+
+  it("draws a view's rows, following its table", () => {
+    validateSpec(flights);
+    const { tables, views, config } = loadSpec(flights);
+    expect([...tables.keys()]).toEqual(["flights"]);
+    const view = views.get("brushed")!;
+    expect(view.source).toBe(tables.get("flights"));
+    expect(Array.from(view.read().indices!)).toEqual([1, 2, 3, 4]);
+    const mark = config.marks[0] as unknown as { table: Table; view: unknown };
+    expect(mark.table).toBe(tables.get("flights"));
+    expect(mark.view).toBe(view);
+    const alone = (data: Record<string, unknown>) =>
+      specToSVG({ ...flights, data: data as never }).replace(/herceg-svg-\d+/g, "");
+    expect(alone(flights.data!)).toBe(
+      alone({
+        flights: { columns: { distance: [900, 400, 2500, 1200], delay: [5, 12, 60, -5] } },
+        brushed: { source: "flights", view: {} },
+      }),
+    );
+  });
+
+  it("sorts a view, and refuses views where tables are needed", () => {
+    const sorted: ChartSpec = {
+      data: {
+        flights: flights.data!.flights!,
+        ranked: { source: "flights", view: { sort: [{ field: "delay", order: "descending" }] } },
+      },
+      marks: [{ type: "line", data: "ranked", x: "distance", y: "delay" }],
+    };
+    expect(Array.from(loadSpec(sorted).views.get("ranked")!.read().indices!)).toEqual([
+      3, 2, 1, 4, 0,
+    ]);
+    expect(() =>
+      loadSpec({ ...sorted, marks: [{ type: "rule", data: "ranked", x: "distance" }] }),
+    ).toThrow(
+      'marks[0]: data: "ranked" is a view; a rule mark takes a table, so name "flights", or derive one',
+    );
+    expect(() =>
+      loadSpec({
+        ...sorted,
+        data: {
+          ...sorted.data,
+          late: { source: "ranked", transform: [{ filter: [">", ["field", "delay"], 0] }] },
+        },
+      }),
+    ).toThrow('data.late.source: "ranked" is a view of "flights"; name "flights"');
+    expect(() =>
+      loadSpec({ ...sorted, rowSelection: { data: "ranked", channel: "picked" } }),
+    ).toThrow('rowSelection.data: "ranked" is a view of "flights"; bind the store of "flights"');
+    expect(() =>
+      validateSpec({
+        ...sorted,
+        data: { ...sorted.data, ranked: { source: "flights", view: { sort: [{ order: "up" }] } } },
+      } as never),
+    ).toThrow(/data\.ranked\.view\.sort\[0\]/);
+    expect(() =>
+      loadSpec({
+        ...sorted,
+        data: { ...sorted.data, ranked: { source: "flights", view: { filter: ["+", 1, 2] } } },
+      }),
+    ).toThrow(/^data\.ranked\.view: A filter needs a true or false expression/);
+  });
+
+  it("keeps an ordered table's rows in order, merging late rows into place", () => {
+    const spec: ChartSpec = {
+      data: {
+        observations: {
+          columns: { time: { type: "time", values: [3000, 1000, 2000] }, value: [3, 1, 2] },
+          orderBy: "time",
+          maxRows: 3,
+        },
+      },
+      marks: [{ type: "line", x: "time", y: "value" }],
+    };
+    validateSpec(spec);
+    const observations = loadSpec(spec).tables.get("observations")!;
+    expect(Array.from(observations.numbers("time"))).toEqual([1000, 2000, 3000]);
+    observations.append({ time: [1500, 4000], value: [1.5, 4] });
+    expect(Array.from(observations.numbers("time"))).toEqual([2000, 3000, 4000]);
+    expect(() =>
+      validateSpec({
+        ...spec,
+        data: { observations: { ...spec.data!.observations!, orderBy: "when" } },
+      }),
+    ).toThrow(/data\.observations\.orderBy/);
+    expect(() =>
+      validateSpec({
+        ...spec,
+        data: { observations: { ...spec.data!.observations!, maxRows: 0 } },
+      }),
+    ).toThrow(/data\.observations\.maxRows/);
+    // A matrix's rows are its cells: neither ordered nor windowed.
+    const field = {
+      columns: { x: [0, 1], y: [0, 1], z: [1, 2, 3, 4] },
+      matrix: { x: "x", y: "y" },
+    };
+    for (const [option, value] of [
+      ["orderBy", "x"],
+      ["maxRows", 2],
+    ] as const)
+      expect(() =>
+        loadSpec({
+          data: { field: { ...field, [option]: value } },
+          marks: [{ type: "heatmap", data: "field", x: "x", y: "y", color: "z" }],
+        } as never),
+      ).toThrow(`data.field.${option}: a matrix's rows are its cells; drop ${option}`);
+    // Ordinary tables keep at most maxRows too.
+    const plain = loadSpec({
+      data: { t: { columns: { x: [1, 2, 3] }, maxRows: 2 } },
+      marks: [{ type: "line", x: "x", y: "x" }],
+    }).tables.get("t")!;
+    expect(Array.from(plain.numbers("x"))).toEqual([2, 3]);
+  });
+});

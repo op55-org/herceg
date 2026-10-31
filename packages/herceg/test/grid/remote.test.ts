@@ -1030,7 +1030,7 @@ describe("remote grids, Sol's review", () => {
     expect(m.selectionState(1)).toBe("some");
     expect(m.selectionState(0)).toBe("none");
     // The record moves to another group where the data lives: after a refresh it counts there.
-    data.replace("host", 2, ["web"] as never);
+    data.replace(2, { host: ["web"] as never });
     m.refresh();
     m.setExpanded(["web"], true);
     await settle();

@@ -34,4 +34,5 @@ export {
   Treemap,
   Violin,
   type WithData,
+  type WithRows,
 } from "./marks.tsx";

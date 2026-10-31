@@ -2491,6 +2491,8 @@ export class MountedChart implements Chart, ExportsScene {
     const { config } = model;
     const key = JSON.stringify([
       config.marks.flatMap((mark) => tablesOf(mark).map((table) => table.version)),
+      // A view's query can change what a mark shows while its table does not.
+      config.marks.map((mark) => viewOf(mark)?.revision),
       [...model.hidden],
       config.navigator?.describe(model),
       config.rowSelection?.description,

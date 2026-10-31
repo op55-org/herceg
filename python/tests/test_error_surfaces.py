@@ -300,6 +300,13 @@ def _calls(tmp: Path) -> dict[str, Call]:
         "hg.col": Call(hg.col, {"name": "v"}),
         "hg.when": Call(hg.when, {"condition": hg.col("v") > 1, "then": 1, "otherwise": 2}),
         "hg.derive": Call(hg.derive, {"data": DATA}),
+        "hg.view": Call(hg.view, {"data": DATA, "filter": hg.col("v") > 1, "sort": "v"}),
+        "hg.ordered": Call(hg.ordered, {"data": DATA, "by": "v", "max_rows": 2}),
+        "View.source_columns": Call(
+            _method(lambda: hg.view(DATA), "source_columns"),
+            {"used": ["v"]},
+            function=hg.View.source_columns,
+        ),
         "hg.matrix": Call(
             hg.matrix,
             {"columns": MATRIX, "x": "x", "y": "y"},
@@ -476,6 +483,8 @@ EXCLUDED = {
     "hg.Cell": "made by a chart's or a cell's layout methods",
     "hg.GridCells": "made by grid()",
     "hg.Derived": "made by hg.derive",
+    "hg.View": "made by hg.view",
+    "hg.Ordered": "made by hg.ordered",
     "hg.Expr": "made by hg.col and hg.when",
     "hg.Matrix": "made by hg.matrix",
     "Matrix.column": "looks a converted column up by name, a KeyError for one it lacks",

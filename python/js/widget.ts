@@ -165,17 +165,21 @@ export interface Snapshot {
   item_positions: ItemPositionsPayload;
   /** The states of subplots' networks, trees, and 3D marks, by event and panel. */
   panel_states?: Partial<Record<PanelEvent, Record<string, ViewState>>>;
-  /**
-   * Per table a row selection binds, how Python numbers its rows: the rows
-   * dropped from its front since it was last replaced, and how many times
-   * it was. Rows reported to Python are numbered so.
-   */
-  rows?: Record<string, [number, number]>;
+  /** Per table a row selection binds, how Python numbers its rows (see `Numbering`). */
+  rows?: Record<string, Numbering>;
   /** What the bound channels hold, rows indexing `buffers`. */
   rowSelections?: HeldRows[];
 }
 
 type Columns = Record<string, ColumnSpec>;
+
+/**
+ * How Python numbers a table's rows, which rows reported to it are numbered
+ * so: the rows dropped from its front since it was last replaced, and how
+ * many times it was; for an ordered table, also the buffer of its rows'
+ * identities as Python holds them, and the next row's.
+ */
+type Numbering = [dropped: number, generation: number, ordinals?: number, next?: number];
 
 /**
  * Updates from Python. Columns index the buffers sent with the message. A
@@ -197,7 +201,7 @@ export type Update = { revision: number } & (
   | { type: "append"; table: string; columns: Columns; maxRows?: number }
   | { type: "replace"; table: string; columns: Columns }
   | { type: "tables"; tables: Record<string, Columns>; options: Record<string, unknown> }
-  | { type: "chart"; spec: ChartSpec; rows: Record<string, [number, number]> }
+  | { type: "chart"; spec: ChartSpec; rows: Record<string, Numbering> }
   | { type: "options"; options: Record<string, unknown> }
   | { type: "select"; selection: SelectionPayload | null; origin?: string }
   | { type: "camera"; camera: Camera | null; panel?: string; origin?: string }
@@ -272,7 +276,9 @@ class Widget {
   /** The stores the views' row selections bind, by table name, which the views share. */
   #stores = new Map<string, SelectionStore>();
   /** Python's numbering of each bound table's rows, as of the snapshot (see `Snapshot.rows`). */
-  #numbering: Record<string, [number, number]> = {};
+  #numbering: Record<string, Numbering> = {};
+  /** Of ordered tables there: their rows' identities in Python, by the table's own identities. */
+  #ordinals = new Map<string, Float64Array>();
   #unsubscribe: (() => void)[] = [];
   /** Applying a row selection from Python, which goes back to no one. */
   #applying = false;
@@ -381,7 +387,7 @@ class Widget {
   #loadChart(
     spec: ChartSpec,
     buffers: readonly SpecBuffer[],
-    numbering: Record<string, [number, number]>,
+    numbering: Record<string, Numbering>,
     restored = false,
   ) {
     // Option updates never change the row selection: it binds the tables loaded here.
@@ -407,6 +413,11 @@ class Widget {
       this.#error = error;
     }
     this.#numbering = numbering;
+    this.#ordinals = new Map(
+      Object.entries(numbering).flatMap(([name, [, , at]]) =>
+        at === undefined ? [] : [[name, float64s(buffers[at]!)] as const],
+      ),
+    );
     this.#reconcileCameras(restored);
     // Changes of the channels by any view go to Python, as Python numbers rows.
     for (const [name, store] of this.#stores) {
@@ -431,7 +442,8 @@ class Widget {
   /** Reports a channel's selection to Python: rows by identity, as Python numbers them. */
   #reportRows(name: string, channel: string, selection: DataSelection | null) {
     const table = this.#tables.get(name)!;
-    const [dropped, generation] = this.#numbering[name] ?? [0, 0];
+    const [dropped, generation, , next = 0] = this.#numbering[name] ?? [0, 0];
+    const ordinals = this.#ordinals.get(name);
     // The revision tells Python which of its changes this one was made after.
     const content = {
       type: "rowSelection",
@@ -446,10 +458,19 @@ class Widget {
       return;
     }
     const positions = selection.rows.positions();
-    // Python numbers rows from the snapshot's first, until a reset numbers them
-    // afresh: the table's identities, past the rows the snapshot left out.
-    const shift = table.generation === 0 ? dropped : 0;
-    const identities = Float64Array.from(positions, (position) => table.identity(position) + shift);
+    // Python numbers rows from the snapshot's first, until a reset numbers
+    // them afresh: the table's identities, past the rows the snapshot left
+    // out; an ordered table's, through the identities Python gave the
+    // snapshot's rows, then the next ones in turn, as both number new rows.
+    const python = (identity: number) =>
+      table.generation > 0
+        ? identity
+        : !ordinals
+          ? identity + dropped
+          : identity < ordinals.length
+            ? ordinals[identity]!
+            : next + identity - ordinals.length;
+    const identities = Float64Array.from(positions, (position) => python(table.identity(position)));
     this.#outbox.post(`rows:${name}:${channel}`, {
       ...content,
       selection: { kind: "rows", generation: generation + table.generation },
@@ -1062,9 +1083,13 @@ class Widget {
     switch (message.type) {
       case "append": {
         const table = this.#table(message.table);
-        table.append(appendBatch(table, decode(message.columns, buffers)));
-        const excess = message.maxRows === undefined ? 0 : table.length - message.maxRows;
-        if (excess > 0) table.dropFirst(excess);
+        // Rows appended and those a window drops, as one change.
+        let excess = 0;
+        table.transaction(() => {
+          table.append(appendBatch(table, decode(message.columns, buffers)));
+          excess = message.maxRows === undefined ? 0 : table.length - message.maxRows;
+          if (excess > 0) table.dropFirst(excess);
+        });
         // Rows added take no node from a network, but may from one over a
         // derived table (a sum turning negative); rows dropped may from any.
         this.#followPositions([message.table], excess <= 0);
@@ -1338,6 +1363,15 @@ class Widget {
 }
 
 /** Rows' positions from Python: little-endian uint32, copied where unaligned. */
+/** A buffer of float64 values, copied where it is not aligned for them. */
+function float64s(buffer: SpecBuffer): Float64Array {
+  const bytes = ArrayBuffer.isView(buffer)
+    ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+    : new Uint8Array(buffer);
+  const aligned = bytes.byteOffset % 8 === 0 ? bytes : bytes.slice();
+  return new Float64Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 8);
+}
+
 function view(buffer: SpecBuffer): Uint32Array {
   const bytes = ArrayBuffer.isView(buffer)
     ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)

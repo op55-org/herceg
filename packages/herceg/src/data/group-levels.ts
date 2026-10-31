@@ -530,7 +530,7 @@ export class GroupLevel {
           const values = new Float64Array(end - start);
           for (let group = start; group < end; group++)
             values[group - start] = this.result(k, group);
-          table.replace(name, start, values);
+          table.replace(start, { [name]: values });
         }
       });
       if (this.count > old) table.append(columns(old, this.count) as never);
