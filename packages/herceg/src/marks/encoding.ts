@@ -17,15 +17,17 @@ import type {
   CalendarBreak,
   IdentityScaleSpec,
   LabelAt,
+  LabelLayoutSpec,
   LabelPlaceSpec,
   MarkerStyle,
+  PartStyle,
   SeriesStyle,
   SymbolName,
 } from "../spec/encoding.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { Frame } from "../spec/place.ts";
 import type { Dash } from "../spec/spec.ts";
-import type { StrokeStyle, TextStyle } from "../spec/style.ts";
+import type { TextStyle } from "../spec/style.ts";
 
 /**
  * The option of marks whose items are rows (lines' and points'
@@ -101,12 +103,12 @@ export type FieldCoordinate<S extends Schema, F extends string = PositionField<S
 /** A part of a label's text, reading fields `F` (see `LabelPart`). */
 export type LabelPartOf<F extends string> =
   | string
-  | { field: F; format?: FormatSpec; series?: never; value?: never }
-  | { series: true; field?: never; value?: never; format?: never }
-  | { value: true; format?: FormatSpec; field?: never; series?: never };
+  | { field: F; format?: FormatSpec; style?: PartStyle; series?: never; value?: never }
+  | { series: true; style?: PartStyle; field?: never; value?: never; format?: never }
+  | { value: true; format?: FormatSpec; style?: PartStyle; field?: never; series?: never };
 
 /** Labels following each series of a line (see `SeriesLabelsSpec`). */
-export interface SeriesLabels<S extends Schema> {
+export interface SeriesLabels<S extends Schema> extends Omit<LabelLayoutSpec, "overlapGroup"> {
   at: LabelAt;
   content?: readonly LabelPartOf<keyof S & string>[];
   place?: LabelPlaceSpec;
@@ -140,7 +142,6 @@ export interface StyleMap<S extends Schema> {
 export interface MarkStyle<S extends Schema> {
   by?: StyleMap<S>;
   marker?: MarkerStyle;
-  leader?: StrokeStyle;
 }
 
 /** Which observations a line or area connects (see `ContinuitySpec`). */
@@ -158,6 +159,7 @@ export type BarLabels<S extends Schema> = (
   style?: TextStyle;
   minLength?: number;
   place?: BarLabelPlaceSpec;
+  overlap?: "show" | "hide";
 };
 
 /** CSS's named colors. */

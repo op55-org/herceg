@@ -145,7 +145,7 @@ beyond `place` and `style`, or `zIndex`).
   it tells apart takes their place, and a label still repeating the one
   before is left blank, its tick and grid line kept.
 - **Listed axes** (`guides/axes.ts`) have layers ("major" first), each with
-  tick marks, labels (rows, rotation, collision, priority, duplicates), and
+  tick marks, labels (rows, rotation, overlap, priority, duplicates), and
   styles. Rotation tries candidates until neighbors' boxes do not overlap;
   "hide" keeps every n-th label for the least n that clears. Labels may go
   inside the plot (`inside`), giving back the room outside. Axes whose tick
@@ -382,25 +382,80 @@ and annotation labels take the same parts.
 labels sit beside their point and slide along their row to stay within
 the plot, shortened with an ellipsis (`fitText`) when wider than it, or
 left out when only the ellipsis fits. Outside, they go in side tracks
-(`Frame.outside`), reserving room unless `reserve` is false. Labels whose
-extents meet are spread along y (`spread`), earlier points first; a label
-is left out only when it cannot fit. Tops move continuously with their
-points while the same labels meet, so labels do not jump as data streams.
-Extents include halos and box outlines.
+(`Frame.outside`), reserving room unless `reserve` is false. Extents
+include halos and box outlines. Every series label of a panel (all its
+marks', and text following series) is placed in one call, by its
+`overlap`:
 
-**Label requests** (`layout/place.ts`). Rule and region labels are placed
-through a placer, so a panel can later place every mark's labels together
-without editing the marks. A mark implementing `LabelledMark` gives a
-`LabelRequest` per label (its block at its first place, the offsets its
-kind allows, the box it stays inside, its overlap rule and priority) and
-draws its labels back at the placements it is handed, `null` leaving one
-out. `placeLabels` places each request as before: at the place reaching
-least past its bounds (the first of equals), then moved inside them. A
-rule's label has two places, where it is and its mirror image across the
-rule (`mirrorPlaces`); its bounds are the plot, the chart for labels in
-the margin, or none. A region's label stays inside its region's box.
-Today each mark calls the placer within its own `geometry`, so every
-caller draws labels as before; plain rule labels without boxes are
+- "show" keeps each label at its point.
+- "move" keeps labels whose x extents meet apart along y, and off the
+  labels kept where they are that they meet, with least total squared
+  displacement, in the order of their points (series order for ties),
+  inside the plot. Labels kept where they are (walls) are those that
+  "show", and those that "hide" whose priority is above every moving
+  label's. Movers are grouped by meeting extents, and each goes between
+  the walls it meets as their points are: below those whose points are
+  before its own, above the others. A group that is a column (every
+  label meets every other and every wall the group meets, as outside
+  labels and labels at one point do) is solved exactly by
+  pool-adjacent-violators after sorting, O(n log n): each label between
+  the walls its point is between; where a stretch is too short, the
+  weakest (lowest `priority`, then last in series order) are left out at
+  once until the rest fit. Other groups of up to 48 labels are solved
+  exactly by `layout/separate.ts`, an active-set method after Dwyer,
+  Marriott, and Stuckey's VPSC, the walls each label meets bounding it:
+  labels held by binding constraints move as blocks, blocks merge where
+  a constraint is broken and split where a binding constraint's
+  multiplier is negative, and it stops where the Karush–Kuhn–Tucker
+  conditions hold. Each step is O(n + m) for m meeting pairs; about 2n
+  steps settle it in tests, and a cap of n² steps (O(n²(n + m)), never
+  reached in tests) falls back to a feasible placement. Labels with no
+  room between their walls are left out first; where the rest cannot
+  all fit, the weakest of those that cannot is left out and the rest
+  looked at again, O(n·(w + m)) each for w walls. Larger groups that are
+  not columns are kept apart as one, every label below the earlier ones
+  and every wall met: apart, but moved further than they need. Finding
+  each group's walls is one sweep along x after sorting the W walls,
+  O(W log W), and each group sorts the w walls it meets, O(w log w):
+  O(G·W log W) at worst, for G groups every wall meets.
+  Labels move only as far as neighbours force them, so they follow their
+  points continuously as data streams.
+- "hide" keeps labels in priority order, then series order, leaving out
+  those covering one kept: those outranking every moving label before
+  the movers are placed, the others after.
+
+Labels moved more than `LEADER_MOVE` (6) pixels draw a leader from their
+point when asked (`LabelOwner.leader`), as a segments geometry under the
+owner's labels.
+
+**The panel placer** (`layout/placer.ts`). After a panel's marks draw,
+`placePanel` places their labels together, once per panel: series labels
+first (`CompiledFeatures.labels`, the feature compiler's), then every
+annotation label (`LabelledMark.labelRequests` of rules, regions, and
+text), which keeps off them as fixed boxes. The model calls it when any
+mark of the chart is a `LabelledMark` (`Mark.placer`), or when features
+are compiled; charts with neither never load it. A mark gives a
+`LabelRequest` per label (its block at its first place, the places its
+kind holds, how it moves, the box it stays inside, its `overlap`,
+`overlapGroup`, and `priority`) and draws its labels back at the
+placements it is handed, `null` leaving one out. Requests are grouped by
+`overlapGroup`, or else by mark, and a group is placed by priority, then
+request order: "show" labels first as fixed boxes, then each "hide" label
+where it covers none placed, and each "move" label at its first free held
+place (a rule's: where it is, then its mirror image across the rule,
+`mirrorPlaces`), then at its kind's nearer moves (a rule's label slides
+along the rule, both ways at each step; text tries rings around its
+point; a region's label slides along its side). Farther moves are tried
+only after every label of the group has tried its near ones. A label
+that asks for a leader and lands more than 6 pixels from its first place
+takes that place only with a leader back to its point clear of the
+group's labels, leaders, and points. Rules and regions keep what they
+computed for their geometry until the placer asks for their labels in
+the same frame, so their rows are read once. Bounds are the plot, the
+chart for labels in the margin, or the region's box. Boxes are filed in
+a grid (`layout/label-boxes.ts`), so each check reads its neighbours: n
+labels among m placed boxes cost O(n·m) at worst and about O(n) when
+spread out. Plain rule labels without boxes, groups, or overlap rules are
 placed as they are drawn (`draw/rule.ts`), following moving rules.
 
 ## Themes and styles

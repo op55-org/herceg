@@ -69,14 +69,14 @@ class PanelsScope(TypedDict):
 #: Which panels share one instance of a scale (``AxisOptions.scope``,
 #: ``Scale.scope``): a name, a layout grid's rows or columns, or panels by id.
 Scope = Literal["chart", "panel", "row", "column"] | LayoutScope | PanelsScope
-Collision = Literal["show", "hide", "stagger", "wrap"]
+TickOverlap = Literal["show", "hide", "stagger", "wrap"]
 Channel = Literal["series", "color", "size", "symbol"]
 
 _UNITS = ("millisecond", "second", "minute", "hour", "day", "week", "month", "year")
 _INTERVAL = re.compile(r"^(?:(\d+) )?([a-z]+?)s?$")
 _NUMBER = re.compile(r"^([-+( ])?(,)?(?:\.(\d{1,2}))?(~)?([defgs%]?)$")
 _DIRECTIVE = re.compile(r"%(-?)(.?)")
-_NUMBER_DIRECTIVES = "YymdeHIMSL"
+_NUMBER_DIRECTIVES = "YymdeHIMSLq"
 _NAME_DIRECTIVES = "aAbBpz%"
 
 
@@ -144,6 +144,35 @@ def _interval(value: Any, role: str) -> Any:
 
 
 @refuses
+@dataclass(frozen=True)
+class Fiscal:
+    """A fiscal year: it starts on the first of month ``start`` (1 to 12)
+    and is named by the year it ends in (``name="end"``, the default) or
+    starts in (``"start"``). ``hg.Format(time=..., fiscal=...)`` writes its
+    years and quarters with ``%Y``, ``%y``, and ``%q``, and
+    ``hg.Ticks(every="3 months", fiscal=...)`` steps from its first month::
+
+        fiscal = hg.Fiscal(start=7)
+        hg.axis(ticks=hg.Ticks(every="3 months", fiscal=fiscal),
+                format=hg.Format(time="FY%y Q%q", fiscal=fiscal))
+    """
+
+    start: int
+    name: Literal["end", "start"] | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.start, bool) or self.start not in range(1, 13):
+            raise ChartError(
+                f"Fiscal start: expected a month from 1 to 12; received {shown(self.start)}"
+            )
+        if self.name is not None:
+            _choice(self.name, ("end", "start"), "Fiscal name")
+
+    def _spec(self) -> dict[str, Any]:
+        return {"start": self.start, **({"name": self.name} if self.name is not None else {})}
+
+
+@refuses
 @dataclass
 class Ticks:
     """Which ticks an axis draws: about ``count`` round values; one ``every``
@@ -154,12 +183,16 @@ class Ticks:
 
         hg.Ticks(every="6 hours")
         hg.Ticks(values=[15, 95])
+
+    Steps of months and years start in January, or with ``fiscal`` (an
+    ``hg.Fiscal``) in its year's first month.
     """
 
     count: int | None = None
     every: float | str | _dt.timedelta | np.timedelta64 | None = None
     anchor: float | _dt.datetime | None = None
     values: Sequence[Any] | None = None
+    fiscal: Fiscal | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         given = [name for name in ("count", "every", "values") if getattr(self, name) is not None]
@@ -176,6 +209,19 @@ class Ticks:
                 "Ticks anchor: calendar steps start at calendar boundaries; drop anchor, "
                 "or step by a timedelta"
             )
+        self.fiscal = _built(self.fiscal, Fiscal, "Ticks fiscal")
+        if self.fiscal is not None:
+            if not isinstance(self.every, str):
+                raise ChartError(
+                    "Ticks fiscal: fiscal years step through time, by calendar months or years; "
+                    'give every="3 months", or drop fiscal'
+                )
+            unit = _interval(self.every, "Ticks every")["unit"]
+            if unit not in ("month", "year"):
+                raise ChartError(
+                    "Ticks fiscal: fiscal years start months and years; step by months or "
+                    "years, or drop fiscal"
+                )
 
     def _spec(self) -> Any:
         if self.count is not None:
@@ -192,6 +238,8 @@ class Ticks:
         spec: dict[str, Any] = {"every": _interval(self.every, "Ticks every")}
         if self.anchor is not None:
             spec["anchor"] = _instant(self.anchor, "Ticks anchor")
+        if self.fiscal is not None:
+            spec["fiscal"] = _spec(self.fiscal)
         return spec
 
 
@@ -229,7 +277,7 @@ def _check_time_pattern(pattern: str, role: str) -> None:
         ):
             raise ChartError(
                 f"{role}: {shown(found.group(0))} at character {found.start() + 1} of "
-                f"{shown(pattern)} is not a time directive herceg reads; use %Y %y %m %d %e "
+                f"{shown(pattern)} is not a time directive herceg reads; use %Y %y %q %m %d %e "
                 '%H %I %M %S %L %p %a %A %b %B %z, "-" for no padding (%-d), and %% for "%"'
             )
 
@@ -239,11 +287,14 @@ def _check_time_pattern(pattern: str, role: str) -> None:
 class Format:
     """How values are written by pattern: ``number``, a d3-format pattern
     (``",.2f"``, ``".1%"``, ``"~s"``), or ``time``, a strftime pattern
-    (``"%b %d %H:%M"``, ``"%-d %b"``) in the chart's time zone. Intl options
+    (``"%b %d %H:%M"``, ``"%-d %b"``) in the chart's time zone, whose
+    ``%q`` is the quarter; with ``fiscal`` (an ``hg.Fiscal``), ``%Y``,
+    ``%y``, and ``%q`` write the fiscal year and its quarter. Intl options
     are a dict of their own names, ``{"maximumFractionDigits": 1}``."""
 
     number: str | None = None
     time: str | None = None
+    fiscal: Fiscal | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if (self.number is None) == (self.time is None):
@@ -258,9 +309,19 @@ class Format:
             _check_number_pattern(self.number, "Format number")
         if self.time is not None:
             _check_time_pattern(self.time, "Format time")
+        self.fiscal = _built(self.fiscal, Fiscal, "Format fiscal")
+        if self.fiscal is not None and self.time is None:
+            raise ChartError(
+                "Format fiscal: numbers have no fiscal year; give time, or drop fiscal"
+            )
 
-    def _spec(self) -> dict[str, str]:
-        return {"number": self.number} if self.number is not None else {"time": self.time or ""}
+    def _spec(self) -> dict[str, Any]:
+        if self.number is not None:
+            return {"number": self.number}
+        spec: dict[str, Any] = {"time": self.time or ""}
+        if self.fiscal is not None:
+            spec["fiscal"] = _spec(self.fiscal)
+        return spec
 
 
 def _flags(options: Any, owner: str, names: Sequence[str]) -> None:
@@ -322,9 +383,9 @@ class TickLabels:
     """How tick labels are placed: ``rotation`` in degrees clockwise, from
     -90 to 90 (a list tries each angle in turn, keeping the first at which
     labels fit), what
-    labels that would overlap do (``collision``: ``"show"``, ``"hide"``,
+    labels that would overlap do (``overlap``: ``"show"``, ``"hide"``,
     ``"stagger"``, ``"wrap"``), their ``row`` (0 by the axis line, 1
-    beyond), ``priority`` where they collide, and whether labels repeating
+    beyond), ``priority`` where they overlap, and whether labels repeating
     the one before them show (``duplicates``). ``inside=True`` draws them
     inside the plot beside their ticks, taking no room outside it. Flat
     labels, inside or out, stand at their ticks along the axis as
@@ -334,7 +395,7 @@ class TickLabels:
     axis line where the tick does not reach it). Colorbars take neither."""
 
     rotation: float | Sequence[float] | None = None
-    collision: Collision | None = None
+    overlap: TickOverlap | None = None
     row: int | None = None
     priority: float | None = None
     duplicates: Literal["hide", "show"] | None = None
@@ -348,8 +409,8 @@ class TickLabels:
             )
         if self.gap is not None:
             _number(self.gap, "TickLabels gap")
-        if self.collision is not None:
-            _choice(self.collision, ("show", "hide", "stagger", "wrap"), "TickLabels collision")
+        if self.overlap is not None:
+            _choice(self.overlap, ("show", "hide", "stagger", "wrap"), "TickLabels overlap")
         if self.duplicates is not None:
             _choice(self.duplicates, ("hide", "show"), "TickLabels duplicates")
         if self.row is not None and (
@@ -1073,6 +1134,7 @@ class AxisGuide:
     layers: Sequence[TickLayer | Mapping[str, Any]] | None = None
     show: bool | None = None
     repeat: Literal["outer", "all"] | None = None
+    room: float | tuple[float, float] | None = None
     style: Style | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -1102,8 +1164,31 @@ class AxisGuide:
                     f"side; received {shown(side)}"
                 )
         self.layers = built_list(self.layers, TickLayer, "axis layers")
+        if self.room is not None:
+            across = self.scale == "x" or (
+                isinstance(self.place, Place) and self.place.side in ("top", "bottom")
+            )
+            if across:
+                raise ChartError(
+                    "axis room: x axes take the depth their rows of labels need, and an "
+                    "ellipsis shortens only y axes' labels; drop room"
+                )
+            bounds = self.room if isinstance(self.room, tuple) else (self.room, self.room)
+            if (
+                len(bounds) != 2
+                or not all(
+                    is_number(b) and not isinstance(b, bool) and math.isfinite(b) and b >= 0
+                    for b in bounds
+                )
+                or bounds[0] > bounds[1]
+            ):
+                raise ChartError(
+                    "axis room: expected finite pixels of at least 0, or (least, most); "
+                    f"received {shown(self.room)}"
+                )
 
     def _spec(self) -> dict[str, Any]:
+        room = self.room
         spec = {
             "type": "axis",
             "id": self.id,
@@ -1124,6 +1209,7 @@ class AxisGuide:
             else None,
             "show": self.show,
             "repeat": self.repeat,
+            "room": {"min": room[0], "max": room[1]} if isinstance(room, tuple) else room,
             "style": style_spec(self.style, "axis style", AXIS_ROLES),
         }
         return {key: value for key, value in spec.items() if value is not None}
@@ -1165,7 +1251,9 @@ def axis(scale: str, **options: Any) -> AxisGuide:
     ``ticks``, ``format``, ``tick``, and ``labels`` are its own ticks';
     ``layers`` adds layers of ticks; ``line`` draws its line; ``repeat``
     says where panels sharing its scale draw it (``"outer"`` or ``"all"``, as
-    ``hg.AxisOptions``)::
+    ``hg.AxisOptions``); ``room`` holds a y axis' ticks and labels in that
+    many pixels beside the plot, or ``(least, most)``, shortening labels
+    wider than it with an ellipsis::
 
         hg.axis("x", layers=[hg.TickLayer(id="day", ticks=hg.Ticks(every="day"),
                                           labels=hg.TickLabels(row=1))])

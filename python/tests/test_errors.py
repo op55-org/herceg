@@ -71,6 +71,9 @@ def _styled(role: str) -> Any:
     return lambda o: _line().__class__(DATA, theme=hg.Theme(style={role: o})).line(x="t", y="v")
 
 
+TIMES = {"t": [dt.datetime(2026, 1, 1), dt.datetime(2026, 7, 1)], "v": [1.0, 2.0]}
+
+
 # Each object of options in a place the chart takes it, the path of that
 # place, and what the object needs to be made.
 SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
@@ -215,6 +218,13 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         "x.format",
         lambda o: hg.Chart(DATA, x=hg.AxisOptions(format=o)).line(x="t", y="v"),
         {"number": ",.1f"},
+    ),
+    "Fiscal": (
+        "x.format.fiscal",
+        lambda o: hg.Chart(TIMES, x=hg.AxisOptions(format=hg.Format(time="%Y", fiscal=o))).line(
+            x="t", y="v"
+        ),
+        {"start": 7},
     ),
     "Grid": ("layout", lambda o: _panelled(layout=o), {}),
     "Weight": (

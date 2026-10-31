@@ -39,7 +39,7 @@ import { type AxisGuide, type Panel, type Rect, tickLabelGap } from "../scene/sc
 import { ChartError } from "../spec/errors.ts";
 import type { Place } from "../spec/place.ts";
 import type { ScaleScope } from "../spec/spec.ts";
-import { cssFont, dashPattern, insets, textPaint } from "../style/style.ts";
+import { cssFont, dashPattern, insets, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
 import {
   type AxisContext,
@@ -237,9 +237,19 @@ export interface PlacedLegend {
 export interface CompiledAxes {
   /**
    * Pixels they take above the plots, and below the default x axes'
-   * labels; and which panels draw an axis above their plot.
+   * labels; which panels draw an axis above their plot; which write x
+   * labels, below, above, or inside their plot; and how far each panel's
+   * y labels reach past their end ticks (half a label's box, or text), of
+   * the panels `state.labeled` says may show y labels and of axes on the
+   * right.
    */
-  across(state: AxesState): { top: number; bottom: number; over: readonly boolean[] };
+  across(state: AxesState): {
+    top: number;
+    bottom: number;
+    over: readonly boolean[];
+    labels: readonly boolean[];
+    reach: readonly number[];
+  };
   /**
    * Where panel `i`'s x labels over `plan`, below and above it, every
    * layer's as drawn, begin and end along the plan's range; undefined
@@ -251,6 +261,12 @@ export interface CompiledAxes {
    * is planned; and which panels draw an axis on the right of their plot.
    */
   beside(state: AxesState): { left: number; right: number; after: readonly boolean[] };
+  /**
+   * How the axis on `scale`'s default side writes panel `i`'s tick labels:
+   * a paint for each of its layers that writes them (none where the guides
+   * list it with no labels); undefined where the guides do not list it.
+   */
+  tickLabels(scale: ScaleName, i: number, styles: ChartStyles): readonly TextPaint[] | undefined;
   /** Panel `index`'s axes along `plot`: the default ones, `axes`, changed and added to. */
   panel(
     axes: readonly AxisGuide[],
@@ -261,8 +277,9 @@ export interface CompiledAxes {
   ): AxisGuide[];
   /**
    * Whether the room `across` kept fits the x axes as panel `i`'s x plan,
-   * `planOf(i)`, labels them; if not, `across` keeps more for scenes of this
-   * width, and the model lays the scene out again.
+   * `planOf(i)`, labels them, and the reach it gave fits the y labels as
+   * planned; if not, `across` keeps more for scenes of this size, and the
+   * model lays the scene out again.
    */
   fits(state: AxesState, planOf: (i: number) => AxisPlan): boolean;
 }
@@ -385,8 +402,10 @@ export function needsGuides(config: ChartConfig): boolean {
           [axis.ticks, axis.format, axis.tooltipFormat].some(
             (setting) =>
               typeof setting === "function" ||
-              (setting as { number?: string })?.number !== undefined ||
-              (setting as { time?: string })?.time !== undefined,
+              // Patterns, and Intl options with a fiscal year, which it refuses.
+              ["number", "time", "fiscal"].some(
+                (key) => (setting as Record<string, unknown> | undefined)?.[key] !== undefined,
+              ),
           )),
     ) ||
     (typeof legend === "object" &&

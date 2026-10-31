@@ -299,7 +299,7 @@ describe("colorbars", () => {
             length: 180,
             ticks: { values },
             format: (v) => (v > 0 && v < 1 ? "a much longer label in the middle" : "end"),
-            labels: { collision: "hide" },
+            labels: { overlap: "hide" },
             style: { tickLabel: { fontSize: 20 } },
           }),
         ],

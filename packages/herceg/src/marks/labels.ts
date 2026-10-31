@@ -13,11 +13,12 @@ import {
   textItem,
   textLines,
 } from "../layout/text.ts";
-import type { LabelsGeometry, Rect, TextGeometry } from "../scene/scene.ts";
+import type { LabelsGeometry, Rect, TextGeometry, TextItem } from "../scene/scene.ts";
 import type { Frozen } from "../spec/spec.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
-import { type TextPaint, textPaint } from "../style/style.ts";
+import { type ResolvedHalo, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
+import type { PartText } from "./features/part-text.ts";
 import type { Frame } from "./mark.ts";
 
 /**
@@ -29,7 +30,13 @@ export function labelPaint(
   color: string,
   style: Frozen<TextStyle> | undefined,
 ): TextPaint {
-  return textPaint([theme.roles.text, { color }, style as TextStyle | undefined, { halo: false }]);
+  const paint = textPaint([
+    theme.roles.text,
+    { color },
+    style as TextStyle | undefined,
+    { halo: false },
+  ]);
+  return { ...paint, lineRatio: style?.lineHeight ?? theme.roles.text.lineHeight };
 }
 
 /** Whether a paint is the theme's plain text: drawn as text marks draw their labels. */
@@ -58,6 +65,8 @@ export interface PlacedLabel {
   baseline: TextAt["baseline"];
   /** The box behind it, where placed with it (see `anchorBlock`); else padded about the text. */
   box?: Rect | undefined;
+  /** Its text in parts of their own looks, drawn in its box (`labelBox`) rather than from its point. */
+  parts?: PartText | undefined;
 }
 
 /**
@@ -67,11 +76,32 @@ export interface PlacedLabel {
  */
 export function labelBox(label: PlacedLabel, paint: TextPaint, measure: MeasureText): Rect {
   if (label.box) return label.box;
-  const lines = textLines(label.text, paint, measure);
+  const lines = label.parts?.lines ?? textLines(label.text, paint, measure);
   const at: TextAt = { ...label, angle: 0 };
   return paint.background
     ? textBox(lines, padded(at, paint.padding), paint)
     : textBox(lines, at, { ...paint, padding: [0, 0, 0, 0] });
+}
+
+/**
+ * How far a label in `paint`, with `halo`, paints past its box: half its
+ * box's outline, or its halo past the box's padding.
+ */
+export function paintedReach(paint: TextPaint, halo: ResolvedHalo | undefined): number {
+  const box = paint.background;
+  const outline = box?.stroke ? (box.strokeWidth ?? 1) / 2 : 0;
+  const padding = box ? Math.min(...paint.padding) : 0;
+  return Math.max(0, outline, (halo?.width ?? 0) / 2 - padding);
+}
+
+/** `box` grown by `reach` on every side. */
+export function grown(box: Rect, reach: number): Rect {
+  return {
+    x: box.x - reach,
+    y: box.y - reach,
+    width: box.width + 2 * reach,
+    height: box.height + 2 * reach,
+  };
 }
 
 /** `label` moved by (`dx`, `dy`), with its box. */
@@ -89,7 +119,8 @@ export function movedLabel(label: PlacedLabel, [dx, dy]: readonly [number, numbe
 /**
  * The geometry of labels in `paint`: text items, each with `halo` (the
  * label style's, else the mark's; "auto" by default) against what it is
- * drawn on.
+ * drawn on. A label of parts takes an item per part; `owners`, when
+ * given, gets each item's label (its index in `labels`).
  */
 export function labelsGeometry(
   key: string,
@@ -97,6 +128,7 @@ export function labelsGeometry(
   paint: TextPaint,
   halo: Halo | undefined,
   frame: Frame,
+  owners?: number[],
 ): LabelsGeometry {
   // Text in a box is drawn on the box.
   const ring = labelHalo(
@@ -104,10 +136,20 @@ export function labelsGeometry(
     paint.background ? { ...frame, surface: paint.background.fill } : frame,
   );
   const under = frame.surface ?? surface(frame.theme);
-  const items = labels.map(({ text, x, y, anchor, baseline, box }) => {
-    const at: TextAt = { x, y, anchor, baseline, angle: 0 };
-    const item = textItem(text, at, paint, under, frame.measure, box);
-    return ring ? { ...item, halo: ring } : item;
+  const items: TextItem[] = [];
+  labels.forEach((label, k) => {
+    const { text, x, y, anchor, baseline, box, parts } = label;
+    let made: TextItem[];
+    if (parts) made = parts.items(labelBox(label, paint, frame.measure), anchor, paint, ring);
+    else {
+      const at: TextAt = { x, y, anchor, baseline, angle: 0 };
+      const item = textItem(text, at, paint, under, frame.measure, box);
+      made = [ring ? { ...item, halo: ring } : item];
+    }
+    for (const item of made) {
+      items.push(item);
+      owners?.push(k);
+    }
   });
   return { kind: "labels", draw: labelsDrawing, key, items };
 }

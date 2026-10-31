@@ -96,6 +96,7 @@ channels read by name, and position scales of a mark's own (see
 | `{ every: 10, anchor?: 5 }` | One every 10 on a number axis, from `anchor` (0). |
 | `{ every: "6 hours" }`, `{ every: { unit, step? } }` | Calendar steps in the chart's `timeZone` (`"day"`, `"2 weeks"`, `"month"`; millisecond to year), at the same places whatever the view: weeks from a Monday, months within the year. |
 | `{ every: { milliseconds: 21600000 }, anchor? }` | Elapsed time, the same length across daylight saving changes (Python: a `timedelta`). |
+| `{ every: "3 months", fiscal: { start: 7 } }` | Steps of months and years counted from a fiscal year's first month (Python `hg.Fiscal(start=7)`), at local midnight on the first. |
 | `{ values: [15, 95] }` | Exactly these, those inside the domain. |
 | `(context) => values` | JavaScript only: from `{ scale, type, domain, pixels, count, timeZone, locale }`. |
 
@@ -111,7 +112,8 @@ channels read by name, and position scales of a mark's own (see
 | --- | --- |
 | Intl options | `Intl.NumberFormat` options on number axes, `Intl.DateTimeFormat` on time axes (Python: a dict of the camelCase names). |
 | `{ number: ",.2f" }` | A d3-format pattern `[sign][,][.precision][~][type]`: sign `-`, `+`, `(`, or space; `,` groups thousands; `~` trims zeros; type `d`, `f`, `e`, `g`, `s` (SI, `"1.5k"`), `%`, or none. Digits and separators are the locale's. |
-| `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`; `%-d` drops padding. |
+| `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %q %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`, `%q` the quarter (1 to 4); `%-d` drops padding. |
+| `{ time: "FY%y Q%q", fiscal: { start: 7, name? } }` | Years and quarters of a fiscal year starting on the first of month `start`, named by the year it ends in (`name: "end"`, the default) or starts in (`"start"`). Months and days stay the calendar's. |
 | `(value, context) => string` | JavaScript only. `""` leaves a tick unlabeled. |
 
 - A tick is its value, never its text: "Apr" of 2024 and "Apr" of 2025 are
@@ -122,6 +124,24 @@ channels read by name, and position scales of a mark's own (see
   alike (`labels: { duplicates: "show" }` writes it).
 - Specs and Python carry Intl options and patterns; functions stay in
   JavaScript, and `validateSpec` refuses them with their path.
+- Only steps of months or years and `{ time }` patterns take `fiscal`; counts,
+  values, number patterns, and Intl options are refused with it.
+- A fiscal row under monthly ticks gives one object to both, so ticks and
+  labels agree:
+
+  ```ts
+  const fiscal = { start: 7 };
+  axis({
+    scale: "x",
+    layers: [{ id: "quarter", ticks: { every: "3 months", fiscal }, format: { time: "FY%y Q%q", fiscal }, labels: { row: 1 } }],
+  });
+  ```
+
+  ```python
+  fiscal = hg.Fiscal(start=7)
+  hg.axis("x", layers=[hg.TickLayer(id="quarter", ticks=hg.Ticks(every="3 months", fiscal=fiscal),
+                                    format=hg.Format(time="FY%y Q%q", fiscal=fiscal), labels=hg.TickLabels(row=1))])
+  ```
 
 ## Axes
 
@@ -139,6 +159,7 @@ channels read by name, and position scales of a mark's own (see
 | `line` | Draw the axis line (x axes do, y axes do not, by default). |
 | `layers` | More tick layers `[{ id, ticks, format, tick, labels, style }]`: minor ticks (`labels: false`), day boundaries in a second row. |
 | `repeat` | `"all"` draws the axis by every panel sharing the scale. |
+| `room` | y axes: the pixels their ticks and labels take beside the plot, so plots of charts and panels line up (`room: 28`), or bounds on what the labels need (`{ min, max }`, Python `(min, max)`). Labels wider than the room are shortened with an ellipsis; tick marks are not, so a room shorter than the outward ticks is refused. Refused on x axes and colorbars. |
 
 An x axis on top needs panels without headers; a y axis on the right
 beside each row's last panel needs rows that share y.
@@ -148,7 +169,7 @@ beside each row's last panel needs rows that share y.
 | `labels` (Python `hg.TickLabels`) | Means |
 | --- | --- |
 | `rotation` | Degrees clockwise from -90 to 90 (`-45` reads upward to its tick), or `{ candidates: [0, -45, -90] }`: the first at which neighbors do not overlap. x axes. |
-| `collision` | `"show"` (default), `"hide"` (every n-th kept), and on x axes `"stagger"` (alternate rows) and `"wrap"` (at spaces, three lines at most). Category axes keep every n-th by default. |
+| `overlap` | `"show"` (default), `"hide"` (every n-th kept), and on x axes `"stagger"` (alternate rows) and `"wrap"` (at spaces, three lines at most). Category axes keep every n-th by default. |
 | `row` | 0 by the axis line, 1 beyond it: rows for layers. x axes. |
 | `priority` | Which labels of a row stay where they collide: the higher. |
 | `duplicates` | `"hide"` (default) or `"show"` a label repeating the one before. |
@@ -337,7 +358,9 @@ are boxes between their levels, ticked at them.
   nodes, funnel stages, radar spokes) are shortened rather than broken.
 - **Padding.** Without `padding`, spacing is automatic. With it (pixels, or
   `{ top, right, bottom, left }`; `0` included), it is the whitespace around
-  everything the chart draws.
+  everything the chart draws on its sides; sides `{ ... }` leaves out keep
+  the automatic spacing (`{ right: 120 }` keeps room for labels on the
+  right alone).
 - **Sparklines** set `padding: 0`, hide their axes (`show: false`), and give
   exact domains (`nice: false`).
 

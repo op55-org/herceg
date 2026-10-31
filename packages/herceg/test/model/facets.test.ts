@@ -15,6 +15,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { LineGeometry, Panel, RectGeometry, Scene } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { headersOf, legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
 import { setViewport } from "../helpers/views.ts";
@@ -238,7 +239,7 @@ describe("facets", () => {
       ],
       facet: { field: "g", columns: 2 },
     });
-    expect(config.facet).toEqual({ field: "g", columns: 2 });
+    expect(config.facet).toMatchObject({ field: "g", columns: 2, header: true, gap: {} });
     expect(() =>
       loadSpec({
         data: { t: { columns: { t: [0], v: [1], g: ["a"] } } },
@@ -319,6 +320,164 @@ describe("facets", () => {
         300,
       ),
     ).toThrow(/50 panels in 1 rows of 50 do not fit/);
+  });
+
+  contractTest("facet.header-gap", () => {
+    // Twenty sites in a column, without headers or y labels, a pixel apart.
+    const n = 20;
+    const sites = table({
+      t: Array.from({ length: n * 2 }, (_, i) => i % 2),
+      v: Array.from({ length: n * 2 }, (_, i) => i),
+      g: Array.from({ length: n * 2 }, (_, i) => `site ${Math.floor(i / 2)}`),
+    });
+    const strips = (height: number, y: { show: boolean }) =>
+      build(
+        {
+          marks: [line(sites, { x: "t", y: "v" })],
+          facet: facet("g", { columns: 1, header: false, gap: 1 }),
+          y,
+        },
+        600,
+        height,
+      );
+    const { model, scene } = strips(560, { show: false });
+    const plots = model.panels().map(({ plot }) => plot);
+    expect(plots).toHaveLength(n);
+    expect(headersOf(scene)).toEqual([]);
+    for (let k = 1; k < n; k++) {
+      expect(plots[k]!.y - (plots[k - 1]!.y + plots[k - 1]!.height)).toBeCloseTo(1, 9);
+      expect(plots[k]!.height).toBeCloseTo(plots[0]!.height, 9);
+    }
+    expect(plots[0]!.height).toBeGreaterThan(24);
+    expect(plots[0]!.height).toBeLessThan(26);
+    // Rows a pixel tall still lay out where no y labels need room; with
+    // labels, each row keeps two of them and their gap.
+    expect(strips(80, { show: false }).model.panels()[0]!.plot.height).toBeLessThan(2);
+    expect(() => strips(300, { show: true })).toThrow(
+      /20 panels in 20 rows of 1 do not fit a 600×300 chart/,
+    );
+    // With headers, rows keep room above for them, and with the gap left out, room to spare.
+    const headed = build(
+      { marks: [line(sites, { x: "t", y: "v" })], facet: facet("g", { columns: 1 }) },
+      600,
+      1200,
+    );
+    const [first, second] = headed.model.panels().map(({ plot }) => plot);
+    expect(second!.y - (first!.y + first!.height)).toBeGreaterThan(10);
+    expect(headersOf(headed.scene)).toHaveLength(n);
+  });
+
+  it("keep a gap given beyond the room labels take between panels", () => {
+    const rows = table({ t: [0, 1e12, 0, 1e12], v: [0, 1, 0, 1], g: ["a", "a", "b", "b"] });
+    /** Each panel's axis labels on `side`: where each starts and ends (rows: tops and bottoms). */
+    const extents = (scene: Scene, side: "bottom" | "left") =>
+      scene.panels.map((panel) =>
+        panel.axes
+          .filter((axis) => axis.side === side)
+          .flatMap((axis) => axis.items)
+          .flatMap((item) => {
+            if (item.type !== "text") return [];
+            const width = estimateText(item.text, item.paint.css);
+            return side === "bottom"
+              ? [[item.x - width / 2, item.x + width / 2] as const]
+              : [[item.y - item.paint.size / 2, item.y + item.paint.size / 2] as const];
+          }),
+      );
+    const across = (gap: number) => {
+      const scene = build(
+        {
+          marks: [line(rows, { x: "t", y: "v" })],
+          facet: facet("g", { columns: 2, header: false, gap }),
+          x: { domain: [0, 1e12], ticks: { values: [0, 1e12] }, format: { number: ",.0f" } },
+          y: { show: false },
+          legend: false,
+        },
+        400,
+        200,
+      ).scene;
+      const [first, second] = extents(scene, "bottom");
+      return second![0]![0] - first!.at(-1)![1];
+    };
+    // Long x labels reaching into the gap between columns, the gap given whitespace past them.
+    expect(across(0)).toBeCloseTo(0, 0);
+    expect(across(40)).toBeCloseTo(40, 0);
+    const down = (gap: number) => {
+      const scene = build(
+        {
+          marks: [line(rows, { x: "t", y: "v" })],
+          facet: facet("g", { columns: 1, header: false, gap }),
+          x: { show: false },
+          y: { domain: [0, 1], ticks: { values: [0, 1] } },
+          legend: false,
+        },
+        400,
+        240,
+      ).scene;
+      const [first, second] = extents(scene, "left");
+      // The first row's lowest label and the second's highest.
+      return Math.min(...second!.map(([top]) => top)) - Math.max(...first!.map(([, end]) => end));
+    };
+    // y labels at rows' ends reaching into the gap between rows.
+    expect(down(0)).toBeGreaterThanOrEqual(-0.5);
+    expect(down(40)).toBeCloseTo(40, 0);
+    // As painted: boxes' outlines reach further, and rows keep apart by them.
+    const outlined = build(
+      {
+        marks: [line(rows, { x: "t", y: "v" })],
+        facet: facet("g", { columns: 1, header: false, gap: 0 }),
+        x: { show: false },
+        y: {
+          domain: [0, 1],
+          ticks: { values: [0, 1] },
+          style: {
+            tickLabel: {
+              background: { fill: "#eee", stroke: "#999", strokeWidth: 20 },
+              padding: 0,
+            },
+          },
+        },
+        legend: false,
+      },
+      400,
+      300,
+    ).scene;
+    const boxes = outlined.panels.map((panel) =>
+      panel.axes
+        .filter((axis) => axis.side === "left")
+        .flatMap((axis) => axis.items)
+        .flatMap((item) => (item.type === "text" && item.box ? [item.box] : [])),
+    );
+    const firstBottom = Math.max(...boxes[0]!.map((box) => box.y + box.height)) + 10;
+    const secondTop = Math.min(...boxes[1]!.map((box) => box.y)) - 10;
+    expect(secondTop).toBeGreaterThanOrEqual(firstBottom - 0.5);
+  });
+
+  it("refuse headers and gaps that are not true or false and pixels", () => {
+    expect(() => facet("g", { header: "no" as never })).toThrow(
+      'facet header: expected true or false; received "no"',
+    );
+    expect(() => facet("g", { gap: -1 })).toThrow(
+      "facet gap: expected pixels of at least 0; received -1",
+    );
+    expect(() => facet({ row: "g" }, { gap: { column: Number.NaN } })).toThrow(
+      "facet gap.column: expected pixels of at least 0; received NaN",
+    );
+    const spec = (facetSpec: object) => () =>
+      loadSpec({
+        data: { t: { columns: { t: [0], v: [1], g: ["a"] } } },
+        marks: [{ type: "line", x: "t", y: "v" }],
+        facet: facetSpec as never,
+      });
+    expect(spec({ field: "g", header: false, gap: { row: 1 } })).not.toThrow();
+    expect(spec({ row: "g", header: 0 })).toThrow(/^facet\.header: expected true or false/);
+    expect(spec({ field: "g", gap: { row: -2 } })).toThrow(/^facet\.gap\.row: expected/);
+    // A grid of facets without headers keeps no room for its row and column names.
+    const grid = table({ t: [0, 1, 0, 1], v: [1, 2, 3, 4], r: ["a", "a", "b", "b"] });
+    const bare = build({
+      marks: [line(grid, { x: "t", y: "v" })],
+      facet: facet({ row: "r" }, { header: false }),
+    });
+    expect(headersOf(bare.scene)).toEqual([]);
   });
 
   it("summarize and measure only the rows they draw, across panels", () => {

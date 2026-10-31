@@ -2,9 +2,10 @@
 import { describe, expect, it } from "vitest";
 import { numberPattern, timePattern } from "../../src/format/patterns.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
+import { contractTest } from "../helpers/contracts.ts";
 
 const number = (pattern: string, value: number, locale = "en-US") =>
-  numberPattern(GUIDE_KIT, pattern, locale, "x.format.number")(value);
+  numberPattern(GUIDE_KIT, { number: pattern }, locale, "x.format")(value);
 
 describe("number patterns", () => {
   it.each([
@@ -55,7 +56,7 @@ describe("number patterns", () => {
 
 const at = Date.UTC(2026, 8, 29, 6, 5, 9, 7);
 const time = (pattern: string, zone = "UTC", locale = "en-US") =>
-  timePattern(GUIDE_KIT, pattern, zone, locale, "x.format.time")(at);
+  timePattern(GUIDE_KIT, { time: pattern }, zone, locale, "x.format")(at);
 
 describe("time patterns", () => {
   it("writes strftime's fields in the scale's zone", () => {
@@ -70,7 +71,9 @@ describe("time patterns", () => {
   it("pads numbers, unless the flag after % says not to", () => {
     expect(time("%-d %b %y")).toBe("29 Sep 26");
     expect(time("%m|%-m|%H|%-H")).toBe("09|9|06|6");
-    expect(timePattern(GUIDE_KIT, "%e", "UTC", "en-US", "x")(Date.UTC(2026, 8, 3))).toBe(" 3");
+    expect(timePattern(GUIDE_KIT, { time: "%e" }, "UTC", "en-US", "x")(Date.UTC(2026, 8, 3))).toBe(
+      " 3",
+    );
   });
 
   it("writes names in the chart's locale", () => {
@@ -83,5 +86,57 @@ describe("time patterns", () => {
     );
     expect(() => time("50%")).toThrow(/"%" at character 3/);
     expect(() => time("%-b")).toThrow(/"%-b" at character 1/);
+  });
+});
+
+describe("fiscal years", () => {
+  const fiscal = (pattern: string, start: number, name?: "end" | "start") => (t: number) =>
+    timePattern(
+      GUIDE_KIT,
+      { time: pattern, fiscal: { start, ...(name && { name }) } },
+      "UTC",
+      "en-US",
+      "x.format",
+    )(t);
+
+  contractTest("format.fiscal.names", () => {
+    // A year starting in July: June 2026 ends FY2026, July 2026 starts FY2027 (named by its end).
+    const june = Date.UTC(2026, 5, 30);
+    const july = Date.UTC(2026, 6, 1);
+    expect(fiscal("FY%Y Q%q", 7)(june)).toBe("FY2026 Q4");
+    expect(fiscal("FY%Y Q%q", 7)(july)).toBe("FY2027 Q1");
+    expect(fiscal("FY%y Q%q", 7)(Date.UTC(2026, 9, 1))).toBe("FY27 Q2");
+    // Named by the year it starts in.
+    expect(fiscal("FY%Y Q%q", 7, "start")(june)).toBe("FY2025 Q4");
+    expect(fiscal("FY%Y Q%q", 7, "start")(july)).toBe("FY2026 Q1");
+    // Starting in January, a fiscal year is the calendar year either way.
+    expect(fiscal("%Y Q%q", 1)(june)).toBe("2026 Q2");
+    expect(fiscal("%Y Q%q", 1, "start")(june)).toBe("2026 Q2");
+    // Months and days stay the calendar's.
+    expect(fiscal("%Y-%m-%d", 7)(july)).toBe("2027-07-01");
+  });
+
+  it("writes calendar quarters without a fiscal year", () => {
+    expect(time("%Y Q%q")).toBe("2026 Q3");
+    expect(time("Q%-q")).toBe("Q3");
+  });
+
+  it("counts in the scale's zone", () => {
+    // 1 July 03:00 in UTC is still 30 June in New York.
+    const t = Date.UTC(2026, 6, 1, 3);
+    const write = (zone: string) =>
+      timePattern(GUIDE_KIT, { time: "FY%y Q%q", fiscal: { start: 7 } }, zone, "en-US", "x")(t);
+    expect(write("UTC")).toBe("FY27 Q1");
+    expect(write("America/New_York")).toBe("FY26 Q4");
+  });
+
+  it("refuses months outside 1 to 12 and names other than end and start", () => {
+    expect(() => fiscal("%Y", 13)(0)).toThrow(
+      "x.format.fiscal.start: expected a month from 1 to 12; received 13",
+    );
+    expect(() => fiscal("%Y", 1.5)(0)).toThrow(/fiscal\.start: expected a month from 1 to 12/);
+    expect(() => fiscal("%Y", 7, "middle" as never)(0)).toThrow(
+      'x.format.fiscal.name: expected "end" or "start"; received "middle"',
+    );
   });
 });

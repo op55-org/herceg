@@ -4,7 +4,7 @@
 
 import type { AxisOptions, ChartAxisOptions } from "../guides/options.ts";
 import type { Align } from "../layout/place.ts";
-import { centeredLines, fitText, type MeasureText, textItem } from "../layout/text.ts";
+import { centeredLines, fitText, type MeasureText, textHeight, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import {
   copyTrace,
@@ -28,11 +28,12 @@ import type { HeaderGuide, Panel, Rect } from "../scene/scene.ts";
 import { ChartError, type ChartErrorCode } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
 import type { ChartSpec, ScaleScope, XAxisSpec } from "../spec/spec.ts";
-import type { TextPaint } from "../style/style.ts";
+import { haloOf, type TextPaint } from "../style/style.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { AxisType } from "./axis.ts";
 import type { AxesState } from "./guides.ts";
 import type { MarkSeries } from "./inspect.ts";
+import { GAP } from "./legend.ts";
 import type { ScaleInstance } from "./model.ts";
 import type { Navigator } from "./navigator.ts";
 import {
@@ -42,6 +43,7 @@ import {
   type ScaleName,
   type Scopes,
 } from "./scales.ts";
+import type { ChartStyles } from "./styles.ts";
 
 /**
  * A panel's title or header at its place: vertically centered on `y`,
@@ -116,8 +118,8 @@ export interface PanelGrid {
   lowest?: readonly boolean[] | undefined;
   /** Whether those labels go between rows, above panels drawing layout marks. */
   between?: boolean | undefined;
-  /** The least height the rows share (see `leastHeight`), which a navigator's strip leaves them. */
-  least?: number | undefined;
+  /** Pixels given between rows and between columns beyond what labels and headers take; spaced to them by default. */
+  gap?: { readonly row?: number | undefined; readonly column?: number | undefined } | undefined;
 }
 
 /** The panels of a scene: their keys, each one's marks and series, and every mark's across panels. */
@@ -203,17 +205,70 @@ export interface RowSpace {
 export function rowGap(grid: PanelGrid, panels: number, space: RowSpace): number {
   const { rows, columns, header, between } = grid;
   const { xBetween, ownX, showX, xLabels, lineHeight, xTitle } = space;
+  // A gap given replaces the whitespace, beyond what labels take.
+  const gap = grid.gap?.row;
   if (rows <= 1) return 0;
   const title = ownX || between ? xTitle : 0;
   if ((xBetween || between) && showX)
-    return xLabels + lineHeight + title + (header ? 8 : Math.ceil(lineHeight / 2) + 4);
-  if (!header) return lineHeight + 10;
+    return xLabels + lineHeight + title + (gap ?? (header ? 8 : Math.ceil(lineHeight / 2) + 4));
+  if (!header) return gap ?? lineHeight + 10;
   const aboveEmpty = showX && panels % columns !== 0;
-  return (aboveEmpty ? xLabels + lineHeight + title : Math.ceil(lineHeight / 2)) + 8;
+  if (aboveEmpty) return xLabels + lineHeight + title + (gap ?? 8);
+  return gap ?? Math.ceil(lineHeight / 2) + 8;
 }
 
-/** Smallest plot side, in pixels, of a panel among several. */
-const MIN_PANEL = 20;
+/**
+ * The least plot a panel among others keeps along an axis whose tick
+ * labels it draws: across, room for two short labels and their gap; down,
+ * two labels reaching `reach` past their ticks (half a label's height) and
+ * their gap. Along an axis it does not label, a pixel.
+ */
+export const leastAcross = (labeled: boolean): number => (labeled ? 48 : 1);
+export const leastDown = (reach: number): number => (reach ? 2 * reach + GAP : 1);
+
+/**
+ * The least plot panel `i` keeps across and down, for the labels it
+ * writes: x labels where the guides say, or else where it has room for
+ * them under it; y labels reaching as far as the guides say, or else as
+ * its automatic axes' do.
+ */
+export function leastOf(v: VerticalPlacing, i: number): { across: number; down: number } {
+  return {
+    across: leastAcross(v.guided ? v.guided.labels[i]! : v.under[i]! > 0),
+    down: leastDown(yReachOf(v, i)),
+  };
+}
+
+/**
+ * How far panel `i`'s y labels reach past their end ticks, as painted
+ * (see `labelReach`): the guides' say where they list axes (unless
+ * `automatic`), else its automatic axes', on the sides it labels.
+ */
+export function yReachOf(v: VerticalPlacing, i: number, automatic = false): number {
+  if (v.guided && !automatic) return v.guided.reach[i]!;
+  let most = 0;
+  for (const side of v.ySides)
+    if (side?.labeled[i])
+      most = Math.max(most, labelReach(v.styles.axisText("tickLabel", side.axis, i)));
+  return most;
+}
+
+/**
+ * How far a label in `paint` reaches up or down past its middle: half its
+ * box, or its text, and what is painted past that, its box's outline or a
+ * halo past the box's top and bottom padding.
+ */
+export function labelReach(paint: TextPaint): number {
+  const box = paint.background;
+  const [top, , bottom] = box ? paint.padding : [0, 0, 0];
+  return Math.ceil(
+    (box ? textHeight(paint) : paint.size) / 2 +
+      Math.max(
+        box?.stroke ? (box.strokeWidth ?? 1) / 2 : 0,
+        (haloOf(paint.halo, "")?.width ?? 0) / 2 - Math.min(top, bottom),
+      ),
+  );
+}
 
 /** Refuses `panels` in rows of `columns` that do not fit `room`, saying what to do: `remedy`. */
 function tooSmall(panels: number, columns: number, room: PanelRoom, remedy: string): ChartError {
@@ -226,8 +281,8 @@ function tooSmall(panels: number, columns: number, room: PanelRoom, remedy: stri
 }
 
 /**
- * Throws when `panels` in `rows` and `columns` could never fit `room`, so
- * that panels are refused before they are listed.
+ * Throws when `panels` in `rows` and `columns` could never fit `room`, a
+ * pixel each at least, so that panels are refused before they are listed.
  */
 export function checkFit(
   { rows, columns }: { rows: number; columns: number },
@@ -235,8 +290,7 @@ export function checkFit(
   room: PanelRoom,
   remedy: string,
 ): void {
-  if (rows > room.height / MIN_PANEL || columns > room.width / MIN_PANEL)
-    throw tooSmall(panels, columns, room, remedy);
+  if (rows > room.height || columns > room.width) throw tooSmall(panels, columns, room, remedy);
 }
 
 /**
@@ -255,27 +309,30 @@ function sharesOf(
 }
 
 /**
- * The least whole height `rows` of `panels`, equal or weighted by
- * `weights`, share without `trackSizes` refusing them: each row of several
- * panels MIN_PANEL pixels tall at least.
+ * The least whole height rows, equal or weighted by `weights`, share
+ * without `trackSizes` refusing them: each row as tall as `least` says.
  */
 export function leastHeight(
-  rows: number,
+  least: readonly number[],
   weights: readonly number[] | undefined,
-  panels: number,
 ): number {
-  if (panels <= 1) return 0;
-  const { shares, total } = sharesOf(rows, weights);
-  const smallest = Math.min(...shares);
-  const least = Math.ceil((MIN_PANEL * total) / smallest);
-  // A hair more where trackSizes, dividing it again, rounds under.
-  return (least * smallest) / total < MIN_PANEL ? Math.ceil(least * (1 + 1e-9)) : least;
+  const { shares, total } = sharesOf(least.length, weights);
+  let need = 0;
+  shares.forEach((share, k) => {
+    const whole = Math.ceil((least[k]! * total) / share);
+    // A hair more where trackSizes, dividing it again, rounds under.
+    need = Math.max(
+      need,
+      (whole * share) / total < least[k]! ? Math.ceil(whole * (1 + 1e-9)) : whole,
+    );
+  });
+  return need;
 }
 
 /**
  * `free` pixels shared by `count` rows or columns of `panels` in rows of
  * `columns`, equally or by `weights` (see `sharesOf`); throws when one of
- * several panels would be less than MIN_PANEL pixels a side.
+ * several panels would be smaller than its track's `least` (see `leastDown`).
  */
 export function trackSizes(
   free: number,
@@ -285,10 +342,12 @@ export function trackSizes(
   columns: number,
   room: PanelRoom,
   remedy: string,
+  least: readonly number[],
 ): number[] {
   const { shares, total } = sharesOf(count, weights);
   const sizes = shares.map((share) => (free * share) / total);
-  if (panels > 1 && Math.min(...sizes) < MIN_PANEL) throw tooSmall(panels, columns, room, remedy);
+  if (panels > 1 && sizes.some((size, k) => size < least[k]!))
+    throw tooSmall(panels, columns, room, remedy);
   return sizes;
 }
 
@@ -352,17 +411,24 @@ export interface VerticalPlacing {
    */
   readonly head: {
     readonly lift: number;
-    readonly auto: boolean;
+    readonly auto: (side: Side) => boolean;
     readonly beside: readonly PanelLegend[];
   };
   /**
    * How much further than their text boxed y labels reach past their end
-   * ticks, and how far in all (0 unboxed); per panel, how far the y labels
-   * it shows reach, boxed or not.
+   * ticks, and how far in all (0 unboxed).
    */
   readonly yOver: number;
   readonly yReach: number;
-  readonly yReachIn: readonly number[];
+  /**
+   * The chart's styles, and each y side's axis and the panels labelling
+   * it, from which `yReachOf` finds how far each panel's labels reach.
+   */
+  readonly styles: ChartStyles;
+  readonly ySides: readonly (
+    | { readonly axis: "y" | "yRight"; readonly labeled: readonly boolean[] }
+    | undefined
+  )[];
   /**
    * Per panel: whether it has axes, the room its x labels and title take
    * under its plot, and the room the guides' axes take above it.
@@ -370,6 +436,14 @@ export interface VerticalPlacing {
   readonly axes: readonly boolean[];
   readonly under: readonly number[];
   readonly over: readonly number[];
+  /**
+   * Where the guides list axes, what they say of each panel's labels:
+   * whether it writes x labels anywhere (below, above, or inside), and how
+   * far its y labels reach (see `CompiledAxes.across`, `leastOf`).
+   */
+  readonly guided:
+    | { readonly labels: readonly boolean[]; readonly reach: readonly number[] }
+    | undefined;
   readonly navigator: Navigator | undefined;
   readonly keep: Keep;
   /** The chart's size, for errors. */
@@ -411,7 +485,11 @@ export interface YLabelRoom {
 /** What the scene measured that placing panels from left to right reads. */
 export interface HorizontalPlacing {
   readonly width: number;
-  readonly head: { readonly left: number; readonly right: number; readonly auto: boolean };
+  readonly head: {
+    readonly left: number;
+    readonly right: number;
+    readonly auto: (side: Side) => boolean;
+  };
   /** The left and right y labels and titles. */
   readonly sides: readonly [YLabelRoom, YLabelRoom];
   /** What the guides' axes take beside the plots, and which panels draw a y axis on the right. */
@@ -523,6 +601,7 @@ export interface PanelPlacement {
       readonly width: number;
       readonly left: number;
       readonly right: number;
+      /** Whether the spacing on the title's side is automatic. */
       readonly auto: boolean;
     },
   ): { x: number; span: [number, number] };

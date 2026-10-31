@@ -14,10 +14,13 @@ import { ChartError } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
 import type { ListedPlacing } from "./guides.ts";
 import { EDGE, GAP } from "./legend.ts";
-import type { Keep, PanelGrid, PanelPlacement } from "./panel-layout.ts";
-
-/** The least plot of a panel among others, in pixels across and down. */
-const LEAST = { x: 48, y: 32 };
+import {
+  type Keep,
+  leastOf,
+  type PanelGrid,
+  type PanelPlacement,
+  yReachOf,
+} from "./panel-layout.ts";
 
 /** How far x labels may reach past a cell into the gap beside it: half of it, up to this. */
 const REACH = 6;
@@ -64,6 +67,8 @@ export class Cells {
   #lifts = new Float64Array(0);
   #under: readonly number[] = [];
   #over: readonly number[] = [];
+  /** Each panel's least plot across, for the x labels it writes. */
+  #wide: readonly number[] = [];
   /** The widths `span` gave legends of panels this scene, by panel (see `again`). */
   #handed: [index: number, width: number][] = [];
   /** By panel, the widths the last scene's legends beside panels wrapped at, which its plots held. */
@@ -119,8 +124,10 @@ export class Cells {
         // Above a plot, its title, or the reach of its y labels' boxes past
         // the top tick (of any labels in an inset's box, which holds them),
         // and the axes the guides list above it.
+        // (Not the guides' reach: which of their layers label anything is
+        // known only once y is planned.)
         const reach = (i: number) =>
-          layout.places[i]!.inset ? v.yReachIn[i]! : v.axes[i] ? v.yReach : 0;
+          layout.places[i]!.inset ? yReachOf(v, i, true) : v.axes[i] ? v.yReach : 0;
         const above = Float64Array.from(
           layout.order,
           (_, i) => Math.max(this.#titled[i] ? grid.header : 0, reach(i)) + v.over[i]!,
@@ -130,6 +137,7 @@ export class Cells {
         // there, its title staying above them.
         this.#under = v.under;
         this.#over = v.over;
+        this.#wide = layout.order.map((_, i) => leastOf(v, i).across);
         this.#beside = v.head.beside.map(({ panel, place, measured }) => {
           const index = layout.order.indexOf(panel);
           if (index < 0)
@@ -152,11 +160,12 @@ export class Cells {
           if (side === "bottom") below[index]! += height + LEGEND_GAP + offset;
         }
         for (let i = 0; i < count; i++) above[i]! += this.#lifts[i]!;
-        // A plot is at least as tall as the legends beside it.
-        const tall = new Float64Array(count).fill(LEAST.y);
+        // A plot is at least as tall as its y labels need (see `leastOf`),
+        // and the legends beside it.
+        const tall = Float64Array.from(layout.order, (_, i) => leastOf(v, i).down);
         for (const { index, side, height } of this.#beside)
           if (side === "left" || side === "right") tall[index] = Math.max(tall[index]!, height);
-        const bottom = v.height - v.head.lift - (v.head.auto ? 2 : 0);
+        const bottom = v.height - v.head.lift - (v.head.auto("bottom") ? 2 : 0);
         const least = leastLength(layout, "y", { before: above, after: below, least: tall });
         const strip = v.navigator ? v.navigator.room(bottom - v.top, least) : 0;
         const { plot } = this.#place(
@@ -193,7 +202,7 @@ export class Cells {
           (_, i) =>
             (right.labeled[i] ? right.reach[i]! + title(right, i) : 0) +
               (right.labeled[i] || h.beside?.after[i] ? (h.beside?.right ?? 0) : 0) ||
-            (head.auto ? 12 - EDGE : 0),
+            (head.auto("right") ? 12 - EDGE : 0),
         );
         // Legends beside a panel take room there, beyond its y labels and titles.
         legends = { left: new Float64Array(count), right: new Float64Array(count) };
@@ -210,16 +219,18 @@ export class Cells {
           if (labelsBefore && !this.edge(i, false)) before[i]! += labelsBefore + GAP;
           if (labelsAfter && !this.edge(i, true)) after[i]! += labelsAfter + GAP;
         }
-        const start = head.left + (head.auto ? EDGE : 0);
-        const end = h.width - head.right - (head.auto ? EDGE : 0);
+        const start = head.left + (head.auto("left") ? EDGE : 0);
+        const end = h.width - head.right - (head.auto("right") ? EDGE : 0);
+        // A plot is at least as wide as its x labels need.
+        const wide = Float64Array.from(this.#wide);
         const xs: number[] = [];
         const ws: number[] = [];
         let spans: Spans;
         const place = () => {
-          spans = this.#place("x", start, end, before, after, h.keep, h.width);
+          spans = this.#place("x", start, end, before, after, h.keep, h.width, wide);
           for (let i = 0; i < count; i++) {
             xs[i] = spans.plot[2 * i]!;
-            ws[i] = Math.max(10, spans.plot[2 * i + 1]! - spans.plot[2 * i]!);
+            ws[i] = Math.max(1, spans.plot[2 * i + 1]! - spans.plot[2 * i]!);
           }
           h.plan(Math.min(...xs), ws);
         };
@@ -240,7 +251,7 @@ export class Cells {
               inset
                 ? 0
                 : this.edge(i, end)
-                  ? head.auto
+                  ? head.auto(end ? "right" : "left")
                     ? EDGE - 2
                     : 0
                   : Math.min(REACH, this.#gutter(i, end) / 2);
@@ -551,7 +562,7 @@ export class Cells {
     after: Float64Array,
     keep: Keep,
     size: number,
-    least: number | Float64Array = LEAST[axis],
+    least: Float64Array,
   ): Spans {
     const layout = this.#layout;
     const key = `${start} ${end}`;
@@ -602,7 +613,7 @@ export class Cells {
       [solved.outer[2 * i], solved.outer[2 * i + 1]] = span;
       solved.plot[2 * i] = span[0] + before[i]!;
       solved.plot[2 * i + 1] = span[1] - after[i]!;
-      const shortest = typeof least === "number" ? least : least[i]!;
+      const shortest = least[i]!;
       if (solved.plot[2 * i + 1]! - solved.plot[2 * i]! < shortest - 0.5)
         throw insetShort(
           node,

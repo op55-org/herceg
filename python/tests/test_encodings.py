@@ -103,18 +103,6 @@ def test_channels_are_checked_in_python_names():
         hg.Encodings(color=hg.when(hg.col("gain") > 1, hg.col("site"), "#000"))
     with pytest.raises(ValueError, match="area encode: has no dash channel; give"):
         hg.Chart(SITES).area(x="t", y="gain", encode=hg.Encodings(dash=hg.Channel(value="--")))
-    with pytest.raises(ValueError, match="line style: has no leader; give"):
-        hg.Chart(SITES).line(x="t", y="gain", style=hg.MarkStyle(leader={"stroke": "#000"}))
-    # Text draws one look, as the engine refuses it.
-    with pytest.raises(
-        hg.ChartError, match="^text style by: draws one look, not looks by value; drop by$"
-    ):
-        hg.Chart(SITES).text(
-            label="peak",
-            x="t",
-            y="gain",
-            style=hg.MarkStyle(by={"field": "site", "map": {"a": {"stroke": "#000"}}}),
-        )
     with pytest.raises(ValueError, match="line markers: expected True, False, or a shape"):
         hg.Chart(SITES).line(x="t", y="gain", markers="hexagon")
 

@@ -65,7 +65,7 @@ export type ValueFormatter = (value: number, context: FormatContext) => string;
 /** Which ticks an axis draws (see `TicksSpec`), or a function choosing them. */
 export type Ticks =
   | Exclude<TicksSpec, { values: unknown }>
-  | { values: readonly (number | string | Date)[] }
+  | { values: readonly (number | string | Date)[]; fiscal?: never }
   | TickGenerator;
 
 /** How values are written (see `FormatSpec`), or a function writing them. */

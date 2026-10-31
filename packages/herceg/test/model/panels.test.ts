@@ -16,6 +16,7 @@ import { panels } from "../../src/model/panels.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { LineGeometry, Panel, RectGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
 
@@ -409,6 +410,53 @@ describe("panels", () => {
     const short = model.formatsOf(undefined, "latency").y(120_100);
     const tall = model.formatsOf(undefined, "traffic").y(120_100);
     expect(tall.length).toBeGreaterThan(short.length);
+  });
+});
+
+describe("panels' least plots", () => {
+  const data = table({ t: [0, 1, 2], v: [1, 3, 2] });
+  const stack = (count: number, axes: { show: boolean }) => ({
+    marks: Array.from({ length: count }, (_, i) => line(data, { x: "t", y: "v", panel: `p${i}` })),
+    panels: panels(Array.from({ length: count }, (_, i) => ({ id: `p${i}` }))),
+    x: axes,
+    y: axes,
+  });
+
+  contractTest("layout.least.labels", () => {
+    // Without axes, twelve stacked panels share 200 pixels down to a few each.
+    const { model } = build(stack(12, { show: false }), 600, 200);
+    const heights = model.panels().map(({ plot }) => plot.height);
+    expect(Math.min(...heights)).toBeLessThan(16);
+    expect(Math.min(...heights)).toBeGreaterThan(1);
+    // With y labels, each keeps two of them and their gap, and the layout
+    // says how much it needs where it cannot.
+    expect(() => build(stack(12, { show: true }), 600, 200)).toThrow(
+      /layout: needs at least \d+ px of height for its panels' plots, titles, and axes, and has \d+ px/,
+    );
+    const tall = build(stack(12, { show: true }), 600, 800).model.panels();
+    expect(Math.min(...tall.map(({ plot }) => plot.height))).toBeGreaterThanOrEqual(18);
+  });
+
+  it("keep room only for the y labels panels draw, as their scale's repeat places them", () => {
+    // Side by side, sharing y: the first labels it, and the second's large
+    // label style draws nothing, so it asks for no room.
+    const pair = (y: ChartConfig["y"]) => ({
+      marks: [
+        line(data, { x: "t", y: "v", panel: "a" }),
+        line(data, { x: "t", y: "v", panel: "b" }),
+      ],
+      panels: panels(
+        [{ id: "a" }, { id: "b", y: { style: { tickLabel: { fontSize: 80 } } } }],
+        grid({ columns: 2 }),
+      ),
+      x: { show: false },
+      legend: false,
+      ...(y && { y }),
+    });
+    const shared = build(pair({ scope: "chart" }), 400, 80).model.panels();
+    expect(shared.map(({ plot }) => plot.height)).toEqual([70, 70]);
+    // With scales of their own, the second labels its own, which need room.
+    expect(() => build(pair(undefined), 400, 80)).toThrow(/px of height/);
   });
 });
 

@@ -52,8 +52,9 @@ describe("architecture", () => {
   // own modules no line chart's module imports: expression compilation (the
   // builders `col` and `when` are data/expr.ts), symbols' shapes, automatic
   // padding's solver (for lines' markers), the guide compiler's pattern
-  // formats, what channels draw (`outputProblem`), and the placement of
-  // labels following series and of text blocks. Charts that import these
+  // formats, what channels draw (`outputProblem`), the placement of labels
+  // following series and of text blocks, and the boxes bars' labels that
+  // hide keep apart by (layout/label-boxes.ts). Charts that import these
   // themselves (grids the first, points the second and third) get them in a
   // chunk of their own.
   // Colors are told from names through the kit (FeatureKit.isColor).
@@ -67,6 +68,7 @@ describe("architecture", () => {
       "spec/channels.ts",
       "layout/attached.ts",
       "layout/block.ts",
+      "layout/label-boxes.ts",
       "draw/text-items.ts",
     ].map((path) => join(SRC, path));
     for (const file of files(features)) {

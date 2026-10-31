@@ -6,6 +6,8 @@
 // a configuration, and static output brings it with it.
 
 import type { Table } from "../data/table.ts";
+import type { AttachedLabel } from "../layout/attached.ts";
+import type { PanelDrawing } from "../layout/placer.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { PointSink, Polyline } from "../lod/polyline.ts";
@@ -16,10 +18,11 @@ import type { RowBindings } from "../marks/row-bindings.ts";
 import type { Series } from "../marks/series.ts";
 import type { TraceFrame } from "../marks/trace.ts";
 import type { Connections } from "../marks/union-stack.ts";
-import type { Geometry } from "../scene/scene.ts";
+import type { Geometry, Rect } from "../scene/scene.ts";
 import type { ChannelSpec, SymbolName } from "../spec/encoding.ts";
 import type { FormatSpec, SwatchSpec } from "../spec/guides.ts";
 import type { Dash } from "../spec/spec.ts";
+import type { ResolvedHalo, TextPaint } from "../style/style.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { clearDomain } from "./clearance.ts";
 import type { GuideKit } from "./guides.ts";
@@ -92,6 +95,13 @@ export interface Identities {
 
 /** A configuration's mark features, compiled. */
 export interface CompiledFeatures {
+  /**
+   * Places the series labels of a panel's marks, `drawings`, together,
+   * adding each mark's to its geometry (painted where it paints); the boxes
+   * of the labels drawn, which annotation labels keep off
+   * (layout/placer.ts).
+   */
+  labels?(drawings: readonly PanelDrawing[]): Rect[];
   /** What `mark` takes from the features; undefined for a mark that uses none. */
   of(mark: Mark): MarkFeatures | undefined;
   /**
@@ -148,10 +158,11 @@ export interface MarkFeatures {
   format?(format: FormatSpec, locale: string | undefined, path: string): (value: number) => string;
   /**
    * Labels following series the mark draws (`labels` on lines and areas,
-   * text `from` a mark), placed in `frame`'s panel after the mark is drawn
-   * there, painted where it paints (marks/features/labels.ts).
+   * text `from` a mark) in `frame`'s panel, once the mark is drawn there,
+   * for `CompiledFeatures.labels` to place with the panel's others
+   * (marks/features/labels.ts).
    */
-  labels?(frame: Frame): Geometry[];
+  labels?(frame: Frame): readonly AttachedLabel[];
   /** What those labels outside the plot took left and right, as last placed (`Mark.room`). */
   room?(): [number, number];
   /** How labels of parts (`content`: a bar's, an annotation's) are written (marks/features/content.ts). */
@@ -170,12 +181,27 @@ export interface MarkFeatures {
    * channel is not given.
    */
   encoded?(channel: "color" | "strokeWidth" | "opacity", row: number): string | number | undefined;
+  /**
+   * Labels placed so far, which later ones keep off (bars' labels that
+   * "hide"), as painted in `paint`: past their boxes by its box's outline,
+   * or by `halo` past its padding where a label draws one.
+   */
+  labelBoxes?(paint: TextPaint, halo: ResolvedHalo | undefined): LabelBoxSet;
 }
 
 /** Rows' looks (see `MarkFeatures.rowLooks`). */
 export interface RowLooks {
   readonly paints: readonly RowPaint[];
   of(row: number): number;
+}
+
+/** Labels placed so far, as painted (see `MarkFeatures.labelBoxes`). */
+export interface LabelBoxSet {
+  /**
+   * Whether a label's box at (x, y), `width` by `height`, drawing its halo
+   * or not, covers none placed so far; where it covers none, it is placed.
+   */
+  takes(x: number, y: number, width: number, height: number, halo: boolean): boolean;
 }
 
 /**

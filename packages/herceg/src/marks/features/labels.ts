@@ -8,10 +8,17 @@
 // chart keeps. Hidden series draw nothing, so their labels are left out;
 // labels make no rows.
 
-import { type AttachedLabel, placeAttached } from "../../layout/attached.ts";
+import { type AttachedLabel, type LabelOwner, placeAttached } from "../../layout/attached.ts";
+import type { PanelDrawing } from "../../layout/placer.ts";
 import type { FeatureKit, MarkFeatures } from "../../model/features.ts";
 import type { AreaGeometry, Geometry, LineGeometry, Rect } from "../../scene/scene.ts";
-import type { AreaLabelsSpec, LabelAt, LabelContent, LabelPlaceSpec } from "../../spec/encoding.ts";
+import type {
+  AreaLabelsSpec,
+  LabelAt,
+  LabelContent,
+  LabelLayoutSpec,
+  LabelPlaceSpec,
+} from "../../spec/encoding.ts";
 import type { AreaSpec } from "../../spec/spec.ts";
 import type { TextStyle } from "../../spec/style.ts";
 import type { Frame, Mark } from "../mark.ts";
@@ -126,24 +133,25 @@ export interface Following {
   /** The halo of the mark the labels are text of, under their style's. */
   readonly halo?: TextStyle["halo"];
   readonly place: LabelPlaceSpec | undefined;
+  /** How they keep apart from the panel's other series labels ("move" by default). */
+  readonly layout: Omit<LabelLayoutSpec, "overlapGroup"> | undefined;
   /** Names the labels' style in messages: `line "cpu" labels.style`. */
   readonly path: string;
 }
 
 /**
- * Places labels following each series `following` names in `frame`'s
- * panel, keyed `key`: their geometry, and the room those outside the plot
- * take on its left and right.
+ * The labels following each series `following` names in `frame`'s panel,
+ * of `owner`, for the panel's placement (`panelLabels`).
  */
 export function followingLabels(
   kit: FeatureKit,
   following: Following,
   frame: Frame,
-  key: string,
-): { geometry: Geometry[]; room: readonly [number, number] } {
+  owner: LabelOwner,
+): AttachedLabel[] {
   const drawn = following.drawings.in(frame);
-  if (!drawn) return { geometry: [], room: [0, 0] };
-  const { source, at, content, place } = following;
+  if (!drawn) return [];
+  const { source, at, content, place, layout } = following;
   const along = source.tooltip === "y" ? "y" : "x";
   // Found as the series drew, as `placing` asked.
   const wanted = following.drawings.want(at, following.edge);
@@ -157,12 +165,11 @@ export function followingLabels(
   for (const { series: s, frame: drawnIn, anchors } of drawn.values()) {
     const anchor = anchors.get(wanted);
     if (!anchor) continue;
-    const paint = kit.textPaint([
-      frame.theme.roles.text,
-      { color: s.color, align },
-      style,
-      { halo: false },
-    ]);
+    const paint = {
+      ...kit.textPaint([frame.theme.roles.text, { color: s.color, align }, style, { halo: false }]),
+      // The style's line height, for parts of other sizes.
+      lineRatio: style?.lineHeight ?? frame.theme.roles.text.lineHeight,
+    };
     const time = drawnIn[along === "x" ? "y" : "x"].type === "time";
     const text = content(anchor.row, s.label, anchor.value, time);
     if (!text) continue;
@@ -179,31 +186,117 @@ export function followingLabels(
         visible: true,
       },
       text,
+      parts: content.styled?.(anchor.row, s.label, anchor.value, time, paint, frame),
       paint,
       place: { outside: place?.outside, reserve: place?.reserve, offset: place?.offset },
       halo: kit.textHalo({ ...paint, halo: style?.halo ?? following.halo ?? "auto" }, under),
+      overlap: layout?.overlap ?? "move",
+      priority: layout?.priority ?? 0,
+      owner,
     });
   }
-  return placeAttached(labels, frame, key, kit);
+  return labels;
 }
 
-/** Labels following series where the feature compiler draws them: placed per panel, keeping their room. */
+/**
+ * Labels following series where the feature compiler draws them: gathered
+ * per panel for `panelLabels` to place with the panel's others, which
+ * keeps the room those outside the plot took.
+ */
 export function placing(
   kit: FeatureKit,
   following: Following,
   key: string,
 ): Required<Pick<MarkFeatures, "labels" | "room">> {
+  const at = following.path.replace(/\.style$/, "");
+  checkLayout(following.layout, at);
   // Each series finds where its label goes as it draws.
   following.drawings.want(following.at, following.edge);
-  let room: [number, number] = [0, 0];
-  return {
-    labels(frame) {
-      const placed = followingLabels(kit, following, frame, key);
-      room = [placed.room[0], placed.room[1]];
-      return placed.geometry;
+  const leader = following.layout?.leader;
+  const look = leader === true ? {} : leader || undefined;
+  const owner: LabelOwner = {
+    key,
+    leader: look && {
+      stroke: look.stroke,
+      path: `${at}.leader.stroke`,
+      strokeWidth: look.strokeWidth ?? 1,
+      dash: kit.dashPattern(look.dash, look.strokeWidth ?? 1),
+      opacity: look.opacity,
     },
-    room: () => room,
+    room: [0, 0],
   };
+  return {
+    labels: (frame) => {
+      // A panel drawing none of its labels keeps no room for them.
+      owner.room = [0, 0];
+      return followingLabels(kit, following, frame, owner);
+    },
+    room: () => owner.room,
+  };
+}
+
+/**
+ * Places the series labels of a panel's marks, `drawings`, together
+ * (layout/attached.ts), adding each mark's to its geometry; the boxes of
+ * the labels drawn.
+ */
+export function panelLabels(
+  kit: FeatureKit,
+  drawings: readonly PanelDrawing[],
+  of: (mark: Mark) => MarkFeatures | undefined,
+): Rect[] {
+  let labels: AttachedLabel[] | undefined;
+  let frame: Frame | undefined;
+  const drawingOf = new Map<LabelOwner, PanelDrawing>();
+  for (const drawing of drawings) {
+    const own = of(drawing.of)?.labels?.(drawing.frame);
+    if (!own) continue;
+    frame ??= drawing.frame;
+    labels ??= [];
+    for (const label of own) {
+      labels.push(label);
+      drawingOf.set(label.owner, drawing);
+    }
+  }
+  if (!labels || !frame) return [];
+  const { geometry, boxes } = placeAttached(labels, frame, kit);
+  for (const [owner, parts] of geometry) drawingOf.get(owner)!.geometry.push(...parts);
+  return boxes;
+}
+
+/**
+ * Checks how series labels keep apart (`at` names them in messages): they
+ * take `overlap`, `leader`, and `priority`, and no group, since a panel's
+ * series labels keep apart across marks already.
+ */
+function checkLayout(layout: LabelLayoutSpec | undefined, at: string): void {
+  if (layout === undefined) return;
+  const { leader, priority } = layout;
+  const overlap = layout.overlap as string | undefined;
+  if (layout.overlapGroup !== undefined)
+    throw new Error(
+      `${at}.overlapGroup: series labels already keep apart across marks; drop overlapGroup`,
+    );
+  if (overlap === "stagger" || overlap === "wrap")
+    throw new Error(
+      `${at}.overlap: "${overlap}" is for tick labels; use "show", "hide", or "move"`,
+    );
+  if (overlap !== undefined && overlap !== "show" && overlap !== "hide" && overlap !== "move")
+    throw new Error(
+      `${at}.overlap: expected "show", "hide", or "move"; received ${JSON.stringify(overlap)}`,
+    );
+  if (leader !== undefined && leader !== false) {
+    if (leader !== true && (typeof leader !== "object" || leader === null))
+      throw new Error(
+        `${at}.leader: expected true, false, or a stroke style such as { stroke: "#999" }`,
+      );
+    if ((overlap ?? "move") !== "move")
+      throw new Error(
+        `${at}.leader: labels that ${overlap} stay at their points and draw none; use overlap "move"`,
+      );
+  }
+  if (priority !== undefined && !Number.isFinite(priority))
+    throw new Error(`${at}.priority: expected a number; received ${JSON.stringify(priority)}`);
 }
 
 /** Has `features`' series record what they draw into `drawings`, for labels following them. */

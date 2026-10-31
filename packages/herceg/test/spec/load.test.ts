@@ -831,7 +831,7 @@ describe("layout marks in panels in specs", () => {
 });
 
 describe("text styles", () => {
-  it("refuse looks by value, which text does not draw", () => {
+  it("refuse a style, which text takes in its label", () => {
     const spec = {
       data: { t: { columns: { x: [0, 1], c: ["a", "b"] } } },
       marks: [
@@ -846,11 +846,7 @@ describe("text styles", () => {
       ],
     } as unknown as ChartSpec;
     expect(() => validateSpec(spec)).toThrow(
-      expect.objectContaining({
-        code: "unsupported",
-        path: "marks[0].style.by",
-        message: "marks[0].style.by: this mark draws one look, not looks by value; drop by",
-      }),
+      expect.objectContaining({ code: "invalid-option", path: "marks[0].style" }),
     );
   });
 

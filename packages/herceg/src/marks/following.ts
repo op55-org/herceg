@@ -15,8 +15,6 @@ const PLACED: readonly [option: keyof TextSpec, instead: string][] = [
   ["at", "drop at, or from"],
   ["x", "drop x and y, or from"],
   ["y", "drop x and y, or from"],
-  ["overlap", "labels following series are spread apart along their column; drop overlap"],
-  ["style", "labels following series draw no leaders; drop style"],
   ["axis", "labels follow their series on its axis; drop axis"],
   ["facet", "labels follow their series in each panel it is drawn in; drop facet"],
   ["contributeDomain", "labels follow where their series is drawn; drop contributeDomain"],

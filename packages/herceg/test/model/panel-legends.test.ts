@@ -243,7 +243,7 @@ describe("panel legends", () => {
         guides: [
           legend({ panel: "latency" }),
           legend({ panel: "errors" }),
-          axis({ scale: "x", labels: { collision: "wrap" } }),
+          axis({ scale: "x", labels: { overlap: "wrap" } }),
         ],
       },
       400,

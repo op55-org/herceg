@@ -281,8 +281,10 @@ function text(page: PdfPage, content: string, x: number, y: number, style: TextS
   const encoded = resolved ? "" : encodeText(content);
   if (resolved ? !resolved.runs.length : !encoded) return;
   const fill = color(style.fill, style.opacity);
-  if (!fill) return;
-  const halo = style.halo && color(style.halo.color, style.halo.opacity);
+  // A halo fades with its text, as in SVG and on a canvas.
+  const halo = style.halo && color(style.halo.color, style.halo.opacity * (style.opacity ?? 1));
+  // Text of no fill may still draw its halo (a label part's, drawn before every part's fill).
+  if (!fill && !halo) return;
   const radians = ((style.angle ?? 0) * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
@@ -319,9 +321,10 @@ function text(page: PdfPage, content: string, x: number, y: number, style: TextS
     return out;
   };
   let out = "q";
+  const fillAlpha = fill?.[3] ?? 1;
   const haloAlpha = halo?.[3] ?? 1;
-  if (fill[3] < 1 || haloAlpha < 1) out += ` /${page.opacity(fill[3], haloAlpha)} gs`;
-  out += ` ${rgb(fill)} rg`;
+  if (fillAlpha < 1 || haloAlpha < 1) out += ` /${page.opacity(fillAlpha, haloAlpha)} gs`;
+  if (fill) out += ` ${rgb(fill)} rg`;
   // The halo is the glyphs' outline, drawn first so the fill covers its
   // inner half. Its replacement text is empty, so readers that honor
   // replacement text in marked content (a PDF 1.5 feature; MuPDF does,
@@ -330,7 +333,7 @@ function text(page: PdfPage, content: string, x: number, y: number, style: TextS
   if (halo)
     out += ` ${rgb(halo)} RG ${num(style.halo!.width)} w 1 j\n/Span << /ActualText () >> BDC ${show(1).trim()} EMC\n`;
   else out += "\n";
-  page.write(`${out}${show(0)}Q\n`);
+  page.write(`${out}${fill ? show(0) : ""}Q\n`);
 }
 
 /**

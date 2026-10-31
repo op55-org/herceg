@@ -8,14 +8,18 @@
 
 import type { FieldKind, NumericArray } from "../data/column.ts";
 import type { Schema, Table } from "../data/table.ts";
+import { leaderDrawingOf } from "../draw/leaders.ts";
+import { markupOf, n } from "../draw/markup.ts";
 import { type Formatter, formatNumber, numberFormatter } from "../format/format.ts";
 import { coordinateAt } from "../layout/position.ts";
 import type { PositionScale } from "../scale/scale.ts";
-import type { Rect } from "../scene/scene.ts";
-import type { LabelSpec } from "../spec/encoding.ts";
+import type { Drawing, Rect, SegmentGeometry } from "../scene/scene.ts";
+import type { LabelSpec, Overlap } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Coordinate } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen } from "../spec/spec.ts";
+import type { StrokeStyle } from "../spec/style.ts";
+import { dashPattern } from "../style/style.ts";
 import type { ContentWriter } from "./features/content.ts";
 import { markKey, rowKey, shownItems } from "./hidden.ts";
 import { type Frame, type MarkKey, type RowParts, requireField } from "./mark.ts";
@@ -103,6 +107,95 @@ export function labelOf(label: string | Frozen<LabelSpec> | undefined): Label | 
   return typeof label === "string" ? { text: label } : (label as Label | undefined);
 }
 
+/**
+ * How an annotation's labels keep apart, as its label's layout gives it
+ * (`LabelLayoutSpec`): its group, policy, and priority, for its requests
+ * to the panel's placer, and its leaders' look, if it draws them.
+ */
+export interface LabelLayout {
+  readonly group: string | undefined;
+  readonly overlap: Overlap;
+  readonly priority: number;
+  readonly leader: boolean;
+  readonly look: Frozen<StrokeStyle> | undefined;
+}
+
+/**
+ * The layout of `label`, an annotation of `role`'s ("rule", "region",
+ * "text"), checked: "show" by default; leaders only for labels that move.
+ */
+export function labelLayout(label: Label | undefined, role: string): LabelLayout {
+  const { overlap = "show", overlapGroup, leader, priority = 0 } = label ?? {};
+  const at = `${role} label`;
+  if ((overlap as string) === "stagger" || (overlap as string) === "wrap")
+    throw new Error(
+      `${at}.overlap: "${overlap}" is for tick labels; use "show", "hide", or "move"`,
+    );
+  if (overlap !== "show" && overlap !== "hide" && overlap !== "move")
+    throw new Error(
+      `${at}.overlap: expected "show", "hide", or "move"; received ${JSON.stringify(overlap)}`,
+    );
+  if (overlapGroup !== undefined && (typeof overlapGroup !== "string" || overlapGroup === ""))
+    throw new Error(
+      `${at}.overlapGroup: expected a group's name; received ${JSON.stringify(overlapGroup)}`,
+    );
+  if (!Number.isFinite(priority))
+    throw new Error(`${at}.priority: expected a number; received ${JSON.stringify(priority)}`);
+  if (leader !== undefined && role === "region")
+    throw new Error(
+      `${at}.leader: region labels slide along their side and draw none; drop leader`,
+    );
+  if (leader !== undefined && leader !== false) {
+    if (leader !== true && (typeof leader !== "object" || leader === null))
+      throw new Error(
+        `${at}.leader: expected true, false, or a stroke style such as { stroke: "#999" }`,
+      );
+    if (overlap !== "move")
+      throw new Error(
+        `${at}.leader: labels that ${overlap} are drawn at their place and draw none; use overlap "move"`,
+      );
+  }
+  return {
+    group: overlapGroup,
+    overlap,
+    priority,
+    leader: !!leader,
+    look: typeof leader === "object" ? leader : undefined,
+  };
+}
+
+/**
+ * The leaders of an annotation's labels (x0, y0, x1, y1 each in `coords`),
+ * keyed `key`, in their `look` (the theme's muted color, a pixel wide, by
+ * default); `path` names the look in messages.
+ */
+export function leadersGeometry(
+  key: string,
+  coords: readonly number[],
+  look: Frozen<StrokeStyle> | undefined,
+  frame: Frame,
+  path: string,
+): SegmentGeometry {
+  const strokeWidth = look?.strokeWidth ?? 1;
+  leaders ??= leaderDrawingOf(markupOf, n);
+  const segments: SegmentGeometry = {
+    kind: "segments",
+    draw: leaders,
+    key,
+    stroke: (look?.stroke && frame.paint(look.stroke, `${path}.stroke`)) || frame.theme.muted,
+    strokeWidth,
+    coords: Float32Array.from(coords),
+    count: coords.length / 4,
+  };
+  const dash = dashPattern(look?.dash, strokeWidth);
+  if (dash) segments.dash = dash;
+  if (look?.opacity !== undefined) segments.opacity = look.opacity;
+  return segments;
+}
+
+/** How leaders draw (made once). */
+let leaders: Drawing<SegmentGeometry> | undefined;
+
 /** The field a place reads, if any: its own, or its share's or pixels'. */
 function fieldOf(position: Frozen<AnnotationPosition> | undefined): string | undefined {
   if (typeof position !== "object") return typeof position === "string" ? position : undefined;
@@ -134,6 +227,8 @@ export class AnnotationData {
   /** The table when the annotation reads one; constants ignore it. */
   readonly table: Table | undefined;
   readonly label: Label | undefined;
+  /** How its labels keep apart from others (`labelLayout`). */
+  readonly layout: LabelLayout;
   /** Whether a place is on a scale of the chart's own. */
   readonly scaled: boolean;
   readonly #role: string;
@@ -155,6 +250,7 @@ export class AnnotationData {
     encode?: object,
   ) {
     this.label = label;
+    this.layout = labelLayout(label, role);
     this.#role = role;
     const text = label?.field;
     if (label && [label.text, text, label.content].filter((v) => v !== undefined).length !== 1)

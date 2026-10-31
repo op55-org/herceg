@@ -153,16 +153,14 @@ export interface StyleMapSpec {
 }
 
 /**
- * How a mark's parts look: its markers and leader lines, and looks mapped
- * by value (`by`). The mark's body takes its flat paint options (`stroke`,
- * `fill`, `strokeWidth`, `dash`, `opacity`, ...); labels take their label
- * object's `style`.
+ * How a mark's parts look: its markers, and looks mapped by value (`by`).
+ * The mark's body takes its flat paint options (`stroke`, `fill`,
+ * `strokeWidth`, `dash`, `opacity`, ...); labels take their label object's
+ * `style`, and their leaders its `leader`.
  */
 export interface MarkStyleSpec {
   by?: StyleMapSpec;
   marker?: MarkerStyle;
-  /** Lines from moved labels back to their points (text marks). */
-  leader?: StrokeStyle;
 }
 
 /** A calendar unit lines break at the boundaries of, in the chart's time zone. */
@@ -223,9 +221,18 @@ export interface LabelPlaceSpec {
  */
 export type LabelPart =
   | string
-  | { field: Field; format?: FormatSpec; series?: never; value?: never }
-  | { series: true; field?: never; value?: never; format?: never }
-  | { value: true; format?: FormatSpec; field?: never; series?: never };
+  | { field: Field; format?: FormatSpec; style?: PartStyle; series?: never; value?: never }
+  | { series: true; style?: PartStyle; field?: never; value?: never; format?: never }
+  | { value: true; format?: FormatSpec; style?: PartStyle; field?: never; series?: never };
+
+/**
+ * How a part of a label looks over the label's style: its size, weight,
+ * slant, color, and opacity. Its halo, box, and alignment are the label's.
+ */
+export type PartStyle = Pick<
+  TextStyle,
+  "fontSize" | "fontWeight" | "fontStyle" | "color" | "opacity"
+>;
 
 /** A label's text, its parts in order: `["Capacity: ", { value: true, format: { number: ".1f" } }]`. */
 export type LabelContent = readonly LabelPart[];
@@ -243,8 +250,37 @@ export type LabelTextSpec = (
   style?: TextStyle;
 };
 
-/** A label: its text (`LabelTextSpec`), placed as `place` says. */
-export type LabelSpec = LabelTextSpec & { place?: LabelPlaceSpec };
+/**
+ * What a label does where it would cover another of its overlap group:
+ * drawn at its place anyway ("show"), left out ("hide", those of lower
+ * `priority` first), or moved to the nearest free place its kind of label
+ * allows, and left out where none is ("move").
+ */
+export type Overlap = "show" | "hide" | "move";
+
+/**
+ * How labels keep apart, written the same wherever a kind of label can
+ * honor it: what a label does where it would cover another (`overlap`),
+ * which labels keep apart (`overlapGroup`: annotation labels of every mark
+ * naming the group; by default, a mark's own), a line from each label
+ * moved more than 6 pixels back to what it labels (`leader`: `true`, or its
+ * look), and which labels stay where some must go (`priority`, the
+ * higher; 0 by default). Each kind takes the parts it honors (see
+ * docs/guide/marks.md, "Labels that would overlap").
+ */
+export interface LabelLayoutSpec {
+  overlap?: Overlap;
+  overlapGroup?: string;
+  leader?: boolean | StrokeStyle;
+  priority?: number;
+}
+
+/**
+ * A label of an annotation (text, rule, region): its text
+ * (`LabelTextSpec`), placed as `place` says, kept apart from others as its
+ * layout says ("show" by default).
+ */
+export type LabelSpec = LabelTextSpec & { place?: LabelPlaceSpec } & LabelLayoutSpec;
 
 /**
  * Which point of a series a label follows: its first or last observation
@@ -257,9 +293,15 @@ export type LabelAt = "first" | "last" | "visible-start" | "visible-end";
  * Labels that follow each series of a line: placed at `at`, saying
  * `content` (the series' name by default), placed as `place` says (beside
  * the point within the plot, or `outside` the plot at its edge) and styled
- * as `style` says.
+ * as `style` says. A panel's series labels keep apart as `overlap` says:
+ * "move" (the default) moves them along y as little as keeps them apart,
+ * in the order of their points, and leaves out those of lowest `priority`
+ * (then the last in series order) where the plot is too short for all;
+ * "show" draws each at its point; "hide" leaves out those that would cover
+ * one of higher priority. `leader` draws a line from each label moved more
+ * than 6 pixels back to its point.
  */
-export interface SeriesLabelsSpec {
+export interface SeriesLabelsSpec extends Omit<LabelLayoutSpec, "overlapGroup"> {
   at: LabelAt;
   content?: LabelContent;
   place?: LabelPlaceSpec;
@@ -298,6 +340,11 @@ export type BarLabelsSpec = (
   style?: TextStyle;
   minLength?: number;
   place?: BarLabelPlaceSpec;
+  /**
+   * Labels that would cover another of the mark's: drawn anyway ("show",
+   * the default), or left out ("hide"), the later in series and row order.
+   */
+  overlap?: "show" | "hide";
 };
 
 /**

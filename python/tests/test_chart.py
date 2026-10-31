@@ -355,9 +355,9 @@ def test_annotations_take_constants_or_columns():
     assert (marks[4]["data"], marks[4]["label"]) == ("data", {"field": "host"})
     assert marks[4]["y"] == {"field": "p99", "offset": -8.0}
     crowded, _ = (
-        hg.Chart(DATA).text(x="t", y="p50", label={"field": "host"}, overlap="move").to_spec()
+        hg.Chart(DATA).text(x="t", y="p50", label={"field": "host", "overlap": "move"}).to_spec()
     )
-    assert crowded["marks"][0]["overlap"] == "move"
+    assert crowded["marks"][0]["label"] == {"field": "host", "overlap": "move"}
     assert sorted(spec["data"]["data"]["columns"]) == ["host", "p50", "p99", "t"]
     svg = chart.to_svg()
     for label in ("warmup", "deploy", "limit", "a", "b"):
@@ -407,9 +407,9 @@ def test_annotation_options_are_checked():
     with pytest.raises(hg.ChartError, match="text label field: column 't'"):
         hg.Chart(DATA).text(x="t", y="p50", label=hg.Label(field="t"))
     with pytest.raises(
-        ValueError, match='text overlap: expected "show", "hide", or "move"; received "dodge"'
+        ValueError, match='Label overlap: expected "show", "hide", or "move"; received "dodge"'
     ):
-        hg.Chart(DATA).text(x="t", y="p50", label="a", overlap="dodge")  # type: ignore[arg-type]
+        hg.Label(text="a", overlap="dodge")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="text at: a place, or its short forms x and y, not both"):
         hg.Chart(DATA).text(x=1, at=hg.Position(x=1, y=2), label="a")
     with pytest.raises(ValueError, match="text label: text goes where at says; drop place"):
@@ -565,6 +565,44 @@ def test_facets_lay_panels_out_by_row_and_column():
         hg.Chart(data, facet_row="host", facet_column="host")
     with pytest.raises(hg.ChartError, match="Chart facet_column: no column 'region'"):
         hg.Chart(data, facet_row="host", facet_column="region").line(x="t", y="p50")
+
+
+@pytest.mark.contract("facet.header-gap.python")
+def test_facets_without_headers_and_with_gaps():
+    sites = {
+        "t": [i % 2 for i in range(40)],
+        "v": list(range(40)),
+        "site": [f"s{i // 2}" for i in range(40)],
+    }
+    chart = hg.Chart(
+        sites,
+        facet="site",
+        facet_columns=1,
+        facet_header=False,
+        facet_gap=1,
+        y=hg.AxisOptions(show=False),
+        height=560,
+    ).line(x="t", y="v")
+    spec, _ = chart.to_spec()
+    assert spec["facet"] == {"field": "site", "columns": 1, "header": False, "gap": 1.0}
+    svg = chart.to_svg()
+    assert ">s0</text>" not in svg
+    # Twenty rows of about 25 pixels, a pixel apart.
+    tops = sorted({float(y) for y in re.findall(r'<clipPath [^>]*><rect [^>]*y="([\d.]+)"', svg)})
+    assert len(tops) == 20
+    assert 25 <= tops[1] - tops[0] <= 27
+    grid, _ = (
+        hg.Chart(sites, facet_row="site", facet_gap=(2, 3), facet_header=True)
+        .line(x="t", y="v")
+        .to_spec()
+    )
+    assert grid["facet"] == {"row": "site", "header": True, "gap": {"row": 2.0, "column": 3.0}}
+    with pytest.raises(hg.ChartError, match="^Chart facet_gap: spaces the panels of facet"):
+        hg.Chart(sites, facet_gap=1)
+    with pytest.raises(hg.ChartError, match="^Chart facet_gap: expected pixels of at least 0"):
+        hg.Chart(sites, facet="site", facet_gap=-1)
+    with pytest.raises(hg.ChartError, match="^Chart facet_header: expected True or False"):
+        hg.Chart(sites, facet="site", facet_header="no")  # type: ignore[arg-type]
 
 
 def test_facet_panels_can_have_y_scales_of_their_own():

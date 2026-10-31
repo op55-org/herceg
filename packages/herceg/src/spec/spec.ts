@@ -13,6 +13,7 @@ import type {
   ChannelSpec,
   ContinuitySpec,
   EncodingsSpec,
+  LabelLayoutSpec,
   LabelPlaceSpec,
   LabelSpec,
   LabelTextSpec,
@@ -136,8 +137,8 @@ export interface ChartSpec {
   /**
    * Whitespace between the chart's edges and everything it draws, in pixels:
    * the same on every side, or each side's own. Room guides need (labels
-   * reaching past a plot's ends) comes on top. Left out, the chart keeps a
-   * few pixels on each side, more where text tends to reach.
+   * reaching past a plot's ends) comes on top. Sides left out keep the
+   * automatic spacing: a few pixels, more where text tends to reach.
    */
   padding?: Insets;
   /**
@@ -286,15 +287,27 @@ export interface PanelSpec {
 /** A panel's own `interaction`: the chart's settings but `sync`. */
 export type PanelInteractionSpec = Omit<InteractionSpec, "sync">;
 
-export interface WrappedFacetSpec {
+export interface WrappedFacetSpec extends FacetLayoutSpec {
   field: Field;
   /** Panels per row; by default about as many columns as rows. */
   columns?: number;
 }
 
-export interface GridFacetSpec {
+export interface GridFacetSpec extends FacetLayoutSpec {
   row?: Field;
   column?: Field;
+}
+
+/** How a facet's panels are spaced: whether they have headers naming them, and the gaps between them. */
+export interface FacetLayoutSpec {
+  /** `false` draws no headers and keeps no room for them; panels are named by their headers by default. */
+  header?: boolean;
+  /**
+   * Pixels between neighboring panels beyond the room their axes' labels
+   * and headers take: one for both, or each its own. Spaced to their
+   * labels by default.
+   */
+  gap?: number | { row?: number; column?: number };
 }
 
 export type RendererName = "auto" | "svg" | "canvas";
@@ -1474,18 +1487,22 @@ interface RegionStyle extends AnnotationBase, RowItems {
     stroke?: RowChannelSpec<string>;
     opacity?: RowChannelSpec<number>;
   };
-  /** Text drawn in every region (in its top left corner by default), constant or each row's `field`. */
-  label?: string | LabelSpec;
+  /** Text drawn in every region (in its top left corner by default), constant or each row's `field`; it draws no leader. */
+  label?: string | (LabelSpec & { leader?: never });
 }
 
 /**
- * Text's label: its text (`LabelTextSpec`). Text at a place is drawn there;
- * text following a series (`from`) is placed as series' labels are
- * (`place`: outside the plot, keeping room or not, and its offset).
+ * Text's label: its text (`LabelTextSpec`), kept apart from others as its
+ * layout says (`LabelLayoutSpec`). Text at a place is drawn there, where
+ * "move" may move it around its point, and keeps apart from the labels of
+ * its `overlapGroup`; text following a series (`from`) is placed as
+ * series' labels are (`place`: outside the plot, keeping room or not, and
+ * its offset), and takes no group.
  */
-export type TextLabelSpec = LabelTextSpec & {
-  place?: Pick<LabelPlaceSpec, "outside" | "reserve" | "offset">;
-};
+export type TextLabelSpec = LabelTextSpec &
+  LabelLayoutSpec & {
+    place?: Pick<LabelPlaceSpec, "outside" | "reserve" | "offset">;
+  };
 
 /**
  * Text at a place (`at`, or `x` and `y`): constant `label` text, or each
@@ -1511,15 +1528,6 @@ export interface TextSpec extends AnnotationBase, RowItems {
    */
   from?: MarkAnchorSpec;
   label: string | TextLabelSpec;
-  /**
-   * Labels that would cover an earlier one of this mark: drawn anyway
-   * ("show", the default), left out ("hide"), or, where their place is taken
-   * or outside the plot, tried around their point and left out when nothing
-   * fits ("move").
-   */
-  overlap?: "show" | "hide" | "move";
-  /** The look of lines from moved labels back to their points. */
-  style?: Pick<MarkStyleSpec, "leader">;
 }
 
 /**

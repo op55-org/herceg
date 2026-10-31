@@ -4,6 +4,7 @@ import type { Schema, Table } from "../data/table.ts";
 import type { Formatter } from "../format/format.ts";
 import { formatNumber, timeTickLabels } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { PlacePanel } from "../layout/placer.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
@@ -736,6 +737,12 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * and keeps what each panel's labels took.
    */
   readonly roomPlaced?: boolean;
+  /**
+   * The panel placer of marks with labels placed among a panel's others
+   * (rule, region, and text marks; layout/placer.ts): the chart places
+   * each panel's labels with it once the panel's marks are drawn.
+   */
+  readonly placer?: PlacePanel;
   /**
    * Pixels the mark's labels outside the plot take beside it, left and
    * right: the chart keeps a track for them on each side, innermost, beside

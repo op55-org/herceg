@@ -18,6 +18,12 @@ export interface TextPaint {
   readonly opacity: number;
   /** Pixels from one line's baseline to the next. */
   readonly lineHeight: number;
+  /**
+   * The style's line height, a multiple of the size, which `lineHeight`
+   * rounds: labels' paints carry it, for parts of other sizes
+   * (marks/features/part-text.ts).
+   */
+  readonly lineRatio?: number | undefined;
   /** Undefined: the text's own natural alignment, along its lines and across them. */
   readonly align: "start" | "center" | "end" | undefined;
   readonly verticalAlign: "top" | "middle" | "bottom" | undefined;

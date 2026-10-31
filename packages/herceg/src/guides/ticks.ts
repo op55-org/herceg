@@ -4,7 +4,7 @@
 // never on pointer movement.
 
 import type { Formatter } from "../format/format.ts";
-import { numberPattern, timePattern } from "../format/patterns.ts";
+import { fiscalOf, intlOptions, numberPattern, timePattern } from "../format/patterns.ts";
 import type { AxisBreaks, AxisContext, AxisType } from "../model/axis.ts";
 import type { GuideKit } from "../model/guides.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -83,6 +83,14 @@ export function tickPlanner(
   };
 }
 
+/** Refuses a fiscal year on ticks that do not step through time (`every`); `path` names them. */
+export function stepsFiscal(ticks: Ticks | undefined, path: string): void {
+  if (typeof ticks === "object" && ticks.fiscal !== undefined && !("every" in ticks))
+    throw new Error(
+      `${path}.fiscal: fiscal years step ticks through months and years; give every, or drop fiscal`,
+    );
+}
+
 /** How many ticks `ticks` asks for, when it is a count. */
 export function countOf(ticks: Ticks | undefined): number | undefined {
   return typeof ticks === "number" ? ticks : ticks && "count" in ticks ? ticks.count : undefined;
@@ -123,18 +131,18 @@ export function writer(
       throw new Error(
         `${path}.number: a time axis writes times; give { time: "%b %d" } or Intl date options`,
       );
-    write = numberPattern(kit, format.number, locale, `${path}.number`);
+    write = numberPattern(kit, format, locale, path);
   } else if ("time" in format) {
     if (type !== "time")
       throw new Error(
         `${path}.time: a ${type} axis writes numbers; give { number: ",.2f" } or Intl number options`,
       );
-    write = timePattern(kit, format.time, zone, locale, `${path}.time`);
+    write = timePattern(kit, format, zone, locale, path);
   } else
     write =
       type === "time"
-        ? kit.timeFormatter(format as Intl.DateTimeFormatOptions, zone, locale)
-        : kit.numberFormatter(format as Intl.NumberFormatOptions, locale);
+        ? kit.timeFormatter(intlOptions(format, path), zone, locale)
+        : kit.numberFormatter(intlOptions(format, path), locale);
   return { callback: false, ticks: (values) => values.map(write), value: write };
 }
 
@@ -184,6 +192,7 @@ function generator(
   scale: string,
   path: string,
 ): Generate | undefined {
+  stepsFiscal(ticks, path);
   if (ticks === undefined || typeof ticks === "number" || "count" in ticks) return undefined;
   const { type, zone, locale, breaks } = context;
   const kind = type === "band" ? "linear" : type;
@@ -210,6 +219,11 @@ function generator(
     return (ticker) => within(given, ticker, breaks);
   }
   const { every, anchor } = ticks;
+  const fiscal = "fiscal" in ticks ? ticks.fiscal : undefined;
+  if (fiscal && (typeof every === "number" || type !== "time"))
+    throw new Error(
+      `${path}.fiscal: fiscal years step through time; a ${kind} axis steps by numbers; drop fiscal`,
+    );
   if (type === "log")
     throw new Error(`${path}.every: a log axis has no even steps; give ticks a count or values`);
   if (typeof every === "number") {
@@ -223,19 +237,25 @@ function generator(
     throw new Error(
       `${path}.every: ${JSON.stringify(every)} steps through time; a ${type} axis steps by a number`,
     );
-  if (typeof every === "object" && "milliseconds" in every)
+  const notFiscal = `${path}.fiscal: fiscal years start months and years; step by months or years, or drop fiscal`;
+  if (typeof every === "object" && "milliseconds" in every) {
+    if (fiscal) throw new Error(notFiscal);
     return stepper(positive(every.milliseconds, `${path}.every.milliseconds`), anchor ?? 0, breaks);
+  }
   if (anchor !== undefined)
     throw new Error(
       `${path}.anchor: calendar steps start at calendar boundaries in the time zone; drop anchor, or step by { milliseconds }`,
     );
   const interval = calendarInterval(every, `${path}.every`);
+  if (fiscal && interval.unit !== "month" && interval.unit !== "year") throw new Error(notFiscal);
+  // The month years start in: January, or the fiscal year's first.
+  const [shift] = fiscal ? fiscalOf(fiscal, `${path}.fiscal`) : [0];
   const generate: Generate = (ticker) => {
     const [lo, hi] = ascending(ticker);
     // Zoomed far out, a coarser step of the same boundaries keeps ticks apart.
     const gap = (hi - lo) / Math.max(1, pixelsOf(ticker) / DENSEST);
     const [unit, step] = sparser(interval.unit, interval.step, gap);
-    return dropHidden(calendarTicks(kit, lo, hi, unit, step, zone), breaks);
+    return dropHidden(calendarTicks(kit, lo, hi, unit, step, zone, shift), breaks);
   };
   generate.interval = interval;
   return generate;
@@ -347,6 +367,7 @@ function sparser(unit: TimeUnit, step: number, gap: number): [TimeUnit, number] 
  * same places whatever the domain: steps within the larger unit (seconds
  * within the minute, hours within the day, days within the month, months
  * within the year), weeks counted from a Monday, and years from year 0.
+ * Years start `shift` months after January (a fiscal year's first month).
  */
 function calendarTicks(
   kit: GuideKit,
@@ -355,9 +376,10 @@ function calendarTicks(
   unit: TimeUnit,
   step: number,
   zone: string,
+  shift: number,
 ): number[] {
   // Hours step through absolute time, keeping both of a repeated hour.
-  if (step === 1 || unit === "hour")
+  if ((step === 1 && !(unit === "year" && shift > 0)) || unit === "hour")
     return kit.timeTicks(lo, hi, { unit, step, duration: UNIT_MS[unit] * step }, zone);
   if (unit === "millisecond" || unit === "second" || unit === "minute")
     return withinHours(kit, lo, hi, unit, step, zone);
@@ -373,9 +395,14 @@ function calendarTicks(
     for (let w = MONDAY + Math.floor((first - MONDAY) / size) * size; w <= last; w += size) add(w);
     return out;
   }
+  // The year a wall time's (fiscal) year starts in.
+  const yearOf = (wall: number) => {
+    const date = new Date(wall);
+    return date.getUTCFullYear() - (date.getUTCMonth() < shift ? 1 : 0);
+  };
   if (unit === "year") {
-    const year = (y: number) => new Date(0).setUTCFullYear(y, 0, 1);
-    const from = new Date(first).getUTCFullYear();
+    const year = (y: number) => new Date(0).setUTCFullYear(y, shift, 1);
+    const from = yearOf(first);
     for (let y = Math.floor(from / step) * step; year(y) <= last; y += step) add(year(y));
     return out;
   }
@@ -384,7 +411,7 @@ function calendarTicks(
   const startOf = (wall: number, by: number) => {
     const date = new Date(wall);
     if (parent === "month") return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + by, 1);
-    if (parent === "year") return new Date(0).setUTCFullYear(date.getUTCFullYear() + by, 0, 1);
+    if (parent === "year") return new Date(0).setUTCFullYear(yearOf(wall) + by, shift, 1);
     const size = UNIT_MS[parent];
     return (Math.floor(wall / size) + by) * size;
   };
@@ -393,7 +420,7 @@ function calendarTicks(
     for (let k = 0; ; k += step) {
       const wall =
         unit === "month"
-          ? Date.UTC(new Date(start).getUTCFullYear(), k, 1)
+          ? Date.UTC(new Date(start).getUTCFullYear(), shift + k, 1)
           : start + k * UNIT_MS[unit];
       if (wall >= end) break;
       add(wall);

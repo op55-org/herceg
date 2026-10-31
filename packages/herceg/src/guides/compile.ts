@@ -4,6 +4,7 @@
 // legends and colorbars. A live chart loads it before drawing such a
 // configuration; static output imports it.
 
+import { intlOptions } from "../format/patterns.ts";
 import type { AxisContext } from "../model/axis.ts";
 import type { CompiledGuides, GuideCompiler, GuideKit } from "../model/guides.ts";
 import type { ChartConfig } from "../model/model.ts";
@@ -14,7 +15,7 @@ import type { Format } from "./options.ts";
 import { axisPadding } from "./padding.ts";
 import { type PaintPlan, planPanels } from "./paint.ts";
 import { ownScales } from "./positions.ts";
-import { countOf, tickPlanner, writer } from "./ticks.ts";
+import { countOf, stepsFiscal, tickPlanner, writer } from "./ticks.ts";
 
 /**
  * Checks what scales, axes, and guides ask, as the validator checks a
@@ -203,10 +204,17 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
         message: `chart ${where}: a category axis places its categories in bands, with room of their own; drop padding`,
       });
     const padding = given !== undefined ? axisPadding(kit, context, given, where) : undefined;
-    if (!plannedTicks && !plannedFormat && !plannedValue && !policy && ticks === count)
-      return padding ? { ...context, padding } : context;
     const at = (value: unknown, fallback: string) =>
       `chart ${paths.get(value as object) ?? `${scale}.${fallback}`}`;
+    // A count and Intl options, which the model plans and writes, have no fiscal year either.
+    stepsFiscal(ticks, at(ticks, "ticks"));
+    for (const [shown, name] of [
+      [format, "format"],
+      [tooltipFormat, "tooltipFormat"],
+    ] as const)
+      if (shown && !planned(shown)) intlOptions(shown as object, at(shown, name));
+    if (!plannedTicks && !plannedFormat && !plannedValue && !policy && ticks === count)
+      return padding ? { ...context, padding } : context;
     // Category axes label every category that fits, and write them as they are.
     if (context.type === "band" && (plannedTicks || plannedFormat))
       throw new Error(

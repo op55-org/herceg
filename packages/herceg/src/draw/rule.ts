@@ -1,4 +1,4 @@
-import { shiftInside } from "../layout/place.ts";
+import { shiftInside } from "../layout/placer.ts";
 import type { Drawing, Rect, RuleGeometry } from "../scene/scene.ts";
 import { cssFont } from "../style/style.ts";
 import { dashAttribute, escapeXml, n } from "./markup.ts";

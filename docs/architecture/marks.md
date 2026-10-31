@@ -517,11 +517,21 @@ loader binds a table only to annotations that read one.
   `clip` cuts them instead of leaving them out. Plain rule labels are placed by every renderer from the same plot
   (`ruleLabel`, `RuleGeometry.labelIn`), so SVG, Canvas, PNG, and PDF agree.
   `scale/css-color.ts` parses colors without DOM APIs for static output.
-- **Placement.** `shiftInside` (`layout/place.ts`) mirrors a rule's label
-  across the rule, then moves any label in. `overlap` places labels
-  greedily in row order, filing boxes in a grid (`layout/label-boxes.ts`)
-  so each checks its neighbors; moved labels try eight spots, then farther
-  ones with a leader line.
+- **Placement.** `shiftInside` (`layout/placer.ts`) mirrors a rule's
+  label across the rule, then moves any label in. Labels with an
+  `overlap` rule or an `overlapGroup` are placed by the panel placer
+  (`placePanel`, see [layout](layout.md)), by priority, then mark and row
+  order; moved labels try their kind's near places, then farther ones,
+  with a leader line when asked.
+- **Styled parts.** A label whose `content` parts carry styles is written
+  by the feature compiler (`marks/features/part-text.ts`, lazy) as a
+  `PartText`: each part measured in its own font, lines as tall as their
+  tallest part. Marks place it as a block (its box, padded or bare) and
+  lower it to the text items painters already draw, one per part, with
+  every part's halo first (a halo-only item, filled `transparent`) so no
+  halo covers a neighbor. Painters are unchanged; PDF draws a halo even
+  for text of no fill. Rules, text, regions, bars, and series labels take
+  it; tick labels do not.
 - **Description.** Annotations have no series. The text alternative lists
   them (up to ten items each) after the series summaries, per panel in
   charts with panels (up to twenty panels).

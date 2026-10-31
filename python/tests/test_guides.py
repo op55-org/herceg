@@ -151,6 +151,77 @@ def test_ticks_and_formats_refuse_what_they_cannot_say_in_python_names():
         hg.Chart(WEEK, y=hg.AxisOptions(format=lambda v: str(v))).line(x="t", y="v").to_spec()
 
 
+@pytest.mark.contract("format.fiscal.python")
+def test_fiscal_years_write_quarters_and_step_ticks_in_both_namings():
+    days = [dt.datetime(2025, 1, 1) + dt.timedelta(days=i) for i in range(730)]
+    data = {"t": days, "v": list(range(730))}
+
+    def labels(name: str | None) -> list[str]:
+        fiscal = hg.Fiscal(start=7, name=name)  # type: ignore[arg-type]
+        chart = hg.Chart(
+            data,
+            width=1200,
+            x=hg.AxisOptions(
+                ticks=hg.Ticks(every="3 months", fiscal=fiscal),
+                format=hg.Format(time="FY%y Q%q", fiscal=fiscal),
+            ),
+        ).line(x="t", y="v")
+        root = ET.fromstring(chart.to_svg())
+        return [t.text or "" for t in root.iter("{http://www.w3.org/2000/svg}text")]
+
+    # July starts the year: named by the year it ends in, or by the one it starts in.
+    ends, starts = labels(None), labels("start")
+    assert ["FY25 Q3", "FY25 Q4", "FY26 Q1", "FY26 Q2"] == [t for t in ends if "FY" in t][:4]
+    assert ["FY24 Q3", "FY24 Q4", "FY25 Q1", "FY25 Q2"] == [t for t in starts if "FY" in t][:4]
+    fiscal = hg.Fiscal(start=7, name="start")
+    assert hg.Format(time="%Y", fiscal=fiscal)._spec() == {
+        "time": "%Y",
+        "fiscal": {"start": 7, "name": "start"},
+    }
+    assert hg.Ticks(every="year", fiscal={"start": 2})._spec() == {
+        "every": {"unit": "year"},
+        "fiscal": {"start": 2},
+    }
+
+
+def test_fiscal_years_refuse_what_they_cannot_say():
+    with pytest.raises(
+        hg.ChartError, match="^Fiscal start: expected a month from 1 to 12; received 13$"
+    ):
+        hg.Fiscal(start=13)
+    with pytest.raises(hg.ChartError, match="^Format fiscal: numbers have no fiscal year"):
+        hg.Format(number=".1f", fiscal=hg.Fiscal(start=7))
+    with pytest.raises(hg.ChartError, match="^Ticks fiscal: fiscal years start months and years"):
+        hg.Ticks(every="6 hours", fiscal=hg.Fiscal(start=7))
+    with pytest.raises(hg.ChartError, match="^Ticks fiscal: fiscal years step through time"):
+        hg.Ticks(every=5, fiscal=hg.Fiscal(start=7))
+
+
+@pytest.mark.contract("axis.room.python")
+def test_axis_room_lines_plots_up_and_shortens_labels():
+    def plot_x(values: list[float], room: object = 28) -> float:
+        chart = hg.Chart({"x": [0, 1, 2], "v": values}, guides=[hg.axis("y", room=room)]).line(
+            x="x", y="v"
+        )
+        root = ET.fromstring(chart.to_svg())
+        rect = root.find(".//{http://www.w3.org/2000/svg}clipPath/{http://www.w3.org/2000/svg}rect")
+        assert rect is not None
+        return float(rect.attrib["x"])
+
+    assert plot_x([1, 5, 9]) == plot_x([100000, 500000, 900000])
+    assert plot_x([1, 5, 9], room=(60, 80)) > plot_x([1, 5, 9]) + 25
+    chart = hg.Chart(
+        {"x": [0, 1, 2], "v": [100000, 500000, 900000]}, guides=[hg.axis("y", room=28)]
+    )
+    assert "…</text>" in chart.line(x="x", y="v").to_svg()
+    assert hg.axis("y", room=(20, 60))._spec()["room"] == {"min": 20, "max": 60}
+    with pytest.raises(hg.ChartError, match="^axis room: x axes take the depth"):
+        hg.axis("x", room=20)
+    for room in [(30, 20), float("inf"), (0, float("inf")), float("nan")]:
+        with pytest.raises(hg.ChartError, match="^axis room: expected finite pixels of at least 0"):
+            hg.axis("y", room=room)
+
+
 def test_scales_and_guides_write_their_specs():
     chart = (
         hg.Chart(
@@ -160,7 +231,7 @@ def test_scales_and_guides_write_their_specs():
                 hg.axis(
                     "x",
                     tick=hg.Tick(direction="in", length=6),
-                    labels=hg.TickLabels(rotation=[0, -45], collision="hide"),
+                    labels=hg.TickLabels(rotation=[0, -45], overlap="hide"),
                     layers=[
                         hg.TickLayer(
                             id="day",
@@ -185,7 +256,7 @@ def test_scales_and_guides_write_their_specs():
         "type": "axis",
         "scale": "x",
         "tick": {"direction": "in", "length": 6},
-        "labels": {"rotation": {"candidates": [0, -45]}, "collision": "hide"},
+        "labels": {"rotation": {"candidates": [0, -45]}, "overlap": "hide"},
         "layers": [
             {
                 "id": "day",

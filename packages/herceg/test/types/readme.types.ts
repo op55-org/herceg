@@ -278,8 +278,7 @@ text({ at: { x: { fraction: 0.03 }, y: { data: 1.7 } }, label: "Note" });
 text(deploys, {
   x: "at",
   y: { field: "build", offset: -10 },
-  label: { field: "build", format: { number: ".1f" }, style: { fontWeight: 600 } },
-  overlap: "move",
+  label: { field: "build", format: { number: ".1f" }, style: { fontWeight: 600 }, overlap: "move" },
 });
 
 // Export

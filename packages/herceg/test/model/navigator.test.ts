@@ -962,8 +962,9 @@ describe("a navigator's strip under panels", () => {
     const data = prices(20);
     const marks = ["a", "b", "c", "d"].map((panel) => line(data, { x: "t", y: "close", panel }));
     const layout = panels(["a", "b", "c", "d"].map((id) => ({ id })));
-    // Each row needs 32 pixels: 4 rows and a 40-pixel strip would not fit.
-    for (const height of [225, 250, 260, 300]) {
+    // Each row needs 18 pixels, for two of its y labels and their gap: 4
+    // rows and a 40-pixel strip would not fit.
+    for (const height of [170, 180, 200, 260]) {
       const { model, scene } = build(
         { marks, panels: layout, navigator: rangeNavigator() },
         600,
@@ -975,7 +976,7 @@ describe("a navigator's strip under panels", () => {
         height,
       ).model.panels();
       const rows = model.panels().map(({ plot }) => plot.height);
-      expect(Math.min(...rows)).toBeGreaterThanOrEqual(32);
+      expect(Math.min(...rows)).toBeGreaterThanOrEqual(18);
       const strip = scene.panels.find(({ key }) => key === NAVIGATOR_PANEL);
       if (strip) {
         expect(strip.plot.height).toBeGreaterThanOrEqual(16);
@@ -987,9 +988,9 @@ describe("a navigator's strip under panels", () => {
       build({ marks, panels: layout, navigator: rangeNavigator() }, 600, height).scene.panels.find(
         ({ key }) => key === NAVIGATOR_PANEL,
       )?.plot.height;
-    expect(strip(225)).toBeUndefined();
-    expect(strip(230)).toBe(18);
-    expect(strip(260)).toBe(40);
+    expect(strip(170)).toBeUndefined();
+    expect(strip(180)).toBe(24);
+    expect(strip(200)).toBe(40);
   });
 
   it("leaves weighted rows what they need, to the pixel, and takes huge weights", () => {
@@ -998,7 +999,7 @@ describe("a navigator's strip under panels", () => {
       line(data, { x: "t", y: "close", panel: "a" }),
       line(data, { x: "t", y: "close", panel: "b" }),
     ];
-    const hidden = { x: { show: false }, y: { show: false }, legend: false } as const;
+    const hidden = { x: { show: false }, legend: false } as const;
     const weighted = (rowHeights: number[], height: number) =>
       build(
         {
@@ -1010,10 +1011,11 @@ describe("a navigator's strip under panels", () => {
         600,
         height,
       );
-    // The short row would be a rounding error under 20 pixels at the least height.
-    for (let height = 195; height <= 215; height++) {
+    // The short row would be a rounding error under the 18 pixels its y
+    // labels need at the least height.
+    for (let height = 170; height <= 215; height++) {
       const { model } = weighted([1, 6], height);
-      expect(Math.min(...model.panels().map(({ plot }) => plot.height))).toBeGreaterThanOrEqual(20);
+      expect(Math.min(...model.panels().map(({ plot }) => plot.height))).toBeGreaterThanOrEqual(18);
     }
     // Weights too large to add up are shares of the largest, as the rows' are.
     expect(stripOf(weighted([1e308, 1e308], 300).scene).plot.height).toBe(40);
