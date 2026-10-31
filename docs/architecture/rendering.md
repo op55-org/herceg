@@ -109,9 +109,11 @@ the keyboard, descriptions, and tooltips keep.
 - Rules, text, and labels have canvas painters, so a canvas paints the plan
   on one plane without a second backing store for annotations.
 
-**Picking takes the topmost target.** Hover and clicks visit marks in paint
-order and series in theirs; of equally near points, the one painted last
-wins (opaque points paint color by color; `Mark.paintsOver` says which
+**Picking takes the topmost target.** The picker
+([Interaction](interaction.md#picking)) visits the frame's records in
+paint order, the last painted first, and the inspection's `"nearest"`
+mode visits marks in paint order and series in theirs; of equally near
+points, the one painted last wins (opaque points paint color by color; `Mark.paintsOver` says which
 paints over the other). Targets within a thousandth of a pixel of the
 nearest count as equally near (`model/nearest.ts`), since points are placed
 in 32-bit floats and lines in doubles. With a selection highlighted, its

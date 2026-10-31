@@ -65,6 +65,7 @@ Most marks take these; where only some do, the row says which, and
 | `panel`, `facet` | Which subplot it draws in; `facet: "repeat"` draws all rows in every facet panel ([Layout](layout.md)). |
 | `clip` | What the drawing is cut to: `"plot"` (data's and regions' default), `"chart"`, or `false` for nothing, so markers at the plot's edge show whole. Rules and text have their own default ([Annotations](#annotations)). |
 | `zIndex` | Paint order ([Styling](styling.md#paint-order)). |
+| `pick: false`, `inspect: false` | Not an event target (clicks pass through to what is under it), and not read by inspection: tooltips, the crosshair, hover events ([Interaction](interaction.md#inspection)). |
 | `tooltip: { fields }` | More of the row in tooltips ([Interaction](interaction.md#tooltips)); marks that summarize rows (histograms, box plots, boxen, violins, contours) and networks refuse it. |
 
 ### Item keys

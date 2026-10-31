@@ -399,7 +399,7 @@ describe("stacks of series over streaming tables", () => {
 describe("bars stacked by a series field, hovered", () => {
   it("read the segment under the pointer, and nearest a segment's top outside them", () => {
     const { model } = sceneOf({
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       marks: [bar(requests(), { x: "minute", y: "count", series: "status", stack: true })],
     });
     const [x, y] = [model.xScale()!, model.yScale()!];

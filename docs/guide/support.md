@@ -69,7 +69,7 @@ the generated [capability matrix](../capabilities.md).
 - **Tooltip and keyboard.** Summaries on log axes have no stop for groups
   whose median is not positive; annotations are read in the chart's
   summary; custom marks through their series. Charts of items alone refuse
-  axis tooltip modes. [Accessibility](accessibility.md#keyboard)
+  the axis inspection modes. [Accessibility](accessibility.md#keyboard)
 - **Tooltip fields** show more of the row a point or item is; items
   summing several rows (pie slices of several rows, inner tree nodes) show
   none, and networks take none. [Tooltips](interaction.md#tooltips)

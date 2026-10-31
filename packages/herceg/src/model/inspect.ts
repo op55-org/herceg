@@ -2,6 +2,7 @@
 // tooltips, hover events, and the accessible live region. An Inspector holds
 // what one scene drew; the chart model makes one per scene.
 
+import { bisect } from "../data/bisect.ts";
 import type { Formatter } from "../format/format.ts";
 import { STILL } from "../marks/dodge.ts";
 import type { Frame, Hit, Mark, RowParts } from "../marks/mark.ts";
@@ -16,6 +17,7 @@ import {
   xAt,
 } from "../marks/series.ts";
 import type { FieldReader, InspectedField } from "../marks/tooltip-fields.ts";
+import type { InspectionMode, Snap } from "../spec/spec.ts";
 import { type Nearest, settle } from "./nearest.ts";
 
 /** One point of an inspection: a series' point, or a layout mark's item. */
@@ -53,7 +55,11 @@ export type Inspection = AxisInspection | ItemInspection;
 export interface AxisInspection {
   /** The axis the inspection follows: "y" in nearest-y mode, otherwise "x". */
   axis: "x" | "y";
-  /** Data value on that axis, snapped to the nearest data point. */
+  /**
+   * The value on that axis the crosshair stands at, as `inspection.snap`
+   * reads: the value snapped to, the pointer's ("each"), or the latest or
+   * earliest point read ("previous", "next").
+   */
   value: number;
   /** Pixel position of `value` on that axis. */
   position: number;
@@ -86,7 +92,7 @@ export interface ItemInspection {
 /** Points a nearest-x search steps over to leave a gap of points not drawn. */
 const GAP_WALK = 1024;
 
-export type TooltipMode = "nearest-x" | "nearest-y" | "nearest";
+export type { InspectionMode };
 
 /**
  * A mark and the series it resolved for a scene; for a mark that reads its
@@ -124,7 +130,14 @@ export interface DrawnScene {
   frame: Frame;
   /** The right y axis and the marks on it, when any are. */
   right?: (YAxisView & { marks: ReadonlySet<Mark> }) | undefined;
-  mode: TooltipMode;
+  mode: InspectionMode;
+  /** Which point of each series an inspection along an axis reads (see `Snap`). */
+  snap?: Snap | undefined;
+  /**
+   * How far from the pointer's value a point may be read: `{ px }` for
+   * "nearest", else in the axis' units (milliseconds on time axes).
+   */
+  within?: number | { px: number } | { milliseconds: number } | undefined;
   /** Series the user hid; they are never inspected. */
   hidden: ReadonlySet<string>;
   formatX: Formatter;
@@ -143,7 +156,9 @@ interface ReadableMark extends InspectedMark {
 export class Inspector {
   readonly marks: ReadableMark[];
   readonly #frame: Frame;
-  readonly mode: TooltipMode;
+  readonly mode: InspectionMode;
+  readonly #snap: Snap;
+  readonly #within: number;
   readonly #formatX: Formatter;
   readonly #formatValue: Formatter;
   readonly #fields: FieldReader | undefined;
@@ -179,6 +194,10 @@ export class Inspector {
   constructor(scene: DrawnScene) {
     this.#frame = scene.frame;
     this.mode = scene.mode;
+    // A number, or one in pixels or milliseconds.
+    const within = scene.within as { px?: number; milliseconds?: number } | undefined;
+    this.#snap = scene.snap ?? "shared";
+    this.#within = within?.px ?? within?.milliseconds ?? (within as number | undefined) ?? Infinity;
     this.#formatX = scene.formatX;
     this.#formatValue = scene.formatValue;
     this.#fields = scene.fields;
@@ -189,7 +208,9 @@ export class Inspector {
       const frame = entry.frame ?? axis.frame;
       const series = entry.mark.readSeries?.(entry.series, frame) ?? entry.series;
       const hidden = entry.frame?.hidden ?? scene.hidden;
-      const visible = series.filter((s) => !hidden.has(s.key) && s.length > 0);
+      // Marks that leave inspection (`inspect: false`) show nothing to read.
+      const shown = entry.mark.spec.inspect !== false;
+      const visible = series.filter((s) => shown && !hidden.has(s.key) && s.length > 0);
       const owner = { ...entry, series, axis, frame, visible };
       for (const s of series) this.#ownerOf.set(s, owner);
       return owner;
@@ -204,17 +225,24 @@ export class Inspector {
   }
 
   /**
-   * Finds the data under a pointer position for tooltips. "nearest-x" reports
-   * every visible series at the data x nearest the pointer, "nearest-y" the
-   * same along y; "nearest" reports the single closest point. Sorted series
-   * use binary search; marks with their own lookup (grid indexes, cell
-   * tables) use it.
+   * Finds the data under a pointer position for tooltips. "nearest-x" reads
+   * the visible series along x, each as `snap` says (the chart's
+   * inspection's by default), within its `within`; "nearest-y" the same
+   * along y; "nearest" reads the single closest point. Sorted series use
+   * binary search; marks with their own lookup (grid indexes, cell tables)
+   * use it.
    */
-  inspect(px: number, py: number, mode?: TooltipMode): AxisInspection | undefined {
+  inspect(
+    px: number,
+    py: number,
+    mode?: InspectionMode,
+    snap = this.#snap,
+  ): AxisInspection | undefined {
     const { plot } = this.#frame;
     if (px < plot.x || px > plot.x + plot.width || py < plot.y || py > plot.y + plot.height)
       return undefined;
     const requested = mode ?? this.mode;
+    const within = this.#within;
     // Cells are always found under the pointer, so with nothing placed along
     // an axis (heatmaps only) every mode inspects the nearest cell.
     const axis = requested === "nearest-y" ? "y" : "x";
@@ -227,7 +255,8 @@ export class Inspector {
     );
     if (requested === "nearest" || series.length === 0) {
       const hit = this.#nearest(px, py);
-      if (!hit) return undefined;
+      // Cells are found under the pointer, whatever `within` a mode along an axis asked for.
+      if (!hit || (requested === "nearest" && hit.distance > within)) return undefined;
       const point = this.#point(hit.series, hit.position, hit.at);
       if (!point) return undefined;
       // The heading names where the point is placed: its x, or its y
@@ -239,17 +268,20 @@ export class Inspector {
         : placeAt(hit.series, axis, rowOf(hit.series, hit.position));
       return this.#inspection(axis, value, [point], owner.axis, owner);
     }
-    // Snap to the data value nearest the pointer across every visible
-    // series, among points drawn in view. Values along y compare within one
-    // y axis: the left one, or the right one when only it has series.
+    // Values along y compare within one y axis: the left one, or the right
+    // one when only it has series.
     let yAxis = this.#left;
     if (axis === "y" && this.#right) {
       const left = series.filter((s) => this.#ownerOf.get(s)!.axis === this.#left);
       if (left.length > 0) series = left;
       else yAxis = this.#right;
     }
+    // Which side of the pointer's value each series reads: either, before, or after it.
+    const side = snap === "previous" ? -1 : snap === "next" ? 1 : 0;
+    const shared = snap === "shared";
+    const points: InspectedPoint[] = [];
     let closest = Infinity;
-    let snapped = Number.NaN;
+    let snapped = side < 0 ? -Infinity : Infinity;
     let by: ReadableMark | undefined;
     for (const s of series) {
       const owner = this.#ownerOf.get(s)!;
@@ -261,14 +293,55 @@ export class Inspector {
       const lo = Math.min(domain[0], domain[1]);
       const hi = Math.max(domain[0], domain[1]);
       const target = scale.invert(axis === "x" ? px : py);
-      const position =
-        mark.place && mark.pick
-          ? (mark.pick([s], px, py, frame)?.position ?? -1)
-          : axis === "x" && s.sorted
-            ? this.#drawnNear(s, this.#nearestWithin(s, target, lo, hi), target, lo, hi)
-            : this.#scanNearest(s, axis, target, lo, hi, scale);
+      let position = -1;
+      // Values as drawn: a panel's own categories are places of the chart's (`placeAt`).
+      const at = (k: number) => placeAt(s, axis, rowOf(s, k));
+      // Where its path ends: a series reads none inside a gap it leaves.
+      const ends = s.features?.pathEnds?.(s, frame);
+      // A mark's own lookup finds its nearest; a side is found along the axis.
+      if (mark.place && mark.pick && !side) {
+        position = mark.pick([s], px, py, frame)?.position ?? -1;
+      } else if (axis === "x" ? s.sorted || s.placesSorted : s.ySorted) {
+        // The drawn points either side of the pointer's value, in view or not.
+        const b = this.#drawnFrom(
+          s,
+          axis,
+          bisect(s.length, (k) => at(k) < target),
+          1,
+        );
+        // Before it: the last of the points at the value, if any are.
+        const a = this.#drawnFrom(s, axis, bisect(s.length, (k) => at(k) <= target) - 1, -1);
+        if (a >= 0 && b > a && ends?.(rowOf(s, a), 1)) continue;
+        // Of those, the ones in view (as the pointer's value is) are read:
+        // either side, the nearer on screen, the earlier on ties, the first
+        // of those at the value itself.
+        const l = a >= 0 && at(a) >= lo ? a : -1;
+        const r = b >= 0 && at(b) <= hi ? b : -1;
+        const far = (k: number) => Math.abs(scale.map(at(k)) - scale.map(target));
+        position = side
+          ? side < 0
+            ? l
+            : r
+          : l < 0 || r < 0
+            ? Math.max(l, r)
+            : far(r) && far(l) <= far(r)
+              ? l
+              : r;
+      } else if (!side) {
+        position = this.#scanNearest(s, axis, target, lo, hi, scale);
+        if (ends && position >= 0 && inGap(s, at, ends, target)) continue;
+      }
       if (position < 0) continue;
-      const value = placeAt(s, axis, rowOf(s, position));
+      const value = at(position);
+      // Within reach of the pointer's value, however it was found.
+      if (Math.abs(value - target) > within) continue;
+      if (!shared) {
+        const point = this.#point(s, position);
+        if (!point) continue;
+        points.push(point);
+        snapped = side < 0 ? Math.max(snapped, value) : Math.min(snapped, value);
+        continue;
+      }
       // Distances are compared on screen, where an axis with breaks shows no break.
       const distance = Math.abs(scale.map(value) - scale.map(target));
       if (distance < closest) {
@@ -276,6 +349,12 @@ export class Inspector {
         snapped = value;
         by = owner;
       }
+    }
+    if (!shared) {
+      if (points.length === 0) return undefined;
+      // Each series' own point: the crosshair stays at the pointer, or the latest or earliest read.
+      const at = side ? snapped : yAxis.frame[axis].invert(axis === "x" ? px : py);
+      return this.#inspection(axis, at, points, yAxis);
     }
     if (!Number.isFinite(snapped)) return undefined;
     const inspection = this.inspectAt(axis, snapped, series, yAxis);
@@ -286,62 +365,21 @@ export class Inspector {
   }
 
   /**
-   * In a sorted series, the position nearest `target` in x among those in
-   * [lo, hi] (and, on an axis with breaks, shown), or -1 when none is.
+   * In a series sorted along `axis`, the first drawn position from `k` on
+   * stepping `by` (1 or -1), jumping points a break of the x axis hides,
+   * looking at most GAP_WALK points; -1 for none. Inside a longer gap of
+   * points not drawn, no point is near enough.
    */
-  #nearestWithin(s: Series, target: number, lo: number, hi: number): number {
-    const breaks = this.#frame.x.breaks;
-    let after = lowerPosition(s, target);
-    let before = after - 1;
-    if (breaks) {
-      after = breaks.shownFrom(s.x, after, s.length, s.rows);
-      before = breaks.shownBefore(s.x, before, s.rows);
+  #drawnFrom(s: Series, axis: "x" | "y", k: number, by: 1 | -1): number {
+    const breaks = axis === "x" && this.#frame.x.breaks;
+    for (let walked = 0; walked < GAP_WALK; walked++, k += by) {
+      if (breaks && k >= 0 && k < s.length)
+        k =
+          by < 0 ? breaks.shownBefore(s.x, k, s.rows) : breaks.shownFrom(s.x, k, s.length, s.rows);
+      if (k < 0 || k >= s.length) return -1;
+      if (this.#drawn(s, rowOf(s, k))) return k;
     }
-    if (!this.#inView(s, before, lo, hi)) return this.#inView(s, after, lo, hi) ? after : -1;
-    return this.#inView(s, after, lo, hi) ? this.#closer(s, before, after, target) : before;
-  }
-
-  #inView(s: Series, position: number, lo: number, hi: number): boolean {
-    if (position < 0 || position >= s.length) return false;
-    const at = xAt(s, position);
-    return at >= lo && at <= hi;
-  }
-
-  /**
-   * In a sorted series, `position`, or when its point is not drawn (a
-   * missing value, a candle missing a price), the drawn point nearest
-   * `target` in x within [lo, hi], looking at most GAP_WALK points either
-   * way (points an axis break hides are jumped, however many); -1 for none.
-   * Inside a longer gap no point is near enough.
-   */
-  #drawnNear(s: Series, position: number, target: number, lo: number, hi: number): number {
-    if (position < 0 || this.#drawn(s, rowOf(s, position))) return position;
-    const breaks = this.#frame.x.breaks;
-    const usable = (k: number) => this.#inView(s, k, lo, hi) && this.#drawn(s, rowOf(s, k));
-    const step = (k: number, by: number) => {
-      const next = k + by;
-      if (!breaks || next < 0 || next >= s.length) return next;
-      return by < 0
-        ? breaks.shownBefore(s.x, next, s.rows)
-        : breaks.shownFrom(s.x, next, s.length, s.rows);
-    };
-    let left = step(position, -1);
-    for (let walked = 1; left >= 0 && walked < GAP_WALK && !usable(left); walked++)
-      left = step(left, -1);
-    let right = step(position, 1);
-    for (let walked = 1; right < s.length && walked < GAP_WALK && !usable(right); walked++)
-      right = step(right, 1);
-    const leftOK = usable(left);
-    const rightOK = usable(right);
-    if (!leftOK) return rightOK ? right : -1;
-    return rightOK ? this.#closer(s, left, right, target) : left;
-  }
-
-  /** Of positions `a` before `b` in a sorted series, the one nearer `target` on screen; `a` on ties. */
-  #closer(s: Series, a: number, b: number, target: number): number {
-    const x = this.#frame.x;
-    const at = x.map(target);
-    return Math.abs(at - x.map(xAt(s, a))) <= Math.abs(x.map(xAt(s, b)) - at) ? a : b;
+    return -1;
   }
 
   /**
@@ -598,4 +636,28 @@ export class Inspector {
       py,
     };
   }
+}
+
+/**
+ * Whether `target` is in a gap of a series drawn in its own order (as `at`
+ * places its positions): between points of it, at none, and crossed by no
+ * segment its path draws (`ends` says where it ends). Past its points, it
+ * reads its nearest end, as sorted series do.
+ */
+function inGap(
+  s: Series,
+  at: (k: number) => number,
+  ends: (row: number, way: 1 | -1) => boolean,
+  target: number,
+): boolean {
+  let [below, above] = [false, false];
+  for (let k = 0; k < s.length; k++) {
+    const value = at(k);
+    if (value === target) return false;
+    if (k + 1 < s.length && !ends(rowOf(s, k), 1) && (value - target) * (at(k + 1) - target) < 0)
+      return false;
+    below ||= value < target;
+    above ||= value > target;
+  }
+  return below && above;
 }

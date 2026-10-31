@@ -22,6 +22,7 @@ import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { rampsOf } from "../helpers/guides.ts";
 import { cellOf } from "../helpers/keyboard.ts";
+import { withPicker } from "../helpers/picker.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const GRAY = ["#000000", "#ffffff"];
@@ -825,7 +826,9 @@ describe("heatmap cells between edges", () => {
     });
     const [px, py] = [model.xScale()!.map(0.5), model.yScale()!.map(0)];
     expect(model.inspect(px, py)!.points[0]!.value).toBe(1);
-    expect(Array.from(clickedRows(model, new Set([edges as never]), px, py)!.rows)).toEqual([0]);
+    expect(
+      Array.from(clickedRows(withPicker(model), new Set([edges as never]), px, py)!.rows),
+    ).toEqual([0]);
     expect([rampsOf(scene)[0]!.low.text, rampsOf(scene)[0]!.high.text]).toEqual(["1", "3"]);
     // A row of no category has no band, so it adds to no sum either.
     const named = table({ x: ["a", null, "c"], y: ["b", "b", "b"], v: [1, 100, 3] });

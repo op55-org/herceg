@@ -1,3 +1,4 @@
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { time } from "../../src/data/column.ts";
 import { col } from "../../src/data/expr.ts";
@@ -584,8 +585,8 @@ describe("events and brushing", () => {
     await frame();
     press(chart.root, "pointermove", x.map(2), 150);
     await frame();
-    // The second move inspects the same point, so it reports nothing new.
-    expect(hovers).toEqual([1, 2]);
+    // Each move is reported, with where the pointer is: the second reads the same point.
+    expect(hovers).toEqual([1, 1, 2]);
     expect(chart.root.querySelector("svg line")!.getAttribute("visibility")).toBe("hidden");
     press(chart.root, "pointerdown", x.map(2), 150);
     press(chart.root, "pointerup", x.map(2), 150);

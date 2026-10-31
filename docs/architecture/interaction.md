@@ -5,6 +5,7 @@ themselves to applications and assistive technology. For what users can
 do, see the [Interaction guide](../guide/interaction.md).
 
 - [Inspection](#inspection)
+- [Picking](#picking)
 - [The interaction controller](#the-interaction-controller)
 - [Bindings](#bindings)
 - [Views](#views)
@@ -31,6 +32,20 @@ the model's `inspect()`.
 
 - Marks only choose the default mode: `nearest-x` when every mark is drawn
   along x, `nearest-y` when every mark is drawn along y, else `nearest`.
+- **Policy** (`Inspector` in `model/inspect.ts`, from the chart's
+  `inspection`). Along an axis, `snap` says which point each series reads:
+  `shared` finds the value nearest the pointer that any series has and
+  reads every series there (`inspectAt`); `each`, `previous`, and `next`
+  read each series' own nearest point, last at or before, or first at or
+  after, by the same binary search, and the crosshair stands at the
+  pointer, the latest, or the earliest read. `within` narrows each search
+  to the pointer's value plus or minus it (pixels for `nearest`). A sorted
+  series reads nothing between two drawn points its path ends between
+  (`SeriesFeatures.pathEnds`: continuity gaps, `where`); unsorted series
+  are scanned, and left out by `previous` and `next`. Marks with
+  `inspect: false` show no series to read.
+- `inspection: false` is the controller's: the pointer reads nothing, while
+  the model's inspector stays, so the keyboard reads as before.
 - Heatmaps and 2D histograms always report the cell under the pointer, and
   contours the band or line there; overlapping cells report the mark
   drawn last.
@@ -43,6 +58,64 @@ the model's `inspect()`.
   values are each reachable. Other series are read at the first point each
   draws at the cursor's x, except where a mark pairs rows of its series
   (`Mark.alongside`, as stacked areas do).
+
+## Picking
+
+What input is on (an event's `target`, `clickedRows`, the keyboard
+cursor's target) is found by one picker, `model/pick.ts`, which tests what
+the frame on screen drew (the `DrawnMark` records of `marks/drawn.ts`),
+never geometry made again from current data.
+
+- **Order and reach.** Panels from the topmost (insets over their parent),
+  marks by `zIndex` then as listed, each geometry as painted, the last
+  painted first; the first within reach wins: containment for rectangles,
+  areas, and text (an area's fill as drawn: its closed outline by nonzero
+  winding across the axis it runs along, curves on the curve, the outline
+  itself inside); a point's edge, a stroke's half
+  width (an outlined area's upper edge too), or a rule's line plus the
+  query's `slop` (4 px, 8 px for touch; a press resolved later reaches as
+  its own pointer did). Points are found through their mark's index; of
+  points as near, the highlighted, then the later. Nothing outside a
+  geometry's or lookup mark's clip is picked, and a stroke is measured to
+  what the clip shows of it (its segments cut to the clip widened by half
+  its width); strokes of no width are not reached, though a rule's label
+  is (`ruleDrawing.labelBox`). A query may name a
+  series (a keyboard cursor's), and then reaches only that series' items.
+  Marks with `pick: false` are passed over.
+- **Paths to rows.** A line's or area's hit segment is resolved in its
+  logical series (`drawn-parts.ts` builds the trace part): for sorted
+  series, the eligible observation nearest the pointer along the axis
+  among those inside the segment's span and the two bracketing it, in the
+  run the segment draws (on a panel's own categories, by their places);
+  for unsorted lines and areas, the path point's own position, which `drawn-parts.ts` finds by walking the series as it was
+  traced (rows the trace cannot draw end a run, rows a break hides are
+  left out, steps add their corners) when first asked.
+- **Lookups.** Marks whose geometry says too little (candlesticks,
+  distributions, heatmaps, 2D histograms, contours, error bars, rugs) pick
+  their own items (`Mark.pickItem`), through the lookups the picker hands
+  them in the query (`marks/lookups.ts`), so their picking code loads with
+  the picker rather than with every chart. Layout marks pick through
+  `LayoutResult.itemAt`. Custom marks, whose drawings name no items, pick
+  their series' nearest point within 3 px plus the slop.
+- **Loading.** The picker is a chunk of its own, loaded by the controller
+  once a `hover`, `click`, or `contextMenu` listener is added or a row
+  selection taking clicks needs it; until it loads, input that needs it
+  waits, and is resolved, in order, once it is here (each Enter on what
+  the keyboard cursor was on when it was pressed: a row by its identity
+  in the table its mark reads, an aggregate or cell by its place,
+  categories by name; nothing for one gone since). Once one chart on a page has
+  loaded it, later charts take it at once. What it reads series with
+  comes from the chart in a kit (`PickKit`), so the chunk shares no
+  module with a chart's first chunk.
+- **Input resolution.** A record is current while the tables and views it
+  read keep their versions and the chart's options and marks are
+  unchanged. Clicks and context menus arriving while it is not wait; the
+  chart resolves them in `#finishFrame` right after the next frame draws
+  (`Interaction.resolve`), capturing the payload before any listener runs,
+  and the controller emits them after drawing. A target's `row` resolves
+  the row picked when read. Each input event keeps the panels drawn as it
+  was captured, so writing it as JSON later (`web/events.ts`) reads the
+  axes it acted on.
 
 ## The interaction controller
 
@@ -210,9 +283,10 @@ the view, and the selection, each on one of the chart's scales.
 - **What the pointer shares** is the value its crosshair is drawn at (a
   line's nearest point, a cell), so peers show what its readout shows.
   The inspection is read once per scene and place (`Interaction.#read`).
-- **Snapping** of shown cursors (`model/snap.ts`): `previous` and `next`
-  binary search each sorted series for its last point at or before (first
-  at or after) the value, skipping undrawn and break-hidden points.
+- **Snapping** of shown cursors: a received cursor is read by the
+  inspector's policy (see [Inspection](#inspection)) with the channel's
+  `snap`, by default the chart's own. Once drawn, it is reported as a
+  `hover` with cause `"sync"` (or `"api"` for `showCursor`).
 - **Across panels** (`sync.panels`, `#across`), the cursor shows at the
   hovered x in panels sharing the x scale, and with `panels` on, in panels
   with their own.
@@ -317,7 +391,7 @@ are never selected by lassos, clicks, or keys.
 | --- | --- |
 | Range brush | Per table, the disjunction over marks in its panels of each mark's condition: its places along the brushed axes in range (category ranges as label lists), joined with a series field's shown series, a row view's filter, and the facet panels covered. Stacks brushed along values select their drawn tops as rows. |
 | Lasso | Each row's anchor tested against the outline in pixels, after its bounding box (bars through `BarMark.placement`). |
-| Click | The topmost mark's point under the pointer: a bar, bin, box, candle (`CandlestickMark.pick`), or cell at distance 0, else the nearest anchor within the mark's reach. Summarized points give their rows through `Mark.summarized`. |
+| Click | The picker's topmost item under the pointer among marks of bound tables ([Picking](#picking)): its row, or a summarized point's rows through `Mark.summarized`. |
 | Layout items | The mark's own `rowsOf` (a slice's counted rows, a subtree's rows, a link's rows) and `lassoed`. An item standing for no bound row changes nothing. |
 
 Results are computed for every table before any channel changes.
@@ -416,11 +490,13 @@ So a change at revision *r* is on screen once a `render` of *r* or later
 arrives; `chart.drawnRevision` reads the revision on screen (undefined
 until a frame draws). The adapters tell their `render` handlers of the
 first frame, drawn as the chart is created before they listen, with that
-revision, and of a first frame still waiting for code when it draws. `hover` and `click` carry an `InputEvent` envelope: the
-inspection, the input's cause (`"pointer"`, `"keyboard"`, `"sync"`, or
-`"api"` for `showCursor`), and the revision of the frame the input acted
-on, which may be older than `chart.revision` while a change waits for its
-frame; a hover the next frame reads again (the pointer resting while the
+revision, and of a first frame still waiting for code when it draws.
+`hover`, `click`, and `contextMenu` carry an `InputEvent`: the pointer
+(its panel, whether in the plot, and its values and categories on the
+panel's axes), the target picked, the inspection, the input's cause
+(`"pointer"`, `"keyboard"`, `"sync"`, or `"api"` for `showCursor`), and
+the revision of the frame the input acted on, which may be older than
+`chart.revision` while a change waits for its frame; a hover the next frame reads again (the pointer resting while the
 data changes) carries that frame's. Gestures of layout controls pass their cause: a button of a legend, a
 toolbar, or breadcrumbs pressed from the keyboard clicks with no count and
 is `"keyboard"`, and a hover cleared with nothing to read (Escape, the

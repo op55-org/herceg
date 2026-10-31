@@ -84,6 +84,11 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
     "Animation": ("animation", lambda o: hg.Chart(DATA, animation=o).line(x="t", y="v"), {}),
     "Title": ("title", lambda o: hg.Chart(DATA, title=o).line(x="t", y="v"), {"text": "T"}),
     "Tooltip": ("tooltip", lambda o: hg.Chart(DATA, tooltip=o).line(x="t", y="v"), {}),
+    "InspectionOptions": (
+        "inspection",
+        lambda o: hg.Chart(DATA, inspection=o).line(x="t", y="v"),
+        {},
+    ),
     "Theme": ("theme", lambda o: hg.Chart(DATA, theme=o).line(x="t", y="v"), {}),
     "Tokens": (
         "theme.tokens",
@@ -310,6 +315,8 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
 READ = {"InspectedField", "InspectedPoint", "Inspection", "RowSelection", "Selection"}
 READ |= {"Viewport", "ViewEdge", "ViewportEvent", "ScaleInstance", "ScaleView"}
 READ |= {"SelectEvent", "SelectionOwner", "VisibilityState", "PanelVisibility"}
+READ |= {"InputEvent", "Pointer", "Box", "ItemTarget", "AxisLabelTarget"}
+READ |= {"LegendEntryTarget", "PlotTarget"}
 
 
 # Fields that replace what an object is given above, which are refused together.

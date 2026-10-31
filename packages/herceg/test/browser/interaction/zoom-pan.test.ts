@@ -2,6 +2,7 @@
 // wheel, a pinch, keys, a drag) and reset by a double click: an input acts
 // on the instances of the panel it is in, panels sharing them follow, and
 // the others stay.
+import "../interactive.ts";
 import { describe, expect, it } from "vitest";
 import { category } from "../../../src/data/column.ts";
 import { table } from "../../../src/data/table.ts";

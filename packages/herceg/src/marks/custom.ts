@@ -132,6 +132,10 @@ interface CustomBase {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /**
@@ -196,6 +200,10 @@ export interface CustomSpec {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** With the chart's `panels`, the id of the panel to draw in, or "*" for every panel. */
   panel?: string;
   /** The x field of the series. */
@@ -261,6 +269,8 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
         "panel",
         "clip",
         "zIndex",
+        "pick",
+        "inspect",
         "legend",
       ]),
     };

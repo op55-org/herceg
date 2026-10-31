@@ -30,13 +30,13 @@ from ._derive import Expr
 from ._errors import ChartError, shown
 from ._events import (
     DrillRoot,
-    Inspection,
+    InputEvent,
     ItemPositions,
     Selection,
     Viewport,
     checked,
     decode_drill_root,
-    decode_inspection,
+    decode_input_event,
     decode_item_positions,
     decode_selection,
     decode_viewport,
@@ -66,8 +66,9 @@ class ChartState:
     #: where panels have scales of their own; see ``panel_viewports``), or a
     #: map's or network's plane, in projected or layout units.
     viewport: Viewport | None = None
-    #: The data under a click, in the run the click started; None otherwise.
-    click: Inspection | None = None
+    #: What a click was on, and the data under it (``hg.InputEvent``), in
+    #: the run the click started; None otherwise.
+    click: InputEvent | None = None
     #: What the channel of the chart's row selection holds (see
     #: ``hg.SelectionBinding``): rows by position in the data, or a brush's
     #: condition; until the user selects, and once the data changes, the
@@ -321,7 +322,7 @@ def _state(
         panel_cameras=panel_cameras,
         selection=selection,
         viewport=viewport,
-        click=decode_inspection(result.get("click")),
+        click=_click(result.get("click")),
         row_selection=_rows(result.get("rows"), chart, epoch),
         drill_root=root,
         item_positions=moved,
@@ -404,3 +405,13 @@ def _script() -> str:
     # Streamlit reads a one-line string containing "/" as a file path; a
     # comment line keeps the bundle inline code whatever the minifier emits.
     return "// herceg chart component\n" + _render.asset("herceg-streamlit.js")
+
+
+def _click(payload: Any) -> InputEvent | None:
+    """A click as the component reports it; None for none, or one of another shape."""
+    if payload is None:
+        return None
+    try:
+        return decode_input_event(payload)
+    except (ValueError, ChartError):
+        return None

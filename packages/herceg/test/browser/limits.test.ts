@@ -1,5 +1,6 @@
 // View limits, edge events, sync channels, and the cursor API.
 
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { category, time } from "../../src/data/column.ts";
 import { table } from "../../src/data/table.ts";
@@ -533,12 +534,12 @@ describe("synced cursors", () => {
       element.style.height = "120px";
       return element;
     };
-    const snapped = (snap: "previous" | "next" | "nearest") =>
+    const snapped = (snap: "previous" | "next" | "shared") =>
       createChart(small(), {
         marks: [line(hourly, { x: "t", y: "v" })],
         interaction: { sync: { cursor: { group: "readings", snap } } },
       });
-    const [previous, next, nearest] = [snapped("previous"), snapped("next"), snapped("nearest")];
+    const [previous, next, nearest] = [snapped("previous"), snapped("next"), snapped("shared")];
     const heardOf = [previous, next, nearest].map((chart) => heard(chart, "hover"));
     by.showCursor({ x: start + 10 * hour + 37 * 60_000 });
     await frame();

@@ -228,7 +228,7 @@ describe("custom marks with series", () => {
       ["a", "20% on 1"],
       ["b", "50% on 1"],
     ]);
-    expect(model.tooltipMode()).toBe("nearest-x");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-x");
     // Without pointText, the text is the y value, as for lines.
     const plain = build({ marks: [lollipops([])] }).model;
     const at = plain.inspect(plain.xScale()!.map(2), plain.yScale()!.map(60), "nearest")!;

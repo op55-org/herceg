@@ -179,10 +179,13 @@ def test_ohlc_bars_and_crosshair_labels():
     )
     assert labeled["tooltip"] == {"axisLabels": True}
     both, _ = (
-        hg.Chart(PRICES, tooltip=hg.Tooltip(mode="nearest", axis_labels=True))
+        hg.Chart(
+            PRICES,
+            inspection=hg.InspectionOptions(mode="nearest"),
+            tooltip=hg.Tooltip(axis_labels=True),
+        )
         .line(x="day", y="c")
         .to_spec()
     )
-    assert both["tooltip"] == {"mode": "nearest", "axisLabels": True}
-    mode, _ = hg.Chart(PRICES, tooltip="nearest").line(x="day", y="c").to_spec()
-    assert mode["tooltip"] == {"mode": "nearest"}
+    assert both["inspection"] == {"mode": "nearest"}
+    assert both["tooltip"] == {"axisLabels": True}

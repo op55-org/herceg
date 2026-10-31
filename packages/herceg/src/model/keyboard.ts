@@ -13,17 +13,19 @@ import type { ChartModel } from "./model.ts";
  * so series inspected along an axis share a stop when they share their
  * positions along it (several fields of one table); every other shown
  * series, each placed off that axis (read alone), and each inspected
- * point by point or cell by cell, is a stop of its own.
+ * point by point or cell by cell, is a stop of its own, as is every
+ * series where the inspection reads one point (mode "nearest").
  */
 export function keyboardStops(
   inspector: Inspector | undefined,
   same: typeof samePositions,
 ): Series[] {
   const shared: { axis: "x" | "y"; series: Series }[] = [];
+  const alone = inspector?.mode === "nearest";
   return (inspector?.marks ?? []).flatMap(({ mark, visible: series }) =>
     series.filter((s) => {
       const axis = mark.tooltip;
-      if (axis !== "x" && axis !== "y") return true;
+      if (alone || (axis !== "x" && axis !== "y")) return true;
       const bound = mark.bound?.[axis];
       if (bound !== undefined && bound.kind !== "axis") return true;
       if (shared.some((p) => p.axis === axis && same(p.series, s, axis))) return false;
@@ -188,7 +190,11 @@ export function inspectPosition(
   // there (a zero on a log axis, say) leaves the other series' points.
   const scale = (off(anchor) ? owner.frame : inspector.frame)[axis];
   if (!Number.isFinite(scale.map(value)) || (scale.type === "band" && value < 0)) return undefined;
-  const along = series.filter((s) => ownerOf(s).mark.tooltip === axis && !off(s));
+  // Where the inspection reads one point (mode "nearest"), the cursor reads its series' alone.
+  const along =
+    inspector.mode === "nearest"
+      ? [anchor]
+      : series.filter((s) => ownerOf(s).mark.tooltip === axis && !off(s));
   const inspection = inspector.inspectAt(
     axis,
     value,

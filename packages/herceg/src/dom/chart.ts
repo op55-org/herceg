@@ -236,6 +236,8 @@ const HELD = [
   "lostpointercapture",
   "wheel",
   "dblclick",
+  "click",
+  "contextmenu",
   "keydown",
   "blur",
 ] as const;
@@ -802,7 +804,10 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   on<K extends keyof ChartEvents>(type: K, listener: ChartListener<K>): () => void {
-    return this.#events.on(type, listener);
+    const off = this.#events.on(type, listener);
+    // What input is on can be read from the first input listened to.
+    this.#controller?.needPicking();
+    return off;
   }
 
   showCursor(position: CursorPosition, options: CursorOptions = {}): void {
@@ -1496,6 +1501,8 @@ export class MountedChart implements Chart, ExportsScene {
     // A tree whose data or options lost the node it was drilled into shows an
     // ancestor: reported before listeners of the frame (hover) may drill again.
     const items = drawn ? this.#model.items?.takeFrame(revision, cause) : undefined;
+    // Input that waited for this frame picks what it drew, before listeners change it.
+    if (drawn) this.#controller?.resolve(revision);
     const scene = this.#scene;
     const report = () => {
       items?.();
@@ -2224,13 +2231,18 @@ export class MountedChart implements Chart, ExportsScene {
       const held = this.#held;
       if (this.#controller || !held) return;
       this.#loadController().catch(() => {});
-      // Over a subplot of settings of its own, the input is its.
+      // The plot it is over, of marks along axes or a layout mark's (for
+      // menus, and subplots of settings of their own, whose input it is).
+      const menu = event.type === "contextmenu";
       let key: string | undefined;
-      if (event instanceof MouseEvent && this.#options.panels?.list.some((p) => p.interaction)) {
+      if (
+        event instanceof MouseEvent &&
+        (menu || this.#options.panels?.list.some((p) => p.interaction))
+      ) {
         const box = this.root.getBoundingClientRect();
         const [x, y] = [event.clientX - box.left, event.clientY - box.top];
         key = this.#model
-          .panels()
+          .allPanels()
           .find(
             ({ key, plot }) =>
               x >= plot.x &&
@@ -2254,6 +2266,11 @@ export class MountedChart implements Chart, ExportsScene {
         // The keys the chart reads, and with zoom + and −, 0: not the page's.
         const zooms = zoom && ["+", "-", "=", "0"].includes(key);
         if ((NAVIGATION_KEYS.includes(key) && key !== "Enter") || zooms) event.preventDefault();
+      } else if (menu) {
+        // Unheard, a secondary press is the browser's, and not played;
+        // heard, it opens no browser menu over a plot.
+        if (!this.#events.has("contextMenu")) return;
+        if (key !== undefined) event.preventDefault();
       } else if (event.type === "pointerdown") {
         // Matching drags own their pointer and suppress native text selection.
         const pointer = event as PointerEvent;
@@ -2366,7 +2383,7 @@ export class MountedChart implements Chart, ExportsScene {
       revision: () => this.#content,
       drawnRevision: () => this.#shown,
       schedule: () => schedule(this.#scheduled),
-      report: (error) => this.#report(chartError(error, "load")),
+      report: (error, phase) => this.#report(chartError(error, phase)),
       invalidate: () => this.#invalidate(false),
       finishFrame: () => this.#finishFrame(false),
       stale: () => this.#panelsChanged,

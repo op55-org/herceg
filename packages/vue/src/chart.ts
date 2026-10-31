@@ -1,6 +1,7 @@
 import {
   type ChartError,
   type ChartEvents,
+  type ChartListener,
   type ChartMark,
   type ChartOptions,
   chartError,
@@ -32,6 +33,7 @@ import {
   Text,
   toRaw,
   type VNode,
+  watch,
 } from "vue";
 import { markBuilder, plain } from "./marks.ts";
 
@@ -60,6 +62,7 @@ const optionProps = {
   panels: Object as Option<"panels">,
   legend: { type: [Boolean, Object] as Option<"legend">, default: undefined },
   padding: [Number, Object] as Option<"padding">,
+  inspection: { type: [Boolean, Object] as Option<"inspection">, default: undefined },
   tooltip: { type: [Boolean, Object] as Option<"tooltip">, default: undefined },
   interaction: Object as Option<"interaction">,
   rowSelection: Object as Option<"rowSelection">,
@@ -83,9 +86,9 @@ const UNSET = Object.fromEntries(OPTION_KEYS.map((key) => [key, undefined]));
 
 /**
  * Chart events, emitted as Vue events (`@select="..."`). Vue does not tell a
- * component which listeners it has, so the chart listens for every event:
- * unlike in React, hover and click payloads are computed even when nobody
- * listens, which costs little next to drawing.
+ * component which listeners it has, so the chart listens for every one of
+ * these; input events are props instead (`onHover`, `onClick`,
+ * `onContextMenu`), since listening for them makes the chart load picking.
  */
 const emits = {
   /** The view changed (zoom, pan, reset, sync): x, y, and right y ranges, each null when not zoomed. */
@@ -94,10 +97,6 @@ const emits = {
   edge: (_: ChartEvents["edge"]) => true,
   /** The selection changed (`interaction.brush`): x and y ranges and a lasso's outline, null when cleared. */
   select: (_: ChartEvents["select"]) => true,
-  /** The data under the pointer or keyboard cursor changed, as for a tooltip of your own. */
-  hover: (_: ChartEvents["hover"]) => true,
-  /** The plot was clicked, with the data under the pointer (and with `rowSelection`, the rows it selected). */
-  click: (_: ChartEvents["click"]) => true,
   /** A channel `rowSelection` binds changed, by any chart or grid: what it holds now. */
   rowSelection: (_: ChartEvents["rowSelection"]) => true,
   /** A 3D chart's camera moved (dragged, zoomed, reset, keys, `setCamera`); once a frame at most. */
@@ -319,6 +318,25 @@ export const Chart = defineComponent({
      * values are not.
      */
     initial: Object as PropType<Hydration>,
+    /**
+     * What the pointer or keyboard cursor is on, or the data the inspection
+     * reads there, changed (`@hover`). Input events are props, not events, so
+     * that the chart knows whether they are listened to: only then does it
+     * load what reads what input is on.
+     */
+    onHover: Function as PropType<ChartListener<"hover">>,
+    /**
+     * A plot, item, axis label, or legend entry was clicked, or Enter pressed
+     * on the keyboard cursor: what it is on, the data the inspection reads
+     * there, and with `rowSelection`, the rows it selected (`@click`).
+     */
+    onClick: Function as PropType<ChartListener<"click">>,
+    /**
+     * A secondary press (a right click, a long press): where, and what it is
+     * on (`@context-menu`). Listened to, it also keeps the browser's own menu
+     * off the plots.
+     */
+    onContextMenu: Function as PropType<ChartListener<"contextMenu">>,
   },
   emits,
   slots: Object as SlotsType<{
@@ -420,6 +438,31 @@ export const Chart = defineComponent({
       emit("error", error);
     }
 
+    /**
+     * Listens for input of `type` while `listener()` gives a listener of it
+     * (`onHover`, `onClick`, `onContextMenu`); returns what starts or stops
+     * listening as the chart is made.
+     */
+    function listenWhile<K extends "hover" | "click" | "contextMenu">(
+      type: K,
+      listener: () => ChartListener<K> | undefined,
+    ): () => void {
+      let stop: (() => void) | undefined;
+      const listen = () => {
+        const on = listener() !== undefined && chart.value !== undefined;
+        if (on === (stop !== undefined)) return;
+        stop?.();
+        stop = on ? chart.value!.on(type, (event) => listener()?.(event)) : undefined;
+      };
+      watch(() => listener() !== undefined, listen);
+      return listen;
+    }
+    const listenToInput = [
+      listenWhile("hover", () => props.onHover),
+      listenWhile("click", () => props.onClick),
+      listenWhile("contextMenu", () => props.onContextMenu),
+    ];
+
     // Creates the chart, or brings it up to date with the last render.
     function sync() {
       if (failure) {
@@ -438,8 +481,6 @@ export const Chart = defineComponent({
         created.on("viewport", (event) => emit("viewport", event));
         created.on("edge", (event) => emit("edge", event));
         created.on("select", (event) => emit("select", event));
-        created.on("hover", (event) => emit("hover", event));
-        created.on("click", (event) => emit("click", event));
         created.on("rowSelection", (event) => emit("rowSelection", event));
         created.on("camera", (event) => emit("camera", event));
         created.on("drill", (event) => emit("drill", event));
@@ -447,6 +488,7 @@ export const Chart = defineComponent({
         created.on("visibility", (event) => emit("visibility", event));
         created.on("render", (event) => emit("render", event));
         chart.value = created;
+        for (const listen of listenToInput) listen();
         applied = next;
         // The first frame was drawn as the chart was created, before it had
         // listeners; one still waiting (for code it loads) reports itself.

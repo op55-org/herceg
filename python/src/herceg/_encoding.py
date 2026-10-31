@@ -401,24 +401,31 @@ class Duration:
         )
 
 
-def _gap_spec(value: Any) -> Any:
-    """A maximum gap: a number in the axis' units, or an elapsed time."""
-    if isinstance(value, _dt.timedelta):
-        value = Duration(milliseconds=value / _dt.timedelta(milliseconds=1))
-    elif isinstance(value, np.timedelta64):
-        if np.isnat(value):
-            raise ChartError("Continuity max_gap: expected a duration; received NaT, no duration")
-        milliseconds = duration_ms(value)
-        if milliseconds is None:
-            raise ChartError(
-                f"Continuity max_gap: {shown(value)} has no fixed length (months, years, or no "
-                "unit); give a fixed duration, or break_by the calendar unit"
-            )
-        value = Duration(milliseconds=milliseconds)
+def gap_spec(value: Any, role: str, *, positive: bool = True, other: str = "") -> Any:
+    """A distance along an axis: a number in its units, or an elapsed time
+    (positive, or with `positive` false at least 0); `other` is what else
+    to give for a duration of no fixed length."""
     if isinstance(value, Duration):
         return {"milliseconds": value._milliseconds()}
-    _number(value, "Continuity max_gap", positive=True)
-    return float(value)
+    if isinstance(value, _dt.timedelta):
+        milliseconds: float = value / _dt.timedelta(milliseconds=1)
+    elif isinstance(value, np.timedelta64):
+        if np.isnat(value):
+            raise ChartError(f"{role}: expected a duration; received NaT, no duration")
+        fixed = duration_ms(value)
+        if fixed is None:
+            raise ChartError(
+                f"{role}: {shown(value)} has no fixed length (months, years, or no "
+                f"unit); give a fixed duration{other}"
+            )
+        milliseconds = fixed
+    else:
+        _number(value, role, positive=positive)
+        return float(value)
+    if milliseconds < 0 or (positive and milliseconds == 0):
+        expected = "a positive duration" if positive else "a duration of at least 0"
+        raise ChartError(f"{role}: expected {expected}; received {shown(value)}")
+    return {"milliseconds": milliseconds}
 
 
 @refuses
@@ -443,8 +450,11 @@ class Continuity:
                 f"received {shown(self.defined)}"
             )
         if self.max_gap is not None:
-            _gap_spec(self.max_gap)
+            self._gap()
         self._break_spec()
+
+    def _gap(self) -> Any:
+        return gap_spec(self.max_gap, "Continuity max_gap", other=", or break_by the calendar unit")
 
     def _break_spec(self) -> Any:
         by = self.break_by
@@ -463,7 +473,7 @@ class Continuity:
     def _spec(self) -> dict[str, Any]:
         spec = {
             "defined": self.defined.to_json() if self.defined is not None else None,
-            "maxGap": _gap_spec(self.max_gap) if self.max_gap is not None else None,
+            "maxGap": self._gap() if self.max_gap is not None else None,
             "breakBy": self._break_spec(),
         }
         return {key: value for key, value in spec.items() if value is not None}

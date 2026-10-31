@@ -1,3 +1,4 @@
+import "./interactive.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";

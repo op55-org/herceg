@@ -9,7 +9,10 @@ from herceg.widget import ChartWidget
 data = {"t": [1.0, 2.0], "v": [3.0, 4.0]}
 
 hg.line(data, "t", "v", title="Latency", zoom="x", theme="dark")
-hg.scatter(data, "t", "v", tooltip=hg.Tooltip(mode="nearest"), animation=None)
+hg.scatter(data, "t", "v", inspection=hg.InspectionOptions(mode="nearest"), animation=None)
+hg.line(data, "t", "v", inspection=hg.InspectionOptions(snap="each"), tooltip=False)
+hg.line(data, "t", "v", inspection=True)  # type: ignore[arg-type]
+hg.Chart(data, inspection=False).point(x="t", y="v", pick=False, inspect=False)
 hg.bar(data, "t", "v", animation=hg.Animation(duration=400, values=True))
 hg.bar(data, "t", "v", animation="slow")  # type: ignore[arg-type]
 helper: hg.HelperOptions = {"title": "Saved", "y_axis": hg.AxisOptions(title="ms")}
@@ -68,7 +71,11 @@ def live(widget: ChartWidget, state: ChartState) -> None:
     root: hg.DrillRoot | None = state.drill_root
     positions: hg.ItemPositions = state.item_positions
     print(root, positions)
-    widget.on_click(lambda inspection: [point.row for point in inspection.points])
+    widget.on_click(
+        lambda event: event.inspection and [point.row for point in event.inspection.points]
+    )
+    widget.on_context_menu(lambda event: event.pointer and event.pointer.values.get("x"))
+    widget.on_hover(lambda event: isinstance(event.target, hg.ItemTarget) and event.target.row)
     if state.selection is not None:
         print(state.selection.y)
 

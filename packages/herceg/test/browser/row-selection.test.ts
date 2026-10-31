@@ -1,6 +1,7 @@
 // Charts bound to selection stores: brushes, lassos, clicks, and keys select
 // rows there, and charts and grids sharing a channel show one selection.
 
+import "./interactive.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { userEvent } from "vitest/browser";
 import { col } from "../../src/data/expr.ts";

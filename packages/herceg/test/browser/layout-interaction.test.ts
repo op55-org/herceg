@@ -2,6 +2,7 @@
 // (through the browser): panning and zooming maps, lassoing their rows,
 // drilling into treemaps and sunbursts, and moving a network's nodes.
 
+import "./interactive.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { cdp, server, userEvent } from "vitest/browser";
 import { type FeatureCollection, fromGeoJSON } from "../../src/data/geojson.ts";

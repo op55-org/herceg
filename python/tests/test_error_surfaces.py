@@ -449,6 +449,7 @@ def _calls(tmp: Path) -> dict[str, Call]:
         "on_item_move": {"callback": print},
         "on_hover": {"callback": print},
         "on_click": {"callback": print},
+        "on_context_menu": {"callback": print},
         "on_edge": {"callback": print},
         "on_camera": {"callback": print},
     }.items():

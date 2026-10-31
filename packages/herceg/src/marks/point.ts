@@ -233,6 +233,10 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S> {
   swarm?: boolean;
   /** Where the points are drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   label?: string;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
@@ -1389,6 +1393,8 @@ export function point<S extends Schema>(
       "dodge",
       "swarm",
       "zIndex",
+      "pick",
+      "inspect",
       "encode",
       "label",
       "legend",

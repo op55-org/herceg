@@ -21,6 +21,7 @@ import type {
   TextGeometry,
 } from "../../src/scene/scene.ts";
 import { checkSpec, validateSpec } from "../../src/spec/validate.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", ...config });
@@ -236,13 +237,13 @@ describe("network row selection", () => {
     );
     const tables = new Set([links, nodes] as unknown as Table[]);
     // a is named by two rows of the nodes table.
-    expect(clickedRows(model, tables, ...at(model, "a"))).toEqual({
+    expect(clickedRows(withPicker(model), tables, ...at(model, "a"))).toEqual({
       table: nodes,
       rows: Uint32Array.of(0, 4),
     });
     // a — b's rows each way, of the links table.
     const link = model.inspectItem('[0,"a","b"]')!.points[0]!;
-    expect(clickedRows(model, tables, link.px, link.py)).toEqual({
+    expect(clickedRows(withPicker(model), tables, link.px, link.py)).toEqual({
       table: links,
       rows: Uint32Array.of(0, 1),
     });
@@ -252,7 +253,11 @@ describe("network row selection", () => {
       selectionStore(links),
     );
     expect(
-      clickedRows(linksOnly, new Set([links as unknown as Table]), ...at(linksOnly, "a")),
+      clickedRows(
+        withPicker(linksOnly),
+        new Set([links as unknown as Table]),
+        ...at(linksOnly, "a"),
+      ),
     ).toBeNull();
   });
 
@@ -309,7 +314,7 @@ describe("overlapping nodes and links", () => {
     expect(found()).toBe('[0,"a"]');
     // A click there selects the rows of the node on top.
     const tables = new Set([links, nodes] as unknown as Table[]);
-    expect(clickedRows(model, tables, ...at(model, "a"))).toEqual({
+    expect(clickedRows(withPicker(model), tables, ...at(model, "a"))).toEqual({
       table: nodes,
       rows: Uint32Array.of(0),
     });
@@ -348,7 +353,7 @@ describe("overlapping nodes and links", () => {
     linkStore.set("c", selectRows(new RowSet(links).add(0)));
     model.scene(estimateText);
     expect(found()).toBe('[0,"a","b"]');
-    expect(clickedRows(model, new Set([links as unknown as Table]), 300, 200)).toEqual({
+    expect(clickedRows(withPicker(model), new Set([links as unknown as Table]), 300, 200)).toEqual({
       table: links,
       rows: Uint32Array.of(0),
     });
@@ -433,8 +438,10 @@ describe("network moves and rows, kept apart from what changes", () => {
     );
     const tables = new Set([links, nodes] as unknown as Table[]);
     // d is only named by links.
-    expect(clickedRows(model, tables, ...at(model, "d"))).toBeNull();
-    expect(clickedRows(model, tables, ...at(model, "a"))?.rows).toEqual(Uint32Array.of(0));
+    expect(clickedRows(withPicker(model), tables, ...at(model, "d"))).toBeNull();
+    expect(clickedRows(withPicker(model), tables, ...at(model, "a"))?.rows).toEqual(
+      Uint32Array.of(0),
+    );
   });
 });
 

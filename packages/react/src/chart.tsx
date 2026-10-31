@@ -69,10 +69,19 @@ export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" 
   onEdge?: ChartListener<"edge"> | undefined;
   /** The selection changed (`interaction.brush`): x and y ranges and a lasso's outline, null when cleared. */
   onSelect?: ChartListener<"select"> | undefined;
-  /** The data under the pointer or keyboard cursor changed, as for a tooltip of your own. */
+  /** What the pointer or keyboard cursor is on, or the data the inspection reads there, changed. */
   onHover?: ChartListener<"hover"> | undefined;
-  /** The plot was clicked, with the data under the pointer (and with `rowSelection`, the rows it selected). */
+  /**
+   * A plot, item, axis label, or legend entry was clicked, or Enter pressed
+   * on the keyboard cursor: what it is on, the data the inspection reads
+   * there (and with `rowSelection`, the rows it selected).
+   */
   onClick?: ChartListener<"click"> | undefined;
+  /**
+   * A secondary press (a right click, a long press): where, and what it is
+   * on. While it is given, the browser's own menu stays off the plots.
+   */
+  onContextMenu?: ChartListener<"contextMenu"> | undefined;
   /** A channel `rowSelection` binds changed, by any chart or grid: what it holds now. */
   onRowSelection?: ChartListener<"rowSelection"> | undefined;
   /** A 3D chart's camera moved (dragged, zoomed, reset, keys, `setCamera`); once a frame at most. */
@@ -415,6 +424,7 @@ export function Chart({
   onSelect,
   onHover,
   onClick,
+  onContextMenu,
   onRowSelection,
   onCamera,
   onDrill,
@@ -504,6 +514,7 @@ export function Chart({
   useChartEvent(chart, "select", onSelect);
   useChartEvent(chart, "hover", onHover);
   useChartEvent(chart, "click", onClick);
+  useChartEvent(chart, "contextMenu", onContextMenu);
   useChartEvent(chart, "rowSelection", onRowSelection);
   useChartEvent(chart, "camera", onCamera);
   useChartEvent(chart, "drill", onDrill);

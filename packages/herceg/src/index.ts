@@ -82,14 +82,21 @@ export type { Selection } from "./dom/brushed.ts";
 export { type ChartOptions, type ChartUpdate, createChart } from "./dom/chart.ts";
 export { showFailure } from "./dom/errors.ts";
 export type {
+  AxisLabelTarget,
+  Box,
   ChangeCause,
   ChartEvents,
   ChartListener,
   InputEvent,
+  ItemTarget,
+  LegendEntryTarget,
   PanelTarget,
   PanelViewport,
+  PlotTarget,
+  Pointer,
   ScaleView,
   StateChange,
+  Target,
   ViewportEvent,
 } from "./dom/events.ts";
 export type {
@@ -204,7 +211,6 @@ export type {
   InspectedPoint,
   Inspection,
   ItemInspection,
-  TooltipMode,
   Viewport,
   XAxisConfig,
 } from "./model/model.ts";

@@ -155,7 +155,7 @@ describe("histogram options", () => {
     expect(a!.sorted).toBe(false);
     expect(model.xScale()!.domain[0]).toBe(0);
     expect(model.yScale()!.domain).toEqual([0, 4]);
-    expect(model.tooltipMode()).toBe("nearest-y");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     expect(axisOf(model)).toBe("y");
     expect(stopsOf(model, "")).toHaveLength(1);
     const hit = model.inspect(model.xScale()!.map(1), model.yScale()!.map(1))!;

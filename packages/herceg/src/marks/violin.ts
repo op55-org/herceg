@@ -24,10 +24,10 @@ import {
   type Stat,
   type Summary,
 } from "./distribution.ts";
-import { boxOf, distanceToCut, distanceToDisc, distanceToStroke } from "./drawn.ts";
 import { definedFields } from "./line.ts";
 import type { AxisFormat, ChartMark, Frame } from "./mark.ts";
 import { placeAt, rowOf, type Series } from "./series.ts";
+import { boxOf, distanceToCut, distanceToDisc, distanceToStroke } from "./shapes.ts";
 import { refuseValues } from "./still.ts";
 
 export type ViolinOptions<S extends Schema> = DistributionOptions<S> & {
@@ -74,7 +74,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
    * painted: its fill, its outline's stroke, and the inner marks
    * `geometry` draws.
    */
-  protected override shapeDistance(
+  override shapeDistance(
     s: Series,
     row: number,
     px: number,
@@ -180,11 +180,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
    * Half its inner box, drawn at least `BOX_MIN` wide on the center of a
    * violin that is not split (a split one's fits in its half).
    */
-  protected override paintedPast(
-    s: Series,
-    row: number,
-    frame: Frame,
-  ): readonly [number, number, number] {
+  override paintedPast(s: Series, row: number, frame: Frame): readonly [number, number, number] {
     const shape = this.summaryOf(s).groups[row]!;
     const boxed =
       (this.spec.inner ?? "box") === "box" &&
@@ -196,11 +192,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
   }
 
   /** The median dot inside its inner box, which a log axis can draw past the values it places. */
-  protected override paintedDot(
-    s: Series,
-    row: number,
-    frame: Frame,
-  ): readonly [number, number] | undefined {
+  override paintedDot(s: Series, row: number, frame: Frame): readonly [number, number] | undefined {
     const shape = this.summaryOf(s).groups[row]!;
     if ((this.spec.inner ?? "box") !== "box" || (!shape.density && shape.min === shape.max))
       return undefined;
@@ -293,7 +285,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
   }
 
   /** Split halves stand on either side of the category's center; others in their slots. */
-  protected override placement(s: Series, frame: Frame): Placement {
+  override placement(s: Series, frame: Frame): Placement {
     if (!this.spec.split) return super.placement(s, frame);
     this.#checkSplit();
     const share = Math.abs((this.horizontal ? frame.y : frame.x).bandwidth ?? 0) / 2;
@@ -654,6 +646,8 @@ export function violin<S extends Schema>(
       "panel",
       "clip",
       "zIndex",
+      "pick",
+      "inspect",
       "id",
     ]),
   };

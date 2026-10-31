@@ -109,8 +109,11 @@ describe("continuity", () => {
     expect((scene.panels[0]!.marks[0] as LineGeometry).path.starts).toEqual([0, 2]);
     expect(model.yScale()!.domain[1]).toBeLessThan(50);
     const x = model.xScale()!;
-    const at = model.inspect(x.map(2), scene.panels[0]!.plot.y + 5) as AxisInspection;
-    expect(at.points.every((p) => p.value !== 50)).toBe(true);
+    // Inside the gap the rejected row leaves, the line reads nothing; beside it, its own points.
+    const y = scene.panels[0]!.plot.y + 5;
+    expect(model.inspect(x.map(2), y)).toBeUndefined();
+    const at = model.inspect(x.map(0.8), y) as AxisInspection;
+    expect(at.points.map((p) => p.value)).toEqual([2]);
     expect(describeChart(model)).toContain("v: 4 points, from 1 to 4, last 4.");
   });
 

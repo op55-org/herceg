@@ -76,20 +76,37 @@ def test_the_result_decodes_to_python_values():
         {
             "selection": {"x": [MS0, MS0 + 60_000], "y": ["a", "b"], "lasso": None, "time": ["x"]},
             "click": {
-                "axis": "x",
-                "value": MS0,
-                "time": True,
-                "label": "00:00",
-                "points": [
-                    {"mark": 0, "markId": None, "key": '[0,"a"]', "label": "a", "row": 1}
-                    | {"value": 1.0, "text": "1"}
-                ],
+                "pointer": {
+                    "x": 12.0,
+                    "y": 30.0,
+                    "panel": None,
+                    "inPlot": True,
+                    "values": {"x": MS0, "y": 2.0},
+                    "categories": {},
+                    "time": ["x"],
+                },
+                "target": {"kind": "plot", "panel": ""},
+                "inspection": {
+                    "axis": "x",
+                    "value": MS0,
+                    "time": True,
+                    "label": "00:00",
+                    "points": [
+                        {"mark": 0, "markId": None, "key": '[0,"a"]', "label": "a", "row": 1}
+                        | {"value": 1.0, "text": "1"}
+                    ],
+                },
+                "cause": "pointer",
+                "revision": 2,
             },
         }
     )
     assert state.selection == hg.Selection(x=(T0, T0 + dt.timedelta(minutes=1)), y=("a", "b"))
     point = hg.InspectedPoint("a", 1.0, "1", row=1, mark=0, key='[0,"a"]')
-    assert state.click == hg.Inspection(axis="x", value=T0, label="00:00", points=(point,))
+    click = state.click
+    assert click is not None and click.target == hg.PlotTarget("")
+    assert click.pointer is not None and click.pointer.values == {"x": T0, "y": 2.0}
+    assert click.inspection == hg.Inspection(axis="x", value=T0, label="00:00", points=(point,))
     assert hst._state({}) == hst.ChartState(selection=None, click=None)
     # A selection of another shape, or of nothing, is none.
     for odd in ({"x": [1.0], "y": None, "lasso": None}, {"x": None, "y": None, "lasso": None}):
@@ -126,7 +143,8 @@ def app():
     chart = hg.Chart(data, brush="x").line(x="x", y="y")
     state = hst.chart(chart, key="chart", on_select="rerun", on_click=lambda: None)
     selection = state.selection and state.selection.x
-    st.json({"selection": selection, "click": state.click and state.click.label})
+    clicked = state.click and state.click.inspection
+    st.json({"selection": selection, "click": clicked and clicked.label})
     hst.chart(hg.Chart(data, theme="dark").point(x="x", y="y"), key="other")
 
 

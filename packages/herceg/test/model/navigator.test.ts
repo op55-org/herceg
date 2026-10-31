@@ -37,6 +37,7 @@ import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
+import { withPicker } from "../helpers/picker.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const HOUR = 3_600_000;
@@ -564,7 +565,8 @@ describe("a navigator's strip under panels", () => {
     const [x, y, w, h] = [c.rects[4]!, c.rects[5]!, c.rects[6]!, c.rects[7]!];
     expect(
       Array.from(
-        clickedRows(model, new Set([groups as unknown as Table]), x + w / 2, y + h / 2)!.rows,
+        clickedRows(withPicker(model), new Set([groups as unknown as Table]), x + w / 2, y + h / 2)!
+          .rows,
       ),
     ).toEqual([5]);
   });

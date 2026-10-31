@@ -1,3 +1,4 @@
+import "./interactive.ts";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fromMatrix } from "../../src/data/matrix.ts";
 import { table } from "../../src/data/table.ts";
@@ -192,7 +193,7 @@ describe("new marks in the browser", () => {
   it("shows heatmap cell tooltips when nearest-x is requested", async () => {
     const cells = table({ c: ["a", "a"], r: ["low", "high"], v: [3, 42] });
     const chart = createChart(host, {
-      tooltip: { mode: "nearest-x" },
+      inspection: { mode: "nearest-x" },
       marks: [heatmap(cells, { x: "c", y: "r", color: "v" })],
     });
     hover(chart.root, chart.toPixel(0, { axis: "x" })!, chart.toPixel(1, { axis: "y" })!);
@@ -454,7 +455,7 @@ describe("new marks in the browser", () => {
     const bars = createChart(host, {
       marks: [bar(sales, { x: "a", y: "region" })],
       interaction,
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
     });
     const lines = createChart(other, { marks: [line(series, { x: "t", y: "v" })], interaction });
     const visibleCrosshair = (root: Element) => root.querySelector("svg line[visibility=visible]");

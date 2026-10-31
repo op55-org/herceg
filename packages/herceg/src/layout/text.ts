@@ -2,6 +2,7 @@
 // no browser or supplied fonts measure it), and text broken into lines and
 // boxed as guides draw it.
 
+import { bisect } from "../data/bisect.ts";
 import type { Rect, TextItem } from "../scene/scene.ts";
 import { haloOf, type ResolvedHalo, type TextPaint } from "../style/style.ts";
 
@@ -106,14 +107,9 @@ export function fitText(text: string, width: number, measure: MeasureText, font:
   if (measure(text, font) <= width) return text;
   // Cut between code points so surrogate pairs stay whole.
   const characters = Array.from(text);
-  let lo = 0;
-  let hi = characters.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >>> 1;
-    if (measure(`${characters.slice(0, mid).join("").trimEnd()}…`, font) <= width) lo = mid;
-    else hi = mid - 1;
-  }
-  return `${characters.slice(0, lo).join("").trimEnd()}…`;
+  const cut = (n: number) => `${characters.slice(0, n).join("").trimEnd()}…`;
+  // The most characters that fit, fewer than all.
+  return cut(bisect(characters.length - 1, (k) => measure(cut(k + 1), font) <= width));
 }
 
 /**

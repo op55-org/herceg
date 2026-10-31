@@ -282,7 +282,7 @@ describe("loadSpec", () => {
         marks: [{ type: "bar", x: [], y: "name" }],
       }),
     ).toThrow(/marks\[0\]\.x: expected at least one field name/);
-    expect(check({ tooltip: { mode: "nearest-z" }, marks: [] })).toThrow(/tooltip\.mode/);
+    expect(check({ inspection: { mode: "nearest-z" }, marks: [] })).toThrow(/inspection\.mode/);
     expect(
       check({
         data: { t: { columns: { c: ["a"], v: [1] } } },
@@ -501,7 +501,7 @@ describe("loadSpec", () => {
       {
         data: { sales: { columns: { region: ["N", "S"], q1: [1, 2], q2: [3, 4] } } },
         marks: [{ type: "bar", x: ["q1", "q2"], y: "region", stack: true }],
-        tooltip: { mode: "nearest-y" },
+        inspection: { mode: "nearest-y" },
         width: 400,
         height: 200,
       },

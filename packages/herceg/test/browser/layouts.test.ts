@@ -1,5 +1,6 @@
 // Layouts of panels in the browser: the linked crosshair as the layout
 // changes, insets under the pointer and the wheel, and panels' legends.
+import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, createChart } from "../../src/dom/chart.ts";

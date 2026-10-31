@@ -2,6 +2,7 @@
 // one page (a notebook's widgets each load their own), or in sandboxed
 // frames of their own (static notebook outputs), which a relay links.
 
+import "./interactive.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { commands } from "vitest/browser";
 import "./helpers.ts";

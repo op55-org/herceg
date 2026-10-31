@@ -70,7 +70,7 @@ Herceg takes Herceg's names:
 | `whiskers`, `outliers`, `depth`, `inner`, ... | The box plot, boxen, and violin marks' options. |
 | `jitter` | stripplot's spread as a fraction of the band (`True` is 0.5; `hg.Jitter` brings a seed). |
 | `z_index`, `encode`, `labels` | Passed to the mark drawing the plot's result (barplot's bars, lineplot's lines, ...). |
-| Chart options | `title`, `width`, `height`, `theme`, `x_axis`, `scales`, `legend`, ... as the one-call helpers take them. |
+| Chart options | `title`, `width`, `height`, `theme`, `x_axis`, `scales`, `legend`, `inspection`, `tooltip`, ... as the one-call helpers take them. |
 
 Statistical options keep Seaborn's names: `estimator`, `errorbar`,
 `n_boot`, `bw_method`, `bw_adjust`, `ci`, `multiple`, `linestyles`,

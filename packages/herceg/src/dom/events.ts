@@ -13,11 +13,110 @@ export type { PanelVisibility } from "../model/legend.ts";
 export type { ChangeCause, PanelViewport, ScaleView } from "../model/model.ts";
 
 /**
- * What pointer and keyboard events carry: what the input read, what made
- * it, and the revision of the frame it acted on (what the user saw).
+ * Where the pointer is, unsnapped: in pixels, and in data on the axes of
+ * the panel it is over, read from the scales (no data is read).
+ */
+export interface Pointer {
+  /** CSS pixels from the chart root's top left corner. */
+  readonly x: number;
+  readonly y: number;
+  /**
+   * The panel it is over: its key ("" in a chart of one panel), whose plot
+   * holds it, or in a chart of one panel, the panel wherever it is;
+   * undefined over no panel.
+   */
+  readonly panel: string | undefined;
+  /** Whether it is inside that panel's plot. */
+  readonly inPlot: boolean;
+  /**
+   * Its values on the panel's axes: numbers, epoch ms on time axes, a
+   * fractional band index on category axes; a map's or network's plane
+   * units. Axes the panel lacks are left out.
+   */
+  readonly values: { readonly x?: number; readonly y?: number; readonly yRight?: number };
+  /** On category axes, the category whose band it is in, by name. */
+  readonly categories: { readonly x?: string; readonly y?: string; readonly yRight?: string };
+}
+
+/** A box in CSS pixels from the chart root's top left corner. */
+export interface Box {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A mark's item under the pointer or keyboard cursor: a bar, a point, a line's observation, a cell, a slice. */
+export interface ItemTarget {
+  readonly kind: "item";
+  /** The mark's index in the chart's `marks`, and its `id`. */
+  readonly mark: number;
+  readonly markId: string | undefined;
+  /** The item's key: the same for the same item in every frame, as long as its name lasts. */
+  readonly item: string;
+  /** Its series' key, as the legend and visibility name it; undefined for items of no series. */
+  readonly series: string | undefined;
+  /**
+   * Its row's position in the mark's table, read when asked from the row
+   * the input picked (so rows a listener drops never make it name another
+   * row); undefined for items of no one row, or once the row is gone.
+   */
+  readonly row: number | undefined;
+  /** The panel it is drawn in ("" in a chart of one panel). */
+  readonly panel: string;
+  /** Where it is drawn: its box; a line's observation or a layout item, its point. */
+  readonly box: Box;
+}
+
+/** A tick label of an axis. */
+export interface AxisLabelTarget {
+  readonly kind: "axisLabel";
+  readonly panel: string;
+  /** "x", "y", or "yRight". */
+  readonly scale: string;
+  /** The tick layer: "major", or the id of a layer an axis the guides list adds. */
+  readonly layer: string;
+  /** The tick's value: epoch ms on time axes, a band index on category axes. */
+  readonly value: number;
+  /** On category axes, the category. */
+  readonly category: string | undefined;
+  readonly text: string;
+  readonly box: Box;
+}
+
+/** An entry of a legend. */
+export interface LegendEntryTarget {
+  readonly kind: "legendEntry";
+  /** What the entry names, as `getLegend()` keys it. */
+  readonly key: string;
+  readonly label: string;
+  /** The subplot whose legend it is in; undefined for the chart's. */
+  readonly panel: string | undefined;
+}
+
+/** A plot where no item is. */
+export interface PlotTarget {
+  readonly kind: "plot";
+  readonly panel: string;
+}
+
+/** What input is on: the topmost thing drawn there that input addresses. */
+export type Target = ItemTarget | AxisLabelTarget | LegendEntryTarget | PlotTarget;
+
+/**
+ * What pointer and keyboard events carry: where the pointer is, what is
+ * under it, what the chart's inspection read there, what made the input,
+ * and the revision of the frame it acted on (what the user saw).
  */
 export interface InputEvent {
-  /** The data under the pointer or cursor; undefined when there is none. */
+  /** Undefined for the keyboard, and for cursors other charts share or `showCursor` shows. */
+  pointer: Pointer | undefined;
+  /** What the pointer or keyboard cursor is on; undefined over nothing input addresses. */
+  target: Target | undefined;
+  /**
+   * The data the chart's `inspection` reads there; undefined where it reads
+   * none, and for the pointer with `inspection: false`.
+   */
   inspection: Inspection | undefined;
   /** The pointer, the keyboard, a cursor another chart shares ("sync"), or `showCursor` ("api"). */
   cause: Extract<ChangeCause, "pointer" | "keyboard" | "sync" | "api">;
@@ -88,14 +187,26 @@ export interface ChartEvents {
     /** What moved the view there, or moved the end. */
     cause: ChangeCause;
   };
-  /** The data under the pointer or cursor changed (see `InputEvent`). */
+  /**
+   * What is under the pointer or a cursor changed: what it is on, or the
+   * data the inspection reads there (see `InputEvent`); for a cursor another
+   * chart shares (cause "sync") or `showCursor` shows ("api"), once drawn.
+   */
   hover: InputEvent;
   /**
-   * The plot was clicked (not dragged), with the data under the pointer and,
-   * with `rowSelection` taking clicks, what the click wrote to the channels
-   * (the rows clicked, or null where a click off the data cleared them).
+   * A press released without moving on a plot, an axis label, or a legend
+   * entry, or Enter on the keyboard cursor (cause "keyboard"): what it is
+   * on, the data the inspection reads there, and with `rowSelection` taking
+   * clicks, what the click wrote to the channels (the rows clicked, or null
+   * where a click off the data cleared them).
    */
   click: InputEvent & { rows?: readonly RowSelectionChange[] };
+  /**
+   * A secondary press (a right click, a long press): where, and what it is
+   * on. While a listener listens, the browser's own menu stays off the
+   * plots (not off the axes or the legend).
+   */
+  contextMenu: InputEvent & { readonly pointer: Pointer };
   /**
    * A channel `rowSelection` binds changed, whoever changed it (this chart,
    * another, a grid): its table, its name, and what it holds now; with the

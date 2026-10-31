@@ -70,6 +70,7 @@ import type {
   InteractionSpec,
   ScaleLimitsSpec,
   ScaleScope,
+  Snap,
 } from "../spec/spec.ts";
 import { insets, type TextPaint } from "../style/style.ts";
 import {
@@ -124,6 +125,7 @@ import {
 import type { Navigator, XPlan } from "./navigator.ts";
 import type { PanelGrid, PanelLayout, PanelPlacement, PanelSplit } from "./panel-layout.ts";
 import type { Panels } from "./panels.ts";
+import type { Picked } from "./pick.ts";
 import type { RowSelection } from "./row-selection.ts";
 import { instanceType, type ScaleName } from "./scales.ts";
 import { type ChartStyles, chartStyles } from "./styles.ts";
@@ -182,9 +184,9 @@ export type XAxisConfig = XAxisOptions & { breaks?: TimeBreaks | undefined };
 import {
   type AxisInspection,
   type Inspection,
+  type InspectionMode,
   Inspector,
   type MarkSeries,
-  type TooltipMode,
 } from "./inspect.ts";
 
 /** A panel of the last scene and what inspects it. */
@@ -391,8 +393,8 @@ export type {
   AxisInspection,
   InspectedPoint,
   Inspection,
+  InspectionMode,
   ItemInspection,
-  TooltipMode,
 } from "./inspect.ts";
 
 /**
@@ -450,6 +452,14 @@ export class ChartModel {
    * inspections: set by a chart once it has loaded what reads them.
    */
   declare fields: FieldReaders | undefined;
+  /**
+   * Picks the topmost item drawn within reach of a point, of marks `accept`
+   * takes: set by a chart once its interaction controller has loaded
+   * (model/pick.ts), which clicks selecting rows pick with.
+   */
+  declare picker:
+    | ((x: number, y: number, accept?: (mark: Mark) => boolean) => Picked | undefined)
+    | undefined;
   /** What instances of the position scales show when zoomed, by scale and instance (`viewKey`). */
   readonly #viewports = new Map<string, readonly [number, number]>();
   /** The instances of the position scales the last scene drew, by `viewKey`. */
@@ -2389,18 +2399,20 @@ export class ChartModel {
 
     // Inspectors keep these formatters, so they come from outside this scope.
     const formatNumbers = numberFormatter(locale);
-    const tooltip = config.tooltip;
+    const asked = config.inspection || {};
     // Cells are always found under the pointer, so charts of cells only
     // (heatmaps) inspect the nearest cell whatever mode is requested.
-    // Subplots choose by the marks in each panel.
-    const modeOf = (among: readonly MarkSeries[]): TooltipMode => {
-      const kinds = new Set(among.map(({ mark }) => mark.tooltip));
+    // Subplots choose by the marks in each panel, of those inspected.
+    const modeOf = (among: readonly MarkSeries[]): InspectionMode => {
+      const kinds = new Set(
+        among.flatMap(({ mark }) => (mark.spec.inspect === false ? [] : [mark.tooltip])),
+      );
       const only = kinds.size === 1 ? [...kinds][0] : kinds.size === 0 ? "x" : undefined;
       return only === "cell"
         ? "nearest"
-        : ((typeof tooltip === "object" ? tooltip.mode : undefined) ??
-            (only === "x" ? "nearest-x" : only === "y" ? "nearest-y" : "nearest"));
+        : (asked.mode ?? (only === "x" ? "nearest-x" : only === "y" ? "nearest-y" : "nearest"));
     };
+
     const mode = modeOf(drawn);
     const valueFormat = (context: AxisContext, scale: PositionScale): Formatter =>
       tooltipFormatter(context, scale, formatNumbers);
@@ -2697,6 +2709,8 @@ export class ChartModel {
         frame,
         right: rightFrame && { marks: rightSet, frame: rightFrame, formatY: formatOf(i, rightY) },
         mode: members ? modeOf(inspected.filter(({ series }) => series.length > 0)) : mode,
+        snap: asked.snap,
+        within: asked.within,
         hidden: frame.hidden,
         formatX: formatXOf(h, i),
         formatY: formatOf(i),
@@ -3340,11 +3354,6 @@ export class ChartModel {
     return !!this.#panels?.coveredAt?.(key, x, y);
   }
 
-  /** Tooltip mode of the last scene: the chart's, or one suited to its marks. */
-  tooltipMode(): TooltipMode {
-    return this.#views[0]?.inspector.mode ?? "nearest-x";
-  }
-
   /**
    * Sentences describing marks without series (annotations), as of the last
    * scene: with facets or panels, as `PanelLayout.annotations` says (of what
@@ -3417,12 +3426,18 @@ export class ChartModel {
    * Finds the data under a pointer position for tooltips, in the panel under
    * it or in `panel`; see `Inspector.inspect`.
    */
-  inspect(px: number, py: number, mode?: TooltipMode, panel?: string): Inspection | undefined {
+  inspect(
+    px: number,
+    py: number,
+    mode?: InspectionMode,
+    panel?: string,
+    snap?: Snap,
+  ): Inspection | undefined {
     const view =
       panel === undefined ? this.#viewAt(px, py) : this.#views.find(({ key }) => key === panel);
     return (
       this.#items?.inspect(px, py, panel) ??
-      (view && this.#inPanel(view, view.inspector.inspect(px, py, mode)))
+      (view && this.#inPanel(view, view.inspector.inspect(px, py, mode, snap)))
     );
   }
 

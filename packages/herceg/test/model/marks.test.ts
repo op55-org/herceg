@@ -492,7 +492,7 @@ describe("horizontal bar", () => {
 
   it("reports every series in the band nearest the pointer", () => {
     const { scene, model } = build({ marks: [bar(sales, { x: ["q1", "q2"], y: "region" })] });
-    expect(model.tooltipMode()).toBe("nearest-y");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     const s = left(scene).ticks[1]!.position;
     const inspection = model.inspect(scene.panels[0]!.plot.x + 5, s + 2) as AxisInspection;
     expect(inspection.axis).toBe("y");
@@ -598,9 +598,12 @@ describe("horizontal bar", () => {
     expect(logColumn.points.map((p) => p.text)).toEqual(["10"]);
   });
 
-  it("places the cursor along y whatever the tooltip mode", () => {
+  it("places the cursor along y whatever the inspection mode", () => {
     for (const mode of ["nearest-y", "nearest", "nearest-x"] as const) {
-      const { model } = build({ marks: [bar(sales, { x: "q1", y: "region" })], tooltip: { mode } });
+      const { model } = build({
+        marks: [bar(sales, { x: "q1", y: "region" })],
+        inspection: { mode },
+      });
       expect(axisOf(model)).toBe("y");
     }
     expect(axisOf(build({ marks: [bar(sales, { x: "region", y: "q1" })] }).model)).toBe("x");
@@ -609,7 +612,7 @@ describe("horizontal bar", () => {
   it("names the category in nearest-point tooltips", () => {
     const { scene, model } = build({
       marks: [bar(sales, { x: "q1", y: "region" })],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
     });
     const x = model.xScale()!;
     const inspection = model.inspect(x.map(20) - 2, left(scene).ticks[1]!.position)!;
@@ -629,7 +632,7 @@ describe("point", () => {
     const { scene, model } = build({ marks: [point(pts, { x: "x", y: "y", series: "kind" })] });
     const geometry = scene.panels[0]!.marks as PointGeometry[];
     expect(geometry.map((g) => g.count)).toEqual([2, 2]);
-    expect(model.tooltipMode()).toBe("nearest");
+    expect(model.inspectorOf("")?.mode).toBe("nearest");
     const target = model.xScale()!.map(2);
     const inspection = model.inspect(target + 2, model.yScale()!.map(0) - 1)!;
     expect(inspection.value).toBe(2);
@@ -717,7 +720,7 @@ describe("point", () => {
   it("snaps nearest-x tooltips to points inside the x domain", () => {
     const pts = table({ x: [-1, 1], y: [5, 5] });
     const { model } = build({
-      tooltip: { mode: "nearest-x" },
+      inspection: { mode: "nearest-x" },
       marks: [point(pts, { x: "x", y: "y" })],
     });
     setViewport(model, [0, 10]);
@@ -731,13 +734,13 @@ describe("point", () => {
     expect(lines.inspect(plot.x, plot.y + 5)!.value).toBe(3);
   });
 
-  it("honors an explicit nearest-x tooltip mode", () => {
+  it("honors an explicit nearest-x inspection mode", () => {
     const pts = table({ x: [0, 1, 2], y: [3, 4, 5] });
     const { model } = build({
-      tooltip: { mode: "nearest-x" },
+      inspection: { mode: "nearest-x" },
       marks: [point(pts, { x: "x", y: "y" })],
     });
-    expect(model.tooltipMode()).toBe("nearest-x");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-x");
     // Far below the point, but at its x.
     const inspection = model.inspect(model.xScale()!.map(1), model.yScale()!.map(3))!;
     expect(inspection.value).toBe(1);
@@ -833,10 +836,10 @@ describe("heatmap", () => {
   it("reports the cell under the pointer even in nearest-x mode", () => {
     const column = table({ c: ["a", "a"], r: ["r1", "r2"], v: [Number.NaN, 10] });
     const { model } = build({
-      tooltip: { mode: "nearest-x" },
+      inspection: { mode: "nearest-x" },
       marks: [heatmap(column, { x: "c", y: "r", color: "v" })],
     });
-    expect(model.tooltipMode()).toBe("nearest");
+    expect(model.inspectorOf("")?.mode).toBe("nearest");
     const [px, py] = [model.xScale()!.map(0), model.yScale()!.map(1)];
     for (const mode of [undefined, "nearest-x", "nearest"] as const) {
       expect(model.inspect(px, py, mode)!.points).toMatchObject([{ label: "r2", value: 10 }]);

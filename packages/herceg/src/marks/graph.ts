@@ -25,7 +25,6 @@ import type {
 import type { Frozen, GraphLayout, GraphSpec, InteractionSpec } from "../spec/spec.ts";
 import type { Halo } from "../spec/style.ts";
 import { surface } from "../theme.ts";
-import { distanceToSegment } from "./drawn.ts";
 import {
   type ItemSources,
   insidePolygon,
@@ -43,6 +42,7 @@ import {
   NodePositions,
   pairKey,
 } from "./node-positions.ts";
+import { distanceToSegment } from "./shapes.ts";
 import { refuseValues } from "./still.ts";
 
 export type GraphOptions<S extends Schema, N extends Schema = Schema> = {

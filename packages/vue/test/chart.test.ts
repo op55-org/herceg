@@ -2,6 +2,7 @@ import {
   type AxisFormat,
   type CustomSeries,
   col,
+  createChart,
   custom,
   type DataDrawContext,
   type DrawContext,
@@ -22,7 +23,7 @@ import {
   time,
   timeBreaks,
 } from "herceg";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type App,
   computed,
@@ -707,6 +708,42 @@ describe("<Chart>", () => {
     await nextTick();
     chart().select([1, 2]);
     expect(seen).toEqual(["two:1-2"]);
+  });
+
+  it("listens for input only while given a listener of it, which loads picking", async () => {
+    const probe = createChart(document.createElement("div"), { marks: [] });
+    const on = vi.spyOn(Object.getPrototypeOf(probe) as HercegChart, "on");
+    probe.destroy();
+    const listened = () => on.mock.calls.filter(([type]) => type === "hover").length;
+    const { view, chart } = chartRef();
+    const seen: unknown[] = [];
+    const handler = shallowRef<((event: unknown) => void) | undefined>();
+    try {
+      mount(
+        `<Chart ref="view" @hover="handler"><Line :data="metrics" x="t" y="a" /></Chart>`,
+        () => ({
+          metrics,
+          view,
+          handler,
+        }),
+      );
+      expect(listened()).toBe(0);
+      handler.value = (event) => seen.push(event);
+      await nextTick();
+      expect(listened()).toBe(1);
+      chart().showCursor({ x: 1 });
+      await chart().loading;
+      await frame();
+      expect(seen).toMatchObject([{ cause: "api" }]);
+      // Given none, it stops; given one again, it listens again.
+      handler.value = undefined;
+      await nextTick();
+      handler.value = (event) => seen.push(event);
+      await nextTick();
+      expect(listened()).toBe(2);
+    } finally {
+      on.mockRestore();
+    }
   });
 
   it("emits render for the first frame, drawn as the chart mounts, with the ref set", async () => {

@@ -57,7 +57,7 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
 | Home, End, Page Up, Page Down | Jump within the series |
 | Up, Down | Next or previous series; past the last, the next panel |
 | Shift + arrows | Select a range along the axis the keys step along |
-| Enter | Zoom to the selected range where zoom is on; drill into a tree node |
+| Enter | Zoom to the selected range where zoom is on; drill into a tree node; otherwise a `click` on the cursor's point (cause `"keyboard"`) |
 | Escape | Clear the selection; end a drag |
 | Backspace | Drill out of a tree |
 | `+`, `-`, `0` | Zoom in, out, and reset |
@@ -66,7 +66,10 @@ hg.line(latency, x="time", y=["api", "web"], title="Request latency",
 
 - Fields of one table drawn as lines, areas, or bars are one stop: each
   announcement names every series at the cursor's x. Series of points and
-  series at other places are stops of their own.
+  series at other places are stops of their own, and with
+  [`inspection: { mode: "nearest" }`](interaction.md#inspection) every
+  series is, read alone.
+- With `inspection: false`, the keyboard still reads and announces points.
 - Heatmaps step cell by cell across rows and columns as drawn, skipping
   empty cells; points and cells outside a zoomed view are reached too.
 - Arriving in a facet panel or subplot, the cursor names it and reads the

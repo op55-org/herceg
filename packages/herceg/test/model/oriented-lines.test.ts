@@ -264,7 +264,7 @@ describe("lines and areas along y", () => {
       vertices(temperature!.path),
       [20, 18, 12, 8, 7].map((t, i) => [x.map(t), y.map(i * 10)]),
     );
-    expect(model.tooltipMode()).toBe("nearest-y");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     const read = model.inspect(300, y.map(19))!;
     expect(read.axis).toBe("y");
     expect(read.label).toBe("20");

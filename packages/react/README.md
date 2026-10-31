@@ -44,7 +44,7 @@ export function Latency() {
   scope) and change it directly: `data.appendRow(...)` draws on the next
   frame without rendering React.
 - **Events** are props (`onSelect`, `onViewport`, `onHover`, `onClick`,
-  ...); a `ref` gives herceg's chart handle for `setViewport`, `toSVG`,
+  `onContextMenu`, ...); a `ref` gives herceg's chart handle for `setViewport`, `toSVG`,
   and the rest.
 - **Tooltips** of your own: `renderTooltip` returns React content,
   rendered with your app's context in the chart's tooltip box.

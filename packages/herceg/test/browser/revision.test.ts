@@ -3,6 +3,7 @@
 // count; frames say which revision they drew, and input events the
 // revision of the frame they acted on.
 
+import "./interactive.ts";
 import { describe, expect, it } from "vitest";
 import { RowSet } from "../../src/data/row-set.ts";
 import { rowView } from "../../src/data/row-view.ts";

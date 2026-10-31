@@ -416,6 +416,7 @@ _ROLES: dict[str, type[Any]] = {
     "grid": StrokeStyle,
     "axis_line": StrokeStyle,
     "tick": StrokeStyle,
+    "crosshair": StrokeStyle,
     "line": LineStyle,
     "bar": BarStyle,
     "tooltip": TooltipStyle,
@@ -436,7 +437,9 @@ class Style:
     Text roles (``text``, the base of every text, ``title``, ``panel_title``,
     ``axis_title``, ``tick_label``, ``legend_label``, ``legend_title``) take
     an ``hg.TextStyle``; ``plot`` an ``hg.PlotStyle``; ``grid``,
-    ``axis_line``, and ``tick`` an ``hg.StrokeStyle``; ``line`` an
+    ``axis_line``, ``tick``, and ``crosshair`` (the line the pointer's, the
+    keyboard's, and other charts' cursors draw across a plot) an
+    ``hg.StrokeStyle``; ``line`` an
     ``hg.LineStyle``, ``bar`` an ``hg.BarStyle``, and ``tooltip`` an
     ``hg.TooltipStyle``::
 
@@ -454,6 +457,7 @@ class Style:
     grid: StrokeStyle | Mapping[str, Any] | None = None
     axis_line: StrokeStyle | Mapping[str, Any] | None = None
     tick: StrokeStyle | Mapping[str, Any] | None = None
+    crosshair: StrokeStyle | Mapping[str, Any] | None = None
     line: LineStyle | Mapping[str, Any] | None = None
     bar: BarStyle | Mapping[str, Any] | None = None
     tooltip: TooltipStyle | Mapping[str, Any] | None = None

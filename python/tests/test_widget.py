@@ -8,7 +8,11 @@ import pytest
 import herceg as hg
 from herceg import Inspection
 from herceg._events import (
+    AxisLabelTarget,
+    Box,
     InspectedPoint,
+    ItemTarget,
+    Pointer,
     decode_inspection,
     decode_selection,
     decode_viewport,
@@ -640,13 +644,14 @@ def test_browser_viewports_made_before_another_change_are_dropped():
     assert widget.get_state()["_chart"]["revision"] == 3
 
 
-def test_hover_and_click_callbacks_receive_inspections():
+def test_input_callbacks_receive_input_events():
     widget, browser = live()
     assert widget.get_state()["_listening"] == []
-    hovered, clicked = [], []
+    hovered, clicked, menus = [], [], []
     widget.on_hover(hovered.append)
     widget.on_click(clicked.append)
-    assert sorted(widget._listening) == ["click", "hover"]
+    widget.on_context_menu(menus.append)
+    assert sorted(widget._listening) == ["click", "contextMenu", "hover"]
     point = {"mark": 0, "markId": None, "key": '[0,"a"]', "label": "a", "row": 0}
     inspection = {
         "axis": "x",
@@ -655,22 +660,68 @@ def test_hover_and_click_callbacks_receive_inspections():
         "label": "00:00",
         "points": [{**point, "value": 1.0, "text": "1"}],
     }
-    browser.reply({"type": "hover", "inspection": inspection})
-    browser.reply({"type": "hover", "inspection": None})
-    browser.reply({"type": "click", "inspection": inspection})
+    pointer = {
+        "x": 40.0,
+        "y": 12.5,
+        "panel": None,
+        "inPlot": True,
+        "values": {"x": MS0, "y": 1.5},
+        "categories": {},
+        "time": ["x"],
+    }
+    box = {"x": 36.0, "y": 8.0, "width": 8.0, "height": 8.0}
+    item = {
+        "kind": "item",
+        "mark": 0,
+        "markId": "latency",
+        "item": '[0,"a"]',
+        "series": "a",
+        "row": 0,
+        "panel": "",
+        "box": box,
+    }
+    event = {"pointer": pointer, "target": item, "inspection": inspection, "revision": 3}
+    browser.reply({"type": "hover", "event": {**event, "cause": "pointer"}})
+    off = {"pointer": {**pointer, "inPlot": False, "values": {}, "time": []}, "target": None}
+    browser.reply({"type": "hover", "event": {**off, "cause": "pointer", "revision": 3}})
+    browser.reply({"type": "click", "event": {**event, "cause": "keyboard", "pointer": None}})
+    label = {
+        "kind": "axisLabel",
+        "panel": "",
+        "scale": "x",
+        "layer": "major",
+        "value": MS0,
+        "time": True,
+        "category": None,
+        "text": "Jan 1",
+        "box": box,
+    }
+    menu = {"pointer": {**pointer, "inPlot": False}, "target": label, "cause": "pointer"}
+    browser.reply({"type": "contextMenu", "event": {**menu, "revision": 3}})
     expected = Inspection(
         axis="x",
         value=T0,
         label="00:00",
         points=(InspectedPoint("a", 1.0, "1", row=0, mark=0, key='[0,"a"]'),),
     )
-    assert hovered == [expected, None]
-    assert clicked == [expected]
+    first, leaving = hovered
+    assert first.pointer == Pointer(40.0, 12.5, None, True, {"x": T0, "y": 1.5}, {})
+    assert first.target == ItemTarget(0, "latency", '[0,"a"]', "a", 0, "", Box(36, 8, 8, 8))
+    assert (first.inspection, first.cause, first.revision) == (expected, "pointer", 3)
+    assert (leaving.target, leaving.inspection, leaving.pointer.in_plot) == (None, None, False)
+    (click,) = clicked
+    assert (click.pointer, click.cause, click.inspection) == (None, "keyboard", expected)
+    (right,) = menus
+    assert right.target == AxisLabelTarget("", "x", "major", T0, None, "Jan 1", Box(36, 8, 8, 8))
     # Points summarizing rows have none; marks with an id name it.
     summary = {**point, "markId": "bins", "row": None, "value": 2.0, "text": "2"}
     decoded = decode_inspection({**inspection, "points": [summary]})
     assert decoded is not None and decoded.points[0].row is None
     assert decoded.points[0].mark_id == "bins"
+    # Events of another shape reach no callback.
+    browser.reply({"type": "click", "event": {**event, "cause": "wheel"}})
+    browser.reply({"type": "click", "event": {**event, "target": {"kind": "bar"}}})
+    assert len(clicked) == 1
 
 
 def test_edges_reach_python_with_datetimes_and_cursors_reach_browsers():
@@ -754,9 +805,11 @@ def test_camera_callbacks_and_3d_items_receive_their_values():
         ],
         "values": {"x": 1, "y": 2, "z": 9, "kind": "a"},
     }
-    browser.reply({"type": "click", "inspection": item})
-    assert clicked[0].values == {"x": 1, "y": 2, "z": 9, "kind": "a"}
-    assert (clicked[0].points[0].mark, clicked[0].points[0].row) == (1, 4)
+    event = {"pointer": None, "target": None, "inspection": item, "cause": "pointer"}
+    browser.reply({"type": "click", "event": {**event, "revision": 1}})
+    inspected = clicked[0].inspection
+    assert inspected.values == {"x": 1, "y": 2, "z": 9, "kind": "a"}
+    assert (inspected.points[0].mark, inspected.points[0].row) == (1, 4)
 
 
 def test_event_payloads_decode_to_python_values():

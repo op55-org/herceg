@@ -17,6 +17,7 @@ import { brushedRows, clickedRows } from "../../src/model/selected-rows.ts";
 import { renderPdf } from "../../src/render/pdf.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { PointGeometry, PolygonGeometry, Scene } from "../../src/scene/scene.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 /** A square [lon, lat] ring, closed. */
 const ring = (x: number, y: number, s: number) => [
@@ -241,15 +242,20 @@ describe("map row selection", () => {
     const { x, y } = plane(model);
     const tables = new Set([regions as unknown as Table, cities as unknown as Table]);
     // C2's middle: its region; the city is on top of C5.
-    expect(clickedRows(model, tables, x.map(25 * radians), y.map(0))?.rows).toEqual(
+    expect(clickedRows(withPicker(model), tables, x.map(25 * radians), y.map(0))?.rows).toEqual(
       Uint32Array.of(2),
     );
-    const city = clickedRows(model, tables, x.map(55 * radians), y.map(0))!;
+    const city = clickedRows(withPicker(model), tables, x.map(55 * radians), y.map(0))!;
     expect(city.table).toBe(cities);
     expect(city.rows).toEqual(Uint32Array.of(0));
     // Only the bound table's rows are clicked.
     expect(
-      clickedRows(model, new Set([regions as unknown as Table]), x.map(55 * radians), y.map(0)),
+      clickedRows(
+        withPicker(model),
+        new Set([regions as unknown as Table]),
+        x.map(55 * radians),
+        y.map(0),
+      ),
     ).toBeNull();
   });
 

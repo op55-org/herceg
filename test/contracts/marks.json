@@ -2782,8 +2782,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: pie reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: pie reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -2793,8 +2793,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: pie reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: pie reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -2993,8 +2993,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: treemap reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: treemap reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3004,8 +3004,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: treemap reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: treemap reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3215,8 +3215,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: sunburst reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: sunburst reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3226,8 +3226,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: sunburst reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: sunburst reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3454,8 +3454,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: gauge reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: gauge reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3465,8 +3465,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: gauge reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: gauge reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3655,8 +3655,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: funnel reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: funnel reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3666,8 +3666,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: funnel reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: funnel reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3911,8 +3911,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: radar reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: radar reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -3922,8 +3922,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: radar reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: radar reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4119,8 +4119,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: sankey reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: sankey reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4130,8 +4130,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: sankey reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: sankey reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4325,8 +4325,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: graph reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: graph reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4336,8 +4336,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: graph reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: graph reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4527,8 +4527,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: geoshape reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: geoshape reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4538,8 +4538,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: geoshape reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: geoshape reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4718,8 +4718,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: geopoint reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: geopoint reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4729,8 +4729,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: geopoint reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: geopoint reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4968,8 +4968,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: point3d reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: point3d reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -4979,8 +4979,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: point3d reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: point3d reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -5230,8 +5230,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: line3d reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: line3d reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -5241,8 +5241,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: line3d reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: line3d reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -5479,8 +5479,8 @@
         "reading.nearest-x": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: surface reads the item under the pointer, not every series at an x; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: surface reads the item under the pointer, not every series at an x; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",
@@ -5490,8 +5490,8 @@
         "reading.nearest-y": {
           "error": {
             "code": "unsupported",
-            "path": "tooltip.mode",
-            "message": "tooltip.mode: surface reads the item under the pointer, not every series at a y; give mode: \"nearest\""
+            "path": "inspection.mode",
+            "message": "inspection.mode: surface reads the item under the pointer, not every series at a y; give mode: \"nearest\""
           },
           "alternative": {
             "text": "Read the item under the pointer with mode \"nearest\".",

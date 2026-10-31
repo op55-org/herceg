@@ -13,7 +13,7 @@ import inspect
 import math
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 try:
     import anywidget
@@ -30,10 +30,21 @@ from . import _render
 from ._chart import Camera, Chart, ChartUpdate, Unpack
 from ._data import listlike
 from ._derive import Expr, _fields_of
-from ._errors import ChartError, Role, checks_hints, hints_of, is_number, refusing, shown, take
+from ._errors import (
+    ChartError,
+    Role,
+    checks_hints,
+    hints_of,
+    is_number,
+    listed,
+    refusing,
+    shown,
+    take,
+)
 from ._events import (
     _UNSET,
     DrillRoot,
+    InputEvent,
     Inspection,
     ItemPositions,
     PanelVisibility,
@@ -51,7 +62,7 @@ from ._events import (
     checked_views,
     decode_drill_root,
     decode_edge,
-    decode_inspection,
+    decode_input_event,
     decode_item_positions,
     decode_selection,
     decode_viewport_event,
@@ -64,6 +75,7 @@ from ._events import (
     same_views,
     views_of,
 )
+from ._interaction import SNAPS, Snap
 from ._live import ExpressData, LiveChart, Message
 from ._rows import RowSelection, decode, encode
 from .express._common import call_of
@@ -171,7 +183,15 @@ class ChartWidget(anywidget.AnyWidget):
         self._visibility_carried = False
         # What a browser last refused of what Python asked.
         self._error: ChartError | None = None
-        names: list[str | StateKey] = [*keys, "hover", "click", "rowSelection", "edge", "error"]
+        names: list[str | StateKey] = [
+            *keys,
+            "hover",
+            "click",
+            "contextMenu",
+            "rowSelection",
+            "edge",
+            "error",
+        ]
         self._callbacks = {name: ipywidgets.CallbackDispatcher() for name in names}
         # What each bound channel holds, by table name and channel, in Python's
         # terms: rows by position in the data as it is now.
@@ -813,14 +833,24 @@ class ChartWidget(anywidget.AnyWidget):
             )
         return (event, panel)
 
-    def on_hover(self, callback: Callable[[Inspection | None], Any], remove: bool = False) -> None:
-        """Calls ``callback(inspection)`` when the data under the pointer changes;
-        None when the pointer leaves the data."""
+    def on_hover(self, callback: Callable[[InputEvent], Any], remove: bool = False) -> None:
+        """Calls ``callback(event)`` (an ``hg.InputEvent``) when the pointer
+        moves, or what it or a cursor is on, or the data the inspection reads
+        there, changes: ``event.pointer``, ``event.target``, and
+        ``event.inspection`` (None off the data)."""
         self._listen("hover", callback, remove)
 
-    def on_click(self, callback: Callable[[Inspection], Any], remove: bool = False) -> None:
-        """Calls ``callback(inspection)`` when the plot is clicked over data."""
+    def on_click(self, callback: Callable[[InputEvent], Any], remove: bool = False) -> None:
+        """Calls ``callback(event)`` (an ``hg.InputEvent``) when a plot, an
+        item, an axis label, or a legend entry is clicked, or Enter is
+        pressed on the keyboard cursor (``event.cause == "keyboard"``)."""
         self._listen("click", callback, remove)
+
+    def on_context_menu(self, callback: Callable[[InputEvent], Any], remove: bool = False) -> None:
+        """Calls ``callback(event)`` (an ``hg.InputEvent``) on a secondary press
+        (a right click, a long press): where, and what it is on. While a
+        callback listens, the browser's own menu stays off the plots."""
+        self._listen("contextMenu", callback, remove)
 
     def on_edge(self, callback: Callable[[ViewEdge], Any], remove: bool = False) -> None:
         """Calls ``callback(edge)`` when the view comes near an end of what the
@@ -834,7 +864,7 @@ class ChartWidget(anywidget.AnyWidget):
         x: Value | None = None,
         y: Value | None = None,
         broadcast: bool = True,
-        snap: Literal["nearest", "previous", "next"] | None = None,
+        snap: Snap | None = None,
         tooltip: bool | None = None,
     ) -> None:
         """Shows the cursor at a value on ``x`` or ``y`` (a datetime on time
@@ -842,7 +872,7 @@ class ChartWidget(anywidget.AnyWidget):
         widget, as a synced chart's cursor shows: a crosshair and the points
         there. ``snap`` and ``tooltip`` say which points it reads and whether
         with the tooltip (see ``hg.SyncChannel``; the cursor channel's by
-        default, else "nearest" and none). Shared with the charts of its
+        default, else the chart's inspection's and none). Shared with the charts of its
         cursor channel unless ``broadcast`` is False."""
         if x is None and y is None:
             raise ChartError(
@@ -855,10 +885,9 @@ class ChartWidget(anywidget.AnyWidget):
         axis, value = ("x", x) if x is not None else ("y", y)
         if not isinstance(value, str):
             value = _milliseconds(value, f"widget.show_cursor {axis}")
-        if snap is not None and snap not in ("nearest", "previous", "next"):
+        if snap is not None and snap not in SNAPS:
             raise ChartError(
-                'widget.show_cursor snap: expected "nearest", "previous", or "next"; '
-                f"received {snap!r}"
+                f"widget.show_cursor snap: expected {listed(SNAPS)}; received {shown(snap)}"
             )
         if tooltip is not None and not isinstance(tooltip, bool):
             raise ChartError(
@@ -1108,10 +1137,12 @@ class ChartWidget(anywidget.AnyWidget):
             except ValueError:
                 return
             self._callbacks["edge"](edge)
-        elif kind in ("hover", "click"):
-            inspection = decode_inspection(content.get("inspection"))
-            if kind == "hover" or inspection is not None:
-                self._callbacks[kind](inspection)
+        elif kind in ("hover", "click", "contextMenu"):
+            try:
+                input_event = decode_input_event(content.get("event"))
+            except (ValueError, ChartError):
+                return
+            self._callbacks[kind](input_event)
         elif kind == "rowSelection":
             name = content.get("table")
             with self._lock:

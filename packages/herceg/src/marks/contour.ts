@@ -26,17 +26,7 @@ import type { Clip, ContourSpec, Frozen } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import { contourFormError } from "./contour-input.ts";
 import { bandRings, GridTracer, type ScalarGrid, type Traced } from "./contour-trace.ts";
-import {
-  boxOf,
-  clipBox,
-  clipSegment,
-  cut,
-  type DrawnMark,
-  distanceToStroke,
-  type PickedItem,
-  type PickQuery,
-  pickedHit,
-} from "./drawn.ts";
+import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { distinct } from "./heatmap-cells.ts";
 import { keyLegend, rampLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
@@ -57,7 +47,8 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
-import { rowOf, type Series } from "./series.ts";
+import type { Series } from "./series.ts";
+import { clipSegment, distanceToStroke } from "./shapes.ts";
 import { refuseValues } from "./still.ts";
 
 export interface ContourOptions<S extends Schema> {
@@ -101,6 +92,10 @@ export interface ContourOptions<S extends Schema> {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   /** The subplot to draw in, or "*" for every panel. */
   panel?: string;
   id?: string;
@@ -173,11 +168,11 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   readonly summarizes = true;
   /** Automatic y domains end at the grid's edges rather than at round values. */
   readonly tight = true;
-  readonly #bands: boolean;
+  readonly filled: boolean;
   /** The traced grid, by the rows it was made from (or the x column for every row). */
   readonly #traces = new WeakMap<object, Traces>();
   /** Each series' contours, by its values, which only it holds. */
-  readonly #contours = new WeakMap<NumericArray, Contours>();
+  readonly contours = new WeakMap<NumericArray, Contours>();
   #thresholds: { version: number; values: readonly number[] } | undefined;
   #extent: { version: number; extent: readonly [number, number] | undefined } | undefined;
 
@@ -193,9 +188,9 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       throw new TypeError(
         `contour variant: expected "lines" or "bands"; received ${JSON.stringify(variant)}`,
       );
-    this.#bands = variant === "bands";
+    this.filled = variant === "bands";
     // Lines of one stroke color have no scale to show (see `legends`).
-    this.legendScales = this.#bands || spec.stroke === undefined ? ["ramp"] : [];
+    this.legendScales = this.filled || spec.stroke === undefined ? ["ramp"] : [];
     const form = contourFormError(spec);
     if (form) throw new TypeError(form);
     checkThresholds(spec.thresholds);
@@ -247,7 +242,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       const count = (given as number | undefined) ?? THRESHOLDS;
       const extent = this.#valueExtent();
       if (!extent) values = [];
-      else if (this.#bands) {
+      else if (this.filled) {
         // A field of one value gets one band around it, of a width its magnitude can hold.
         const half = Math.max(0.5, Math.abs(extent[0]) * 1e-6);
         const [lo, hi] =
@@ -278,7 +273,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     const levels = this.#levels();
     const f = (value: number) => formatNumber(value, locale);
     const scale = this.#colorScale(theme, paint);
-    if (this.#bands)
+    if (this.filled)
       return levels.slice(0, -1).map((lo, i) => {
         const hi = levels[i + 1]!;
         return {
@@ -353,7 +348,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   #contoursOf(traces: Traces, i: number, level: number): Contours {
     const cached = traces.series[i];
     if (cached) return cached;
-    const bands = this.#bands;
+    const bands = this.filled;
     let sets: Traced[];
     let cancelled: Uint8Array[];
     if (bands) {
@@ -371,7 +366,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       !cancelled[k]![r] && (!bands || (k === 1 ? sets[k]!.areas[r]! < 0 : sets[k]!.areas[r]! > 0));
     const contours = this.#regions(traces, i, level, sets, cancelled, isRegion);
     traces.series[i] = contours;
-    this.#contours.set(contours.values, contours);
+    this.contours.set(contours.values, contours);
     return contours;
   }
 
@@ -388,7 +383,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     cancelled: readonly Uint8Array[],
     isRegion: (k: number, r: number) => boolean,
   ): Contours {
-    const bands = this.#bands;
+    const bands = this.filled;
     const parts: number[] = [];
     const positions = sets.map((set, k) => {
       const position = new Int32Array(set.areas.length).fill(-1);
@@ -453,7 +448,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     const tracer = new GridTracer(grid);
     const last = thresholds.length - 1;
     const sets = thresholds.map((t, i) =>
-      this.#bands ? tracer.rings(t, i === last) : tracer.lines(t),
+      this.filled ? tracer.rings(t, i === last) : tracer.lines(t),
     );
     const traces = { version: table.version, thresholds, grid, sets, series: [] };
     this.#traces.set(key, traces);
@@ -495,8 +490,8 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     _format: unknown,
     paint: PaintReader,
   ): LegendPart[] {
-    if (series.length === 0 || (!this.#bands && this.spec.stroke !== undefined)) return [];
-    const glyph = this.#bands ? "M-5,-5h10v10h-10Z" : "M-6,-1h12v2h-12Z";
+    if (series.length === 0 || (!this.filled && this.spec.stroke !== undefined)) return [];
+    const glyph = this.filled ? "M-5,-5h10v10h-10Z" : "M-6,-1h12v2h-12Z";
     const title = this.spec.label ?? this.spec.color;
     const key = keyLegend({
       title,
@@ -504,7 +499,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       entries: series.map((s) => ({ label: s.label, glyph, r: 5, color: s.color })),
     });
     const scale = this.#colorScale(theme, paint);
-    const colorbar: LegendPart["colorbar"] = this.#bands
+    const colorbar: LegendPart["colorbar"] = this.filled
       ? { kind: "steps", title, levels: this.#levels(), colors: series.map((s) => s.color) }
       : scale &&
         rampLegend({
@@ -538,7 +533,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     let hi = -Infinity;
     let found = false;
     for (const s of series) {
-      const contours = this.#contours.get(s.values);
+      const contours = this.contours.get(s.values);
       if (!contours) continue;
       found = true;
       const positions = axis === "x" ? contours.grid.xs : contours.grid.ys;
@@ -566,11 +561,11 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     // draws what the buffer holds again.
     const inputs = [...x.domain, ...x.range, ...y.domain, ...y.range];
     for (const s of series) {
-      const contours = this.#contours.get(s.values);
+      const contours = this.contours.get(s.values);
       if (!contours || s.length === 0 || frame.hidden.has(s.key)) continue;
       const project = projector(contours.grid, x, y);
-      const [u0, u1, v0, v1] = this.#view(contours, frame);
-      if (this.#bands) {
+      const [u0, u1, v0, v1] = this.viewBox(contours, frame);
+      if (this.filled) {
         let points = 0;
         let rings = 0;
         for (let k = 0; k < contours.sets.length; k++) {
@@ -616,7 +611,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
           colorIndex: Uint32Array.of(0),
           fillOpacity: this.spec.fillOpacity ?? 1,
           stroke: s.color,
-          strokeWidth: this.#edgeWidth(frame),
+          strokeWidth: this.edgeWidth(frame),
         });
         continue;
       }
@@ -652,88 +647,11 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   }
 
   /**
-   * Its bands and lines are found by `pick`, named by their level's value,
-   * and bounded by their region's outer ring or their line.
+   * Its bands and lines are found as drawn, named by their level's value,
+   * and bounded by their region's outer ring or their line (marks/lookups.ts).
    */
   pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-    return pickedHit(this, drawn, query, {
-      bounds: (s, position, frame) => {
-        const { x, y } = frame;
-        const contours = this.#contours.get(s.values);
-        if (!contours) return undefined;
-        const { boxes } = contours.sets[contours.parts[position * 2]!]!;
-        const r = contours.parts[position * 2 + 1]! * 4;
-        const { xs, ys } = contours.grid;
-        // With half what their edges paint past them (so straight lines have an area).
-        const grow = this.#edgeWidth(frame) / 2;
-        const x0 = x.map(along(xs, boxes[r]!));
-        const y0 = y.map(along(ys, boxes[r + 1]!));
-        const x1 = x.map(along(xs, boxes[r + 2]!));
-        const y1 = y.map(along(ys, boxes[r + 3]!));
-        const ring = boxOf(
-          Math.min(x0, x1) - grow,
-          Math.min(y0, y1) - grow,
-          Math.max(x0, x1) + grow,
-          Math.max(y0, y1) + grow,
-        );
-        return cut(ring, clipBox(this.spec.clip, frame));
-      },
-      group: (s, position) => ({ parts: [], names: [s.values[rowOf(s, position)]!] }),
-      // What clipping keeps, as far as the query reaches: band regions,
-      // and lines' strokes measured from their edges.
-      lookup: (series, px, py, frame) => {
-        const box = clipBox(this.spec.clip, frame);
-        if (this.#bands) return this.#nearestBand(series, px, py, frame, query.slop, box);
-        // Lines of no width paint nothing.
-        return this.#stroke(frame) > 0
-          ? this.#find(series, px, py, frame, query.slop, box)
-          : undefined;
-      },
-    });
-  }
-
-  /**
-   * For picking: the band region nearest a pixel within `reach` of what
-   * `clip` keeps of it: the one holding the clip's point nearest the
-   * pixel, else the one whose edge, cut to the clip, is nearest.
-   */
-  #nearestBand(
-    series: readonly Series[],
-    px: number,
-    py: number,
-    frame: Frame,
-    reach: number,
-    clip: Readonly<Rect>,
-  ): Hit | undefined {
-    const qx = Math.min(Math.max(px, clip.x), clip.x + clip.width);
-    const qy = Math.min(Math.max(py, clip.y), clip.y + clip.height);
-    const distance = Math.hypot(px - qx, py - qy);
-    if (!(distance <= reach)) return undefined;
-    // Outside the clip, the band shown at its edge: just inside it, so a
-    // band that only meets the edge is not.
-    const inward = (p: number, q: number, from: number, size: number) =>
-      p === q ? q : q === from ? from + Math.min(INSIDE, size / 2) : q - Math.min(INSIDE, size / 2);
-    const held = this.#find(
-      series,
-      inward(px, qx, clip.x, clip.width),
-      inward(py, qy, clip.y, clip.height),
-      frame,
-      0,
-    );
-    // Only a region geometry draws (its ring in the view).
-    const contours = held && this.#contours.get(held.series.values);
-    const drawn =
-      held &&
-      contours &&
-      ringShown(contours, this.#view(contours, frame))(
-        contours.parts[held.position * 2]!,
-        contours.parts[held.position * 2 + 1]!,
-      );
-    if (!drawn) return this.#find(series, px, py, frame, reach, clip);
-    // A later band's outline may be painted over the region there.
-    const edge = this.#edgeWidth(frame) > 0 && this.#find(series, px, py, frame, distance, clip);
-    const later = edge && series.indexOf(edge.series) > series.indexOf(held.series);
-    return later ? edge : { ...held, distance };
+    return query.lookups.contour(this, drawn, query, PICKING);
   }
 
   /**
@@ -741,7 +659,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
    * lines geometry draws (`inView`; a ring out of view changes no fill
    * inside it), which picking finds alone.
    */
-  #view(contours: Contours, { x, y, plot }: Frame): readonly [number, number, number, number] {
+  viewBox(contours: Contours, { x, y, plot }: Frame): readonly [number, number, number, number] {
     const [u0, u1] = gridRange(contours.grid.xs, [x.invert(plot.x), x.invert(plot.x + plot.width)]);
     const [v0, v1] = gridRange(contours.grid.ys, [
       y.invert(plot.y + plot.height),
@@ -750,7 +668,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     return [u0, u1, v0, v1];
   }
 
-  #stroke(frame: Frame): number {
+  stroke(frame: Frame): number {
     return this.spec.strokeWidth ?? frame.theme.style.line.strokeWidth;
   }
 
@@ -759,8 +677,8 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
    * bands' outlines, in their own color, which cover the seams
    * antialiasing leaves between neighbors; lines' strokes.
    */
-  #edgeWidth(frame: Frame): number {
-    if (!this.#bands) return this.#stroke(frame);
+  edgeWidth(frame: Frame): number {
+    if (!this.filled) return this.stroke(frame);
     return (this.spec.fillOpacity ?? 1) === 1 ? 0.5 : 0;
   }
 
@@ -769,7 +687,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
    * pixels, there: tooltips follow the pointer along contours.
    */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
-    return this.#find(series, px, py, frame, LINE_REACH + this.#stroke(frame) / 2);
+    return this.find(series, px, py, frame, LINE_REACH + this.stroke(frame) / 2);
   }
 
   /**
@@ -777,7 +695,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
    * `reach` pixels of its middle. With `clip`, picking's: lines' strokes
    * and bands' edges within `reach`, measured to what the clip keeps.
    */
-  #find(
+  find(
     series: readonly Series[],
     px: number,
     py: number,
@@ -785,17 +703,17 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     reach: number,
     clip?: Readonly<Rect>,
   ): Hit | undefined {
-    const half = clip ? this.#edgeWidth(frame) / 2 : 0;
+    const half = clip ? this.edgeWidth(frame) / 2 : 0;
     let best: Hit | undefined;
     for (const s of series) {
-      const contours = this.#contours.get(s.values);
+      const contours = this.contours.get(s.values);
       if (!contours || s.length === 0 || frame.hidden.has(s.key)) continue;
       const { grid } = contours;
       const u = gridUnit(grid.xs, frame.x.invert(px));
       const v = gridUnit(grid.ys, frame.y.invert(py));
       contours.index ??= new BlockIndex(contours);
       const { index } = contours;
-      if (this.#bands && !clip) {
+      if (this.filled && !clip) {
         if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
         const position = index.region(u, v);
         if (position >= 0) return { series: s, position, distance: 0, at: [px, py] };
@@ -812,7 +730,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       );
       // Bands' edges count where some of the band shows beside them.
       const inBand =
-        this.#bands && clip
+        this.filled && clip
           ? (x: number, y: number) =>
               index.region(
                 gridUnit(grid.xs, frame.x.invert(x)),
@@ -820,7 +738,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
               ) >= 0
           : undefined;
       // Picking finds what geometry drew.
-      const shown = clip && ringShown(contours, this.#view(contours, frame));
+      const shown = clip && ringShown(contours, this.viewBox(contours, frame));
       const near = index.nearestEdge(
         u,
         v,
@@ -837,7 +755,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       if (near && near.distance <= (best?.distance ?? Infinity))
         best = {
           series: s,
-          position: this.#bands ? index.regionOf(near.set, near.ring) : near.ring,
+          position: this.filled ? index.regionOf(near.set, near.ring) : near.ring,
           distance: near.distance,
           at: near.at,
         };
@@ -874,7 +792,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     let count = 0;
     let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
     for (const part of parts) {
-      const contours = this.#contours.get(part.values);
+      const contours = this.contours.get(part.values);
       if (!contours) continue;
       count += part.length;
       for (let p = 0; p < part.length; p++) {
@@ -887,9 +805,9 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
         y1 = Math.max(y1, along(ys, set.boxes[r * 4 + 3]!));
       }
     }
-    const what = this.#bands ? "region" : "line";
+    const what = this.filled ? "region" : "line";
     const field = this.spec.label ?? this.spec.color;
-    const heading = this.#bands ? `${field} ${name}` : `${field} at ${name}`;
+    const heading = this.filled ? `${field} ${name}` : `${field} at ${name}`;
     if (count === 0) return `${heading}: none`;
     return (
       `${heading}: ${count} ${what}${count === 1 ? "" : "s"}, ` +
@@ -1522,6 +1440,8 @@ export function contour<S extends Schema>(
       "panel",
       "clip",
       "zIndex",
+      "pick",
+      "inspect",
       "id",
     ]),
   };
@@ -1534,3 +1454,7 @@ export function contour<S extends Schema>(
   // Field names were checked against S above; marks work on the erased schema.
   return new ContourMark(spec, table as unknown as Table);
 }
+
+/** What its lookup reads of this module (see marks/lookups.ts). */
+const PICKING = { along, ringShown, inside: INSIDE };
+export type ContourPicking = typeof PICKING;

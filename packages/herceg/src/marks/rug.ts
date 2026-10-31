@@ -4,17 +4,7 @@ import type { Breaks } from "../lod/m4.ts";
 import type { SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, Frozen, RugSpec } from "../spec/spec.ts";
 import { colored } from "./colored.ts";
-import {
-  boxOf,
-  clipBox,
-  cut,
-  type DrawnMark,
-  distanceToCut,
-  type PickedItem,
-  type PickQuery,
-  paintedLater,
-  pickedHit,
-} from "./drawn.ts";
+import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import type { CssColor, ItemKeyed } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -38,6 +28,7 @@ import {
 } from "./mark.ts";
 import { type MarkRows, MarkRowsCache, rowsOf } from "./rows.ts";
 import { lowerPosition, rowOf, type Series, xExtent } from "./series.ts";
+import { boxOf, clipBox, distanceToCut, paintedLater } from "./shapes.ts";
 import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -68,6 +59,10 @@ interface RugStyle<S extends Schema> extends ItemKeyed<S> {
   clip?: Clip;
   /** Where it is drawn among the panel's marks: higher above lower; 0 by default. */
   zIndex?: number;
+  /** `false`: the pointer passes through the marks: clicks, hover, and context menus pick what is under them. */
+  pick?: boolean;
+  /** `false`: tooltips, hover, and the keyboard leave the marks out. */
+  inspect?: boolean;
   panel?: string;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
   tooltip?: MarkTooltip<S>;
@@ -167,7 +162,11 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
     );
     // Both columns alias the observations for the existing series machinery;
     // only `tooltip` is a data coordinate. `place` supplies the pixel anchor.
-    return buildSeries(table, sources, values, key, palette, spec.stroke);
+    // Sorted, they are sorted along y too (inspections read rugs along y so).
+    return buildSeries(table, sources, values, key, palette, spec.stroke).map((s) => ({
+      ...s,
+      ySorted: s.sorted,
+    }));
   }
 
   xExtent(series: readonly Series[], log: boolean, _breaks?: Breaks) {
@@ -186,11 +185,11 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
     if (scale.breaks?.hides(value)) return undefined;
     const at = scale.map(value);
     if (!Number.isFinite(at)) return undefined;
-    const [edge, end] = this.#edge(frame);
+    const [edge, end] = this.edge(frame);
     return this.tooltip === "x" ? [at, (edge + end) / 2] : [(edge + end) / 2, at];
   }
 
-  #edge({ plot }: Frame): readonly [number, number] {
+  edge({ plot }: Frame): readonly [number, number] {
     const length = Math.min(this.spec.length ?? 8, this.tooltip === "x" ? plot.height : plot.width);
     if (this.tooltip === "x") {
       const top = this.spec.side === "top";
@@ -207,7 +206,7 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
     const out: SegmentGeometry[] = [];
     const horizontal = this.tooltip === "y";
     const scale = frame[this.tooltip];
-    const [edge, end] = this.#edge(frame);
+    const [edge, end] = this.edge(frame);
     const start = horizontal ? frame.plot.y : frame.plot.x;
     const stop = start + (horizontal ? frame.plot.height : frame.plot.width);
     for (const s of series) {
@@ -243,31 +242,15 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
 
   /**
    * Its ticks are found as `pick` finds them, measured to their painted
-   * strokes, the one painted last of those as near; each a line from the
-   * plot's edge.
+   * strokes (marks/lookups.ts).
    */
   pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-    const stroke = this.spec.strokeWidth ?? 1;
-    return pickedHit(this, drawn, query, {
-      lookup: (series, px, py, frame) => this.#find(series, px, py, frame, stroke, true),
-      bounds: (s, position, frame) => {
-        const row = rowOf(s, position);
-        if (!this.place(s, row, frame)) return undefined;
-        const at = frame[this.tooltip].map(s.values[row]!);
-        const [edge, end] = this.#edge(frame);
-        const half = stroke / 2;
-        const tick =
-          this.tooltip === "x"
-            ? boxOf(at - half, edge, at + half, end)
-            : boxOf(edge, at - half, end, at + half);
-        return cut(tick, clipBox(this.spec.clip, frame));
-      },
-    });
+    return query.lookups.rug(this, drawn, query);
   }
 
   /** Binary search in value order; distance is to the actual clipped tick. */
   pick(series: readonly Series[], px: number, py: number, frame: Frame): Hit | undefined {
-    return this.#find(series, px, py, frame, 0, false);
+    return this.find(series, px, py, frame, 0, false);
   }
 
   /**
@@ -276,7 +259,7 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
    * last (a highlight's selected rows over the others, as tooltips rank
    * them).
    */
-  #find(
+  find(
     series: readonly Series[],
     px: number,
     py: number,
@@ -288,7 +271,7 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
     const pointer = this.tooltip === "x" ? px : py;
     const lo = Math.min(...scale.domain);
     const hi = Math.max(...scale.domain);
-    const [edge, end] = this.#edge(frame);
+    const [edge, end] = this.edge(frame);
     const across = this.tooltip === "x" ? py : px;
     const distanceAcross = Math.max(Math.min(edge, end) - across, across - Math.max(edge, end), 0);
     const width = stroke / 2;
@@ -419,6 +402,8 @@ export function rug<S extends Schema>(
       "panel",
       "clip",
       "zIndex",
+      "pick",
+      "inspect",
       "id",
       "itemKey",
     ]),

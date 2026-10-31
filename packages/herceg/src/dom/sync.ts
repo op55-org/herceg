@@ -6,7 +6,7 @@
 // charts in frames of their own (static notebook outputs) take part through
 // a relay (relay.ts).
 
-import type { CursorSnap, SyncSpec } from "../spec/spec.ts";
+import type { Snap, SyncSpec } from "../spec/spec.ts";
 
 /** What charts share: the cursor's position, the x (or y) range in view, and the selection. */
 export type Channel = "cursor" | "viewport" | "selection";
@@ -20,7 +20,7 @@ export interface ChannelOf {
   scale: "x" | "y" | "xy";
   /** The panel whose scales it carries; by default, those every panel shares. */
   panel?: string | undefined;
-  snap?: CursorSnap | undefined;
+  snap?: Snap | undefined;
   tooltip?: boolean | undefined;
 }
 

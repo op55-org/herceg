@@ -78,8 +78,8 @@ share.panel("share").pie("region", "revenue", inner_radius=0.6)
 - **Data** is pandas, Polars, PyArrow, a mapping of names to arrays or
   lists, or a list of records ([Data in Python](../data.md#data-in-python)).
   `hg.derive` filters, bins, aggregates, and rolls in the browser.
-- **Options** are dataclasses (`hg.AxisOptions`, `hg.Tooltip`,
-  `hg.Theme`, ...) or dicts of the same fields. Names have one spelling,
+- **Options** are dataclasses (`hg.AxisOptions`, `hg.InspectionOptions`,
+  `hg.Tooltip`, `hg.Theme`, ...) or dicts of the same fields. Names have one spelling,
   snake_case where TypeScript has camelCase.
 - **Errors** are `hg.ChartError`, raised as early as Python can check
   ([Errors](output.md#errors)).

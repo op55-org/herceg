@@ -15,6 +15,7 @@ import { rowSelection } from "../../src/model/row-selection.ts";
 import { clickedRows } from "../../src/model/selected-rows.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import type { ArcGeometry, RectGeometry, Scene, TextGeometry } from "../../src/scene/scene.ts";
+import { withPicker } from "../helpers/picker.ts";
 
 const sales = table({
   region: ["Europe", "Europe", "Europe", "Asia", "Asia"],
@@ -268,10 +269,12 @@ describe("tree row selection", () => {
     // Europe's header strip, along the top of its box, is Europe's own.
     const [x, y] = europe.outline.match(/-?[\d.]+/g)!.map(Number);
     const tables = new Set([sales as unknown as Table]);
-    expect(clickedRows(model, tables, x! + 3, y! + 3)?.rows).toEqual(Uint32Array.of(0, 1, 2));
+    expect(clickedRows(withPicker(model), tables, x! + 3, y! + 3)?.rows).toEqual(
+      Uint32Array.of(0, 1, 2),
+    );
     const paris = items(model).find((item) => item.points[0]!.label.endsWith("Paris"))!;
     const { px, py } = paris.points[0]!;
-    expect(clickedRows(model, tables, px, py)?.rows).toEqual(Uint32Array.of(0));
+    expect(clickedRows(withPicker(model), tables, px, py)?.rows).toEqual(Uint32Array.of(0));
   });
 
   it("draw each node's selected share, dimming the rest, saying how much of a node is selected", () => {

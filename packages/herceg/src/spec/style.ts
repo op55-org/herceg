@@ -127,6 +127,8 @@ export interface StyleRoles {
   axisLine?: StrokeStyle;
   /** An axis' tick marks. */
   tick?: StrokeStyle;
+  /** The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. */
+  crosshair?: StrokeStyle;
   /** Lines, area outlines, and contour lines that do not set their own width. */
   line?: { strokeWidth?: number };
   /** Bars: the radius of the corners at the value end of unstacked bars; 0 for square bars. */

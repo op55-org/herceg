@@ -2,6 +2,7 @@
 // panel draws inside it, read on the scales they are drawn with (a right
 // axis too), and a legend hides series where it says: a panel's legend in
 // its panel, the chart's in every panel.
+import "../interactive.ts";
 import { describe, expect, it } from "vitest";
 import { compileExpression } from "../../../src/data/expression.ts";
 import { type SelectionStore, selectionStore } from "../../../src/data/selection.ts";

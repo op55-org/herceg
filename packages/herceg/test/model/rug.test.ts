@@ -127,7 +127,7 @@ describe("rug", () => {
         marks: [mark],
         [axis]: { format: { maximumFractionDigits: 1 } },
       });
-      expect(model.tooltipMode()).toBe(axis === "x" ? "nearest-x" : "nearest-y");
+      expect(model.inspectorOf("")?.mode).toBe(axis === "x" ? "nearest-x" : "nearest-y");
       const [stop] = stopsOf(model, "");
       const hits = [0, 1, 2, 3].map((i) => positionOf(model, stop!.key, i)!.points[0]!);
       expect(hits.map((p) => p.value)).toEqual([1, 2, 2, 3]);

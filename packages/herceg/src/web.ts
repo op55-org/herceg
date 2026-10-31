@@ -5,8 +5,10 @@
 
 export type {
   EdgePayload,
+  InputEventPayload,
   InspectionPayload,
   PanelViewportPayload,
+  PointerPayload,
   RowSelectionPayload,
   ScaleInstancePayload,
   ScaleStatePayload,
@@ -14,6 +16,7 @@ export type {
   SelectEventPayload,
   SelectionOwnerPayload,
   SelectionPayload,
+  TargetPayload,
   ViewportEventPayload,
   ViewportPayload,
   ViewportStatePayload,
@@ -21,6 +24,7 @@ export type {
 } from "./web/events.ts";
 export {
   edgePayload,
+  inputEventPayload,
   inspectionPayload,
   restoreViewportState,
   rowSelectionPayload,

@@ -64,7 +64,7 @@ describe("error bars", () => {
     expect(y1).toBeCloseTo(y2!, 3);
     expect(x1).toBeCloseTo(x.map(4), 3);
     expect(x2).toBeCloseTo(x.map(9), 3);
-    expect(model.tooltipMode()).toBe("nearest-y");
+    expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     const inspection = model.inspect(scene.panels[0]!.plot.x + 5, model.yScale()!.map(1))!;
     expect(inspection.points.map((p) => p.text)).toEqual(["4 – 9"]);
   });
@@ -110,7 +110,7 @@ describe("error bars", () => {
     for (const mode of ["nearest", "nearest-x"] as const) {
       const { model } = build({
         marks: [errorbar(spans, { y: "y", x1: "lo", x2: "hi" })],
-        tooltip: { mode },
+        inspection: { mode },
       });
       const hit = model.inspect(model.xScale()!.map(30), model.yScale()!.map(1))!;
       expect(hit.points[0]!.text).toBe("0 – 30");
@@ -179,7 +179,7 @@ describe("error bars", () => {
     const stems = table({ x: [1, 2], lo: [0, 0], hi: [100, 1] });
     const { model } = build({
       marks: [errorbar(stems, { x: "x", y1: "lo", y2: "hi" })],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
     });
     const hit = model.inspect(model.xScale()!.map(1), model.yScale()!.map(1))!;
     expect(hit.points[0]!.text).toBe("0 – 100");
@@ -193,7 +193,7 @@ describe("error bars", () => {
         errorbar(a, { x: "x", y1: "lo", y2: "hi", label: "a" }),
         errorbar(b, { x: "x", y1: "lo", y2: "hi", label: "b" }),
       ],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       x: { domain: [0, 2] },
     });
     const hit = model.inspect(model.xScale()!.map(1.01), model.yScale()!.map(5))!;
@@ -201,7 +201,7 @@ describe("error bars", () => {
     const clipped = table({ x: [9, 15], lo: [0, 0], hi: [100, 1] });
     const view = build({
       marks: [errorbar(clipped, { x: "x", y1: "lo", y2: "hi", cap: 0 })],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       x: { domain: [10, 20] },
     });
     // Near the top left of the plot, the clipped interval at x = 9 is not drawn.
@@ -216,7 +216,7 @@ describe("error bars", () => {
     const capped = table({ x: [1, 1.6], lo: [0, 50], hi: [100, 90] });
     const { model } = build({
       marks: [errorbar(capped, { x: "x", y1: "lo", y2: "hi", cap: 80 })],
-      tooltip: { mode: "nearest" },
+      inspection: { mode: "nearest" },
       x: { domain: [0, 10] },
       y: { domain: [0, 100] },
     });
