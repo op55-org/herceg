@@ -1501,14 +1501,14 @@
       "table": "samples",
       "categories": ["k", "m"],
       "selection": {
-        "effect": "none",
         "rows": {
           "brush-x": [2, 3],
           "brush-y": [3],
           "brush-xy": [3],
           "lasso": [3],
           "click": [3]
-        }
+        },
+        "highlight": { "on": [3, 20], "off": [4, 40] }
       },
       "reading": {
         "points": [["m", 3, "20"]],

@@ -719,11 +719,11 @@ function withScheme<T extends { colors?: string | readonly string[] | undefined 
 }
 
 function annotationTable(
-  spec: { data?: string; label?: string | LabelSpec },
+  spec: { data?: string; label?: string | LabelSpec; encode?: object },
   positions: readonly (AnnotationPosition | undefined)[],
   tables: Map<string, Table>,
 ): Table | undefined {
-  return readsTable(positions, spec.label) ? tableFor(spec.data, tables) : undefined;
+  return readsTable(positions, spec.label, spec.encode) ? tableFor(spec.data, tables) : undefined;
 }
 
 /** The name `table` has among `tables`. */

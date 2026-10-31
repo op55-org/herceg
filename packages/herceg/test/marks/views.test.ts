@@ -13,6 +13,7 @@ import { bar } from "../../src/marks/bar.ts";
 import { boxen } from "../../src/marks/boxen.ts";
 import { boxplot } from "../../src/marks/boxplot.ts";
 import { candlestick } from "../../src/marks/candlestick.ts";
+import { custom } from "../../src/marks/custom.ts";
 import { errorbar } from "../../src/marks/errorbar.ts";
 import { heatmap } from "../../src/marks/heatmap.ts";
 import { histogram } from "../../src/marks/histogram.ts";
@@ -116,6 +117,39 @@ const marks: [string, (data: Data) => ChartMark][] = [
   ["heatmap of cells", (data) => heatmap(data, { x: "t", y: "w", color: "v" })],
   ["calendar", (data) => heatmap(data, { date: "day", color: "v" })],
   ["rug", (data) => rug(data, { x: "v", series: "host" })],
+  [
+    "custom mark of points",
+    (data) =>
+      custom(data, {
+        x: "t",
+        y: "v",
+        series: "host",
+        draw({ series, x, y, item, circle }) {
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              item(s, row, () => circle(x(s.x[row]!), y(s.y[row]!), 3));
+            }
+        },
+      }),
+  ],
+  [
+    "custom mark of ranges",
+    (data) =>
+      custom(data, {
+        x: ["low", "high"],
+        y: "region",
+        draw({ table: rows, series, x, y, item, rect }) {
+          const high = rows.numbers("high");
+          for (const s of series)
+            for (let k = 0; k < s.length; k++) {
+              const row = s.rowAt(k);
+              const left = x(s.x[row]!);
+              item(s, row, () => rect(left, y(s.y[row]!) - 2, x(high[row]!) - left, 4));
+            }
+        },
+      }),
+  ],
 ];
 
 describe("series marks over row views", () => {

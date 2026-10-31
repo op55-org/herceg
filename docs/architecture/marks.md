@@ -267,9 +267,10 @@ about 13 KB gzip.
 
 Every channel compiles through `compileChannel` into one of: a constant; a
 category field through an `OrdinalScale` (outputs per dictionary code, so a
-row's value is an array lookup); an identity scale (values as they are); the
-series' names through a scale; or a condition, compiled once and read per
-row.
+row's value is an array lookup); a number or time field through a
+`ChannelScale` (`channel-scales.ts`); an identity scale (values as they
+are); the series' names through a scale; or a condition, compiled once and
+read per row.
 
 - Every output is checked against the channel drawing it (`outputProblem`
   in `spec/channels.ts`): constants, both branches of a condition, a named
@@ -282,6 +283,24 @@ row.
   colors resolve before facets split rows and streaming never recolors.
 - The default scales (`"color"`, `"symbol"`, `"dash"`) are made when first
   read.
+- **Channel scales** are the chart's scales with a `range` (`linear`,
+  `log`, `sqrt`). Each field read through one registers its mark's rows;
+  `update()` takes the union of their extents (cached per rows revision)
+  as the domain each frame, before series resolve, and bumps the scale's
+  `revision` when the domain or a ramp's colors change. Caches of looks
+  key on the sum of their channels' revisions (`scaledRevision`), so they
+  read again only then. Outputs are functions built once per read
+  (`numberOutputs`, `colorOutputs`): numbers kept within the channel's
+  limits, colors from a 256-step ramp of the stops (interpolated as
+  `scale/color.ts` does, which the compiler does not import). A missing
+  output draws the mark's own paint; points leave the row out.
+- **Rows' looks** (`row-styles.ts`): bars, and regions over a table
+  (`rowLooks`, `MarkFeatures.rowLooks`), number each row's look; regions
+  draw a rectangle geometry per run of consecutive rows of one look, in
+  row order. Their legend entries by label take the look of the first row
+  holding each (`CompiledFeatures.labelLooks`, which the legend asks).
+  Scaled channels number looks by output, so a ramp's rows take at most
+  its 256 steps.
 
 ### Looks and style runs
 
@@ -513,12 +532,38 @@ loader binds a table only to annotations that read one.
 
 `custom()` emits paths (SVG path syntax) and text, which become one
 `shapes` geometry drawn as SVG elements or through `Path2D`, so custom
-shapes follow renderer choice, clipping, and export. Over one x field and y
-fields, the mark builds series as a line does (`SeriesSplitter`,
-`buildSeries`), so legends, hiding, tooltips, events, the keyboard, facet
-splits, domains, and summaries come from the chart's series code; there is
-no inspection code of its own. `draw` receives read-only series views made
-per draw. `zero` puts zero in the domain through `Mark.zero`. Since shapes
+shapes follow renderer choice, clipping, and export. The mark builds series
+as a line does (`SeriesSplitter`, `buildSeries`): over one x field and y
+fields, a series per y field; over other fields (ranges), one series, or
+one per value of the series field, each row an item. So legends, colors,
+hiding, tooltips, events, the keyboard, facet splits, domains, and
+summaries come from the chart's series code. `draw` receives read-only
+series views made per draw.
+
+**Items.** Shapes drawn inside `item(series, row, draw)` are that row's
+item. A geometry's items (calls' starting shapes, series, and positions)
+stay with it in a `WeakMap`; `custom-shapes.ts`'s `ShapeIndex` finds each
+item's box when first asked (a `Float64Array`, 32 bytes an item) and,
+over 256 items, files them in a grid of cells of at least 32 px over the
+mark's clip and its size around it, so a query tests the few items near
+it; their paths are traced again for the exact test
+(nonzero fills, strokes with butt ends and round joins, curves and arcs
+flattened to a quarter pixel near the query and to chords elsewhere, text
+by its box) rather than kept. The picker reaches
+them through `pickItem` (the topmost item within slop; a mark of points
+that drew no items, its series' nearest point within 3 px; ranges, only
+their items), and `partOf` names the item of a shape. Range marks are inspected as `"point"` tooltips with the
+mark's `place` (the item's box, inside the plot) and `pick` (the item
+exactly under the pointer, its tooltip at the pointer) hooks, so tooltips
+and the keyboard read items by shape. `summarize` writes the text
+alternative's sentence for ranges and points along category y (counts,
+categories, and each value axis' extent over its fields), and `draw`'s
+series views give a panel's own bands as its places (`placeAt`). A
+highlighted selection's rows come
+from `Frame.highlighted`; shapes of unselected items are dimmed by the
+marks' `DIM`. `encode` compiles through the channels above
+(`features/encoded.ts`), read per table version, theme, and scale
+revision. `zero` puts zero in the domain through `Mark.zero`. Since shapes
 between points are unknown, y extents take in the points just past the
 view. Specs hold only the type, id, and series fields, so Python cannot
 make custom marks and adapters rebuild them on every render. Custom marks

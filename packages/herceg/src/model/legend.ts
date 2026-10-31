@@ -12,11 +12,12 @@ import {
   textItem,
   textWidth,
 } from "../layout/text.ts";
-import type { ChartMark, ColorRamp, Mark } from "../marks/mark.ts";
+import type { ColorRamp, Mark } from "../marks/mark.ts";
 import type { Series } from "../marks/series.ts";
 import { type Guide, type GuideItem, LEGEND_SWATCH, type LegendItem } from "../scene/scene.ts";
 import type { TextPaint } from "../style/style.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import type { CompiledFeatures } from "./features.ts";
 import type { PanelSplit } from "./panel-layout.ts";
 import type { PanelLegends } from "./panel-legends.ts";
 
@@ -191,8 +192,12 @@ export interface LegendContent {
   /** Layout marks' items' colors, by key. */
   color?: ((key: string) => string) | undefined;
   panelLegends?: typeof PanelLegends | undefined;
-  /** The keys of the declared domains' values a mark's entries stand for, drawn or not. */
-  domains?: ((mark: ChartMark) => readonly string[]) | undefined;
+  /**
+   * The chart's compiled features, when it has any: the keys of the declared
+   * domains' values a mark's entries stand for, drawn or not, and
+   * annotations' entries in the paint of their rows.
+   */
+  features?: Pick<CompiledFeatures, "domainKeys" | "labelLooks"> | undefined;
 }
 
 /**

@@ -227,9 +227,27 @@ function readingsOf(mark: Mark): Reading[] {
     // A contour's grid rows, at their x and y.
     case "contour":
       return [{ x: field(spec.x as string), y: field(spec.y as string) }];
-    // Custom marks of x and y fields place rows as points do.
-    case "custom":
-      return spec.x === undefined ? [] : byField(field(spec.x as string), list(spec.y!));
+    // Custom marks of one x field place rows as points and lines do; over
+    // other fields (ranges), each row spans its fields on each axis, and a
+    // brush holds the rows whose spans it meets.
+    case "custom": {
+      if (spec.x === undefined || spec.y === undefined) return [];
+      const [xs, ys] = [list(spec.x), list(spec.y)];
+      if (xs.length === 1 && (ys.length === 1 || spec.series === undefined))
+        return byField(field(xs[0]!), ys);
+      const span = (fields: readonly string[]): Place =>
+        fields.length === 1
+          ? field(fields[0]!)
+          : {
+              low: fields
+                .map((name): Expression => ["field", name])
+                .reduce((a, b) => ["min", a, b]),
+              high: fields
+                .map((name): Expression => ["field", name])
+                .reduce((a, b) => ["max", a, b]),
+            };
+      return [{ x: span(xs), y: span(ys) }];
+    }
     default:
       return [];
   }

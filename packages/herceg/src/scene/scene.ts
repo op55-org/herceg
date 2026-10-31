@@ -459,6 +459,8 @@ export interface TextShape {
   y: number;
   fill: string;
   anchor: "start" | "middle" | "end";
+  /** From 0 to 1 (1 by default): an item's text a selection dims. */
+  opacity?: number | undefined;
 }
 
 /** Paths and text, such as a custom mark's, in drawing order, clipped to the plot. */

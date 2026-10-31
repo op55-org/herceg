@@ -5,6 +5,7 @@
 // imports it. It imports only types from the chart's modules and is handed
 // what it uses of their code (`FeatureKit`).
 
+import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
 import { numberPattern, timePattern } from "../../format/patterns.ts";
@@ -17,15 +18,17 @@ import type {
   Identities,
   MarkFeatures,
   PointChannels,
+  RowLooks,
   SeriesFeatures,
   SeriesSwatch,
 } from "../../model/features.ts";
 import type { LegendEntry } from "../../model/legend.ts";
 import type { ChartConfig } from "../../model/model.ts";
-import type { AreaGeometry, Geometry, LineGeometry } from "../../scene/scene.ts";
+import type { AreaGeometry, Geometry, GuideItem, LineGeometry } from "../../scene/scene.ts";
 import type {
   AreaLabelsSpec,
   ChannelSpec,
+  EncodingsSpec,
   LabelContent,
   OrdinalScaleSpec,
   SymbolName,
@@ -36,6 +39,7 @@ import type { AreaSpec, BarSpec, LineSpec, TextSpec } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { ChartMark, Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
+import { ChannelScale, channelScaleProblem, wholeTable } from "./channel-scales.ts";
 import {
   checkOutputs,
   compileChannel,
@@ -47,6 +51,7 @@ import {
 } from "./channels.ts";
 import { writeContent } from "./content.ts";
 import { bandRuns, indexedBand, Topology } from "./continuity.ts";
+import { encodedChannels } from "./encoded.ts";
 import { type MarkScope, scalePrefix, scopeOfMark, tableNames } from "./identity.ts";
 import {
   checkAt,
@@ -70,7 +75,7 @@ import {
   type TracedEdge,
   tableRow,
 } from "./provenance.ts";
-import { RowStyles } from "./row-styles.ts";
+import { type RowStyleSpec, RowStyles, rowLooks } from "./row-styles.ts";
 import {
   fillPieces,
   holed,
@@ -141,8 +146,34 @@ function compile(
   const ofPanels = new Map<string, OrdinalScaleSpec>();
   /** Declared identity scales, which map nothing. */
   const unmapped = new Set<string>();
+  /** Declared channel scales, which map numbers onto widths, opacities, sizes, and colors. */
+  const continuous = new Map<string, ChannelScale>();
   for (const [name, spec] of Object.entries(config.scales ?? {})) {
+    if (spec !== undefined && POSITIONS.includes(name) && "range" in spec)
+      throw new kit.ChartError({
+        code: "invalid-option",
+        path: scalePath(name),
+        message: `chart ${scalePath(name)}: places values on an axis, which a range does not set; give the channel scale another name, and name it in encode`,
+      });
     if (POSITIONS.includes(name) || spec === undefined) continue;
+    if ("range" in spec) {
+      const problem = channelScaleProblem(spec);
+      if (problem)
+        throw new kit.ChartError({
+          code: "invalid-option",
+          path: `${scalePath(name)}${problem.at}`,
+          message: `chart ${scalePath(name)}${problem.at}: expected ${problem.expected}; received ${JSON.stringify(problem.value)}`,
+        });
+      // The default scales map categories: what series and category fields read unnamed.
+      if (DEFAULT_SCALES.includes(name))
+        throw new kit.ChartError({
+          code: "invalid-option",
+          path: scalePath(name),
+          message: `chart ${scalePath(name)}: "${name}" is the scale marks read categories through by default, which a scale with a range does not map; give the channel scale another name, and name it in encode`,
+        });
+      continuous.set(name, new ChannelScale(name, spec));
+      continue;
+    }
     // Malformed first, for good, as the validator checks a spec before what it draws.
     const { scope } = spec as { scope?: unknown };
     if (spec.type === "ordinal" && scope !== undefined && scope !== "chart" && scope !== "panel")
@@ -192,9 +223,21 @@ function compile(
     return prefix;
   };
   const readIn =
-    (table: Table | undefined, mark: Where, panel: string | undefined): ScaleOf =>
+    (
+      table: Table | undefined,
+      mark: Where,
+      panel: string | undefined,
+      rows?: () => MarkRows,
+    ): ScaleOf =>
     (name, path, field) => {
       if (unmapped.has(name)) return IDENTITY;
+      const channelScale = continuous.get(name);
+      if (channelScale) {
+        // The rows the mark draws, before facets and the legend, whose values the domain spans.
+        if (field !== undefined && table?.has(field))
+          channelScale.read(rows ?? (() => wholeTable(table)), field);
+        return channelScale;
+      }
       const scale = scaleIn(name, panel, path);
       if (scale) return scale;
       // Without a declared "color", a field's values take the colors of what they stand for.
@@ -243,6 +286,11 @@ function compile(
   const domainKeys = (prefix: string, scale: CategoryScale) =>
     (scale.spec?.domain ?? []).map((value) => `${prefix}${JSON.stringify(value)}}`);
   const byMark = new Map<Mark, MarkFeatures & { use(theme: Theme, paint: PaintReader): void }>();
+  /**
+   * Regions painted per row whose legend entries are their labels' values,
+   * by mark key: each entry takes the look of the first row holding it.
+   */
+  const paintedRows = new Map<Mark, PaintedRows>();
   const declared = config.scales?.color !== undefined;
   // Labels following series: marks' own `labels`, and text `from` a mark
   // (by its id). Their sources' series record what they draw (labels.ts).
@@ -288,8 +336,9 @@ function compile(
       );
     const by = (field: string) => identities.field(mark.table!, field, where.index);
     const { panel } = mark.spec;
+    // Colors an identity or channel scale gives stand for nothing.
     const scope = scopeOfMark(mark, own, by, declared, (name) =>
-      unmapped.has(name) ? undefined : prefixIn(name, panel),
+      unmapped.has(name) || continuous.has(name) ? undefined : prefixIn(name, panel),
     );
     // A series field is inferred from a color field only through a scale that maps its values.
     const encoded = (spec as { encode?: { color?: object } }).encode?.color;
@@ -298,14 +347,14 @@ function compile(
       (mark.spec as { series?: unknown }).series === undefined &&
       through?.field !== undefined &&
       through.field === mark.identity?.field &&
-      unmapped.has(through.scale as string)
+      (unmapped.has(through.scale as string) || continuous.has(through.scale as string))
     )
       throw new Error(
-        `${path} ${encoded ? "encode.color" : "color"}.scale: "${through.scale}" is an identity scale, whose colors split no series; give series, or series: false`,
+        `${path} ${encoded ? "encode.color" : "color"}.scale: "${through.scale}" is ${unmapped.has(through.scale as string) ? "an identity scale" : "a channel scale"}, whose colors split no series; give series, or series: false`,
       );
     for (const prefix of [scope?.color, scope?.rows])
       if (prefix && prefix !== own) prefixes.add(prefix);
-    const read = readIn(mark.table, where, panel);
+    const read = readIn(mark.table, where, panel, mark.rows && (() => mark.rows!()));
     // A color channel naming series stands for them whatever paints them
     // (scopeOfMark), so it is checked where a paint of the mark's own wins too.
     const color = (spec as { encode?: { color?: ChannelSpec<string> } }).encode?.color;
@@ -319,10 +368,11 @@ function compile(
         `${path} encode.color`,
       );
     // The declared scale series' colors follow, its places in their field's dictionary order.
+    // Scopes name only scales of categories (`scopeOfMark` leaves channel scales out).
     const scale =
       scope?.scale === undefined
         ? undefined
-        : read(scope.scale, `${path} ${scope.option ?? "color"}`);
+        : (read(scope.scale, `${path} ${scope.option ?? "color"}`) as CategoryScale);
     if (scale) {
       checkOutputs(scale, outputCheck("color", kit.isColor), `${path} color`);
       // The scale reads the values that color the mark, not series it colors otherwise.
@@ -348,7 +398,23 @@ function compile(
     else if (spec.type === "area") byMark.set(mark, areaFeatures(kit, mark, at, zone, log));
     else if (spec.type === "bar") byMark.set(mark, barFeatures(kit, mark, at, zone, config.locale));
     else if (spec.type === "point") byMark.set(mark, pointFeatures(kit, mark, at));
-    else if (spec.type === "rule" || spec.type === "region" || spec.type === "text")
+    else if (spec.type === "custom") byMark.set(mark, customFeatures(kit, mark, at));
+    else if (spec.type === "region" && (mark.spec as { encode?: object }).encode) {
+      const looks = rowLooks(mark.spec as RowStyleSpec, mark.table, read, path, kit.isColor);
+      byMark.set(mark, { ...labelFeatures(kit, mark, zone, path, where, config.locale), ...looks });
+      const { label } = mark.spec as { label?: string | { field?: string } };
+      const field = typeof label === "object" ? label.field : undefined;
+      if (field !== undefined && mark.table)
+        paintedRows.set(mark, {
+          table: mark.table,
+          field,
+          looks: looks.rowLooks,
+          // Outlines of no width, or of no sides, draw nothing (region.ts).
+          outlined: outlines(
+            mark.spec as { strokeWidth?: number; strokeSides?: readonly string[] },
+          ),
+        });
+    } else if (spec.type === "rule" || spec.type === "region" || spec.type === "text")
       byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config.locale));
     else
       throw new Error(
@@ -456,6 +522,10 @@ function compile(
       }
       return out;
     },
+    labelLooks: (mark, entries) => {
+      const painted = paintedRows.get(mark);
+      return painted ? rowPainted(entries, painted) : entries;
+    },
     domainKeys: (mark) =>
       [...listed].flatMap(([prefix, { scale, marks }]) =>
         marks.has(mark) ? domainKeys(prefix, scale) : [],
@@ -466,6 +536,8 @@ function compile(
       paint = p;
       chart.slot = slot;
       for (const scale of scales.values()) scale.update();
+      // Every reader of a channel scale is known: its domain spans them all, whatever their order.
+      for (const [name, scale] of continuous) scale.update(p, `chart ${scalePath(name)}`);
       for (const features of byMark.values()) features.use(t, p);
     },
   };
@@ -1623,6 +1695,35 @@ function areaLooks(
   };
 }
 
+/** A custom mark's channels, which its `draw` reads per row, and the colors they give its series. */
+function customFeatures(
+  kit: FeatureKit,
+  mark: Mark,
+  { scope, path, read, scale }: At,
+): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
+  const { encode } = mark.spec as {
+    encode?: Pick<EncodingsSpec, "color" | "strokeWidth" | "opacity">;
+  };
+  const channels = encodedChannels(kit, encode, mark.table!, mark.identity?.field, read, path);
+  let theme: Theme | undefined;
+  return {
+    use(t, p) {
+      theme = t;
+      channels.use(t, p);
+    },
+    palette: (base) =>
+      scaledPalette(
+        base,
+        scope,
+        scale,
+        () => theme,
+        (key, label, given) => given ?? channels.seriesColor(sourceOf(key), label),
+      ),
+    attach: (s) => identify(s, scope, undefined),
+    encoded: channels.encoded,
+  };
+}
+
 /** Points' looks by their channels (points.ts), which every series of the mark shares. */
 function pointFeatures(
   kit: FeatureKit,
@@ -1664,4 +1765,73 @@ function pointFeatures(
       s.features = { points: styles.looks() };
     },
   };
+}
+
+/** Whether a region's outlines draw: of a width above 0, on a side at least (all by default). */
+function outlines({
+  strokeWidth = 1,
+  strokeSides,
+}: {
+  strokeWidth?: number;
+  strokeSides?: readonly string[];
+}) {
+  return strokeWidth > 0 && strokeSides?.length !== 0;
+}
+
+/** A region painted per row whose legend lists it by its label field (see `rowPainted`). */
+interface PaintedRows {
+  readonly table: Table;
+  readonly field: string;
+  readonly looks: () => RowLooks | undefined;
+  /** Whether its outlines draw (see `outlines`). */
+  readonly outlined: boolean;
+}
+
+/**
+ * A region's legend entries (their keys name the label's value,
+ * marks/hidden.ts `rowKey`) in the paint of the first row holding each:
+ * its fill as the entry's color, its opacity over the swatch's, and its
+ * outline, which makes the swatch an outlined box (1 pixel wide, as
+ * legends' outlines are).
+ */
+function rowPainted(
+  entries: LegendEntry[],
+  { table, field, looks: of, outlined }: PaintedRows,
+): LegendEntry[] {
+  const looks = of();
+  if (!looks) return entries;
+  const first = new Map<string, number>();
+  for (let row = table.length - 1; row >= 0; row--)
+    first.set(String(table.value(field as never, row)), row);
+  return entries.map((entry) => {
+    const { equals } = JSON.parse(entry.key) as { equals?: string };
+    const row = equals === undefined ? undefined : first.get(equals);
+    if (row === undefined) return entry;
+    const look = looks.paints[looks.of(row)]!;
+    const color = look.fill ?? entry.color;
+    const stroke = outlined ? look.stroke : undefined;
+    const items = entry.sample?.items.map((item): GuideItem => {
+      if (item.type === "rect" && stroke !== undefined) {
+        // The box's fill at the swatch's opacity, under the row's own.
+        const [w, h] = [item.width, item.height];
+        return {
+          type: "shape",
+          d: `M${-w / 2},${-h / 2}h${w}v${h}h${-w}z`,
+          at: [item.x + w / 2, item.y + h / 2],
+          fill: color,
+          stroke,
+          ...(item.opacity !== undefined && { fillOpacity: item.opacity }),
+          ...(look.opacity !== undefined && { opacity: look.opacity }),
+        };
+      }
+      if (item.type !== "rect" && item.type !== "shape") return item;
+      return {
+        ...item,
+        fill: color,
+        ...(item.type === "shape" && stroke !== undefined && { stroke }),
+        ...(look.opacity !== undefined && { opacity: (item.opacity ?? 1) * look.opacity }),
+      };
+    });
+    return { ...entry, color, ...(items && { sample: { ...entry.sample!, items } }) };
+  });
 }

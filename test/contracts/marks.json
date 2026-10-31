@@ -72,7 +72,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "line \"m\" color.field: field \"y\" holds numbers, which color reads as they are through scale: { type: \"identity\" }; give that, or a category field"
+            "message": "line \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
           },
           "alternative": {
             "text": "Color it by a category field, which the legend lists.",
@@ -152,7 +152,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "line \"m\" color.field: field \"y\" holds numbers, which color reads as they are through scale: { type: \"identity\" }; give that, or a category field"
+            "message": "line \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
           },
           "alternative": {
             "text": "Color it by a category field, which the legend lists.",
@@ -232,7 +232,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "area \"m\" color.field: field \"y\" holds numbers, which color reads as they are through scale: { type: \"identity\" }; give that, or a category field"
+            "message": "area \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
           },
           "alternative": {
             "text": "Color it by a category field, which the legend lists.",
@@ -312,7 +312,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "area \"m\" color.field: field \"y\" holds numbers, which color reads as they are through scale: { type: \"identity\" }; give that, or a category field"
+            "message": "area \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
           },
           "alternative": {
             "text": "Color it by a category field, which the legend lists.",
@@ -392,7 +392,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "bar \"m\" color.field: field \"y\" holds numbers, which color reads as they are through scale: { type: \"identity\" }; give that, or a category field"
+            "message": "bar \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
           },
           "alternative": {
             "text": "Color it by a category field, which the legend lists.",
@@ -472,7 +472,7 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color.field",
-            "message": "bar \"m\" color.field: field \"y\" holds numbers, which color reads as they are through scale: { type: \"identity\" }; give that, or a category field"
+            "message": "bar \"m\" color.field: field \"y\" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: \"identity\" }); give scale, or a category field"
           },
           "alternative": {
             "text": "Color it by a category field, which the legend lists.",
@@ -2561,6 +2561,7 @@
         "selection.rows-lasso",
         "selection.click",
         "selection.receive",
+        "selection.highlight",
         "reading.nearest-x",
         "reading.nearest-y",
         "reading.nearest",
@@ -2595,17 +2596,6 @@
           "alternative": {
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["custom.placement.nested", "custom.placement.facet"]
-          }
-        },
-        "selection.highlight": {
-          "error": {
-            "code": "unsupported",
-            "path": "rowSelection.effect",
-            "message": "custom rowSelection effect: custom marks draw their own geometry, with no highlight of the rows selected; give effect: \"none\""
-          },
-          "alternative": {
-            "text": "Bind the store with effect: \"none\": gestures still write the rows they select.",
-            "proofs": ["custom.selection.rows-xy"]
           }
         },
         "lifecycle.value-animation": {

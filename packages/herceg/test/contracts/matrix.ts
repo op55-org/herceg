@@ -104,20 +104,21 @@ export const REACH: Record<string, number> = { custom: CUSTOM_RADIUS };
 
 /**
  * Options of the rows the spec cannot write, by row: custom marks draw a
- * circle per point of each series (noting the series in `customDrew`).
+ * circle per point of each series, each its row's item (noting the series
+ * in `customDrew`).
  */
 export const MADE_OPTIONS: Record<string, CustomDataOptions<Schema>> = {
   custom: {
     x: "x",
     y: "y",
     series: "kind",
-    draw({ series, x, y, circle }) {
+    draw({ series, x, y, circle, item }) {
       customDrew.clear();
       for (const s of series) customDrew.add(s.label);
       for (const s of series)
         for (let i = 0; i < s.length; i++) {
-          const row = s.rows?.[i] ?? i;
-          circle(x(s.x[row]!), y(s.y[row]!), CUSTOM_RADIUS, { fill: s.color });
+          const row = s.rowAt(i);
+          item(s, row, () => circle(x(s.x[row]!), y(s.y[row]!), CUSTOM_RADIUS, { fill: s.color }));
         }
     },
   } as CustomDataOptions<Schema>,

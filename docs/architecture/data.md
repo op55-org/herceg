@@ -133,7 +133,8 @@ revision).
   whenever their revision changes.
 - **Not yet through it.** Contours read matrix grids, dendrograms their
   own clustering, and selected rows' view filters still read tables or
-  views directly. Custom marks take tables only.
+  views directly. Custom marks take views, and hand `draw` series of the
+  view's rows; what `draw` reads of their table beyond them is its own.
 
 ## Series rows and stacks
 

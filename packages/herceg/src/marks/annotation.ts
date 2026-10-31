@@ -111,13 +111,18 @@ function fieldOf(position: Frozen<AnnotationPosition> | undefined): string | und
   return (share as { field?: string }).field;
 }
 
-/** Whether an annotation reads a table: a place, its label, or a part of its label's content is a field. */
+/**
+ * Whether an annotation reads a table: a place, its label, or a part of its
+ * label's content is a field, or it paints rows (a region's `encode`).
+ */
 export function readsTable(
   positions: readonly (Frozen<AnnotationPosition> | undefined)[],
   label: string | Frozen<LabelSpec> | undefined,
+  encode?: object,
 ): boolean {
   const own = typeof label === "object" ? label : undefined;
   return (
+    (encode !== undefined && Object.keys(encode).length > 0) ||
     own?.field !== undefined ||
     !!own?.content?.some((part) => typeof part === "object" && part.field !== undefined) ||
     positions.some((p) => fieldOf(p) !== undefined)
@@ -137,7 +142,8 @@ export class AnnotationData {
 
   /**
    * `positions` are named by their axis (`x`, `y1`, ...); others (a rule's
-   * `span`) lie along `across`.
+   * `span`) lie along `across`. `encode` paints rows: a region's, which then
+   * reads its table whatever its places.
    */
   constructor(
     table: Table | undefined,
@@ -146,6 +152,7 @@ export class AnnotationData {
     role: string,
     scales: { x: string; y: string },
     across: "x" | "y" = "x",
+    encode?: object,
   ) {
     this.label = label;
     this.#role = role;
@@ -170,7 +177,7 @@ export class AnnotationData {
       scaled ||= scale !== undefined && scale !== own;
     }
     this.scaled = scaled;
-    if (!readsTable(Object.values(positions), label)) {
+    if (!readsTable(Object.values(positions), label, encode)) {
       this.table = undefined;
       return;
     }

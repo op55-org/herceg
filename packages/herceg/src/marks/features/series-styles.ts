@@ -22,6 +22,7 @@ import {
   outputCheck,
   rowReader,
   type ScaleOf,
+  scaledRevision,
 } from "./channels.ts";
 import type { Where } from "./compile.ts";
 import { firstAfter, type Look, type RunPart, type Runs, StyleRuns, subset } from "./runs.ts";
@@ -124,6 +125,10 @@ export class SeriesStyles {
   readonly #byRows: boolean;
   /** The runs of channels reading rows, where some do. */
   readonly #runs: StyleRuns | undefined;
+  /** Channels reading rows through channel scales, whose domains other marks' rows may move. */
+  readonly #scaled: readonly Channel<unknown>[];
+  /** What the runs' looks were read with: the theme, and the channel scales' revisions. */
+  #runKey: { theme: Theme | undefined; scaled: number } | undefined;
   /** The axis the series' positions run along. */
   readonly #along: "x" | "y";
   /** The field the series' color is read from, where it is not the series field. */
@@ -145,7 +150,9 @@ export class SeriesStyles {
     string,
     { rows: Series["rows"]; length: number; paint: SeriesPaint; color: string }
   >();
-  #paintsOf: { version: number; theme: Theme | undefined; paint: PaintReader } | undefined;
+  #paintsOf:
+    | { version: number; theme: Theme | undefined; paint: PaintReader; scaled: number }
+    | undefined;
 
   constructor(
     spec: SeriesStyleSpec,
@@ -189,6 +196,7 @@ export class SeriesStyles {
     let rows = false;
     let colorField: string | undefined;
     const parts: RunPart[] = [];
+    const scaled: Channel<unknown>[] = [];
     const reader = <V>(
       channel: ChannelSpec<V> | undefined,
       check: Check,
@@ -212,8 +220,10 @@ export class SeriesStyles {
       if (
         compiled.kind === "condition" ||
         compiled.kind === "identity" ||
+        compiled.kind === "scaled" ||
         (compiled.kind === "field" && compiled.field !== spec.series)
       ) {
+        if (compiled.kind === "scaled") scaled.push(compiled);
         // Rows' looks: runs along the series.
         parts.push({
           name: paint ? "color" : (name as keyof Look),
@@ -271,6 +281,7 @@ export class SeriesStyles {
     }
     this.#byRows = rows;
     this.#colorField = colorField;
+    this.#scaled = scaled;
     // Rows in band order are read whole each version; others as they are appended.
     this.#runs = parts.length
       ? new StyleRuns(table, parts, markRows, bands === undefined)
@@ -281,6 +292,16 @@ export class SeriesStyles {
   use(theme: Theme, paint: PaintReader): void {
     this.#theme = theme;
     this.#paint = paint;
+  }
+
+  /** What runs' looks are read with, a new object whenever the theme or a channel scale changes. */
+  #lookKey(): object {
+    const theme = this.#theme;
+    const scaled = scaledRevision(this.#scaled);
+    const kept = this.#runKey;
+    if (kept && kept.theme === theme && kept.scaled === scaled) return kept;
+    this.#runKey = { theme, scaled };
+    return this.#runKey;
   }
 
   /** A series' value of a compiled channel that does not read rows: one per series. */
@@ -482,13 +503,15 @@ export class SeriesStyles {
     const version = this.#table.version;
     const theme = this.#theme;
     const paint = this.#paint;
+    const scaled = scaledRevision(this.#scaled);
     if (
       this.#paintsOf?.version !== version ||
       this.#paintsOf.theme !== theme ||
-      this.#paintsOf.paint !== paint
+      this.#paintsOf.paint !== paint ||
+      this.#paintsOf.scaled !== scaled
     ) {
       this.#paints.clear();
-      this.#paintsOf = { version, theme, paint };
+      this.#paintsOf = { version, theme, paint, scaled };
       // What was checked of rows the table no longer has goes, so series a
       // stream leaves behind are not kept; one that returns is checked afresh.
       const { generation, rowOffset } = this.#table;
@@ -513,7 +536,7 @@ export class SeriesStyles {
     const read = (color: string | undefined, option: string) =>
       color === undefined ? undefined : this.#paint(color, `${path} ${option}`);
     // Channels reading rows give the series the look of its first run.
-    const runs = this.#runs?.of(s, this.#theme);
+    const runs = this.#runs?.of(s, this.#lookKey());
     const first = runs?.count ? this.#runs!.look(runs.looks[0]!) : undefined;
     if (runs && runs.count > 1 && !(this.#along === "x" ? s.sorted : s.ySorted)) {
       const { index, mark } = this.#where;

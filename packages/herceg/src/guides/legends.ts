@@ -263,7 +263,7 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
     theme: Theme,
     chart: { readonly width: number; readonly height: number },
   ): PlacedLegend[] => {
-    const owners = ownersOf(marks, content.domains);
+    const owners = ownersOf(marks, content.features);
     const paint = text.paint ?? same;
     const partsOf = partOwners(kit, marks, planned.drawsOwn, places, theme, text.locale, paint);
     // Marks left out of legends (`legend: false`, annotations not listed by
@@ -306,11 +306,12 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
         if (mark.spec.legend !== true) unlisted.add(id);
         if (mark.spec.legend !== true && !(typeof id === "string" && named.has(id))) return;
         const look = annotationLook(kit, mark.spec, theme, paint);
-        for (const entry of labelEntries(mark)) {
+        const own = labelEntries(mark).map((entry) => ({ ...entry, ...look }));
+        for (const entry of content.features?.labelLooks(mark, own) ?? own) {
           if (keys.has(entry.key)) continue;
           keys.add(entry.key);
           owners.set(entry.key, [id]);
-          entries.push({ ...entry, ...look });
+          entries.push(entry);
         }
         return;
       }
@@ -740,13 +741,16 @@ function colorbarPart(
  */
 function ownersOf(
   marks: readonly MarkSeries[],
-  domains: LegendContent["domains"],
+  features: LegendContent["features"],
 ): Map<string, (string | number)[]> {
   const owners = new Map<string, (string | number)[]>();
   marks.forEach(({ mark, series }, index) => {
     const id = mark.spec.id ?? index;
     // Series are listed under their identity's entry.
-    for (const key of [...series.map((s) => s.entry ?? s.key), ...(domains?.(mark) ?? [])]) {
+    for (const key of [
+      ...series.map((s) => s.entry ?? s.key),
+      ...(features?.domainKeys(mark) ?? []),
+    ]) {
       const list = owners.get(key) ?? [];
       if (!list.includes(id)) list.push(id);
       owners.set(key, list);

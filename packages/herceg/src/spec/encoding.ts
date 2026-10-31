@@ -29,7 +29,8 @@ export type SymbolName =
 /**
  * A value per row: a field's value read through a scale (the channel's
  * default scale, "color" for colors, the one of the chart's `scales` that
- * `scale` names, or with `scale: { type: "identity" }` the value itself),
+ * `scale` names: of categories for a category field, a channel scale for a
+ * number field; or with `scale: { type: "identity" }` the value itself),
  * the series' names through a scale (`{ series: true, scale }`: series of
  * marks naming one scale share colors, legend entries, and dodged places by
  * name, as a line and the band around it do), a constant, or a
@@ -41,6 +42,9 @@ export type ChannelSpec<V> =
   | { value: V }
   | { condition: { when: Expression; then: V; otherwise: V } };
 
+/** A channel of each row's own look: any but the series' names, for what has no series (regions). */
+export type RowChannelSpec<V> = Exclude<ChannelSpec<V>, { series: true }>;
+
 /**
  * A scale that maps nothing: each row's value is the channel's output (a
  * color for colors, a symbol's name, an area in square pixels for sizes,
@@ -50,6 +54,27 @@ export type ChannelSpec<V> =
  */
 export interface IdentityScaleSpec {
   type: "identity";
+}
+
+/**
+ * A continuous scale for channels other than position, in the chart's
+ * `scales`: it maps a number field's values onto widths, opacities, sizes
+ * (areas), or colors. Its domain is the fields' extent over the rows the
+ * marks reading it draw, unless given; `range` is its outputs at the
+ * domain's ends: two numbers, or two or more colors ("#rrggbb", a ramp
+ * through them, evenly spaced). Inputs past the domain extend it, or with
+ * `clamp` take its ends' outputs; colors stay at their ends. Outputs stay
+ * in what the channel takes (opacities from 0 to 1, widths and sizes from
+ * 0). Missing values, and values the scale cannot take (a log's zero or
+ * less, a square root's negatives), take the mark's own paint; points,
+ * which leave out rows missing a value they encode, leave those out.
+ */
+export interface ChannelScaleSpec {
+  type: "linear" | "log" | "sqrt";
+  /** The inputs mapped to `range`'s ends: two different numbers, positive for "log", not negative for "sqrt". */
+  domain?: readonly [number, number];
+  range: readonly [number, number] | readonly string[];
+  clamp?: boolean;
 }
 
 /**

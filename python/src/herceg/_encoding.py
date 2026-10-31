@@ -89,10 +89,12 @@ def _constant(value: Any, role: str) -> Any:
 @dataclass
 class Channel:
     """A value per row: a column's value read through a scale (``field``,
-    with ``scale`` naming one of the chart's ``scales``; colors read
-    ``"color"`` by default, symbols ``"symbol"``, dashes ``"dash"``; with
-    ``scale=hg.IdentityScale()``, or the spec's ``{"type": "identity"}``,
-    each value is the output itself, such as a column of colors), the
+    with ``scale`` naming one of the chart's ``scales``: an
+    ``hg.OrdinalScale`` for categories, an ``hg.ChannelScale`` for numbers;
+    colors read ``"color"`` by default, symbols ``"symbol"``, dashes
+    ``"dash"``; with ``scale=hg.IdentityScale()``, or the spec's
+    ``{"type": "identity"}``, each value is the output itself, such as a
+    column of colors), the
     series' names through a scale (``series=True`` with ``scale``: marks
     naming one scale share colors, legend entries, and dodged places by
     their series' names, as a line and the band around it do, whatever data
@@ -218,10 +220,10 @@ class Encodings:
     ``color`` is the primary paint: a line's stroke, and a bar's or area's
     fill; ``fill`` and ``stroke`` set those paints themselves and win over
     it. Lines take color, stroke, dash, stroke_width, and opacity; bars
-    color, fill, stroke, stroke_width, and opacity; areas color, fill,
-    stroke, and opacity; points color, fill, symbol, size (an area in
-    square pixels), opacity (their fill's), and a constant stroke and
-    stroke_width."""
+    color, fill, stroke, stroke_width, and opacity; areas and regions of
+    rows color, fill, stroke, and opacity; points color, fill, symbol, size
+    (an area in square pixels), opacity (their fill's), and a constant
+    stroke and stroke_width."""
 
     color: ChannelOption | None = None
     fill: ChannelOption | None = None

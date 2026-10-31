@@ -8,7 +8,7 @@ import { col } from "../src/data/expr.ts";
 import { fromGeoJSON } from "../src/data/geojson.ts";
 import { fromMatrix } from "../src/data/matrix.ts";
 import { orderedTable } from "../src/data/ordered.ts";
-import { type RowQuery, rowView } from "../src/data/row-view.ts";
+import { type RowQuery, type RowView, rowView } from "../src/data/row-view.ts";
 import { selectionStore, selectWhere } from "../src/data/selection.ts";
 import { type Table, table } from "../src/data/table.ts";
 import { fromWall } from "../src/format/zone.ts";
@@ -22,6 +22,7 @@ import { type BarMark, bar } from "../src/marks/bar.ts";
 import { boxplot } from "../src/marks/boxplot.ts";
 import { contour } from "../src/marks/contour.ts";
 import { GridTracer } from "../src/marks/contour-trace.ts";
+import { custom } from "../src/marks/custom.ts";
 import { geopoint } from "../src/marks/geopoint.ts";
 import { geoshape } from "../src/marks/geoshape.ts";
 import { graph } from "../src/marks/graph.ts";
@@ -32,6 +33,7 @@ import { point } from "../src/marks/point.ts";
 import { PositionStack } from "../src/marks/position-stack.ts";
 import { region } from "../src/marks/region.ts";
 import { rule } from "../src/marks/rule.ts";
+import { lowerPosition, placeAt, rowOf } from "../src/marks/series.ts";
 import { SplitRows } from "../src/marks/split.ts";
 import { RowStack } from "../src/marks/stack.ts";
 import { packSwarm } from "../src/marks/swarm.ts";
@@ -43,6 +45,7 @@ import { membership } from "../src/model/highlight.ts";
 import { ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
 import { panels } from "../src/model/panels.ts";
+import { Picker } from "../src/model/pick.ts";
 import { rowSelection } from "../src/model/row-selection.ts";
 import { staticCompilers } from "../src/render/compilers.ts";
 import { timeBreaks } from "../src/scale/breaks.ts";
@@ -948,3 +951,241 @@ measure(
   },
   { warmup: 5, samples: 30 },
 );
+
+// Custom marks taking part through their items (the customisation study's
+// A2): 2,000 range comets, each a tapered tail and a dot drawn in its row's
+// item, colored, widened, and faded through the chart's scales. The scene
+// builds the shapes and records the items; picking and inspecting find the
+// item under the pointer by its shapes, through the shapes' grid index.
+const COMETS = 2000;
+const comet = (() => {
+  let state = 2;
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 2 ** 32;
+  };
+  const x0 = new Float64Array(COMETS);
+  const y0 = new Float64Array(COMETS);
+  const x1 = new Float64Array(COMETS);
+  const y1 = new Float64Array(COMETS);
+  const confidence = new Float64Array(COMETS);
+  const age = new Float64Array(COMETS);
+  const kind: string[] = [];
+  for (let i = 0; i < COMETS; i++) {
+    x0[i] = next() * 100;
+    y0[i] = next() * 100;
+    const angle = next() * 2 * Math.PI;
+    const length = 3 + next() * 9;
+    x1[i] = x0[i]! + Math.cos(angle) * length;
+    y1[i] = y0[i]! + Math.sin(angle) * length;
+    confidence[i] = next();
+    kind.push(["energy", "metals", "grains", "rates", "fx"][Math.floor(next() * 5)]!);
+    age[i] = next() * 30;
+  }
+  return table({ x0, y0, x1, y1, confidence, age, kind: category(kind) });
+})();
+/** A comet from (sx, sy) to (ex, ey): a tail `w` pixels wide at its start, then a head 10 long. */
+const cometPath = (sx: number, sy: number, ex: number, ey: number, w: number) => {
+  const length = Math.hypot(ex - sx, ey - sy) || 1;
+  const [nx, ny] = [-(ey - sy) / length, (ex - sx) / length];
+  const head = Math.min(10, length);
+  const [bx, by] = [ex - ny * head, ey + nx * head];
+  return `M${sx + (nx * w) / 2} ${sy + (ny * w) / 2}L${bx + nx / 2} ${by + ny / 2}L${bx - nx / 2} ${by - ny / 2}L${sx - (nx * w) / 2} ${sy - (ny * w) / 2}ZM${bx + nx * 4} ${by + ny * 4}L${ex} ${ey}L${bx - nx * 4} ${by - ny * 4}Z`;
+};
+const comets = (items: boolean) =>
+  custom(comet, {
+    x: ["x0", "x1"],
+    y: ["y0", "y1"],
+    series: "kind",
+    encode: {
+      color: { field: "kind", scale: "kinds" },
+      strokeWidth: { field: "confidence", scale: "widths" },
+      opacity: { field: "age", scale: "fade" },
+    },
+    draw({ series, x, y, item, path, circle, encoded }) {
+      const [ax, ay, bx, by] = [
+        comet.numbers("x0"),
+        comet.numbers("y0"),
+        comet.numbers("x1"),
+        comet.numbers("y1"),
+      ];
+      for (const s of series)
+        for (let k = 0; k < s.length; k++) {
+          const row = s.rowAt(k);
+          const [sx, sy] = [x(ax[row]!), y(ay[row]!)];
+          const style = { fill: s.color, opacity: encoded("opacity", row) };
+          const drawn = () => {
+            path(
+              cometPath(sx, sy, x(bx[row]!), y(by[row]!), encoded("strokeWidth", row) ?? 2),
+              style,
+            );
+            circle(sx, sy, 3, style);
+          };
+          if (items) item(s, row, drawn);
+          else drawn();
+        }
+    },
+  });
+const cometChart = (items: boolean) => {
+  const chart = new ChartModel(
+    {
+      x: { domain: [0, 100], nice: false },
+      y: { domain: [0, 100], nice: false },
+      scales: {
+        kinds: { type: "ordinal", domain: ["energy", "metals", "grains", "rates", "fx"] },
+        widths: { type: "linear", domain: [0, 1], range: [2, 7] },
+        fade: { type: "linear", domain: [0, 30], range: [1, 0.35] },
+      },
+      marks: [comets(items)],
+    },
+    undefined,
+    ...staticCompilers(),
+  );
+  chart.setSize(960, 640, 1);
+  const picker = new Picker({ rowOf, placeAt, lowerPosition });
+  chart.picker = (px, py, accept) => picker.pick(chart, { x: px, y: py, slop: 4 }, accept);
+  return chart;
+};
+for (const items of [false, true])
+  measure(
+    `custom: 2,000 comets through scales, scene${items ? ", as items" : ""}`,
+    () => {
+      cometChart(items).scene(estimateText);
+    },
+    { warmup: 5, samples: 30 },
+  );
+const cometPlaces = Array.from(
+  { length: 100 },
+  (_, i) => [40 + ((i * 97) % 880), 31 + ((i * 61) % 580)] as const,
+);
+const pickedComets = cometChart(true);
+pickedComets.scene(estimateText);
+measure("custom: 2,000 comets, pick under 100 places", () => {
+  for (const [px, py] of cometPlaces) pickedComets.picker!(px, py);
+});
+measure("custom: 2,000 comets, inspect under 100 places", () => {
+  for (const [px, py] of cometPlaces) pickedComets.inspect(px, py);
+});
+
+// Custom items over a view sorted against its table's order: each item
+// call finds its row's position in its series, over a table by halving
+// and over the view through an index of its positions.
+const SQUARES = 32_000;
+const squareRows = table({
+  x: Float64Array.from({ length: SQUARES }, (_, i) => i),
+  y: Float64Array.from({ length: SQUARES }, (_, i) => (i * 7919) % 1000),
+});
+type Squares = typeof squareRows extends Table<infer S> ? S : never;
+const squaresOf = (data: Table<Squares> | RowView<Squares>) =>
+  custom(data, {
+    x: "x",
+    y: "y",
+    draw({ series, x, y, item, rect }) {
+      for (const s of series)
+        for (let k = 0; k < s.length; k++) {
+          const row = s.rowAt(k);
+          item(s, row, () => rect(x(s.x[row]!), y(s.y[row]!), 2, 2));
+        }
+    },
+  });
+for (const [name, data] of [
+  ["a table", squareRows],
+  ["a descending view", rowView(squareRows, { sort: [{ field: "x", order: "descending" }] })],
+] as const) {
+  const chart = new ChartModel({ marks: [squaresOf(data)] }, undefined, ...staticCompilers());
+  let width = 800;
+  measure(
+    `custom: 32,000 items over ${name}, scene`,
+    () => {
+      // A new size each time: the scene is drawn again.
+      width = width === 800 ? 801 : 800;
+      chart.setSize(width, 600, 1);
+      chart.scene(estimateText);
+    },
+    { warmup: 5, samples: 30 },
+  );
+}
+
+// Regions over a table painted per row (B8's Marimekko, at 10,000 cells):
+// fills through a scale of categories and opacities by identity, batched
+// into a geometry per run of rows of one look.
+const CELLS = 10_000;
+const cells = table({
+  x1: Float64Array.from({ length: CELLS }, (_, i) => (i % 100) * 10),
+  x2: Float64Array.from({ length: CELLS }, (_, i) => (i % 100) * 10 + 9),
+  y1: Float64Array.from({ length: CELLS }, (_, i) => Math.floor(i / 100)),
+  y2: Float64Array.from({ length: CELLS }, (_, i) => Math.floor(i / 100) + 0.9),
+  segment: category(Array.from({ length: CELLS }, (_, i) => `s${(i * 7) % 6}`)),
+  share: Float64Array.from({ length: CELLS }, (_, i) => ((i * 13) % 100) / 100),
+});
+measure(
+  "region: 10,000 rows painted per row, scene",
+  () => {
+    const chart = new ChartModel(
+      {
+        scales: { segments: { type: "ordinal", domain: ["s0", "s1", "s2", "s3", "s4", "s5"] } },
+        marks: [
+          region(cells, {
+            x1: "x1",
+            x2: "x2",
+            y1: "y1",
+            y2: "y2",
+            encode: {
+              fill: { field: "segment", scale: "segments" },
+              opacity: { field: "share", scale: { type: "identity" } },
+            },
+          }),
+        ],
+      },
+      undefined,
+      ...staticCompilers(),
+    );
+    chart.setSize(800, 600, 1);
+    chart.scene(estimateText);
+  },
+  { warmup: 5, samples: 30 },
+);
+
+// Channel scales: 100,000 points sized and faded from number fields through
+// the chart's scales, against the same channels by identity.
+const SCALED = 100_000;
+const scaled = table({
+  x: Float64Array.from({ length: SCALED }, (_, i) => (i * 7919) % 1000),
+  y: Float64Array.from({ length: SCALED }, (_, i) => (i * 104_729) % 1000),
+  v: Float64Array.from({ length: SCALED }, (_, i) => ((i * 31) % 1000) / 1000),
+});
+for (const through of ["identity", "a channel scale"] as const)
+  measure(
+    `channels: 100k points, opacity and size by ${through}, scene`,
+    () => {
+      const chart = new ChartModel(
+        {
+          scales: {
+            fade: { type: "linear", range: [0.2, 1] },
+            sizes: { type: "sqrt", range: [4, 64] },
+          },
+          marks: [
+            point(scaled, {
+              x: "x",
+              y: "y",
+              encode:
+                through === "identity"
+                  ? {
+                      opacity: { field: "v", scale: { type: "identity" } },
+                      size: { field: "v", scale: { type: "identity" } },
+                    }
+                  : {
+                      opacity: { field: "v", scale: "fade" },
+                      size: { field: "v", scale: "sizes" },
+                    },
+            }),
+          ],
+        },
+        undefined,
+        ...staticCompilers(),
+      );
+      chart.setSize(800, 600, 1);
+      chart.scene(estimateText);
+    },
+    { warmup: 3, samples: 20 },
+  );

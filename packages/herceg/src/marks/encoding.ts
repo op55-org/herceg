@@ -57,22 +57,28 @@ export type CssColor =
 
 /**
  * A channel: a category field's values through a scale (`scale` names one of
- * the chart's `scales`; colors take "color" by default), a field's values
- * as they are (`scale: { type: "identity" }`, or the name of an identity
- * scale of the chart's: colors, shapes, and dashes from category fields,
- * sizes, widths, and opacities from number fields), the series' names
- * through a scale (`{ series: true, scale }`, which joins marks' series by
- * name: a line and its band), a constant, or a condition on each row.
+ * the chart's `scales`; colors take "color" by default), a number or time
+ * field's values through a channel scale of the chart's (one with a
+ * `range`: widths, opacities, sizes, or colors), a field's values as they
+ * are (`scale: { type: "identity" }`, or the name of an identity scale of
+ * the chart's: colors, shapes, and dashes from category fields, sizes,
+ * widths, and opacities from number fields), the series' names through a
+ * scale (`{ series: true, scale }`, which joins marks' series by name: a
+ * line and its band), a constant, or a condition on each row.
  */
 export type Channel<V, S extends Schema> =
   | { field: CategoryField<S>; scale?: string }
+  | { field: NumericField<S>; scale: string }
   | {
       field: V extends number ? NumberField<S> : CategoryField<S>;
-      scale: string | IdentityScaleSpec;
+      scale: IdentityScaleSpec;
     }
   | { series: true; scale: string }
   | { value: V }
   | { condition: { when: Condition; then: V; otherwise: V } };
+
+/** A channel of each row's own look: any but the series' names (see `Channel`). */
+export type RowChannel<V, S extends Schema> = Exclude<Channel<V, S>, { series: true }>;
 
 /** A number or time field through the channel's own mapping: a color ramp, sizes by area, opacities. */
 export interface MappedField<S extends Schema> {

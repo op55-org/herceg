@@ -4,7 +4,12 @@
 // `legend` options are their short forms (see docs/architecture/layout.md,
 // "The guide compiler").
 
-import type { IdentityScaleSpec, OrdinalScaleSpec, SymbolName } from "./encoding.ts";
+import type {
+  ChannelScaleSpec,
+  IdentityScaleSpec,
+  OrdinalScaleSpec,
+  SymbolName,
+} from "./encoding.ts";
 import type { Place, Side } from "./place.ts";
 import type { ScaleScope } from "./spec.ts";
 import type { AxisStyles, LegendStyles, TextStyle } from "./style.ts";
@@ -157,14 +162,21 @@ export interface ScaleSpec {
 
 /**
  * The chart's scales by name: the position scales x, the left y, and the
- * right y, and scales of categories ("color", which color fields read
- * unless they name another, "symbol", "dash", or names marks give).
+ * right y, scales of categories ("color", which color fields read unless
+ * they name another, "symbol", "dash", or names marks give), identity
+ * scales, and channel scales, which map numbers onto widths, opacities,
+ * sizes, and colors (those with a `range`).
  */
 export interface ScalesSpec {
   x?: ScaleSpec;
   y?: ScaleSpec;
   yRight?: ScaleSpec;
-  readonly [name: string]: ScaleSpec | OrdinalScaleSpec | IdentityScaleSpec | undefined;
+  readonly [name: string]:
+    | ScaleSpec
+    | OrdinalScaleSpec
+    | IdentityScaleSpec
+    | ChannelScaleSpec
+    | undefined;
 }
 
 /**

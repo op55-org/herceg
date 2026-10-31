@@ -1033,19 +1033,19 @@
         "breaks": "TypeScript takes timeBreaks()'s TimeBreaks, an instance; the widget's update() takes hg.Break dataclasses."
       }
     },
-    "settings ScalesSpec hg.IdentityScale|hg.OrdinalScale|hg.Scale": {
+    "settings ScalesSpec hg.ChannelScale|hg.IdentityScale|hg.OrdinalScale|hg.Scale": {
       "choices": {
         "type": {
-          "takes": ["linear", "log", "time"],
-          "reason": "Python's hg.OrdinalScale and hg.IdentityScale are those types; hg.Scale's type picks among the rest."
+          "takes": ["linear", "log", "sqrt", "time"],
+          "reason": "Python's hg.OrdinalScale and hg.IdentityScale are those types; hg.Scale's and hg.ChannelScale's types pick among the rest."
         }
       }
     },
-    "settings Scales hg.IdentityScale|hg.OrdinalScale|hg.Scale": {
+    "settings Scales hg.ChannelScale|hg.IdentityScale|hg.OrdinalScale|hg.Scale": {
       "choices": {
         "type": {
-          "takes": ["linear", "log", "time"],
-          "reason": "Python's hg.OrdinalScale and hg.IdentityScale are those types; hg.Scale's type picks among the rest."
+          "takes": ["linear", "log", "sqrt", "time"],
+          "reason": "Python's hg.OrdinalScale and hg.IdentityScale are those types; hg.Scale's and hg.ChannelScale's types pick among the rest."
         }
       }
     },
@@ -1296,6 +1296,22 @@
     "settings ChannelSpec<string> hg.Channel": {
       "without": {
         "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+      }
+    },
+    "settings RowChannelSpec<number> hg.Channel": {
+      "without": {
+        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+      },
+      "only": {
+        "series": "Python's one hg.Channel serves every channel, so it takes series=True; region encode refuses it with a correction (`region encode.fill: regions have no series whose names it could read; give hg.Channel(field=...) or value=..., or hg.when(...)`), as the spec's validation does."
+      }
+    },
+    "settings RowChannelSpec<string> hg.Channel": {
+      "without": {
+        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+      },
+      "only": {
+        "series": "Python's one hg.Channel serves every channel, so it takes series=True; region encode refuses it with a correction (`region encode.fill: regions have no series whose names it could read; give hg.Channel(field=...) or value=..., or hg.when(...)`), as the spec's validation does."
       }
     },
     "settings ChannelSpec<Dash> hg.Channel": {

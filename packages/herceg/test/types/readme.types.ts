@@ -434,10 +434,12 @@ custom(requests, {
     series[0]!.y[0] = 0;
   },
 });
-// @ts-expect-error custom fields are number or time fields of the table
+// One category field places rows in bands.
 custom(sales, { x: "region", draw() {} });
-// @ts-expect-error y fields are number or time fields
-custom(requests, { x: "time", y: "service", draw() {} });
+// @ts-expect-error a range's fields are number or time fields of the table
+custom(sales, { x: ["region", "value"], draw() {} });
+// @ts-expect-error y fields of a range are number or time fields
+custom(requests, { x: "time", y: ["latency", "service"], draw() {} });
 // @ts-expect-error series fields are category fields
 custom(requests, { x: "time", y: "latency", series: "latency", draw() {} });
 // @ts-expect-error series is a category field or false

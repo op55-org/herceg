@@ -67,14 +67,6 @@ export type DrawnPart =
       readonly positions?: Int32Array | undefined;
     };
 
-/** An item a mark draws that is not a series point: custom marks' items, which no mark records yet. */
-export interface DrawnItem {
-  readonly key: string;
-  readonly box: Readonly<Rect>;
-  /** Its series and row where it has them, for tooltips and selections. */
-  readonly row?: DrawnRow | undefined;
-}
-
 /** What one frame drew of one mark in one panel. */
 export interface DrawnMark {
   readonly mark: MarkKey;
@@ -84,8 +76,6 @@ export interface DrawnMark {
   /** As painted; while a transition plays, the state it goes to. */
   readonly geometry: readonly Geometry[];
   readonly series: readonly Series[];
-  /** Items that are not series points, in reading order. */
-  readonly items?: readonly DrawnItem[] | undefined;
   /** For layout marks: what they laid out, whose items `itemAt` finds (model/pick.ts `pickLayout`). */
   readonly layout?: LayoutResult | undefined;
   /**

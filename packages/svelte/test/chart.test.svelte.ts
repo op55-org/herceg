@@ -20,6 +20,7 @@ import { type Component, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXPORT_SCENE, type ExportsScene } from "../../herceg/src/render/export-scene.ts";
 import Annotations from "./Annotations.svelte";
+import Channels from "./Channels.svelte";
 import Dendrograms from "./Dendrograms.svelte";
 import Encodings from "./Encodings.svelte";
 import Faulty from "./Faulty.svelte";
@@ -120,6 +121,24 @@ describe("<Chart>", () => {
     const svg = props.chart!.toSVG();
     expect(svg).toContain('stroke="#00ab41"');
     expect(svg).toContain(">Goal<");
+  });
+
+  it("passes channels to custom marks and regions, read through the chart's scales", async () => {
+    let widths: (number | undefined)[] = [];
+    const props = $state({
+      chart: null as HercegChart | null,
+      widths: (read: (number | undefined)[]) => {
+        widths = read;
+      },
+    });
+    render(Channels, props);
+    // Channels are read by code the chart loads first.
+    await props.chart!.loading;
+    expect(widths).toEqual([1, 5]);
+    const fills = [...host.querySelectorAll('[data-kind="rect"]')].map((shape) =>
+      shape.getAttribute("fill"),
+    );
+    expect(fills).toEqual(["#ff0000", "#0000ff"]);
   });
 
   it("draws dendrogram components and updates reactive leaf labels", async () => {

@@ -155,7 +155,7 @@ export class PanelLegends {
       // The values of the declared domains a mark reads, drawn or not, which
       // it owns beside those drawing them.
       const domains = (mark: ChartMark, owner: string | number) => {
-        for (const key of content.domains?.(mark) ?? [])
+        for (const key of content.features?.domainKeys(mark) ?? [])
           if (targets.has(key)) own(key, owner);
           else add(key, key, owner);
       };

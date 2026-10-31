@@ -411,7 +411,7 @@ function refuseReaders(readers: readonly Mark[], bound: Bound, at: string) {
     throw new ChartError({
       code: "unsupported",
       path: `${at}.effect`,
-      message: `${unlit.spec.type} rowSelection effect: ${unlit.spec.type === "contour" ? "its bands draw" : "custom marks draw their own geometry, with"} no highlight of the rows selected; give effect: "none"`,
+      message: `${unlit.spec.type} rowSelection effect: ${unlit.spec.type === "contour" ? "its bands draw" : "it draws"} no highlight of the rows selected; give effect: "none"`,
     });
 }
 

@@ -27,7 +27,7 @@ import {
   type TextField,
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
-import type { ItemKeyed } from "./encoding.ts";
+import type { ItemKeyed, RowChannel } from "./encoding.ts";
 import {
   labelBox,
   labelPaint,
@@ -105,6 +105,18 @@ export type RegionDataOptions<S extends Schema> = RegionStyle &
   RegionRange<PlaceOption<PositionField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
+    /**
+     * Each row's paint: `color` (the fill) or `fill`, `stroke`, and
+     * `opacity`, which scales the fill's `fillOpacity` and the outline's;
+     * fields through the chart's scales (a channel scale for numbers).
+     * Regions are drawn in row order whatever their looks.
+     */
+    encode?: {
+      color?: RowChannel<string, S>;
+      fill?: RowChannel<string, S>;
+      stroke?: RowChannel<string, S>;
+      opacity?: RowChannel<number, S>;
+    };
   };
 
 /** Pixels between a region's edge and its label. */
@@ -165,6 +177,11 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
         strokeSides,
       );
     checkLegend(input, "region");
+    // An encoding of no channels paints nothing, and reads no rows.
+    if (input.encode && Object.keys(input.encode).length === 0) {
+      const { encode: _, ...rest } = input;
+      input = rest;
+    }
     this.spec = frozen(input);
     // Read from the copy: the caller may change what it passed.
     const spec = this.spec;
@@ -172,19 +189,29 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     const problem = regionFormError(spec);
     if (problem) throw new Error(problem);
     const label = labelOf(spec.label);
+    // Channels paint each row of the table, wherever the rows' places are.
+    if (spec.encode && !table)
+      throw new Error(
+        "region encode: channels read the rows of a table; give region(table, options), or drop encode",
+      );
     this.#data = new AnnotationData(
       table,
       { x1: spec.x1, x2: spec.x2, y1: spec.y1, y2: spec.y2 },
       label,
       "region",
       { x: "x", y: spec.axis === "right" ? "yRight" : "y" },
+      "x",
+      spec.encode,
     );
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "region");
     this.#plain = label !== undefined && !label.style && !label.place && !label.format;
     const format = label?.format as { number?: unknown; time?: unknown } | undefined;
     this.featured =
-      format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
+      format?.number !== undefined ||
+      format?.time !== undefined ||
+      label?.content !== undefined ||
+      spec.encode !== undefined;
   }
 
   get table(): Table | undefined {
@@ -279,13 +306,13 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   }
 
   geometry(_series: unknown, frame: Frame, key: MarkKey, panelRows?: RowParts): Geometry[] {
-    const { fill, labels } = this.#regions(frame, key, panelRows);
-    if (labels.length === 0) return [fill];
+    const { fills, labels } = this.#regions(frame, key, panelRows);
+    if (labels.length === 0) return fills;
     const placed = placeLabels(
       labels.map(({ request }) => request),
       [],
     );
-    return [fill, ...this.#drawLabels(frame, key, labels, placed)];
+    return [...fills, ...this.#drawLabels(frame, key, labels, placed)];
   }
 
   /** Its labels, for a panel's placer (see `LabelledMark`). */
@@ -306,13 +333,15 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   /**
    * Its regions of the rows the legend leaves shown, each cut to its box
    * (the plot, or the chart), and their labels, each placed in its region's
-   * visible part and asked to stay inside the box.
+   * visible part and asked to stay inside the box. Rows with looks of their
+   * own (`encode`) are drawn in row order, a geometry per run of rows of
+   * one look.
    */
   #regions(
     frame: Frame,
     key: MarkKey,
     panelRows: RowParts | undefined,
-  ): { fill: RectGeometry; labels: RegionLabel[] } {
+  ): { fills: RectGeometry[]; labels: RegionLabel[] } {
     // What the legend hides of it goes undrawn.
     const rows = this.#data.shown(frame.hidden, key, panelRows);
     const { plot, theme } = frame;
@@ -328,9 +357,15 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     // The row each region drawn is (and, with labels, each label), for drawn-mark records.
     const drawnRows = rowBuffer(frame, id, "rows", size);
     const color = painted(frame.paint, this.spec.fill, "region fill") ?? theme.muted;
+    // Each row's look, where channels read rows; runs of rows of one look start at `starts`.
+    const looks = frame.features?.of(this)?.rowLooks?.();
+    const starts: number[] = [];
+    const runLooks: number[] = [];
     // An outline draws the sides it is given of each region's own edges.
-    const edge = this.#edge(frame, color);
-    const sides = edge && frame.bytes(id, "sides", size);
+    const outlined =
+      this.#edge(frame, color) !== undefined ||
+      !!looks?.paints.some((look) => look.stroke !== undefined);
+    const sides = outlined ? frame.bytes(id, "sides", size) : undefined;
     const given = sideMask(this.spec.strokeSides ?? ["top", "right", "bottom", "left"]);
     const labels: RegionLabel[] = [];
     const paint = label && this.#paint(frame);
@@ -348,6 +383,11 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
         ? this.#span(ys, "y", i, frame.y, frame, box.y, box.y + box.height)
         : ([plot.y, plot.y + plot.height, 0] as const);
       if (!across || !down) return;
+      const look = looks ? looks.of(i) : 0;
+      if (count === 0 || look !== runLooks[runLooks.length - 1]) {
+        starts.push(count);
+        runLooks.push(look);
+      }
       drawnRows[count] = i;
       rects[count * 4] = across[0];
       rects[count * 4 + 1] = down[0];
@@ -387,18 +427,30 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       }
       count++;
     });
-    const fill: RectGeometry = {
-      kind: "rect",
-      draw: rectDrawing,
-      key: id,
-      fill: color,
-      fillOpacity: this.spec.fillOpacity ?? 0.15,
-      rects,
-      count,
-    };
-    if (edge) fill.edge = { ...edge, sides: sides! };
-    this.#drawnRows.set(fill, drawnRows);
-    return { fill, labels };
+    if (starts.length === 0) {
+      starts.push(0);
+      runLooks.push(0);
+    }
+    const fillOpacity = this.spec.fillOpacity ?? 0.15;
+    const fills = starts.map((start, run): RectGeometry => {
+      const end = starts[run + 1] ?? count;
+      const look = looks?.paints[runLooks[run]!];
+      const opacity = look?.opacity ?? 1;
+      const fill: RectGeometry = {
+        kind: "rect",
+        draw: rectDrawing,
+        key: looks ? `${id}|${run}` : id,
+        fill: look?.fill ?? color,
+        fillOpacity: fillOpacity * opacity,
+        rects: rects.subarray(start * 4, end * 4),
+        count: end - start,
+      };
+      const edge = this.#edge(frame, fill.fill, look?.stroke);
+      if (edge) fill.edge = { ...edge, opacity, sides: sides!.subarray(start, end) };
+      this.#drawnRows.set(fill, drawnRows.subarray(start, end));
+      return fill;
+    });
+    return { fills, labels };
   }
 
   /** The labels' paint: the theme's text in their style. */
@@ -460,14 +512,15 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
   }
 
   /**
-   * The regions' outline, given a color or a width: 1 pixel wide and in
-   * their fill's color, `fill`, by default.
+   * The regions' outline, given a color (the mark's, or a row's `stroke`,
+   * read already) or a width: 1 pixel wide and in their fill's color,
+   * `fill`, by default.
    */
-  #edge(frame: Frame, fill: string): RectGeometry["edge"] {
-    const { stroke, strokeWidth = 1 } = this.spec;
-    if ((stroke === undefined && this.spec.strokeWidth === undefined) || strokeWidth <= 0)
-      return undefined;
-    const color = painted(frame.paint, stroke, "region stroke") ?? fill;
+  #edge(frame: Frame, fill: string, stroke?: string): RectGeometry["edge"] {
+    const { strokeWidth = 1 } = this.spec;
+    const given = this.spec.stroke !== undefined || this.spec.strokeWidth !== undefined;
+    if ((!given && stroke === undefined) || strokeWidth <= 0) return undefined;
+    const color = stroke ?? painted(frame.paint, this.spec.stroke, "region stroke") ?? fill;
     return { stroke: color, width: strokeWidth, opacity: 1, dash: undefined };
   }
 
@@ -658,10 +711,14 @@ export function region<S extends Schema>(
         "facet",
         "panel",
         "clip",
+        "encode",
       ],
     ),
   } as unknown as RegionSpec;
-  if (table?.name !== undefined && readsTable([spec.x1, spec.x2, spec.y1, spec.y2], spec.label))
+  if (
+    table?.name !== undefined &&
+    readsTable([spec.x1, spec.x2, spec.y1, spec.y2], spec.label, spec.encode)
+  )
     spec.data = table.name;
   return new RegionMark(spec, table as unknown as Table | undefined);
 }

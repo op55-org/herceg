@@ -16,7 +16,15 @@ import type { SymbolName } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
 import type { MarkRows } from "../rows.ts";
-import { type Channel, type Check, compileChannel, outputCheck, type ScaleOf } from "./channels.ts";
+import {
+  type Channel,
+  type Check,
+  compileChannel,
+  outputCheck,
+  type ScaleOf,
+  scaledOutputs,
+  scaledRevision,
+} from "./channels.ts";
 import { markerPath } from "./markers.ts";
 import { subset } from "./runs.ts";
 
@@ -52,7 +60,9 @@ export class PointStyles {
   readonly #rows: () => MarkRows;
   #theme: Theme | undefined;
   #paint: PaintReader = (value) => value;
-  #looks: { version: number; subset: string | undefined; looks: PointLooks } | undefined;
+  #looks:
+    | { version: number; subset: string | undefined; scaled: number; looks: PointLooks }
+    | undefined;
 
   constructor(
     kit: FeatureKit,
@@ -143,7 +153,13 @@ export class PointStyles {
     const table = this.#table;
     const rows = this.#rows();
     const drawn = subset(rows);
-    if (this.#looks?.version === table.version && this.#looks.subset === drawn)
+    // Outputs through channel scales change with their domains, which other marks' rows may move.
+    const scaled = scaledRevision([this.#color, this.#size, this.#opacity].map((c) => c?.channel));
+    if (
+      this.#looks?.version === table.version &&
+      this.#looks.subset === drawn &&
+      this.#looks.scaled === scaled
+    )
       return this.#looks.looks;
     const theme = this.#theme;
     const paint = this.#paint;
@@ -190,7 +206,7 @@ export class PointStyles {
       text: (row: number, format: (value: number) => string) => this.#text(row, format),
       reach: this.#reach(rows),
     };
-    this.#looks = { version: table.version, subset: drawn, looks };
+    this.#looks = { version: table.version, subset: drawn, scaled, looks };
     return looks;
   }
 
@@ -218,6 +234,30 @@ export class PointStyles {
       return (row) => (channel.when(row) ? then : otherwise);
     }
     if (channel.kind === "series") return () => none;
+    if (channel.kind === "scaled") {
+      const values = table.numbers(channel.field as never);
+      // Sizes and opacities are their outputs.
+      if (!channel.scale.colors) {
+        const map = channel.scale.numberOutputs(channel.limits);
+        return (row) => {
+          const out = map(values[row]!);
+          return Number.isNaN(out) ? none : out;
+        };
+      }
+      // Rows of one color share its number: a ramp's colors, each read once.
+      const color = channel.scale.colorOutputs();
+      const known = new Map<string | number, number>();
+      return (row) => {
+        const output = color(values[row]!);
+        if (output === undefined) return none;
+        let at = known.get(output);
+        if (at === undefined) {
+          at = of(output as V);
+          known.set(output, at);
+        }
+        return at;
+      };
+    }
     if (channel.kind === "identity" && channel.numbers) {
       // The values are the outputs, checked over their extent; others are missing.
       const values = table.numbers(channel.field as never);
@@ -307,7 +347,7 @@ export class PointStyles {
     let text = "";
     for (const compiled of [this.#color, this.#size, this.#opacity, this.#symbol]) {
       const c = compiled?.channel;
-      if (!c || (c.kind !== "field" && c.kind !== "identity")) continue;
+      if (!c || (c.kind !== "field" && c.kind !== "identity" && c.kind !== "scaled")) continue;
       if (c.field === this.#series || named.has(c.field)) continue;
       named.add(c.field);
       if (table.kind(c.field) === "category") {
@@ -336,6 +376,13 @@ export class PointStyles {
         const { codes, dictionary } = table.categories(c.field as never);
         const held = heldCodes(rows, codes, dictionary.length);
         return (held ? dictionary.filter((_, code) => held[code]) : dictionary) as V[];
+      }
+      if (c.kind === "scaled") {
+        // Its outputs are monotonic: the farthest are at the ends of the values
+        // it can take (a log's positive ones) or of the domain.
+        const ends = [...(c.scale.extentOf(rows, c.field) ?? []), ...(c.scale.domain ?? [])];
+        const of = scaledOutputs(c);
+        return ends.flatMap((value) => of(value) ?? []) as V[];
       }
       if (c.kind !== "field") return [];
       // Values the scale leaves unmapped take `unknown`, else the fallback.

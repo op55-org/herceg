@@ -114,17 +114,11 @@ describe("architecture", () => {
   // embedded in Python, which has no DOM or web APIs such as TextEncoder.
   it("PDF export uses no DOM or web APIs", () => {
     const render = join(SRC, "render");
-    const modules = [
-      "pdf.ts",
-      "pdf-document.ts",
-      "pdf-paper.ts",
-      "pdf-fonts.ts",
-      "deflate.ts",
-      "svg-path.ts",
-    ];
+    const modules = ["pdf.ts", "pdf-document.ts", "pdf-paper.ts", "pdf-fonts.ts", "deflate.ts"];
     for (const file of [
       join(SRC, "pdf.ts"),
       join(SRC, "scale/css-color.ts"),
+      join(SRC, "draw/svg-path.ts"),
       ...modules.map((name) => join(render, name)),
     ]) {
       const source = readFileSync(file, "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");

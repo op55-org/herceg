@@ -121,6 +121,7 @@ from ._events import (
 )
 from ._guides import (
     AxisGuide,
+    ChannelScale,
     Colorbar,
     Format,
     GridLines,
@@ -202,6 +203,7 @@ __all__ = [
     "candlestick",
     "Cell",
     "Channel",
+    "ChannelScale",
     "Chart",
     "ChartError",
     "ChartOptions",

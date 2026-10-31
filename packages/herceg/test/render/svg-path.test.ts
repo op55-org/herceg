@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tracePath } from "../../src/render/svg-path.ts";
+import { tracePath } from "../../src/draw/svg-path.ts";
 
 /** The path as absolute commands, with coordinates rounded to 0.01. */
 function trace(d: string): string[] {

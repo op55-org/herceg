@@ -13,7 +13,7 @@ between TypeScript, Python, and the adapters, and why.
 - ✗1 refused: asking for it fails with note 1's message, which names an alternative tested to work.
 - ·2 not applicable, for note 2's reason.
 
-Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refused, and 119 not applicable.
+Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refused, and 119 not applicable.
 
 [By mark](#by-mark) · [Placement](#placement) · [Selection](#selection) · [Legends](#legends) · [Reading](#reading) · [Rendering](#rendering) · [Lifecycle](#lifecycle) · [Export](#export) · [Integration](#integration) · [Express recipes](#express-recipes) · [Interaction in panels](#interaction-in-panels) · [GPU paths](#gpu-paths)
 
@@ -46,7 +46,7 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 | regions of a table | 28 | 3 | 8 | 7 |
 | text (constant) | 27 | 3 | 1 | 15 |
 | text of a table | 28 | 3 | 8 | 7 |
-| custom | 39 | 0 | 3 | 4 |
+| custom | 40 | 0 | 2 | 4 |
 | pie | 27 | 3 | 15 | 1 |
 | treemap | 26 | 3 | 16 | 1 |
 | sunburst | 26 | 3 | 16 | 1 |
@@ -157,20 +157,20 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 | regions of a table | ✓ | ✓ | ✓ | ✓ | ✗13 | ✗13 | ✗13 | ✗13 | ✗13 | ✗13 | ✗13 |
 | text (constant) | ✓ | ✓ | ✓ | ✓ | ·12 | ·12 | ·12 | ·12 | ·12 | ·12 | ·12 |
 | text of a table | ✓ | ✓ | ✓ | ✓ | ✗13 | ✗13 | ✗13 | ✗13 | ✗13 | ✗13 | ✗13 |
-| custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗14 |
-| pie | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ✓ | ✓ |
-| treemap | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ✓ | ✓ |
-| sunburst | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ✓ | ✓ |
-| gauge | ✗16 | ✗16 | ✗16 | ✗16 | ✗17 | ✗17 | ✗17 | ✗17 | ✗17 | ✗17 | ✗17 |
-| funnel | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ✓ | ✓ |
-| radar | ✗16 | ✗16 | ✗16 | ✗16 | ✗18 | ✗18 | ✗18 | ✗18 | ✗18 | ✗18 | ✗18 |
-| sankey | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✗15 | ✓ | ✓ | ✓ |
-| graph (network) | ✗19 | ✗19 | ✗19 | ✓ | ✗19 | ✗19 | ✗19 | ✓ | ✓ | ✓ | ✓ |
-| geoshape | ✗19 | ✗19 | ✗19 | ✓ | ✗19 | ✗19 | ✗19 | ✓ | ✓ | ✓ | ✓ |
-| geopoint | ✗19 | ✗19 | ✗19 | ✓ | ✗19 | ✗19 | ✗19 | ✓ | ✓ | ✓ | ✓ |
-| point3d | ✗16 | ✗16 | ✗16 | ✗16 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 |
-| line3d | ✗16 | ✗16 | ✗16 | ✗16 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 |
-| surface | ✗16 | ✗16 | ✗16 | ✗16 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 | ✗20 |
+| custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| pie | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✓ | ✓ | ✓ |
+| treemap | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✓ | ✓ | ✓ |
+| sunburst | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✓ | ✓ | ✓ |
+| gauge | ✗15 | ✗15 | ✗15 | ✗15 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 | ✗16 |
+| funnel | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✓ | ✓ | ✓ |
+| radar | ✗15 | ✗15 | ✗15 | ✗15 | ✗17 | ✗17 | ✗17 | ✗17 | ✗17 | ✗17 | ✗17 |
+| sankey | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✗14 | ✓ | ✓ | ✓ |
+| graph (network) | ✗18 | ✗18 | ✗18 | ✓ | ✗18 | ✗18 | ✗18 | ✓ | ✓ | ✓ | ✓ |
+| geoshape | ✗18 | ✗18 | ✗18 | ✓ | ✗18 | ✗18 | ✗18 | ✓ | ✓ | ✓ | ✓ |
+| geopoint | ✗18 | ✗18 | ✗18 | ✓ | ✗18 | ✗18 | ✗18 | ✓ | ✓ | ✓ | ✓ |
+| point3d | ✗15 | ✗15 | ✗15 | ✗15 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 |
+| line3d | ✗15 | ✗15 | ✗15 | ✗15 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 |
+| surface | ✗15 | ✗15 | ✗15 | ✗15 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 | ✗19 |
 
 - ✗4 Refused: `histogram brush: its y axis holds statistics; brush along x only` (for histogram). Instead: Brush along x for the rows it covers; a y brush without a store reports its ranges, without rows.
 - ✗5 Refused: `histogram brush: its y axis holds statistics; brush along x only` (for histogram). Instead: Brush along x for the rows it covers; a xy brush without a store reports its ranges, without rows.
@@ -182,13 +182,12 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 - ✗11 Refused: `dendrogram rowSelection: its rows are merges of clusters, which gestures do not select; bind the table of the heatmap it orders`. Instead: Select the rows of the heatmap the dendrogram orders.
 - ·12 Not applicable: A constant annotation reads no table, so it has no rows to select or highlight.
 - ✗13 Refused: `rule rowSelection: annotations do not select their rows yet; bind the table of a mark that draws its rows as data, such as points` (for rules of a table). Instead: Bind the table of a mark that draws its rows as data, such as points.
-- ✗14 Refused: `custom rowSelection effect: custom marks draw their own geometry, with no highlight of the rows selected; give effect: "none"`. Instead: Bind the store with effect: "none": gestures still write the rows they select.
-- ✗15 Refused: `pie brush: no axes to brush; drop interaction.brush` (for pie). Instead: Click an item to select the rows it stands for.
-- ✗16 Refused: `gauge brush: no axes to brush; drop interaction.brush` (for gauge). Instead: Brush a chart of two of its dimensions, as points along x and y.
-- ✗17 Refused: `gauge brush: no axes to brush; drop interaction.brush` (for gauge). Instead: Draw the values along axes, as a bar chart, whose rows clicks and brushes select.
-- ✗18 Refused: `radar brush: its axes radiate from the center, which a brush cannot span; drop interaction.brush` (for radar). Instead: Draw the values along axes, as a line chart, whose rows clicks and brushes select.
-- ✗19 Refused: `graph brush: expected interaction.brush "lasso"; received "x"` (for graph (network)). Instead: Lasso the items on its plane.
-- ✗20 Refused: `point3d brush: its axes turn with the camera, which a brush cannot span; drop interaction.brush` (for point3d). Instead: Select in a chart of two of its dimensions, as points along x and y.
+- ✗14 Refused: `pie brush: no axes to brush; drop interaction.brush` (for pie). Instead: Click an item to select the rows it stands for.
+- ✗15 Refused: `gauge brush: no axes to brush; drop interaction.brush` (for gauge). Instead: Brush a chart of two of its dimensions, as points along x and y.
+- ✗16 Refused: `gauge brush: no axes to brush; drop interaction.brush` (for gauge). Instead: Draw the values along axes, as a bar chart, whose rows clicks and brushes select.
+- ✗17 Refused: `radar brush: its axes radiate from the center, which a brush cannot span; drop interaction.brush` (for radar). Instead: Draw the values along axes, as a line chart, whose rows clicks and brushes select.
+- ✗18 Refused: `graph brush: expected interaction.brush "lasso"; received "x"` (for graph (network)). Instead: Lasso the items on its plane.
+- ✗19 Refused: `point3d brush: its axes turn with the camera, which a brush cannot span; drop interaction.brush` (for point3d). Instead: Select in a chart of two of its dimensions, as points along x and y.
 
 ## Legends
 
@@ -200,84 +199,84 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 
 | Mark | Categorical legend | Colorbar | Entry of your own | Toggle | Panel toggle |
 | --- | :---: | :---: | :---: | :---: | :---: |
-| line | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| line along y | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| area | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| area between two fields | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| bar | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| stacked bars | ✓ | ✗21 | ✓ | ✓ | ✓ |
+| line | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| line along y | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| area | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| area between two fields | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| bar | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| stacked bars | ✓ | ✗20 | ✓ | ✓ | ✓ |
 | point | ✓ | ✓ | ✓ | ✓ | ✓ |
-| histogram | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| 2D histogram | ·22 | ✓ | ✓ | ·23 | ·23 |
-| boxplot | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| boxen | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| violin | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| rug | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| errorbar | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| candlestick | ·24 | ·25 | ✓ | ✓ | ✓ |
-| heatmap | ·26 | ✓ | ✓ | ·27 | ·27 |
-| calendar heatmap | ·28 | ✓ | ✓ | ·29 | ·29 |
-| contour | ·30 | ✓ | ✓ | ·31 | ·31 |
-| dendrogram | ·32 | ·33 | ✓ | ·34 | ·34 |
-| rule (constant) | ·35 | ·36 | ✓ | ✓ | ✓ |
-| rules of a table | ·37 | ·38 | ✓ | ✓ | ✓ |
-| region (constant) | ·39 | ·40 | ✓ | ✓ | ✓ |
-| regions of a table | ·41 | ·42 | ✓ | ✓ | ✓ |
-| text (constant) | ·43 | ·44 | ✓ | ✓ | ✓ |
-| text of a table | ·45 | ·46 | ✓ | ✓ | ✓ |
-| custom | ✓ | ·47 | ✓ | ✓ | ✓ |
-| pie | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| treemap | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| sunburst | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| gauge | ·48 | ·49 | ✓ | ·50 | ·50 |
-| funnel | ·51 | ·52 | ✓ | ·53 | ·53 |
-| radar | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| sankey | ·54 | ·55 | ✓ | ·56 | ·56 |
-| graph (network) | ✓ | ✗21 | ✓ | ✓ | ✓ |
+| histogram | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| 2D histogram | ·21 | ✓ | ✓ | ·22 | ·22 |
+| boxplot | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| boxen | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| violin | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| rug | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| errorbar | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| candlestick | ·23 | ·24 | ✓ | ✓ | ✓ |
+| heatmap | ·25 | ✓ | ✓ | ·26 | ·26 |
+| calendar heatmap | ·27 | ✓ | ✓ | ·28 | ·28 |
+| contour | ·29 | ✓ | ✓ | ·30 | ·30 |
+| dendrogram | ·31 | ·32 | ✓ | ·33 | ·33 |
+| rule (constant) | ·34 | ·35 | ✓ | ✓ | ✓ |
+| rules of a table | ·36 | ·37 | ✓ | ✓ | ✓ |
+| region (constant) | ·38 | ·39 | ✓ | ✓ | ✓ |
+| regions of a table | ·40 | ·41 | ✓ | ✓ | ✓ |
+| text (constant) | ·42 | ·43 | ✓ | ✓ | ✓ |
+| text of a table | ·44 | ·45 | ✓ | ✓ | ✓ |
+| custom | ✓ | ·46 | ✓ | ✓ | ✓ |
+| pie | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| treemap | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| sunburst | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| gauge | ·47 | ·48 | ✓ | ·49 | ·49 |
+| funnel | ·50 | ·51 | ✓ | ·52 | ·52 |
+| radar | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| sankey | ·53 | ·54 | ✓ | ·55 | ·55 |
+| graph (network) | ✓ | ✗20 | ✓ | ✓ | ✓ |
 | geoshape | ✓ | ✓ | ✓ | ✓ | ✓ |
 | geopoint | ✓ | ✓ | ✓ | ✓ | ✓ |
 | point3d | ✓ | ✓ | ✓ | ✓ | ✓ |
-| line3d | ✓ | ✗21 | ✓ | ✓ | ✓ |
-| surface | ·57 | ✓ | ✓ | ·58 | ·58 |
+| line3d | ✓ | ✗20 | ✓ | ✓ | ✓ |
+| surface | ·56 | ✓ | ✓ | ·57 | ·57 |
 
-- ✗21 Refused: `line "m" color.field: field "y" holds numbers, which color reads as they are through scale: { type: "identity" }; give that, or a category field` (for line). Instead: Color it by a category field, which the legend lists.
-- ·22 Not applicable: A 2D histogram colors its cells by count, on a continuous scale: a colorbar shows it.
-- ·23 Not applicable: A 2D histogram colors its cells by count, on a continuous scale: its colorbar hides nothing.
-- ·24 Not applicable: Candlesticks color by rise and fall, not by a category.
-- ·25 Not applicable: Candlesticks color by rise and fall (rise, fall), of no field.
-- ·26 Not applicable: A heatmap colors its cells by value, on a continuous scale: a colorbar shows it.
-- ·27 Not applicable: A heatmap colors its cells by value, on a continuous scale: its colorbar hides nothing.
-- ·28 Not applicable: A calendar heatmap colors its days by value, on a continuous scale: a colorbar shows it.
-- ·29 Not applicable: A calendar heatmap colors its days by value, on a continuous scale: its colorbar hides nothing.
-- ·30 Not applicable: Contours color their bands by value, on a continuous scale: a colorbar shows it.
-- ·31 Not applicable: Contours color their bands by value, on a continuous scale: their colorbar hides nothing.
-- ·32 Not applicable: A dendrogram draws merges of one color, of no category.
-- ·33 Not applicable: A dendrogram draws merges of one color (stroke), of no field.
-- ·34 Not applicable: A dendrogram is listed in no legend: it draws merges of one color, of no category.
-- ·35 Not applicable: A constant rule draws one line of no category.
-- ·36 Not applicable: A constant rule paints the color it is given (stroke), of no field.
-- ·37 Not applicable: Rules of a table draw in one color, of no category.
-- ·38 Not applicable: Rules paint the color they are given (stroke): annotations mark places, and encode no field in color.
-- ·39 Not applicable: A constant region draws one area of no category.
-- ·40 Not applicable: A constant region paints the color it is given (fill), of no field.
-- ·41 Not applicable: Regions of a table draw in one color, of no category.
-- ·42 Not applicable: Regions paint the color they are given (fill): annotations mark places, and encode no field in color.
-- ·43 Not applicable: Constant text draws one label of no category.
-- ·44 Not applicable: Constant text paints the color it is given (fill), of no field.
-- ·45 Not applicable: Text of a table draws in one color, of no category.
-- ·46 Not applicable: Text paints the color it is given (fill): annotations mark places, and encode no field in color.
-- ·47 Not applicable: A custom mark's draw function paints it; the chart colors its series by category.
-- ·48 Not applicable: A gauge draws one value, of no category.
-- ·49 Not applicable: A gauge draws one value, in the colors of its bands.
-- ·50 Not applicable: A gauge draws one value, listed in no legend.
-- ·51 Not applicable: A funnel draws its stages in one color, labeled in place.
-- ·52 Not applicable: A funnel draws its stages in one color (fill), labeled in place.
-- ·53 Not applicable: A funnel draws its stages in one color, labeled in place, listed in no legend.
-- ·54 Not applicable: A Sankey diagram labels its nodes in place; their colors tell nodes apart within it, of no category of the chart.
-- ·55 Not applicable: A Sankey diagram colors its nodes to tell them apart within it, by no field.
-- ·56 Not applicable: A Sankey diagram labels its nodes in place, and lists none in a legend.
-- ·57 Not applicable: A surface colors by height, on a continuous scale: a colorbar shows it.
-- ·58 Not applicable: A surface colors by height, on a continuous scale: its colorbar hides nothing.
+- ✗20 Refused: `line "m" color.field: field "y" holds numbers, which color reads through a channel scale (a scale of the chart's with a range) or as they are (scale: { type: "identity" }); give scale, or a category field` (for line). Instead: Color it by a category field, which the legend lists.
+- ·21 Not applicable: A 2D histogram colors its cells by count, on a continuous scale: a colorbar shows it.
+- ·22 Not applicable: A 2D histogram colors its cells by count, on a continuous scale: its colorbar hides nothing.
+- ·23 Not applicable: Candlesticks color by rise and fall, not by a category.
+- ·24 Not applicable: Candlesticks color by rise and fall (rise, fall), of no field.
+- ·25 Not applicable: A heatmap colors its cells by value, on a continuous scale: a colorbar shows it.
+- ·26 Not applicable: A heatmap colors its cells by value, on a continuous scale: its colorbar hides nothing.
+- ·27 Not applicable: A calendar heatmap colors its days by value, on a continuous scale: a colorbar shows it.
+- ·28 Not applicable: A calendar heatmap colors its days by value, on a continuous scale: its colorbar hides nothing.
+- ·29 Not applicable: Contours color their bands by value, on a continuous scale: a colorbar shows it.
+- ·30 Not applicable: Contours color their bands by value, on a continuous scale: their colorbar hides nothing.
+- ·31 Not applicable: A dendrogram draws merges of one color, of no category.
+- ·32 Not applicable: A dendrogram draws merges of one color (stroke), of no field.
+- ·33 Not applicable: A dendrogram is listed in no legend: it draws merges of one color, of no category.
+- ·34 Not applicable: A constant rule draws one line of no category.
+- ·35 Not applicable: A constant rule paints the color it is given (stroke), of no field.
+- ·36 Not applicable: Rules of a table draw in one color, of no category.
+- ·37 Not applicable: Rules paint the color they are given (stroke): annotations mark places, and encode no field in color.
+- ·38 Not applicable: A constant region draws one area of no category.
+- ·39 Not applicable: A constant region paints the color it is given (fill), of no field.
+- ·40 Not applicable: Regions of a table draw in one color, of no category.
+- ·41 Not applicable: Regions paint the color they are given (fill): annotations mark places, and encode no field in color.
+- ·42 Not applicable: Constant text draws one label of no category.
+- ·43 Not applicable: Constant text paints the color it is given (fill), of no field.
+- ·44 Not applicable: Text of a table draws in one color, of no category.
+- ·45 Not applicable: Text paints the color it is given (fill): annotations mark places, and encode no field in color.
+- ·46 Not applicable: A custom mark's draw function paints it; the chart colors its series by category.
+- ·47 Not applicable: A gauge draws one value, of no category.
+- ·48 Not applicable: A gauge draws one value, in the colors of its bands.
+- ·49 Not applicable: A gauge draws one value, listed in no legend.
+- ·50 Not applicable: A funnel draws its stages in one color, labeled in place.
+- ·51 Not applicable: A funnel draws its stages in one color (fill), labeled in place.
+- ·52 Not applicable: A funnel draws its stages in one color, labeled in place, listed in no legend.
+- ·53 Not applicable: A Sankey diagram labels its nodes in place; their colors tell nodes apart within it, of no category of the chart.
+- ·54 Not applicable: A Sankey diagram colors its nodes to tell them apart within it, by no field.
+- ·55 Not applicable: A Sankey diagram labels its nodes in place, and lists none in a legend.
+- ·56 Not applicable: A surface colors by height, on a continuous scale: a colorbar shows it.
+- ·57 Not applicable: A surface colors by height, on a continuous scale: its colorbar hides nothing.
 
 ## Reading
 
@@ -297,46 +296,46 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 | bar | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | stacked bars | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | point | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| histogram | ✓ | ✓ | ✓ | ✗59 | ✓ | ✓ |
-| 2D histogram | ✓ | ✓ | ✓ | ✗59 | ✓ | ✓ |
-| boxplot | ✓ | ✓ | ✓ | ✗59 | ✓ | ✓ |
-| boxen | ✓ | ✓ | ✓ | ✗59 | ✓ | ✓ |
-| violin | ✓ | ✓ | ✓ | ✗59 | ✓ | ✓ |
+| histogram | ✓ | ✓ | ✓ | ✗58 | ✓ | ✓ |
+| 2D histogram | ✓ | ✓ | ✓ | ✗58 | ✓ | ✓ |
+| boxplot | ✓ | ✓ | ✓ | ✗58 | ✓ | ✓ |
+| boxen | ✓ | ✓ | ✓ | ✗58 | ✓ | ✓ |
+| violin | ✓ | ✓ | ✓ | ✗58 | ✓ | ✓ |
 | rug | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | errorbar | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | candlestick | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | heatmap | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | calendar heatmap | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| contour | ✓ | ✓ | ✓ | ✗59 | ✓ | ✓ |
-| dendrogram | ·60 | ·60 | ·60 | ·60 | ·60 | ✓ |
-| rule (constant) | ·61 | ·61 | ·61 | ·62 | ·61 | ✓ |
-| rules of a table | ·63 | ·63 | ·63 | ·63 | ·63 | ✓ |
-| region (constant) | ·61 | ·61 | ·61 | ·62 | ·61 | ✓ |
-| regions of a table | ·63 | ·63 | ·63 | ·63 | ·63 | ✓ |
-| text (constant) | ·61 | ·61 | ·61 | ·62 | ·61 | ✓ |
-| text of a table | ·63 | ·63 | ·63 | ·63 | ·63 | ✓ |
+| contour | ✓ | ✓ | ✓ | ✗58 | ✓ | ✓ |
+| dendrogram | ·59 | ·59 | ·59 | ·59 | ·59 | ✓ |
+| rule (constant) | ·60 | ·60 | ·60 | ·61 | ·60 | ✓ |
+| rules of a table | ·62 | ·62 | ·62 | ·62 | ·62 | ✓ |
+| region (constant) | ·60 | ·60 | ·60 | ·61 | ·60 | ✓ |
+| regions of a table | ·62 | ·62 | ·62 | ·62 | ·62 | ✓ |
+| text (constant) | ·60 | ·60 | ·60 | ·61 | ·60 | ✓ |
+| text of a table | ·62 | ·62 | ·62 | ·62 | ·62 | ✓ |
 | custom | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| pie | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| treemap | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| sunburst | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| gauge | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| funnel | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| radar | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| sankey | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| graph (network) | ✗64 | ✗64 | ✓ | ✗65 | ✓ | ✓ |
-| geoshape | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| geopoint | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| point3d | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| line3d | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
-| surface | ✗64 | ✗64 | ✓ | ✓ | ✓ | ✓ |
+| pie | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| treemap | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| sunburst | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| gauge | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| funnel | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| radar | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| sankey | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| graph (network) | ✗63 | ✗63 | ✓ | ✗64 | ✓ | ✓ |
+| geoshape | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| geopoint | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| point3d | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| line3d | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
+| surface | ✗63 | ✗63 | ✓ | ✓ | ✓ | ✓ |
 
-- ✗59 Refused: `marks[0].tooltip.fields: a histogram's bins count rows, so a field has no one value to read; brush them to select their rows, and read the rows' fields in a chart that draws them` (for histogram). Instead: Brush to select the rows summarized (a selection store), and read their fields in a chart that draws them, such as points receiving the store's rows. ([selection.test.ts](../packages/herceg/test/browser/contracts/selection.test.ts))
-- ·60 Not applicable: A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows.
-- ·61 Not applicable: An annotation is read through its label and the chart's description, not by the pointer or keys.
-- ·62 Not applicable: A constant annotation reads no table, so it has no row whose fields could be read.
-- ·63 Not applicable: Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.
-- ✗64 Refused: `inspection.mode: pie reads the item under the pointer, not every series at an x; give mode: "nearest"` (for pie). Instead: Read the item under the pointer with mode "nearest".
-- ✗65 Refused: `marks[0].tooltip: not a property of herceg's spec format; remove it, or load with { unknown: "warn" } or "ignore"`. Instead: Hover a node or a link: the tooltip names it.
+- ✗58 Refused: `marks[0].tooltip.fields: a histogram's bins count rows, so a field has no one value to read; brush them to select their rows, and read the rows' fields in a chart that draws them` (for histogram). Instead: Brush to select the rows summarized (a selection store), and read their fields in a chart that draws them, such as points receiving the store's rows. ([selection.test.ts](../packages/herceg/test/browser/contracts/selection.test.ts))
+- ·59 Not applicable: A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows.
+- ·60 Not applicable: An annotation is read through its label and the chart's description, not by the pointer or keys.
+- ·61 Not applicable: A constant annotation reads no table, so it has no row whose fields could be read.
+- ·62 Not applicable: Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.
+- ✗63 Refused: `inspection.mode: pie reads the item under the pointer, not every series at an x; give mode: "nearest"` (for pie). Instead: Read the item under the pointer with mode "nearest".
+- ✗64 Refused: `marks[0].tooltip: not a property of herceg's spec format; remove it, or load with { unknown: "warn" } or "ignore"`. Instead: Hover a node or a link: the tooltip names it.
 
 ## Rendering
 
@@ -406,44 +405,44 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 | point | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | histogram | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 2D histogram | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| boxplot | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
-| boxen | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
-| violin | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
-| rug | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
+| boxplot | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
+| boxen | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
+| violin | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
+| rug | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
 | errorbar | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | candlestick | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | heatmap | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | calendar heatmap | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| contour | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
-| dendrogram | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
-| rule (constant) | ✓ | ·67 | ✓ | ✓ | ✓ | ✓ |
+| contour | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
+| dendrogram | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
+| rule (constant) | ✓ | ·66 | ✓ | ✓ | ✓ | ✓ |
 | rules of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| region (constant) | ✓ | ·67 | ✓ | ✓ | ✓ | ✓ |
+| region (constant) | ✓ | ·66 | ✓ | ✓ | ✓ | ✓ |
 | regions of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| text (constant) | ✓ | ·67 | ✓ | ✓ | ✓ | ✓ |
+| text (constant) | ✓ | ·66 | ✓ | ✓ | ✓ | ✓ |
 | text of a table | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| custom | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
-| pie | ·68 | ✓ | ✗69 | ✗69 | ✗69 | ✓ |
-| treemap | ·70 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| sunburst | ·70 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| gauge | ·68 | ✓ | ✗71 | ✗71 | ✗71 | ✓ |
-| funnel | ·68 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| radar | ·68 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
-| sankey | ·68 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| graph (network) | ✓ | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| geoshape | ✓ | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| geopoint | ✓ | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| point3d | ·72 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
-| line3d | ·72 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
-| surface | ·72 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
+| custom | ✓ | ✗65 | ✓ | ✓ | ✓ | ✓ |
+| pie | ·67 | ✓ | ✗68 | ✗68 | ✗68 | ✓ |
+| treemap | ·69 | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| sunburst | ·69 | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| gauge | ·67 | ✓ | ✗70 | ✗70 | ✗70 | ✓ |
+| funnel | ·67 | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| radar | ·67 | ✗65 | ✗70 | ✗70 | ✗70 | ✓ |
+| sankey | ·67 | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| graph (network) | ✓ | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| geoshape | ✓ | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| geopoint | ✓ | ✗65 | ✗68 | ✗68 | ✗68 | ✓ |
+| point3d | ·71 | ✗65 | ✗70 | ✗70 | ✗70 | ✓ |
+| line3d | ·71 | ✗65 | ✗70 | ✗70 | ✗70 | ✓ |
+| surface | ·71 | ✗65 | ✗70 | ✗70 | ✗70 | ✓ |
 
-- ✗66 Refused: `animation.values: boxplot does not move to new values; leave values out, and new values show at once` (for boxplot). Instead: Leave animation.values out: changed values show at once.
-- ·67 Not applicable: It draws given values, not a table's.
-- ·68 Not applicable: It has no axes or view of its own to move.
-- ✗69 Refused: `pie sync: no axes to sync; drop interaction.sync` (for pie). Instead: Link it to the synced charts through a selection store: what one selects, the others highlight. ([selection.test.ts](../packages/herceg/test/browser/contracts/selection.test.ts))
-- ·70 Not applicable: A drill lays the tree out anew and shows at once; the chart has no axes to move a view along.
-- ✗71 Refused: `gauge sync: no axes to sync; drop interaction.sync` (for gauge). Instead: Draw the values along axes, as points, which sync.
-- ·72 Not applicable: Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.
+- ✗65 Refused: `animation.values: boxplot does not move to new values; leave values out, and new values show at once` (for boxplot). Instead: Leave animation.values out: changed values show at once.
+- ·66 Not applicable: It draws given values, not a table's.
+- ·67 Not applicable: It has no axes or view of its own to move.
+- ✗68 Refused: `pie sync: no axes to sync; drop interaction.sync` (for pie). Instead: Link it to the synced charts through a selection store: what one selects, the others highlight. ([selection.test.ts](../packages/herceg/test/browser/contracts/selection.test.ts))
+- ·69 Not applicable: A drill lays the tree out anew and shows at once; the chart has no axes to move a view along.
+- ✗70 Refused: `gauge sync: no axes to sync; drop interaction.sync` (for gauge). Instead: Draw the values along axes, as points, which sync.
+- ·71 Not applicable: Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.
 
 ## Export
 
@@ -529,7 +528,7 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 | regions of a table | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | text (constant) | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | text of a table | ✓ | ✓ | ✓ | ○ | ○ | ○ |
-| custom | ✓ | ✓ | ✓ | ·73 | ·73 | ·73 |
+| custom | ✓ | ✓ | ✓ | ·72 | ·72 | ·72 |
 | pie | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | treemap | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | sunburst | ✓ | ✓ | ✓ | ○ | ○ | ○ |
@@ -544,7 +543,7 @@ Of 1896 cells: 1252 proved to work, 211 supported but not yet proved, 314 refuse
 | line3d | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | surface | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 
-- ·73 Not applicable: It is a TypeScript function: a spec sent from Python cannot hold it. ([contracts.test.ts](../python/js/test/contracts.test.ts))
+- ·72 Not applicable: It is a TypeScript function: a spec sent from Python cannot hold it. ([contracts.test.ts](../python/js/test/contracts.test.ts))
 
 ## Express recipes
 
@@ -569,12 +568,12 @@ Each recipe is all the marks it draws, proved together in Python.
 | rugplot | ○ | ○ | ○ | ○ | ○ | ○ |
 | regplot (points, fit, and band) | ○ | ○ | ○ | ○ | ○ | ○ |
 | residplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| pairplot (grid of panels) | ✗74 | ○ | ○ | ○ | ○ | ○ |
-| jointplot (joint and marginal panels) | ✗74 | ○ | ○ | ○ | ○ | ○ |
-| clustermap (heatmap and dendrograms) | ✗74 | ·75 | ○ | ○ | ○ | ○ |
+| pairplot (grid of panels) | ✗73 | ○ | ○ | ○ | ○ | ○ |
+| jointplot (joint and marginal panels) | ✗73 | ○ | ○ | ○ | ○ | ○ |
+| clustermap (heatmap and dendrograms) | ✗73 | ·74 | ○ | ○ | ○ | ○ |
 
-- ✗74 Refused: `pairplot panel: draws several panels, in a chart of its own; drop panel` (for pairplot (grid of panels)). Instead: Draw it as a chart of its own, which a page or dashboard places beside others. ([test_capabilities.py](../python/tests/test_capabilities.py))
-- ·75 Not applicable: It colors cells by value, which its colorbar explains: it draws no series a legend entry could hide. ([test_capabilities.py](../python/tests/test_capabilities.py))
+- ✗73 Refused: `pairplot panel: draws several panels, in a chart of its own; drop panel` (for pairplot (grid of panels)). Instead: Draw it as a chart of its own, which a page or dashboard places beside others. ([test_capabilities.py](../python/tests/test_capabilities.py))
+- ·74 Not applicable: It colors cells by value, which its colorbar explains: it draws no series a legend entry could hide. ([test_capabilities.py](../python/tests/test_capabilities.py))
 
 ## Interaction in panels
 
