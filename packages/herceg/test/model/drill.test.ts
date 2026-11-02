@@ -277,6 +277,25 @@ describe("tree row selection", () => {
     expect(clickedRows(withPicker(model), tables, px, py)?.rows).toEqual(Uint32Array.of(0));
   });
 
+  it("leave a hidden color's rows out of what a selection holds", () => {
+    const split = table({ a: ["A", "A", "B"], b: ["shown", "hidden", "other"], v: [1, 9, 5] });
+    for (const make of [treemap, sunburst] as const) {
+      const store = selectionStore(split);
+      const mark = make(split, { id: "t", path: ["a", "b"], value: "v", color: "b", levels: 1 });
+      const model = bound({ marks: [mark] }, store);
+      model.hidden.add(JSON.stringify(["t", "hidden"]));
+      const text = () => {
+        model.scene(estimateText);
+        return items(model).find((item) => item.points[0]!.label === "A")!.points[0]!.text;
+      };
+      // Only the hidden row: none of what A shows is selected.
+      store.set("c", selectRows(new RowSet(split).add(1)));
+      expect(text(), make.name).toBe("1 (16.7%); 0 of 1 row selected, v 0 of 1");
+      store.set("c", selectRows(new RowSet(split).add(0)));
+      expect(text(), make.name).toBe("1 (16.7%); 1 of 1 row selected, v 1 of 1");
+    }
+  });
+
   it("draw each node's selected share, dimming the rest, saying how much of a node is selected", () => {
     const store = selectionStore(sales);
     const model = bound({ marks: [tree()] }, store);
@@ -308,8 +327,11 @@ describe("drill roots", () => {
     const marks = model.scene(estimateText).panels[0]!.marks;
     const keys = marks.map((m) => m.key);
     expect(new Set(keys).size).toBe(keys.length);
-    // France and Spain: a group and a leaf geometry each.
-    expect(marks.filter((m) => m.kind === "rect")).toHaveLength(4);
+    // France and Spain, in their branch's color: one geometry of groups, one of leaves.
+    expect(marks.filter((m) => m.kind === "rect").map((m) => m.key)).toEqual([
+      "treemap-groups-1",
+      "treemap-leaves-2",
+    ]);
   });
 
   it("compare a change with the root set, though not drawn yet", () => {

@@ -65,6 +65,7 @@ import {
   Radar,
   Region,
   Rule,
+  Sunburst,
   Surface,
   Text,
   Treemap,
@@ -97,6 +98,7 @@ const paths = () => host.querySelectorAll("svg path:is([clip-path], [clip-path] 
 const components = {
   Contour,
   Graph,
+  Sunburst,
   Treemap,
   Violin,
   Chart,
@@ -527,6 +529,27 @@ describe("<Chart>", () => {
     );
     network.chart().setItemPosition('[0,"a"]', { x: 1, y: 2 });
     expect(moves).toEqual([{ x: 1, y: 2 }]);
+  });
+
+  it("takes a tree's bare flags as true and its other options as given", () => {
+    const sales = table({ region: ["N", "N", "S"], country: ["a", "b", "c"], v: [1, 2, 3] });
+    const rings = chartRef();
+    mount(
+      `<Chart ref="view">
+        <Sunburst :data="sales" :path="['region', 'country']" value="v" breadcrumbs center
+          :levels="1" :inner-radius="0.3" :gap="{ angular: 1, radial: 2 }" />
+      </Chart>`,
+      () => ({ sales, view: rings.view }),
+    );
+    const [mark] = optionsOf(rings.chart()).marks as unknown as { spec: Record<string, unknown> }[];
+    expect(mark!.spec).toMatchObject({
+      breadcrumbs: true,
+      center: true,
+      levels: 1,
+      innerRadius: 0.3,
+    });
+    // Breadcrumbs at the root, where by default a chart that cannot drill shows none.
+    expect(host.textContent).toContain("All");
   });
 
   it("builds annotations from constants or from their own data", () => {

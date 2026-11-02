@@ -102,6 +102,7 @@ import {
   type TimeColumnSpec,
   type TitleSpec,
   type TooltipSpec,
+  type TreeLook,
   type ViewLimitsSpec,
   type ViewSpec,
   type WrappedFacetSpec,
@@ -1671,10 +1672,31 @@ const ordinalScale: Check = (v, path) => {
 };
 
 /** A tree's fields: a path of category fields, or node and parent fields. */
+/** What treemaps and sunbursts both take: the tree, its paint, its levels, and its breadcrumbs. */
 function hierarchyChecks(): Record<
-  "path" | "node" | "parent" | "value" | "labels" | "panel" | "tooltip",
+  | "path"
+  | "node"
+  | "parent"
+  | "value"
+  | "panel"
+  | "tooltip"
+  | "color"
+  | "leaf"
+  | "branch"
+  | "fillOpacity"
+  | "sort"
+  | "levels"
+  | "breadcrumbs",
   Check
 > {
+  const look: Check = (v, path) => {
+    object(v, path);
+    properties(v as Record<string, unknown>, path, {
+      fill: string,
+      fillOpacity: fraction,
+      opacity: fraction,
+    } satisfies ChecksOf<TreeLook>);
+  };
   return {
     panel: string,
     tooltip,
@@ -1685,7 +1707,44 @@ function hierarchyChecks(): Record<
     node: field,
     parent: field,
     value: field,
-    labels: boolean,
+    color: field,
+    leaf: look,
+    branch: look,
+    fillOpacity: (v, path) => {
+      if (typeof v === "number") return fraction(v, path);
+      if (!isRecord(v)) fail(path, "a number from 0 to 1, or { measure, range }", v);
+      for (const key of ["measure", "range"])
+        if (v[key] === undefined) throw missing(path, key, undefined);
+      properties(v, path, {
+        measure: oneOf("share", "value", "depth"),
+        range: (r, at) => {
+          if (!Array.isArray(r) || r.length !== 2)
+            fail(at, "[from, to], two numbers from 0 to 1", r);
+          for (const [i, x] of (r as unknown[]).entries()) fraction(x, `${at}[${i}]`);
+        },
+      });
+    },
+    sort: oneOf("value", "input"),
+    levels: count,
+    breadcrumbs: boolean,
+  };
+}
+
+/** A tree's labels: true, false, or what they say and how, with the placement its kind takes. */
+function treeLabels(placement: Record<string, Check>): Check {
+  return (v, path) => {
+    if (typeof v === "boolean") return;
+    object(v, path);
+    const l = v as Record<string, unknown>;
+    if (l.overlap !== undefined)
+      throw refusal(`${path}.overlap`, "names show where they fit; drop overlap");
+    properties(l, path, { ...placement, content: labelContent, style: textStyle });
+    for (const [i, part] of (Array.isArray(l.content) ? l.content : []).entries())
+      if (isRecord(part) && "series" in part)
+        throw refusal(
+          `${path}.content[${i}]`,
+          "names a series, and tree items are none; give text, a field, or the value",
+        );
   };
 }
 
@@ -2510,8 +2569,31 @@ const MARKS: MarkChecks = {
       label: string,
     },
   },
-  treemap: { required: [], checks: hierarchyChecks() },
-  sunburst: { required: [], checks: hierarchyChecks() },
+  treemap: {
+    required: [],
+    checks: {
+      ...hierarchyChecks(),
+      labels: treeLabels({ at: oneOf("top-left", "center"), parents: boolean }),
+      tile: oneOf("squarify", "slice-dice"),
+      gap: width,
+    },
+  },
+  sunburst: {
+    required: [],
+    checks: {
+      ...hierarchyChecks(),
+      labels: treeLabels({ rotation: oneOf("horizontal", "radial") }),
+      innerRadius: (v, path) => {
+        if (typeof v !== "number" || !(v >= 0 && v < 1)) fail(path, "at least 0 and below 1", v);
+      },
+      center: boolean,
+      gap: (v, path) => {
+        if (typeof v === "number") return width(v, path);
+        if (!isRecord(v)) fail(path, "pixels, or { angular, radial }", v);
+        properties(v, path, { angular: width, radial: width });
+      },
+    },
+  },
   sankey: {
     required: ["source", "target"],
     checks: {

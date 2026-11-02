@@ -256,14 +256,14 @@ export const Violin = /* @__PURE__ */ markComponent(
 export const Treemap = /* @__PURE__ */ markComponent(
   "Treemap",
   ({ data, ...options }: WithData<TreemapOptions<Schema>, Schema>) => treemap(data, options),
-  ["labels"],
+  ["labels", "breadcrumbs"],
 ) as unknown as <S extends Schema>(props: WithData<TreemapOptions<S>, S>) => null;
 
 /** A sunburst of a tree given by `path` fields, or `node` and `parent`; it has its chart, each facet panel, or its `panel` to itself. */
 export const Sunburst = /* @__PURE__ */ markComponent(
   "Sunburst",
   ({ data, ...options }: WithData<SunburstOptions<Schema>, Schema>) => sunburst(data, options),
-  ["labels"],
+  ["labels", "center", "breadcrumbs"],
 ) as unknown as <S extends Schema>(props: WithData<SunburstOptions<S>, S>) => null;
 
 /** A gauge: the last finite value of `value` on a dial; it has its chart, each facet panel, or its `panel` to itself. */

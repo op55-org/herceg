@@ -189,6 +189,34 @@ export interface LayoutItem {
   layer?: number;
 }
 
+/**
+ * A layout mark's item as the frame drew it (see `LayoutResult.items`):
+ * continuous CSS pixels, before any rounding to device pixels.
+ */
+export interface ItemInfo {
+  /** The item's key, as events give it. */
+  readonly key: string;
+  /** Its names from the top: a tree node's path (drilled or not), a slice's or stage's category. */
+  readonly names: readonly string[];
+  readonly label: string;
+  /** The value drawn (its share's measure). */
+  readonly value: number;
+  readonly box: { x: number; y: number; width: number; height: number };
+  /** Sectors: center, the ring's radii before gaps, and angles in radians clockwise from 12 o'clock. */
+  readonly sector?: {
+    cx: number;
+    cy: number;
+    innerRadius: number;
+    outerRadius: number;
+    startAngle: number;
+    endAngle: number;
+  };
+  /** Trees: depth below the drill root, 1 for its children. */
+  readonly depth?: number;
+  /** Trees: the parent's key; undefined under the whole tree's root. */
+  readonly parent?: string | undefined;
+}
+
 /** What a layout mark drew in one scene. */
 export interface LayoutResult {
   geometry: Geometry[];
@@ -247,12 +275,20 @@ export interface LayoutResult {
   moves?: NodeMoves | undefined;
   /** Whether layout work remains, which later frames do (see `LayoutFrame.clock`). */
   pending?: boolean | undefined;
+  /**
+   * Its items as drawn, in reading order (items without room left out):
+   * continuous CSS pixels, made on the first call and the same array
+   * after. The engine's own; getItems and custom marks copy them.
+   */
+  items?(): readonly ItemInfo[];
 }
 
 /** A mark that lays out its own geometry in a panel; internal, as `Mark` is. */
 export interface LayoutMark extends ChartMark {
   /** Tells layout marks from marks along axes. */
   readonly layout: true;
+  /** Its results give their items' geometry (`LayoutResult.items`). */
+  readonly publishes?: true;
   /**
    * What charts keep of what their layout marks drew, and check charts of
    * layout marks with: every layout mark gives the same class, through which

@@ -326,6 +326,22 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         lambda o: hg.Chart(DATA, guides=[o]).point(x="t", y="v", color="w"),
         {},
     ),
+    "TreemapLabels": (
+        "marks[0].labels",
+        lambda o: hg.Chart(DATA).treemap(path=["s"], value="v", labels=o),
+        {},
+    ),
+    "SunburstLabels": (
+        "marks[0].labels",
+        lambda o: hg.Chart(DATA).sunburst(path=["s"], value="v", labels=o),
+        {},
+    ),
+    "Look": ("marks[0].leaf", lambda o: hg.Chart(DATA).sunburst(path=["s"], leaf=o), {}),
+    "Measure": (
+        "marks[0].fill_opacity",
+        lambda o: hg.Chart(DATA).treemap(path=["s"], value="v", fill_opacity=o),
+        {"measure": "share", "range": (0.5, 1.0)},
+    ),
 }
 
 # What Python reads of a chart (its events and inspection), which no chart takes.

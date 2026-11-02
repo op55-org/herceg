@@ -39,6 +39,7 @@ import { rule } from "../src/marks/rule.ts";
 import { lowerPosition, placeAt, rowOf } from "../src/marks/series.ts";
 import { SplitRows } from "../src/marks/split.ts";
 import { RowStack } from "../src/marks/stack.ts";
+import { sunburst } from "../src/marks/sunburst.ts";
 import { packSwarm } from "../src/marks/swarm.ts";
 import { text } from "../src/marks/text.ts";
 import { treemap } from "../src/marks/treemap.ts";
@@ -793,6 +794,26 @@ measure("treemap: drill 12 facet panels of 10,000 leaves", () => {
   facetTrees.scene(estimateText);
 });
 measure("treemap: redraw 12 facet panels drilled", () => facetTrees.scene(estimateText));
+
+// The 10,000 leaves drawn whole, as a treemap and as a sunburst, and the
+// sunburst drilled into a region.
+const flat10k = new ChartModel({
+  marks: [treemap(sales10k, { path: ["region", "country", "city"], value: "revenue" })],
+});
+flat10k.setSize(1200, 800, 1);
+flat10k.scene(estimateText);
+measure("treemap: redraw 10,000 leaves", () => flat10k.scene(estimateText));
+const rings10k = new ChartModel({
+  marks: [sunburst(sales10k, { path: ["region", "country", "city"], value: "revenue" })],
+  interaction: { zoom: true },
+});
+rings10k.setSize(1200, 800, 1);
+rings10k.scene(estimateText);
+measure("sunburst: redraw 10,000 leaves", () => rings10k.scene(estimateText));
+measure("sunburst: drill into a region of 10,000 leaves", () => {
+  rings10k.items!.setDrillRoot([`region ${drilled++ % 20}`]);
+  rings10k.scene(estimateText);
+});
 
 // Six subplots of the 200 regions, one panned while the other five keep their view.
 const sixMaps = new ChartModel({

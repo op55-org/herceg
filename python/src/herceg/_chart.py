@@ -46,12 +46,15 @@ from ._encoding import (
     Label,
     MarkAnchor,
     MarkStyle,
+    Measure,
     Pixels,
     Position,
     RowPosition,
     SeriesLabels,
     Stack,
+    SunburstLabels,
     SymbolName,
+    TreemapLabels,
     channel_spec,
     choice_option,
     condition_spec,
@@ -90,6 +93,8 @@ from ._errors import (
     refusing,
     renamed,
     shown,
+    tuplable,
+    tupled,
 )
 from ._guides import (
     ChannelScale,
@@ -147,6 +152,7 @@ from ._style import (
     PANEL_ROLES,
     HaloOption,
     Insets,
+    Look,
     Place,
     Side,
     Style,
@@ -481,6 +487,9 @@ _TIME_FORMAT = frozenset(
     + ("formatMatcher", "dateStyle", "timeStyle", "weekday", "era", "year", "month", "day")
     + ("dayPeriod", "hour", "minute", "second", "fractionalSecondDigits", "timeZoneName")
 )
+
+#: What only times are written with: a pattern, a fiscal year, or Intl.DateTimeFormat's own options.
+_TIME_ONLY = (_TIME_FORMAT - _NUMBER_FORMAT) | {"time", "fiscal"}
 
 
 def _check_format(format: dict[str, Any] | None, role: str, known: frozenset[str]) -> None:
@@ -3465,7 +3474,16 @@ class Chart:
         node: str | None = None,
         parent: str | None = None,
         data: Any = None,
-        labels: bool | None = None,
+        labels: bool | TreemapLabels | Mapping[str, Any] | None = None,
+        tile: Literal["squarify", "slice-dice"] | None = None,
+        sort: Literal["value", "input"] | None = None,
+        gap: float | None = None,
+        levels: int | None = None,
+        color: str | None = None,
+        fill_opacity: float | Measure | Mapping[str, Any] | None = None,
+        leaf: Look | Mapping[str, Any] | None = None,
+        branch: Look | Mapping[str, Any] | None = None,
+        breadcrumbs: bool | None = None,
         tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
@@ -3475,13 +3493,55 @@ class Chart:
 
         The tree is ``path``, category columns from the outermost group in, or
         ``node`` and ``parent`` columns naming each row's node and its parent.
-        Leaves take their top-level group's color; the legend toggles groups.
+        Children fill their parent in rows kept close to square
+        (``tile="squarify"``, the default), or sliced along x, theirs along y,
+        and so on (``"slice-dice"``, a Marimekko's columns and cells); largest
+        first (``sort="value"``) or in the data's order (``"input"``), ``gap``
+        pixels apart (2 by default), ``levels`` deep below the root (all by
+        default). Names go where they fit (``labels``, an ``hg.TreemapLabels``).
+
+        Items take their top-level group's color, or with ``color`` (a column
+        of the path) their value of it, those above its level unfilled; the
+        legend toggles colors. ``fill_opacity`` is a number or an
+        ``hg.Measure``; ``leaf`` and ``branch`` (``hg.Look``) are laid over
+        items without and with children. ``breadcrumbs`` shows the path above
+        a drilled tree (by default while the chart drills it or it is
+        drilled), never (False), or always (True).
         ``tooltip=hg.Tooltip(fields=[...])`` shows more of the row of a node
         that is one row.
         A treemap has its chart to itself; with facets, each panel, a treemap
         of the panel's rows; with panels, the one ``panel`` names.
         """
-        return self._tree("treemap", path, value, node, parent, data, labels, tooltip, panel, id)
+        kind = "treemap"
+        if gap is not None and not (
+            is_number(gap) and not isinstance(gap, bool) and 0 <= gap < math.inf
+        ):
+            raise ChartError(f"treemap gap: expected pixels of at least 0; received {shown(gap)}")
+        return self._tree(
+            kind,
+            path,
+            value,
+            node,
+            parent,
+            data,
+            labels,
+            tooltip,
+            panel,
+            id,
+            {
+                "tile": choice_option(tile, ("squarify", "slice-dice"), "treemap tile"),
+                "gap": gap,
+            },
+            {
+                "sort": sort,
+                "levels": levels,
+                "color": color,
+                "fill_opacity": fill_opacity,
+                "leaf": leaf,
+                "branch": branch,
+                "breadcrumbs": breadcrumbs,
+            },
+        )
 
     @_check_method_options
     def sunburst(
@@ -3492,15 +3552,82 @@ class Chart:
         node: str | None = None,
         parent: str | None = None,
         data: Any = None,
-        labels: bool | None = None,
+        labels: bool | SunburstLabels | Mapping[str, Any] | None = None,
+        levels: int | None = None,
+        inner_radius: float | None = None,
+        center: bool | None = None,
+        gap: float | tuple[float, float] | None = None,
+        sort: Literal["value", "input"] | None = None,
+        color: str | None = None,
+        fill_opacity: float | Measure | Mapping[str, Any] | None = None,
+        leaf: Look | Mapping[str, Any] | None = None,
+        branch: Look | Mapping[str, Any] | None = None,
+        breadcrumbs: bool | None = None,
         tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
     ) -> Chart:
         """A sunburst: a tree as rings around a center, each node's angle its
         share of its parent's; the tree, and where it is drawn, as for
-        ``treemap``."""
-        return self._tree("sunburst", path, value, node, parent, data, labels, tooltip, panel, id)
+        ``treemap``.
+
+        ``levels`` rings show below the root (all by default; with it, rings
+        keep their width as the tree is drilled), around a center
+        ``inner_radius`` of the radius wide (0.18 by default). A drilled root
+        is painted in the center unless ``center=False``; a click there goes up
+        either way. ``gap`` is the pixels between sectors and rings (2 by
+        default), or ``(angular, radial)``. Names go across sectors, or along
+        their radius with ``labels=hg.SunburstLabels(rotation="radial")``. Colors,
+        ``fill_opacity``, ``leaf``, ``branch``, ``sort``, and ``breadcrumbs`` as
+        for ``treemap``."""
+        if inner_radius is not None and not (
+            is_number(inner_radius) and not isinstance(inner_radius, bool) and 0 <= inner_radius < 1
+        ):
+            raise ChartError(
+                "sunburst inner_radius: expected a fraction of at least 0 and below 1; "
+                f"received {shown(inner_radius)}"
+            )
+
+        def pixels(g: Any) -> bool:
+            return is_number(g) and not isinstance(g, bool) and 0 <= g < math.inf
+
+        spread: Any = gap
+        pair = (
+            tupled(gap, (2,)) if gap is not None and not is_number(gap) and tuplable(gap) else None
+        )
+        if pair is not None and len(pair) == 2 and all(map(pixels, pair)):
+            spread = {"angular": float(pair[0]), "radial": float(pair[1])}
+        elif gap is not None and (pair is not None or not pixels(gap)):
+            raise ChartError(
+                "sunburst gap: expected pixels of at least 0, or (angular, radial) pixels; "
+                f"received {shown(gap)}"
+            )
+        return self._tree(
+            "sunburst",
+            path,
+            value,
+            node,
+            parent,
+            data,
+            labels,
+            tooltip,
+            panel,
+            id,
+            {
+                "innerRadius": inner_radius,
+                "center": _flag(center, "sunburst center"),
+                "gap": spread,
+            },
+            {
+                "sort": sort,
+                "levels": levels,
+                "color": color,
+                "fill_opacity": fill_opacity,
+                "leaf": leaf,
+                "branch": branch,
+                "breadcrumbs": breadcrumbs,
+            },
+        )
 
     def _tree(
         self,
@@ -3510,10 +3637,12 @@ class Chart:
         node: str | None,
         parent: str | None,
         data: Any,
-        labels: bool | None,
+        labels: Any,
         tooltip: Tooltip | None,
         panel: str | None,
         id: str | None,
+        own: dict[str, Any],
+        paint: dict[str, Any],
     ) -> Chart:
         self._layout_place(kind)
         table = self._mark_table(data)
@@ -3532,6 +3661,30 @@ class Chart:
         else:
             raise ChartError(f"{kind}: needs a path of category columns, or node and parent")
         self._require(table, value, ("number",), f"{kind} value")
+        color = paint["color"]
+        if color is not None:
+            if path is None:
+                raise ChartError(
+                    f"{kind} color: a tree of node and parent columns is colored by its "
+                    "top-level nodes; give a path to color by one of its levels, or drop color"
+                )
+            if color not in path:
+                raise ChartError(
+                    f"{kind} color: {color!r} is not a column of the path; use one of "
+                    f"{', '.join(path)}"
+                )
+        levels = paint["levels"]
+        if levels is not None and (
+            isinstance(levels, bool) or not isinstance(levels, int) or levels < 1
+        ):
+            raise ChartError(
+                f"{kind} levels: expected a whole number of at least 1; received {shown(levels)}"
+            )
+        fill_opacity = paint["fill_opacity"]
+        if fill_opacity is not None and not is_number(fill_opacity):
+            fill_opacity = built_spec(fill_opacity, Measure, f"{kind} fill_opacity")
+        elif fill_opacity is not None:
+            fraction_option(fill_opacity, f"{kind} fill_opacity")
         return self._add(
             {
                 "type": kind,
@@ -3539,13 +3692,52 @@ class Chart:
                 "node": node,
                 "parent": parent,
                 "value": value,
-                "labels": _flag(labels, f"{kind} labels"),
+                "labels": self._tree_labels(kind, table, path, node, parent, labels),
+                **own,
+                "sort": choice_option(paint["sort"], ("value", "input"), f"{kind} sort"),
+                "levels": levels,
+                "color": color,
+                "fillOpacity": fill_opacity,
+                "leaf": _tree_look(paint["leaf"], f"{kind} leaf"),
+                "branch": _tree_look(paint["branch"], f"{kind} branch"),
+                "breadcrumbs": _flag(paint["breadcrumbs"], f"{kind} breadcrumbs"),
                 "tooltip": self._mark_tooltip(table, tooltip, kind),
                 "panel": panel,
                 "id": id,
             },
             table,
         )
+
+    def _tree_labels(
+        self,
+        kind: str,
+        table: int,
+        path: Sequence[str] | None,
+        node: str | None,
+        parent: str | None,
+        labels: Any,
+    ) -> Any:
+        """A tree's ``labels`` as the spec takes them: True, False, or an
+        ``hg.TreemapLabels`` or ``hg.SunburstLabels``, refusing parts reading
+        columns the table lacks."""
+        if labels is None or isinstance(labels, bool):
+            return labels
+        kind_of = TreemapLabels if kind == "treemap" else SunburstLabels
+        spec = built_spec(labels, kind_of, f"{kind} labels")
+        for i, part in enumerate(spec.get("content") or ()):
+            written = part.get("format") if isinstance(part, dict) else None
+            if isinstance(written, dict) and _TIME_ONLY & written.keys():
+                raise ChartError(
+                    f"{kind} labels.content[{i}].format: tree labels write numbers, which time "
+                    'formats do not; give a number format, such as hg.Format(number=",.0f")'
+                )
+        tree = {*(path or ()), node, parent}
+        for i, field in _part_fields(spec):
+            if field not in tree:
+                self._require(
+                    table, field, ("category", "number"), f"{kind} labels.content[{i}].field"
+                )
+        return spec
 
     @_check_method_options
     def radar(
@@ -8481,6 +8673,13 @@ def _midpoint(
     return float(midpoint)
 
 
+def _tree_look(look: Any, role: str) -> dict[str, Any] | None:
+    """A tree's ``leaf`` or ``branch`` look as the spec takes it."""
+    if look is None:
+        return None
+    return cast("dict[str, Any]", _spec(_built(look, Look, role)))
+
+
 def _flag(value: Any, role: str) -> bool | None:
     if value is not None and not isinstance(value, bool):
         raise ChartError(f"{role}: expected True or False; received {shown(value)}")
@@ -9582,7 +9781,16 @@ def treemap(
     *,
     node: str | None = None,
     parent: str | None = None,
-    labels: bool | None = None,
+    labels: bool | TreemapLabels | Mapping[str, Any] | None = None,
+    tile: Literal["squarify", "slice-dice"] | None = None,
+    sort: Literal["value", "input"] | None = None,
+    gap: float | None = None,
+    levels: int | None = None,
+    color: str | None = None,
+    fill_opacity: float | Measure | Mapping[str, Any] | None = None,
+    leaf: Look | Mapping[str, Any] | None = None,
+    branch: Look | Mapping[str, Any] | None = None,
+    breadcrumbs: bool | None = None,
     panel: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9595,6 +9803,15 @@ def treemap(
         node=node,
         parent=parent,
         labels=labels,
+        tile=tile,
+        sort=sort,
+        gap=gap,
+        levels=levels,
+        color=color,
+        fill_opacity=fill_opacity,
+        leaf=leaf,
+        branch=branch,
+        breadcrumbs=breadcrumbs,
         tooltip=tooltip,
         panel=panel,
         id=id,
@@ -9609,7 +9826,17 @@ def sunburst(
     *,
     node: str | None = None,
     parent: str | None = None,
-    labels: bool | None = None,
+    labels: bool | SunburstLabels | Mapping[str, Any] | None = None,
+    levels: int | None = None,
+    inner_radius: float | None = None,
+    center: bool | None = None,
+    gap: float | tuple[float, float] | None = None,
+    sort: Literal["value", "input"] | None = None,
+    color: str | None = None,
+    fill_opacity: float | Measure | Mapping[str, Any] | None = None,
+    leaf: Look | Mapping[str, Any] | None = None,
+    branch: Look | Mapping[str, Any] | None = None,
+    breadcrumbs: bool | None = None,
     panel: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9622,6 +9849,16 @@ def sunburst(
         node=node,
         parent=parent,
         labels=labels,
+        levels=levels,
+        inner_radius=inner_radius,
+        center=center,
+        gap=gap,
+        sort=sort,
+        color=color,
+        fill_opacity=fill_opacity,
+        leaf=leaf,
+        branch=branch,
+        breadcrumbs=breadcrumbs,
         tooltip=tooltip,
         panel=panel,
         id=id,

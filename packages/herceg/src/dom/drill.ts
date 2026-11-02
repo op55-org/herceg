@@ -1,11 +1,12 @@
 // Drilling into treemaps and sunbursts with `interaction.zoom`: a click on a
 // node with nodes under it (unless the chart's row selection takes clicks,
 // which then select its rows) and Enter on the node the keyboard reads
-// show the subtree under it; a click on a sunburst's middle, Backspace,
-// and the toolbar's buttons go back up, and 0 to the whole tree. The path
-// the tree draws above itself is the breadcrumbs: native buttons lie over
-// each step but the last, invisible until focused, so the pointer, the Tab
-// key, and screen readers reach the steps the drawing shows. Each change
+// show the subtree under it; a click on a sunburst's middle (painted or
+// left empty), Backspace, and the toolbar's buttons go back up, and 0 to
+// the whole tree. The path the tree draws above itself is the breadcrumbs:
+// native buttons lie over each step but the last, invisible until focused,
+// so the pointer, the Tab key, and screen readers reach the steps the
+// drawing shows. Each change
 // is reported as a `drill` event; it is made on the tree drawn, and a node
 // a change of data not drawn yet takes gives way to its nearest ancestor.
 //
@@ -51,10 +52,16 @@ export class Controls implements ChartControls {
     // Ahead of the chart's keys, which read the nodes with the arrows.
     root.addEventListener("keydown", keys, { capture: true });
     this.#stop.push(() => root.removeEventListener("keydown", keys, { capture: true }));
-    // A click that selects no rows (no row selection of the chart takes clicks) drills.
+    // A click that selects no rows (no row selection of the chart takes clicks) drills;
+    // one on a sunburst's empty center goes up.
     this.#stop.push(
-      host.chart.on("click", ({ inspection, rows }) => {
-        if (!rows && inspection?.axis === "item") this.#clicked(inspection.key, inspection.panel);
+      host.chart.on("click", ({ inspection, rows, pointer }) => {
+        if (rows) return;
+        if (inspection?.axis === "item") this.#clicked(inspection.key, inspection.panel);
+        else if (pointer) {
+          const panel = pointer.panel || undefined;
+          if (this.#drill(panel)?.out?.(pointer.x, pointer.y)) this.#up(panel);
+        }
       }),
     );
   }

@@ -119,6 +119,20 @@ export function isLightColor(color: string): boolean | undefined {
 }
 
 /**
+ * `fill` at `opacity` over the opaque `backdrop`, as one opaque color (what
+ * text drawn on it is seen against); undefined where either is unreadable
+ * or the backdrop is translucent.
+ */
+export function overColor(fill: string, opacity: number, backdrop: string): string | undefined {
+  const top = parseColor(fill.trim().toLowerCase());
+  const bottom = parseColor(backdrop.trim().toLowerCase());
+  if (!top || !bottom || bottom[3] < 1) return undefined;
+  const alpha = opacity * top[3];
+  const [r, g, b] = [0, 1, 2].map((i) => top[i]! * alpha + bottom[i]! * (1 - alpha));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+/**
  * White or black text on `fill` painted at `opacity` (times the color's own
  * alpha) over `backdrop`: white where its WCAG contrast with the result is
  * at least 3:1 (as on the palettes' mid-tone blues, greens, and oranges),

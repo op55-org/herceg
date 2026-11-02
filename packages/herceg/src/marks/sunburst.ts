@@ -1,25 +1,23 @@
 import { pathOf } from "../data/hierarchy.ts";
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
-import {
-  ArcPath,
-  arcDrawing,
-  inSector,
-  sectorPaints,
-  sectorShareRadius,
-  traceSector,
-} from "../draw/arc.ts";
-import { textDrawing } from "../draw/labels.ts";
+import { ArcPath, inSector, sectorPaints, sectorShareRadius, traceSector } from "../draw/arc.ts";
+import { labelsDrawing, textDrawing } from "../draw/labels.ts";
+import { INNER_CUT, OUTER_CUT, type RingGeometry, ringDrawing } from "../draw/rings.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { layoutPartition } from "../layout/partition.ts";
 import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
-import type { ArcGeometry, Geometry, TextGeometry } from "../scene/scene.ts";
+import type { Geometry, LabelsGeometry, Rect, TextGeometry, TextItem } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { Frozen, InteractionSpec, SunburstSpec } from "../spec/spec.ts";
+import type { TextStyle } from "../spec/style.ts";
 import { surface } from "../theme.ts";
-import { refuseColor } from "./colored.ts";
+import type { LabelPartOf } from "./encoding.ts";
+import type { TreeText } from "./features/tree-text.ts";
 import {
+  type ItemInfo,
   type ItemSources,
   type LayoutControls,
   type LayoutFrame,
@@ -32,7 +30,27 @@ import { definedFields } from "./line.ts";
 import { type ChartMark, DIM, frozen, type MARK } from "./mark.ts";
 import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
-import { type Branch, count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
+import { count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
+import { TreeLabels } from "./tree-labels.ts";
+import {
+  checkTreeLevels,
+  checkTreePaint,
+  type MeasureDomain,
+  measureDomain,
+  TreePaint,
+  type TreePaintOptions,
+} from "./tree-paint.ts";
+
+/**
+ * A sunburst's names (see `SunburstLabelsSpec`): across each sector, or
+ * along its radius, upright (`rotation: "radial"`), saying `content` in
+ * `style`.
+ */
+export interface SunburstLabels<S extends Schema> {
+  rotation?: "horizontal" | "radial";
+  content?: readonly Exclude<LabelPartOf<keyof S & string>, { series: true }>[];
+  style?: TextStyle;
+}
 
 export type SunburstOptions<S extends Schema> = (
   | {
@@ -47,22 +65,32 @@ export type SunburstOptions<S extends Schema> = (
       parent: CategoryField<S>;
       path?: never;
     }
-) & {
-  /** Number field summed over each node's rows; without it, rows count. */
-  value?: NumberField<S>;
-  /** Names inside the sectors that have room for them; true by default. */
-  labels?: boolean;
-  /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
-  tooltip?: MarkTooltip<S>;
-  id?: string;
-  /** With the chart's `panels`, the id of the panel the sunburst has to itself. */
-  panel?: string;
-};
+) &
+  TreePaintOptions<CategoryField<S>> & {
+    /** Number field summed over each node's rows; without it, rows count. */
+    value?: NumberField<S>;
+    /** Names inside the sectors that have room for them; true by default. */
+    labels?: boolean | SunburstLabels<S>;
+    /** The center kept empty of rings, as a fraction of the sunburst's radius; 0.18 by default. */
+    innerRadius?: number;
+    /**
+     * A drilled sunburst's root painted in its center (true, the default);
+     * `false` leaves it empty, and a click there still goes up a level.
+     */
+    center?: boolean;
+    /** Pixels between neighboring sectors and between rings; 2 by default. */
+    gap?: number | { angular?: number; radial?: number };
+    /** Fields of the row an item is, which tooltips show besides its value where it is one row. */
+    tooltip?: MarkTooltip<S>;
+    id?: string;
+    /** With the chart's `panels`, the id of the panel the sunburst has to itself. */
+    panel?: string;
+  };
 
 /** Sectors start at the top and go clockwise. */
 const START = -Math.PI / 2;
 const TAU = 2 * Math.PI;
-/** Space between neighboring sectors and rings, in pixels. */
+/** Space between neighboring sectors and rings, in pixels, unless `gap` says. */
 const GAP = 2;
 /** Where a label's box is checked: its corners and the middles of its edges. */
 const BOX_POINTS = [
@@ -75,14 +103,17 @@ const BOX_POINTS = [
   [-1, 1],
   [-1, 0],
 ] as const;
-/** The empty center, as a fraction of the radius. */
+/** The empty center, as a fraction of the radius, unless `innerRadius` says. */
 const HOLE = 0.18;
-/** How opaque a drilled sunburst's root, in its center, is. */
+/** How opaque a drilled sunburst's root, in its center, is by default. */
 const CENTER_OPACITY = 0.3;
+/** The narrowest a name may be cut to, in pixels, besides its ellipsis. */
+const LEAST_NAME = 12;
 
 export class SunburstMark implements LayoutMark {
   declare readonly [MARK]: true;
   readonly layout = true;
+  readonly publishes = true;
   readonly views = ItemViews;
   readonly spec: Frozen<SunburstSpec>;
   readonly table: Table;
@@ -92,6 +123,12 @@ export class SunburstMark implements LayoutMark {
   readonly interactions = ["zoom"] as const;
   readonly selects = true;
   readonly #data: TreeData;
+  readonly #paint: TreePaint;
+  readonly #labels: TreeLabels;
+  /** Labels of parts, in styles, or turned need the feature compiler, which hands them its code. */
+  readonly featured: boolean;
+  /** Pixels between neighboring sectors, and between rings. */
+  readonly #gap: { angular: number; radial: number };
 
   constructor(input: SunburstSpec, table: Table) {
     this.spec = frozen(input);
@@ -99,14 +136,58 @@ export class SunburstMark implements LayoutMark {
     const spec = this.spec;
     this.#data = new TreeData(table, spec, "sunburst");
     checkTooltip(table, spec.tooltip, "sunburst");
+    checkTreePaint(spec, "sunburst");
+    checkTreeLevels(spec, "sunburst");
+    const fail = (path: string, message: string) =>
+      new ChartError({ code: "invalid-option", path, message: `sunburst ${path}: ${message}` });
+    const inner = spec.innerRadius;
+    if (inner !== undefined && !(typeof inner === "number" && inner >= 0 && inner < 1))
+      throw fail(
+        "innerRadius",
+        `expected at least 0 and below 1; received ${JSON.stringify(inner)}`,
+      );
+    if (spec.center !== undefined && typeof spec.center !== "boolean")
+      throw fail("center", `expected true or false; received ${JSON.stringify(spec.center)}`);
+    const pixels = (value: unknown, path: string) => {
+      if (value !== undefined && !(typeof value === "number" && value >= 0 && value < Infinity))
+        throw fail(
+          path,
+          `expected a number of pixels, at least 0; received ${JSON.stringify(value)}`,
+        );
+      return value as number | undefined;
+    };
+    const { gap } = spec;
+    if (typeof gap === "object" && gap !== null) {
+      for (const key of Object.keys(gap))
+        if (key !== "angular" && key !== "radial")
+          throw fail(`gap.${key}`, `gaps are angular or radial; drop ${key}`);
+      this.#gap = {
+        angular: pixels(gap.angular, "gap.angular") ?? GAP,
+        radial: pixels(gap.radial, "gap.radial") ?? GAP,
+      };
+    } else {
+      const both = pixels(gap, "gap") ?? GAP;
+      this.#gap = { angular: both, radial: both };
+    }
+    this.#paint = new TreePaint(spec);
+    const { encoding } = this.#data;
+    this.#labels = new TreeLabels(
+      spec.labels,
+      table,
+      "path" in encoding ? encoding.path : undefined,
+      "path" in encoding ? undefined : { node: encoding.id, parent: encoding.parent },
+      "sunburst",
+    );
+    this.featured = this.#labels.featured;
     this.table = table;
     this.measure = spec.value ?? "Count";
-    // Branches stand for their top-level nodes' values, as series of that field do.
-    const { encoding } = this.#data;
-    this.identity = {
-      field: "path" in encoding ? encoding.path[0]! : encoding.id,
-      read: secondOf,
-    };
+    // Items stand for their color field's values, as series of that field do.
+    this.identity = { field: this.#data.colorField, read: secondOf };
+  }
+
+  /** Takes the feature compiler's code for its labels (see marks/features/tree-text.ts). */
+  useTreeText(text: TreeText): void {
+    this.#labels.use(text);
   }
 
   legend(id: string | number, color: (key: string) => string): LegendEntry[] {
@@ -119,15 +200,16 @@ export class SunburstMark implements LayoutMark {
 
   draw(frame: LayoutFrame): LayoutResult {
     refuseValues(frame.keyed, this.spec.type);
-    const { theme, measure, hidden, locale } = frame;
+    const { theme, locale } = frame;
+    const data = this.#data;
     // A facet panel draws the part of the tree its rows give a value; a
     // chart drilled into a node, the subtree under it, the node in the middle.
-    const root = frame.root?.length ? this.#data.rootOf(frame.id, frame.root) : 0;
-    const view = root > 0 ? this.#data.drilled(root, frame.rows) : this.#data.view(frame.rows);
-    const { tree, branch } = view;
+    const root = frame.root?.length ? data.rootOf(frame.id, frame.root) : 0;
+    const view = root > 0 ? data.drilled(root, frame.rows) : data.view(frame.rows);
+    const { tree, group } = view;
     // Breadcrumbs take a strip above the tree in charts that drill.
-    const path =
-      frame.drillable || root > 0 ? this.#data.breadcrumbs(frame.id, view, frame) : undefined;
+    const crumbed = this.spec.breadcrumbs ?? (frame.drillable || root > 0);
+    const path = crumbed ? data.breadcrumbs(frame.id, view, frame) : undefined;
     const bounds = path
       ? {
           ...frame.bounds,
@@ -135,187 +217,245 @@ export class SunburstMark implements LayoutMark {
           height: frame.bounds.height - path.height,
         }
       : frame.bounds;
+    const shown = data.shown(frame.id, view, frame.hidden);
     const selected = frame.selected?.(this.table);
-    const counts = selected && this.#data.selectedOf(view, selected);
-    const branches = this.#data.branches(frame.id, view);
-    const shown = this.#data.shown(view, branches, hidden);
+    const counts =
+      selected && data.selectedOf(view, selected, data.hiddenGroups(frame.id, frame.hidden), shown);
     const spans = new Float64Array(tree.size * 2);
-    layoutPartition(tree, shown, true, spans);
+    layoutPartition(tree, shown, data.byValue, spans);
 
+    const { angular, radial } = this.#gap;
     const r = Math.max(0, Math.min(bounds.width, bounds.height) / 2 - 2);
-    const hole = r * HOLE;
-    const ring = tree.height > 0 ? (r - hole) / tree.height : 0;
+    const hole = r * (this.spec.innerRadius ?? HOLE);
+    // Rings as wide as `levels` of them fill the radius, drawn or not, so
+    // drilling keeps their width; every level fills it by default.
+    const levels = Math.min(tree.height, this.spec.levels ?? tree.height);
+    const rings = this.spec.levels ?? tree.height;
+    const ring = rings > 0 ? (r - hole) / rings : 0;
     const cx = bounds.x + bounds.width / 2;
     const cy = bounds.y + bounds.height / 2;
     const radii = (node: number) => {
       const r0 = hole + ring * (tree.depth[node]! - 1);
       // Rings are a gap apart too.
-      return [r0 + GAP / 2, r0 + ring - GAP / 2] as const;
+      return [r0 + radial / 2, r0 + ring - radial / 2] as const;
     };
     const angles = (node: number) =>
       [START + spans[node * 2]! * TAU, START + spans[node * 2 + 1]! * TAU] as const;
-
-    // Sectors by depth, in their branch's color, lighter further out.
-    const colors = branches.map(({ key }) => frame.color(key));
-    const colorIndex = new Map(branches.map(({ node }, i) => [node, i]));
-    // Each ring's sectors that show, in clockwise order.
     const paints = (node: number) => {
+      if (tree.depth[node]! > levels) return false;
       const [r0, r1] = radii(node);
       const [a0, a1] = angles(node);
-      return sectorPaints(r0, r1, a1 - a0, GAP);
+      return sectorPaints(r0, r1, a1 - a0, angular);
     };
-    const byDepth: number[][] = Array.from({ length: tree.height + 1 }, () => []);
+    // Each ring's sectors that show, in clockwise order.
+    const byDepth: number[][] = Array.from({ length: levels + 1 }, () => []);
     for (let at = 1; at < tree.size; at++) {
       const node = tree.order[at]!;
       if (shown[node]! > 0 && paints(node)) byDepth[tree.depth[node]!]!.push(node);
     }
     for (const nodes of byDepth) nodes.sort((a, b) => spans[a * 2]! - spans[b * 2]!);
-    const geometry: Geometry[] = [...(path?.geometry ?? [])];
-    const opacityAt = (depth: number) => Math.max(0.45, 1 - 0.2 * (depth - 1));
+
+    // Each item's paint: its color group's color, the default or measured opacity, its look.
+    const colors: (string | undefined)[] = [];
+    const colorOf = (node: number): string | undefined => {
+      const g = group[node]!;
+      if (g < 0) return undefined;
+      colors[g] ??= frame.color(data.groupKey(frame.id, data.groups()[g]!));
+      return colors[g];
+    };
+    const context = this.#paint.context(this.#domain(frame, root), frame.paint, "sunburst");
+    const paintOf = (node: number, fallback: number) =>
+      this.#paint.of(tree, view.values, shown, node, colorOf(node), fallback, context);
     // A drilled sunburst's root fills its middle, a faint disc of its color.
-    // A facet panel with nothing under the root draws none.
-    const centered = root > 0 && hole > GAP && view.values[0]! > 0;
-    const centerColor = colors[0] ?? theme.muted;
+    // A facet panel with nothing under the root draws none, nor does a root
+    // above the level `color` names, which is not filled.
+    const center = paintOf(0, CENTER_OPACITY);
+    const centered =
+      root > 0 &&
+      this.spec.center !== false &&
+      hole > radial &&
+      view.values[0]! > 0 &&
+      center.fill !== undefined;
+    const centerColor = center.fill ?? theme.muted;
+    const fills: (string | undefined)[] = [];
+    const opacities = new Float64Array(tree.size);
+    for (let depth = 1; depth <= levels; depth++)
+      for (const node of byDepth[depth]!) {
+        const { fill, opacity } = paintOf(node, Math.max(0.45, 1 - 0.2 * (depth - 1)));
+        fills[node] = fill;
+        opacities[node] = opacity;
+      }
+
+    const geometry: Geometry[] = [...(path?.geometry ?? [])];
+    // Sectors by ring and look, each batch with its colors; the dimmed first.
+    interface Batch {
+      arcs: number[];
+      colors: string[];
+      /** Each color's place in `colors`. */
+      colorAt: Map<string, number>;
+      index: number[];
+      cuts: number[];
+      rims: number[];
+      order: readonly number[];
+      opacity: number;
+      name: string;
+      dim: boolean;
+    }
+    const batches = new Map<string, Batch>();
+    const add = (
+      depth: number,
+      fill: string,
+      opacity: number,
+      dim: boolean,
+      arc: readonly number[],
+      cut: number,
+      rim: number,
+    ) => {
+      const drawnAt = opacity * (dim ? DIM : 1);
+      const key = `${depth}\u0000${dim}\u0000${drawnAt}`;
+      let batch = batches.get(key);
+      if (!batch) {
+        const name = `sunburst-${depth === 0 ? "root" : depth}`;
+        batch = {
+          arcs: [],
+          colors: [],
+          colorAt: new Map(),
+          index: [],
+          cuts: [],
+          rims: [],
+          order: [depth, dim ? 0 : 1, batches.size],
+          opacity: drawnAt,
+          name,
+          dim,
+        };
+        batches.set(key, batch);
+      }
+      let color = batch.colorAt.get(fill);
+      if (color === undefined) {
+        color = batch.colors.push(fill) - 1;
+        batch.colorAt.set(fill, color);
+      }
+      batch.arcs.push(...arc);
+      batch.index.push(color);
+      batch.cuts.push(cut);
+      batch.rims.push(rim);
+    };
     if (centered) {
       // With a selection highlighted, the root's selected share is drawn out
       // from its middle, as its nodes' are from their inner edges.
-      const outer = hole - GAP / 2;
-      const middle = counts
-        ? sectorShareRadius(0, outer, TAU, 0, this.#data.shareOf(view, counts, 0))
-        : outer;
-      const disc = (key: string, r0: number, r1: number, opacity: number): ArcGeometry => ({
-        kind: "arc",
-        draw: arcDrawing,
-        key,
-        arcs: Float32Array.of(cx, cy, r0, r1, START, START + TAU),
-        count: 1,
-        colors: [centerColor],
-        colorIndex: Uint32Array.of(0),
-        fillOpacity: opacity,
-        gap: 0,
-      });
+      const outer = hole - radial / 2;
+      const middle = counts ? sectorShareRadius(0, outer, TAU, 0, data.shareOf(counts, 0)) : outer;
+      const disc = [cx, cy, 0, outer, START, START + TAU];
       if (middle < outer)
-        geometry.push(disc("sunburst-root-dimmed", middle, outer, CENTER_OPACITY * DIM));
-      if (middle > 0) geometry.push(disc("sunburst-root", 0, middle, CENTER_OPACITY));
+        add(
+          0,
+          centerColor,
+          center.opacity,
+          true,
+          [cx, cy, middle, outer, START, START + TAU],
+          OUTER_CUT,
+          outer,
+        );
+      if (middle > 0)
+        add(
+          0,
+          centerColor,
+          center.opacity,
+          false,
+          middle < outer ? [cx, cy, 0, middle, START, START + TAU] : disc,
+          middle < outer ? 0 : OUTER_CUT,
+          outer,
+        );
     }
     // With a selection highlighted, a node's selected share is drawn out from
     // its ring's inner edge, covering that share of its sector, the rest dimmed.
-    const span = (node: number, dim: boolean): readonly [number, number] => {
-      const [r0, r1] = radii(node);
-      if (!counts) return [r0, r1];
-      const [a0, a1] = angles(node);
-      const middle = sectorShareRadius(
-        r0,
-        r1,
-        a1 - a0,
-        GAP,
-        this.#data.shareOf(view, counts, node),
-      );
-      return dim ? [middle, r1] : [r0, middle];
-    };
-    for (let depth = 1; depth <= tree.height; depth++) {
-      const all = byDepth[depth]!;
-      const parts = counts
-        ? [
-            [all.filter((node) => this.#data.shareOf(view, counts, node) < 1), true] as const,
-            [all.filter((node) => counts.hits[node]! > 0), false] as const,
-          ]
-        : [[all, false] as const];
-      for (const [nodes, dim] of parts) {
-        if (nodes.length === 0) continue;
-        const arcs = new Float32Array(nodes.length * 6);
-        const index = new Uint32Array(nodes.length);
-        nodes.forEach((node, i) => {
-          arcs.set([cx, cy, ...span(node, dim), ...angles(node)], i * 6);
-          index[i] = colorIndex.get(branch[node]!) ?? 0;
-        });
-        geometry.push({
-          kind: "arc",
-          draw: arcDrawing,
-          key: `sunburst-${depth}${dim ? "-dimmed" : ""}`,
-          arcs,
-          count: nodes.length,
-          colors,
-          colorIndex: index,
-          fillOpacity: opacityAt(depth) * (dim ? DIM : 1),
-          gap: GAP,
-          // The parts keep their node's sides, its gap resolved at its rim.
-          rims: counts && Float32Array.from(nodes, (node) => radii(node)[1]),
-        } as ArcGeometry);
+    for (let depth = 1; depth <= levels; depth++) {
+      for (const node of byDepth[depth]!) {
+        const fill = fills[node];
+        if (fill === undefined) continue;
+        const [r0, r1] = radii(node);
+        const [a0, a1] = angles(node);
+        const opacity = opacities[node]!;
+        const whole = INNER_CUT | OUTER_CUT;
+        if (!counts) {
+          add(depth, fill, opacity, false, [cx, cy, r0, r1, a0, a1], whole, r1);
+          continue;
+        }
+        const part = data.shareOf(counts, node);
+        const middle = sectorShareRadius(r0, r1, a1 - a0, angular, part);
+        if (part < 1)
+          add(
+            depth,
+            fill,
+            opacity,
+            true,
+            [cx, cy, part > 0 ? middle : r0, r1, a0, a1],
+            part > 0 ? OUTER_CUT : whole,
+            r1,
+          );
+        if (counts.hits[node]! > 0)
+          add(
+            depth,
+            fill,
+            opacity,
+            false,
+            [cx, cy, r0, part < 1 ? middle : r1, a0, a1],
+            part < 1 ? INNER_CUT : whole,
+            r1,
+          );
       }
+    }
+    const ordered = [...batches.values()].sort((a, b) => {
+      for (let i = 0; i < a.order.length; i++)
+        if (a.order[i] !== b.order[i]) return a.order[i]! - b.order[i]!;
+      return 0;
+    });
+    const named = new Map<string, number>();
+    for (const batch of ordered) {
+      // Batches of one ring in looks of their own are numbered.
+      const n = named.get(`${batch.name}${batch.dim}`) ?? 0;
+      named.set(`${batch.name}${batch.dim}`, n + 1);
+      geometry.push({
+        kind: "arc",
+        draw: ringDrawing,
+        key: `${batch.name}${n > 0 ? `-${n}` : ""}${batch.dim ? "-dimmed" : ""}`,
+        arcs: Float32Array.from(batch.arcs),
+        count: batch.index.length,
+        colors: batch.colors,
+        colorIndex: Uint32Array.from(batch.index),
+        fillOpacity: batch.opacity,
+        gap: angular,
+        // The parts keep their node's sides, its gap resolved at its rim.
+        rims: counts && Float32Array.from(batch.rims),
+        cuts: Uint8Array.from(batch.cuts),
+        ringGap: radial,
+      } as RingGeometry);
     }
 
-    if (this.spec.labels ?? true) {
-      const font = `${theme.fontSize}px ${theme.font}`;
-      const lineHeight = Math.round(theme.fontSize * 1.25);
-      const backdrop = surface(theme);
-      const byColor = new Map<string, { coords: number[]; labels: string[] }>();
-      if (centered) {
-        const name = labelFor(view.prefix.at(-1) ?? "", 2 * hole - 8, measure, font);
-        if (name && lineHeight < hole)
-          byColor.set(theme.text, { coords: [cx, cy], labels: [name] });
-      }
-      for (const nodes of byDepth) {
-        for (const node of nodes) {
-          const [r0, r1] = radii(node);
-          const [a0, a1] = angles(node);
-          const middle = (r0 + r1) / 2;
-          const mid = (a0 + a1) / 2;
-          const [x, y] = [cx + middle * Math.cos(mid), cy + middle * Math.sin(mid)];
-          // Horizontal text centered in the sector: the longest that keeps
-          // its box (corners and edge middles) inside it, as painted.
-          const fits = (width: number) => {
-            const [w, h] = [width / 2 + 2, lineHeight / 2];
-            for (const [dx, dy] of BOX_POINTS) {
-              if (!inSector(x + dx * w, y + dy * h, cx, cy, r0, r1, a0, a1, GAP)) return false;
-            }
-            return true;
-          };
-          // The whole name first, then shorter and shorter cuts of it.
-          const name = oneLineText(tree.names[node]!);
-          let text = fits(measure(name, font)) ? name : "";
-          for (let room = measure(name, font) * 0.8; !text && room >= 12; room *= 0.8) {
-            const candidate = labelFor(name, room, measure, font);
-            if (!candidate) break;
-            if (fits(measure(candidate, font))) text = candidate;
-          }
-          if (!text) continue;
-          const fill = colors[colorIndex.get(branch[node]!) ?? 0]!;
-          const ink = contrastingText(fill, opacityAt(tree.depth[node]!), backdrop) ?? theme.text;
-          let group = byColor.get(ink);
-          if (!group) {
-            group = { coords: [], labels: [] };
-            byColor.set(ink, group);
-          }
-          group.coords.push(x, y);
-          group.labels.push(text);
-        }
-      }
-      for (const [fill, { coords, labels }] of byColor) {
-        geometry.push({
-          kind: "text",
-          draw: textDrawing,
-          key: `sunburst-labels-${fill}`,
-          fill,
-          anchor: "middle",
-          halo: undefined,
-          coords: Float32Array.from(coords),
-          labels,
-          count: labels.length,
-        } as TextGeometry);
-      }
-    }
+    if (this.#labels.on)
+      geometry.push(
+        ...this.#drawLabels(byDepth, view, shown, radii, angles, fills, opacities, frame, {
+          cx,
+          cy,
+          hole,
+          centered,
+          centerColor,
+          centerOpacity: center.opacity,
+        }),
+      );
 
     const percent = numberFormatter({ style: "percent", maximumFractionDigits: 1 }, locale);
     const total = shown[0]!;
+    const rootKey = root > 0 ? data.keyOf(frame.id, view, 0) : undefined;
     const itemOf = (node: number): LayoutItem => {
       const outline = new ArcPath();
       const label = [...view.prefix, ...pathOf(tree, node)].join(" / ");
-      const key = this.#data.keyOf(frame.id, view, node);
+      const key = data.keyOf(frame.id, view, node);
       if (node === 0) {
         // The root in the middle: its total, the whole of what is shown.
-        traceSector(outline, cx, cy, 0, hole - GAP / 2, START, START + TAU, 0);
-        const text = `${formatNumber(total, locale)}${this.#data.selectedText(view, counts, 0, locale)}`;
+        const outer = hole - radial / 2;
+        traceSector(outline, cx, cy, 0, outer, START, START + TAU, 0);
+        const text = `${formatNumber(total, locale)}${data.selectedText(counts, 0, locale)}`;
         return {
           key,
           label,
@@ -329,30 +469,67 @@ export class SunburstMark implements LayoutMark {
       }
       const [r0, r1] = radii(node);
       const [a0, a1] = angles(node);
-      traceSector(outline, cx, cy, r0, r1, a0, a1, GAP);
+      traceSector(outline, cx, cy, r0, r1, a0, a1, angular);
       const mid = (a0 + a1) / 2;
       return {
         key,
         label,
-        color: colors[colorIndex.get(branch[node]!) ?? 0] ?? theme.muted,
+        color: fills[node] ?? colorOf(node) ?? theme.muted,
         value: shown[node]!,
-        text: `${formatNumber(shown[node]!, locale)} (${percent(shown[node]! / total)}${where(view)})${this.#data.selectedText(view, counts, node, locale)}`,
+        text: `${formatNumber(shown[node]!, locale)} (${percent(shown[node]! / total)}${where(view)})${data.selectedText(counts, node, locale)}`,
         px: cx + ((r0 + r1) / 2) * Math.cos(mid),
         py: cy + ((r0 + r1) / 2) * Math.sin(mid),
         outline: outline.d,
       };
     };
-    const navigation = this.#data.navigation(frame.id, view, shown, paints, itemOf);
+    // An item's geometry: its ring's radii before gaps, angles from 12 o'clock.
+    const infoOf = (node: number): ItemInfo => {
+      const names = [...view.prefix, ...pathOf(tree, node)];
+      const r0 = node === 0 ? 0 : hole + ring * (tree.depth[node]! - 1);
+      const r1 = node === 0 ? hole : r0 + ring;
+      const [a0, a1] = node === 0 ? [START, START + TAU] : angles(node);
+      const parent = tree.parent[node]!;
+      // The center's parent is the root's own, in the whole tree.
+      const above = node === 0 ? data.parentKey(frame.id, view) : rootKey;
+      return {
+        key: data.keyOf(frame.id, view, node),
+        names,
+        label: names.join(" / "),
+        value: shown[node]!,
+        box: sectorBox(cx, cy, r0, r1, a0, a1),
+        sector: {
+          cx,
+          cy,
+          innerRadius: r0,
+          outerRadius: r1,
+          startAngle: a0 - START,
+          endAngle: a1 - START,
+        },
+        depth: tree.depth[node]!,
+        parent: parent > 0 ? data.keyOf(frame.id, view, parent) : above,
+      };
+    };
+    const navigation = data.navigation(frame.id, view, shown, paints, itemOf);
     // A drilled sunburst's root is read first.
     const first = centered ? 1 : 0;
-    const rootKey = centered ? this.#data.keyOf(frame.id, view, 0) : undefined;
+    const centerKey = centered ? rootKey : undefined;
+    let infos: ItemInfo[] | undefined;
     return {
       geometry,
+      // The center, when painted, then each drawn sector, in reading order.
+      items() {
+        infos ??= [
+          ...(centered ? [infoOf(0)] : []),
+          ...Array.from({ length: navigation.count }, (_, i) => infoOf(navigation.node(i))),
+        ];
+        return infos;
+      },
       itemAt(px, py) {
         const distance = Math.hypot(px - cx, py - cy);
         if (centered && distance < hole) return itemOf(0);
         if (!(distance >= hole && distance <= r) || ring <= 0) return undefined;
-        const depth = Math.min(tree.height, Math.floor((distance - hole) / ring) + 1);
+        const depth = Math.floor((distance - hole) / ring) + 1;
+        if (depth > levels) return undefined;
         let fraction = (Math.atan2(py - cy, px - cx) - START) / TAU;
         fraction -= Math.floor(fraction);
         // The last sector of the ring starting at or before the angle.
@@ -368,7 +545,7 @@ export class SunburstMark implements LayoutMark {
         if (node === undefined) return undefined;
         const [r0, r1] = radii(node);
         const [a0, a1] = angles(node);
-        return inSector(px, py, cx, cy, r0, r1, a0, a1, GAP) ? itemOf(node) : undefined;
+        return inSector(px, py, cx, cy, r0, r1, a0, a1, angular) ? itemOf(node) : undefined;
       },
       // Not spread: that would read `count` and order every node now.
       get count() {
@@ -376,22 +553,202 @@ export class SunburstMark implements LayoutMark {
       },
       item: (index) => (index < first ? itemOf(0) : navigation.item(index - first)),
       indexOf: (key) => {
-        if (key === rootKey) return 0;
+        if (key === centerKey) return 0;
         const at = navigation.indexOf(key);
         return at < 0 ? -1 : at + first;
       },
-      summary: () => this.#summary(view, shown, branches, locale, percent),
-      rowsOf: (key, of) => (of === this.table ? this.#data.rowsOf(frame.id, view, key) : undefined),
-      soleRow: (key, of) =>
-        of === this.table ? this.#data.soleRow(frame.id, view, key) : undefined,
-      drill: this.#data.drill(frame.id, root, view, path?.crumbs ?? []),
+      summary: () => this.#summary(view, shown, locale, percent),
+      rowsOf: (key, of) => (of === this.table ? data.rowsOf(frame.id, view, key) : undefined),
+      soleRow: (key, of) => (of === this.table ? data.soleRow(frame.id, view, key) : undefined),
+      // An empty center goes up a level when clicked, though it is no item.
+      drill: data.drill(
+        frame.id,
+        root,
+        view,
+        path?.crumbs ?? [],
+        root > 0 && !centered ? (x, y) => Math.hypot(x - cx, y - cy) < hole : undefined,
+      ),
     };
+  }
+
+  /** What measures read across the sunburst (see `measureDomain`): the drilled tree's, alike in every facet panel. */
+  #domain(frame: LayoutFrame, root: number): MeasureDomain {
+    if (!this.#paint.measured) return { value: 0, depth: 0 };
+    const view = root > 0 ? this.#data.drilled(root) : this.#data.view();
+    const shown = this.#data.shown(frame.id, view, frame.hidden);
+    return measureDomain(view, shown, this.spec.levels ?? Number.POSITIVE_INFINITY);
+  }
+
+  /**
+   * Names inside sectors with room for them, across each sector or along
+   * its radius, upright, written as the labels ask, in black or white by
+   * contrast with their sector; a drilled root's in the center.
+   */
+  #drawLabels(
+    byDepth: readonly number[][],
+    view: TreeView,
+    shown: Float64Array,
+    radii: (node: number) => readonly [number, number],
+    angles: (node: number) => readonly [number, number],
+    fills: readonly (string | undefined)[],
+    opacities: Float64Array,
+    frame: LayoutFrame,
+    middle: {
+      cx: number;
+      cy: number;
+      hole: number;
+      centered: boolean;
+      centerColor: string;
+      centerOpacity: number;
+    },
+  ): Geometry[] {
+    const { theme, measure, locale } = frame;
+    const labels = this.#labels;
+    const { tree } = view;
+    const { angular } = this.#gap;
+    const { cx, cy, hole } = middle;
+    const font = `${theme.fontSize}px ${theme.font}`;
+    const lineHeight = Math.round(theme.fontSize * 1.25);
+    const backdrop = frame.surface ?? surface(theme);
+    const radial = labels.rotation === "radial";
+    const plain = new Map<string, { coords: number[]; labels: string[] }>();
+    const items: TextItem[] = [];
+    // An unfilled sector shows the plot behind it.
+    const inkOf = (fill: string | undefined, opacity: number) =>
+      contrastingText(fill ?? backdrop, fill === undefined ? 1 : opacity, backdrop) || theme.text;
+    const write = (node: number) =>
+      labels.parts(view, node, shown[node]!, () => this.#data.soleRowOf(view, node), locale);
+    if (middle.centered) {
+      // The root's name across the center, its corners inside the disc.
+      const disc = hole - this.#gap.radial / 2 - 2;
+      const across = (height: number) => 2 * Math.sqrt(Math.max(0, disc ** 2 - (height / 2) ** 2));
+      const ink = inkOf(middle.centerColor, middle.centerOpacity);
+      if (!labels.styled) {
+        const room = across(lineHeight);
+        const name = room >= 8 && labelFor(view.prefix.at(-1) ?? "", room, measure, font);
+        if (name) plain.set(ink, { coords: [cx, cy], labels: [name] });
+      } else {
+        const parts = write(0);
+        const paint = parts && labels.paint(frame, ink);
+        if (parts && paint) {
+          const [padX, padY] = labels.padding(paint);
+          const whole = labels.block(parts, paint, frame);
+          const block = whole.fit(across(whole.lines.height + padY) - padX);
+          if (block) items.push(...labels.items(block, cx, cy, 0, paint, frame));
+        }
+      }
+    }
+    // The thinnest line radial names may have, for sectors too thin for any.
+    const thinnest = radial ? labels.paint(frame, theme.text).lineHeight / 2 : 0;
+    for (const nodes of byDepth) {
+      for (const node of nodes) {
+        const fill = fills[node];
+        const [r0, r1] = radii(node);
+        const [a0, a1] = angles(node);
+        const sweep = a1 - a0;
+        const mid = (a0 + a1) / 2;
+        const center = (r0 + r1) / 2;
+        const [x, y] = [cx + center * Math.cos(mid), cy + center * Math.sin(mid)];
+        const ink = inkOf(fill, opacities[node]!);
+        if (radial) {
+          // Along the radius, turned upright on the left half; its outer
+          // corners inside the ring's outer edge, and no thicker than the
+          // sector at its inner end.
+          const outer = 2 * r1 * Math.sin(Math.min(sweep, Math.PI) / 2) - angular;
+          if (outer < thinnest || r1 - r0 < 8) continue;
+          const parts = write(node);
+          if (!parts) continue;
+          const paint = labels.paint(frame, ink);
+          const [padX, padY] = labels.padding(paint);
+          const whole = labels.block(parts, paint, frame);
+          const half = (whole.lines.height + padY) / 2;
+          const reach = Math.sqrt(Math.max(0, (r1 - 2) ** 2 - half ** 2));
+          const block = whole.fit(2 * Math.min(reach - center, center - r0 - 2) - padX);
+          if (!block) continue;
+          const inner = Math.max(r0, center - (block.lines.width + padX) / 2);
+          const thick = 2 * inner * Math.sin(Math.min(sweep, Math.PI) / 2) - angular;
+          if (block.lines.height + padY > thick) continue;
+          const turn = (mid * 180) / Math.PI;
+          const angle = Math.cos(mid) < 0 ? turn + 180 : turn;
+          items.push(...labels.items(block, x, y, angle, paint, frame));
+          continue;
+        }
+        // Across the sector, centered: the longest that keeps its box (corners
+        // and edge middles) inside it, as painted.
+        const fits = (width: number, height: number) => {
+          const [w, h] = [width / 2 + 2, height / 2];
+          for (const [dx, dy] of BOX_POINTS) {
+            if (!inSector(x + dx * w, y + dy * h, cx, cy, r0, r1, a0, a1, angular)) return false;
+          }
+          return true;
+        };
+        if (!labels.styled) {
+          // No name keeps a box narrower than nothing inside: not measured.
+          if (!fits(0, lineHeight)) continue;
+          // The whole name first, then shorter and shorter cuts of it.
+          const name = oneLineText(tree.names[node]!);
+          const width = measure(name, font);
+          let text = fits(width, lineHeight) ? name : "";
+          for (let room = width * 0.8; !text && room >= LEAST_NAME; room *= 0.8) {
+            const candidate = labelFor(name, room, measure, font);
+            if (!candidate) break;
+            if (fits(measure(candidate, font), lineHeight)) text = candidate;
+          }
+          if (!text) continue;
+          let batch = plain.get(ink);
+          if (!batch) {
+            batch = { coords: [], labels: [] };
+            plain.set(ink, batch);
+          }
+          batch.coords.push(x, y);
+          batch.labels.push(text);
+          continue;
+        }
+        const parts = write(node);
+        if (!parts) continue;
+        const paint = labels.paint(frame, ink);
+        const whole = labels.block(parts, paint, frame);
+        // As painted, with its background's padding. Cuts keep the block's
+        // height: none fits where nothing that tall does.
+        const [padX, padY] = labels.padding(paint);
+        const tall = whole.lines.height + padY;
+        if (!fits(padX, tall)) continue;
+        let block = fits(whole.lines.width + padX, tall) ? whole : undefined;
+        for (let room = whole.lines.width * 0.8; !block && room >= LEAST_NAME; room *= 0.8) {
+          const cut = whole.fit(room);
+          if (!cut) break;
+          if (fits(cut.lines.width + padX, tall)) block = cut;
+        }
+        if (block) items.push(...labels.items(block, x, y, 0, paint, frame));
+      }
+    }
+    const geometry: Geometry[] = [...plain].map(
+      ([fill, { coords, labels: texts }]) =>
+        ({
+          kind: "text",
+          draw: textDrawing,
+          key: `${JSON.stringify(frame.id)}-sunburst-labels-${fill}`,
+          fill,
+          anchor: "middle",
+          halo: undefined,
+          coords: Float32Array.from(coords),
+          labels: texts,
+          count: texts.length,
+        }) as TextGeometry,
+    );
+    if (items.length > 0)
+      geometry.push({
+        kind: "labels",
+        draw: labelsDrawing,
+        key: `${JSON.stringify(frame.id)}-sunburst-names`,
+        items,
+      } as LabelsGeometry);
+    return geometry;
   }
 
   #summary(
     view: TreeView,
     shown: Float64Array,
-    branches: readonly Branch[],
     locale: string | undefined,
     percent: (value: number) => string,
   ): string {
@@ -401,12 +758,30 @@ export class SunburstMark implements LayoutMark {
     const total = shown[0]!;
     if (!(total > 0)) return `Sunburst of ${what}, with nothing to show.`;
     // The branches drawn: shown, and with rows (in a facet panel, its own).
-    const visible = this.#data.largest(branches, shown);
+    const visible = this.#data.largest(view.tops, shown);
     const largest = visible
       .slice(0, 3)
       .map(({ node, label }) => `${label} ${percent(shown[node]! / total)}`);
     return `Sunburst of ${what}: ${count(this.#data.leaves(tree, shown), "leaf", "leaves")} in ${count(visible.length, "group", "groups")} totaling ${formatNumber(total, locale)}. Largest: ${largest.join(", ")}.`;
   }
+}
+
+/** The bounds of a ring sector: its corners, and its outer arc where it crosses an axis. */
+function sectorBox(cx: number, cy: number, r0: number, r1: number, a0: number, a1: number): Rect {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const at = (radius: number, angle: number) => {
+    xs.push(cx + radius * Math.cos(angle));
+    ys.push(cy + radius * Math.sin(angle));
+  };
+  for (const angle of [a0, a1]) {
+    at(r0, angle);
+    at(r1, angle);
+  }
+  for (let k = Math.ceil(a0 / (Math.PI / 2)); k * (Math.PI / 2) < a1; k++)
+    at(r1, (k * Math.PI) / 2);
+  const [x, y] = [Math.min(...xs), Math.min(...ys)];
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
 /**
@@ -422,12 +797,29 @@ export function sunburst<S extends Schema>(
   table: Table<S>,
   options: SunburstOptions<S>,
 ): ChartMark<Frozen<SunburstSpec>> {
-  refuseColor(options, "sunburst");
   const { path } = options;
   // Every option is kept, so the mark refuses a tree named both ways.
   const spec = {
     type: "sunburst",
-    ...definedFields(options, ["node", "parent", "value", "labels", "tooltip", "id", "panel"]),
+    ...definedFields(options, [
+      "node",
+      "parent",
+      "value",
+      "labels",
+      "levels",
+      "innerRadius",
+      "center",
+      "gap",
+      "sort",
+      "breadcrumbs",
+      "color",
+      "leaf",
+      "branch",
+      "fillOpacity",
+      "tooltip",
+      "id",
+      "panel",
+    ]),
     ...(path !== undefined && { path: [...path] }),
   } as unknown as SunburstSpec;
   if (table.name !== undefined) spec.data = table.name;
