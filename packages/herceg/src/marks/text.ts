@@ -1,4 +1,4 @@
-import type { PositionField, Schema, Table } from "../data/table.ts";
+import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import type { Formatter } from "../format/format.ts";
 import {
@@ -12,11 +12,13 @@ import type { Geometry, Rect } from "../scene/scene.ts";
 import type { LabelLayoutSpec, MarkAnchorSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { FormatSpec } from "../spec/guides.ts";
+import type { BoxAnchor, ItemAnchor, ItemCoordinate } from "../spec/place.ts";
 import type { AnnotationPosition, Clip, Frozen, TextLabelSpec, TextSpec } from "../spec/spec.ts";
 import type { Halo, TextStyle as TextStyleSpec } from "../spec/style.ts";
 import type { TextPaint } from "../style/style.ts";
 import {
   AnnotationData,
+  type ItemRefOf,
   inView,
   labelOf,
   leadersGeometry,
@@ -103,10 +105,67 @@ export type TextLabel<F extends string = string> =
         style?: TextStyleSpec;
       });
 
-/** Where text is: `at`, or its short forms `x` and `y`. */
-type TextPlace<F extends string> =
-  | { x: PlaceOption<F>; y: PlaceOption<F>; at?: never; from?: never }
-  | { at: { x: PlaceOption<F>; y: PlaceOption<F> }; x?: never; y?: never; from?: never };
+/**
+ * Where text is: `at`, or its short forms `x` and `y`; or `from` a layout
+ * item, at an anchor of its box. Item names are constants or category
+ * fields `C` of the text's table.
+ */
+type TextPlace<F extends string, C extends string = never> =
+  | { x: PlaceOption<F, C>; y: PlaceOption<F, C>; at?: never; from?: never }
+  | { at: { x: PlaceOption<F, C>; y: PlaceOption<F, C> }; x?: never; y?: never; from?: never }
+  | { from: ItemAnchorOf<C>; x?: never; y?: never; at?: never };
+
+/** Text that follows a layout item (see `ItemAnchor`), its names typed by the text's table. */
+export interface ItemAnchorOf<C extends string> extends ItemRefOf<C> {
+  /** The point of the item's box the label is at, its block aligned to it unless its style says otherwise. */
+  at: BoxAnchor;
+  /** Pixels from the anchor, right and down. */
+  offset?: { x?: number; y?: number };
+}
+
+/** Where each box anchor is along x and y, and how a label's block is aligned to it. */
+const ANCHORS: Record<
+  BoxAnchor,
+  readonly [
+    x: "start" | "center" | "end",
+    y: "start" | "center" | "end",
+    align: "start" | "center" | "end",
+    verticalAlign: "top" | "middle" | "bottom",
+  ]
+> = {
+  "top-left": ["start", "start", "start", "top"],
+  top: ["center", "start", "center", "top"],
+  "top-right": ["end", "start", "end", "top"],
+  left: ["start", "center", "start", "middle"],
+  center: ["center", "center", "center", "middle"],
+  right: ["end", "center", "end", "middle"],
+  "bottom-left": ["start", "end", "start", "bottom"],
+  bottom: ["center", "end", "center", "bottom"],
+  "bottom-right": ["end", "end", "end", "bottom"],
+};
+
+/**
+ * The places on each axis of text following a layout item: the anchor's
+ * edges of the item's box, moved by the offset. Throws for an anchor that
+ * is none of a box's.
+ */
+export function itemPlaces(from: Frozen<ItemAnchor>): [ItemCoordinate, ItemCoordinate] {
+  const anchor = ANCHORS[from.at];
+  if (!anchor || !Object.hasOwn(ANCHORS, from.at))
+    throw new ChartError({
+      code: "invalid-option",
+      path: "from.at",
+      message: `text from.at: expected ${Object.keys(ANCHORS)
+        .map((at) => JSON.stringify(at))
+        .join(", ")}; received ${JSON.stringify(from.at)}`,
+    });
+  const item = { mark: from.mark, item: from.item };
+  const { x, y } = from.offset ?? {};
+  return [
+    { item, at: anchor[0], ...(x !== undefined && { offset: x }) },
+    { item, at: anchor[1], ...(y !== undefined && { offset: y }) },
+  ];
+}
 
 /**
  * Text following another mark's series (`from`), one label per series, of
@@ -160,7 +219,7 @@ export type TextOptions = TextStyle &
 /** Labels from a table, one per row; places may also be constants. */
 export type TextDataOptions<S extends Schema> = TextStyle &
   ItemKeyed<S> &
-  TextPlace<PositionField<S>> & { label: TextLabel<TextField<S>> };
+  TextPlace<PositionField<S>, CategoryField<S>> & { label: TextLabel<TextField<S>> };
 
 /**
  * Text labels at data positions. They are drawn as SVG above the data and,
@@ -192,8 +251,13 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     this.domainFallback = spec.contributeDomain !== true;
     if (spec.at && (spec.x !== undefined || spec.y !== undefined))
       throw new Error("text at: a place, or its short forms x and y, not both; drop at or x and y");
-    const x = spec.at?.x ?? spec.x;
-    const y = spec.at?.y ?? spec.y;
+    // Text following a layout item is at edges of its box (see `itemPlaces`).
+    const from = spec.from && "item" in spec.from ? spec.from : undefined;
+    if (from && (spec.at || spec.x !== undefined || spec.y !== undefined))
+      throw new Error("text from: a place on another mark, or at, or x and y; one of them");
+    const [fromX, fromY] = from ? itemPlaces(from) : [];
+    const x = fromX ?? spec.at?.x ?? spec.x;
+    const y = fromY ?? spec.at?.y ?? spec.y;
     if (x === undefined || y === undefined) throw new Error("text: needs a place: at, or x and y");
     if (spec.label === undefined)
       throw new Error("text label: required; give its text, or { field }");
@@ -206,10 +270,16 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       });
     this.#x = x;
     this.#y = y;
-    const label = labelOf(spec.label);
+    const own = labelOf(spec.label);
+    // A label following an item is aligned to its anchor, as far as its style leaves it.
+    const [, , align, verticalAlign] = from ? ANCHORS[from.at] : [];
+    const label =
+      own && align && verticalAlign
+        ? { ...own, style: { align, verticalAlign, ...own.style } }
+        : own;
     this.#data = new AnnotationData(
       table,
-      spec.at ? { "at.x": x, "at.y": y } : { x, y },
+      from ? { "from.x": x, "from.y": y } : spec.at ? { "at.x": x, "at.y": y } : { x, y },
       label,
       "text",
       {
@@ -279,6 +349,10 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
 
   get scaled() {
     return this.#data.scaled;
+  }
+
+  get follows() {
+    return this.#data.follows;
   }
 
   scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
@@ -631,7 +705,7 @@ export function text<S extends Schema>(
   const table = second ? (first as Table<S>) : undefined;
   const options = (second ?? first) as TextDataOptions<S>;
   // A position's places are coordinates in specs: values and fields tagged.
-  const tagged = (place: PlaceOption<string>) => {
+  const tagged = (place: PlaceOption<string, string>) => {
     const value = position(place);
     return typeof value === "number"
       ? { data: value }
@@ -663,8 +737,9 @@ export function text<S extends Schema>(
     ]),
   } as unknown as TextSpec;
   // Text following a mark's series reads that mark's rows.
-  if (spec.from) return new FollowingTextMark(spec);
-  const places = spec.at ? [spec.at.x, spec.at.y] : [spec.x, spec.y];
+  const { from } = spec;
+  if (from && !("item" in from)) return new FollowingTextMark(spec);
+  const places = from ? itemPlaces(from) : spec.at ? [spec.at.x, spec.at.y] : [spec.x, spec.y];
   if (table?.name !== undefined && readsTable(places as AnnotationPosition[], spec.label))
     spec.data = table.name;
   return new TextMark(spec, table as unknown as Table | undefined);

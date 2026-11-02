@@ -263,7 +263,7 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
     theme: Theme,
     chart: { readonly width: number; readonly height: number },
   ): PlacedLegend[] => {
-    const owners = ownersOf(marks, content.features);
+    const owners = ownersOf(marks, places, content.features);
     const paint = text.paint ?? same;
     const partsOf = partOwners(kit, marks, planned.drawsOwn, places, theme, text.locale, paint);
     // Marks left out of legends (`legend: false`, annotations not listed by
@@ -293,8 +293,8 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
           ) ?? [],
       ),
     );
-    marks.forEach(({ mark, series }, index) => {
-      const id = mark.spec.id ?? index;
+    marks.forEach(({ mark, series }) => {
+      const id = places.get(mark)!;
       const { color, encode } = mark.spec as {
         color?: string;
         encode?: { color?: { field?: string } };
@@ -373,6 +373,7 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
             paint,
             listedMarks,
             labelEntries,
+            places,
           )
         : undefined;
     for (const plan of plans) if (plan.panel !== undefined) inPanels!.check(plan.panel, plan.path);
@@ -656,7 +657,8 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
               },
               text,
               flow(plan.place),
-              marks,
+              // Swatches look as the marks drawn in its panel do.
+              shown ? marks.filter(({ mark }) => shown.drawn.has(places.get(mark)!)) : marks,
               theme,
               {
                 targets: targetsOf,
@@ -741,11 +743,12 @@ function colorbarPart(
  */
 function ownersOf(
   marks: readonly MarkSeries[],
+  places: ReadonlyMap<object, string | number>,
   features: LegendContent["features"],
 ): Map<string, (string | number)[]> {
   const owners = new Map<string, (string | number)[]>();
-  marks.forEach(({ mark, series }, index) => {
-    const id = mark.spec.id ?? index;
+  marks.forEach(({ mark, series }) => {
+    const id = places.get(mark)!;
     // Series are listed under their identity's entry.
     for (const key of [
       ...series.map((s) => s.entry ?? s.key),
@@ -788,10 +791,9 @@ function partOwners(
     if (shared) shared.owners.push(owner);
     else owners.set(part.key, { owners: [owner], part });
   };
-  marks.forEach(({ mark, series }, index) => {
+  for (const { mark, series } of marks)
     for (const part of mark.legends?.(series, theme, format, paint) ?? [])
-      own(part, mark.spec.id ?? index);
-  });
+      own(part, places.get(mark)!);
   for (const layout of layouts)
     for (const part of layout.legends?.(theme, locale, paint) ?? []) own(part, places.get(layout)!);
   return owners;
@@ -835,8 +837,8 @@ interface Row {
 
 /**
  * A legend with settings: its title, entries in a grid or rows, then its
- * parts; a panel's toggles each entry's series in it (`targets`) and draws
- * swatches as the marks drawn there (`drawn`) do.
+ * parts; a panel's toggles each entry's series in it (`targets`), with
+ * swatches as the marks drawn there do.
  */
 function measureLegend(
   kit: GuideKit,
@@ -847,21 +849,14 @@ function measureLegend(
   marks: readonly MarkSeries[],
   theme: Theme,
   own: Own,
-  {
-    targets,
-    drawn,
-  }: {
-    targets?: ReadonlyMap<string, readonly string[]> | undefined;
-    drawn?: ReadonlySet<string | number> | undefined;
-  } = {},
+  { targets }: { targets?: ReadonlyMap<string, readonly string[]> | undefined } = {},
 ): (MeasuredLegend & { explained: string[] }) | undefined {
   const { options, path } = plan;
   const text: LegendText = { ...shared, ...paints(kit, shared, options.style, `${path}.style`) };
   const { measure } = text;
-  const looks = drawn ? marks.filter(({ mark }, m) => drawn.has(mark.spec.id ?? m)) : marks;
   const paint = text.paint ?? same;
   // What it includes, then its own entries.
-  let rows = derived(kit, options, content, looks, theme, paint, plan.sources);
+  let rows = derived(kit, options, content, marks, theme, paint, plan.sources);
   if (targets) rows = rows.map((row) => ({ ...row, targets: targets.get(row.key) ?? row.targets }));
   if (options.entries) {
     // Each entry has a key of its own: equal labels never merge, and keys never do.

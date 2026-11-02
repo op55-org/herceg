@@ -31,6 +31,7 @@ import type {
   ChannelSpec,
   EncodingsSpec,
   LabelContent,
+  MarkAnchorSpec,
   OrdinalScaleSpec,
   SymbolName,
 } from "../../spec/encoding.ts";
@@ -304,7 +305,8 @@ function compile(
   const followed = new Set(
     marks.flatMap((mark) => {
       const from = (mark.spec as Partial<TextSpec>).from;
-      return mark.spec.type === "text" && from ? [from.mark] : [];
+      // Text following a layout mark's items is placed as text is.
+      return mark.spec.type === "text" && from && !("item" in from) ? [from.mark] : [];
     }),
   );
   const drawings = new Map<Mark, Drawings>();
@@ -327,7 +329,8 @@ function compile(
     path: string,
     where: Where,
   ): void {
-    if (spec.type === "text" && (mark.spec as TextSpec).from) {
+    const from = spec.type === "text" ? (mark.spec as TextSpec).from : undefined;
+    if (from && !("item" in from)) {
       byMark.set(mark, followingText(kit, mark, where, marks, drawings, config, zone));
       return;
     }
@@ -568,7 +571,7 @@ function followingText(
   zone: string,
 ): MarkFeatures & { use(): void } {
   const spec = mark.spec as TextSpec;
-  const from = spec.from!;
+  const from = spec.from as MarkAnchorSpec;
   const at = `${where.path} from`;
   const source = marks.find((m) => m.spec.id === from.mark);
   if (!source) {

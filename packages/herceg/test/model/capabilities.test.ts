@@ -595,9 +595,10 @@ describe("capabilities: facets", () => {
   });
 
   it.each(paneled)("$name has each facet panel to itself, splitting its rows", (c) => {
+    // Beside it go only marks placed by its items or in pixels.
     expect(() =>
       build({ marks: [c.make(), line(samples, { x: "x", y: "y" })], facet: facet("group") }),
-    ).toThrow("has each facet panel to itself");
+    ).toThrow("facet panels have no x and y scales; draw the line in another chart");
     if (!c.layer)
       expect(() => build({ marks: [c.make(), c.make()], facet: facet("group") })).toThrow(
         "has each facet panel to itself",
@@ -752,7 +753,7 @@ describe("capabilities: subplots", () => {
         marks: [c.make({ panel: "b" }), line(samples, { x: "x", y: "y", panel: "b" })],
         panels: subplot,
       }),
-    ).toThrow(`line panel: a ${type} mark has panel "b" to itself`);
+    ).toThrow(`line panel: panel "b" draws a ${type === "plot3d" ? "3D plot" : type}`);
     expect(() =>
       build({
         marks: [c.make({ panel: "b" }), rule({ x: 1, panel: "*" })],

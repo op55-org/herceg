@@ -200,12 +200,12 @@ def test_3d_marks_share_their_chart_only_with_each_other():
     chart.surface(z=np.ones((2, 2)))
     with pytest.raises(
         ValueError,
-        match="point_3d: shares its chart only with point_3d, line_3d, and surface marks",
+        match="line: a 3D plot's chart has no x and y scales; draw the line in another chart",
     ):
         chart.line("x", "y")
     with pytest.raises(
         ValueError,
-        match="point_3d: shares its chart only with point_3d, line_3d, and surface marks",
+        match="line: a 3D plot's chart has no x and y scales",
     ):
         hg.Chart(points()).line("x", "y").point_3d("x", "y", "z")
     with pytest.raises(ValueError, match="Chart brush: a point_3d has no x axis"):
@@ -278,7 +278,7 @@ def test_3d_subplots_compose_layers_and_export_each_camera():
         hg.Chart(points(), panels=[hg.Panel("a", camera=hg.Camera())]).line(
             "x", "y", panel="a"
         ).to_spec()
-    with pytest.raises(ValueError, match="point_3d panel: a line draws in panel"):
+    with pytest.raises(ValueError, match='line panel: panel "a" draws a 3D plot'):
         hg.Chart(points(), panels=["a"]).line("x", "y", panel="a").point_3d(
             "x", "y", "z", panel="a"
         )

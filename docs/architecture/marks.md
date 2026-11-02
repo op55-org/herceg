@@ -220,7 +220,8 @@ are rows (`LayoutMark.rowItems`: map layers, 3D points and lines' samples, with 
 mark key; a map of one layer names it for items that say none), else
 their item keys. A layout pick is a hit or none, as `itemAt` gives it: a
 panel holds one layout mark, so no distance ranks it against another
-mark's items, and its reach is the tooltip's. Pickers will test the remaining
+mark's items, and its reach is the tooltip's; its decorations' records come
+after it, picked above it. Pickers will test the remaining
 geometry by kind and ask `partOf` what was hit; nothing in the library
 reads records yet.
 
@@ -589,7 +590,7 @@ theme, text measurement, hidden keys, stable colors per item key) and draws
 the `LayoutResult` it returns (geometry, an item lookup by pixel, items in
 reading order, a summary). The room is the space below the chart's title
 and legend, or a panel's plot in facets and subplots. A panel holds marks
-along axes or one layout mark, never both.
+along axes, or one layout mark and its decorations.
 
 What a tooltip or keyboard cursor is on is an `Inspection`: an axis
 inspection (a position and each series' point there) or an item inspection
@@ -604,6 +605,34 @@ Arrow keys step through items in reading order.
 | Funnel | Stage totals per table version | One rectangle geometry over a shapes path of connectors. |
 | Radar | Packed arrays of the values rows give, by series and spoke, rebuilt on change | Existing geometry kinds (lines, shapes, points), so renderers need no radar code. The radius is the largest leaving room for spoke labels, each label's outward edge bounding it linearly (`layout/radar-labels.ts`). |
 | Sankey | One pass: names to nodes once per dictionary code, rows of a pair adding to one link | `layout/sankey.ts` follows d3-sankey (cycle links dropped by depth-first search, longest-path columns, six relaxation passes). Link stacks re-sort once per column and keep offsets in both stacks, so a hub of thousands of links costs milliseconds, not quadratic time. Values are fractions of the largest link, so sums near the largest double stay finite. Links are bands of two cubics; picking solves the curve's x with Newton steps. |
+
+### Items as drawn, and decorations
+
+Pies, funnels, treemaps, and sunbursts publish their items' geometry
+(`LayoutMark.publishes`): `LayoutResult.items()` builds each drawn item's
+`ItemInfo` on first ask, so frames nothing reads build none. The scene's
+panel names its layout mark and that list (`Panel.items`); `getItems`
+copies the list of the scene on screen with its revision, and custom marks
+read copies through their frame (`Frame.items`).
+
+Decorations (`model/decorations.ts`) are the text, rules, regions, and
+custom marks beside a layout mark: marks whose places are all items,
+fractions, or pixels (`Mark.follows`, the layout marks whose items they
+name). `checkDecorations` refuses the others in a chart, facet panels, or a
+subplot of a layout mark, and places on items of marks elsewhere or of
+marks that publish none, naming the way in; a chart without layout marks
+refuses item places as it draws them. They draw with a frame of their own
+whose x and y scales throw (`noScale`) and whose `items` look items up by
+their names, after the layout mark, painted by `zIndex`, and their records
+follow the layout mark's, so the picker finds them above it. Item places
+resolve in `layout/position.ts` through `PositionContext.box`; text `from`
+an item becomes two item places, its label aligned to the anchor.
+
+A pie's value transition (`dom/value-transition.ts`) redraws the panel
+from interpolated slices (`PieSlices.draw`) and their items
+(`PieSlices.placed`), and draws the decorations again over those items
+(`PanelItems.decorate`), so they never lag a frame; a gauge's dial redraws
+its pixel decorations alike.
 
 ### Networks
 

@@ -247,9 +247,14 @@ export const arcDrawing: Drawing<ArcGeometry> = {
   },
 };
 
-/** Whether `traceSector` draws anything of a sector. */
-export function sectorPaints(r0: number, r1: number, sweep: number, gap: number): boolean {
-  return sweep > 0 && r1 > r0 && sectorInner(r0, r1, sweep, gap) < r1;
+/**
+ * Whether `traceSector` draws anything of a sector held in arc geometry,
+ * whose 32-bit floats may round a thin sector's angles together.
+ */
+export function sectorPaints(r0: number, r1: number, a0: number, a1: number, gap: number): boolean {
+  const f = Math.fround;
+  const [inner, outer, sweep] = [f(r0), f(r1), f(a1) - f(a0)];
+  return sweep > 0 && outer > inner && sectorInner(inner, outer, sweep, gap) < outer;
 }
 
 /**
@@ -286,4 +291,66 @@ export function inSector(
       ? distance
       : Math.abs(dx * Math.sin(a) - dy * Math.cos(a));
   return side(a0) >= half && side(a1) >= half;
+}
+
+/**
+ * A sector as a layout item gives it (`ItemInfo`): its circle, radii, and
+ * angles clockwise from 12 o'clock, from canvas angles `a0` to `a1`
+ * (clockwise from 3 o'clock), and the box around it.
+ */
+export function sectorInfo(
+  cx: number,
+  cy: number,
+  r0: number,
+  r1: number,
+  a0: number,
+  a1: number,
+): {
+  box: { x: number; y: number; width: number; height: number };
+  sector: {
+    cx: number;
+    cy: number;
+    innerRadius: number;
+    outerRadius: number;
+    startAngle: number;
+    endAngle: number;
+  };
+} {
+  const sweep = Math.min(Math.max(a1 - a0, 0), TAU);
+  // Its corners, and the outer arc's extremes along x and y within its sweep.
+  const xs = [
+    Math.cos(a0) * r0,
+    Math.cos(a0) * r1,
+    Math.cos(a0 + sweep) * r0,
+    Math.cos(a0 + sweep) * r1,
+  ];
+  const ys = [
+    Math.sin(a0) * r0,
+    Math.sin(a0) * r1,
+    Math.sin(a0 + sweep) * r0,
+    Math.sin(a0 + sweep) * r1,
+  ];
+  for (
+    let quarter = Math.ceil(a0 / (Math.PI / 2));
+    quarter * (Math.PI / 2) <= a0 + sweep;
+    quarter++
+  ) {
+    const at = quarter * (Math.PI / 2);
+    xs.push(Math.cos(at) * r1);
+    ys.push(Math.sin(at) * r1);
+  }
+  const [left, right] = [Math.min(...xs), Math.max(...xs)];
+  const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+  const start = a0 + Math.PI / 2;
+  return {
+    box: { x: cx + left, y: cy + top, width: right - left, height: bottom - top },
+    sector: {
+      cx,
+      cy,
+      innerRadius: r0,
+      outerRadius: r1,
+      startAngle: start - TAU * Math.floor(start / TAU + 1e-12),
+      endAngle: start - TAU * Math.floor(start / TAU + 1e-12) + sweep,
+    },
+  };
 }

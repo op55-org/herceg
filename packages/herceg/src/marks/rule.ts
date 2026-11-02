@@ -1,4 +1,4 @@
-import type { PositionField, Schema, Table } from "../data/table.ts";
+import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { ruleDrawing, ruleLine } from "../draw/rule.ts";
 import type { Formatter } from "../format/format.ts";
@@ -30,6 +30,7 @@ import type { Theme } from "../theme.ts";
 import {
   AnnotationData,
   checkLegend,
+  type ItemPlace,
   inView,
   type Label,
   labelOf,
@@ -70,7 +71,8 @@ export type RuleLabel<F extends string = string, Layout = LabelLayoutSpec> =
         place?: LabelPlaceSpec;
       });
 
-interface RuleStyle {
+/** A rule's look and options; places on items in `span` name category fields `C` of its table. */
+interface RuleStyle<C extends string = never> {
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -91,7 +93,7 @@ interface RuleStyle {
   /** From 0 to 1. */
   strokeOpacity?: number;
   /** Where along the other axis the rule runs; the plot's whole extent by default. */
-  span?: readonly [Coordinate, Coordinate];
+  span?: readonly [Coordinate | ItemPlace<C>, Coordinate | ItemPlace<C>];
   /** Whether the rule's value counts toward its axis' domain; false by default. */
   contributeDomain?: boolean;
   /** `true` lists the rules in the chart's legends by their label; they are left out by default. */
@@ -113,9 +115,9 @@ export type RuleOptions = RuleStyle &
   };
 
 /** Rules from a table, one per row; places may also be constants. */
-export type RuleDataOptions<S extends Schema> = RuleStyle &
+export type RuleDataOptions<S extends Schema> = RuleStyle<CategoryField<S>> &
   ItemKeyed<S> &
-  RulePosition<PlaceOption<PositionField<S>>> & {
+  RulePosition<PlaceOption<PositionField<S>, CategoryField<S>>> & {
     /** Text drawn by every rule: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>>;
   };
@@ -249,7 +251,11 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
           return category === undefined ? undefined : `${vertical ? "x" : "y"} ${category}`;
         }
         if (place.kind !== "value")
-          return place.kind === "frame" ? (vertical ? "x" : "y") : undefined;
+          return place.kind === "frame" || place.kind === "item"
+            ? vertical
+              ? "x"
+              : "y"
+            : undefined;
         const value = valueAt(place.channel, i);
         return Number.isFinite(value) ? `${vertical ? "x" : "y"} ${f(value)}` : undefined;
       },
@@ -271,6 +277,10 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
 
   get scaled() {
     return this.#data.scaled;
+  }
+
+  get follows() {
+    return this.#data.follows;
   }
 
   scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {

@@ -10,6 +10,7 @@ import type { NumericArray } from "../data/column.ts";
 import type { SymbolName } from "../draw/symbols.ts";
 import type { Mapping } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
+import type { ItemInfo } from "../marks/layout-mark.ts";
 import type { Clip } from "../spec/spec.ts";
 import type { PlotPaint, ResolvedHalo, StrokePaint, TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
@@ -540,6 +541,8 @@ export interface PieSlices {
   labeled: boolean;
   /** The pie's sectors, leaders, and labels with `items` ending at `ends`, out to radius `r`. */
   draw(items: readonly PieSlice[], ends: Float64Array, r: number, labeled: boolean): Geometry[];
+  /** The layout items `draw` draws (see `PanelItems`). */
+  placed(items: readonly PieSlice[], ends: Float64Array, r: number): readonly ItemInfo[];
 }
 
 /** One shape of a polygons geometry: rings of points, filled together. */
@@ -1077,6 +1080,25 @@ export interface Panel {
    */
   visible?: readonly Rect[] | undefined;
   keep?: readonly Rect[] | undefined;
+  /** In a panel a layout mark draws, its items as drawn there. */
+  items?: PanelItems | undefined;
+}
+
+/**
+ * A layout mark's items as a panel draws them (`Chart.getItems`): the
+ * mark's key, and the items where it publishes them, made when first asked
+ * for. Marks placed by the items or in pixels beside it (decorations) are
+ * drawn again by `decorate`, over the mark's geometry `under` and items
+ * `items` (made when a mark reads them; none for marks that give none) of
+ * a frame a value transition draws: the panel's geometry then, in paint
+ * order.
+ */
+export interface PanelItems {
+  readonly mark: string | number;
+  readonly list: (() => readonly ItemInfo[]) | undefined;
+  readonly decorate?:
+    | ((under: Geometry[], items: (() => readonly ItemInfo[]) | undefined) => Geometry[])
+    | undefined;
 }
 
 export interface Scene {

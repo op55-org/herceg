@@ -140,6 +140,8 @@ export class Picker {
   }
 
   #pickPainted({ drawn, mark, g }: Painted, query: PickQuery): Picked | undefined {
+    // Nothing is picked outside the box a decoration's panel draws it within.
+    if (drawn.keep && !inside(drawn.keep, query.x, query.y)) return undefined;
     if (!mark || g < 0) {
       // Nothing is picked outside the mark's clip, whatever its lookup finds within reach.
       const clipped =

@@ -153,7 +153,7 @@ describe("pie", () => {
     const slices = pie(sales, { category: "region" });
     const series = table({ t: [1, 2], v: [1, 2] });
     expect(() => build({ marks: [slices, line(series, { x: "t", y: "v" })] })).toThrow(
-      "has its chart to itself",
+      "line: a pie's chart has no x and y scales; draw the line in another chart, or place text, rules, regions, or custom marks by the pie's items or in pixels",
     );
     expect(() => build({ marks: [slices], interaction: { zoom: true } })).toThrow(
       "pie zoom: no axes to zoom; drop interaction.zoom",

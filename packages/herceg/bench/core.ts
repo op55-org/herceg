@@ -78,6 +78,30 @@ function measure(name: string, run: () => void, { warmup = 20, samples = 50, rep
 }
 
 const N = 1_000_000;
+// A chart's scene of 2,000 horizontal bars: on a category y, and standing on
+// a number y (ranks) with orient "y", whose bands come from the ranks' spacing.
+const brands = table({
+  brand: Array.from({ length: 2000 }, (_, i) => `brand ${i}`),
+  rank: Float64Array.from({ length: 2000 }, (_, i) => (i * 7) % 2000),
+  value: Float64Array.from({ length: 2000 }, (_, i) => 1 + ((i * 13) % 97)),
+});
+for (const ranked of [false, true]) {
+  const model = new ChartModel({
+    marks: [
+      ranked
+        ? bar(brands, { x: "value", y: "rank", orient: "y" })
+        : bar(brands, { x: "value", y: "brand" }),
+    ],
+  });
+  model.setSize(800, 1600, 1);
+  model.scene(estimateText);
+  measure(
+    `scene of 2,000 bars along y${ranked ? ", on a rank y" : ", on a category y"}`,
+    () => model.scene(estimateText),
+    { warmup: 10, samples: 50 },
+  );
+}
+
 // Rebuild only the bar overview at fixed scales, with warmed reusable
 // buffers. This isolates the exact fallback on a mostly missing source.
 const sparseBars = bar(
@@ -481,6 +505,79 @@ measure(
   },
   { warmup: 5, samples: 30 },
 );
+
+// The same pies unlabelled, and with a name beside each slice placed by its
+// box as drawn (decorations, model/decorations.ts): 400 names a scene.
+const sliceNames = table({
+  region: Array.from({ length: PANELS * 8 }, (_, i) => `region ${i % PANELS}`),
+  product: Array.from({ length: PANELS * 8 }, (_, i) => `product ${Math.floor(i / PANELS)}`),
+});
+const namedPies = (names: boolean) => {
+  const model = new ChartModel({
+    marks: [
+      pie(sales, { id: "slices", category: "product", value: "revenue", labels: false }),
+      ...(names
+        ? [
+            text(sliceNames, {
+              from: { mark: "slices", item: [{ field: "product" }], at: "center" },
+              label: { field: "product" },
+            }),
+          ]
+        : []),
+    ],
+    facet: facet("region", { columns: 10 }),
+  });
+  model.setSize(1600, 1200, 1);
+  model.scene(estimateText);
+  return model;
+};
+for (const names of [false, true]) {
+  const model = namedPies(names);
+  measure(
+    `facets: redraw 50 pies${names ? ", a name beside each slice" : ", unlabelled"}`,
+    () => model.scene(estimateText),
+    { warmup: 10, samples: 50 },
+  );
+}
+
+// B8's Marimekko at scale: a treemap of 50 columns of 40 cells, alone or with
+// a name above each column and a rule at its left edge, placed by the columns.
+const marimekko = table({
+  column: Array.from({ length: 2000 }, (_, i) => `column ${i % 50}`),
+  cell: Array.from({ length: 2000 }, (_, i) => `cell ${Math.floor(i / 50)}`),
+  value: Float64Array.from({ length: 2000 }, (_, i) => 1 + ((i * 7) % 13)),
+});
+const columnNames = table({ column: Array.from({ length: 50 }, (_, i) => `column ${i}`) });
+for (const decorated of [false, true]) {
+  const model = new ChartModel({
+    marks: [
+      treemap(marimekko, { id: "cells", path: ["column", "cell"], value: "value", labels: false }),
+      ...(decorated
+        ? [
+            text(columnNames, {
+              from: {
+                mark: "cells",
+                item: [{ field: "column" }],
+                at: "top-left",
+                offset: { y: -16 },
+              },
+              label: { field: "column" },
+            }),
+            rule(columnNames, { x: { item: { mark: "cells", item: [{ field: "column" }] } } }),
+          ]
+        : []),
+    ],
+    padding: { top: 28 },
+    legend: false,
+  });
+  model.setSize(1600, 800, 1);
+  model.scene(estimateText);
+  measure(
+    `treemap of 2,000 cells${decorated ? ", 50 names and rules by its columns" : ", alone"}`,
+    () => model.scene(estimateText),
+    { warmup: 10, samples: 50 },
+  );
+}
 
 // A treemap per region of 100,000 distinct leaves, 2,000 to a panel: each
 // panel keeps the part of the tree its rows give a value, not all of it.

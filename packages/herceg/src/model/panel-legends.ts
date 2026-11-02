@@ -37,8 +37,8 @@ interface PanelTargets {
   parts: Set<string>;
   /** The entries of the layout mark drawn there, under their identities' keys, for swatches. */
   also: LegendEntry[];
-  /** Whether a layout mark's items are what it draws. */
-  items: boolean;
+  /** The keys of the items of the layout mark drawn there, by their entries' keys; none beside it. */
+  items: readonly (readonly [string, readonly string[]])[] | undefined;
 }
 
 /**
@@ -125,6 +125,8 @@ export class PanelLegends {
     named: ReadonlySet<string | number>,
     /** An annotation's entries by its label, of its rows in a panel. */
     labelEntries: (mark: Mark, rows: RowParts | undefined) => { key: string }[],
+    /** Each mark's identity: its id, or its place among the chart's marks. */
+    places: ReadonlyMap<object, string | number>,
   ) {
     this.#owners = owners;
     this.#partsOf = partsOf;
@@ -160,40 +162,40 @@ export class PanelLegends {
           else add(key, key, owner);
       };
       const item = split.items?.[p];
+      let items: [string, string[]][] | undefined;
       if (item && color) {
-        // Its items' keys take its id or its place in the chart. As an
-        // owner, beside marks along axes (known by their ids, or their
-        // places among those from 0), an unnamed one goes by a negative
-        // number, which no id or place is.
+        // Its items' keys, and it as an owner, take its id or its place in the chart.
         const id = item.mark.spec.id ?? item.index;
-        const owner = item.mark.spec.id ?? -1 - item.index;
-        drawn.add(owner);
+        drawn.add(id);
         for (const entry of item.mark.legend(id, color, theme, paint)) {
           const identity = groups?.get(entry.key) ?? entry.key;
-          add(identity, entry.key, owner);
+          add(identity, entry.key, id);
           also.push({ ...entry, key: identity });
         }
         for (const part of item.mark.legends?.(theme, locale, paint) ?? []) parts.add(part.key);
-        domains(item.mark, owner);
-      } else
-        split.panels[p]!.forEach(({ mark, series, rows }, m) => {
-          const id = mark.spec.id ?? m;
-          // Marks of every panel are the chart's legend's alone.
-          if (mark.spec.panel === "*") everywhere.add(id);
-          if (split.members?.[p]?.[m] === false || mark.spec.panel === "*") return;
-          if (mark.labelEntries) {
-            // Annotations listed by their labels: what their rows drawn here name.
-            if (mark.spec.legend !== true && !named.has(id)) return;
-            drawn.add(id);
-            for (const { key } of labelEntries(mark, rows)) add(key, key, id);
-            return;
-          }
-          // Marks left out of legends are listed where a legend names them.
-          if (mark.spec.legend === false && !named.has(id)) return;
+        domains(item.mark, id);
+        // Its items, before what is drawn beside it adds its own.
+        items = [...members].map(([identity, keys]) => [identity, [...keys]]);
+      }
+      // The other marks drawn there: along its axes, or beside its layout mark.
+      split.panels[p]!.forEach(({ mark, series, rows }, m) => {
+        const id = places.get(mark)!;
+        // Marks of every panel are the chart's legend's alone.
+        if (mark.spec.panel === "*") everywhere.add(id);
+        if (split.members?.[p]?.[m] === false || mark.spec.panel === "*") return;
+        if (mark.labelEntries) {
+          // Annotations listed by their labels: what their rows drawn here name.
+          if (mark.spec.legend !== true && !named.has(id)) return;
           drawn.add(id);
-          for (const s of series) add(s.entry ?? s.key, s.key, id);
-          domains(mark, id);
-        });
+          for (const { key } of labelEntries(mark, rows)) add(key, key, id);
+          return;
+        }
+        // Marks left out of legends are listed where a legend names them.
+        if (mark.spec.legend === false && !named.has(id)) return;
+        drawn.add(id);
+        for (const s of series) add(s.entry ?? s.key, s.key, id);
+        domains(mark, id);
+      });
       this.#panels.set(key, {
         members,
         targets,
@@ -201,7 +203,7 @@ export class PanelLegends {
         drawn,
         parts,
         also,
-        items: !!(item && color),
+        items,
       });
     });
     this.#everywhere = everywhere;
@@ -326,7 +328,7 @@ export class PanelLegends {
 
   /** Each layout mark's items drawn in a panel: the panel, their identity's key, and their own keys. */
   *items(): Generator<[panel: string, identity: string, keys: readonly string[]]> {
-    for (const [panel, { members, items }] of this.#panels)
-      if (items) for (const [identity, keys] of members) yield [panel, identity, keys];
+    for (const [panel, { items }] of this.#panels)
+      for (const [identity, keys] of items ?? []) yield [panel, identity, keys];
   }
 }

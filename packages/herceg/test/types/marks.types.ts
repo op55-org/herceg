@@ -605,3 +605,50 @@ const radiusAndChannel = { radius: 4, encode: { size: { field: "cpu" } } };
 // @ts-expect-error the spec alike: a constant radius, or a size channel's areas
 ({ type: "point", x: "at", y: "cpu", ...radiusAndChannel }) satisfies PointSpec;
 ({ type: "point", x: "at", y: "cpu", encode: { size: { field: "cpu" } } }) satisfies PointSpec;
+
+// Bars stand on any y with orient "y" (ranks), their lengths numbers along x.
+bar(dots, { x: "cpu", y: "at", orient: "y" });
+bar(dots, { x: ["cpu", "at"], y: "at", orient: "y", stack: true });
+// @ts-expect-error bars along y measure numbers
+bar(dots, { x: "stage", y: "at", orient: "y" });
+// @ts-expect-error bars along x stand on x whatever y is, and measure numbers along y
+bar(dots, { x: "at", y: "stage", orient: "x" });
+
+// Marks placed by a layout mark's items: names, or category fields of their table.
+text(dots, {
+  from: { mark: "cells", item: [{ field: "stage" }], at: "top-left", offset: { x: 3, y: -16 } },
+  label: { field: "stage" },
+});
+rule(dots, { x: { item: { mark: "cells", item: [{ field: "stage" }] }, at: "start" } });
+rule({ x: { item: { mark: "cells", item: ["a"] }, at: "end", offset: -2 } });
+region(dots, {
+  x1: { item: { mark: "cells", item: ["a", { field: "stage" }] } },
+  x2: { item: { mark: "cells", item: ["a", { field: "stage" }] }, at: "end" },
+});
+// @ts-expect-error items' names are category fields
+rule(dots, { x: { item: { mark: "cells", item: [{ field: "cpu" }] } } });
+rule(dots, {
+  y: { px: 4 },
+  span: [{ item: { mark: "cells", item: [{ field: "stage" }] } }, { px: 100 }],
+});
+rule(dots, {
+  y: { px: 4 },
+  // @ts-expect-error in spans too
+  span: [{ item: { mark: "cells", item: [{ field: "cpu" }] } }, { px: 100 }],
+});
+rule({
+  y: { px: 4 },
+  // @ts-expect-error a rule without a table reads no fields
+  span: [{ item: { mark: "cells", item: [{ field: "stage" }] } }, { px: 100 }],
+});
+// @ts-expect-error text follows a box's corners, edges' middles, or center
+text(dots, { from: { mark: "cells", item: ["a"], at: "top-start" }, label: "x" });
+// @ts-expect-error places along an item's box are its start, center, or end
+rule({ x: { item: { mark: "cells", item: ["a"] }, at: "middle" } });
+// Custom marks read items as drawn.
+custom({
+  draw(context) {
+    for (const { box, names } of context.items("cells"))
+      if (names.length === 1) context.rect(box.x, box.y, box.width, 2);
+  },
+});

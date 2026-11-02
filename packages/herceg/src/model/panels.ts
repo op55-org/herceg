@@ -428,10 +428,21 @@ export class Panels implements PanelLayout {
         throw new Error(
           `${type} panel: "*" would draw in panel "${first[0]}", which a ${first[1]} mark has to itself; give the id of a panel with axes`,
         );
-      if (held.has(panel))
+    }
+    // Beside a layout mark in its panel, marks placed by its items or in pixels;
+    // in panels with axes, none by items.
+    for (const mark of marks) {
+      const followed = held.has(mark.spec.panel!) ? undefined : mark.follows?.[0];
+      const owner = followed && layouts.find(({ spec }) => spec.id === followed);
+      if (owner)
         throw new Error(
-          `${type} panel: a ${held.get(panel)} mark has panel "${panel}" to itself; name another`,
+          `${mark.spec.type} item mark: "${followed}" is drawn in panel "${owner.spec.panel}"; draw the ${mark.spec.type} there`,
         );
+    }
+    for (const layout of layouts) {
+      const beside = marks.filter((mark) => mark.spec.panel === layout.spec.panel);
+      if (beside.length > 0)
+        layout.views.decorations(beside, [layout], options.marks, layout.spec.panel);
     }
     const scopes = this.scopes(options);
     this.#agree("x", marks, scopes.x, options, held);

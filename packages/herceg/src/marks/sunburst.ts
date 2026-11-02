@@ -1,6 +1,13 @@
 import { pathOf } from "../data/hierarchy.ts";
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
-import { ArcPath, inSector, sectorPaints, sectorShareRadius, traceSector } from "../draw/arc.ts";
+import {
+  ArcPath,
+  inSector,
+  sectorInfo,
+  sectorPaints,
+  sectorShareRadius,
+  traceSector,
+} from "../draw/arc.ts";
 import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { INNER_CUT, OUTER_CUT, type RingGeometry, ringDrawing } from "../draw/rings.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
@@ -9,7 +16,7 @@ import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
-import type { Geometry, LabelsGeometry, Rect, TextGeometry, TextItem } from "../scene/scene.ts";
+import type { Geometry, LabelsGeometry, TextGeometry, TextItem } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, InteractionSpec, SunburstSpec } from "../spec/spec.ts";
 import type { TextStyle } from "../spec/style.ts";
@@ -245,7 +252,7 @@ export class SunburstMark implements LayoutMark {
       if (tree.depth[node]! > levels) return false;
       const [r0, r1] = radii(node);
       const [a0, a1] = angles(node);
-      return sectorPaints(r0, r1, a1 - a0, angular);
+      return sectorPaints(r0, r1, a0, a1, angular);
     };
     // Each ring's sectors that show, in clockwise order.
     const byDepth: number[][] = Array.from({ length: levels + 1 }, () => []);
@@ -496,15 +503,7 @@ export class SunburstMark implements LayoutMark {
         names,
         label: names.join(" / "),
         value: shown[node]!,
-        box: sectorBox(cx, cy, r0, r1, a0, a1),
-        sector: {
-          cx,
-          cy,
-          innerRadius: r0,
-          outerRadius: r1,
-          startAngle: a0 - START,
-          endAngle: a1 - START,
-        },
+        ...sectorInfo(cx, cy, r0, r1, a0, a1),
         depth: tree.depth[node]!,
         parent: parent > 0 ? data.keyOf(frame.id, view, parent) : above,
       };
@@ -764,24 +763,6 @@ export class SunburstMark implements LayoutMark {
       .map(({ node, label }) => `${label} ${percent(shown[node]! / total)}`);
     return `Sunburst of ${what}: ${count(this.#data.leaves(tree, shown), "leaf", "leaves")} in ${count(visible.length, "group", "groups")} totaling ${formatNumber(total, locale)}. Largest: ${largest.join(", ")}.`;
   }
-}
-
-/** The bounds of a ring sector: its corners, and its outer arc where it crosses an axis. */
-function sectorBox(cx: number, cy: number, r0: number, r1: number, a0: number, a1: number): Rect {
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const at = (radius: number, angle: number) => {
-    xs.push(cx + radius * Math.cos(angle));
-    ys.push(cy + radius * Math.sin(angle));
-  };
-  for (const angle of [a0, a1]) {
-    at(r0, angle);
-    at(r1, angle);
-  }
-  for (let k = Math.ceil(a0 / (Math.PI / 2)); k * (Math.PI / 2) < a1; k++)
-    at(r1, (k * Math.PI) / 2);
-  const [x, y] = [Math.min(...xs), Math.min(...ys)];
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
 /**

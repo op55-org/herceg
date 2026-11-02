@@ -290,9 +290,12 @@ refused.
 ## Layout marks in panels
 
 `checkLayouts` owns the rules: with a facet, a layout mark is the chart's
-only mark and splits its rows (a map's layers each split or repeat); with
-subplots, it names one panel, which takes no axis settings and no other
-mark. 3D marks refuse facets. `ItemViews.interactions` checks
+only mark besides its decorations and splits its rows (a map's layers each
+split or repeat); with subplots, it names one panel, which takes no axis
+settings and no other marks but its decorations
+([Items as drawn, and decorations](marks.md#items-as-drawn-and-decorations)).
+Decorations in facet panels split their rows by facet as other marks do,
+and draw within the panel and half the gap beside it. 3D marks refuse facets. `ItemViews.interactions` checks
 `interaction` against what the layout marks take.
 
 - The splitter marks such panels (`PanelSplit.items`); they get no axes,

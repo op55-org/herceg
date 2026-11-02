@@ -7,8 +7,10 @@ import { geopoint } from "../../src/marks/geopoint.ts";
 import { type GeoShapeMark, geoshape } from "../../src/marks/geoshape.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
+import { text } from "../../src/marks/text.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { type ChartConfig, ChartModel, type ItemInspection } from "../../src/model/model.ts";
+import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import type { PointGeometry, PolygonGeometry, Scene } from "../../src/scene/scene.ts";
 import { LIGHT, surface } from "../../src/theme.ts";
@@ -439,7 +441,7 @@ describe("maps", () => {
     const world = fromGeoJSON(countries());
     const data = table({ x: [1, 2], y: [3, 4], c: ["a", "b"] });
     expect(() => build({ marks: [geoshape(world), line(data, { x: "x", y: "y" })] })).toThrow(
-      /chart to itself/,
+      /a map's chart has no x and y scales/,
     );
     expect(() => build({ marks: [geoshape(world), pie(data, { category: "c" })] })).toThrow(
       /geoshape: a map holds only geoshape and geopoint marks; draw "pie" marks/,
@@ -453,6 +455,46 @@ describe("maps", () => {
     // Maps zoom both ways, and sync nothing.
     expect(() => build({ marks: [geoshape(world)], interaction: { zoom: "y" } })).toThrow(/zoom/);
     expect(() => build({ marks: [geoshape(world)], interaction: { sync: "a" } })).toThrow(/sync/);
+  });
+
+  it("know their layers by their places among the chart's marks, notes before and between", () => {
+    const world = fromGeoJSON(countries());
+    const places = table({ name: ["Port"], lon: [15], lat: [5] });
+    const note = (id: string) => text({ id, x: { px: 5 }, y: { px: 5 }, label: id });
+    const { model } = build({
+      projection: "equirectangular",
+      marks: [
+        note("first"),
+        geoshape(world, { id: "regions", labelField: "name" }),
+        note("between"),
+        geopoint(places, { id: "ports", longitude: "lon", latitude: "lat", labelField: "name" }),
+      ],
+    });
+    const [ada, , , , port] = items(model);
+    for (const [item, mark, markId] of [
+      [ada!, 1, "regions"],
+      [port!, 3, "ports"],
+    ] as const) {
+      const { px, py } = item.points[0]!;
+      expect((model.inspect(px, py) as ItemInspection).points[0]).toMatchObject({ mark, markId });
+    }
+  });
+
+  it("keep their color ramps beside notes in pixels, which are listed by their own places", () => {
+    const world = fromGeoJSON(countries());
+    // With the guide compiler, which plans legends beside layout marks.
+    const model = new ChartModel(
+      {
+        marks: [
+          geoshape(world, { color: "gdp" }),
+          text({ x: { px: 5 }, y: { px: 5 }, label: "Note" }),
+        ],
+      },
+      undefined,
+      ...staticCompilers(),
+    );
+    model.setSize(600, 300, 1);
+    expect(rampsOf(model.scene(estimateText)).map((ramp) => ramp.title.text)).toEqual(["gdp"]);
   });
 
   it("render as static SVG with even-odd regions", () => {

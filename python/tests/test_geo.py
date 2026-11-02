@@ -233,11 +233,12 @@ def test_maps_share_a_chart_only_with_maps_and_need_them_for_a_projection():
     assert [mark["type"] for mark in spec["marks"]] == ["geoshape", "geopoint"]
     with pytest.raises(
         ValueError,
-        match="geoshape: shares its chart only with geoshape and geopoint marks; draw the point",
+        match="point: a map's chart has no x and y scales; draw the point in another chart, or "
+        "place text, rules, or regions in pixels",
     ):
         hg.Chart(collection()).geoshape().point("gdp", "gdp")
     with pytest.raises(
-        ValueError, match="pie: has its chart to itself; draw the geoshape in another chart"
+        ValueError, match="pie: has its chart to itself; draw other marks in another chart"
     ):
         hg.Chart(collection()).pie("zone").geoshape()
     with pytest.raises(

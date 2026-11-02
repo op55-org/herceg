@@ -2587,8 +2587,10 @@ export class ChartModel {
           hidden: hiddenIn(key),
           color: this.#itemColor,
           surface: plotSurface(paint?.fill),
+          features: this.#featured,
         };
-        const drawn = this.#items.panel({ key, label, plot }, item, frame);
+        // The marks beside it are its decorations (model/decorations.ts).
+        const drawn = this.#items.panel({ key, label, plot }, item, frame, split, i);
         return paint ? { ...drawn, frame: paint } : drawn;
       }
       const axes: AxisGuide[] = [];
@@ -3221,12 +3223,16 @@ export class ChartModel {
     const theme = this.#theme;
     const { locale, marks } = this.#config;
     const mark = this.#layouts[0]!;
+    const items = this.items!;
     const parts = mark.legends?.(theme, locale, this.#readings.color) ?? [];
     const header = this.#furniture(
-      this.#listItems(this.#itemEntries(mark, mark.spec.id ?? 0, theme), this.#lister()),
+      this.#listItems(this.#itemEntries(mark, items.layoutId, theme), this.#lister()),
       parts,
       measure,
       false,
+      0,
+      // Annotations beside it list their labels.
+      items.besides,
     );
     // Nothing is drawn along axes: let go of what the last such scene kept,
     // its views going fitted.
@@ -3241,7 +3247,6 @@ export class ChartModel {
     this.#floats.clear();
     this.#doubles.clear();
     this.#bytes.clear();
-    const items = this.items!;
     items.fields = this.fields?.(locale, this.#config.timeZone ?? "local", numberFormatter(locale));
     const paint = this.#styles.plot(0);
     const under = plotSurface(paint?.fill);
@@ -3263,6 +3268,7 @@ export class ChartModel {
       color: this.#itemColor,
       clouds,
       keyed: keyedBy(this.#config),
+      features: this.#featured,
     });
     this.#all = this.#items!.panels;
     // The mark's room is its plot, drawn on the plot's paint.

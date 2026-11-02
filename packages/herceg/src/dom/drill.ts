@@ -53,11 +53,14 @@ export class Controls implements ChartControls {
     root.addEventListener("keydown", keys, { capture: true });
     this.#stop.push(() => root.removeEventListener("keydown", keys, { capture: true }));
     // A click that selects no rows (no row selection of the chart takes clicks) drills;
-    // one on a sunburst's empty center goes up.
+    // one on a sunburst's empty center goes up. Marks drawn over the tree (placed
+    // by its items or in pixels) take their own clicks, unless they pick nothing.
     this.#stop.push(
-      host.chart.on("click", ({ inspection, rows, pointer }) => {
+      host.chart.on("click", ({ inspection, rows, pointer, target }) => {
         if (rows) return;
-        if (inspection?.axis === "item") this.#clicked(inspection.key, inspection.panel);
+        const tree = inspection?.axis === "item" ? inspection : undefined;
+        if (target?.kind === "item" && target.item !== tree?.key) return;
+        if (tree) this.#clicked(tree.key, tree.panel);
         else if (pointer) {
           const panel = pointer.panel || undefined;
           if (this.#drill(panel)?.out?.(pointer.x, pointer.y)) this.#up(panel);

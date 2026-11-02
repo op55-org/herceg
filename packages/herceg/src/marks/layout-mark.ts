@@ -190,36 +190,71 @@ export interface LayoutItem {
 }
 
 /**
- * A layout mark's item as the frame drew it (see `LayoutResult.items`):
- * continuous CSS pixels, before any rounding to device pixels.
+ * A layout mark's item as a frame drew it (`Chart.getItems`, custom marks'
+ * `items`, and marks placed by items): continuous CSS pixels, before any
+ * rounding to device pixels.
  */
 export interface ItemInfo {
-  /** The item's key, as events give it. */
+  /** Its item key, as events name it. */
   readonly key: string;
-  /** Its names from the top: a tree node's path (drilled or not), a slice's or stage's category. */
+  /** Its names from the top: a tree node's path (drilled or not), a slice's or a stage's category. */
   readonly names: readonly string[];
   readonly label: string;
   /** The value drawn (its share's measure). */
   readonly value: number;
-  readonly box: { x: number; y: number; width: number; height: number };
-  /** Sectors: center, the ring's radii before gaps, and angles in radians clockwise from 12 o'clock. */
-  readonly sector?: {
-    cx: number;
-    cy: number;
-    innerRadius: number;
-    outerRadius: number;
-    startAngle: number;
-    endAngle: number;
+  readonly box: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
   };
-  /** Trees: depth below the drill root, 1 for its children. */
+  /**
+   * Sectors (pies, sunbursts): center, the ring's radii before gaps, and
+   * angles in radians clockwise from 12 o'clock.
+   */
+  readonly sector?: {
+    readonly cx: number;
+    readonly cy: number;
+    readonly innerRadius: number;
+    readonly outerRadius: number;
+    readonly startAngle: number;
+    readonly endAngle: number;
+  };
+  /** Trees: its depth below the drill root (1 for the root's children). */
   readonly depth?: number;
-  /** Trees: the parent's key; undefined under the whole tree's root. */
+  /** Trees: its parent's key; undefined for the top level of the whole tree. */
   readonly parent?: string | undefined;
+}
+
+/** Copies of `items`, which hand the engine's own items out (`getItems`, custom marks). */
+export function copiesOf(items: readonly ItemInfo[]): ItemInfo[] {
+  return items.map(({ box, sector, names, ...item }) => ({
+    ...item,
+    names: [...names],
+    box: { ...box },
+    ...(sector && { sector: { ...sector } }),
+  }));
+}
+
+/**
+ * A layout mark's items as a panel drew them, for marks placed by them:
+ * all of them, and the one named `names` from the top, if it is drawn.
+ */
+export interface DrawnItems {
+  readonly all: readonly ItemInfo[];
+  named(names: readonly string[]): ItemInfo | undefined;
 }
 
 /** What a layout mark drew in one scene. */
 export interface LayoutResult {
   geometry: Geometry[];
+  /**
+   * Its items as drawn, in reading order (those without room left out),
+   * made on the first call and the same array after; given by marks that
+   * publish their items' geometry (`LayoutMark.publishes`). The engine's
+   * own: what hands them out copies them.
+   */
+  items?(): readonly ItemInfo[];
   /** The item under a pixel. */
   itemAt(px: number, py: number): LayoutItem | undefined;
   /**
@@ -275,20 +310,12 @@ export interface LayoutResult {
   moves?: NodeMoves | undefined;
   /** Whether layout work remains, which later frames do (see `LayoutFrame.clock`). */
   pending?: boolean | undefined;
-  /**
-   * Its items as drawn, in reading order (items without room left out):
-   * continuous CSS pixels, made on the first call and the same array
-   * after. The engine's own; getItems and custom marks copy them.
-   */
-  items?(): readonly ItemInfo[];
 }
 
 /** A mark that lays out its own geometry in a panel; internal, as `Mark` is. */
 export interface LayoutMark extends ChartMark {
   /** Tells layout marks from marks along axes. */
   readonly layout: true;
-  /** Its results give their items' geometry (`LayoutResult.items`). */
-  readonly publishes?: true;
   /**
    * What charts keep of what their layout marks drew, and check charts of
    * layout marks with: every layout mark gives the same class, through which
@@ -296,6 +323,11 @@ export interface LayoutMark extends ChartMark {
    */
   readonly views: typeof ItemViews;
   readonly table: Table | undefined;
+  /**
+   * Whether what it draws gives its items' geometry (`LayoutResult.items`),
+   * which `Chart.getItems`, custom marks, and marks placed by items read.
+   */
+  readonly publishes?: true;
   /** Tables the mark reads besides `table`, such as a network's nodes; charts follow their changes too. */
   readonly otherTables?: readonly Table[];
   /** What the values are, for tooltip headers: the value field, or "Count". */

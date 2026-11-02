@@ -16,11 +16,13 @@ import { n } from "../draw/markup.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import type { PathShape, PlotRect, Rect, ShapesGeometry, TextShape } from "../scene/scene.ts";
 import type { ChannelSpec, RowChannelSpec } from "../spec/encoding.ts";
+import { ChartError } from "../spec/errors.ts";
 import { dashPattern } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import { ShapeIndex } from "./custom-shapes.ts";
 import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
 import type { Channel, ItemKeyed, RowChannel } from "./encoding.ts";
+import { copiesOf, type ItemInfo } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { clipBox } from "./lookups.ts";
 import {
@@ -109,6 +111,14 @@ export interface DrawContext {
   line(x1: number, y1: number, x2: number, y2: number, style?: ShapeStyle): void;
   /** Text vertically centered on `y`. */
   text(x: number, y: number, text: string, style?: TextShapeStyle): void;
+  /**
+   * The items the layout mark `mark` (its id: a pie, funnel, treemap, or
+   * sunburst) drew in this panel in this frame, in static exports too:
+   * copies of their boxes and sectors in pixels. In a layout mark's chart,
+   * a custom mark without x and y fields is drawn after it, beside it.
+   * Throws for an id of no such mark drawn in the panel.
+   */
+  items(mark: string): readonly ItemInfo[];
 }
 
 /**
@@ -701,6 +711,14 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     return this.#description;
   }
 
+  /**
+   * Without x and y fields it places shapes in pixels, or by layout items
+   * (`context.items`): it may draw beside a layout mark, in its chart.
+   */
+  get follows(): readonly string[] | undefined {
+    return this.spec.x === undefined && this.spec.y === undefined ? [] : undefined;
+  }
+
   geometry(series: readonly Series[], frame: Frame, key: MarkKey): ShapesGeometry[] {
     refuseValues(frame.keyed, this.spec.type);
     const { theme, paint } = frame;
@@ -808,6 +826,16 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
       },
       encoded: ((channel: CustomChannel, row: number) =>
         features?.encoded?.(channel, row)) as DataDrawContext<Schema>["encoded"],
+      items: (mark) => {
+        const drawn = frame.items?.(mark);
+        if (!drawn)
+          throw new ChartError({
+            code: "invalid-option",
+            path: "draw",
+            message: `custom items: no layout mark "${mark}" is drawn in this panel; give the id of a pie, funnel, treemap, or sunburst the custom mark is drawn beside`,
+          });
+        return copiesOf(drawn.all);
+      },
       selection: (view, row) => {
         ownerOf(view, "selection");
         return selected ? (selected[row] ? "selected" : "unselected") : undefined;

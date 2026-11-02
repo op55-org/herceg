@@ -43,6 +43,7 @@ from ._encoding import (
     Duration,
     Encodings,
     Fraction,
+    ItemAnchor,
     Label,
     MarkAnchor,
     MarkStyle,
@@ -64,6 +65,7 @@ from ._encoding import (
     encodings_spec,
     fraction_option,
     gap_spec,
+    item_fields,
     label_dict_problem,
     label_spec,
     length_spec,
@@ -2065,6 +2067,7 @@ class Chart:
         halo: HaloOption | None = None,
         width: Pixels | Mapping[str, float] | None = None,
         stroke_sides: Sequence[Side] | None = None,
+        orient: Orient | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
         inspect: bool | None = None,
@@ -2073,7 +2076,9 @@ class Chart:
     ) -> Chart:
         """Bars: one band per category of x, or bars centered on number or time x.
 
-        A category ``y`` makes the bars horizontal, with lengths in ``x``.
+        A category ``y`` makes the bars horizontal, with lengths in ``x``;
+        ``orient`` says which axis bars stand on whatever the columns are
+        (``orient="y"`` stands them on a number or time ``y``, such as ranks).
         Several series (a ``series`` column's values, or several ``y``
         columns) stand side by side at each position, as grouped bars, unless
         ``dodge=False`` overlaps them or ``stack`` piles them. A category
@@ -2137,9 +2142,31 @@ class Chart:
         channels = encodings_spec(encode, _BAR_CHANNELS, "bar")
         self._check_colors(table, color, channels, "bar")
         split = self._series_of(table, series, color, channels, fill, "fill", "bar")
-        if isinstance(y, str) and self._kind(table, y) == "category":
+        if orient not in (None, "x", "y"):
+            raise ChartError(f'bar orient: expected "x" or "y"; received {shown(orient)}')
+        horizontal = (
+            orient == "y"
+            if orient is not None
+            else isinstance(y, str) and self._kind(table, y) == "category"
+        )
+        if orient is not None:
+            # Bars stand on one axis and measure their lengths along the other, in numbers.
+            across = "x" if orient == "y" else "y"
+            lengths = x if orient == "y" else y
+            for name in [lengths] if isinstance(lengths, str) else lengths:
+                if self._kind(table, name) == "category":
+                    raise ChartError(
+                        f'bar orient: "{orient}" makes {across} the lengths, and {name!r} holds '
+                        f'categories; give orient="{across}", or a number column as {across}'
+                    )
+        if horizontal:
             if axis == "right":
                 raise ChartError('bar axis: horizontal bars have no right axis; drop axis="right"')
+            if not isinstance(y, str):
+                raise ChartError(
+                    "bar y: bars along y stand on one column; give one y column, and several x"
+                )
+            self._require(table, y, ("number", "time", "category"), "bar y")
             xs = self._require_many(table, x, _NUMERIC, "bar x")
             self._single_or_series(xs, split, "bar", inferred=series is None)
             ys: str | list[str] = y
@@ -2154,11 +2181,7 @@ class Chart:
             ys = self._require_many(table, y, _NUMERIC, "bar y")
             self._single_or_series(ys, split, "bar", inferred=series is None)
         if stack == "fill":
-            _check_stack_values(
-                self._tables[table][1],
-                xs if isinstance(y, str) and self._kind(table, y) == "category" else ys,
-                "bar",
-            )
+            _check_stack_values(self._tables[table][1], xs if horizontal else ys, "bar")
         return self._add(
             {
                 "type": "bar",
@@ -2192,6 +2215,7 @@ class Chart:
                 "strokeSides": self._option(
                     "bar stroke_sides", lambda: _sides(stroke_sides, "bar stroke_sides")
                 ),
+                "orient": orient,
                 "zIndex": z_index,
                 "pick": pick,
                 "inspect": inspect,
@@ -5226,7 +5250,7 @@ class Chart:
         x: Coordinate | None = None,
         y: Coordinate | None = None,
         at: Position | None = None,
-        from_: MarkAnchor | Mapping[str, Any] | None = None,
+        from_: MarkAnchor | ItemAnchor | Mapping[str, Any] | None = None,
         data: Any = None,
         contribute_domain: bool | None = None,
         axis: Literal["left", "right"] | None = None,
@@ -5255,7 +5279,9 @@ class Chart:
         tried around their point and left out when nothing fits (``"move"``),
         with a line back to it (``leader=True``); ``overlap_group`` keeps them
         apart from other marks' labels. Text ``from_`` another mark is placed
-        with that panel's series labels, as ``hg.SeriesLabels`` are. Without
+        with that panel's series labels, as ``hg.SeriesLabels`` are; text
+        ``from_`` an ``hg.ItemAnchor`` is placed at a point of a layout
+        mark's item (a treemap's cell), each row's item by its names. Without
         ``clip``, text at a value is left out while the value is out of the
         plot's view, and text at pixels or a share of the chart (above the
         plot, say) is drawn wherever it is; ``clip=False`` draws all of it,
@@ -5265,14 +5291,24 @@ class Chart:
         replaced data.
         """
         anchor: dict[str, Any] | None = None
+        on_item = isinstance(from_, ItemAnchor) or (isinstance(from_, Mapping) and "item" in from_)
         if from_ is not None:
             if at is not None or x is not None or y is not None:
                 raise ChartError(
                     "text from_: a place on another mark, or at, or x and y; one of them",
                     path=f"marks[{len(self._marks)}]",
                 )
-            self._check_label_dict(from_, "text", "from_", ("mark", "at", "edge"))
-            anchor = self._option("text from_", lambda: built_spec(from_, MarkAnchor, "text from_"))
+            if on_item:
+                item: ItemAnchor = self._option(
+                    "text from_", lambda: _built(from_, ItemAnchor, "text from_")
+                )
+                from_ = item
+                anchor = self._option("text from_", item._spec)
+            else:
+                self._check_label_dict(from_, "text", "from_", ("mark", "at", "edge"))
+                anchor = self._option(
+                    "text from_", lambda: built_spec(from_, MarkAnchor, "text from_")
+                )
         if at is not None and (x is not None or y is not None):
             raise ChartError(
                 "text at: a place, or its short forms x and y, not both; drop at or x and y"
@@ -5284,7 +5320,7 @@ class Chart:
         if label is None:
             raise ChartError("text label: needs text or an hg.Label; give label")
         self._check_label_dict(label, "text", "label", ("content",))
-        following = from_ is not None
+        following = from_ is not None and not on_item
         label_json = self._option(
             "text label", lambda: label_spec(label, "text", places=following, following=following)
         )
@@ -5304,7 +5340,13 @@ class Chart:
             self._check_following_fields(anchor["mark"], label_json)
             table = None
         else:
-            places = {"x": at.x, "y": at.y} if at is not None else {"x": x, "y": y}
+            places = (
+                {"from_": from_}
+                if on_item
+                else {"x": at.x, "y": at.y}
+                if at is not None
+                else {"x": x, "y": y}
+            )
             table = self._annotation_table(data, places, label_json, "text")
         return self._add(
             {
@@ -5379,6 +5421,20 @@ class Chart:
                 )
         layouts = self._layouts()
         check_layout_options(self._settings, layouts, len(self._panels))
+        # Marks placed by items need the layout mark drawn beside them.
+        ids = {mark.get("id") for mark in layouts}
+        for k, (mark, _) in enumerate(self._marks):
+            missing = next((id for id in _item_marks(mark) if id not in ids), None)
+            if missing is not None:
+                method = _method(mark["type"])
+                raise ChartError(
+                    f"{method} item mark: no layout mark has id {shown(missing)}; draw the "
+                    f"{method} beside the pie, funnel, treemap, or sunburst it follows, in its "
+                    "chart or panel",
+                    code="unknown-reference",
+                    path=f"marks[{k}]",
+                    mark=mark.get("id", k),
+                )
         maps = [mark for mark in layouts if mark["type"] in _MAP_MARKS]
         if self._facets and maps and all(mark.get("facet") == "repeat" for mark in maps):
             raise ChartError(
@@ -6805,7 +6861,13 @@ class Chart:
         text = label.get("field") if isinstance(label, dict) else None
         # A label of parts reads the columns its parts name.
         parts = _part_fields(label)
-        if not fields and text is None and not parts:
+        # Items' names read category columns (hg.col).
+        names = [
+            (f"{name}.item[{k}]", field)
+            for name, value in positions.items()
+            for k, field in enumerate(item_fields(value))
+        ]
+        if not fields and text is None and not parts and not names:
             if data is not None and not isinstance(data, (Derived, Matrix)):
                 Table(data)  # data it reads nothing of is still a table
             return None
@@ -6819,6 +6881,8 @@ class Chart:
                 self._require(table, field, ("number",), f"{role} {name}.{share}.field")
             else:
                 self._require(table, field, (*_NUMERIC, "category"), f"{role} {name}")
+        for at, field in names:
+            self._require(table, field, ("category",), f"{role} {at}")
         self._require(table, text, ("category", "number"), f"{role} label field")
         for i, part in parts:
             self._require(table, part, _ANY, f"{role} label.content[{i}].field")
@@ -6878,24 +6942,7 @@ class Chart:
         if self._panels:
             self._place_in_panels(spec)
         elif not layers and (layouts or (spec["type"] in _LAYOUT_MARKS and self._marks)):
-            kind = layouts[0] if layouts else spec["type"]
-            # The layout mark, and a mark that cannot share its chart.
-            alone, other = _method(kind), method if layouts else _method(kinds[0])
-            if self._facets:
-                raise ChartError(
-                    f"{alone}: has each facet panel to itself; draw the {other} in another chart"
-                )
-            if kind in _MAP_MARKS:
-                raise ChartError(
-                    f"{alone}: shares its chart only with geoshape and geopoint marks; "
-                    f"draw the {other} in another chart"
-                )
-            if kind in _MARKS_3D:
-                raise ChartError(
-                    f"{alone}: shares its chart only with point_3d, line_3d, and surface marks; "
-                    f"draw the {other} in another chart"
-                )
-            raise ChartError(f"{alone}: has its chart to itself; draw the {other} in another chart")
+            self._beside_layout(spec)
         if spec.get("axis") not in (None, "left", "right"):
             raise ChartError(
                 f'{method} axis: expected "left" or "right"; received {shown(spec["axis"])}'
@@ -6934,16 +6981,118 @@ class Chart:
         self._marks.append((spec, table))
         return self
 
+    def _beside_layout(self, spec: dict[str, Any]) -> None:
+        """Refuses, as the browser does, a second layout mark in a chart (or its
+        facet panels) that has one, and marks beside it other than text, rules,
+        and regions placed by its items or in pixels (see `_check_decoration`)."""
+        layout = next((mark for mark, _ in self._marks if mark["type"] in _LAYOUT_MARKS), spec)
+        kind = layout["type"]
+        # The layers of a map, and of a 3D chart, are drawn as one layout mark.
+        group = next((group for group in (_MAP_MARKS, _MARKS_3D) if kind in group), ())
+        if spec is not layout and spec["type"] in _LAYOUT_MARKS and spec["type"] not in group:
+            where = "each facet panel" if self._facets else "its chart"
+            raise ChartError(
+                f"{_method(kind)}: has {where} to itself; draw other marks in another chart"
+            )
+        beside = [mark for mark, _ in self._marks] if spec is layout else [spec]
+        for mark in beside:
+            if mark["type"] not in group:
+                self._check_decoration(mark, layout, None)
+
+    def _drawn_elsewhere(self, mark: Mapping[str, Any], layouts: list[Mapping[str, Any]]) -> None:
+        """Refuses, as the browser does, a mark in a panel with axes placed by
+        the items of one of ``layouts``, which draw in panels of their own."""
+        followed = next(iter(_item_marks(mark)), None)
+        owner = next((layout for layout in layouts if layout.get("id") == followed), None)
+        if followed is not None and owner is not None:
+            method = _method(mark["type"])
+            raise ChartError(
+                f"{method} item mark: {shown(followed)} is drawn in panel "
+                f"{shown(owner['panel'])}; draw the {method} there"
+            )
+
+    def _check_decoration(
+        self, mark: Mapping[str, Any], layout: Mapping[str, Any], panel: str | None
+    ) -> None:
+        """Refuses, as the browser does, a mark beside layout mark ``layout`` in
+        its chart, facet panels, or subplot ``panel`` that is not placed by its
+        items (``hg.ItemCoordinate``, ``hg.ItemAnchor``) or in pixels, and items
+        of marks other than ``layout`` (one that gives its items' geometry)."""
+        named = _named(layout["type"])
+        name = named.split(" ", 1)[1]
+        publishes = layout["type"] in _PUBLISHING
+        method = _method(mark["type"])
+        at = next(
+            (k for k, (other, _) in enumerate(self._marks) if other is mark), len(self._marks)
+        )
+        where = {"path": f"marks[{at}]", "mark": mark.get("id", at)}
+        by = f"by the {name}'s items or in pixels" if publishes else "in pixels"
+        follows = _follows(mark)
+        if follows is None:
+            room = (
+                "facet panels have"
+                if self._facets
+                else "chart has"
+                if panel is None
+                else "panel has"
+            )
+            others = f"place text, rules, or regions {by}"
+            if mark["type"] in ("text", "rule", "region"):
+                how = (
+                    f"by the {name}'s items (hg.ItemCoordinate, or text from_=hg.ItemAnchor) "
+                    "or in pixels (hg.Pixels, hg.Fraction)"
+                    if publishes
+                    else "in pixels (hg.Pixels, hg.Fraction)"
+                )
+                message = f"{method}: {named}'s {room} no x and y scales; place it {how}"
+            elif panel is None:
+                message = (
+                    f"{method}: {named}'s {room} no x and y scales; draw the {method} in "
+                    f"another chart, or {others}"
+                )
+            else:
+                message = (
+                    f"{method} panel: panel {shown(panel)} draws {named}, which has no x and y "
+                    f"scales; name another panel, or {others}"
+                )
+            raise ChartError(message, code="unsupported", **where)
+        ids = {layout.get("id")}
+        if layout["type"] in _MAP_MARKS + _MARKS_3D:
+            group = _MAP_MARKS if layout["type"] in _MAP_MARKS else _MARKS_3D
+            ids |= {other.get("id") for other, _ in self._marks if other["type"] in group}
+        for id in follows:
+            source: Mapping[str, Any] | None = next(
+                (other for other, _ in self._marks if other.get("id") == id), None
+            )
+            if source is None and id in ids:
+                source = layout
+            problem = (
+                f"no mark has id {shown(id)}; give the id of the {name} it follows"
+                if source is None
+                else f"{shown(id)} is {_named(source['type'])}, which has no layout "
+                "items; give a layout mark's id"
+                if source["type"] not in _LAYOUT_MARKS
+                else f"{shown(id)} is drawn in another panel; draw the {method} in its panel"
+                if id not in ids
+                else f"{shown(id)} is {named}, whose items give no geometry to place by; "
+                "follow a pie, funnel, treemap, or sunburst"
+                if not publishes
+                else None
+            )
+            if problem is not None:
+                raise ChartError(
+                    f"{method} item mark: {problem}",
+                    code="unknown-reference" if source is None else "invalid-option",
+                    **where,
+                )
+
     def _place_in_panels(self, spec: dict[str, Any]) -> None:
         """Refuses, as the browser would, a layout mark (a pie) without a panel of
         its own, and marks drawing in a panel a layout mark has to itself."""
         kind, panel = spec["type"], spec.get("panel")
         method = _method(kind)
-        held = {
-            mark["panel"]: _method(mark["type"])
-            for mark, _ in self._marks
-            if mark["type"] in _LAYOUT_MARKS
-        }
+        layouts = {mark["panel"]: mark for mark, _ in self._marks if mark["type"] in _LAYOUT_MARKS}
+        held = {key: _method(mark["type"]) for key, mark in layouts.items()}
         # Layers of a map or a 3D box can share their panel.
         layer = any(
             kind in group and held.get(panel) in {_method(item) for item in group}
@@ -6956,11 +7105,11 @@ class Chart:
                     f'{method} panel: "*" would draw in panel {shown(first)}, which a '
                     f"{held[first]} has to itself; give the id of a panel with axes"
                 )
-            if panel in held:
-                raise ChartError(
-                    f"{method} panel: a {held[panel]} has panel {shown(panel)} to itself; "
-                    "give the id of a panel with axes"
-                )
+            if panel in layouts:
+                # Beside it, marks placed by its items or in pixels.
+                self._check_decoration(spec, layouts[panel], panel)
+            else:
+                self._drawn_elsewhere(spec, list(layouts.values()))
             return
         if panel is None or panel == "*":
             raise ChartError(
@@ -6979,11 +7128,15 @@ class Chart:
                     f"too, and a {method} has its panel to itself; give the {other} the id of "
                     "a panel with axes"
                 )
-            if mark.get("panel") == panel and not layer:
+            if mark.get("panel") == panel and not layer and mark["type"] in _LAYOUT_MARKS:
                 raise ChartError(
                     f"{method} panel: a {other} draws in panel {shown(panel)}, and a {method} "
                     "has its panel to itself; give one of them another panel"
                 )
+            if mark.get("panel") == panel and not layer:
+                self._check_decoration(mark, spec, panel)
+            elif mark.get("panel") not in layouts:
+                self._drawn_elsewhere(mark, [spec])
         own = next((p for p in self._panels if p.id == panel), None)
         if own is not None and (own.x is not None or own.y is not None or own.y_right is not None):
             axis = "x" if own.x is not None else "y" if own.y is not None else "y_right"
@@ -7298,6 +7451,50 @@ _MARKS_3D = ("point3d", "line3d", "surface")
 
 #: Chart methods whose names differ from the type of the mark they add.
 _METHODS = {"point3d": "point_3d", "line3d": "line_3d"}
+
+#: Layout marks whose items give the geometry other marks are placed by.
+_PUBLISHING = ("pie", "funnel", "treemap", "sunburst")
+
+
+def _named(kind: str) -> str:
+    """A mark of a spec type as messages name it: "a treemap", "an area";
+    the layers of a map, "a map", and of a 3D chart, "a 3D plot"."""
+    name = "map" if kind in _MAP_MARKS else "3D plot" if kind in _MARKS_3D else _method(kind)
+    return f"{'an' if name[0] in 'aeiou' else 'a'} {name}"
+
+
+def _places(spec: Mapping[str, Any]) -> list[Any]:
+    """The positions a text, rule, or region mark is placed by."""
+    given = [spec.get(name) for name in ("x", "y", "x1", "x2", "y1", "y2")]
+    given += [*(spec.get("span") or ()), *(spec.get("at") or {}).values()]
+    return [place for place in given if place is not None]
+
+
+def _item_marks(spec: Mapping[str, Any]) -> list[str]:
+    """The ids of the marks whose items a mark names to be placed by."""
+    if spec["type"] not in ("text", "rule", "region"):
+        return []
+    anchor = spec.get("from")
+    places = [anchor] if anchor is not None and "item" in anchor else []
+    places += [p["item"] for p in _places(spec) if isinstance(p, Mapping) and "item" in p]
+    return list(dict.fromkeys(place["mark"] for place in places))
+
+
+def _follows(spec: Mapping[str, Any]) -> list[str] | None:
+    """The ids of the layout marks whose items a text, rule, or region mark
+    is placed by, when it is placed only by items or in pixels (and so can
+    draw beside a layout mark); None otherwise."""
+    if spec["type"] not in ("text", "rule", "region"):
+        return None
+    anchor = spec.get("from")
+    if anchor is not None:
+        return [anchor["mark"]] if "item" in anchor else None
+    if not all(
+        isinstance(place, Mapping) and {"item", "fraction", "px"} & set(place)
+        for place in _places(spec)
+    ):
+        return None
+    return _item_marks(spec)
 
 
 def _method(kind: str) -> str:
@@ -7922,6 +8119,15 @@ def _fields(spec: dict[str, Any]) -> set[str]:
         field = coordinate_field_spec(place)
         if field is not None:
             fields.add(field)
+    # Items' names that columns give, in places on items and text from an item.
+    places = [spec.get(key) for key in ("x", "y", "x1", "x2", "y1", "y2")]
+    places += [*(spec.get("at") or {}).values(), *(spec.get("span") or ())]
+    refs = [place["item"] for place in places if isinstance(place, dict) and "item" in place]
+    anchor = spec.get("from")
+    if isinstance(anchor, dict) and "item" in anchor:
+        refs.append(anchor)
+    for ref in refs:
+        fields.update(name["field"] for name in ref["item"] if isinstance(name, dict))
     # Columns only tooltips show travel too.
     for entry in (spec.get("tooltip") or {}).get("fields", ()):
         fields.add(entry if isinstance(entry, str) else entry["field"])
@@ -9042,6 +9248,7 @@ def bar(
     clip: Clip | None = None,
     halo: HaloOption | None = None,
     stroke_sides: Sequence[Side] | None = None,
+    orient: Orient | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
     inspect: bool | None = None,
@@ -9050,7 +9257,8 @@ def bar(
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A bar chart: series side by side (overlapping with ``dodge=False``) or
-    stacked; horizontal when ``y`` is a category (see ``Chart.bar``)."""
+    stacked; horizontal when ``y`` is a category, or with ``orient="y"``
+    (see ``Chart.bar``)."""
     chart, tooltip = _rows_chart_of(data, options)
     return chart.bar(
         x,
@@ -9076,6 +9284,7 @@ def bar(
         tooltip=tooltip,
         halo=halo,
         stroke_sides=stroke_sides,
+        orient=orient,
         z_index=z_index,
         pick=pick,
         inspect=inspect,

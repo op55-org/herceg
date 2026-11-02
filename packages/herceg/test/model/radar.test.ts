@@ -370,7 +370,7 @@ describe("radar", () => {
     const mark = radar(scores, { category: "skill", value: "score" });
     const series = table({ t: [1, 2], v: [1, 2] });
     expect(() => build({ marks: [mark, line(series, { x: "t", y: "v" })] })).toThrow(
-      "has its chart to itself",
+      "a radar's chart has no x and y scales",
     );
     expect(() => build({ marks: [mark], interaction: { brush: "x" } })).toThrow(
       "radar brush: its axes radiate from the center, which a brush cannot span; drop interaction.brush",

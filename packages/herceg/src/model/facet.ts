@@ -170,10 +170,12 @@ export class Facet implements PanelLayout {
       drawn = layouts[0].views.inPanels(layouts, options, false);
       const [layout] = drawn as [LayoutMark];
       layout.views.interactions(drawn, options, false, type);
-      if (drawn.length > 1 || marks.length > 0)
+      if (drawn.length > 1)
         throw new Error(
           `${type}: has each facet panel to itself; draw other marks in another chart`,
         );
+      // Beside it, marks placed by its items or in pixels.
+      layout.views.decorations(marks, drawn, options.marks);
       const parts = layout.layers ?? [layout];
       // A layer of a map may repeat instead (a base map).
       const remedy = layout.layers

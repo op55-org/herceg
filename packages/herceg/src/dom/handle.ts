@@ -2,6 +2,7 @@
 // framework adapters expose. Engine state stays behind it; panels and axes
 // come out as read-only snapshots of the last frame drawn.
 
+import type { ItemInfo } from "../marks/layout-mark.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
 import type {
   DrawnPanel,
@@ -99,6 +100,13 @@ export interface LegendEntry {
 
 /** Network nodes moved by the chart's user, by item key: where each is, in the network's layout units. */
 export type ItemPositions = Readonly<Record<string, Readonly<{ x: number; y: number }>>>;
+
+/** The items a layout mark drew in the frame on screen (`Chart.getItems`), and the revision drawn. */
+export interface DrawnItemsInfo {
+  readonly revision: number;
+  /** Copies, made for this call. */
+  readonly items: readonly ItemInfo[];
+}
 
 export interface InspectOptions extends PanelTarget {
   /** How to find the data; by default the chart's `inspection` mode, read with its `snap` and `within`. */
@@ -210,6 +218,18 @@ export interface Chart {
    * A copy; empty for charts without networks.
    */
   getItemPositions(target?: PanelTarget): ItemPositions;
+  /**
+   * The items the layout mark `mark` (its id: a pie, funnel, treemap, or
+   * sunburst) drew in the frame on screen, while a transition plays as that
+   * frame drew them, with the revision drawn; for overlays redrawn on each
+   * `render`. Boxes and sectors are continuous CSS pixels from `root`'s top
+   * left, before rounding to device pixels. In facets or subplots drawing
+   * it in several panels, `panel` names one. Undefined until a frame
+   * draws, and for charts without layout marks (as `getDrillRoot` is). In
+   * charts with them, throws for an id of none, of a mark whose items have
+   * no geometry, and for a panel that does not draw it.
+   */
+  getItems(target: { mark: string } & PanelTarget): DrawnItemsInfo | undefined;
   /**
    * Moves a network's node, keyed as its items are, to a place in the
    * network's layout units (as `itemMove` events report them; links settle

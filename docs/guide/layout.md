@@ -269,11 +269,13 @@ latency.legend(place=hg.Place(inside="top-left"))
 Pies, treemaps, sunbursts, gauges, funnels, radars, Sankey diagrams, maps,
 and networks draw in panels too.
 
-- **In facets**, a layout mark is the chart's only mark and draws each
-  panel's rows. A pie sums its panel's rows; radars keep every spoke and
-  series, each scaled to its panel unless `domain` is given.
-- **In subplots**, it has the panel it names to itself (not `"*"`), beside
-  panels with axes, which keep zooming and brushing.
+- **In facets**, a layout mark is the chart's only mark besides those
+  placed by its items or in pixels
+  ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)),
+  and draws each panel's rows. A pie sums its panel's rows; radars keep
+  every spoke and series, each scaled to its panel unless `domain` is given.
+- **In subplots**, it has the panel it names (not `"*"`) to itself and such
+  marks, beside panels with axes, which keep zooming and brushing.
 - **Maps.** In facets each layer splits its rows unless `facet: "repeat"`
   (a base map), and every panel is fitted to all rows, so a place is at the
   same pixels in each panel.

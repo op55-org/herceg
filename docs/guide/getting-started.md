@@ -133,6 +133,7 @@ methods of their own (see [Notebooks](python/notebooks-and-streamlit.md)).
 | `getCamera`, `setCamera` | 3D charts' view. |
 | `getDrillRoot`, `setDrillRoot` | Treemaps' and sunbursts' drilled node. |
 | `getItemPositions`, `setItemPosition` | Networks' moved nodes. |
+| `getItems({ mark })` | A pie's, funnel's, treemap's, or sunburst's items as drawn ([Hierarchy](hierarchy-and-flow.md#marks-beside-layout-marks)). |
 | `toSVG(sizing?)`, `toPNG({ dpi }?)` | Exports of what the chart shows ([Export](export.md)). |
 
 Methods that address one panel take `{ panel }` (see

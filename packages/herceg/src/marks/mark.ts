@@ -23,6 +23,7 @@ import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
 import type { ContentWriter } from "./features/content.ts";
+import type { DrawnItems } from "./layout-mark.ts";
 import type { RowBindings } from "./row-bindings.ts";
 import { type MarkRows, rowAt, rowCount } from "./rows.ts";
 import { isSortedSubset, rowsByCode, type Series, type SeriesStream } from "./series.ts";
@@ -189,6 +190,18 @@ export interface Frame {
   chart?: Rect | undefined;
   /** The chart's position scales of its own along x or y over this plot, where it has any. */
   scaleOf?: ((name: string, axis: "x" | "y") => PositionScale) | undefined;
+  /**
+   * In a panel a layout mark draws, what it drew there, by its `id`, for
+   * marks placed by its items (model/decorations.ts); undefined for an id
+   * of no layout mark drawn in the panel, and in panels with axes.
+   */
+  items?: ((mark: string) => DrawnItems | undefined) | undefined;
+  /**
+   * What marks are cut to where their own `clip` says nothing: false for
+   * decorations, which are cut to nothing (model/decorations.ts); the
+   * marks' own defaults when absent.
+   */
+  clip?: Clip | undefined;
   /**
    * Where marks' labels outside the plot go: the x where those on the left
    * end and those on the right start, in the tracks the chart keeps for
@@ -446,6 +459,13 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   readonly bound?: RowBindings | undefined;
   /** For annotations: whether a place is on a scale of the chart's own. */
   readonly scaled?: boolean;
+  /**
+   * For marks placed only by layout items or in pixels, on no scale (text,
+   * rules, regions, custom marks without x and y fields): the ids of the
+   * layout marks whose items they follow, which may be none. Such marks
+   * decorate a layout mark's chart (model/decorations.ts).
+   */
+  readonly follows?: readonly string[] | undefined;
   /**
    * For marks placing values on a scale of the chart's own by their places
    * (annotations): the extent of those along `axis` on scale `name`, of

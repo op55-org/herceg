@@ -76,6 +76,7 @@ import {
   type Chart,
   type CursorOptions,
   type CursorPosition,
+  type DrawnItemsInfo,
   type InspectOptions,
   type ItemPositions,
   type LegendEntry,
@@ -1083,6 +1084,10 @@ export class MountedChart implements Chart, ExportsScene {
 
   getItemPositions(target?: PanelTarget): ItemPositions {
     return this.#model.items?.positions(target?.panel) ?? {};
+  }
+
+  getItems(target: { mark: string } & PanelTarget): DrawnItemsInfo | undefined {
+    return this.#model.items?.getItems(target, this.#scene, this.drawnRevision);
   }
 
   setItemPosition(

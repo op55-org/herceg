@@ -12,6 +12,7 @@
 
 import type { TableChange } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
+import type { ItemInfo } from "../marks/layout-mark.ts";
 import type { Mark, MarkKey } from "../marks/mark.ts";
 import type { planAxis } from "../model/axis.ts";
 import type { axisGuide } from "../model/axis-guide.ts";
@@ -220,6 +221,7 @@ interface MovingPie {
   r: readonly [number, number];
   labeled: boolean;
   draw: PieSlices["draw"];
+  placed: PieSlices["placed"];
 }
 
 /** A gauge moving: its value at each end, and how it draws one. */
@@ -1043,6 +1045,7 @@ function movePie(shown: ShownPie, next: PieSlices): { pie: MovingPie; moves: boo
     r: [shown.r, next.r],
     labeled: next.items.length > 0 ? next.labeled : shown.labeled,
     draw: next.draw,
+    placed: next.placed,
   };
   return { pie, moves };
 }
@@ -1066,11 +1069,17 @@ function panelAt(panel: Panel, tween: PanelTween, t: number): Panel {
   const { x, y, yRight } = tween.motions;
   const blends = { x: blendAt(x, t), y: blendAt(y, t), yRight: blendAt(yRight, t) };
   const { pie, dial } = tween;
-  const marks = pie
-    ? pieAt(pie, t)
-    : dial
-      ? dial.draw(dial.from + (dial.to - dial.from) * t)
-      : panel.marks.slice();
+  let { items } = panel;
+  let marks: Geometry[];
+  if (pie) {
+    const [drawn, placed] = pieAt(pie, t);
+    // Its items as this frame draws them, and what is placed by them over them.
+    items = items && { ...items, list: placed };
+    marks = items?.decorate ? items.decorate(drawn, placed) : drawn;
+  } else if (dial) {
+    const drawn = dial.draw(dial.from + (dial.to - dial.from) * t);
+    marks = items?.decorate ? items.decorate(drawn, undefined) : drawn;
+  } else marks = panel.marks.slice();
   for (const bars of tween.bars) marks[bars.index] = barsAt(bars, t, blends[bars.along]);
   for (const points of tween.points)
     marks[points.index] = pointsAt(points, t, blends.x, blends[points.side]);
@@ -1086,7 +1095,7 @@ function panelAt(panel: Panel, tween: PanelTween, t: number): Panel {
   for (const list of tween.lists) marks[list.index] = listAt(list, blends.x, blends[list.side]);
   for (const raster of tween.rasters) marks[raster.index] = rasterAt(raster, t);
   const guides = tween.axes && axesAt(panel, tween.axes, t);
-  return { ...panel, ...guides, marks };
+  return { ...panel, ...guides, marks, items };
 }
 
 /** Starts quickly and settles without overshooting (cubic ease-out), as views move. */
@@ -1121,7 +1130,8 @@ function barsAt(moving: MovingBars, t: number, value: Blend): RectGeometry {
   return { ...mark, rects, count, rounded: corners, bars: undefined };
 }
 
-function pieAt(moving: MovingPie, t: number): Geometry[] {
+/** A pie's geometry at eased progress `t`, and the items it draws. */
+function pieAt(moving: MovingPie, t: number): [Geometry[], () => readonly ItemInfo[]] {
   const { from, to, values, ends } = moving;
   // Widths move, so neighbors share their boundary throughout and the
   // slices of two pies always make a whole turn. Slices with no width yet
@@ -1137,7 +1147,15 @@ function pieAt(moving: MovingPie, t: number): Geometry[] {
     items.push({ ...item, value });
   });
   const [r0, r1] = moving.r;
-  return moving.draw(items, ends.subarray(0, items.length), r0 + (r1 - r0) * t, moving.labeled);
+  const at = ends.subarray(0, items.length);
+  const r = r0 + (r1 - r0) * t;
+  // Placed, when something reads them, from a copy of the ends: the next frame writes over them.
+  const ends0 = at.slice();
+  let placed: readonly ItemInfo[] | undefined;
+  return [
+    moving.draw(items, at, r, moving.labeled),
+    () => (placed ??= moving.placed(items, ends0, r)),
+  ];
 }
 
 function sameRect(a: Rect, b: Rect): boolean {
