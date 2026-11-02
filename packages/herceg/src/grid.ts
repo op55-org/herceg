@@ -4,6 +4,8 @@
 export {
   createGrid,
   Grid,
+  type GridEvents,
+  type GridInputEvent,
   type GridOptions,
   type GridUpdate,
 } from "./dom/grid.ts";

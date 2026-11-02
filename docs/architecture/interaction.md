@@ -444,6 +444,75 @@ the view, and the selection, each on one of the chart's scales.
 - Hover listeners receive inspections even with the built-in tooltip off,
   which is how an application draws its own.
 
+## Pins, drags, and what a click does
+
+Pinned tooltips, rule drags, and the order of a click's actions live in
+the controller, so a chart that uses none of them loads no more than its
+chunk and does no more work in a hover frame: each frame reads the pin
+only where one is held, and a rule is looked for under the pointer only
+where a mark has `drag`.
+
+- **Pins.** A pin is the place the tooltip is held at (`PinTarget`): an
+  item's key, kept with the keyboard cursor it stood for, or a value on an
+  axis in a panel. Each frame finds it again (`#pinned`, `#pinFound`): an
+  item by its key in each frame drawn after a change of options or data
+  (`seen` is the drawn revision), among every series the inspection reads
+  (`#inspected`, not only the keyboard's stops); a value through
+  `#cursorAt` and the chart's `snap`, along the axis the inspection
+  follows (`#pinAxis`). A value pin is made only where the inspection at
+  its value reads the picked item's series. A pin whose item is gone, or
+  at a value where no series has data, lets go and reports it; one out of
+  view hides the box, and no hover tooltip shows meanwhile. A new pin is
+  resolved before it is reported. Pinned, the tooltip box takes pointer
+  events, the `group` role, and focus (kept as its content is drawn
+  again); a pointerdown outside it (`#watchOutside` listens on the
+  chart's root node, each shadow root around it, and the document),
+  Escape, or a second click lets it go. A click's pin toggle is decided
+  as the click acts (`#clickPin` returns a function), so clicks queued
+  while picking loads toggle in turn. `pin()` and `pinned` are state support's
+  (`state/chart-state.ts`), which names references and checks `expected`
+  before calling the controller through `model.pins`; a pin asked for
+  before the controller loads waits on the model (`model.pinning`), and
+  one before the first frame or before picking loads waits in the
+  controller (`#pinLater`), applied in the next frame drawn.
+- **Rule drags.** A press within 4 px of a rule with `drag` starts a
+  `move` press instead of a binding's drag: the rule mark's `moved` map,
+  keyed by the chart's model so charts sharing a mark move it apart,
+  holds the value (data, from the scale's `invert` of the clamped
+  pointer) that draws it at the pointer, reported once a frame as a
+  preview (`#previewRule`); release commits and clears it, so the next
+  frame draws the options' value; Escape, a lost pointer, options without
+  the rule, and destroying the chart clear it, release the pointer's
+  capture, and report a cancel at that value; so does a drop whose rule
+  or panel went meanwhile. A move with no button held, or a leave while
+  the chart holds no capture of the pointer, is a release the chart
+  missed: a commit where the rule was. The drag is its pointer's
+  (`#besideRule`): other pointers neither move nor end it. A press while
+  picking loads, in a chart with draggable rules, waits for picking with
+  the pointer input after it (`#waiting`, played by `#playWaiting`;
+  Escape gives it up). Options that make the rule again along the same
+  axis, scale, and panel hand the drag to the new mark (`#handOver`).
+  Draggable rules' axes join the touch policy, so touches on them are not
+  the page's. `itemMove` carries
+  `markId`, `phase` (node moves' is `"commit"`), `axis: "right"` for
+  rules on the right axis, and the panel in subplots.
+- **One activation.** `#clicked` computes the picked target once, then
+  decides: a click inside a pinned tooltip is the content's; a legend
+  entry does its legend's `action`; a tree's item where `zoom` drills
+  drills and nothing else (through `model.drills`, the drill support's
+  hook, so the drill is done before `click` is reported); otherwise the
+  selection (`interaction.select`) and the pin (`tooltip.pin`) each act
+  on that one target, then `click` is emitted. Enter on the keyboard
+  cursor goes through the same order and reports a keyboard `click`.
+  A listener that destroys the chart stops the rest.
+- **Legend actions.** The guide compiler (`guides/legends.ts`, lazy)
+  gives entries of a `"select"` or `false` legend no `targets`, so the
+  core legend toggles nothing, and a select legend's entries the series
+  they name (`selects`); the controller turns a press into a `series`
+  selection through `host.select` and marks entries `aria-pressed`. The
+  core keeps no code for it: a select legend without state support is
+  refused when the controller reads the options.
+
 ## Layout controls
 
 Layout marks are navigated by controls of their family, each its own lazy

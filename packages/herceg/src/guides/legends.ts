@@ -981,8 +981,15 @@ function measureLegend(
           ...(row.mixed && { mixed: true }),
           ...(row.shows && { shows: row.shows }),
         };
+        const { action } = options;
         if (row.targets.length > 0) {
           if (row.targets.length !== 1 || row.targets[0] !== row.key) item.targets = row.targets;
+          // An entry of a legend that does not hide hides and shows nothing; one that selects, selects it.
+          if (action !== undefined && action !== "hide") {
+            item.targets = [];
+            delete item.shows;
+          }
+          if (action === "select") item.selects = row.targets;
           entries.push(item);
         } else caption.push(...entryItems(kit, item, swatch, text));
       });
@@ -999,6 +1006,7 @@ function measureLegend(
           key: plan.key,
           entries,
           ...(plan.panel !== undefined && { panel: plan.panel }),
+          ...(plan.options.action !== undefined && { action: plan.options.action }),
           label: text.label,
           halo: kit.textHalo(text.label, text.surface),
           get items() {

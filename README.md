@@ -20,13 +20,15 @@ whose data is large or changes often.
   by click and drawn in looks of their own, chart state that React, Vue,
   Svelte, and Python bind and write back, gesture bindings, synced cursors
   and views across charts, tooltips that read each series as the chart's
-  inspection says, events naming the item, axis label, or legend entry under
-  the pointer, keyboard navigation, and animated changes.
+  inspection says and pin on a click with links inside, rules dragged to a
+  new value, legends that select, events naming the item, axis label, or
+  legend entry under the pointer, keyboard navigation, and animated changes.
 - **Output.** SVG, PNG, JPEG, WebP, and PDF, server rendering with
   hydration, a portable JSON spec with binary columns, and page fragments
   for server-rendered sites.
 - **Grids.** A virtualized analytical grid with grouped rows, pivots, and
-  remote data, sharing tables and selections with charts.
+  remote data, sharing tables and selections with charts, reporting clicks
+  by row identity.
 - **Python.** A Pythonic API over pandas, Polars, PyArrow, and NumPy, with
   notebook widgets, Streamlit, Seaborn-style statistics
   (`herceg.express`), and Flask, Django, and FastAPI pages.

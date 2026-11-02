@@ -59,6 +59,7 @@ export {
   type GridFocus,
   type GridRange,
   type GridRef,
+  type GridSelectionOptions,
   type GridSettings,
   type SelectionState,
   type SelectMode,
@@ -584,6 +585,12 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
         for (let group = 0; group < at.length; group++) at[group] = groups!.size(group, depth);
       });
     });
+  }
+
+  protected selectedAlone(rowIndex: number): boolean {
+    const { group, depth, position } = this.#entry(rowIndex);
+    const rows = position >= 0 ? 1 : this.#groups!.size(group, depth);
+    return this.selectionState(rowIndex) === "all" && this.selectedCount === rows;
   }
 
   /** Clears the channel and the range anchor; whether there was anything to clear. */

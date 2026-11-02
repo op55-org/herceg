@@ -77,6 +77,10 @@ the generated [capability matrix](../capabilities.md).
 - **Tooltip fields** show more of the row a point or item is; items
   summing several rows (pie slices of several rows, inner tree nodes) show
   none, and networks take none. [Tooltips](interaction.md#tooltips)
+- **Dragging.** Rules at a number or a time drag (`drag: true`); rules of
+  a table's rows, rules placed by shares or pixels, regions, and text do
+  not. Network nodes drag with `interaction.drag`.
+  [Dragging rules](interaction.md#dragging-rules)
 - **Value animation.** Lines and areas move when no labels follow them and
   their rows stay; areas along y show changes at once.
   [Animation](interaction.md#animation)

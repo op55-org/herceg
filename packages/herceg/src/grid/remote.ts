@@ -548,18 +548,9 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         return;
       }
       const path = [...list.parent, groupValue(block, list.depth, row, this.#by())];
-      const scope = this.#scopeNow();
       this.rangeAnchor = ref;
       // Toggling the group selected as a whole clears it; any other selects the group alone.
-      const rows = (block.data as RowsWindow & { kind: "groups" }).rowCounts[row]!;
-      if (
-        mode === "toggle" &&
-        current &&
-        current === scope?.selection &&
-        scope.path !== null &&
-        groupId(scope.path) === groupId(path) &&
-        this.#groupState(current, path, rows) === "all"
-      ) {
+      if (mode === "toggle" && this.selectedAlone(rowIndex)) {
         store.set(this.channel, null);
         return;
       }
@@ -634,6 +625,31 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
   /** Selects every row matching the query's filter, those the source adds later too. */
   selectAll(): void {
     this.#selectMatching(null);
+  }
+
+  /**
+   * Whether the loaded row at `rowIndex` is all that is selected: a
+   * record's key alone, or a group's header selected as a whole.
+   */
+  protected selectedAlone(rowIndex: number): boolean {
+    const current = this.selectionStore.get(this.channel);
+    const { list, ordinal } = this.#at(rowIndex);
+    const block = list.blocks.get(Math.floor(ordinal / this.blockSize));
+    if (!current || block?.state !== "loaded") return false;
+    const row = ordinal - block.index * this.blockSize;
+    if (list.leaf) {
+      const key = keyOf(block, row, this.schema.key);
+      return current.kind === "keys" && current.keys.length === 1 && current.keys[0] === key;
+    }
+    const path = [...list.parent, groupValue(block, list.depth, row, this.#by())];
+    const scope = this.#scopeNow();
+    const rows = (block.data as RowsWindow & { kind: "groups" }).rowCounts[row]!;
+    return (
+      current === scope?.selection &&
+      scope.path !== null &&
+      groupId(scope.path) === groupId(path) &&
+      this.#groupState(current, path, rows) === "all"
+    );
   }
 
   clearSelection(): boolean {

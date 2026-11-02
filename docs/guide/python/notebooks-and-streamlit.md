@@ -83,6 +83,8 @@ live.on_click(show_row, remove=True)  # stop calling it
 live.on_edge(lambda edge: print(edge.side, edge.bound))  # near an end of `limits`
 live.on_error(lambda error: print(error))  # what a browser refused
 live.show_cursor(x=when)  # hide_cursor() hides it
+live.pin(value=when, axis="x")  # pins the tooltip there; pin() lets it go
+live.on_pin(lambda pinned: print(pinned))  # clicks with hg.Tooltip(pin="click") too
 ```
 
 | Value | Holds |
@@ -95,6 +97,8 @@ live.show_cursor(x=when)  # hide_cursor() hides it
 | `hg.ViewEdge` | `scale`, `side`, `domain`, `bound`, `panels`, `cause`. |
 | `hg.InputEvent` | What `on_hover`, `on_click`, and `on_context_menu` hear: `pointer` (`hg.Pointer`: `x`, `y`, `panel`, `in_plot`, its `values` by axis, datetimes on time axes, and `categories`; None for the keyboard), `target` (`hg.ItemTarget`, `hg.AxisLabelTarget`, `hg.LegendEntryTarget`, or `hg.PlotTarget`, by `kind`; None over nothing), `inspection`, `cause`, and `revision`. |
 | `hg.Inspection` | What the inspection reads: `axis`, `value`, `label`, `panel`, and `points` (`hg.InspectedPoint`: `label`, `value`, `text`, `fields`, `row`, `mark`, `mark_id`, `key`). |
+| `hg.PinTarget` | Where the tooltip is pinned (`live.pinned`, what `on_pin` hears): an `item` by its key, or a `value` on an `axis`, in a `panel`. Assign one to `live.pinned`, or call `live.pin(...)`; None lets it go. |
+| `hg.ItemMove` | What `on_item_move` hears: a network node or a dragged rule moved, by `key` and `mark_id`, its `position` (`hg.ItemPosition`: a node's `x` and `y`, or a rule's value on its axis), `phase` (`"preview"` while a rule moves, `"commit"`, `"cancel"`), `cause`, and `revision`. |
 
 - Values are Python values: datetimes on time axes (naive, in UTC),
   category labels on category axes, numbers otherwise.
@@ -110,6 +114,14 @@ live.show_cursor(x=when)  # hide_cursor() hides it
   changes nothing and `on_select` hears the selection as it is.
 - `set_viewport` asks every browser showing the widget; what one refuses
   comes to `on_error` as an `hg.ChartError`.
+- **Pins** reach every output and survive redisplay; a pin at an item the
+  data removed lets go, and `on_pin` hears so.
+- **Dragged rules** (`chart.rule(y=250, id="threshold", drag=True)`) go
+  back where they were unless Python moves them:
+  `live.on_item_move(lambda move: move.phase == "commit" and live.update_rule("threshold", y=move.position.y))`.
+  `update_rule` moves a rule at a value in every output and in what later
+  outputs draw; the browser draws the rule back until Python's answer
+  arrives.
 - **Panels.** `get_viewport(panel="latency")`, `panel_viewports`,
   `set_viewport(..., panel=)`, and `on_viewport(..., panel=)` address a
   panel's scales. A chart of map or network subplots alone needs `panel`.
@@ -140,7 +152,7 @@ live.on_edge(load_older)
 | Chart | State | Callback | Per panel |
 | --- | --- | --- | --- |
 | Treemap, sunburst (`zoom=True`) | `drill_root`: a tuple of item keys, None for the whole tree | `on_drill` | `panel_drill_roots`, `on_drill(..., panel=)` |
-| Network (`drag=True`) | `item_positions`: moved nodes' `(x, y)` in layout units | `on_item_move` | `panel_item_positions` |
+| Network (`drag=True`) | `item_positions`: moved nodes' `(x, y)` in layout units | `on_item_positions` (each move: `on_item_move`) | `panel_item_positions`, `on_item_positions(..., panel=)` |
 | 3D | `camera`: an `hg.Camera` | `on_camera` | `panel_cameras`, `on_camera(..., panel=)` |
 
 ```python

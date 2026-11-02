@@ -61,6 +61,7 @@ import {
   type ChartSelection,
   needsState,
   type Phase,
+  type PinTarget,
   STATE_OPTIONS,
 } from "../spec/state.ts";
 import type { AttachedState, ChartStateSupport } from "../state/chart-state.ts";
@@ -242,6 +243,7 @@ const KIT: InteractionKit = {
   tickLabelGap,
   keys: NAVIGATION_KEYS,
   dragThreshold: DRAG_THRESHOLD,
+  needsState,
 };
 
 /** Input the chart keeps for its controller until it is attached. */
@@ -924,6 +926,13 @@ export class MountedChart implements Chart, ExportsScene {
   get basis(): Basis {
     throw needsState("basis");
   }
+
+  /** State support's, as `basis` and `pinned` are (which it defines too). */
+  pin(_at: PinTarget | null, _options?: Conditional): void {
+    throw needsState("pin");
+  }
+
+  declare readonly pinned: PinTarget | null | undefined;
 
   select(
     selection: ChartSelection | readonly [number, number] | null,
@@ -2543,6 +2552,7 @@ export class MountedChart implements Chart, ExportsScene {
       scene: () => this.#scene,
       revision: () => this.#content,
       drawnRevision: () => this.#shown,
+      count: () => ++this.#revision,
       schedule: () => schedule(this.#scheduled),
       report: (error, phase) => this.#report(chartError(error, phase)),
       invalidate: () => this.#invalidate(false),

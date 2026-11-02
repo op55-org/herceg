@@ -1090,6 +1090,11 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         _choice(builder.order, ("row", "column"), f"{role} order")
     if builder.swatches is not None:
         _choice(builder.swatches, ("mark",), f"{role} swatches")
+    action = builder.action
+    if not (action is None or action is False or action in ("hide", "select")):
+        raise ChartError(
+            f'{role} action: expected "hide", "select", or False; received {shown(action)}'
+        )
     entries = builder.entries
     if entries is not None and (not listlike(entries)):
         raise ChartError(
@@ -1110,6 +1115,7 @@ def legend_layout(builder: Any, role: str) -> dict[str, Any]:
         "entries": made,
         "swatches": builder.swatches,
         "style": style_spec(builder.style, f"{role} style", LEGEND_ROLES),
+        "action": action,
     }
     return {key: value for key, value in spec.items() if value is not None}
 
@@ -1274,7 +1280,11 @@ class LegendOptions:
     of every mark showing an entry's value), and how it looks (``style``,
     an ``hg.Style`` of its ``legend_label``, ``legend_title``, and
     ``tick_label`` roles). Giving one shows the legend, also for a single
-    series."""
+    series. ``action`` is what clicking an entry does: ``"hide"`` (the
+    default) hides and shows what it stands for, ``"select"`` selects
+    those series (Shift adds or removes one; see the chart's ``select``),
+    and ``False`` nothing of the chart's own (``on_click`` still hears of
+    it)."""
 
     place: Place | Mapping[str, Any] | None = None
     columns: int | None = None
@@ -1285,6 +1295,7 @@ class LegendOptions:
     entries: Sequence[LegendEntry | Mapping[str, Any]] | None = None
     swatches: Literal["mark"] | None = None
     style: Style | Mapping[str, Any] | None = None
+    action: Literal["hide", "select", False] | None = None
 
     def _spec(self) -> dict[str, Any]:
         return legend_layout(self, "LegendOptions")
@@ -1316,6 +1327,7 @@ class LegendGuide:
     show: bool | None = None
     style: Style | Mapping[str, Any] | None = None
     panel: str | None = None
+    action: Literal["hide", "select", False] | None = None
 
     def _spec(self) -> dict[str, Any]:
         _flags(self, "legend", ("show",))
@@ -1342,7 +1354,8 @@ def legend(**options: Any) -> LegendGuide:
     swatches that look like the marks. Legends list one entry per value a
     chart's series stand for, whichever marks and panels show it. With
     ``panel``, it lists what that panel draws (above the panel by default),
-    and its entries hide and show it there."""
+    and its entries hide and show it there; ``action`` says what clicking an
+    entry does (see ``hg.LegendOptions``)."""
     _known_options("legend", options, LegendGuide)
     return LegendGuide(**options)
 

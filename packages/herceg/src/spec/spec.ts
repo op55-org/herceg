@@ -707,6 +707,17 @@ export interface TooltipSpec {
    * the other axes, across the plot at a dashed line. Off by default.
    */
   axisLabels?: boolean;
+  /**
+   * "click": a click (or Enter) on what the tooltip shows pins it there;
+   * its content then takes the pointer and the keyboard's focus, so links
+   * and buttons in it work. Escape, a click outside it, a click off the
+   * data, or a second click on what it shows lets it go. Pinned to an
+   * item (inspection "nearest", or layout items) it follows the item and
+   * closes once the item is gone; pinned to a value along the
+   * inspection's axis, every series is read there again as data changes,
+   * and it hides while the value is out of view. Off (`false`) by default.
+   */
+  pin?: "click" | false;
 }
 
 /**
@@ -1476,6 +1487,14 @@ interface AnnotationBase extends Omit<MarkBase, keyof SelectionLooks> {
 
 interface RuleStyle extends AnnotationBase, RowItems {
   type: "rule";
+  /**
+   * Dragging the rule moves it along its axis: `itemMove` events report
+   * its value as it moves (`preview`), where it is dropped (`commit`), and
+   * Escape or a lost pointer (`cancel`). The value is the application's to
+   * set, in the rule's options; until it does, the rule goes back. Rules
+   * at a number or a date only, not rules of a table's rows.
+   */
+  drag?: boolean;
   stroke?: string;
   strokeWidth?: number;
   dash?: Dash;

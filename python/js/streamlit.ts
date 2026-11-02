@@ -44,6 +44,7 @@ import {
   type ItemPositionsPayload,
   inputEventPayload,
   MOVES,
+  ownsNode,
   PLANES,
   positionsValue,
   recordPosition,
@@ -312,6 +313,8 @@ function mount(component: Component, data: Uint8Array, previous: Instance | unde
   });
   chart.on("drill", () => reportDrill(instance));
   chart.on("itemMove", ({ key, position, panels }) => {
+    // Rules dragged have no state of their own to keep.
+    if (!ownsNode(config.marks, key)) return;
     const panel = panels?.[0] ?? "";
     const held = instance.positions.get(panel) ?? {};
     instance.positions.set(panel, held);

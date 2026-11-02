@@ -757,10 +757,18 @@ class Tooltip:
     ``chart.line(..., tooltip=hg.Tooltip(fields=["requests"]))``, or to a
     one-call helper, ``hg.line(..., tooltip=...)``, whose one mark
     takes them. The keyboard's announcements and hover events read them too.
+
+    ``pin="click"`` pins the tooltip where a click (or Enter on the keyboard
+    cursor) inspects: it stays, takes the pointer and focus so its links
+    work, and goes on Escape, a click outside, or another click. Pinned at
+    a point it follows that point (``mode`` "nearest"), else the value on
+    the inspection's axis, read again as data changes; a widget's
+    ``pin()`` pins from Python and ``on_pin`` hears of pins.
     """
 
     axis_labels: bool = False
     fields: Sequence[str | TooltipField] | None = None
+    pin: Literal["click"] | None = None
 
     def _spec(self) -> dict[str, Any]:
         if self.fields is not None:
@@ -771,13 +779,16 @@ class Tooltip:
         spec: dict[str, Any] = {}
         if _flag(self.axis_labels, "Tooltip axis_labels"):
             spec["axisLabels"] = True
+        if self.pin is not None:
+            spec["pin"] = choice_option(self.pin, ("click",), "Tooltip pin")
         return spec
 
     def _mark_spec(self, mark: str) -> dict[str, Any]:
         """The tooltip of mark ``mark``: its fields."""
         role = Role(mark).field("tooltip")
-        if self.axis_labels:
-            raise role.field("axis_labels").error("is the chart's; give it to the chart's tooltip")
+        for name in ("axis_labels", "pin"):
+            if getattr(self, name):
+                raise role.field(name).error("is the chart's; give it to the chart's tooltip")
         if self.fields is None:
             return {}
         at = role.field("fields")
@@ -5140,6 +5151,7 @@ class Chart:
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
+        drag: bool | None = None,
     ) -> Chart:
         """Reference lines: horizontal at ``y`` or vertical at ``x``.
 
@@ -5159,6 +5171,11 @@ class Chart:
         ``item_key`` names a numeric, datetime, or category column whose value
         names each row's item, which selections and transitions follow across
         replaced data.
+        ``drag=True`` lets the pointer move a rule at a number or datetime
+        along its axis: a widget's ``on_item_move`` hears where it goes, and
+        the rule stays only where your code then puts it with
+        ``widget.update_rule`` (it goes back otherwise). Rules of the rows
+        of ``data`` move with their rows: ``drag`` is refused for them.
         """
         if (x is None) == (y is None):
             raise ChartError("rule: needs exactly one of x and y")
@@ -5171,11 +5188,22 @@ class Chart:
             )
         places = {"x": x, "y": y, **({"span[0]": span[0], "span[1]": span[1]} if span else {})}
         table = self._annotation_table(data, places, label_json, "rule")
+        place = {"x": coordinate_spec(x, "rule x"), "y": coordinate_spec(y, "rule y")}
+        if _flag(drag, "rule drag"):
+            if table is not None:
+                raise ChartError(
+                    "rule drag: rules over a table move with their rows; drag a rule of a value"
+                )
+            axis_name = "x" if x is not None else "y"
+            if isinstance(place[axis_name], bool) or not isinstance(place[axis_name], (int, float)):
+                raise ChartError(
+                    "rule drag: a dragged rule stands at a number or a date along its axis; "
+                    f"give {axis_name} one"
+                )
         return self._add(
             {
                 "type": "rule",
-                "x": coordinate_spec(x, "rule x"),
-                "y": coordinate_spec(y, "rule y"),
+                **place,
                 "span": (
                     [tagged_spec(place, "rule span") for place in span]
                     if span is not None
@@ -5197,6 +5225,7 @@ class Chart:
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "rule"),
                 "id": id,
+                "drag": drag or None,
             },
             table,
         )
@@ -7937,6 +7966,11 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
         raise ChartError(
             "Chart inspection: expected an hg.InspectionOptions, or False; received "
             f"{shown(inspection)}"
+        )
+    if inspection is False and isinstance(tooltip, Tooltip) and tooltip.pin is not None:
+        raise ChartError(
+            "Chart tooltip pin: pins what the pointer inspects; drop inspection=False",
+            path="tooltip.pin",
         )
     choice_option(settings["renderer"], ("auto", "svg", "canvas"), "Chart renderer")
     if isinstance(settings["theme"], str):

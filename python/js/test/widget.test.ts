@@ -2876,3 +2876,102 @@ it("restores and synchronizes cameras per subplot across notebook displays", asy
     ]),
   );
 });
+
+describe("widget pins and rule drags", () => {
+  /** The charts the widget draws, as their listeners register. */
+  function chartsOf(listener: { mock: { instances: unknown[] } }) {
+    return [...new Set(listener.mock.instances)] as MountedChart[];
+  }
+
+  it("pins as Python says in every display, and reports a pin made in one", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const initial = snapshot({ tooltip: { pin: "click" } });
+    const model = new MockModel({ _chart: initial, _listening: [] });
+    mount(model, 2);
+    await vi.dynamicImportSettled();
+    await frame();
+    const [first, second] = chartsOf(listener);
+    model.receive({ type: "pin", pinned: { value: 1, axis: "x" }, revision: 1 });
+    await frame();
+    await frame();
+    for (const chart of [first!, second!])
+      expect(chart.pinned).toMatchObject({ value: 1, axis: "x" });
+    // Shown from Python: nothing goes back.
+    expect(model.messages("pin")).toHaveLength(0);
+    first!.pin({ value: 2, axis: "x" });
+    await frame();
+    await expect.poll(() => model.messages("pin").length).toBe(1);
+    expect(model.messages("pin")[0]).toMatchObject({
+      pinned: { value: 2, axis: "x", time: false },
+    });
+    expect(second!.pinned).toMatchObject({ value: 2, axis: "x" });
+    // A display drawn later pins where the snapshot says.
+    model.set("_chart", { ...initial, revision: 2, pinned: { value: 0, axis: "x" } });
+    await frame();
+    await frame();
+    await expect.poll(() => chartsOf(listener).at(-1)!.pinned).toMatchObject({ value: 0 });
+  });
+
+  it("tells Python of a pin it asked for at a value no display reads", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const model = new MockModel({
+      _chart: snapshot({ tooltip: { pin: "click" }, inspection: { mode: "nearest-x", within: 0 } }),
+      _listening: [],
+    });
+    mount(model);
+    await vi.dynamicImportSettled();
+    await frame();
+    const [chart] = chartsOf(listener);
+    model.receive({ type: "pin", pinned: { value: 1.5, axis: "x" }, revision: 1 });
+    await frame();
+    await frame();
+    expect(chart!.pinned).toBeNull();
+    await expect.poll(() => model.messages("pin").at(-1)).toMatchObject({ pinned: null });
+  });
+
+  it("sends rule drags to Python as moves, not node positions, and draws rules where it moves them", async () => {
+    const listener = vi.spyOn(MountedChart.prototype, "on");
+    const initial = snapshot();
+    const spec = {
+      ...initial.spec,
+      marks: [...initial.spec.marks, { type: "rule" as const, y: 2, id: "limit", drag: true }],
+    };
+    const model = new MockModel({ _chart: { ...initial, spec }, _listening: ["move"] });
+    const [host] = mount(model);
+    await vi.dynamicImportSettled();
+    await frame();
+    const chart = chartsOf(listener)[0]!;
+    const rect = chart.root.getBoundingClientRect();
+    const at = (type: string, y: number) =>
+      chart.root.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: MOUSE,
+          buttons: type === "pointermove" ? 1 : 0,
+          clientX: rect.left + chart.toPixel(1, { axis: "x" })!,
+          clientY: rect.top + chart.toPixel(y, { axis: "y" })!,
+        }),
+      );
+    at("pointerdown", 2);
+    at("pointermove", 2.5);
+    chart.render();
+    at("pointerup", 2.5);
+    const moves = model.messages("move") as { event: { phase: string; markId: string } }[];
+    expect(moves.at(-1)!.event).toMatchObject({
+      phase: "commit",
+      markId: "limit",
+      key: '["limit",0]',
+    });
+    expect(moves.every(({ event }) => event.phase !== "cancel")).toBe(true);
+    expect(model.messages("itemMove")).toHaveLength(0);
+    // Not set: the rule goes back; Python moves it, and it stays.
+    model.receive({ type: "rule", mark: 1, axis: "y", value: 2.5, revision: 1 });
+    chart.render();
+    const rule = () =>
+      host!
+        .querySelector<SVGLineElement>("svg line[stroke-dasharray], svg line")
+        ?.getAttribute("y1");
+    expect(Number(rule())).toBeCloseTo(chart.toPixel(2.5, { axis: "y" })!, 0);
+  });
+});

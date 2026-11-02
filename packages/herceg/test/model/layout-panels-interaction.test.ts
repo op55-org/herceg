@@ -514,10 +514,12 @@ describe("networks in facet panels", () => {
     expect(model.items!.setItemPosition('[0,"d"]', { x: 1, y: 2 }, "2024")).toEqual({
       key: '[0,"d"]',
       position: { x: 1, y: 2 },
+      phase: "commit",
     });
     expect(model.items!.setItemPosition('[0,"d"]', { x: 3, y: 4 })).toEqual({
       key: '[0,"d"]',
       position: { x: 3, y: 4 },
+      phase: "commit",
     });
     expect(() => model.items!.setItemPosition('[0,"d"]', { x: 5, y: 6 }, "2023")).toThrow(
       /setItemPosition: no node .* in the network/,
@@ -543,6 +545,7 @@ describe("networks in subplots", () => {
     expect(model.items!.setItemPosition('[1,"a"]', { x: 1, y: 2 }, "b")).toEqual({
       key: '[1,"a"]',
       position: { x: 1, y: 2 },
+      phase: "commit",
       panels: ["b"],
     });
     model.scene(estimateText);

@@ -622,6 +622,9 @@ draws has no place.
   Text is meant for a few hundred labels.
 - **Legend.** `legend: true` lists an annotation by its label (a rule as a
   line, a region as a box) and its entry hides it.
+- **Dragging.** A rule at a number or a time with `drag: true` can be
+  dragged along its axis, the application keeping or refusing where it is
+  dropped ([Dragging rules](interaction.md#dragging-rules)).
 - **Outlines.** Regions take `stroke`, `strokeWidth`, and `strokeSides`.
 - **Paint per row.** Regions over a table take `encode`: `color`, `fill`,
   `stroke`, and `opacity` from each row's fields through the chart's

@@ -1065,7 +1065,8 @@ describe("networks", () => {
     expect(where(chart, "a")[0]).toBeCloseTo(ax + 20, 0);
     expect(where(chart, "b")).toEqual(b);
     const moved = moves[0]!.position!;
-    chart.setItemPosition('[0,"a"]', moved);
+    expect(moves[0]!.phase).toBe("commit");
+    chart.setItemPosition('[0,"a"]', { x: moved.x!, y: moved.y! });
     chart.render();
     expect(where(chart, "a")[1]).toBeCloseTo(ay + 15, 0);
     await drag(chart, where(chart, "a"), [ax + 30, ay + 15], true);
@@ -1181,6 +1182,7 @@ describe("networks", () => {
     expect(moves.at(-1)).toEqual({
       key: '[0,"a"]',
       position: null,
+      phase: "commit",
       cause: "pointer",
       revision: chart.revision,
     });

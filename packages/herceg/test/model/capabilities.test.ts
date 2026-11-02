@@ -2543,3 +2543,16 @@ describe("capabilities: web payloads", () => {
     }
   });
 });
+
+describe("capabilities: dragging", () => {
+  it("drags rules at a number or a time, and refuses rules of rows and of shares", () => {
+    expect(rule({ y: 25, drag: true }).spec).toMatchObject({ drag: true });
+    expect(rule({ x: Date.UTC(2026, 0, 1), drag: true }).spec).toMatchObject({ drag: true });
+    expect(() => rule(table({ y: [1, 2] }), { y: "y", drag: true } as never)).toThrow(
+      /rules over a table move with their rows/,
+    );
+    expect(() => rule({ y: { fraction: 0.5 }, drag: true })).toThrow(
+      /a dragged rule stands at a number or a date/,
+    );
+  });
+});

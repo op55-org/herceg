@@ -336,7 +336,8 @@
         "panel_drill_roots": "Each panel's drill root at once, which TypeScript reads and sets per panel.",
         "panel_item_positions": "Each panel's item positions at once, which TypeScript reads and sets per panel.",
         "send_state": "ipywidgets' sync of the widget's state with the browser.",
-        "error": "What a browser last refused of what Python asked (a view, a selection, keys to hide), or None; the chart's handle throws instead."
+        "error": "What a browser last refused of what Python asked (a view, a selection, keys to hide), or None; the chart's handle throws instead.",
+        "update_rule": "Keeps a dropped rule by moving it in the live chart's spec, as TypeScript sets the rule's option with update (rules hold no state)."
       },
       "spelled": {
         "getViewport": {
@@ -352,6 +353,9 @@
     "events python": {
       "without": {
         "render": "Drawing frames is the browser's."
+      },
+      "only": {
+        "on_item_positions": "The network positions state's callback (item_positions); on_item_move hears each move, as itemMove reports it."
       }
     },
     "express *": {
@@ -911,7 +915,8 @@
     },
     "settings MarkTooltipSpec hg.Tooltip": {
       "only": {
-        "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`)."
+        "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`).",
+        "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`)."
       }
     },
     "settings ContinuitySpec hg.Continuity": {

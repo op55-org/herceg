@@ -52,21 +52,25 @@ export class Controls implements ChartControls {
     // Ahead of the chart's keys, which read the nodes with the arrows.
     root.addEventListener("keydown", keys, { capture: true });
     this.#stop.push(() => root.removeEventListener("keydown", keys, { capture: true }));
-    // A click that selects no rows (no row selection of the chart takes clicks) drills;
-    // one on a sunburst's empty center goes up. Marks drawn over the tree (placed
-    // by its items or in pixels) take their own clicks, unless they pick nothing.
-    this.#stop.push(
-      host.chart.on("click", ({ inspection, rows, pointer, target }) => {
-        if (rows) return;
-        const tree = inspection?.axis === "item" ? inspection : undefined;
-        if (target?.kind === "item" && target.item !== tree?.key) return;
-        if (tree) this.#clicked(tree.key, tree.panel);
-        else if (pointer) {
-          const panel = pointer.panel || undefined;
-          if (this.#drill(panel)?.out?.(pointer.x, pointer.y)) this.#up(panel);
-        }
-      }),
-    );
+    // A click or Enter that the chart's interaction code finds drills (one
+    // on a node with nodes under it, or on a sunburst's middle) drills here,
+    // before the click is reported.
+    const { model } = host;
+    const drills = (
+      item: string | undefined,
+      key: string,
+      x: number,
+      y: number,
+      cause: ChangeCause,
+    ) => {
+      const panel = key || undefined;
+      if (item !== undefined) this.#clicked(item, panel, cause);
+      else if (this.#drill(panel)?.out?.(x, y)) this.#up(panel, cause);
+    };
+    model.drills = drills;
+    this.#stop.push(() => {
+      if (model.drills === drills) model.drills = undefined;
+    });
   }
 
   /** Charts load these controls only while `interaction.zoom` is on: nothing changes here. */
@@ -128,12 +132,12 @@ export class Controls implements ChartControls {
     return model.interactionOf(panel)?.zoom ? model.items?.result(panel)?.drill : undefined;
   }
 
-  #clicked(key: string, panel: string | undefined): void {
+  #clicked(key: string, panel: string | undefined, cause: ChangeCause): void {
     const drill = this.#drill(panel);
     if (!drill) return;
     // A sunburst's middle is its root: a click there goes up.
-    if (key === drill.key) this.#up(panel);
-    else if (drill.opens(key)) this.#open(key, panel);
+    if (key === drill.key) this.#up(panel, cause);
+    else if (drill.opens(key)) this.#open(key, panel, cause);
   }
 
   /** Drills panel `panel`'s tree into the node keyed `key` (null: the whole tree), and says where it is now. */
@@ -157,7 +161,10 @@ export class Controls implements ChartControls {
     this.#open(root.path.at(-2)?.key ?? null, panel, cause);
   }
 
-  /** Enter opens the node read, Backspace goes up, and 0 shows the whole tree, in the panel read. */
+  /**
+   * Backspace goes up, and 0 shows the whole tree, in the panel read; Enter
+   * on a node drills through the chart's interaction code, as a click does.
+   */
   #key(event: KeyboardEvent): void {
     if (event.target !== this.#root) return;
     // The panel the keyboard reads; without a cursor, the chart's one tree, if it has one.
@@ -168,13 +175,7 @@ export class Controls implements ChartControls {
     if (!drill) return;
     // Backspace and 0 go from the root set, though a frame may not have drawn it yet.
     const drilled = this.#host.model.items?.drillRoot(panel)?.key != null;
-    if (event.key === "Enter") {
-      const key = cursor?.key;
-      if (key === undefined) return;
-      if (key === drill.key) this.#up(panel, "keyboard");
-      else if (drill.opens(key)) this.#open(key, panel, "keyboard");
-      else this.#host.announce("Nothing is under this node.");
-    } else if (event.key === "Backspace" && drilled) this.#up(panel, "keyboard");
+    if (event.key === "Backspace" && drilled) this.#up(panel, "keyboard");
     else if (event.key === "0" && drilled) this.#open(null, panel, "keyboard");
     else return;
     event.preventDefault();

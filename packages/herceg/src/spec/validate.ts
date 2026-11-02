@@ -1441,6 +1441,9 @@ function legendOptions(spec: Record<string, unknown>, path: string) {
     },
     swatches: oneOf("mark"),
     style: rolesOf(["legendLabel", "legendTitle", "tickLabel"]),
+    action: (v: unknown, at: string) => {
+      if (v !== false) oneOf("hide", "select")(v, at);
+    },
   };
 }
 
@@ -2560,6 +2563,7 @@ const MARKS: MarkChecks = {
       ...placement,
       x: annotationPlace,
       y: annotationPlace,
+      drag: boolean,
       stroke: string,
       strokeWidth: width,
       dash,
@@ -3435,6 +3439,16 @@ const mark: Check = (v, path) => {
       `${path}.axis`,
       "a dendrogram's heights are plot-relative, on no y axis; drop axis",
     );
+  if (spec.type === "rule" && spec.drag && spec.data !== undefined)
+    throw refusal(
+      `${path}.drag`,
+      "rules over a table move with their rows; drag a rule of a value",
+    );
+  if (spec.type === "rule" && spec.drag && typeof (spec.x ?? spec.y) !== "number")
+    throw refusal(
+      `${path}.drag`,
+      `a dragged rule stands at a number along its axis; give ${spec.x === undefined ? "y" : "x"} one`,
+    );
   // A summary's items stand for many rows, which have no one value of a field.
   const summary = SUMMARIES[spec.type as string];
   if (summary && spec.tooltip !== undefined)
@@ -3794,7 +3808,12 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
           );
         properties(t as Record<string, unknown>, path, {
           axisLabels: boolean,
+          pin: (v, at) => {
+            if (v !== false) oneOf("click")(v, at);
+          },
         } satisfies ChecksOf<TooltipSpec>);
+        if ((t as TooltipSpec).pin && chart.inspection === false)
+          throw refusal(`${path}.pin`, "pins what the pointer inspects; drop inspection: false");
       },
       interaction: (i, path) => {
         object(i, path);

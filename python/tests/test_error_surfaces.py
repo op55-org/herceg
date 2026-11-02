@@ -212,17 +212,22 @@ def _box() -> ChartWidget:
     return hg.Chart(DATA).point_3d(x="t", y="v", z="w").widget()
 
 
+def _rule() -> ChartWidget:
+    return hg.Chart(DATA).line(x="t", y="v").rule(y=1.0, id="limit", drag=True).widget()
+
+
 # The widget each method and property is of: one drawing what it reads or sets.
 WIDGETS = {
     "on_drill": _tree,
     "drill_root": _tree,
     "panel_drill_roots": _tree,
-    "on_item_move": _network,
+    "on_item_positions": _network,
     "item_positions": _network,
     "panel_item_positions": _network,
     "on_camera": _box,
     "camera": _box,
     "panel_cameras": _box,
+    "update_rule": _rule,
 }
 
 
@@ -454,7 +459,11 @@ def _calls(tmp: Path) -> dict[str, Call]:
         "on_error": {"callback": print},
         "on_row_selection": {"callback": print},
         "on_drill": {"callback": print},
+        "on_item_positions": {"callback": print},
         "on_item_move": {"callback": print},
+        "on_pin": {"callback": print},
+        "pin": {"value": 1.0},
+        "update_rule": {"id": "limit", "y": 2.0},
         "on_hover": {"callback": print},
         "on_click": {"callback": print},
         "on_context_menu": {"callback": print},

@@ -13,7 +13,7 @@ import inspect
 import math
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 try:
     import anywidget
@@ -48,8 +48,10 @@ from ._events import (
     DrillRoot,
     InputEvent,
     Inspection,
+    ItemMove,
     ItemPositions,
     PanelVisibility,
+    PinTarget,
     Range,
     SelectEvent,
     Value,
@@ -66,14 +68,18 @@ from ._events import (
     decode_drill_root,
     decode_edge,
     decode_input_event,
+    decode_item_move,
     decode_item_positions,
+    decode_pin,
     decode_selection,
     decode_viewport_event,
     decode_visibility,
     encode_drill_root,
     encode_item_positions,
+    encode_pin,
     encode_selection,
     encode_view_change,
+    same_pin,
     same_values,
     same_views,
     views_of,
@@ -104,6 +110,7 @@ _STATE_KEYS = {
     "itemMove": "item_positions",
     "camera": "camera",
     "visibility": "visibility",
+    "pin": "pinned",
 }
 #: Events whose state each subplot's tree, network, or 3D marks have of their own.
 _PANEL_EVENTS = ("drill", "itemMove", "camera")
@@ -165,7 +172,7 @@ class ChartWidget(anywidget.AnyWidget):
         # (panel ""), and each subplot's tree, network, or 3D marks', by panel.
         # The views are as a browser last reported them (None before any
         # did), with Python's changes of view no browser has made yet.
-        keys: list[StateKey] = [("select", ""), ("viewport", ""), ("visibility", "")]
+        keys: list[StateKey] = [("select", ""), ("viewport", ""), ("visibility", ""), ("pin", "")]
         for event in _PANEL_EVENTS:
             keys += [(event, panel) for panel in self._live.state_panels(event)]
         self._states: dict[StateKey, dict[str, Any] | None] = {
@@ -209,6 +216,7 @@ class ChartWidget(anywidget.AnyWidget):
             "hover",
             "click",
             "contextMenu",
+            "move",
             "rowSelection",
             "edge",
             "error",
@@ -311,7 +319,7 @@ class ChartWidget(anywidget.AnyWidget):
         lock held, since `columns` were made from the rows it holds."""
         assert self._express is not None
         chart = self._express.make(columns)
-        live = LiveChart(chart, self._live.overrides)
+        live = LiveChart(chart, self._live.overrides, self._live.rules)
         self._express.keep(columns, chart)
         if not self._live.drawn_alike(live):
             cameras = self._replace_live(live)
@@ -663,6 +671,48 @@ class ChartWidget(anywidget.AnyWidget):
         self._set(self._own("drill", "widget.drill_root"), encode_drill_root(value))
 
     @property
+    def pinned(self) -> PinTarget | None:
+        """Where the tooltip is pinned (an ``hg.PinTarget``), by a click
+        (``hg.Tooltip(pin="click")``) or ``pin``; None while it is not.
+        Assign one to pin it in every browser showing the widget, None to
+        let it go."""
+        return decode_pin(self._states[("pin", "")])
+
+    @pinned.setter
+    def pinned(self, value: PinTarget | None) -> None:
+        self._set(("pin", ""), encode_pin(value, "widget.pinned"))
+
+    def pin(
+        self,
+        item: str | None = None,
+        *,
+        value: Value | None = None,
+        axis: Literal["x", "y"] | None = None,
+        panel: str | None = None,
+    ) -> None:
+        """Pins the tooltip in every browser showing the widget, as a click
+        pins it: at an ``item`` (its key, as events report it), or at a
+        ``value`` on ``axis`` (a datetime on time axes, a category's name on
+        category axes); in ``panel``, for a chart of several. With neither,
+        lets it go. ``pinned`` reads it; ``on_pin`` hears of changes."""
+        name = "widget.pin"
+        if axis not in (None, "x", "y"):
+            raise ChartError(f'{name} axis: expected "x" or "y"; received {shown(axis)}')
+        if item is not None and not isinstance(item, str):
+            raise ChartError(f"{name} item: expected an item's key; received {shown(item)}")
+        if item is not None and value is not None:
+            raise ChartError(f"{name} value: an item or a value, not both; drop one")
+        if item is not None and axis is not None:
+            raise ChartError(f"{name} axis: an item is pinned where it is; drop axis")
+        if item is None and value is None:
+            if axis is not None or panel is not None:
+                raise ChartError(f"{name}: expected an item or a value to pin at; give one")
+            self._set(("pin", ""), None)
+            return
+        target = PinTarget(item=item, value=value, axis=axis, panel=panel)
+        self._set(("pin", ""), encode_pin(target, name))
+
+    @property
     def panel_drill_roots(self) -> dict[str, DrillRoot | None]:
         """Each treemap or sunburst subplot's drill root, by panel id. Assigning a
         mapping drills the panels it names; a panel left out keeps its root.
@@ -867,7 +917,7 @@ class ChartWidget(anywidget.AnyWidget):
         ``panel_drill_roots``)."""
         self._listen(self._key("drill", panel, "widget.on_drill"), callback, remove)
 
-    def on_item_move(
+    def on_item_positions(
         self,
         callback: Callable[[ItemPositions], Any],
         remove: bool = False,
@@ -876,7 +926,29 @@ class ChartWidget(anywidget.AnyWidget):
     ) -> None:
         """Calls callback(positions) with all overrides after a move or reset;
         with ``panel``, of that subplot's network (see ``panel_item_positions``)."""
-        self._listen(self._key("itemMove", panel, "widget.on_item_move"), callback, remove)
+        self._listen(self._key("itemMove", panel, "widget.on_item_positions"), callback, remove)
+
+    def on_item_move(self, callback: Callable[[ItemMove], Any], remove: bool = False) -> None:
+        """Calls ``callback(move)`` (an ``hg.ItemMove``) as a browser's
+        pointer or keyboard moves an item: a network node, or a rule of
+        ``chart.rule(..., drag=True)`` while it is dragged ("preview"),
+        where it is dropped ("commit"), and when the drag is given up
+        ("cancel"). A dropped rule stays only where ``update_rule`` puts it."""
+        self._listen("move", callback, remove)
+
+    def on_pin(self, callback: Callable[[PinTarget | None], Any], remove: bool = False) -> None:
+        """Calls ``callback(pinned)`` (an ``hg.PinTarget``, None when let go)
+        when the tooltip is pinned or let go, including Python's ``pin``."""
+        self._listen(("pin", ""), callback, remove)
+
+    def update_rule(self, id: str, *, x: Value | None = None, y: Value | None = None) -> None:
+        """Moves the rule ``id`` (``chart.rule(..., id=...)`` at a number or
+        a datetime) to ``x`` or ``y``, along the axis it stands on, in every
+        browser showing the widget and in what a browser connecting later
+        draws: how Python keeps a rule dragged (``on_item_move``) where it
+        was dropped."""
+        with self._lock:
+            self._push(self._live.update_rule(id, x, y))
 
     def _key(self, event: str, panel: str | None, name: str) -> StateKey:
         """The key of the state a callback hears of: the chart's own, or the
@@ -1048,6 +1120,7 @@ class ChartWidget(anywidget.AnyWidget):
                 and {"state": visibility, "carried": self._visibility_carried},
                 "drill_root": own["drill"],
                 "item_positions": own["itemMove"],
+                "pinned": own["pin"],
                 "camera": own["camera"],
                 "panel_states": panels,
                 "rows": numbering,
@@ -1088,12 +1161,17 @@ class ChartWidget(anywidget.AnyWidget):
         same = (
             same_views(payload, stored)
             if event == "viewport"
+            else same_pin(payload, stored, origin is not None)
+            if event == "pin"
             else payload == stored
             if event in exact
             else same_values(payload, stored)
         )
         if same:
-            if event in (*exact, "viewport"):
+            if event == "pin" and payload is not None:
+                # The same pin, perhaps saying better whether its value is a time.
+                self._states[key] = payload
+            if event in (*exact, "viewport", "pin"):
                 return False
             # The same values: only what is said of them may be news (which
             # axes hold times, the categories a lasso is over), and a lasso's
@@ -1227,6 +1305,12 @@ class ChartWidget(anywidget.AnyWidget):
             except (ValueError, ChartError):
                 return
             self._callbacks[kind](input_event)
+        elif kind == "move":
+            try:
+                move = decode_item_move(content.get("event"))
+            except ValueError:
+                return
+            self._callbacks["move"](move)
         elif kind == "rowSelection":
             name = content.get("table")
             with self._lock:
@@ -1339,10 +1423,12 @@ def _held(
 
 def _decoded(
     event: str, payload: dict[str, Any] | None
-) -> ChartSelection | DrillRoot | ItemPositions | Camera | VisibilityState | None:
+) -> ChartSelection | DrillRoot | ItemPositions | Camera | VisibilityState | PinTarget | None:
     """Interaction state as Python reads it."""
     if event == "camera":
         return _decode_camera(payload)
+    if event == "pin":
+        return decode_pin(payload)
     if event == "drill":
         return decode_drill_root(payload)
     if event == "itemMove":

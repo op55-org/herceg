@@ -100,8 +100,14 @@ export interface ChartProps
   onCamera?: ChartListener<"camera"> | undefined;
   /** A treemap or sunburst was drilled into a node or back out: its key (null for the whole tree) and path. */
   onDrill?: ChartListener<"drill"> | undefined;
-  /** A network's node was moved (dragged, keys, `setItemPosition`) or put back (null). */
+  /**
+   * A network's node was moved (dragged, keys, `setItemPosition`) or put
+   * back (null), or a rule of `drag: true` moved: previews while dragged, a
+   * commit where dropped, a cancel when given up.
+   */
   onItemMove?: ChartListener<"itemMove"> | undefined;
+  /** The tooltip was pinned (a click with `tooltip.pin`, `pin()`) or let go (null). */
+  onPin?: ChartListener<"pin"> | undefined;
   /** Series or items were hidden or shown (legend, `setVisibility`): the keys now hidden. */
   onVisibility?: ChartListener<"visibility"> | undefined;
   /** The chart drew a frame of its data: its panels and pixel mapping describe it, for overlays. */
@@ -451,6 +457,7 @@ export function Chart({
   onCamera,
   onDrill,
   onItemMove,
+  onPin,
   onVisibility,
   onRender,
   onError,
@@ -545,6 +552,7 @@ export function Chart({
   useChartEvent(chart, "camera", onCamera);
   useChartEvent(chart, "drill", onDrill);
   useChartEvent(chart, "itemMove", onItemMove);
+  useChartEvent(chart, "pin", onPin);
   useChartEvent(chart, "visibility", onVisibility);
   const render = useChartEvent(chart, "render", onRender);
 

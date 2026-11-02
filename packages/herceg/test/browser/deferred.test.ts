@@ -9,6 +9,7 @@ import { table } from "../../src/data/table.ts";
 import { type Chart, createChart, forgetInteraction } from "../../src/dom/chart.ts";
 import { line } from "../../src/marks/line.ts";
 import { point3d } from "../../src/marks/point3d.ts";
+import { rule } from "../../src/marks/rule.ts";
 import type { ChartError } from "../../src/spec/errors.ts";
 import { brushOf } from "../helpers/selections.ts";
 
@@ -21,9 +22,10 @@ beforeEach(() => {
   forgetInteraction();
 });
 
-afterEach(() => {
+afterEach(async () => {
   host.remove();
   forgetInteraction();
+  (await import("../../src/dom/interaction.ts")).forgetPicking();
   window.getSelection()?.removeAllRanges();
 });
 
@@ -283,6 +285,91 @@ describe("the interaction controller", () => {
     brushed.destroy();
   });
 
+  it("commits a rule dragged out of the chart and released there while it loaded", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const chart = createChart(host, {
+      marks: [line(data(), { x: "t", y: "v" }), rule({ id: "limit", y: 30, drag: true })],
+    });
+    chart.render();
+    const moves: string[] = [];
+    let last: number | undefined;
+    chart.on("itemMove", ({ phase, position }) => {
+      moves.push(phase);
+      last = position?.y;
+    });
+    const x = chart.toPixel(2, { axis: "x" })!;
+    const y = (value: number) => chart.toPixel(value, { axis: "y" })!;
+    await mouse(chart, "move", x, y(30));
+    await mouse(chart, "press", x, y(30));
+    try {
+      await mouse(chart, "move", x, y(40));
+      // Out of the chart, which holds no pointer for rules before its controller.
+      await mouse(chart, "move", x, 340);
+    } finally {
+      await mouse(chart, "release", x, 340);
+    }
+    expect(moves).toEqual([]);
+    attach(module);
+    await chart.loading;
+    chart.render();
+    expect(moves.at(-1)).toBe("commit");
+    expect(last).toBeCloseTo(40, 0);
+    chart.destroy();
+  });
+
+  it("plays a rule's drag once picking, which says what was pressed, has loaded", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    module.forgetPicking();
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const chart = createChart(host, {
+      marks: [line(data(), { x: "t", y: "v" }), rule({ id: "limit", y: 30, drag: true })],
+    });
+    chart.render();
+    const moves: string[] = [];
+    chart.on("itemMove", ({ phase }) => moves.push(phase));
+    const x = chart.toPixel(2, { axis: "x" })!;
+    const y = (value: number) => chart.toPixel(value, { axis: "y" })!;
+    pointer(chart, "pointerdown", x, y(30), { button: 0, buttons: 1 });
+    pointer(chart, "pointermove", x, y(40), { buttons: 1 });
+    pointer(chart, "pointerup", x, y(40), { button: 0 });
+    attach(module);
+    await chart.loading;
+    await expect.poll(() => moves.at(-1)).toBe("commit");
+    chart.destroy();
+  });
+
+  it("goes on dragging a rule that left the chart while it loaded, once loaded", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const chart = createChart(host, {
+      marks: [line(data(), { x: "t", y: "v" }), rule({ id: "limit", y: 30, drag: true })],
+    });
+    chart.render();
+    const moves: string[] = [];
+    chart.on("itemMove", ({ phase }) => moves.push(phase));
+    const x = chart.toPixel(2, { axis: "x" })!;
+    const y = (value: number) => chart.toPixel(value, { axis: "y" })!;
+    await mouse(chart, "move", x, y(30));
+    await mouse(chart, "press", x, y(30));
+    try {
+      await mouse(chart, "move", x, y(40));
+      await mouse(chart, "move", x, 340);
+      // Loaded while the button is still down.
+      attach(module);
+      await chart.loading;
+      await expect.poll(() => moves.at(-1)).toBe("preview");
+    } finally {
+      await mouse(chart, "release", x, 340);
+    }
+    chart.render();
+    expect(moves.at(-1)).toBe("commit");
+    chart.destroy();
+  });
+
   it("does nothing once destroyed while it loaded", async () => {
     const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
     pointer(chart, "pointermove", 300, 150);
@@ -419,6 +506,95 @@ describe("the interaction controller", () => {
     expect(key.defaultPrevented).toBe(false);
     // It still draws and answers.
     expect(chart.inspect(300, 150)?.points[0]?.value).toBe(30);
+    chart.destroy();
+  });
+});
+
+describe("input while picking loads", () => {
+  /** Holds picking back for charts made after this, until the returned call. */
+  async function holdPicking(): Promise<() => void> {
+    const module = await import("../../src/dom/interaction.ts");
+    const pick = await import("../../src/model/pick.ts");
+    let release = () => {};
+    module.forgetPicking(() => new Promise((resolve) => (release = () => resolve(pick))));
+    return () => release();
+  }
+
+  /** A chart with a rule to drag, its controller attached (it says what touches do). */
+  async function ruled(): Promise<Chart> {
+    const chart = createChart(host, {
+      marks: [line(data(), { x: "t", y: "v" }), rule({ id: "limit", y: 30, drag: true })],
+    });
+    chart.render();
+    pointer(chart, "pointermove", 10, 10);
+    await expect.poll(() => chart.root.style.touchAction).not.toBe("");
+    return chart;
+  }
+
+  it("gives up a press Escape ends before picking says it was on a rule", async () => {
+    const release = await holdPicking();
+    const chart = await ruled();
+    const moves: string[] = [];
+    chart.on("itemMove", ({ phase }) => moves.push(phase));
+    const x = chart.toPixel(2, { axis: "x" })!;
+    const y = (value: number) => chart.toPixel(value, { axis: "y" })!;
+    pointer(chart, "pointerdown", x, y(30), { button: 0, buttons: 1 });
+    pointer(chart, "pointermove", x, y(40), { buttons: 1 });
+    const key = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    chart.root.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(true);
+    pointer(chart, "pointerup", x, y(40), { button: 0 });
+    release();
+    await chart.loading;
+    chart.render();
+    expect(moves).toEqual([]);
+    chart.destroy();
+  });
+
+  it("keeps the browser's menu off while a press waits", async () => {
+    const release = await holdPicking();
+    const chart = await ruled();
+    chart.on("contextMenu", () => {});
+    const x = chart.toPixel(2, { axis: "x" })!;
+    pointer(chart, "pointerdown", x, chart.toPixel(10, { axis: "y" })!, { button: 0, buttons: 1 });
+    const menu = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: chart.root.getBoundingClientRect().left + x,
+      clientY: chart.root.getBoundingClientRect().top + chart.toPixel(10, { axis: "y" })!,
+    });
+    chart.root.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+    release();
+    await chart.loading;
+    chart.destroy();
+  });
+
+  it("pins with the first of two clicks there, and lets go with the second", async () => {
+    const release = await holdPicking();
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const chart = createChart(host, {
+      tooltip: { pin: "click" },
+      marks: [line(data(), { x: "t", y: "v" })],
+    });
+    chart.render();
+    const pins: boolean[] = [];
+    chart.on("pin", ({ at }) => pins.push(at !== null));
+    const [x, y] = [chart.toPixel(2, { axis: "x" })!, chart.toPixel(30, { axis: "y" })!];
+    const rect = chart.root.getBoundingClientRect();
+    for (let i = 0; i < 2; i++) {
+      pointer(chart, "pointerdown", x, y, { button: 0 });
+      pointer(chart, "pointerup", x, y, { button: 0 });
+      chart.root.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, clientX: rect.left + x, clientY: rect.top + y }),
+      );
+    }
+    attach(module);
+    await expect.poll(() => chart.root.querySelector("[aria-live]")).not.toBeNull();
+    release();
+    await expect.poll(() => pins).toEqual([true, false]);
     chart.destroy();
   });
 });

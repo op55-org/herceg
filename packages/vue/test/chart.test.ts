@@ -484,6 +484,23 @@ describe("<Chart>", () => {
     expect(chart().getCamera()).toMatchObject({ azimuth: 40, elevation: 25 });
   });
 
+  it("emits pins, a click's and the application's", async () => {
+    const data = table({ t: [0, 1, 2], a: [1, 3, 2] });
+    const pins: unknown[] = [];
+    const onPin = ({ at }: { at: unknown }) => pins.push(at);
+    const { view, chart } = chartRef();
+    mount(
+      `<Chart ref="view" :tooltip="{ pin: 'click' }" @pin="onPin">
+        <Line :data="data" x="t" y="a" />
+      </Chart>`,
+      () => ({ data, view, onPin }),
+    );
+    for (let loading = chart().loading; loading; loading = chart().loading) await loading;
+    chart().pin({ value: 1, axis: "x" });
+    chart().render();
+    expect(pins).toMatchObject([{ value: 1, axis: "x" }]);
+  });
+
   it("emits the camera panel from compositional 3D marks", async () => {
     const data = table({ x: [0, 1], y: [1, 0], z: [0, 1] });
     const events: (readonly string[] | undefined)[] = [];

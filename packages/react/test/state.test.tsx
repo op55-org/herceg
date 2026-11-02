@@ -90,3 +90,28 @@ it("writes the selection and the view it reports back, with no loop", () => {
   expect(events.at(-1)).toMatchObject({ cause: "options", phase: "commit" });
   expect(events).toHaveLength(2);
 });
+
+it("hears pins, from a click's pin to the application's", async () => {
+  let chart: HercegChart | null = null;
+  const pins: ChartEvents["pin"][] = [];
+  act(() =>
+    root.render(
+      <Chart
+        ref={(value) => {
+          chart = value;
+        }}
+        tooltip={{ pin: "click" }}
+        onPin={(event) => pins.push(event)}
+      >
+        <Line data={metrics} x="t" y="a" />
+      </Chart>,
+    ),
+  );
+  for (let loading = chart!.loading; loading; loading = chart!.loading) await loading;
+  act(() => chart!.pin({ value: 2, axis: "x" }));
+  act(() => chart!.render());
+  expect(pins.map(({ at, cause }) => [at, cause])).toEqual([
+    [{ value: 2, axis: "x", panel: expect.any(String) }, "api"],
+  ]);
+  expect(chart!.pinned).toMatchObject({ value: 2 });
+});

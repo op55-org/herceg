@@ -3,6 +3,7 @@
 // their aggregates. Kept apart from `herceg/grid`, so grids that show no
 // pivot load none of it.
 
+export type { GridEvents, GridInputEvent } from "./dom/grid.ts";
 export { createPivotGrid, type PivotGrid, type PivotGridOptions } from "./dom/grid-pivot.ts";
 export {
   createPivotGridModel,

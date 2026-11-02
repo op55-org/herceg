@@ -46,6 +46,41 @@ const firstCells = () =>
   );
 
 describe("<Grid>", () => {
+  it("hears clicks by row identity and frames drawn, calling the latest handlers", async () => {
+    const t = requests(10);
+    const model = createGridModel({
+      data: rowView(t),
+      columns: [{ field: "id" }, { field: "ms" }],
+    });
+    const heard: string[] = [];
+    const revisions: number[] = [];
+    const draw = (tag: string) =>
+      root.render(
+        <Grid
+          model={model}
+          ariaLabel="Requests"
+          style={{ height: 300 }}
+          onRowClick={({ ref, column }) => heard.push(`${tag} row ${ref.id} ${column}`)}
+          onCellClick={({ rowIndex }) => heard.push(`${tag} cell ${rowIndex}`)}
+          onRender={({ revision }) => revisions.push(revision)}
+        />,
+      );
+    act(() => draw("first"));
+    // The first frame, drawn as the grid was made, once.
+    expect(revisions).toEqual([model.revision]);
+    const cell = () => host.querySelector('.hg-body [aria-rowindex="4"] [aria-colindex="2"]')!;
+    await userEvent.click(cell());
+    act(() => draw("second"));
+    await userEvent.click(cell());
+    expect(heard).toEqual([
+      `first row ${t.identity(2)} ms`,
+      "first cell 2",
+      `second row ${t.identity(2)} ms`,
+      "second cell 2",
+    ]);
+    expect(revisions.at(-1)).toBe(model.revision);
+  });
+
   it("draws its model, and applies changed props without a new grid", () => {
     const model = createGridModel({
       data: rowView(requests(100)),

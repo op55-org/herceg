@@ -43,7 +43,8 @@ One name per concept, used the same way in code and docs.
 | **Viewport** | What a chart shows when zoomed: `{ x, y, yRight }`, the visible x range (one per x scale when panels have x scales of their own) and the left and right y axes' ranges; null for an axis that is not zoomed, which shows its configured domain or its data. A map's are ranges of its projection's plane; a network's are ranges of its layout, with y increasing downwards. |
 | **Drill root** | The node a treemap or sunburst is drilled into, whose subtree it lays out (`getDrillRoot`, chart state that clicks, keys, and `setDrillRoot` change, shared by facet panels and each subplot's own); null for the whole tree. |
 | **Selection** | What a chart's user selected, one at a time (`ChartSelection`): a brush's ranges and a lasso's outline in data values (`kind: "brush"`), or items or series by their keys (`"items"`, `"series"`). Not a row selection, which is rows a selection store's channel holds; a brush or click can write one. |
-| **Chart state** | What a chart's user changes: the selection, the viewport, what is hidden (visibility), and drill roots; events report it, and with state support (`herceg/state`) state options give it and conditional writes set it. |
+| **Chart state** | What a chart's user changes: the selection, the viewport, what is hidden (visibility), drill roots, and the pinned tooltip; events report it, and with state support (`herceg/state`) state options give it and conditional writes set it. |
+| **Pin** | Where the tooltip is held (`PinTarget`, `chart.pinned`): at an item, which it follows, or at a value on an axis in a panel, read again as data changes; a click (`tooltip.pin`), Enter, or `chart.pin` sets it. |
 | **Basis** | An opaque name of a chart's state as a report saw it (`basis`), which a conditional write gives as `expected` so that it applies only if that state has not changed since. |
 | **Controls** | What a chart of a 3D, map, tree, or network mark loads to turn, pan and zoom, drill, or move nodes by pointer, keyboard, and toolbar (`dom/controls.ts`). |
 | **Spec** | The portable, JSON-serializable description of a chart (`ChartSpec`). |
@@ -139,7 +140,7 @@ Intl format options, and expression trees; no functions or typed arrays.
 | [Marks](architecture/marks.md) | Series keys, identity and color, encodings and channels, band axes, bars, heatmaps, contours, annotations, custom marks, layout marks, networks, maps, 3D |
 | [Rendering](architecture/rendering.md) | Drawings, renderers and how one is chosen, browser layers, paint order and picking, points and GPU clouds, rasters, scheduling, animation |
 | [Layout](architecture/layout.md) | Scale instances, positions, chart layout, guides, legends, facets and subplots, insets, two y axes, text, themes and styles, time breaks, the range navigator |
-| [Interaction](architecture/interaction.md) | Inspection, picking, the lazy interaction controller, bindings, views and limits, brushes, sync, tooltips, layout controls, selected rows, accessibility, the chart handle, errors |
+| [Interaction](architecture/interaction.md) | Inspection, picking, the lazy interaction controller, bindings, views and limits, brushes, sync, tooltips, pins, rule drags, and what a click does, layout controls, selected rows, accessibility, the chart handle, errors |
 | [Export](architecture/export.md) | The export plan, static SVG, images, PDF, fonts and text admission, server snapshots, web payloads and fragments |
-| [Grids](architecture/grids.md) | Grid models, columns, grouped rows, pivots, selection, the virtualized DOM grid, remote grids |
+| [Grids](architecture/grids.md) | Grid models, columns, grouped rows, pivots, selection, the virtualized DOM grid and its events, remote grids |
 | [Packages](architecture/packages.md) | Package layout, the React, Vue, and Svelte adapters, the Python package's live charts and Streamlit, the DOM-free core |

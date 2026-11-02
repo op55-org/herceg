@@ -456,6 +456,13 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    */
   readonly tooltip: "x" | "y" | "point" | "cell";
   /**
+   * For rules with `drag`: the value a drag holds the rule at while it
+   * moves, by the chart dragging it (its model, `Frame.owner`), set by the
+   * interaction controller and drawn in that chart in place of the rule's
+   * own until dropped. A mark several charts draw moves in one alone.
+   */
+  readonly moved?: WeakMap<object, number> | undefined;
+  /**
    * For marks of rows placing them otherwise than plainly on their axes (in
    * a frame, on a scale of the chart's own, or moved by pixels): how, by
    * direction (marks/row-bindings.ts). The chart draws and inspects such a

@@ -62,6 +62,8 @@ export interface ItemChanges {
   itemMove: {
     key: string;
     position: { x: number; y: number } | null;
+    /** Node moves are reported done; rules' drags report previews too (dom/interaction.ts). */
+    phase: "commit";
     panels?: readonly string[];
   };
 }
@@ -1253,8 +1255,8 @@ export class ItemViews {
     const moves = view.result.moves!;
     const state = this.#state(view.state);
     state.dragged = undefined;
-    const report = (change: ItemChanges["itemMove"]) => {
-      const scoped = { ...change, ...this.#scope(view) };
+    const report = (change: Omit<ItemChanges["itemMove"], "phase">) => {
+      const scoped = { ...change, phase: "commit" as const, ...this.#scope(view) };
       this.changed?.("itemMove", scoped);
       return scoped;
     };

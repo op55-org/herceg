@@ -657,6 +657,7 @@ describe("moving nodes of hidden groups", () => {
     expect(model.items!.setItemPosition(key("a"), { x: 7, y: 8 })).toEqual({
       key: key("a"),
       position: { x: 7, y: 8 },
+      phase: "commit",
     });
     expect(() => model.items!.setItemPosition(key("z"), { x: 1, y: 1 })).toThrow(
       /setItemPosition: no node .* in the network/,

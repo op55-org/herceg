@@ -2284,6 +2284,46 @@ def test_inspection_options_are_refused(make, message):
         make()
 
 
+def test_pins_drags_and_legend_actions_reach_the_spec():
+    data = {"t": [0, 1], "a": [1.0, 2.0], "b": [2.0, 1.0]}
+    chart = (
+        hg.Chart(
+            data,
+            tooltip=hg.Tooltip(pin="click"),
+            select="series",
+            legend=hg.LegendOptions(action="select"),
+            guides=[hg.legend(action=False)],
+        )
+        .line(x="t", y=["a", "b"])
+        .rule(y=1.5, id="limit", drag=True)
+        .rule(x=dt.datetime(2026, 1, 1), drag=True)
+    )
+    spec = chart.to_spec()[0]
+    assert spec["tooltip"] == {"pin": "click"}
+    assert spec["legend"] == {"action": "select"}
+    assert spec["guides"] == [{"type": "legend", "action": False}]
+    assert [mark.get("drag") for mark in spec["marks"]] == [None, True, True]
+    assert spec["marks"][2]["x"] == 1767225600000.0
+
+
+def test_pins_drags_and_legend_actions_are_refused_where_they_do_not_work():
+    data = {"t": [0, 1], "v": [1.0, 2.0]}
+    with pytest.raises(ValueError, match=r'^Tooltip pin: expected "click"; received "hover"'):
+        hg.Chart(data, tooltip=hg.Tooltip(pin="hover")).line("t", "v").to_spec()  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=r"^Chart tooltip pin: pins what the pointer inspects"):
+        hg.Chart(data, tooltip=hg.Tooltip(pin="click"), inspection=False).line("t", "v").to_spec()
+    with pytest.raises(ValueError, match=r"^line tooltip pin: is the chart's"):
+        hg.Chart(data).line("t", "v", tooltip=hg.Tooltip(pin="click"))
+    with pytest.raises(ValueError, match=r'^LegendOptions action: expected "hide", "select", or'):
+        hg.Chart(data, legend=hg.LegendOptions(action="toggle")).line("t", "v").to_spec()  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=r"^rule drag: rules over a table move with their rows"):
+        hg.Chart(data).rule(y="v", drag=True)
+    with pytest.raises(ValueError, match=r"^rule drag: a dragged rule stands at a number or"):
+        hg.Chart(data).rule(y=hg.Fraction(0.5), drag=True)
+    with pytest.raises(ValueError, match=r"^rule drag: expected True or False"):
+        hg.Chart(data).rule(y=1.0, drag="yes")  # type: ignore[arg-type]
+
+
 def test_tooltip_fields_are_refused_where_they_do_not_belong():
     data = {"t": [0, 1], "p99": [210.0, 304.0], "host": ["a", "b"]}
     with pytest.raises(ValueError, match=r"^Chart tooltip fields: belong to the marks"):

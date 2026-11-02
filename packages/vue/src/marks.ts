@@ -386,7 +386,7 @@ export const Rule = /* @__PURE__ */ markComponent(
   "Rule",
   ({ data, ...options }: RuleOptions & { data?: Table<Schema> }) =>
     data ? rule(data, options as RuleDataOptions<Schema>) : rule(options),
-  ["contributeDomain", "legend", "pick", "inspect"],
+  ["contributeDomain", "legend", "pick", "inspect", "drag"],
 ) as unknown as <T = undefined>(props: RuleProps<T>) => null;
 
 /** Shaded x or y ranges, constant or one per row of `data`. */

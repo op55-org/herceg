@@ -121,8 +121,14 @@ const emits = {
   camera: (_: ChartEvents["camera"]) => true,
   /** A treemap or sunburst was drilled into a node or back out: its key (null for the whole tree) and path. */
   drill: (_: ChartEvents["drill"]) => true,
-  /** A network's node was moved (dragged, keys, `setItemPosition`) or put back (null). */
+  /**
+   * A network's node was moved (dragged, keys, `setItemPosition`) or put
+   * back (null), or a rule of `drag: true` moved: previews while dragged, a
+   * commit where dropped, a cancel when given up.
+   */
   itemMove: (_: ChartEvents["itemMove"]) => true,
+  /** The tooltip was pinned (a click with `tooltip.pin`, `pin()`) or let go (null). */
+  pin: (_: ChartEvents["pin"]) => true,
   /** Series or items were hidden or shown (legend, `setVisibility`): the keys now hidden. */
   visibility: (_: ChartEvents["visibility"]) => true,
   /** The chart drew a frame of its data: its panels and pixel mapping describe it, for overlays. */
@@ -524,6 +530,7 @@ export const Chart = defineComponent({
           emit("update:drillRoot", event.state!);
         });
         created.on("itemMove", (event) => emit("itemMove", event));
+        created.on("pin", (event) => emit("pin", event));
         created.on("visibility", (event) => {
           emit("visibility", event);
           emit("update:visibility", event.state!);
