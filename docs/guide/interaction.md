@@ -308,8 +308,9 @@ written as the axis' `format` writes it.
 
 | Option | Does |
 | --- | --- |
-| `tooltip` | `true` (default), `false`, or `{ axisLabels }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw; inspection goes on for hover and click events. |
+| `tooltip` | `true` (default), `false`, or `{ axisLabels, pin }`. What it lists is what [`inspection`](#inspection) reads; `false` hides the box and the pointer's crosshair, the application's to draw; inspection goes on for hover and click events. |
 | `tooltip.axisLabels` | Labels the crosshair on the axes. |
+| `tooltip.pin` | `"click"`: a click or Enter pins the tooltip ([Pinned tooltips](#pinned-tooltips)). |
 | axis `tooltipFormat` | How tooltips, the keyboard, and crosshair labels write values, without changing ticks. |
 | mark `tooltip: { fields }` | More of the row: field names, or `{ field, label?, format? }`. |
 | `renderTooltip` | JavaScript only: content of your own, text or a node. |
@@ -352,6 +353,128 @@ hg.Chart(daily).line(x="time", y="p99", tooltip=hg.Tooltip(fields=["requests"]))
   React, Vue, and Svelte render their own components there
   ([Frameworks](frameworks.md#tooltips)).
 
+## Pinned tooltips
+
+With `tooltip: { pin: "click" }`, a click on what the tooltip shows pins
+it there, and Enter pins it at the keyboard cursor. A pinned tooltip
+stays as the pointer moves on, takes the pointer and the focus, so links
+and buttons in `renderTooltip` content work, and is a group named
+"Pinned tooltip". Content drawn again as the data changes keeps the
+focus: on the control it was on where the new content has that control,
+else on the tooltip. Escape, a click outside it (off the data, or outside
+the chart), or a second click where it is pinned lets it go, and the
+focus goes back to the chart.
+
+```ts
+const chart = createChart(element, {
+  state: chartState, // pin() and pinned need state support
+  marks: [line(sales, { id: "sales", x: "day", y: ["east", "west"] })],
+  tooltip: { pin: "click" },
+  renderTooltip: (inspection) => {
+    const link = document.createElement("a");
+    link.href = `/days/${inspection.value}`;
+    link.textContent = "Open the day";
+    return link;
+  },
+});
+chart.on("pin", ({ at, cause }) => cause !== "api" && saveView({ pinned: at }));
+chart.pin({ value: Date.UTC(2025, 3, 1), axis: "x" }); // restores a pin the page saved
+```
+
+```python
+chart = hg.line(sales, x="day", y=["east", "west"], tooltip=hg.Tooltip(pin="click"))
+widget = chart.widget()
+widget.on_pin(lambda pinned: print(pinned))
+widget.pin(value=datetime(2025, 4, 1), axis="x")
+```
+
+- **What it is pinned to.** With the inspection's mode `"nearest"`, or
+  on a layout item (a slice, a node), the item itself: it follows the item
+  by its key as data changes and goes when the item does. With
+  `"nearest-x"` or `"nearest-y"`, the item's value on that axis
+  (`{ value, axis, panel }`): every series is read there again as data
+  changes. Either hides while out of view, zoomed or panned away, and
+  shows again with it; meanwhile no other tooltip shows. A change of the
+  inspection's mode lets it go.
+- **What pins.** An item the inspection reads: a series' point, a layout
+  item, a custom mark's item. Annotations and marks with `inspect: false`
+  pin nothing; a click there, or off the data, lets a pin go. Along an
+  axis, an item the inspection at its value does not read (a heatmap's
+  cell, a point placed in the plot's own units, a right-axis point under
+  `"nearest-y"` beside left-axis series) pins nothing.
+- **From the application.** `chart.pin({ item } | { value, axis?, panel? }
+  | null)` pins or lets go as a click would, reported as a `pin` event
+  with cause `"api"`; `chart.pinned` reads where it is. `item` takes a key
+  from an event or a reference (`{ mark: "sales", item: [...] }`);
+  `value`, a number, epoch ms on time axes, or a category's name; `axis`
+  is the inspection's by default; `panel`, needed in charts of several, a
+  panel's key. Pins asked for before the first frame wait for it; one
+  that then finds nothing to read is reported let go. A pin at a value
+  nothing reads lets any pin go. Both need [state support](#chart-state);
+  `pinned` is `undefined` without it.
+- **Options.** `tooltip.pin` with `inspection: false` is refused: nothing
+  is inspected to pin.
+
+## Dragging rules
+
+A rule at a value with `drag: true` can be dragged along its axis. While
+it moves, it is drawn at the pointer and the chart reports `itemMove`
+with `phase: "preview"` once a frame; on release, `"commit"`; on Escape
+or a lost pointer, `"cancel"`, and the rule goes back. Its `position` is
+the value in data (`{ y }` for a horizontal rule, `{ x }` for a vertical
+one; epoch ms on time axes), `markId` the rule's `id`; a rule on the
+right axis adds `axis: "right"`, and one in a subplot or facet `panels:
+[id]` (every report of the drag, its cancel too, names the panel it began
+in). A
+press on a dragged rule neither pans nor brushes nor clicks, and touches
+on it move it rather than scroll the page. The drag is its pointer's:
+another finger neither moves nor ends it. A rule that the options take
+away, or whose subplot or facet goes, goes back with a cancel.
+
+The value stays the application's: a rule has no state of its own. After
+a commit the next frame draws the rule where its options say: where the
+listener set it (accepted), back where it was (rejected), or nowhere (the
+rule removed).
+
+```ts
+let threshold = 250;
+const marks = () => [line(latency, { x: "time", y: "p99" }), rule({ id: "threshold", y: threshold, drag: true })];
+const chart = createChart(element, { marks: marks() });
+chart.on("itemMove", ({ markId, phase, position }) => {
+  if (markId !== "threshold" || phase !== "commit" || position?.y === undefined) return;
+  threshold = Math.round(position.y); // accepted, rounded
+  chart.update({ marks: marks() });
+});
+```
+
+```python
+chart = hg.Chart(latency).line(x="time", y="p99").rule(y=250, id="threshold", drag=True)
+widget = chart.widget()
+widget.on_item_move(lambda move: move.phase == "commit" and widget.update_rule("threshold", y=move.position.y))
+```
+
+Rules over a table move with their rows and refuse `drag`
+(`rule drag: rules over a table move with their rows; drag a rule of a
+value`); so do rules placed by a share of the plot or by pixels. The
+pointer over a dragged rule shows the resize cursor along its axis.
+
+## What a click does
+
+A click or Enter on a chart does at most one of the chart's own actions,
+in this order, so one click is never two that conflict:
+
+1. inside a pinned tooltip: its content's own (a link, a button), nothing
+   of the chart's;
+2. on a legend entry: the legend's `action`;
+3. on a tree's item where `zoom` drills: drilling;
+4. otherwise, about the item picked: the selection (`interaction.select`)
+   and the pin (`tooltip.pin`), each as it would alone, so a chart with
+   both selects and pins the same point with one click. A click that
+   picks no item clears the selection and lets the pin go.
+
+A leaf of a tree, which drills nowhere, is selected and pinned as other
+items are. The `click` event follows in every case.
+
 ## Events
 
 `on(event, listener)` returns a function that stops listening. Events
@@ -380,7 +503,8 @@ chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer
 | `edge` | A view near an end of its extent: `scale`, `instance`, `panels`, `side`, `domain`, `bound`, `cause`. |
 | `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`, `phase` (the writing gesture's, another chart's live brush's too), `cause` (this chart's gesture, click, or key, or `"sync"` for another writer), and `revision`. |
 | `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, and `panels` for panels' own legends; with state support, `state`. |
-| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled (with state support, its `state`); a network node moved, each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
+| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled (with state support, its `state`); a network node moved, or a [rule dragged](#dragging-rules) (`markId`, `phase`), each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
+| `pin` | The tooltip was [pinned](#pinned-tooltips) or let go: `at` (null when let go), its `inspection`, `cause`, `revision`; with state support, `basis`. |
 | `render` | A frame of the data, or a selection over it, was drawn, for overlays that follow the panels: the `revision` on screen. |
 | `error` | A `ChartError`, once per failed change. |
 
@@ -506,6 +630,12 @@ chart.point(x="weight", y="mpg", series="origin", id="cars",
   its own `clear` says). Enter on the keyboard cursor's point does what a
   click does. An item is only its mark's: another mark's point of the
   same row is not selected.
+- **Legends.** With `legend: { action: "select" }` (or a guide legend's
+  `action`), a legend entry selects the series it names instead of hiding
+  them: alone, or with Shift added or removed; a press on the one selected
+  clears. Entries show which are selected (`aria-pressed`) and dim the
+  others. It needs state support; `action: false` makes entries do nothing
+  of the chart's own, `click` still reporting them.
 - **Setting it.** `chart.select` takes a selection of any kind; a brush's
   x range alone may be a pair (`chart.select([from, to])`). Items and
   series are named by the keys events give (`target.item`,
@@ -561,7 +691,7 @@ which `bindings` can give other gestures.
 ## Chart state
 
 A chart's state is what its user changes: the selection, the view, what
-is hidden, and a tree's drill root. Charts report it in events. With
+is hidden, a tree's drill root, and the pinned tooltip. Charts report it in events. With
 state support they also take it as options, and take writes that apply
 only if the user has not changed it meanwhile. State support is a module
 of its own, so charts that never set their state from outside do not
@@ -604,7 +734,8 @@ the options never loops. Given as `undefined`, an option is forgotten.
 
 With state support, state events carry the whole state as its option
 takes it (`state`). Drill roots apply once the first frame has drawn the
-trees.
+trees. The pinned tooltip has no option: `chart.pin` sets it, with
+`expected` too, and `chart.pinned` reads it.
 
 **Conditional writes.** Each state event carries a `basis`, and
 `chart.basis` names the chart's state now. Given as `expected`, a setter

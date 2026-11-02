@@ -50,7 +50,7 @@ import type {
   treemap,
   violin,
 } from "herceg";
-import type { GridOptions as DataGridOptions } from "herceg/grid";
+import type { GridOptions as DataGridOptions, GridEvents } from "herceg/grid";
 import type { GridOptions, InsetOptions, PanelDefinition, Tracks } from "herceg/layout";
 import type { ReactNode } from "react";
 import type { MarkProps, Mixed, Takes } from "../../herceg/test/helpers/props.ts";
@@ -171,7 +171,10 @@ true satisfies Takes<
   Omit<PropsOf<typeof Chart>, Own>,
   Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> & Listeners
 >;
+type GridListeners = {
+  [E in keyof GridEvents as `on${Capitalize<E>}`]?: ((event: GridEvents[E]) => void) | undefined;
+};
 true satisfies Takes<
   Omit<PropsOf<typeof DataGrid<Mixed>>, "model" | "className" | "style" | "ref">,
-  Omit<DataGridOptions<Mixed>, "model">
+  Omit<DataGridOptions<Mixed>, "model"> & GridListeners
 >;

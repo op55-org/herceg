@@ -899,6 +899,132 @@ def test_drill_state_callbacks_resets_and_redisplay(kind):
         widget.drill_root = "East"
 
 
+def test_pins_from_python_and_browsers_with_callbacks_and_redisplay():
+    start = dt.datetime(2026, 1, 1)
+    widget = hg.line(
+        {"t": [start + dt.timedelta(hours=i) for i in range(3)], "v": [1.0, 3.0, 2.0]},
+        x="t",
+        y="v",
+        tooltip=hg.Tooltip(pin="click"),
+    ).widget()
+    browser = Browser(widget)
+    pins = []
+    widget.on_pin(pins.append)
+    assert widget.pinned is None
+    widget.pin(value=start, axis="x")
+    sent = browser.last[0]
+    assert sent == {
+        "type": "pin",
+        "pinned": {"value": 1767225600000.0, "axis": "x", "time": True},
+        "revision": 1,
+    }
+    assert pins == [hg.PinTarget(value=start, axis="x")] and widget.pinned == pins[0]
+    # The browser's echo, naming its panel, is the same pin: no second call.
+    browser.reply({"type": "pin", "pinned": {**sent["pinned"]}, "revision": 1})
+    assert len(pins) == 1
+    assert widget.get_state()["_chart"]["pinned"] == sent["pinned"]
+    # A click pins an item there; Escape lets it go.
+    browser.reply({"type": "pin", "pinned": {"item": '[0,"v",1]'}, "revision": 1})
+    assert pins[-1] == hg.PinTarget(item='[0,"v",1]')
+    browser.reply({"type": "pin", "pinned": None, "revision": 1})
+    assert pins[-1] is None and widget.pinned is None
+    # Reports of other shapes change nothing.
+    browser.reply({"type": "pin", "pinned": {"value": True, "axis": "x"}, "revision": 1})
+    browser.reply({"type": "pin", "pinned": {"item": 3}, "revision": 1})
+    assert widget.pinned is None and len(pins) == 3
+    widget.pinned = hg.PinTarget(item='[0,"v",2]')
+    widget.pin()
+    assert pins[-2:] == [hg.PinTarget(item='[0,"v",2]'), None]
+    with pytest.raises(ValueError, match="widget.pin: expected an item or a value"):
+        widget.pin(axis="x")
+    with pytest.raises(ValueError, match="widget.pin axis: an item is pinned where it is"):
+        widget.pin('[0,"v",2]', axis="x")
+    with pytest.raises(ValueError, match="PinTarget item: expected an item or a value, one of"):
+        hg.PinTarget()
+    with pytest.raises(ValueError, match="widget.pinned: expected an hg.PinTarget"):
+        widget.pinned = '[0,"v",2]'
+
+
+def test_a_pin_leaving_its_axis_to_the_chart_is_not_one_along_x():
+    # Along y, where the chart inspects along y: only the browser knows.
+    widget = hg.line({"t": [0.0, 1.0, 2.0], "v": [1.0, 3.0, 2.0]}, x="t", y="v").widget()
+    browser = Browser(widget)
+    pins = []
+    widget.on_pin(pins.append)
+    widget.pin(value=2.0, axis="x")
+    widget.pin(value=2.0)
+    assert [content["pinned"] for content, _ in browser.messages if content["type"] == "pin"] == [
+        {"value": 2.0, "axis": "x"},
+        {"value": 2.0},
+    ]
+    # The browser names the axis it took: the same pin, said better.
+    browser.reply(
+        {"type": "pin", "pinned": {"value": 2.0, "axis": "y"}, "revision": 2, "origin": "tab"}
+    )
+    assert len(pins) == 2
+    assert widget.get_state()["_chart"]["pinned"] == {"value": 2.0, "axis": "y"}
+
+
+def test_item_moves_reach_python_as_events_and_rules_move_by_update_rule():
+    start = dt.datetime(2026, 1, 1)
+    widget = (
+        hg.Chart({"t": [start, start + dt.timedelta(hours=1)], "v": [1.0, 2.0]})
+        .line(x="t", y="v")
+        .rule(y=1.5, id="limit", drag=True)
+        .rule(x=start, id="launch", drag=True)
+        .widget()
+    )
+    browser = Browser(widget)
+    moves = []
+    widget.on_item_move(moves.append)
+    assert "move" in widget._listening
+    browser.reply(
+        {
+            "type": "move",
+            "event": {
+                "key": '["launch",0]',
+                "markId": "launch",
+                "position": {"x": 1767229200000},
+                "phase": "commit",
+                "cause": "pointer",
+                "revision": 4,
+                "time": ["x"],
+            },
+        }
+    )
+    browser.reply({"type": "move", "event": {"key": 3, "phase": "commit", "revision": 4}})
+    assert moves == [
+        hg.ItemMove(
+            key='["launch",0]',
+            mark_id="launch",
+            position=hg.ItemPosition(x=start + dt.timedelta(hours=1)),
+            phase="commit",
+            cause="pointer",
+            revision=4,
+        )
+    ]
+    # Python keeps the drop: every browser draws the rule there, and later ones too.
+    widget.update_rule("launch", x=moves[0].position.x)
+    assert browser.last[0] == {
+        "type": "rule",
+        "mark": 2,
+        "axis": "x",
+        "value": 1767229200000.0,
+        "revision": 1,
+    }
+    widget.update_rule("limit", y=2.5)
+    spec = widget.get_state()["_chart"]["spec"]
+    assert [mark.get("x", mark.get("y")) for mark in spec["marks"][1:]] == [2.5, 1767229200000.0]
+    assert spec["marks"][1]["drag"] is True
+    nope = 'widget.update_rule id: "nope" is no rule\'s id; the rules with ids are "limit", "la'
+    with pytest.raises(ValueError, match=nope):
+        widget.update_rule("nope", y=1.0)
+    with pytest.raises(ValueError, match='widget.update_rule y: rule "launch" stands on x; give x'):
+        widget.update_rule("launch", y=1.0)
+    with pytest.raises(ValueError, match="widget.update_rule: expected x or y"):
+        widget.update_rule("limit")
+
+
 def network():
     return hg.graph(
         {"source": ["a", "b"], "target": ["b", "c"]}, "source", "target", drag=True
@@ -909,7 +1035,7 @@ def test_item_positions_replace_reset_copy_and_report_without_listeners():
     widget = network()
     browser = Browser(widget)
     moves = []
-    widget.on_item_move(moves.append)
+    widget.on_item_positions(moves.append)
     positions = {'[0,"a"]': (np.float64(1), np.int64(2)), '[0,"b"]': (3, 4)}
     widget.item_positions = positions
     assert widget.item_positions == positions and moves == [positions]
@@ -925,7 +1051,7 @@ def test_item_positions_replace_reset_copy_and_report_without_listeners():
     assert widget.get_state()["_chart"]["item_positions"] == {'[0,"a"]': [5.0, 6.0]}
     widget.item_positions = {}
     assert moves[-1] == {} and widget.item_positions == {}
-    widget.on_item_move(moves.append, remove=True)
+    widget.on_item_positions(moves.append, remove=True)
     browser.reply({"type": "itemMove", "item_positions": {'[0,"b"]': [8, 9]}, "revision": 3})
     assert widget.item_positions == {'[0,"b"]': (8.0, 9.0)}
     assert len(moves) == 3
@@ -984,7 +1110,7 @@ def test_network_data_changes_keep_moves_of_nodes_that_remain_and_rebase_delayed
     )
     assert widget.item_positions == {'[0,"b"]': (3.0, 4.0), '[0,"c"]': (5.0, 6.0)}
     moves = []
-    widget.on_item_move(moves.append)
+    widget.on_item_positions(moves.append)
     widget.update(title="Still moved")
     widget.append({"source": ["c"], "target": ["d"]})
     # Nodes that remain stay moved; Python hears of nothing.

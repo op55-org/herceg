@@ -404,6 +404,50 @@ describe("grid selection", () => {
       }),
     ).toThrow(/grid selectionStore: the store is of another table/);
   });
+
+  it("selects one row a plain click, and clears it on the row alone with click toggle", () => {
+    const t = table({ x: [1, 2, 3] });
+    const only = createGridModel({ data: rowView(t), columns: [{ field: "x" }] });
+    only.click(1);
+    only.click(1);
+    expect(selected(only)).toEqual([1]);
+    const toggling = createGridModel({
+      data: rowView(t),
+      columns: [{ field: "x" }],
+      selection: { click: "toggle" },
+    });
+    toggling.click(1);
+    expect(selected(toggling)).toEqual([1]);
+    toggling.click(1);
+    expect(selected(toggling)).toEqual([]);
+    // Among others selected, the row is not alone: the click selects only it.
+    toggling.select(0);
+    toggling.select(1, "toggle");
+    toggling.click(1);
+    expect(selected(toggling)).toEqual([1]);
+    expect(() =>
+      createGridModel({
+        data: rowView(t),
+        columns: [],
+        selection: { click: "always" as never },
+      }),
+    ).toThrow('grid selection.click: expected "toggle" or "only"; received "always"');
+  });
+
+  it("counts what it tells listeners of as its revision", () => {
+    const t = table({ x: [1, 2, 3] });
+    const model = createGridModel({ data: rowView(t), columns: [{ field: "x" }] });
+    const before = model.revision;
+    model.select(0);
+    expect(model.revision).toBe(before + 1);
+    // Moving the focus and extending the selection with it is one change.
+    model.focusCell(0, "x");
+    const focused = model.revision;
+    model.moveFocus("down", { extend: true });
+    expect(model.revision).toBe(focused + 1);
+    t.append({ x: [4] });
+    expect(model.revision).toBe(focused + 2);
+  });
 });
 
 describe("grid models", () => {

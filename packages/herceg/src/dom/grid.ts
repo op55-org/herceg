@@ -25,7 +25,7 @@ import { resolveTokens, themeReadsPage } from "../theme.ts";
 import { ColumnControls } from "./grid-columns.ts";
 import { GRID_CSS, themeProperties } from "./grid-style.ts";
 import { readPage, watchPage } from "./page-theme.ts";
-import { observeVisibility, type Scheduled, schedule, unschedule } from "./scheduler.ts";
+import { observeVisibility, report, type Scheduled, schedule, unschedule } from "./scheduler.ts";
 
 export interface GridOptions<S extends Schema = Schema, M extends BaseGridModel<S> = GridModel<S>> {
   /** What the grid shows; the application owns it, and destroying the grid leaves it be. */
@@ -40,6 +40,40 @@ export interface GridOptions<S extends Schema = Schema, M extends BaseGridModel<
 
 /** Options to change; one given as undefined goes back to its default. */
 export type GridUpdate = Partial<Omit<GridOptions, "model">>;
+
+/** What a grid's clicks on rows and cells report. */
+export interface GridInputEvent {
+  /**
+   * The row as the model names it (see `GridRef`): a table row by its
+   * identity, a group by its key, the same however sorting, filtering, and
+   * scrolling move it.
+   */
+  readonly ref: GridRef;
+  /**
+   * Its index in the grid's rows now (the model's `row(rowIndex)` reads
+   * it); -1 where the click's selection took it out of them (a filter on
+   * the selection, applied by a `select` listener).
+   */
+  readonly rowIndex: number;
+  /** The id of the column of the cell clicked. */
+  readonly column: string;
+  /** A press, or Enter on the focused cell. */
+  readonly cause: "pointer" | "keyboard";
+}
+
+/** A grid's events by name, with what their listeners receive. */
+export interface GridEvents {
+  /**
+   * A body row was clicked (a press released in place on one of its
+   * cells, after the click selected) or Enter pressed on one of its cells.
+   * Not for its expand toggle or checkbox, which act alone.
+   */
+  rowClick: GridInputEvent;
+  /** The same click, as on its cell: in every case `rowClick` is, after it. */
+  cellClick: GridInputEvent;
+  /** The grid drew a frame of its model, as of the model's `revision`. */
+  render: { readonly revision: number };
+}
 
 /**
  * Header rows over the columns' own, for grids that need them
@@ -189,6 +223,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   /** The scroller's offset as last drawn, and the model's top it stands for. */
   #expected: { physical: number; logical: number } | null = null;
   #dirty = true;
+  #drawn = 0;
   #visible = true;
   #destroyed = false;
   #rendering = false;
@@ -196,6 +231,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   #focusRequested = false;
   #pageChanged = false;
   #press: { x: number; y: number } | null = null;
+  readonly #listeners = new Map<keyof GridEvents, Set<(event: never) => void>>();
   readonly #stops: (() => void)[] = [];
   #unwatchPage: (() => void) | undefined;
 
@@ -287,6 +323,11 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     return this.#visible;
   }
 
+  /** The model's `revision` as the grid last drew it (it draws its first frame as it is made). */
+  get drawnRevision(): number {
+    return this.#drawn;
+  }
+
   /** Changes options; one given as undefined goes back to its default. */
   update(options: GridUpdate): void {
     const next: Record<string, unknown> = { ...this.#options, ...options };
@@ -304,6 +345,39 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     this.#draw();
   }
 
+  /** Listens to `type`; returns what stops it. A listener that throws is reported; the others still run. */
+  on<K extends keyof GridEvents>(type: K, listener: (event: GridEvents[K]) => void): () => void {
+    let set = this.#listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.#listeners.set(type, set);
+    }
+    set.add(listener);
+    return () => set.delete(listener);
+  }
+
+  #emit<K extends keyof GridEvents>(type: K, event: GridEvents[K]): void {
+    for (const listener of [...(this.#listeners.get(type) ?? [])]) {
+      // A listener may destroy the grid: the rest hear nothing more.
+      if (this.#destroyed) return;
+      try {
+        (listener as (event: GridEvents[K]) => void)(event);
+      } catch (error) {
+        report(error);
+      }
+    }
+  }
+
+  /**
+   * Reports a click (or Enter) on the cell of column `column` in the row
+   * named `ref`, where that row is now (-1 if gone): its own action is done.
+   */
+  #clicked(ref: GridRef, column: string, cause: GridInputEvent["cause"]): void {
+    const event = { ref, rowIndex: this.model.indexOf(ref), column, cause };
+    this.#emit("rowClick", event);
+    this.#emit("cellClick", event);
+  }
+
   /** Focuses a cell (row -1 for the header row), scrolling it into view, and moves the page's focus to it. */
   focusCell(rowIndex: number, column: string): void {
     this.model.focusCell(rowIndex, column);
@@ -316,6 +390,7 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
     if (this.#destroyed) return;
     this.#controls.destroy();
     this.#destroyed = true;
+    this.#listeners.clear();
     unschedule(this);
     for (const stop of this.#stops) stop();
     this.#unwatchPage?.();
@@ -381,6 +456,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
   #draw() {
     this.#dirty = false;
     const model = this.model;
+    // What the frame draws: changes made as it draws (by a focus listener) are the next frame's.
+    const revision = model.revision;
     this.#rendering = true;
     try {
       const count = model.rowCount;
@@ -411,6 +488,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       this.#rendering = false;
       this.#focusRequested = false;
     }
+    this.#drawn = revision;
+    if (this.#listeners.get("render")?.size) this.#emit("render", { revision });
   }
 
   /**
@@ -913,6 +992,9 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       const expansion = this.#expansion(focus.rowIndex);
       model.setExpanded(groupKey, !expanded);
       expansion(false);
+    } else if (key === "Enter") {
+      // Enter on a row's cell is a click on it, without selecting (Space selects).
+      this.#clicked(model.row(focus.rowIndex).ref, focus.column, "keyboard");
     } else if (key === " ") {
       model.select(focus.rowIndex, "toggle");
       this.#announceSelection();
@@ -963,12 +1045,16 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       model.select(rowIndex, "toggle");
       this.#announceSelection();
     } else {
+      // The row, named before selecting: listeners of the selection may move it.
+      const { ref } = model.row(rowIndex);
       const command = event.ctrlKey || event.metaKey;
-      model.select(
-        rowIndex,
-        command ? (event.shiftKey ? "addRange" : "toggle") : event.shiftKey ? "range" : "only",
-      );
+      if (!command && !event.shiftKey) model.click(rowIndex);
+      else model.select(rowIndex, command ? (event.shiftKey ? "addRange" : "toggle") : "range");
       this.#announceSelection();
+      this.#focusRequested = true;
+      this.render();
+      this.#clicked(ref, column, "pointer");
+      return;
     }
     this.#focusRequested = true;
     this.render();

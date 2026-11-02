@@ -31,6 +31,7 @@ from ._chart import (
 from ._data import UNTYPED, Column, Table
 from ._derive import Ordered
 from ._errors import ChartError, UnknownOption, key_path, located, shown
+from ._events import _milliseconds
 from ._guides import guides_spec
 from ._rows import bound_tables
 from .express._common import Call, call_of, panel_plots, remake
@@ -42,9 +43,17 @@ Message = tuple[dict[str, Any], list[bytes]]
 
 
 class LiveChart:
-    def __init__(self, chart: Chart, overrides: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        chart: Chart,
+        overrides: Mapping[str, Any] | None = None,
+        rules: Mapping[str, tuple[str, float]] | None = None,
+    ) -> None:
         #: The options ``update`` changed, which a chart made again keeps.
         self.overrides = dict(overrides or {})
+        #: Where ``update_rule`` put rules, by id: the axis and the place,
+        #: which a chart made again keeps for its rules of those ids.
+        self.rules = dict(rules or {})
         settings = {**chart._settings, **self.overrides}
         chart._check_spec()
         self._settings = settings
@@ -58,6 +67,10 @@ class LiveChart:
         self._options = self._spec_options(settings)
         self._layout = chart._layout_spec()
         self._marks = chart._mark_specs()
+        for index, mark in enumerate(self._marks):
+            moved = self.rules.get(mark["id"]) if mark["type"] == "rule" and "id" in mark else None
+            if moved and _movable(mark, moved[0]):
+                self._marks[index] = {**mark, moved[0]: moved[1]}
         # What option updates are checked against: the layout marks and the subplots.
         self._layouts = chart._layouts()
         self._subplots = len(chart._panels)
@@ -376,6 +389,47 @@ class LiveChart:
         self.overrides.update(changes)
         return ({"type": "options", "options": changed}, []) if changed else None
 
+    def update_rule(self, id: Any, x: Any, y: Any) -> Message:
+        """Moves the rule of id `id` to `x` or `y`, along the axis it stands
+        on; the message carries the mark's index and its new place."""
+        name = "widget.update_rule"
+        places = {
+            axis: _milliseconds(value, f"{name} {axis}")
+            for axis, value in (("x", x), ("y", y))
+            if value is not None
+        }
+        if not places:
+            raise ChartError(f"{name}: expected x or y, the axis the rule stands on; give one")
+        if len(places) == 2:
+            raise ChartError(f"{name} x: a rule stands on x or on y; give one of them")
+        rules = [
+            index
+            for index, mark in enumerate(self._marks)
+            if mark["type"] == "rule" and mark.get("id") == id
+        ]
+        if not isinstance(id, str) or not rules:
+            ids = [mark["id"] for mark in self._marks if mark["type"] == "rule" and "id" in mark]
+            known = ", ".join(shown(i) for i in ids) or "none"
+            raise ChartError(
+                f"{name} id: {shown(id)} is no rule's id; the rules with ids are {known}"
+            )
+        index = rules[0]
+        mark = self._marks[index]
+        [(axis, place)] = places.items()
+        if axis not in mark:
+            raise ChartError(
+                f"{name} {axis}: rule {shown(id)} stands on {'y' if axis == 'x' else 'x'}; "
+                f"give {'y' if axis == 'x' else 'x'}"
+            )
+        if not _movable(mark, axis):
+            raise ChartError(
+                f"{name} id: rule {shown(id)} stands at a column or a share of the plot; "
+                "move a rule at a number or a datetime"
+            )
+        self._marks[index] = {**mark, axis: place}
+        self.rules[id] = (axis, place)
+        return ({"type": "rule", "mark": index, "axis": axis, "value": place}, [])
+
     def _spec_options(self, settings: dict[str, Any]) -> dict[str, Any]:
         """The spec options of `settings`, with the panels' legends after their guides."""
         options = spec_options(settings)
@@ -500,6 +554,12 @@ class LiveChart:
             field: _as_kind(_read_rows(table, field, method), column, field, method)
             for field, column in current.items()
         }
+
+
+def _movable(mark: Mapping[str, Any], axis: str) -> bool:
+    """Whether the rule spec `mark` stands at a number (or a time) on
+    `axis`: one ``update_rule`` moves."""
+    return "data" not in mark and isinstance(mark.get(axis), (int, float))
 
 
 class ExpressData:

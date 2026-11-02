@@ -20,7 +20,7 @@ import type { DrawnPanel, Inspection, Viewport, ViewSet } from "../model/model.t
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Expression } from "../spec/spec.ts";
-import type { Phase } from "../spec/state.ts";
+import type { Phase, PinTarget } from "../spec/state.ts";
 
 type Ends = [number, number] | [string, string];
 type Range = readonly [number, number];
@@ -464,6 +464,73 @@ function identifies(identity: string, scale: Axis): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Where the tooltip is pinned (`PinTarget`) as JSON: an item by its key,
+ * or a value on an axis, which `time` says is a time in epoch milliseconds.
+ * Reports name the axis and say `time`; Python may leave them out.
+ */
+export type PinPayload =
+  | { item: string; panel?: string }
+  | { value: number | string; axis?: "x" | "y"; time?: boolean; panel?: string };
+
+export function pinPayload(chart: Chart, at: PinTarget | null | undefined): PinPayload | null {
+  if (!at) return null;
+  // A chart of one panel pins there: its key says nothing.
+  const panels = chart.getPanels();
+  const panel = at.panel !== undefined && panels.length > 1 ? { panel: at.panel } : {};
+  // The chart names pinned items by their keys.
+  if ("item" in at) return { item: at.item as string, ...panel };
+  const axis = at.axis ?? "x";
+  // Along y in a panel of the right axis alone, the value is on that one.
+  const type =
+    axisOf(panels, at.panel, axis) ??
+    (axis === "y" ? axisOf(panels, at.panel, "yRight") : undefined);
+  return { value: at.value, axis, time: type === "time", ...panel };
+}
+
+/** A pin from JSON, as `chart.pin` takes it. */
+export function pinTarget(payload: PinPayload | null): PinTarget | null {
+  if (!payload || "item" in payload) return payload;
+  const { time: _, ...at } = payload;
+  return at;
+}
+
+/**
+ * A move of an item (`itemMove`) as JSON: a network node's place in layout
+ * units, or a dragged rule's value on its one axis, a time where `time`
+ * names it.
+ */
+export interface ItemMovePayload {
+  key: string;
+  markId: string | null;
+  position: { x?: number; y?: number } | null;
+  phase: Phase;
+  cause: ChangeCause;
+  revision: number;
+  time: Axis[];
+  panel?: string;
+}
+
+export function itemMovePayload(chart: Chart, event: ChartEvents["itemMove"]): ItemMovePayload {
+  const { key, position, phase, cause, revision } = event;
+  const panel = event.panels?.[0];
+  // A rule moves along one axis, which may hold times; a node moves in its plane.
+  const along = position && (["x", "y"] as const).filter((axis) => position[axis] !== undefined);
+  const scale = event.axis === "right" ? "yRight" : along?.[0];
+  const time =
+    along?.length === 1 && axisOf(chart.getPanels(), panel, scale!) === "time" ? along : [];
+  return {
+    key,
+    markId: event.markId ?? null,
+    position: position && { ...position },
+    phase,
+    cause,
+    revision,
+    time,
+    ...(panel !== undefined && { panel }),
+  };
 }
 
 /** An edge event as JSON. */

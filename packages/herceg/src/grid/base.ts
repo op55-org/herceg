@@ -35,6 +35,19 @@ export interface GridSettings {
   timeZone?: TimeZone;
   /** Text of missing values; empty by default. */
   missing?: string;
+  /** How clicks select rows (see `GridSelectionOptions`). */
+  selection?: GridSelectionOptions;
+}
+
+/** How a grid's clicks select its rows. */
+export interface GridSelectionOptions {
+  /**
+   * What a plain click on the one row selected (or a group's header whose
+   * rows are all that is selected) does: clears the selection ("toggle"),
+   * or keeps it ("only", the default). Elsewhere a plain click selects
+   * only its row; Ctrl or Cmd toggles a row, Shift selects a range.
+   */
+  click?: "toggle" | "only";
 }
 
 /** A cell: its row's index in the view (-1 for the header row) and its column. */
@@ -179,11 +192,21 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   readonly #listeners = new Set<() => void>();
   #batching = 0;
   #notified = false;
+  /** Counts what listeners were told of: what the grid shows changes with it (see `revision`). */
+  #revision = 0;
+  /** What a plain click on the one row selected does (`selection.click`). */
+  readonly #clicks: "toggle" | "only";
 
   constructor(options: GridSettings) {
     this.rowHeight = options.rowHeight ?? ROW_HEIGHT;
     if (!(Number.isFinite(this.rowHeight) && this.rowHeight > 0))
       throw new RangeError(`A grid's rowHeight must be positive, not ${this.rowHeight}`);
+    const click = options.selection?.click ?? "only";
+    if (click !== "toggle" && click !== "only")
+      throw new TypeError(
+        `grid selection.click: expected "toggle" or "only"; received ${JSON.stringify(click)}`,
+      );
+    this.#clicks = click;
     this.settings = {
       locale: options.locale,
       timeZone: options.timeZone ?? "local",
@@ -535,6 +558,31 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   /** Clears the selection and the range anchor; whether there was anything to clear. */
   abstract clearSelection(): boolean;
 
+  /**
+   * Whether the row at `rowIndex` (or a group header's rows) is all that
+   * is selected, which a plain click clears with `selection.click` "toggle".
+   */
+  protected abstract selectedAlone(rowIndex: number): boolean;
+
+  /**
+   * What a plain click on the row at `rowIndex` does: selects only it, or
+   * with `selection.click` "toggle", clears the selection where the row is
+   * all of it.
+   */
+  click(rowIndex: number): void {
+    if (this.#clicks === "toggle" && this.selectedAlone(rowIndex)) this.clearSelection();
+    else this.select(rowIndex, "only");
+  }
+
+  /**
+   * Counts the changes of what the grid shows (its rows, columns, sort,
+   * selection, scrolling, focus): each one listeners are told of
+   * increments it, and a grid's `render` reports the revision it drew.
+   */
+  get revision(): number {
+    return this.#revision;
+  }
+
   // Subscriptions
 
   /** Calls `listener` whenever what the grid shows may have changed; returns a function that stops it. */
@@ -549,8 +597,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   }
 
   protected notify() {
-    if (this.#batching > 0) this.#notified = true;
-    else for (const listener of [...this.#listeners]) listener();
+    if (this.#batching > 0) {
+      this.#notified = true;
+      return;
+    }
+    this.#revision++;
+    for (const listener of [...this.#listeners]) listener();
   }
 
   /** Runs a command whose steps notify, telling listeners once, when it is done. */

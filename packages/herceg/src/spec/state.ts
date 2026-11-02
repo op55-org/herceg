@@ -67,6 +67,21 @@ export interface SeriesSelection {
 /** A chart's selection: one at a time, of a brush, of items, or of series; each replaces the others. */
 export type ChartSelection = BrushSelection | ItemSelection | SeriesSelection;
 
+/**
+ * Where the tooltip is pinned: an item, by its key from an event or a
+ * reference, which it follows; or a value along an axis (epoch ms on time
+ * axes, a category by name on category axes) in a panel ("" or left out
+ * in a chart of one), where every series is read again as data changes.
+ */
+export type PinTarget =
+  | { readonly item: string | ItemReference; readonly panel?: string | undefined }
+  | {
+      readonly value: number | string;
+      /** The axis the inspection reads along by default. */
+      readonly axis?: "x" | "y" | undefined;
+      readonly panel?: string | undefined;
+    };
+
 /** Where a change a gesture makes is: still moving, done, or undone. */
 export type Phase = "preview" | "commit" | "cancel";
 

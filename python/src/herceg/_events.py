@@ -526,6 +526,158 @@ class SelectEvent:
 
 
 @dataclass(frozen=True)
+class PinTarget:
+    """Where the tooltip is pinned (``widget.pinned``, ``widget.pin``): at an
+    ``item``, by the key events report it by, which the pin follows as the
+    data changes; or at a ``value`` on an ``axis`` ("x" or "y"; a datetime
+    on time axes, a category's name on category axes), where every series
+    is read again as the data changes. ``panel`` names the subplot or facet
+    panel of a chart of several."""
+
+    item: str | None = None
+    value: Value | None = None
+    axis: Literal["x", "y"] | None = None
+    panel: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.item is None) == (self.value is None):
+            raise ChartError("PinTarget item: expected an item or a value, one of them")
+        if self.item is not None and not isinstance(self.item, str):
+            raise ChartError(
+                f"PinTarget item: expected an item's key, as events report it; "
+                f"received {shown(self.item)}"
+            )
+        if self.item is not None and self.axis is not None:
+            raise ChartError("PinTarget axis: an item is pinned where it is; drop axis")
+        if self.axis not in (None, "x", "y"):
+            raise ChartError(f'PinTarget axis: expected "x" or "y"; received {shown(self.axis)}')
+        if self.panel is not None and not isinstance(self.panel, str):
+            raise ChartError(
+                f"PinTarget panel: expected a panel's id; received {shown(self.panel)}"
+            )
+
+
+def encode_pin(value: PinTarget | None, name: str) -> dict[str, Any] | None:
+    """A pin as the browser takes it: a value's time in epoch milliseconds."""
+    if value is None:
+        return None
+    if not isinstance(value, PinTarget):
+        raise ChartError(f"{name}: expected an hg.PinTarget or None; received {shown(value)}")
+    panel = {"panel": value.panel} if value.panel is not None else {}
+    if value.item is not None:
+        return {"item": value.item, **panel}
+    at = value.value
+    time = isinstance(at, (_dt.date, _dt.datetime)) or (
+        not isinstance(at, str) and not is_number(at)
+    )
+    encoded = at if isinstance(at, str) else _milliseconds(at, f"{name} value")
+    axis = {"axis": value.axis} if value.axis is not None else {}
+    return {"value": encoded, **axis, **({"time": True} if time else {}), **panel}
+
+
+def decode_pin(payload: dict[str, Any] | None) -> PinTarget | None:
+    if payload is None:
+        return None
+    panel = payload.get("panel")
+    if "item" in payload:
+        return PinTarget(item=payload["item"], panel=panel)
+    return PinTarget(
+        value=_value(payload["value"], payload.get("time") is True),
+        axis=payload.get("axis"),
+        panel=panel,
+    )
+
+
+def same_pin(
+    payload: Mapping[str, Any] | None, stored: Mapping[str, Any] | None, reported: bool
+) -> bool:
+    """Whether `payload` is the pin `stored` is, however it is said (which
+    axes hold times). A browser's report (`reported`) naming the axis of a
+    pin that left it to its default says the same pin better; a pin from
+    Python that leaves it to the default may be along another axis, which
+    only the chart's inspection tells."""
+    if payload is None or stored is None:
+        return payload is None and stored is None
+    if payload.get("panel") != stored.get("panel"):
+        return False
+    if "item" in payload or "item" in stored:
+        return payload.get("item") == stored.get("item")
+    axis, was = payload.get("axis"), stored.get("axis")
+    return payload["value"] == stored["value"] and (axis == was or (reported and was is None))
+
+
+@dataclass(frozen=True)
+class ItemPosition:
+    """Where an item moved: a network node's ``x`` and ``y`` in layout
+    units, or a dragged rule's value on its one axis (a datetime on time
+    axes), the other None."""
+
+    x: float | _dt.datetime | None = None
+    y: float | _dt.datetime | None = None
+
+
+@dataclass(frozen=True)
+class ItemMove:
+    """A move of an item (``widget.on_item_move``): a network node dragged
+    (``chart.network(..., drag=True)``) or a rule (``chart.rule(...,
+    drag=True)``), by its ``key``; ``mark_id`` is the rule's ``id``.
+    ``phase`` is "preview" while a rule moves, "commit" where it is dropped
+    (a node's every move), and "cancel" when its drag is given up (Escape,
+    a lost pointer), back at its value. ``position`` is None for a node put
+    back. A rule stays where it was dropped only once Python moves it there
+    (``widget.update_rule``)."""
+
+    key: str
+    mark_id: str | None
+    position: ItemPosition | None
+    phase: Literal["preview", "commit", "cancel"]
+    cause: str
+    revision: int
+    panel: str | None = None
+
+
+def decode_item_move(payload: Any) -> ItemMove:
+    """An item move as the browser writes it (``itemMovePayload``), checked;
+    raises ValueError for one of another shape."""
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected an object, not {payload!r}")
+    key, mark_id, phase = payload.get("key"), payload.get("markId"), payload.get("phase")
+    revision, position = payload.get("revision"), payload.get("position")
+    time = payload.get("time", [])
+    if not (
+        isinstance(key, str)
+        and (mark_id is None or isinstance(mark_id, str))
+        and phase in ("preview", "commit", "cancel")
+        and isinstance(revision, int)
+        and not isinstance(revision, bool)
+        and isinstance(time, list)
+        and (position is None or isinstance(position, dict))
+    ):
+        raise ValueError(f"expected an item move, not {payload!r}")
+    at = None
+    if position is not None:
+        values = {axis: position.get(axis) for axis in ("x", "y")}
+        if not all(value is None or _finite(value) for value in values.values()):
+            raise ValueError(f"expected finite coordinates, not {position!r}")
+        at = ItemPosition(
+            **{
+                axis: None if value is None else _time(float(value), axis in time)
+                for axis, value in values.items()
+            }
+        )
+    panel = payload.get("panel")
+    return ItemMove(
+        key=key,
+        mark_id=mark_id,
+        position=at,
+        phase=phase,
+        cause=str(payload.get("cause")),
+        revision=revision,
+        panel=panel if isinstance(panel, str) else None,
+    )
+
+
+@dataclass(frozen=True)
 class PanelVisibility:
     """What a panel's legend hid and showed in that panel unlike in the rest of the chart."""
 
@@ -1018,6 +1170,8 @@ def checked(event: str, payload: Any) -> dict[str, Any] | None:
         return {"path": list(path)} if path else None
     if event == "itemMove":
         return encode_item_positions(payload)
+    if event == "pin":
+        return _checked_pin(payload)
     if event == "click":
         return _checked_inspection(payload)
     kind = payload.get("kind")
@@ -1048,6 +1202,23 @@ def checked(event: str, payload: Any) -> dict[str, Any] | None:
         out = {"kind": "brush", **out}
     out["time"] = time
     return out
+
+
+def _checked_pin(payload: dict[str, Any]) -> dict[str, Any]:
+    panel = payload.get("panel")
+    if not (panel is None or isinstance(panel, str)):
+        raise ValueError(f"a pin's panel is its key, not {panel!r}")
+    where = {"panel": panel} if panel is not None else {}
+    if "item" in payload:
+        if not isinstance(payload["item"], str):
+            raise ValueError(f"a pinned item is named by its key, not {payload['item']!r}")
+        return {"item": payload["item"], **where}
+    value, axis, time = payload.get("value"), payload.get("axis"), payload.get("time", False)
+    if not (isinstance(value, str) or _finite(value)) or axis not in ("x", "y"):
+        raise ValueError(f"expected a value on x or y, not {payload!r}")
+    if not isinstance(time, bool):
+        raise ValueError(f"time says whether the value is a time, not {time!r}")
+    return {"value": value, "axis": axis, **({"time": True} if time else {}), **where}
 
 
 def _checked_inspection(payload: dict[str, Any]) -> dict[str, Any]:

@@ -69,7 +69,7 @@ def live(widget: ChartWidget, state: ChartState) -> None:
     widget.drill_root = None
     widget.item_positions = {'[0,"a"]': (1.0, 2.0)}
     widget.on_drill(lambda root: root and root[-1])
-    widget.on_item_move(lambda positions: positions.get('[0,"a"]'))
+    widget.on_item_positions(lambda positions: positions.get('[0,"a"]'))
     root: hg.DrillRoot | None = state.drill_root
     positions: hg.ItemPositions = state.item_positions
     print(root, positions)

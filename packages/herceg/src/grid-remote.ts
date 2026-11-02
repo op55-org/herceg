@@ -4,6 +4,7 @@
 // selections by key or condition. Kept apart from `herceg/grid`, so grids
 // over local tables load none of it.
 
+export type { GridEvents, GridInputEvent } from "./dom/grid.ts";
 export { createRemoteGrid, type RemoteGrid, type RemoteGridOptions } from "./dom/grid-remote.ts";
 export {
   type GridAggregate,

@@ -43,6 +43,7 @@
     oncamera,
     ondrill,
     onitemmove,
+    onpin,
     onvisibility,
     onrender,
     onerror,
@@ -230,6 +231,7 @@
   listen("camera", () => oncamera);
   listen("drill", () => ondrill);
   listen("itemMove", () => onitemmove);
+  listen("pin", () => onpin);
   listen("visibility", () => onvisibility);
   listen("render", () => onrender);
 

@@ -571,6 +571,22 @@ describe("remote grids", () => {
     expect(store.get("grid-rows")).toEqual({ kind: "keys", keys: [m.keyAt(0)] });
   });
 
+  it("clear the record selected alone on a plain click, with click toggle", async () => {
+    const { source, answerAll } = controlled();
+    const store = remoteSelectionStore(source.schema);
+    const m = model(source, { selectionStore: store, selection: { click: "toggle" } });
+    await settle();
+    await answerAll();
+    m.click(2);
+    expect(store.get("grid-rows")).toEqual({ kind: "keys", keys: [2] });
+    m.click(2);
+    expect(store.get("grid-rows")).toBeNull();
+    m.select(2);
+    m.select(3, "toggle");
+    m.click(3);
+    expect(store.get("grid-rows")).toEqual({ kind: "keys", keys: [3] });
+  });
+
   it("refuse ranges over rows not loaded, saying why", async () => {
     const { source, pending, answerAll } = controlled(10_000);
     const m = model(source, { cachedBlocks: 2 });

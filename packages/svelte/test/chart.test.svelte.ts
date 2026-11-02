@@ -38,6 +38,7 @@ import MarkTips from "./MarkTips.svelte";
 import Nodes from "./Nodes.svelte";
 import Parent from "./Parent.svelte";
 import Pies from "./Pies.svelte";
+import Pins from "./Pins.svelte";
 import Prices from "./Prices.svelte";
 import RowTips from "./RowTips.svelte";
 import Solids from "./Solids.svelte";
@@ -296,6 +297,21 @@ describe("<Chart>", () => {
     render(Nodes, tree);
     tree.chart!.setDrillRoot(["N"]);
     expect(drills).toEqual(['[0,"N"]']);
+  });
+
+  it("calls onpin", async () => {
+    const pins: unknown[] = [];
+    const props = $state({
+      data: table({ t: [0, 1, 2], a: [1, 3, 2] }),
+      chart: null as HercegChart | null,
+      onpin: ({ at }: { at: unknown }) => pins.push(at),
+    });
+    render(Pins, props);
+    const chart = props.chart!;
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    chart.pin({ value: 1, axis: "x" });
+    chart.render();
+    expect(pins).toMatchObject([{ value: 1, axis: "x" }]);
   });
 
   it("calls onitemmove", () => {

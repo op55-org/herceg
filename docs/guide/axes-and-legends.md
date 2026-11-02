@@ -273,7 +273,8 @@ hg.Chart(prices, x=sessions, time_zone="America/New_York").candlestick("time", "
 ## Legends
 
 A legend is shown by default for two or more series; `true` or an object
-shows it for one, `false` hides it. Entries toggle what they stand for.
+shows it for one, `false` hides it. Entries toggle what they stand for,
+or with `action`, select it.
 
 ```ts
 createChart(element, {
@@ -296,6 +297,7 @@ hg.Chart(df, legend=hg.LegendOptions(place=hg.Place(side="bottom", align="center
 | `entries` | Entries of your own: `{ key, label, swatch? \| sample?: { mark }, targets? }`. A `swatch` is a `line`, `rect`, `symbol`, or `composite`; `targets` (`{ mark }`, `{ mark, field, values }`, `{ scale, values }`) are what it hides; entries without targets explain. |
 | `swatches` | `"mark"`: swatches that look like the marks (dash, width, markers, fill, symbol). |
 | `style` | `legendLabel`, `legendTitle`, `tickLabel`. |
+| `action` | What clicking an entry does: `"hide"` (default) hides and shows it; `"select"` [selects its series](interaction.md#selections) (Shift adds; needs state support); `false`, nothing of the chart's own (`click` reports it). |
 | `panel` | A [panel's own legend](layout.md#panels-legends). |
 | `id`, `show` | (`legend()` only) A name; `false` draws none. |
 

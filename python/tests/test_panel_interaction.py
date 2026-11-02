@@ -241,7 +241,7 @@ def test_widgets_keep_moves_of_networks_whose_data_did_not_change():
     )
     Browser(widget)
     heard = []
-    widget.on_item_move(heard.append, panel="net")
+    widget.on_item_positions(heard.append, panel="net")
     moved = {'[1,"a"]': (1.0, 2.0)}
     widget.panel_item_positions = {"net": moved}
     # New places for the map leave the network be.

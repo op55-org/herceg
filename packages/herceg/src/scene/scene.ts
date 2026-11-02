@@ -11,6 +11,7 @@ import type { SymbolName } from "../draw/symbols.ts";
 import type { Mapping } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
 import type { ItemInfo } from "../marks/layout-mark.ts";
+import type { LegendAction } from "../spec/guides.ts";
 import type { Clip } from "../spec/spec.ts";
 import type { PlotPaint, ResolvedHalo, StrokePaint, TextPaint } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
@@ -933,8 +934,13 @@ export interface LegendItem {
   glyph?: string | undefined;
   /** The glyph's outline color, drawn 1 pixel wide, for outlined points. */
   stroke?: string | undefined;
-  /** The series keys the entry hides and shows, when not its own key. */
+  /**
+   * The series keys the entry hides and shows, when not its own key: none
+   * in a legend whose `action` is not "hide".
+   */
   targets?: readonly string[] | undefined;
+  /** In a legend that selects, the keys of what the entry selects (the series they name). */
+  selects?: readonly string[] | undefined;
   /**
    * What showing the entry lets go of, where more than its targets: what
    * else hides what they name (a mark hidden whole, a predicate over rows
@@ -964,6 +970,8 @@ export interface LegendItem {
 export interface LegendGuide extends GuideBase {
   readonly kind: "legend";
   readonly entries: readonly LegendItem[];
+  /** What pressing an entry does, where not "hide" (see `LegendOptionsSpec.action`). */
+  readonly action?: LegendAction | undefined;
   /** A panel's legend: the subplot whose marks its entries hide and show, there only. */
   readonly panel?: string | undefined;
   readonly label: TextPaint;

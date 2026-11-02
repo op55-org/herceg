@@ -30,6 +30,7 @@ import {
   type ChartSelection,
   type DrillState,
   type ItemReference,
+  type PinTarget,
   type SeriesReference,
   STATE_OPTIONS,
   type StateSpec,
@@ -88,7 +89,8 @@ type Setter =
   | "setVisibility"
   | "setDrillRoot"
   | "setCamera"
-  | "setItemPosition";
+  | "setItemPosition"
+  | "pin";
 
 /** `import { chartState } from "herceg/state"`: give it as the `state` option. */
 export const chartState: ChartStateSupport = {
@@ -172,6 +174,7 @@ const REPORTS = [
   "drill",
   "camera",
   "itemMove",
+  "pin",
   "rowSelection",
 ] as const;
 
@@ -187,6 +190,7 @@ const WRITES: Record<Setter, readonly [(typeof REPORTS)[number], number]> = {
   setDrillRoot: ["drill", 1],
   setCamera: ["camera", 1],
   setItemPosition: ["itemMove", 2],
+  pin: ["pin", 1],
 };
 
 class ChartState implements AttachedState {
@@ -236,6 +240,20 @@ class ChartState implements AttachedState {
     };
     // Changes of view are reported only to listeners: these are always heard.
     events.on("viewport", () => {});
+    // The pinned tooltip, which the interaction controller keeps once it
+    // has loaded; a pin asked for before then waits for it.
+    const { model } = host;
+    Object.assign(host.chart, {
+      pin: (at: PinTarget | null) => {
+        const named =
+          at && "item" in at ? { ...at, item: this.#keyOf(at.item, "pin.item", "pin item") } : at;
+        if (model.pins) model.pins.pin(named, "api");
+        else model.pinning = { at: named };
+      },
+    });
+    Object.defineProperty(host.chart, "pinned", {
+      get: () => (model.pins ? model.pins.pinned : (model.pinning?.at ?? null)),
+    });
     // Conditional writes, and items and series by reference: the setters, wrapped.
     const chart = host.chart as unknown as Record<Setter, (...args: unknown[]) => void>;
     for (const [where, [, at]] of Object.entries(WRITES) as [Setter, (typeof WRITES)[Setter]][]) {
@@ -342,26 +360,31 @@ class ChartState implements AttachedState {
     const list = kind === "items" ? selection.items : selection.series;
     if (!Array.isArray(list))
       throw new TypeError(`selection ${kind}: expected a list of keys or references`);
-    const marks = this.#host.model.config.marks as readonly Mark[];
-    const keys = list.map((entry: string | ItemReference | SeriesReference, i) => {
-      if (typeof entry === "string") return entry;
-      if (!marks.some(({ spec }) => spec.id === entry?.mark))
-        throw new ChartError({
-          code: "unknown-reference",
-          path: `selection.${kind}[${i}].mark`,
-          message: `selection ${kind}[${i}]: no mark has the id ${JSON.stringify(entry?.mark)}; give a mark's id, or a key from an event`,
-        });
-      return JSON.stringify([
-        entry.mark,
-        ...("item" in entry ? entry.item : [(entry as SeriesReference).series]),
-      ]);
-    });
+    const keys = list.map((entry: string | ItemReference | SeriesReference, i) =>
+      this.#keyOf(entry, `selection.${kind}[${i}]`, `selection ${kind}[${i}]`),
+    );
     // In one order, so that selections equal by value are equal as written.
     const unique = [...new Set(keys)].sort();
     if (unique.length === 0) return null;
     // Their looks load as they are given, so the chart's `loading` waits for them.
     this.#loadLooks();
     return kind === "items" ? { kind, items: unique } : { kind, series: unique };
+  }
+
+  /** An item or series key, as given or as a reference names it (refused, at `path`, for a mark of no such id). */
+  #keyOf(entry: string | ItemReference | SeriesReference, path: string, where: string): string {
+    if (typeof entry === "string") return entry;
+    const marks = this.#host.model.config.marks as readonly Mark[];
+    if (!marks.some(({ spec }) => spec.id === entry?.mark))
+      throw new ChartError({
+        code: "unknown-reference",
+        path: `${path}.mark`,
+        message: `${where}: no mark has the id ${JSON.stringify(entry?.mark)}; give a mark's id, or a key from an event`,
+      });
+    return JSON.stringify([
+      entry.mark,
+      ...("item" in entry ? entry.item : [(entry as SeriesReference).series]),
+    ]);
   }
 
   /**
@@ -384,6 +407,10 @@ class ChartState implements AttachedState {
     const [type] = WRITES[where];
     // A write of the state waits for the first frame: none checks against it before that.
     if (this.#waiting.has(type) && this.#host.chart.drawnRevision === undefined) return true;
+    // Nor against a pin asked for and not made yet, which no report has said.
+    const { model } = this.#host;
+    if (type === "pin" && (model.pins ? model.pins.waiting : model.pinning !== undefined))
+      return true;
     // A camera a gesture turned, not reported yet: its report, at the next frame, says how it is.
     if (
       where === "setCamera" &&
@@ -413,6 +440,7 @@ class ChartState implements AttachedState {
     const { model } = this.#host;
     const panel = (of as PanelTarget).panel;
     if (type === "select") return ["selection"];
+    if (type === "pin") return ["pin"];
     if (type === "visibility") return ["hidden"];
     if (type === "viewport") {
       const items = model.items;

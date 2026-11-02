@@ -94,6 +94,7 @@ export type {
   LegendEntryTarget,
   PanelTarget,
   PanelViewport,
+  PinEvent,
   PlotTarget,
   Pointer,
   ScaleView,

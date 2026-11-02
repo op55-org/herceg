@@ -363,6 +363,8 @@ READ |= {"InputEvent", "Pointer", "Box", "ItemTarget", "AxisLabelTarget"}
 READ |= {"LegendEntryTarget", "PlotTarget"}
 # Selections, which events report and charts and widgets take.
 READ |= {"ItemSelection", "SeriesSelection", "ItemReference", "SeriesReference"}
+# Pins, which events report and widgets take, and moves of items.
+READ |= {"PinTarget", "ItemMove", "ItemPosition"}
 
 
 # Fields that replace what an object is given above, which are refused together.

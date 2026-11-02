@@ -10,6 +10,7 @@ import type {
   ChartSelection,
   DrillState,
   Phase,
+  PinTarget,
   ViewportState,
   VisibilityState,
 } from "../spec/state.ts";
@@ -207,6 +208,17 @@ export interface SelectEvent extends StateChange {
   rows?: readonly RowSelectionChange[];
 }
 
+/** What a `pin` event reports (see `ChartEvents.pin`). */
+export interface PinEvent extends StateChange {
+  /** Where the tooltip is pinned (see `PinTarget`); null once let go. */
+  at: PinTarget | null;
+  /**
+   * What the pinned tooltip shows; undefined once let go, and while a pin
+   * of a value is out of view.
+   */
+  inspection: Inspection | undefined;
+}
+
 /** The panel a view or selection is set in, for charts whose panels have scales of their own. */
 export interface PanelTarget {
   /** A panel's key: its facet value (both, in a grid, as a JSON array) or subplot id. */
@@ -292,9 +304,31 @@ export interface ChartEvents {
   /**
    * A network's node was moved (dragged, Shift with the arrow keys, or
    * `setItemPosition`), or put back where the layout puts it (null): its
-   * item key and where it is now, in the network's layout units.
+   * item key and where it is now, in the network's layout units. Or a
+   * rule with `drag` is being dragged: its item key, its mark's `id`, and
+   * its value along its axis (`{ y }` for a horizontal rule, `{ x }` for a
+   * vertical one), as it moves (`preview`, once a frame), where it was
+   * dropped (`commit`), or where it went back to (`cancel`). A rule's
+   * value is the application's to set: the frame after a commit draws the
+   * rule where its options put it then.
    */
-  itemMove: ItemChanges["itemMove"] & StateChange;
+  itemMove: Omit<ItemChanges["itemMove"], "position" | "phase"> &
+    StateChange & {
+      position: { readonly x?: number; readonly y?: number } | null;
+      /** A dragged rule's mark's `id`; undefined for a network's nodes, and for marks without one. */
+      markId?: string | undefined;
+      /** "right" for a rule on the right y axis (its `axis` option), whose `y` is on that scale. */
+      axis?: "right" | undefined;
+      /** A rule's drag while it moves (`preview`), done (`commit`), or undone (`cancel`); `commit` for every node move. */
+      phase: Phase;
+    };
+  /**
+   * The tooltip was pinned (by a click with `tooltip.pin`, Enter, or
+   * `pin`) or let go (Escape, a click outside, a second click, `pin(null)`,
+   * the item it followed gone, `inspection.mode` changed): where, and what
+   * it shows.
+   */
+  pin: PinEvent;
   /**
    * Series or items were hidden or shown: through the legend,
    * `setVisibility` or `setHiddenKeys`, or as marks the chart no longer

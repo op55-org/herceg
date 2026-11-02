@@ -341,7 +341,18 @@ export interface LegendOptionsSpec {
   /** Swatches that look like the marks: a dashed line for a dashed line, a symbol for points. */
   swatches?: "mark";
   style?: LegendStyles;
+  /**
+   * What a click (or Enter) on an entry does: "hide" (the default) hides
+   * and shows what it names; "select" selects it, as a series selection
+   * (Shift adds it or takes it out; a click on the one selected clears
+   * it); `false`, nothing of the chart's own (`click` events still report
+   * it). "select" needs state support (`herceg/state`).
+   */
+  action?: LegendAction;
 }
+
+/** What activating a legend entry does (see `LegendOptionsSpec.action`). */
+export type LegendAction = "hide" | "select" | false;
 
 /** A legend: the entries of what it includes (all the chart's by default), laid out as its options say. */
 export interface LegendGuideSpec extends LegendOptionsSpec {

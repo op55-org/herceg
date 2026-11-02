@@ -47,9 +47,14 @@ import {
   edgePayload,
   type ItemPositionsPayload,
   inputEventPayload,
+  itemMovePayload,
   MOVES,
   namesCategories,
+  ownsNode,
+  type PinPayload,
   PLANES,
+  pinPayload,
+  pinTarget,
   positionsValue,
   recordPosition,
   restoreViewportState,
@@ -106,6 +111,7 @@ interface ViewStates {
   drill: DrillPayload | null;
   itemMove: ItemPositionsPayload;
   visibility: VisibilityState | null;
+  pin: PinPayload | null;
 }
 type ViewEvent = keyof ViewStates;
 type ViewState = ViewStates[ViewEvent];
@@ -116,6 +122,7 @@ const stateKeys = {
   drill: "drill_root",
   itemMove: "item_positions",
   visibility: "visibility",
+  pin: "pinned",
 } as const;
 /** Events whose state each network subplot (or tree or 3D subplot) has of its own. */
 type PanelEvent = "drill" | "itemMove" | "camera";
@@ -164,6 +171,8 @@ export interface Snapshot {
   visibility?: { state: VisibilityState; carried: boolean } | null;
   drill_root: DrillPayload | null;
   item_positions: ItemPositionsPayload;
+  /** Where the tooltip is pinned. */
+  pinned?: PinPayload | null;
   /** The states of subplots' networks, trees, and 3D marks, by event and panel. */
   panel_states?: Partial<Record<PanelEvent, Record<string, ViewState>>>;
   /** Per table a row selection binds, how Python numbers its rows (see `Numbering`). */
@@ -211,7 +220,10 @@ export type Update = { revision: number } & (
   | { type: "visibility"; visibility: VisibilityState | null; origin?: string }
   | { type: "drill"; drill_root: DrillPayload | null; panel?: string; origin?: string }
   | { type: "itemMove"; item_positions: ItemPositionsPayload; panel?: string; origin?: string }
+  | { type: "pin"; pinned: PinPayload | null; origin?: string }
   | { type: "rows"; table: string; channel: string; selection: RowsPayload | null; origin?: string }
+  /** Python moved a rule (`update_rule`): the mark's index in the spec, the axis, and its value. */
+  | { type: "rule"; mark: number; axis: "x" | "y"; value: number }
 );
 
 interface View {
@@ -358,6 +370,7 @@ class Widget {
     this.#outbox.cancel("viewport");
     this.#outbox.cancel("visibility");
     this.#outbox.cancelAll("drill");
+    this.#outbox.cancel("pin");
     this.#cancelItems();
     this.#outbox.cancelAll("rows:");
     this.#states = new Map<string, ViewState>([
@@ -367,6 +380,7 @@ class Widget {
       ["visibility", snapshot.visibility?.state ?? null],
       ["drill", snapshot.drill_root],
       ["itemMove", snapshot.item_positions],
+      ["pin", snapshot.pinned ?? null],
     ]);
     this.#requests = [...(snapshot.viewportRequests ?? [])];
     this.#visibilityCarried = snapshot.visibility?.carried ?? false;
@@ -576,6 +590,15 @@ class Widget {
         this.#show(view, "drill", this.#state("drill", panel), true, panel);
       for (const panel of moves) this.#show(view, "itemMove", this.#positions(panel), true, panel);
       this.#show(view, "select", this.#state("select"));
+      if (this.#state("pin")) {
+        try {
+          this.#show(view, "pin", this.#state("pin"));
+          this.#pinShown(view);
+        } catch {
+          // Pinned at what this chart does not draw (gone with the data): let go.
+          this.#report("pin", view, null);
+        }
+      }
     };
     // What restoring changed that Python should hear.
     const restored = () => {
@@ -620,8 +643,12 @@ class Widget {
     chart.on("drill", (root) => {
       if (!this.#applying) this.#report("drill", view, drillPayload(root), root.panels?.[0] ?? "");
     });
+    chart.on("pin", ({ at }) => {
+      if (!this.#applying) this.#report("pin", view, pinPayload(chart, at));
+    });
     chart.on("itemMove", ({ key, position, panels }) => {
-      if (this.#applying) return;
+      // Rules dragged have no state: they reach Python as events alone.
+      if (this.#applying || !this.#ownsNode(key)) return;
       const panel = panels?.[0] ?? "";
       const own = view.positions.get(panel) ?? {};
       view.positions.set(panel, own);
@@ -821,6 +848,42 @@ class Widget {
           else this.#model.send(content);
         }),
       );
+    if (this.#listening("move"))
+      view.input.push(
+        chart.on("itemMove", (event) => {
+          // Moves made here, not states shown from Python or another display.
+          if (this.#applying) return;
+          const content = { type: "move", event: itemMovePayload(chart, event) };
+          // Previews are many: Python hears the latest; a commit or cancel after them.
+          if (event.phase === "preview") this.#outbox.post("move", content);
+          else {
+            this.#outbox.cancel("move");
+            this.#model.send(content);
+          }
+        }),
+      );
+  }
+
+  /**
+   * Python moved rule `mark` (its index in the spec) to `value` on `axis`
+   * (`update_rule`): every display draws it there, and a chart loaded later
+   * from the spec kept here.
+   */
+  #moveRule(mark: number, axis: "x" | "y", value: number) {
+    const marks = [...((this.#structure.marks as Record<string, unknown>[] | undefined) ?? [])];
+    if (!marks[mark] || !this.#config) return;
+    marks[mark] = { ...marks[mark], [axis]: value };
+    this.#structure = { ...this.#structure, marks };
+    const { config } = loadSpec(
+      { ...this.#structure, ...this.#options } as unknown as ChartSpec,
+      [],
+      {
+        tables: this.#tables,
+        stores: this.#stores,
+      },
+    );
+    this.#config = { ...this.#config, marks: config.marks };
+    for (const view of this.#views) view.chart?.update({ marks: config.marks });
   }
 
   #listening(event: string): boolean {
@@ -903,10 +966,7 @@ class Widget {
 
   /** Whether a network of the chart, as its tables are now, has the node keyed `key`. */
   #ownsNode(key: string): boolean {
-    return (this.#config?.marks ?? []).some((mark, index) => {
-      const owns = (mark as { ownsNode?: (key: string, id: string | number) => boolean }).ownsNode;
-      return owns?.call(mark, key, mark.spec.id ?? index) === true;
-    });
+    return ownsNode(this.#config?.marks, key);
   }
 
   /**
@@ -975,6 +1035,16 @@ class Widget {
     return !!view.chart && !this.#waiting(view.chart);
   }
 
+  /**
+   * Python's pin, shown: where the chart pins instead (nothing, at a value
+   * it reads nothing at) goes back to Python. One the chart waits to make
+   * reports itself once made.
+   */
+  #pinShown(view: View): void {
+    const chart = view.chart!;
+    this.#report("pin", view, pinPayload(chart, chart.pinned ?? null));
+  }
+
   #show(view: View, event: ViewEvent, payload: ViewState, restore = false, panel = "") {
     const chart = view.chart!;
     if (event === "viewport") {
@@ -987,6 +1057,15 @@ class Widget {
     }
     if (event === "camera") {
       chart.setCamera(payload as Camera | null, targetOf(panel));
+      return;
+    }
+    if (event === "pin") {
+      this.#applying = true;
+      try {
+        chart.pin(pinTarget(payload as PinPayload | null));
+      } finally {
+        this.#applying = false;
+      }
       return;
     }
     if (event === "drill" || event === "itemMove") {
@@ -1213,10 +1292,14 @@ class Widget {
         for (const view of this.#views) if (this.#ready(view)) this.#make(view, request);
         return;
       }
+      case "rule":
+        this.#moveRule(message.mark, message.axis, message.value);
+        return;
       case "camera":
       case "select":
       case "viewport":
       case "visibility":
+      case "pin":
       case "drill": {
         // This browser's own view, back from Python: it is already drawn,
         // and newer ones may be on their way.
@@ -1235,7 +1318,9 @@ class Widget {
                 ? message.views
                 : message.type === "visibility"
                   ? message.visibility
-                  : message.drill_root;
+                  : message.type === "pin"
+                    ? message.pinned
+                    : message.drill_root;
         this.#states.set(key, payload);
         if (message.type === "visibility") {
           this.#visibilityCarried = false;
@@ -1258,6 +1343,13 @@ class Widget {
               this.#refused(error);
               return;
             }
+            if (message.type === "pin") {
+              // What this display pins instead goes back to Python.
+              this.#report("pin", view, pinPayload(view.chart!, view.chart!.pinned));
+              throw new Error(
+                `widget.pinned: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
             if (message.type !== "drill") throw error;
             this.#report("drill", view, root(), panel);
             throw new Error(
@@ -1265,6 +1357,7 @@ class Widget {
             );
           }
           if (message.type === "drill") this.#report("drill", view, root(), panel);
+          if (message.type === "pin") this.#pinShown(view);
         }
         return;
       }
@@ -1470,6 +1563,16 @@ function appendBatch(table: Table, rows: Table): Parameters<Table["append"]>[0] 
 function valuesOf(event: ViewEvent, state: ViewState): string {
   if (event === "drill" || event === "camera" || event === "visibility")
     return JSON.stringify(state);
+  if (event === "pin") {
+    // Whether a value is a time changes nothing; an axis left to the
+    // default may be either, as the chart inspects (Python takes a
+    // report naming it as the same pin).
+    const at = state as PinPayload | null;
+    if (!at) return "null";
+    return JSON.stringify(
+      "item" in at ? [at.item, at.panel ?? null] : [at.value, at.axis ?? null, at.panel ?? null],
+    );
+  }
   if (event === "viewport") {
     // Displays count their own changes of view: the views are what count.
     const views = state as ViewsPayload | null;

@@ -112,6 +112,14 @@ export type RuleOptions = RuleStyle &
   RulePosition<PlaceOption<never>> & {
     /** Text drawn by the rule: its text, or a label object (place, style). */
     label?: RuleLabel<never>;
+    /**
+     * Dragging the rule moves it along its axis: `itemMove` events report
+     * its value while it moves (`preview`), where it is dropped
+     * (`commit`), and Escape or a lost pointer (`cancel`). The value is the
+     * application's to set in these options; until it does, the rule goes
+     * back. Rules at a number or a date only.
+     */
+    drag?: boolean;
   };
 
 /** Rules from a table, one per row; places may also be constants. */
@@ -163,6 +171,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
       }
     | undefined;
   readonly placer = placePanel;
+  /** Where a chart's drag holds the rule (`drag`), by the chart's model: drawn there in place of its value until dropped. */
+  readonly moved = new WeakMap<object, number>();
 
   constructor(input: RuleSpec, table?: Table) {
     checkLegend(input, "rule");
@@ -184,6 +194,18 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     );
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "rule");
+    if (spec.drag) {
+      // A rule of a row moves with it; a drag moves a value the application keeps.
+      if (table)
+        throw new Error(
+          "rule drag: rules over a table move with their rows; drag a rule of a value",
+        );
+      const at = spec.x ?? spec.y;
+      if (typeof at !== "number" && !(at instanceof Date))
+        throw new Error(
+          `rule drag: a dragged rule stands at a number or a date along its axis; give ${spec.x === undefined ? "y" : "x"} one`,
+        );
+    }
     const { layout } = this.#data;
     this.#plain =
       typeof spec.label === "string" ||
@@ -417,7 +439,8 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     const data = this.#data;
     const vertical = spec.x !== undefined;
     const scale = vertical ? frame.x : frame.y;
-    const place = data.place(vertical ? spec.x! : spec.y!);
+    // Dragged, it is drawn where the drag holds it.
+    const place = data.place(this.moved.get(frame.owner) ?? (vertical ? spec.x! : spec.y!));
     const across = vertical ? frame.y : frame.x;
     const span = spec.span?.map((c) => data.place(c));
     const strokeWidth = spec.strokeWidth ?? 1;
@@ -714,7 +737,8 @@ export function rule<S extends Schema>(
   second?: RuleDataOptions<S>,
 ): ChartMark<Frozen<RuleSpec>> {
   const table = second ? (first as Table<S>) : undefined;
-  const options = (second ?? first) as RuleDataOptions<S>;
+  // Constant rules may drag; the constructor refuses drag over a table.
+  const options = (second ?? first) as RuleDataOptions<S> & Pick<RuleOptions, "drag">;
   const spec = {
     type: "rule",
     ...definedFields(
@@ -744,6 +768,7 @@ export function rule<S extends Schema>(
         "facet",
         "panel",
         "clip",
+        "drag",
       ],
     ),
   } as unknown as RuleSpec;

@@ -72,6 +72,7 @@ import type {
   ScaleScope,
   Snap,
 } from "../spec/spec.ts";
+import type { PinTarget } from "../spec/state.ts";
 import { insets, type TextPaint } from "../style/style.ts";
 import {
   type PaintReader,
@@ -466,6 +467,29 @@ export class ChartModel {
    */
   declare picker:
     | ((x: number, y: number, accept?: (mark: Mark) => boolean) => Picked | undefined)
+    | undefined;
+  /**
+   * The pinned tooltip, which state support's `pin` and `pinned` reach:
+   * set by a chart's interaction controller once it has loaded; until
+   * then, `pinning` holds the pin asked for, which it makes as it attaches.
+   * `waiting`: a pin asked for waits for a frame to find its place.
+   */
+  declare pins:
+    | {
+        pin(at: PinTarget | null, cause: ChangeCause): void;
+        readonly pinned: PinTarget | null;
+        readonly waiting: boolean;
+      }
+    | undefined;
+  declare pinning: { at: PinTarget | null } | undefined;
+  /**
+   * Drills panel `panel`'s tree as a click at (x, y) on item `item` (none
+   * for a plot), or Enter on it, asks (dom/drill.ts, set while its
+   * controls are loaded): the interaction controller calls it in a
+   * click's order, before the click is reported.
+   */
+  declare drills:
+    | ((item: string | undefined, panel: string, x: number, y: number, cause: ChangeCause) => void)
     | undefined;
   /** What instances of the position scales show when zoomed, by scale and instance (`viewKey`). */
   readonly #viewports = new Map<string, readonly [number, number]>();

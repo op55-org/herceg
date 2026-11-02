@@ -130,6 +130,9 @@ export function ownContent(
       element.style.boxShadow =
         "0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 16px rgba(16, 24, 40, 0.12)";
       element.style.font = `${theme.fontSize}px ${theme.font}`;
+      const page = element.getRootNode() as Document | ShadowRoot;
+      const focused = page.activeElement as HTMLElement | null;
+      const within = focused !== element && element.contains(focused);
       element.replaceChildren();
       const content = own?.(inspection);
       // Text is shown as text, never parsed as markup.
@@ -137,6 +140,10 @@ export function ownContent(
       else builtIn(inspection, theme);
       // A fragment leaves its children in the box, not itself.
       shown.push(content instanceof Node ? element.firstChild : undefined);
+      // The focus stays in a pinned tooltip whose content is drawn again:
+      // on the control it was on if the new content has it, else on the box.
+      if (within && !element.contains(page.activeElement))
+        (element.contains(focused) ? focused! : element).focus({ preventScroll: true });
     }
     element.style.display = "block";
     at = [pointer, bounds];

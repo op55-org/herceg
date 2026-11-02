@@ -7,6 +7,7 @@ data. Grids are TypeScript and React only; Python has none.
 
 - [A grid](#a-grid)
 - [Sorting and selecting](#sorting-and-selecting)
+- [Events](#events)
 - [Columns](#columns)
 - [Linking a grid and a chart](#linking-a-grid-and-a-chart)
 - [Grouped rows](#grouped-rows)
@@ -55,6 +56,7 @@ grids of the same rows share the view and the selection store.
 | `rowHeight` | Pixels per row; 28 by default. |
 | `missing` | Text for missing values (empty by default). |
 | `selectionStore`, `channel` | Where selected rows go (`"grid-rows"` by default). |
+| `selection` | `{ click: "toggle" }`: a plain click on the one row selected clears it (`"only"`, the default, keeps it). |
 | `groups` | Row groups to show (see [below](#grouped-rows)). |
 
 The grid follows its table and view as they change:
@@ -83,6 +85,36 @@ a grid's container gets 320 pixels. Grids take the charts'
   [selection store](data.md#row-sets-and-selection-stores) under its
   channel, where an application or a chart can read it. A condition put in
   that channel shows as selected rows too.
+- **Toggling.** With `selection: { click: "toggle" }`, a plain click on
+  the row that is all the selection (or a group's header whose rows are)
+  clears it, as dashboards' tables do; otherwise a plain click selects
+  only its row.
+
+## Events
+
+`grid.on(event, listener)` returns what stops it.
+
+| Event | Reports |
+| --- | --- |
+| `rowClick` | A body row clicked (a press released in place, after the click selected), or Enter on one of its cells: `ref`, the row as the model names it (`GridRef`: a table row by its identity, a group by its key), its `rowIndex` now, the `column` id, and `cause` (`"pointer"` or `"keyboard"`). A group's expand toggle and checkbox act alone and report nothing. |
+| `cellClick` | The same click, as on its cell, after `rowClick`. |
+| `render` | A frame drawn, with the model's `revision` it drew (`grid.drawnRevision` is the last; the first frame draws as the grid is made). |
+
+```ts
+const grid = createGrid(element, { model, ariaLabel: "Orders" });
+grid.on("rowClick", ({ rowIndex, ref }) => {
+  openOrder(orders.value("id", model.rowAt(rowIndex)));
+  lastOpened = ref; // names the row however it is sorted later: model.indexOf(lastOpened)
+});
+grid.on("render", ({ revision }) => revision >= waitingFor && markReady());
+```
+
+`ref` follows its row through sorting, filtering, and scrolling
+(`model.indexOf(ref)` finds it); `rowIndex` is where it is as listeners
+hear of the click, -1 if the click's selection took it out of the rows
+(a `select` listener filtering the view by the selection). `model.revision` counts the changes
+the grid shows (rows, columns, sort, selection, scroll, focus). Enter on
+a cell reports a click without selecting; Space selects.
 
 ## Columns
 
@@ -367,7 +399,8 @@ function Requests({ data }: { data: typeof requests }) {
 ```
 
 A new `model` makes a new grid; `ariaLabel`, `theme`, and `headerHeight`
-change in place. A model no one keeps stops following its view, so one
+change in place. `onRowClick`, `onCellClick`, and `onRender` hear the
+grid's [events](#events), the latest handler each time. A model no one keeps stops following its view, so one
 made with `useMemo` needs no cleanup. Vue and Svelte have no grid
 component; call `createGrid` on an element.
 

@@ -145,6 +145,7 @@ describe("moved nodes", () => {
     expect(model.items!.setItemPosition('[0,"a"]', { x, y })).toEqual({
       key: '[0,"a"]',
       position: { x, y },
+      phase: "commit",
     });
     const scene = model.scene(estimateText);
     const [ax, ay] = at(model, "a");
@@ -161,6 +162,7 @@ describe("moved nodes", () => {
     expect(model.items!.setItemPosition('[0,"a"]', null)).toEqual({
       key: '[0,"a"]',
       position: null,
+      phase: "commit",
     });
     model.scene(estimateText);
     expect(at(model, "a")).toEqual(before[0]);
@@ -481,6 +483,7 @@ describe("moves across charts, groups, and changes", () => {
     expect(model.items!.setItemPosition('[0,"a"]', null)).toEqual({
       key: '[0,"a"]',
       position: null,
+      phase: "commit",
     });
     model.hidden.clear();
     model.scene(estimateText);

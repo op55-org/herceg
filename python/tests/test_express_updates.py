@@ -255,6 +255,21 @@ def test_appending_to_an_express_widget_computes_its_statistics_again():
     assert hx.statistics(live._express.chart).tables["estimates"]["n"].sum() == 50
 
 
+def test_rules_moved_by_update_rule_stay_as_the_chart_is_computed_again():
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame(head(DATA, 120))
+    live = hx.histplot(frame, x="tip").rule(x=2.0, id="limit", drag=True).widget()
+    browser = Browser(live)
+    live.update_rule("limit", x=3.0)
+    rest = pd.DataFrame(DATA).iloc[120:]
+    for change in (lambda: live.append(rest), lambda: live.replace(frame)):
+        change()
+        rules = [mark for mark in live._snapshot()["spec"]["marks"] if mark.get("id") == "limit"]
+        assert rules[0]["x"] == 3.0
+    # Only tables went: the rule kept its place in every browser.
+    assert all(content["type"] != "rule" for content, _ in browser.messages[1:])
+
+
 def test_appends_from_several_threads_all_take_part():
     import threading
 
@@ -314,9 +329,9 @@ def test_a_recompute_keeps_moves_of_the_nodes_its_new_tables_still_have():
     ):
         live.item_positions = {'[0,"a"]': (1.0, 2.0), '[0,"b"]': (3.0, 4.0)}
         reported = []
-        live.on_item_move(reported.append)
+        live.on_item_positions(reported.append)
         live.replace(rows)
-        live.on_item_move(reported.append, remove=True)
+        live.on_item_positions(reported.append, remove=True)
         assert sent in [content["type"] for content, _ in browser.messages]
         assert dict(live.item_positions) == kept and len(reported) == 1
 

@@ -118,7 +118,7 @@ Every mark has a component, named as its function: `Line`, `Area`, `Bar`,
 
 | | React | Vue | Svelte |
 | --- | --- | --- | --- |
-| Events | `onViewport`, `onSelect`, `onHover`, `onClick`, `onContextMenu`, `onEdge`, `onRowSelection`, `onCamera`, `onDrill`, `onItemMove`, `onVisibility`, `onRender`, `onError` | `@viewport`, `@select`, `@hover`, `@click`, `@context-menu`, `@edge`, `@row-selection`, `@camera`, `@drill`, `@item-move`, `@visibility`, `@render`, `@error` | `onviewport`, `onselect`, `onhover`, `onclick`, `oncontextmenu`, `onedge`, `onrowselection`, `oncamera`, `ondrill`, `onitemmove`, `onvisibility`, `onrender`, `onerror` |
+| Events | `onViewport`, `onSelect`, `onHover`, `onClick`, `onContextMenu`, `onEdge`, `onRowSelection`, `onCamera`, `onDrill`, `onItemMove`, `onPin`, `onVisibility`, `onRender`, `onError` | `@viewport`, `@select`, `@hover`, `@click`, `@context-menu`, `@edge`, `@row-selection`, `@camera`, `@drill`, `@item-move`, `@pin`, `@visibility`, `@render`, `@error` | `onviewport`, `onselect`, `onhover`, `onclick`, `oncontextmenu`, `onedge`, `onrowselection`, `oncamera`, `ondrill`, `onitemmove`, `onpin`, `onvisibility`, `onrender`, `onerror` |
 | The chart handle | `ref` | template ref's `.chart` (null until mounted) | `bind:chart` (null until mounted) |
 
 The events are the engine's ([Events](interaction.md#events)); the latest

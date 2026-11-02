@@ -30,13 +30,15 @@ import type { PositionScale } from "../scale/scale.ts";
 import type {
   AxisGuide,
   LabelBox,
+  LegendGuide,
+  LegendItem,
   PlotRect,
   Scene,
   TextItem,
   tickLabelGap,
 } from "../scene/scene.ts";
 import type { BrushSpec, CursorShowSpec, Snap, ZoomSpec } from "../spec/spec.ts";
-import type { ChartSelection } from "../spec/state.ts";
+import type { ChartSelection, needsState, Phase, PinTarget } from "../spec/state.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
@@ -69,8 +71,20 @@ type PickModule = typeof import("../model/pick.ts");
 let picking: PickModule | undefined;
 
 /** Loads picking for the charts on the page: as the first that needs it does, and for this package's tests. */
+/** How picking's module is imported (see `forgetPicking`). */
+let importPicking = (): Promise<PickModule> => import("../model/pick.ts");
+
 export const loadPicking = (): Promise<PickModule> =>
-  import("../model/pick.ts").then((module) => (picking = module));
+  importPicking().then((module) => (picking = module));
+
+/**
+ * For this package's tests: charts made after this load picking again, as
+ * the page's first, through `load`.
+ */
+export function forgetPicking(load = (): Promise<PickModule> => import("../model/pick.ts")): void {
+  picking = undefined;
+  importPicking = load;
+}
 
 /**
  * Where an input event keeps the panels drawn as it was captured, which
@@ -93,6 +107,7 @@ export interface InteractionKit extends PickKit {
   keys: readonly string[];
   /** Below this many pixels, a press is a click rather than a drag. */
   dragThreshold: number;
+  needsState: typeof needsState;
 }
 
 /** What a chart lends its controller. */
@@ -115,6 +130,8 @@ export interface InteractionHost {
   revision(): number;
   /** The chart's revision the frame on screen drew, which input events carry. */
   drawnRevision(): number;
+  /** Counts a change of the chart's state the controller made (a pin), returning the chart's revision. */
+  count(): number;
   /** Draws the overlay again on the next frame. */
   schedule(): void;
   /**
@@ -205,6 +222,45 @@ type KeyedItem =
   | { place: readonly (number | string | undefined)[] };
 
 /**
+ * The pinned tooltip: where (`at`, as `pinned` reports it), and for an
+ * item, the keyboard's kind of cursor on it and what that is on, found
+ * again in each frame drawn since a change of options or data (`seen`:
+ * the revision of the frame it was found in).
+ */
+interface Pin {
+  at: PinTarget;
+  cursor?: KeyboardCursor;
+  item?: KeyedItem | undefined;
+  seen?: number;
+}
+
+/**
+ * A rule with `drag` being dragged: its mark (as the chart has it now, by
+ * `id` or else its place), its item's key, the axis it moves along and its
+ * scale, the value it had, the value the pointer gives it, and the value
+ * last reported (a preview).
+ */
+interface DraggedRule {
+  mark: Mark;
+  /** The pointer pressing it, which holds the pointer's capture. */
+  pointer: number;
+  /**
+   * The panel it is dragged in, in a chart of several when the press began:
+   * every report of the gesture names it, so a cancel after its facet went
+   * still pairs with the previews.
+   */
+  panel?: string;
+  index: number;
+  id: string | undefined;
+  key: string;
+  axis: "x" | "y";
+  scale: "x" | "y" | "yRight";
+  from: number;
+  at?: number;
+  reported?: number;
+}
+
+/**
  * A primary-button press on a plot until release: where it started, the
  * panel (and so the scales) it started in, and what dragging does.
  */
@@ -212,7 +268,9 @@ interface Press {
   x: number;
   y: number;
   panel: DrawnPanel;
-  mode: "pan" | "brush" | "edit" | "cursor" | "click";
+  mode: "pan" | "brush" | "edit" | "cursor" | "click" | "move";
+  /** The rule a "move" press drags. */
+  rule?: DraggedRule;
   /** What the press's binding does. */
   action: Binding["action"] | undefined;
   moved: boolean;
@@ -269,7 +327,20 @@ function inverter(
  * The bindings of a chart's options, compiled, and those of subplots with
  * settings of their own, by id; throws for those it refuses.
  */
-function bindingsOf({ interaction, rowSelection, panels }: ChartOptions): Compiled {
+function bindingsOf(options: ChartOptions, kit: InteractionKit): Compiled {
+  const { interaction, rowSelection, panels, tooltip, inspection, legend, guides } = options;
+  if (typeof tooltip === "object" && tooltip.pin && inspection === false)
+    throw new Error("tooltip.pin: pins what the pointer inspects; drop inspection: false");
+  // Legends selecting series select through state support.
+  const selects = [legend, ...(guides ?? [])].findIndex((l) => {
+    const { type = "legend", action } = (l ?? {}) as { type?: string; action?: unknown };
+    return type === "legend" && action === "select";
+  });
+  if (selects >= 0 && !options.state)
+    throw kit.needsState(
+      "legend action",
+      selects === 0 ? "legend.action" : `guides[${selects - 1}].action`,
+    );
   const brushesRows = rowSelection?.bindings.some(({ events }) => events.includes("brush"));
   const own = new Map<string, Bindings>();
   for (const [i, { id, interaction: settings }] of (panels?.declared ?? []).entries())
@@ -290,6 +361,9 @@ type Compiled = [chart: Bindings, own: ReadonlyMap<string, Bindings>];
 /** The scales a brush of `shape` has ranges on: a rectangle's and a lasso's, both. */
 const shapeScales = (shape: BrushSpec): readonly ("x" | "y")[] =>
   shape === "x" ? ["x"] : shape === "y" ? ["y"] : ["x", "y"];
+
+/** The opacity of an entry of a legend that selects while others are selected, as hidden entries fade. */
+const HIDDEN_ENTRY = 0.4;
 
 /** What the controller acts on along axes; layout marks' controls take the rest. */
 const OWN = ({ type }: Binding["action"]) => type !== "orbit" && type !== "moveItem";
@@ -396,6 +470,27 @@ export class Interaction {
   readonly #framed = new Map<string, View>();
   /** What the input being handled is, as views changed report it. */
   #cause: ChangeCause = "pointer";
+  /** The pinned tooltip, and a pin asked for before a frame and picking could place it. */
+  #pin: Pin | null = null;
+  #pinLater: { at: PinTarget | null; cause: ChangeCause } | undefined;
+  /** The inspection's mode the pin was made in: another lets it go. */
+  #pinMode: unknown;
+  /** Whether the pinned tooltip takes the keyboard's focus once drawn (pinned from the keyboard). */
+  #focusPin = false;
+  /** The legends' actions as last drawn, to restore their entries' states when they change. */
+  #legendActions = "";
+  /** The scene and the selection the legends' entries last said. */
+  #legendsDrawn: [Scene | undefined, ChartSelection | null] = [undefined, null];
+  /** Lets the pin go on a press outside the chart, while one is pinned. */
+  #outside: ((event: Event) => void) | undefined;
+  /** A press that may be on a rule, and the input after it, waiting for picking to tell; null when none. */
+  #waiting: Event[] | null = null;
+  /** Where `#outside` listens: the chart's root, the shadow roots around it, and the document. */
+  #outsideOn: readonly EventTarget[] = [];
+  /** The series point a picked aggregate (a bin, a box, a cell) stands for, which pins read it at. */
+  readonly #points = new WeakMap<ItemTarget, { series: Series; position: number }>();
+  /** Whether the chart has marks with `drag`, which presses pick first and the pointer's cursor shows. */
+  #draggable = false;
   /** Handlers by event type, which play held input too. */
   readonly #handlers = new Map<string, (event: never) => void>();
   readonly #cleanup: (() => void)[] = [];
@@ -405,7 +500,7 @@ export class Interaction {
     this.#host = host;
     this.#kit = kit;
     // Bindings it refuses throw before anything is installed.
-    const compiled = bindingsOf(host.options());
+    const compiled = bindingsOf(host.options(), kit);
     [this.#bindings] = compiled;
     const { svgElement } = kit;
     const document = host.root.ownerDocument;
@@ -424,6 +519,12 @@ export class Interaction {
     host.overlay.append(...this.#crosshairs, this.#dots, this.#outline);
     this.#listen();
     this.configure(compiled);
+    // State support pins through the model; a pin it asked for before now is made now.
+    const { model } = host;
+    model.pins = this;
+    const asked = model.pinning;
+    model.pinning = undefined;
+    if (asked) this.#pinAsked({ at: asked.at, cause: "api" });
   }
 
   /** Whether the pointer or keyboard is on the chart, or a press is in progress. */
@@ -524,7 +625,529 @@ export class Interaction {
 
   /** Throws for bindings of `options` it would refuse, as `configure` does, changing nothing. */
   check(options: ChartOptions): void {
-    bindingsOf(options);
+    bindingsOf(options, this.#kit);
+  }
+
+  /**
+   * Pins the tooltip at `at`, or lets it go (null), as `cause` asks: state
+   * support's `pin`. Before a frame shows where, and picking has loaded to
+   * name items, the pin waits for them (see `draw`). Throws for a place
+   * the chart does not draw.
+   */
+  pin(at: PinTarget | null, cause: ChangeCause): void {
+    if (at && (!this.#host.scene() || !this.#picking)) {
+      this.#pinLater = { at, cause };
+      this.needPicking();
+      this.#host.schedule();
+      return;
+    }
+    this.#pinLater = undefined;
+    this.#setPin(at && this.#pinAt(at), cause);
+  }
+
+  /**
+   * Makes a pin asked for before it could be made (see `pin`). One at
+   * nothing the chart reads, or draws, is let go, said so, as `pinned`
+   * said it was asked for.
+   */
+  #pinAsked(asked: { at: PinTarget | null; cause: ChangeCause }): void {
+    const host = this.#host;
+    const had = this.#pin;
+    try {
+      this.pin(asked.at, asked.cause);
+    } catch (error) {
+      this.#pinLater = undefined;
+      host.report(error, "compile");
+    }
+    if (asked.at && !had && !this.#pin && !this.#pinLater && !this.#disposed)
+      host.events.emit("pin", {
+        at: null,
+        inspection: undefined,
+        cause: asked.cause,
+        revision: host.count(),
+      });
+  }
+
+  /** Where the tooltip is pinned, or asked to be. */
+  get pinned(): PinTarget | null {
+    return this.#pinLater ? this.#pinLater.at : (this.#pin?.at ?? null);
+  }
+
+  /** Whether a pin asked for waits for a frame (see `pin`). */
+  get waiting(): boolean {
+    return this.#pinLater !== undefined;
+  }
+
+  /** Whether a click or Enter pins the tooltip (`tooltip.pin`). */
+  #pinsByClick(): boolean {
+    const { tooltip } = this.#host.options();
+    return typeof tooltip === "object" && tooltip.pin === "click";
+  }
+
+  /** A pin at a place the application names (see `PinTarget`); throws for one the chart does not draw. */
+  #pinAt(at: PinTarget): Pin {
+    const { model } = this.#host;
+    const all = model.allPanels();
+    const names = all.map(({ key }) => JSON.stringify(key)).join(", ");
+    const panel = at.panel ?? (all.length === 1 ? all[0]!.key : undefined);
+    if (panel === undefined || !all.some(({ key }) => key === panel))
+      throw new RangeError(
+        panel === undefined
+          ? `pin panel: the chart has several panels; give one of ${names}`
+          : `pin panel: ${JSON.stringify(panel)} is no panel of the chart; panels are ${names}`,
+      );
+    if ("item" in at) {
+      const pin = this.#itemPin(at.item as string, panel);
+      if (!pin)
+        throw new RangeError(
+          `pin item: ${JSON.stringify(at.item)} is no item the chart draws; give a key from an event`,
+        );
+      return pin;
+    }
+    const { value } = at;
+    if (typeof value !== "string" && !Number.isFinite(value))
+      throw new TypeError(
+        `pin value: expected a finite number or a category's name; received ${String(value)}`,
+      );
+    const axis = at.axis ?? this.#pinAxis(panel, this.#cursorAxis());
+    const scale = model.panels().find(({ key }) => key === panel)?.[axis];
+    if (!scale)
+      throw new RangeError(
+        `pin axis: panel ${JSON.stringify(panel)} has no ${JSON.stringify(axis)} axis; pin an item there`,
+      );
+    // Categories by name, which data changes do not move.
+    const name = typeof value === "number" ? scale.categories?.[value] : value;
+    return { at: { value: name ?? value, axis, panel } };
+  }
+
+  /**
+   * A pin at the item keyed `key` in `panel`: a layout mark's, or one of
+   * its mark's series' there, found by the rows the key names, or for an
+   * aggregate, item by item. Undefined where none is drawn.
+   */
+  #itemPin(key: string, panel: string): Pin | undefined {
+    const { model } = this.#host;
+    if (model.inspectItem(key, panel))
+      return this.#anchored({ panel, key, position: 0 }, undefined, key);
+    let named: unknown;
+    try {
+      [named] = JSON.parse(key) as unknown[];
+    } catch {
+      return undefined;
+    }
+    const marks = model.config.marks as readonly Mark[];
+    const mark = marks.find((m, i) => (m.spec.id ?? i) === named);
+    if (!mark) return undefined;
+    const series = this.#inspected(panel).filter((s) => model.markOf(s) === mark);
+    const names = (cursor: KeyboardCursor) =>
+      this.#keyboardTarget(this.#keyed(cursor), cursor)?.item === key;
+    const { table } = mark;
+    if (table && !mark.summarizes && mark.tooltip !== "cell") {
+      for (const row of this.#items().rowsOf(key, table)) {
+        const item = { table, identity: table.identity(row), generation: table.generation };
+        for (const s of series) {
+          const cursor = this.#itemNow({ panel, key: s.key, position: 0 }, item);
+          if (cursor && names(cursor)) return this.#anchored(cursor, item, key);
+        }
+      }
+      return undefined;
+    }
+    for (const s of series)
+      for (let position = 0; position < s.length; position++) {
+        const cursor = { panel, key: s.key, position };
+        if (names(cursor)) return this.#anchored(cursor, this.#keyedItem(cursor), key);
+      }
+    return undefined;
+  }
+
+  /**
+   * A pin of the item the keyboard's kind of cursor `cursor` is on (keyed
+   * `key`, `item` naming what it is on): of the item itself where the
+   * inspection reads one point or reads items, else of its value along the
+   * inspection's axis. Undefined for an item the inspection does not read.
+   */
+  #anchored(cursor: KeyboardCursor, item: KeyedItem | undefined, key: string): Pin | undefined {
+    const { model } = this.#host;
+    const inspection = this.#keyed(cursor);
+    if (!inspection) return undefined;
+    const { panel } = cursor;
+    const mode = model.inspectorOf(panel)?.mode;
+    if (inspection.axis === "item" || mode === "nearest")
+      return { at: { item: key, panel }, cursor, item, seen: this.#host.drawnRevision() };
+    // Its value along the axis the chart inspects along, which may not be its mark's own.
+    const axis = this.#pinAxis(panel, inspection.axis);
+    // Cells, points placed off that axis, and the right axis' points beside a left axis (whose
+    // values a pin along y reads, even with its series hidden) are read where they are.
+    const series = this.#inspected(panel).find(({ key }) => key === cursor.key);
+    const mark = series && model.markOf(series);
+    const drawn = model.panels().find(({ key }) => key === panel);
+    if (
+      !mark ||
+      !drawn ||
+      mark.tooltip === "cell" ||
+      (mark.place && mark.tooltip !== axis) ||
+      (mark.bound?.[axis] !== undefined && mark.bound[axis]!.kind !== "axis") ||
+      (axis === "y" && mark.spec.axis === "right" && drawn.drawsY)
+    )
+      return undefined;
+    const scale = drawn[axis];
+    let at = inspection.value;
+    if (axis !== inspection.axis) {
+      const point = inspection.points.find((p) => p.key === cursor.key) ?? inspection.points[0];
+      at = point && scale ? scale.invert(axis === "x" ? point.px : point.py) : Number.NaN;
+      if (scale?.categories) at = Math.round(at);
+      if (!Number.isFinite(at)) return undefined;
+    }
+    const value = scale?.categories?.[at] ?? at;
+    // An item the inspection at that value does not read pins nothing.
+    const [read] = this.#cursorAt(value, axis, undefined, [drawn]);
+    if (!read?.points.some((p) => p.key === cursor.key)) return undefined;
+    return { at: { value, axis, panel } };
+  }
+
+  /** The axis a pin of a value in `panel` is along: the one its inspection follows, else `axis`. */
+  #pinAxis(panel: string, axis: "x" | "y"): "x" | "y" {
+    const mode = this.#host.model.inspectorOf(panel)?.mode;
+    return mode === "nearest-y" ? "y" : mode === "nearest-x" ? "x" : axis;
+  }
+
+  /**
+   * The keyboard's kind of cursor on an item target, and what it is on: a
+   * layout mark's item by its key, an aggregate at the point it stands
+   * for, a row in its series; undefined for items of no series (annotations).
+   */
+  #cursorOf(target: ItemTarget): [KeyboardCursor, KeyedItem | undefined] | undefined {
+    const { model } = this.#host;
+    const { panel, series, item } = target;
+    const point = this.#points.get(target);
+    if (point) {
+      const cursor = { panel, key: point.series.key, position: point.position };
+      return [cursor, this.#keyedItem(cursor)];
+    }
+    if (series === undefined)
+      return model.inspectItem(item, panel)
+        ? [{ panel, key: item, position: 0 }, undefined]
+        : undefined;
+    const table = (model.config.marks[target.mark] as Mark | undefined)?.table;
+    const { row } = target;
+    if (!table || row === undefined) return undefined;
+    const keyed = { table, identity: table.identity(row), generation: table.generation };
+    const cursor = this.#itemNow({ panel, key: series, position: 0 }, keyed);
+    return cursor ? [cursor, keyed] : undefined;
+  }
+
+  /** Every series the inspection reads in `panel`: the keyboard's stops, and those sharing their positions. */
+  #inspected(panel: string): Series[] {
+    return (this.#host.model.inspectorOf(panel)?.marks ?? []).flatMap(({ visible }) => visible);
+  }
+
+  /**
+   * What a click or Enter on `target`, captured now, makes of the pinned
+   * tooltip as it acts (in order with other input, after listeners of what
+   * acted before it), where the chart pins by click: a pin at an item the
+   * inspection reads, or letting it go (null) on a plot where no item is,
+   * on an item it does not pin (a region), and on what it shows.
+   * Undefined where it changes nothing: elsewhere, and once the options
+   * no longer pin by click or inspect as they did.
+   */
+  #clickPin(target: Target | undefined): () => Pin | null | undefined {
+    if (!this.#pinsByClick() || (target?.kind !== "item" && target?.kind !== "plot"))
+      return () => undefined;
+    const at = target.kind === "item" ? this.#cursorOf(target) : undefined;
+    const pin = (at && this.#anchored(...at, (target as ItemTarget).item)) ?? null;
+    const mode = this.#pinMode;
+    return () =>
+      !this.#pinsByClick() || this.#pinMode !== mode
+        ? undefined
+        : pin && JSON.stringify(pin.at) === JSON.stringify(this.#pin?.at)
+          ? null
+          : pin;
+  }
+
+  /**
+   * Pins the tooltip (`pin`), or lets it go (null), and reports it: a pin
+   * takes the pointer, and from the keyboard the focus, once drawn; let go
+   * while it has the focus, the focus goes back to the chart.
+   */
+  #setPin(pin: Pin | null, cause: ChangeCause): void {
+    const host = this.#host;
+    // A listener may have destroyed the chart.
+    if (this.#disposed) return;
+    const same = pin && JSON.stringify(pin.at) === JSON.stringify(this.#pin?.at);
+    // What a new pin shows, found first: one at what is gone lets the one there go.
+    const found = pin && !same ? this.#pinFound(pin) : undefined;
+    if (found === null) pin = null;
+    // A pin where it is changes nothing.
+    if (!pin && !this.#pin) return;
+    this.#pin = pin;
+    if (same) return;
+    const { element } = this.#tooltip;
+    element.style.pointerEvents = pin ? "auto" : "none";
+    if (pin) {
+      // Its content is read and reached now, as the live region no longer says it.
+      element.removeAttribute("aria-hidden");
+      element.setAttribute("role", "group");
+      element.setAttribute("aria-label", "Pinned tooltip");
+      element.tabIndex = -1;
+      this.#focusPin = cause === "keyboard";
+    } else {
+      // The focus goes back to the chart before its place in the tooltip goes.
+      const page = element.getRootNode() as Document | ShadowRoot;
+      if (element.contains(page.activeElement)) host.root.focus({ preventScroll: true });
+      element.setAttribute("aria-hidden", "true");
+      element.removeAttribute("role");
+      element.removeAttribute("aria-label");
+      element.removeAttribute("tabindex");
+    }
+    this.#watchOutside(!!pin);
+    const revision = host.count();
+    host.schedule();
+    host.events.emit("pin", {
+      at: pin?.at ?? null,
+      inspection: found ?? undefined,
+      cause,
+      revision,
+    });
+  }
+
+  /**
+   * What the pinned tooltip shows now (see `#pinFound`); lets the pin go
+   * (cause "data") once what it is at is gone.
+   */
+  #pinned(): Inspection | undefined {
+    const pin = this.#pin;
+    const found = pin ? this.#pinFound(pin) : undefined;
+    if (found === null) this.#setPin(null, "data");
+    return found ?? undefined;
+  }
+
+  /**
+   * What `pin` shows now: its item, found again once options or data
+   * changed, or every series at its value; undefined while hidden (out of
+   * view); null once its item, panel, or category is gone, or nothing
+   * reads at its value in view.
+   */
+  #pinFound(pin: Pin): Inspection | undefined | null {
+    const host = this.#host;
+    const { model } = host;
+    const { at } = pin;
+    if (pin.cursor) {
+      // Found in the frame drawn: a change since is found again once drawn.
+      const revision = host.drawnRevision();
+      if (pin.item && pin.seen !== revision) {
+        // Found again by its key, which may name another row (a reset, an
+        // item key moved); the row it stood at is no more than a guess.
+        const now = this.#itemPin((at as { item: string }).item, pin.cursor.panel);
+        if (!now?.cursor) return null;
+        pin.cursor = now.cursor;
+        pin.item = now.item;
+      }
+      pin.seen = revision;
+      const inspection = this.#keyed(pin.cursor);
+      // A layout mark's item no longer in its layout is gone; a row's out of view is hidden.
+      const layout = model
+        .drawnMarks()
+        .find((d) => d.layout && d.panel === pin.cursor!.panel)?.layout;
+      if (!inspection && !pin.item && (!layout || layout.indexOf(pin.cursor.key) < 0)) return null;
+      if (!inspection) return undefined;
+      // A series' item zoomed out of the plot is hidden, as values out of view are.
+      const plot =
+        inspection.axis !== "item" &&
+        model.panels().find(({ key }) => key === pin.cursor!.panel)?.plot;
+      const inside = ({ px, py }: { px: number; py: number }) =>
+        !!plot &&
+        px >= plot.x &&
+        px <= plot.x + plot.width &&
+        py >= plot.y &&
+        py <= plot.y + plot.height;
+      return plot && !inspection.points.some(inside) ? undefined : inspection;
+    }
+    const {
+      value,
+      axis = "x",
+      panel,
+    } = at as { value: number | string; axis?: "x" | "y"; panel: string };
+    const drawn = model.panels().find(({ key }) => key === panel);
+    const scale = drawn?.[axis];
+    if (!drawn || !scale || (typeof value === "string" && !scale.categories?.includes(value)))
+      return null;
+    const px = scale.map(typeof value === "string" ? scale.categories!.indexOf(value) : value);
+    const { plot } = drawn;
+    const [from, length] = axis === "x" ? [plot.x, plot.width] : [plot.y, plot.height];
+    if (!(px >= from && px <= from + length)) return undefined;
+    const [inspection] = this.#cursorAt(value, axis, undefined, [drawn]);
+    return inspection ?? null;
+  }
+
+  /**
+   * Listens for presses outside the chart while a pin is pinned (`on`), or
+   * stops. A press in a shadow root reaches the root around it as one on
+   * its host, so the chart's root and every shadow root around it judge
+   * presses, out to the document: each by what it sees of the chart.
+   */
+  #watchOutside(on: boolean): void {
+    for (const target of this.#outsideOn)
+      target.removeEventListener("pointerdown", this.#outside!, true);
+    this.#outsideOn = [];
+    if (!on) return;
+    const { root } = this.#host;
+    const roots: (Document | ShadowRoot)[] = [];
+    for (let node = root.getRootNode(); node instanceof ShadowRoot; node = node.host.getRootNode())
+      roots.push(node);
+    roots.push(root.ownerDocument);
+    this.#outside ??= (event) => {
+      const around = this.#outsideOn as readonly (Document | ShadowRoot)[];
+      const k = around.indexOf(event.currentTarget as Document | ShadowRoot);
+      // The chart in its own root; the host of the shadow root that holds it in the others.
+      const inside = k > 0 ? (around[k - 1] as ShadowRoot).host : root;
+      if (!event.composedPath().includes(inside)) this.#setPin(null, "pointer");
+    };
+    this.#outsideOn = roots;
+    for (const target of roots) target.addEventListener("pointerdown", this.#outside, true);
+  }
+
+  /** Whether `event`'s pointer is another than the one dragging a rule, which it leaves alone. */
+  #besideRule(event: PointerEvent): boolean {
+    const rule = this.#press?.rule;
+    return !!rule && rule.pointer !== event.pointerId;
+  }
+
+  /** Whether an event's target is in the pinned tooltip, whose content takes its own input. */
+  #onPin(target: EventTarget | null): boolean {
+    return !!this.#pin && this.#tooltip.element.contains(target as Node);
+  }
+
+  /** The rule with `drag` within reach of (x, y), picked with the reach of `event`'s pointer. */
+  #ruleAt(x: number, y: number, event: PointerEvent): DraggedRule | undefined {
+    const picked = this.#pressing(event, () =>
+      this.#pick(x, y, (mark) => !!(mark.spec as { drag?: boolean }).drag),
+    );
+    if (!picked) return undefined;
+    const marks = this.#host.model.config.marks as readonly Mark[];
+    const index =
+      typeof picked.key === "number"
+        ? picked.key
+        : marks.findIndex(({ spec }) => spec.id === picked.key);
+    const mark = marks[index]!;
+    const spec = mark.spec as { x?: number; y?: number; axis?: string; id?: string };
+    const axis = spec.x !== undefined ? "x" : "y";
+    return {
+      mark,
+      pointer: event.pointerId,
+      index,
+      id: spec.id,
+      key: this.#itemTarget(picked).item,
+      axis,
+      scale: axis === "y" && spec.axis === "right" ? "yRight" : axis,
+      from: Number(spec[axis]),
+    };
+  }
+
+  /**
+   * The mark a rule being dragged is now, as the chart's options have it;
+   * undefined once gone, or made along another axis or scale, or in
+   * another panel, which makes it another rule.
+   */
+  #ruleNow(rule: DraggedRule): Mark | undefined {
+    const marks = this.#host.model.config.marks as readonly Mark[];
+    const mark =
+      rule.id === undefined ? marks[rule.index] : marks.find(({ spec }) => spec.id === rule.id);
+    type Placed = { drag?: boolean; x?: unknown; axis?: string; panel?: string } | undefined;
+    const [now, was] = [mark?.spec as Placed, rule.mark.spec as Placed];
+    return now?.drag &&
+      (now.x !== undefined) === (rule.axis === "x") &&
+      now.axis === was?.axis &&
+      now.panel === was?.panel
+      ? mark
+      : undefined;
+  }
+
+  /**
+   * Draws a rule being dragged at the pointer's value along its axis,
+   * kept in the plot: it is the chart's to draw there until it is dropped
+   * (`Mark.moved`), the application's value its to set.
+   */
+  #moveRule(press: Press, x: number, y: number): void {
+    const rule = press.rule!;
+    const mark = this.#ruleNow(rule);
+    const scale = this.#still(press.panel) && press.panel[rule.scale];
+    if (!mark || !scale) {
+      this.#cancelPress(false, "options");
+      return;
+    }
+    const { plot } = press.panel;
+    const at =
+      rule.axis === "x"
+        ? Math.min(Math.max(x, plot.x), plot.x + plot.width)
+        : Math.min(Math.max(y, plot.y), plot.y + plot.height);
+    // Options may have made it another mark since: the one drawn now is moved.
+    this.#handOver(rule, mark);
+    rule.at = scale.invert(at);
+    mark.moved?.set(this.#host.model, rule.at);
+    this.#host.invalidate();
+  }
+
+  /** Moves a dragged rule's preview to `mark`, the one the options draw for it now, keeping the pointer. */
+  #handOver(rule: DraggedRule, mark: Mark): void {
+    if (rule.mark === mark) return;
+    rule.mark.moved?.delete(this.#host.model);
+    rule.mark = mark;
+    if (rule.at !== undefined) mark.moved?.set(this.#host.model, rule.at);
+  }
+
+  /**
+   * A rule dropped where the pointer let go (where it was last, for a
+   * release that went elsewhere): reported as a commit, then drawn, from
+   * the next frame, where its options put it, which listeners may have
+   * changed (accepted), left (rejected), or taken away.
+   */
+  #dropRule(press: Press, x?: number, y?: number): void {
+    const rule = press.rule!;
+    // Options or data that took its rule or its panel since send it back, as while held.
+    if (!this.#ruleNow(rule) || !(this.#still(press.panel) && press.panel[rule.scale])) {
+      this.#cancelPress(false, "options", press);
+      return;
+    }
+    if (x !== undefined && y !== undefined) this.#moveRule(press, x, y);
+    if (rule.at === undefined) return;
+    this.#reportRule(rule, "commit", "pointer", rule.at);
+    this.#letGo(rule);
+  }
+
+  /** Draws a rule dragged where its options put it again, and lets the pointer go. */
+  #letGo(rule: DraggedRule): void {
+    rule.mark.moved?.delete(this.#host.model);
+    const { root } = this.#host;
+    if (root.hasPointerCapture?.(rule.pointer)) root.releasePointerCapture(rule.pointer);
+    this.#host.invalidate();
+  }
+
+  /** What a rule being dragged shows, reported once a frame when it moved since. */
+  #previewRule(): void {
+    const rule = this.#press?.rule;
+    if (rule?.at === undefined || rule.at === rule.reported) return;
+    rule.reported = rule.at;
+    this.#reportRule(rule, "preview", "pointer", rule.at);
+  }
+
+  /** An `itemMove` of a rule being dragged: at `value` along its axis, undefined for a rule gone. */
+  #reportRule(
+    rule: DraggedRule,
+    phase: Phase,
+    cause: ChangeCause,
+    value: number | undefined,
+  ): void {
+    const { panel } = rule;
+    this.#host.events.emit("itemMove", {
+      key: rule.key,
+      markId: rule.id,
+      position: value === undefined ? null : { [rule.axis]: value },
+      phase,
+      cause,
+      revision: this.#host.drawnRevision(),
+      ...(rule.scale === "yRight" && { axis: "right" }),
+      ...(panel !== undefined && { panels: [panel] }),
+    });
   }
 
   /**
@@ -532,7 +1155,7 @@ export class Interaction {
    * changing anything, for bindings it refuses (a gesture bound twice, a key
    * the cursor takes).
    */
-  configure([bindings, own]: Compiled = bindingsOf(this.#host.options())): void {
+  configure([bindings, own]: Compiled = bindingsOf(this.#host.options(), this.#kit)): void {
     const host = this.#host;
     const options = host.options();
     this.#bindings = bindings;
@@ -547,6 +1170,16 @@ export class Interaction {
     const pinch = this.#pinch;
     if (pinch && !bound(pinch.panel, pinch.action)) this.#pinch = null;
     host.root.style.touchAction = this.#touchPolicy();
+    this.#draggable = options.marks.some((mark) => (mark.spec as { drag?: boolean }).drag);
+    // A rule being dragged that the options no longer have goes back; one
+    // they made again (an equal mark) goes on being dragged.
+    const now = press?.rule && this.#ruleNow(press.rule);
+    if (now) this.#handOver(press!.rule!, now);
+    else if (press?.rule) this.#cancelPress(false, "options");
+    // A pin of one inspection's mode means nothing in another.
+    const mode = options.inspection === false ? false : options.inspection?.mode;
+    if (this.#pin && mode !== this.#pinMode) this.#setPin(null, "options");
+    this.#pinMode = mode;
     // Labels that failed to load are tried again.
     if (this.#crosshair === null) this.#crosshair = undefined;
     if (typeof options.tooltip === "object" && options.tooltip.axisLabels) this.#loadCrosshair();
@@ -559,7 +1192,8 @@ export class Interaction {
 
   /**
    * Loads picking once what input is on is asked for: by listeners of
-   * hover, click, or contextMenu, or a row selection taking clicks
+   * hover, click, or contextMenu, a row selection taking clicks, pins,
+   * dragged rules, or trees that drill
    * (checked as options change, as listeners are added, and as input
    * comes); at once if a chart on the page loaded it. Input it would read
    * waits for it (`#fresh`), and is resolved once it is here.
@@ -571,6 +1205,10 @@ export class Interaction {
       this.#pickingLoad ||
       (!host.rows() &&
         !host.options().interaction?.select &&
+        !this.#pinsByClick() &&
+        !this.#pinLater &&
+        !this.#draggable &&
+        !host.model.drills &&
         !(["hover", "click", "contextMenu"] as const).some((t) => host.events.has(t)))
     )
       return;
@@ -583,17 +1221,26 @@ export class Interaction {
         this.#pickingLoad = undefined;
         if (this.#disposed) return;
         this.#usePicking(module);
+        this.#playWaiting();
         this.resolve(host.drawnRevision());
         this.draw();
       },
       (error: unknown) => {
-        // Input that waited for it is dropped; new options try again.
+        // Input that waited for it is dropped, a press on a rule played without it; new options try again.
         this.#pickingLoad = undefined;
         this.#picking = null;
         this.#pending = [];
+        this.#playWaiting();
         host.report(error, "load");
       },
     );
+  }
+
+  /** Plays a press that waited for picking (to tell a rule's), and what followed it. */
+  #playWaiting(): void {
+    const waiting = this.#waiting;
+    this.#waiting = null;
+    for (const event of waiting ?? []) this.#handlers.get(event.type)?.(event as never);
   }
 
   #usePicking(module: PickModule): void {
@@ -628,7 +1275,12 @@ export class Interaction {
 
   dispose(): void {
     this.#disposed = true;
+    this.#watchOutside(false);
+    if (this.#host.model.pins === this) this.#host.model.pins = undefined;
+    // A rule being dragged no longer holds its place (a mark may outlive its chart).
+    this.#press?.rule?.mark.moved?.delete(this.#host.model);
     this.#pending = [];
+    this.#waiting = null;
     this.#due = [];
     this.#captured = null;
     for (const stop of this.#cleanup) stop();
@@ -794,7 +1446,7 @@ export class Interaction {
     const marks = this.#host.model.config.marks;
     const mark = typeof key === "number" ? key : marks.findIndex(({ spec }) => spec.id === key);
     const { part } = item;
-    return this.#target(
+    const target = this.#target(
       mark,
       part.kind === "group"
         ? part.key
@@ -808,6 +1460,8 @@ export class Interaction {
       drawn.panel,
       item.box,
     );
+    if (part.kind === "group" && part.point) this.#points.set(target, part.point);
+    return target;
   }
 
   /**
@@ -859,6 +1513,21 @@ export class Interaction {
    * on the legend between its entries.
    */
   #legendEntry(element: EventTarget | null | undefined): LegendEntryTarget | null | undefined {
+    const found = this.#legendItem(element);
+    return (
+      found && {
+        kind: "legendEntry",
+        key: found.item.key,
+        label: found.item.label,
+        panel: found.guide.panel,
+      }
+    );
+  }
+
+  /** The legend and entry `element` is in: undefined outside the legend, null between its entries. */
+  #legendItem(
+    element: EventTarget | null | undefined,
+  ): { guide: LegendGuide; item: LegendItem } | null | undefined {
     const legend = this.#host.legend;
     if (!(element instanceof Node) || !legend.contains(element)) return undefined;
     const button = (element instanceof Element ? element : element.parentElement)?.closest(
@@ -871,10 +1540,118 @@ export class Interaction {
     let k = 0;
     for (const guide of scene.guides) {
       if (guide.kind !== "legend") continue;
-      for (const { key, label } of guide.entries)
-        if (k++ === at) return { kind: "legendEntry", key, label, panel: guide.panel };
+      for (const item of guide.entries) if (k++ === at) return { guide, item };
     }
     return null;
+  }
+
+  /**
+   * A legend entry's `select` action (a legend's own hides): selects the
+   * series it names, alone; with `add` (Shift), added to the series
+   * selected, or taken out where they all are; pressed again as the only
+   * ones selected, none.
+   */
+  #legendSelect(element: EventTarget | null, add: boolean, cause: ChangeCause): void {
+    const found = this.#legendItem(element);
+    if (found?.guide.action !== "select") return;
+    const host = this.#host;
+    const [kind, keys] = this.#legendNames(found.item.selects ?? found.item.key);
+    const held = this.#heldOf(kind);
+    const all = keys.length > 0 && keys.every((key) => held.includes(key));
+    const next = add
+      ? all
+        ? held.filter((key) => !keys.includes(key))
+        : [...new Set([...held, ...keys])]
+      : all && held.length === keys.length
+        ? []
+        : keys;
+    const sorted = [...next].sort();
+    host.select(
+      next.length === 0
+        ? null
+        : kind === "series"
+          ? { kind, series: sorted }
+          : { kind, items: sorted },
+      undefined,
+      cause,
+    );
+  }
+
+  /** The keys of the series or items the selection holds, where it is of `kind`. */
+  #heldOf(kind: "series" | "items"): readonly string[] {
+    const current = this.#host.selection();
+    if (current?.kind === "series" && kind === "series") return current.series as readonly string[];
+    if (current?.kind === "items" && kind === "items") return current.items as readonly string[];
+    return [];
+  }
+
+  /**
+   * What a legend entry's targets name: series by their own keys, what
+   * they stand for (`HiddenKeys.groups`), or their marks whole; where they
+   * name none, the layout marks' items that stand for them (a pie's slices).
+   */
+  #legendNames(targets: string | readonly string[]): ["series" | "items", string[]] {
+    const { model } = this.#host;
+    const named = new Set([targets].flat());
+    const { groups } = model.hidden;
+    const all = model.series().map(({ key }) => key);
+    const series = all.filter((key) => {
+      const mark = /^\[(-?\d+|"(?:[^"\\]|\\.)*")[,\]]/.exec(key)?.[1];
+      return (
+        named.has(key) || named.has(groups.get(key)!) || (!!mark && named.has(`{"mark":${mark}}`))
+      );
+    });
+    if (series.length > 0) return ["series", series];
+    const items = [...groups]
+      .filter(([key, identity]) => named.has(identity) && !all.includes(key))
+      .map(([key]) => key);
+    return ["items", items];
+  }
+
+  /**
+   * Says what pressing the entries of legends that do not hide does: in a
+   * legend that selects, pressed while their series are selected (and the
+   * others faded while some are); in one that does nothing, nothing.
+   */
+  #legendStates(scene: Scene): void {
+    // Frames of the cursor alone change neither the legends nor the selection.
+    const selection = this.#host.selection();
+    if (scene === this.#legendsDrawn[0] && selection === this.#legendsDrawn[1]) return;
+    this.#legendsDrawn = [scene, selection];
+    const legends = scene.guides.filter((guide): guide is LegendGuide => guide.kind === "legend");
+    const actions = JSON.stringify(legends.map(({ action }) => action));
+    const changed = actions !== this.#legendActions;
+    this.#legendActions = actions;
+    if (!changed && !legends.some(({ action }) => action !== undefined && action !== "hide"))
+      return;
+    const buttons = this.#host.legend.querySelectorAll("button");
+    let k = 0;
+    for (const { action, entries } of legends)
+      for (const item of entries) {
+        const button = buttons[k++];
+        if (!button) continue;
+        if (action === undefined || action === "hide") {
+          // Hiding again: pressed and titled as the legend draws entries that hide.
+          if (changed) {
+            button.setAttribute("aria-pressed", item.mixed ? "mixed" : String(!item.hidden));
+            button.title = `${item.hidden || item.mixed ? "Show" : "Hide"} ${item.label}`;
+            button.style.opacity = "";
+          }
+          continue;
+        }
+        if (action === false) {
+          button.removeAttribute("aria-pressed");
+          button.removeAttribute("title");
+          button.style.opacity = "";
+          continue;
+        }
+        const [kind, keys] = this.#legendNames(item.selects ?? item.key);
+        const chosen = new Set(this.#heldOf(kind));
+        const on = keys.length > 0 && keys.every((key) => chosen.has(key));
+        button.setAttribute("aria-pressed", String(on));
+        button.title = `${on ? "Deselect" : "Select"} ${item.label}`;
+        button.style.opacity = chosen.size > 0 && !on ? String(HIDDEN_ENTRY) : "";
+      }
   }
 
   /**
@@ -922,7 +1699,8 @@ export class Interaction {
     const { model } = this.#host;
     if (!keyboard || !this.#picking) return undefined;
     const marks = model.config.marks;
-    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
+    // Pins name series that share the keyboard's stops' positions too.
+    const series = this.#inspected(keyboard.panel).find(({ key }) => key === keyboard.key);
     const mark = series && model.markOf(series);
     if (!series || !mark) {
       // A layout mark's item: the one keyed, as its panel's record drew it.
@@ -1031,8 +1809,12 @@ export class Interaction {
     // A listener may destroy the chart: what is left of the input goes with it.
     for (const emit of due) if (!this.#disposed) emit();
     if (this.#disposed) return;
-    // What a brush being drawn shows is reported once a frame.
+    // What a brush or a rule being dragged shows is reported once a frame.
     this.#preview();
+    this.#previewRule();
+    // A pin asked for before a frame and picking could place it is made now.
+    const later = this.#pinLater;
+    if (later && this.#picking) this.#pinAsked(later);
     const captured = this.#captured;
     this.#captured = null;
     const resolved = captured?.scene === scene;
@@ -1042,6 +1824,7 @@ export class Interaction {
     // Listeners of what this frame reported: edges, the cursor shared.
     if (changed()) return;
     const { theme } = scene;
+    this.#legendStates(scene);
     const panels = host.model.panels();
     // Panels without insets over them any more need no clip.
     for (const [key, clip] of this.#cuts)
@@ -1051,6 +1834,9 @@ export class Interaction {
       }
     const options = host.options();
     const showTooltip = options.tooltip ?? true;
+    // The pinned tooltip, read again: a pin whose item went lets go here.
+    const pinned = this.#pinned();
+    if (changed()) return;
     // Hover listeners get the inspection even without the built-in tooltip,
     // which is how applications draw their own.
     const hovering = host.events.has("hover");
@@ -1065,21 +1851,29 @@ export class Interaction {
     // cursor another chart shares, or `showCursor` shows, shows in every
     // panel, with one tooltip when it asks for it.
     const across = this.#across(own);
-    const shown = own ? [own, ...across] : this.#synced();
+    const shown = [
+      ...(pinned && showTooltip ? [pinned] : []),
+      ...(own ? [own, ...across] : this.#synced()),
+    ];
     const sync = options.interaction?.sync;
     const acrossTips =
       typeof sync === "object" && typeof sync.panels === "object" && sync.panels.tooltip;
     const reads = ({ points }: Inspection) => points.length > 0;
+    // A pinned tooltip is the only one the chart shows, none while it is out of view.
     const tips = new Set<Inspection>(
-      showTooltip
-        ? own
-          ? [active, ...(acrossTips ? across : [])].filter(
-              (tip): tip is Inspection => !!tip && reads(tip),
-            )
-          : this.#showing(host.cursor()).tooltip
-            ? shown.filter(reads).slice(0, 1)
-            : []
-        : [],
+      showTooltip && this.#pin
+        ? pinned
+          ? [pinned]
+          : []
+        : showTooltip
+          ? own
+            ? [active, ...(acrossTips ? across : [])].filter(
+                (tip): tip is Inspection => !!tip && reads(tip),
+              )
+            : this.#showing(host.cursor()).tooltip
+              ? shown.filter(reads).slice(0, 1)
+              : []
+          : [],
     );
     // What the pointer or keyboard is on and reads (a cursor shown here is reported once drawn).
     // Once what it is on can be read (`needPicking`).
@@ -1120,7 +1914,8 @@ export class Interaction {
         this.#outline.setAttribute("stroke", theme.text);
         this.#outline.setAttribute("visibility", "visible");
         const [item] = inspection.points;
-        const anchor = this.#pointer ?? { x: item!.px, y: item!.py };
+        const at = { x: item!.px, y: item!.py };
+        const anchor = inspection === pinned ? at : (this.#pointer ?? at);
         if (tips.has(inspection)) this.#tip(tipped++).show(inspection, theme, anchor, bounds);
         continue;
       }
@@ -1156,8 +1951,11 @@ export class Interaction {
         dots.push([point.px, point.py, point.color, cut || undefined]);
       // The pointer's tooltip is at the pointer; others' at the crosshair.
       if (tips.has(inspection)) {
+        // A pin of an item points at it.
+        const point = inspection === pinned && this.#pin?.cursor && inspection.points[0];
         const anchor =
           (inspection === active && this.#pointer) ||
+          (point && { x: point.px, y: point.py }) ||
           (vertical
             ? { x: inspection.position, y: plot.y + plot.height / 2 }
             : { x: plot.x + plot.width / 2, y: inspection.position });
@@ -1193,6 +1991,11 @@ export class Interaction {
     }
     // Tooltips not shown this frame hide: the chart's own first, then those of other panels.
     for (const tip of [this.#tooltip, ...this.#tips].slice(tipped)) tip.hide();
+    // Pinned from the keyboard, its content takes the focus once shown.
+    if (this.#focusPin && tipped > 0 && pinned) {
+      this.#focusPin = false;
+      this.#tooltip.element.focus({ preventScroll: true });
+    }
     // A cursor another chart shares, or `showCursor` shows, once drawn; or
     // nothing since what read last went (Escape, the pointer leaving).
     if (hovering && !mine)
@@ -1303,6 +2106,10 @@ export class Interaction {
       const type = bindings.match("pinch", touch)?.action.type;
       if (pinch !== "zoom") pinch = type ?? pinch;
     }
+    // Rules dragged move along their axis: a horizontal rule along y.
+    for (const { spec } of this.#host.options().marks)
+      if ((spec as { drag?: boolean }).drag)
+        along += (spec as { x?: unknown }).x !== undefined ? "x" : "y";
     const pinches = axes && pinch === "zoom";
     const [x, y] = [along.includes("x"), along.includes("y")];
     return x && y
@@ -1594,6 +2401,20 @@ export class Interaction {
       options?: AddEventListenerOptions,
     ) => {
       const handle = (event: HTMLElementEventMap[K]) => {
+        // What follows a press waiting for picking waits with it, in order
+        // (but what capture listeners note as it happens, the wheel's steps,
+        // and menus, which wait for picking on their own and whose browser
+        // menu is kept off at once).
+        if (
+          this.#waiting &&
+          !options?.capture &&
+          event instanceof MouseEvent &&
+          !(event instanceof WheelEvent) &&
+          event.type !== "contextmenu"
+        ) {
+          this.#waiting.push(event);
+          return;
+        }
         this.#cause = type === "wheel" ? "wheel" : type === "keydown" ? "keyboard" : "pointer";
         handler(event);
       };
@@ -1606,7 +2427,19 @@ export class Interaction {
       return { x: event.clientX - rect.left, y: event.clientY - rect.top };
     };
 
+    // Over a pinned tooltip, the pointer is on its content, not on the chart.
+    const leave = () => {
+      this.#pointer = this.#reading = this.#pointerShared = this.#over = null;
+      host.shareCursor(null);
+    };
     on("pointermove", (event) => {
+      if (this.#onPin(event.target) && !this.#press) {
+        if (this.#pointer) {
+          leave();
+          host.schedule();
+        }
+        return;
+      }
       // Inspection reads the new values: they show first.
       host.showValues();
       this.#pointer = local(event);
@@ -1614,7 +2447,8 @@ export class Interaction {
       this.#over = event.target;
       this.#keyboard = null;
       this.#brushAnchor = null;
-      const press = this.#press;
+      // Another pointer than a rule's being dragged moves nothing.
+      const press = this.#besideRule(event) ? null : this.#press;
       const { x, y } = this.#pointer;
       if (this.#touches.has(event.pointerId)) {
         this.#touches.set(event.pointerId, { x, y });
@@ -1632,6 +2466,16 @@ export class Interaction {
         press.moved ||= Math.hypot(x - press.x, y - press.y) >= DRAG_THRESHOLD;
         if (press.moved && press.mode === "pan") {
           this.#pan(press, x, y);
+          return;
+        }
+        if (press.mode === "move" && event.buttons === 0) {
+          // Its release went elsewhere (before the pointer was captured): dropped where it was.
+          this.#press = null;
+          if (press.moved) this.#dropRule(press);
+          return;
+        }
+        if (press.moved && press.mode === "move") {
+          this.#moveRule(press, x, y);
           return;
         }
         const brush = host.brush();
@@ -1657,21 +2501,34 @@ export class Interaction {
           this.#preview();
         }
       }
+      // Over a rule it can drag, the pointer says which way it moves.
+      if (this.#draggable && !press) {
+        const rule = this.#ruleAt(x, y, event);
+        root.style.cursor = rule ? (rule.axis === "x" ? "ew-resize" : "ns-resize") : "";
+      }
       host.schedule();
       this.#sharePointer(x, y);
     });
     on("pointerleave", (event) => {
-      this.#pointer = this.#reading = this.#pointerShared = this.#over = null;
-      // A captured drag leaves only when released; any other press ends here.
-      this.#cancelPress();
+      leave();
+      // A captured drag leaves only when released; any other press ends
+      // here. A rule's goes on where it holds the pointer (a leave played
+      // from before the controller took it), else it is dropped where it was
+      // (its press played after its release outside).
+      const press = this.#press;
+      if (press?.mode !== "move") this.#cancelPress();
+      else if (!this.#besideRule(event) && !root.hasPointerCapture?.(event.pointerId)) {
+        this.#press = null;
+        this.#dropRule(press);
+      }
       if (this.#tap?.pointer === event.pointerId) this.#tap = null;
-      host.shareCursor(null);
     });
 
     on(
       "wheel",
       (event) => {
-        if (!host.scene()) return;
+        // A pinned tooltip's content scrolls as its own.
+        if (!host.scene() || this.#onPin(event.target)) return;
         const point = local(event);
         if (this.#onItems(point.x, point.y)) return;
         // Outside the plots, the wheel acts on the x scale every panel
@@ -1708,8 +2565,15 @@ export class Interaction {
       { passive: false },
     );
     on("pointerdown", (event) => {
-      // Buttons (the legend's, controls') take their own presses.
-      if (!host.scene() || (event.target as Element).closest?.("button")) return;
+      // Buttons (the legend's, controls') and a pinned tooltip's content
+      // take their own presses; a rule being dragged keeps its pointer's.
+      if (
+        !host.scene() ||
+        (event.target as Element).closest?.("button") ||
+        this.#onPin(event.target) ||
+        this.#besideRule(event)
+      )
+        return;
       // A drag starts from the view it lands in, not one passing by, and
       // from values as they are.
       host.settle();
@@ -1733,6 +2597,33 @@ export class Interaction {
       if (!panel) {
         if (event.button === 0 && (!this.#picking || this.#axisLabel(x, y)))
           this.#tap = { pointer: event.pointerId, x, y, moved: false, label: true };
+        return;
+      }
+      // A press on a rule with `drag` moves it, whatever else dragging does
+      // there; which rule it presses, picking says, which it may wait for.
+      if (event.button === 0 && this.#draggable && !this.#picking && this.#pickingLoad) {
+        this.#waiting = [event];
+        if (event.pointerType !== "touch") root.setPointerCapture?.(event.pointerId);
+        return;
+      }
+      const rule = event.button === 0 && this.#draggable ? this.#ruleAt(x, y, event) : undefined;
+      if (rule) {
+        if (this.#host.model.panels().length > 1) rule.panel = panel.key;
+        // A tap another pointer holds is no click now (as beside a pinch).
+        if (this.#tap) this.#tap.moved = true;
+        this.#press = {
+          x,
+          y,
+          panel,
+          mode: "move",
+          action: undefined,
+          moved: false,
+          from: this.#view(panel),
+          rule,
+        };
+        event.preventDefault();
+        if (event.eventPhase) root.focus({ preventScroll: true });
+        if (event.pointerType !== "touch") root.setPointerCapture?.(event.pointerId);
         return;
       }
       // A drag that starts on the brush moves or resizes it, where a binding says so.
@@ -1764,17 +2655,24 @@ export class Interaction {
         return;
       }
       const tap = this.#tap;
-      if (tap) {
+      // A rule's drag ends with its own pointer's release, whatever another's tap waits for.
+      if (tap && this.#press?.rule?.pointer !== event.pointerId) {
         if (tap.pointer !== event.pointerId) return;
         this.#tap = null;
         if (!tap.moved) this.#click(local(event), event, tap.label);
         return;
       }
+      if (this.#besideRule(event)) return;
       const press = this.#press;
       this.#press = null;
       if (!press) return;
       if (!press.moved) {
         if (event.button === 0 && press.mode !== "cursor") this.#click(local(event), event);
+        return;
+      }
+      if (press.mode === "move") {
+        const end = local(event);
+        this.#dropRule(press, end.x, end.y);
         return;
       }
       if (press.mode !== "brush" && press.mode !== "edit") return;
@@ -1828,7 +2726,7 @@ export class Interaction {
     const cancel = (event: PointerEvent) => {
       this.#touches.delete(event.pointerId);
       this.#pinch = null;
-      this.#cancelPress();
+      if (!this.#besideRule(event)) this.#cancelPress();
       if (this.#tap?.pointer === event.pointerId) this.#tap = null;
     };
     on("pointercancel", cancel);
@@ -1838,7 +2736,7 @@ export class Interaction {
     // Double click resets: on a plot, its scales; elsewhere, every one. The
     // legend's buttons keep their clicks.
     on("dblclick", (event) => {
-      if (host.legend.contains(event.target as Node)) return;
+      if (host.legend.contains(event.target as Node) || this.#onPin(event.target)) return;
       const { x, y } = local(event);
       if (this.#onItems(x, y)) return;
       const panel = this.#panelAt(x, y);
@@ -1854,7 +2752,7 @@ export class Interaction {
     // A secondary press reports where it is and what it is on; while it is
     // listened to, the browser's own menu stays off the plots.
     on("contextmenu", (event) => {
-      if (!host.scene() || !host.events.has("contextMenu")) return;
+      if (!host.scene() || !host.events.has("contextMenu") || this.#onPin(event.target)) return;
       const { x, y } = local(event);
       if (this.#panelAt(x, y) || this.#onItems(x, y)) event.preventDefault();
       if (this.#fresh()) this.#menu(x, y, event)();
@@ -1883,6 +2781,8 @@ export class Interaction {
     on("click", (event) => {
       const click = read?.event === event ? read.click : legendClick(event);
       read = undefined;
+      // A legend that selects selects first: the click is reported after.
+      this.#legendSelect(event.target, event.shiftKey, event.detail === 0 ? "keyboard" : "pointer");
       // After input still waiting to be read, in order.
       if (click && this.#pending.length) this.#pending.push({ type: "legend", click });
       else if (click) host.events.emit("click", click);
@@ -2111,13 +3011,21 @@ export class Interaction {
    * panel went. With `back` (Escape), a pan goes back to where it started,
    * unless the view changed since in another way (`setViewport`, a synced chart).
    */
-  #cancelPress(back = false, cause: ChangeCause = "pointer") {
-    const press = this.#press;
+  #cancelPress(back = false, cause: ChangeCause = "pointer", press = this.#press) {
     this.#press = null;
     this.#host.brush()?.cancel();
     this.#host.schedule();
     // A brush that reported what it showed reports going back.
     if (press?.previewed !== undefined) this.#host.preview(null, press.panel, "cancel", cause);
+    // A rule goes back to where its options put it (gone with them, none).
+    const rule = press?.rule;
+    if (rule) {
+      this.#letGo(rule);
+      if (rule.reported !== undefined) {
+        const now = this.#ruleNow(rule)?.spec as Record<string, unknown> | undefined;
+        this.#reportRule(rule, "cancel", cause, now && Number(now[rule.axis]));
+      }
+    }
     if (!back || !press?.last || !this.#still(press.panel)) return;
     const { panel, from, last } = press;
     const now = this.#view(panel);
@@ -2251,13 +3159,19 @@ export class Interaction {
     // bound rows in turn; else row selections pick with the reach of its
     // pointer, as its event does.
     const picks = !!host.options().interaction?.select;
-    const target = picks
-      ? (payload?.target ?? this.#pressing(event, () => this.#targetAt(x, y, event.target)))
-      : undefined;
-    const chosen = picks ? this.#chosen(target, event.shiftKey) : undefined;
+    const target =
+      picks || this.#pinsByClick() || host.model.drills
+        ? (payload?.target ?? this.#pressing(event, () => this.#targetAt(x, y, event.target)))
+        : undefined;
     const select = picks
       ? undefined
       : this.#pressing(event, () => host.rows()?.clicked(x, y, event));
+    // One click, one decision: a tree drills (unless clicks select rows),
+    // and does nothing else; else the click selects and pins, each as the
+    // chart asks, what it picked.
+    const drills = !select && this.#drills(target, x, y);
+    const chosen = picks && !drills ? this.#chosen(target, event.shiftKey) : undefined;
+    const pinning = drills ? undefined : this.#clickPin(target);
     const panel = this.#panelAt(x, y);
     const brush = host.model.interactionOf(panel?.key)?.brush;
     // A click clears the brush where it says so (by default), but not one on the brush it moves.
@@ -2267,13 +3181,45 @@ export class Interaction {
       (settings?.clear ?? "click") === "click" &&
       !(settings?.edit && panel && this.#brushAt(panel, x, y));
     return () => {
+      if (drills) this.#drill(target!, x, y, "pointer");
       const written = select?.();
       if (chosen !== undefined) host.select(chosen);
-      // A click on an item standing for none of the bound rows keeps the brush too.
-      else if (clears && written !== null && host.selection()?.kind === "brush") host.select(null);
+      // A click on an item standing for none of the bound rows keeps the brush too, as a drill does.
+      else if (clears && !drills && written !== null && host.selection()?.kind === "brush")
+        host.select(null);
+      const pin = pinning?.();
+      if (pin !== undefined) this.#setPin(pin, "pointer");
       // Onto the event captured, which keeps the panels it was captured with.
-      if (payload) host.events.emit("click", Object.assign(payload, written));
+      if (payload && !this.#disposed) host.events.emit("click", Object.assign(payload, written));
     };
+  }
+
+  /** Drills as `#drills` found a click or Enter on `target` does (dom/drill.ts). */
+  #drill(target: Target, x: number, y: number, cause: ChangeCause): void {
+    if (target.kind === "item" || target.kind === "plot")
+      this.#host.model.drills?.(
+        target.kind === "item" ? target.item : undefined,
+        target.panel,
+        x,
+        y,
+        cause,
+      );
+  }
+
+  /**
+   * Whether a click at (x, y) on `target` drills a tree its panel's `zoom`
+   * drills (dom/drill.ts): into a node with nodes under it, or up from its
+   * root or a sunburst's empty middle.
+   */
+  #drills(target: Target | undefined, x: number, y: number): boolean {
+    if (target?.kind !== "item" && target?.kind !== "plot") return false;
+    const { model } = this.#host;
+    const panel = target.panel || undefined;
+    const drill = model.interactionOf(panel)?.zoom ? model.items?.result(panel)?.drill : undefined;
+    if (!drill) return false;
+    return target.kind === "item"
+      ? target.item === drill.key || drill.opens(target.item)
+      : !!drill.out?.(x, y);
   }
 
   /**
@@ -2361,7 +3307,7 @@ export class Interaction {
    */
   #itemNow(keyboard: KeyboardCursor, item: KeyedItem | undefined): KeyboardCursor | null {
     if (!item) return keyboard;
-    const series = this.#stops(keyboard.panel).find(({ key }) => key === keyboard.key);
+    const series = this.#inspected(keyboard.panel).find(({ key }) => key === keyboard.key);
     const mark = series && this.#host.model.markOf(series);
     if (!series || !mark) return null;
     const row =
@@ -2396,10 +3342,16 @@ export class Interaction {
       cause: "keyboard",
       revision,
     });
-    const chosen = this.#chosen(payload.target, false);
+    // Enter on a node with nodes under it, or on a sunburst's middle, drills, and does nothing else.
+    const drills = this.#drills(payload.target, Number.NaN, Number.NaN);
+    const chosen = drills ? undefined : this.#chosen(payload.target, false);
+    const pinning = drills ? undefined : this.#clickPin(payload.target);
     return () => {
+      if (drills) this.#drill(payload.target!, Number.NaN, Number.NaN, "keyboard");
       if (chosen !== undefined) host.select(chosen, undefined, "keyboard");
-      if (host.events.has("click")) host.events.emit("click", payload);
+      const pin = pinning?.();
+      if (pin !== undefined) this.#setPin(pin, "keyboard");
+      if (!this.#disposed && host.events.has("click")) host.events.emit("click", payload);
     };
   }
 
@@ -2435,6 +3387,22 @@ export class Interaction {
   #key(event: KeyboardEvent) {
     const host = this.#host;
     const { model, live } = host;
+    // Escape gives up a press waiting for picking, and what followed it.
+    const waiting = this.#waiting;
+    if (event.key === "Escape" && waiting) {
+      event.preventDefault();
+      this.#waiting = null;
+      const { pointerId } = waiting[0] as PointerEvent;
+      if (host.root.hasPointerCapture?.(pointerId)) host.root.releasePointerCapture(pointerId);
+      return;
+    }
+    // Escape lets a pinned tooltip go, the focus in its content or not,
+    // unless it ends a drag first.
+    if (event.key === "Escape" && this.#pin && !this.#press) {
+      event.preventDefault();
+      this.#setPin(null, "keyboard");
+      return;
+    }
     // Controls inside the chart (legend buttons) keep their own keys.
     if (event.target !== host.root || this.#boundKey(event) || !this.#kit.keys.includes(event.key))
       return;
@@ -2460,7 +3428,13 @@ export class Interaction {
       if (selection?.kind !== "brush" || !at || !this.#zooms(selection, at)) {
         // Else Enter on the keyboard cursor clicks what it is on, as the pointer
         // would, and selects it where the chart asks.
-        if (this.#keyboard && (host.events.has("click") || host.options().interaction?.select)) {
+        if (
+          this.#keyboard &&
+          (host.events.has("click") ||
+            host.options().interaction?.select ||
+            this.#pinsByClick() ||
+            model.drills)
+        ) {
           event.preventDefault();
           if (this.#fresh()) this.#enter()();
           else {

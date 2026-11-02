@@ -182,6 +182,26 @@ describe("grouped grids", () => {
     expect(model.selectionState(8)).toBe("none");
   });
 
+  it("clear a group selected alone on a plain click on its header, with click toggle", () => {
+    const view = rowView(requests());
+    const model = createGridModel({
+      data: view,
+      groups: groupRows(view, { by: ["host"], ops: {} }),
+      columns: [{ field: "id" }],
+      selection: { click: "toggle" },
+    });
+    model.click(0);
+    expect(model.selectionState(0)).toBe("all");
+    model.click(0);
+    expect(model.selectedCount).toBe(0);
+    // With a row of another group selected too, the click selects the group alone.
+    model.click(0);
+    model.setExpanded(["api"], true);
+    model.select(2, "toggle");
+    model.click(0);
+    expect(model.selectedCount).toBe(4);
+  });
+
   it("count a condition in the channel, and selections made elsewhere, per group", () => {
     const t = requests();
     const store = selectionStore(t);

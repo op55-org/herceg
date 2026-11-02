@@ -122,6 +122,16 @@ positions between two places, added in one pass (`RowSet.addAll`). A
 condition in the channel shows as selected rows, compiled once per change
 and counted after commands, not per frame.
 
+A plain click goes through `model.click(rowIndex)`: it selects the row
+alone, or with `selection: { click: "toggle" }` clears the selection where
+the row is all of it (`selectedAlone`: one row, or a group's header whose
+rows are the whole selection; for a remote model, a record's key alone, or
+a group's scope).
+
+**Revision.** `model.revision` counts the notifications the model sends
+its listeners (a batch of commands counts once), so it changes exactly when
+what the grid shows may have.
+
 ## The DOM grid
 
 `dom/grid.ts` is a scroll container (`role="grid"`) holding a sticky header
@@ -165,6 +175,12 @@ row and a spacer as tall as the rows.
 - **Styling.** Theme tokens become custom properties on the grid's root,
   read by one stylesheet each grid carries, so grids in shadow roots are
   styled. Frames go through the shared scheduler; grids out of view wait.
+- **Events** (`grid.on`): `rowClick` and `cellClick` name the row by the
+  model's `GridRef`, taken before the click selects (listeners of the
+  selection may move or restrict rows), and give its index after; Enter on
+  a body cell reports `cause: "keyboard"`. `render` reports the model's
+  revision after each frame drawn, built only while it has a listener.
+  Listeners that throw are reported (`reportError`); the others still run.
 - `destroy()` unschedules the grid, undoes a drag under way, closes its
   menu, and removes listeners, observers, and elements.
 

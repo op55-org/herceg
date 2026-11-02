@@ -24,9 +24,14 @@ export {
   edgePayload,
   type InputEventPayload,
   type InspectionPayload,
+  type ItemMovePayload,
   inputEventPayload,
   inspectionPayload,
+  itemMovePayload,
   namesCategories,
+  type PinPayload,
+  pinPayload,
+  pinTarget,
   restoreViewportState,
   type SelectionPayload,
   selectionPayload,
@@ -119,13 +124,24 @@ export function showDrillRoot(
   chart.setDrillRoot(null, target);
 }
 
-/** Records one engine delta in the accumulated manual positions. */
+/**
+ * Whether one of `marks` is a network with the node keyed `key`: moves of
+ * other items (rules dragged) are events, not the networks' state.
+ */
+export function ownsNode(marks: ChartOptions["marks"] | undefined, key: string): boolean {
+  return (marks ?? []).some((mark, index) => {
+    const owns = (mark as { ownsNode?: (key: string, id: string | number) => boolean }).ownsNode;
+    return owns?.call(mark, key, mark.spec.id ?? index) === true;
+  });
+}
+
+/** Records one engine delta in the accumulated manual positions: a node's place, or null to put it back. */
 export function recordPosition(
   held: ItemPositionsPayload,
   key: string,
-  position: { x: number; y: number } | null,
+  position: { readonly x?: number; readonly y?: number } | null,
 ): void {
-  if (position)
+  if (position?.x !== undefined && position.y !== undefined)
     Object.defineProperty(held, key, {
       value: [position.x, position.y],
       enumerable: true,

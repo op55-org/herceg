@@ -17,7 +17,7 @@ import type { SvgSizing } from "../render/svg.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { PlotRect } from "../scene/scene.ts";
 import type { CameraSpec, CursorShowSpec } from "../spec/spec.ts";
-import type { ChartSelection } from "../spec/state.ts";
+import type { ChartSelection, PinTarget } from "../spec/state.ts";
 import type { Camera } from "../three/camera.ts";
 import type { ChartUpdate } from "./chart.ts";
 import type {
@@ -177,6 +177,20 @@ export interface Chart {
    * report's `basis`, as a setter's `expected` (see `Conditional`).
    */
   readonly basis: Basis;
+  /**
+   * Pins the tooltip as a click would, or lets it go (null): at an item,
+   * by its key from an event or a reference (in axis modes, at the item's
+   * value on the inspection's axis, as a click pins), or at a value along
+   * an axis in a panel. A `pin` event with cause "api" follows (once the
+   * chart's interaction code is loaded, right after its first frame).
+   * Needs state support (`herceg/state`), as reading `pinned` does.
+   */
+  pin(at: PinTarget | null, options?: Conditional): void;
+  /**
+   * Where the tooltip is pinned (see `PinTarget`), or null: with state
+   * support, which reads it; undefined without (`pin` events report it).
+   */
+  readonly pinned: PinTarget | null | undefined;
   /**
    * What is selected, or null: a brush's ranges (epoch ms for time axes)
    * and a lasso's outline, or items or series by their keys. While a
