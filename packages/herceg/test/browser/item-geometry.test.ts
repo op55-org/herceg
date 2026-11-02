@@ -289,6 +289,9 @@ describe("decorations", () => {
     await frame();
     await frame();
     vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    // A frame on the fake clock, so a slow real frame before it cannot make the change jump.
+    chart.render();
+    vi.advanceTimersByTime(16);
     const drawn: boolean[] = [];
     chart.on("render", () => drawn.push(textAt(chart, "CPU now") !== undefined));
     readings.setColumn("cpu", [0.9]);
