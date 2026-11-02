@@ -59,12 +59,66 @@ hg.sunburst(org, node="team", parent="parent_team", value="cost")
   their count). Negative or infinite values are errors.
 - **Treemaps** fill the room with nested rectangles (squarified, largest
   first), groups named in a strip along their top. **Sunbursts** draw a
-  ring per depth, each node's angle its share of its parent's.
+  ring per depth around an empty middle, each node's angle its share of
+  its parent's.
 - Nodes take their top-level group's color (deeper sunburst rings lighter),
   and the legend toggles top-level groups.
 - Names go inside shapes with room for at least three characters. Tooltips
   report a node's path, value, and share; the arrow keys visit nodes depth
   first. Items keep their keys (a node's path or name) as the tree changes.
+
+### Shapes, paint, and names
+
+```ts
+// A Marimekko: markets side by side, each split by segment, colored by segment.
+treemap(sales, {
+  path: ["market", "segment"], value: "value",
+  tile: "slice-dice", sort: "input", gap: 1,
+  color: "segment", fillOpacity: { measure: "share", range: [0.5, 1] },
+  labels: { parents: false, content: [{ field: "segment" }, "\n", { value: true, style: { opacity: 0.7 } }] },
+});
+// Two rings at a time around a third of the radius, leaves lighter, names along the radius.
+sunburst(flare, {
+  path: ["ring1", "ring2", "ring3"], value: "size",
+  levels: 2, innerRadius: 1 / 3, center: false, gap: 1,
+  branch: { fillOpacity: 0.6 }, leaf: { fillOpacity: 0.4 },
+  labels: { rotation: "radial" },
+});
+```
+
+```python
+hg.treemap(sales, ["market", "segment"], "value", tile="slice-dice", sort="input", gap=1,
+           color="segment", fill_opacity=hg.Measure("share", range=(0.5, 1)),
+           labels=hg.TreemapLabels(parents=False, content=[
+               hg.LabelPart(field="segment"), "\n", hg.LabelPart(value=True)]))
+hg.sunburst(flare, ["ring1", "ring2", "ring3"], "size", levels=2, inner_radius=1 / 3,
+            center=False, gap=1, branch=hg.Look(fill_opacity=0.6), leaf=hg.Look(fill_opacity=0.4),
+            labels=hg.SunburstLabels(rotation="radial"))
+```
+
+| Option | Marks | Means |
+| --- | --- | --- |
+| `tile` | treemap | `"squarify"` (the default): rows kept close to square. `"slice-dice"`: the top level side by side along x, the next along y, and so on. |
+| `sort` | both | `"value"` (the default): largest first. `"input"`: the data's order. The legend follows it. |
+| `gap` | both | Pixels between siblings, 2 by default; a sunburst's may be `{ angular, radial }`. |
+| `levels` | both | Levels drawn below the root, all by default. A sunburst's rings keep their width as it is drilled. |
+| `innerRadius` | sunburst | The empty middle, a fraction of the radius (0.18 by default). |
+| `center` | sunburst | `false` leaves a drilled node out of the middle; a click there still goes up. |
+| `color` | both | A field of the path whose values color the items, at any level; items above it are not filled. A tree of `node` and `parent` fields is colored by its top-level nodes. |
+| `fillOpacity` | both | A number, or a measure read through a range: `{ measure, range }`, where the measure is an item's `"share"` of its parent, its `"value"`, or its `"depth"`. |
+| `leaf`, `branch` | both | Looks (`fill`, `fillOpacity`, and an `opacity` the fill opacity is multiplied by) for items without and with children, over the paint above. |
+| `breadcrumbs` | both | The strip above a drilled tree: shown while the chart drills or the tree is drilled (the default), never (`false`), or always (`true`). |
+| `labels` | both | `true`, `false`, or `{ content, style }` (parts as in [labels of parts](marks.md#parts-with-a-look-of-their-own)) with, on treemaps, `at` (`"top-left"`, the default, or `"center"`) and `parents` (`false` names only rectangles without others inside and keeps no strip at the top of the others), and on sunbursts `rotation` (`"horizontal"` or `"radial"`, upright along each sector's radius). A path field names the item, or its ancestor at that level; another field reads the one row the item stands for; `{ value: true }` writes its value. Fields are written on one line (only text parts break lines), names are black or white by what they are seen over, and those that do not fit are left out; `overlap` and time formats are refused. |
+
+- With `color`, the legend lists the colors in `sort` order and toggles
+  them; a hidden color's items leave the layout, and their ancestors'
+  totals shrink with them.
+- On a canvas, rectangles' shared edges and the gaps between them fall on
+  device pixels, each gap at least one: a 1 px gap is 2 device pixels at a
+  pixel ratio of 1.5, never a blurred 1.5. Sunburst gaps are whole device
+  pixels wide too, but beside sectors less than three gaps wide, which
+  keep a narrower gap so that they still show (in SVG and PDF too). SVG
+  and PDF, and PNG (drawn from the SVG), keep the layout's own numbers.
 
 ### Drilling into trees
 
@@ -87,8 +141,9 @@ hg.Chart(sales, zoom=True).treemap(path=["region", "country"], value="revenue")
   its subtree in the room. Nodes keep their keys and colors; tooltips give
   shares of the node drilled into ("12% in Europe").
 - A breadcrumb strip ("All / Europe / France") is part of the chart, so
-  exports show it, with a native button over each step. A sunburst also
-  puts the drilled node in its middle, where a click goes up.
+  exports show it, with a native button over each step (`breadcrumbs`
+  above). A sunburst also puts the drilled node in its middle (unless
+  `center: false`), where a click goes up.
 - Keys: Enter opens, Backspace goes up, 0 shows the whole tree; a toolbar
   has Up and whole-tree buttons. Each change is announced.
 - When a row selection takes clicks, a click selects the node's rows and

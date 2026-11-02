@@ -46,7 +46,8 @@ streams and while series are hidden.
   holding only `"C"` gives it the palette's third color.
 - **Shared across marks.** Lines, areas, bars, and points colored by the
   same table's `"site"` agree, and so do layout marks' items: pie slices,
-  top-level treemap and sunburst branches, radar series, map regions and
+  treemap and sunburst items (by top-level branch, or by a level of the
+  path with `color`), radar series, map regions and
   points, network node groups, and 3D points and lines.
 - **Shared across derived data.** Derived tables, row views, and spec tables
   naming the table as their `origin` count as the same table. An unrelated

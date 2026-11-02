@@ -357,6 +357,25 @@ class StrokeStyle:
 
 
 @refuses
+@dataclass(frozen=True)
+class Look:
+    """A look laid over a mark's paint: its ``fill``, its ``fill_opacity``,
+    and an ``opacity`` the fill opacity is multiplied by. Treemaps' and
+    sunbursts' ``leaf=`` and ``branch=`` take one for items without and with
+    children::
+
+        chart.sunburst(path=["ring1", "ring2"], leaf=hg.Look(fill_opacity=0.4))
+    """
+
+    fill: str | None = None
+    fill_opacity: float | None = None
+    opacity: float | None = None
+
+    def __post_init__(self) -> None:
+        _checked(self, "Look", colors=("fill",), fractions=("fill_opacity", "opacity"))
+
+
+@refuses
 @dataclass
 class PlotStyle:
     """A plot's area: a background under its grid lines and a border around it."""

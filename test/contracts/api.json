@@ -50,6 +50,11 @@
         }
       }
     },
+    "mark sunburst python": {
+      "untyped": {
+        "gap": "Python takes the gaps between sectors and between rings as a pair, (angular, radial), where the spec writes { angular, radial }."
+      }
+    },
     "mark gauge python": {
       "choices": {
         "bands": {

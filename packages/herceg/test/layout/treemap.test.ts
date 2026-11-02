@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { hierarchy, subtreeValues } from "../../src/data/hierarchy.ts";
 import { table } from "../../src/data/table.ts";
 import { layoutPartition } from "../../src/layout/partition.ts";
-import { layoutTreemap } from "../../src/layout/treemap.ts";
+import {
+  CUT_BOTTOM,
+  CUT_LEFT,
+  CUT_RIGHT,
+  CUT_TOP,
+  layoutTreemap,
+} from "../../src/layout/treemap.ts";
 
 function tree(groups: string[], items: string[], weights: number[]) {
   const t = table({ group: groups, item: items, w: weights });
@@ -95,5 +101,54 @@ describe("layoutPartition", () => {
     expect(span(x)).toEqual([0.375, 0.5]);
     layoutPartition(t, values, false, out);
     expect(span(x)).toEqual([0, 0.125]);
+  });
+});
+
+describe("layoutTreemap's tilings", () => {
+  const { tree: t, values } = tree(["a", "a", "b"], ["a1", "a2", "b1"], [1, 3, 5]);
+  const bounds = { x: 0, y: 0, width: 900, height: 400 };
+  const [a, b] = Array.from(t.children.subarray(t.childStart[0]!, t.childStart[1]!));
+  const [a1, a2] = [t.nodeOfRow[0]!, t.nodeOfRow[1]!];
+
+  it("slices the root's children along x and theirs along y, in the table's order with byValue false", () => {
+    const out = new Float64Array(t.size * 4);
+    layoutTreemap(
+      t,
+      values,
+      bounds,
+      { inner: 0, outer: 0, top: 0, tile: "slice-dice", byValue: false },
+      out,
+    );
+    expect(box(out, a!)).toEqual([0, 0, 400, 400]);
+    expect(box(out, b!)).toEqual([400, 0, 500, 400]);
+    expect(box(out, a1)).toEqual([0, 0, 400, 100]);
+    expect(box(out, a2)).toEqual([0, 100, 400, 300]);
+    // Largest first by default.
+    layoutTreemap(t, values, bounds, { inner: 0, outer: 0, top: 0, tile: "slice-dice" }, out);
+    expect(box(out, b!)).toEqual([0, 0, 500, 400]);
+    expect(box(out, a2)).toEqual([500, 0, 400, 300]);
+  });
+
+  it("lays out no deeper than levels", () => {
+    const out = new Float64Array(t.size * 4);
+    layoutTreemap(t, values, bounds, { inner: 0, outer: 0, top: 20, levels: 1 }, out);
+    expect(box(out, a1)).toEqual([0, 0, 0, 0]);
+    expect(area(out, a!)).toBeGreaterThan(0);
+  });
+
+  it("marks the sides that face a gap, siblings' and those flush with a parent's", () => {
+    const out = new Float64Array(t.size * 4);
+    const cuts = new Uint8Array(t.size);
+    const layout = { inner: 2, outer: 0, top: 0, tile: "slice-dice" as const, byValue: false };
+    layoutTreemap(t, values, bounds, layout, out, cuts);
+    // a is flush with the chart on three sides; its right faces b.
+    expect(cuts[a!]).toBe(CUT_RIGHT);
+    expect(cuts[b!]).toBe(CUT_LEFT);
+    // a1 faces a2 below and, flush with a's right, b.
+    expect(cuts[a1]).toBe(CUT_BOTTOM | CUT_RIGHT);
+    expect(cuts[a2]).toBe(CUT_TOP | CUT_RIGHT);
+    // Under a strip for names, a child's top faces no gap.
+    layoutTreemap(t, values, bounds, { ...layout, top: 20 }, out, cuts);
+    expect(cuts[a1]! & CUT_TOP).toBe(0);
   });
 });

@@ -14,6 +14,7 @@ import type {
   ContinuitySpec,
   EncodingsSpec,
   LabelLayoutSpec,
+  LabelPart,
   LabelPlaceSpec,
   LabelSpec,
   LabelTextSpec,
@@ -1907,19 +1908,91 @@ export type TreeShape =
   | { path: readonly string[]; node?: never; parent?: never }
   | { node: string; parent: string; path?: never };
 
+/** A value each tree item has, which its paint may read: its share of its parent's value, its value, or its depth. */
+export type ItemMeasure = "share" | "value" | "depth";
+
+/**
+ * Tree items' fill opacity: a number from 0 to 1, or an item measure read
+ * through `range` linearly: shares from 0 to 1, values from 0 to the
+ * largest item's, depths from the top level to the deepest drawn.
+ */
+export type TreeOpacity = number | { measure: ItemMeasure; range: readonly [number, number] };
+
+/** A look laid over tree items' paint: a fill, a fill opacity, and an opacity it is multiplied by. */
+export interface TreeLook {
+  fill?: string;
+  fillOpacity?: number;
+  opacity?: number;
+}
+
+/**
+ * How tree items look and are ordered: `color`, a field of the path whose
+ * values color the items at its level and below (those above are not
+ * filled; each top-level node's color by default); `leaf` and `branch`,
+ * looks of items without and with children, over `fillOpacity`; siblings
+ * largest first (`sort: "value"`, the default) or in the data's order
+ * ("input"), as the legend lists colors; and breadcrumbs above the tree
+ * while the chart drills it or it is drilled (by default), never
+ * (`false`), or always (`true`).
+ */
+interface TreePaintStyle {
+  color?: string;
+  leaf?: TreeLook;
+  branch?: TreeLook;
+  fillOpacity?: TreeOpacity;
+  sort?: "value" | "input";
+  /** Levels drawn below the tree's root (the drill root); every level by default. */
+  levels?: number;
+  breadcrumbs?: boolean;
+}
+
+/**
+ * Names of tree items, inside those with room for them: each item's name,
+ * or `content` (text, `{ field }`: a field of the path names the item or
+ * its ancestor at that level, another field the value of the one row the
+ * item stands for; `{ value: true }`: the item's value), styled by `style`.
+ */
+export interface TreeLabelsSpec {
+  content?: readonly Exclude<LabelPart, { series: true }>[];
+  style?: TextStyle;
+}
+
+/**
+ * A treemap's names: in each rectangle's top-left corner (the default) or
+ * its center; `parents: false` names only rectangles drawn without others
+ * inside them, and keeps no strip at the top of the others for names.
+ */
+export interface TreemapLabelsSpec extends TreeLabelsSpec {
+  at?: "top-left" | "center";
+  parents?: boolean;
+}
+
+/** A sunburst's names: across the sector ("horizontal", the default), or along its radius, upright ("radial"). */
+export interface SunburstLabelsSpec extends TreeLabelsSpec {
+  rotation?: "horizontal" | "radial";
+}
+
 /**
  * A treemap: nested rectangles for a tree whose leaves' areas are their
  * share of `value` (or of the rows), as the portable spec describes it.
  */
 export type TreemapSpec = TreemapStyle & TreeShape;
 
-interface TreemapStyle extends RowTooltip {
+interface TreemapStyle extends RowTooltip, TreePaintStyle {
   type: "treemap";
   data?: string;
   id?: string;
   value?: string;
   /** Names inside the rectangles that have room for them; true by default. */
-  labels?: boolean;
+  labels?: boolean | TreemapLabelsSpec;
+  /**
+   * How children fill their parent: in rows kept close to square
+   * ("squarify", the default), or sliced along x, their children along y,
+   * and so on ("slice-dice", as a Marimekko's columns and cells).
+   */
+  tile?: "squarify" | "slice-dice";
+  /** Pixels between siblings; 2 by default. */
+  gap?: number;
   /** With the chart's `panels`, the id of the panel the treemap has to itself. */
   panel?: string;
 }
@@ -1930,13 +2003,22 @@ interface TreemapStyle extends RowTooltip {
  */
 export type SunburstSpec = SunburstStyle & TreeShape;
 
-interface SunburstStyle extends RowTooltip {
+interface SunburstStyle extends RowTooltip, TreePaintStyle {
   type: "sunburst";
   data?: string;
   id?: string;
   value?: string;
   /** Names inside the sectors that have room for them; true by default. */
-  labels?: boolean;
+  labels?: boolean | SunburstLabelsSpec;
+  /** The center kept empty of rings, as a fraction of the sunburst's radius; 0.18 by default. */
+  innerRadius?: number;
+  /**
+   * A drilled sunburst's root painted in its center (true, the default);
+   * `false` leaves the center empty, and a click there still goes up.
+   */
+  center?: boolean;
+  /** Pixels between neighboring sectors and between rings; 2 by default. */
+  gap?: number | { angular?: number; radial?: number };
   /** With the chart's `panels`, the id of the panel the sunburst has to itself. */
   panel?: string;
 }

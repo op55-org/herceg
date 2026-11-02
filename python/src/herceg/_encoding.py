@@ -27,6 +27,8 @@ from ._errors import (
     placed,
     refuses,
     shown,
+    tuplable,
+    tupled,
 )
 from ._guides import Format, IdentityScale, format_spec
 from ._style import (
@@ -1158,6 +1160,122 @@ def pixels_option(value: Any, role: str) -> Any:
     ):
         raise ChartError(f"{role}: expected 0 or more pixels; received {shown(value)}")
     return value
+
+
+def _tree_content(content: Any, role: str) -> None:
+    """Refuses parts of a tree's labels that name a series, which tree items are none of."""
+    for i, part in enumerate(content_spec(content, f"{role} content") or ()):
+        if isinstance(part, dict) and part.get("series"):
+            raise ChartError(
+                f"{role} content[{i}]: names a series, and tree items are none; "
+                "give text, a column, or the value"
+            )
+
+
+@refuses
+@dataclass
+class TreemapLabels:
+    """Names of a treemap's rectangles, inside those with room for them: each
+    item's name, or ``content`` (see ``hg.LabelPart``: a column of the path
+    names the item, or its ancestor at that level; another column, its value
+    in the one row the item stands for; ``value=True``, the item's value),
+    styled by ``style``, in each rectangle's top-left corner (``at="top-left"``,
+    the default) or its ``"center"``. ``parents=False`` names only rectangles
+    drawn without others inside them and keeps no strip for names at the top
+    of the others::
+
+        chart.treemap(path=["market", "segment"], labels=hg.TreemapLabels(
+            parents=False,
+            content=[hg.LabelPart(field="segment"), "\n", hg.LabelPart(value=True)],
+        ))
+    """
+
+    at: Literal["top-left", "center"] | None = None
+    parents: bool | None = None
+    content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
+    style: TextStyle | Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.at is not None:
+            _choice(self.at, ("top-left", "center"), "TreemapLabels at")
+        if self.parents is not None and not isinstance(self.parents, bool):
+            raise ChartError(
+                f"TreemapLabels parents: expected True or False; received {shown(self.parents)}"
+            )
+        _tree_content(self.content, "TreemapLabels")
+        self.style = _built(self.style, TextStyle, "TreemapLabels style")
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {
+            "at": self.at,
+            "parents": self.parents,
+            "content": content_spec(self.content, "TreemapLabels content"),
+            "style": _spec(self.style) if self.style is not None else None,
+        }
+        return {key: value for key, value in spec.items() if value is not None}
+
+
+@refuses
+@dataclass
+class SunburstLabels:
+    """Names of a sunburst's sectors, inside those with room for them: each
+    item's name, or ``content`` and ``style`` as ``hg.TreemapLabels`` take
+    them, written across each sector (``rotation="horizontal"``, the default)
+    or along its radius, upright (``"radial"``)::
+
+        chart.sunburst(path=["ring1", "ring2"], labels=hg.SunburstLabels(rotation="radial"))
+    """
+
+    rotation: Literal["horizontal", "radial"] | None = None
+    content: Sequence[str | LabelPart | Mapping[str, Any]] | None = None
+    style: TextStyle | Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.rotation is not None:
+            _choice(self.rotation, ("horizontal", "radial"), "SunburstLabels rotation")
+        _tree_content(self.content, "SunburstLabels")
+        self.style = _built(self.style, TextStyle, "SunburstLabels style")
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {
+            "rotation": self.rotation,
+            "content": content_spec(self.content, "SunburstLabels content"),
+            "style": _spec(self.style) if self.style is not None else None,
+        }
+        return {key: value for key, value in spec.items() if value is not None}
+
+
+#: What a tree item's measure reads.
+ItemMeasure = Literal["share", "value", "depth"]
+
+
+@refuses
+@dataclass(frozen=True)
+class Measure:
+    """A value each tree item has, read through ``range`` linearly: its
+    ``"share"`` of its parent (0 to 1), its ``"value"`` (0 to the largest
+    item's), or its ``"depth"`` (the top level to the deepest drawn)::
+
+        chart.treemap(path=["market", "segment"], fill_opacity=hg.Measure("share", range=(0.5, 1)))
+    """
+
+    measure: ItemMeasure
+    range: tuple[float, float]
+
+    def __post_init__(self) -> None:
+        _choice(self.measure, ("share", "value", "depth"), "Measure measure")
+        span = tupled(self.range, (2,)) if tuplable(self.range) else self.range
+        if not isinstance(span, tuple) or len(span) != 2:
+            raise ChartError(
+                "Measure range: expected (from, to), two numbers from 0 to 1; "
+                f"received {shown(self.range)}"
+            )
+        for i, value in enumerate(span):
+            _fraction(value, f"Measure range[{i}]")
+        object.__setattr__(self, "range", (float(span[0]), float(span[1])))
+
+    def _spec(self) -> dict[str, Any]:
+        return {"measure": self.measure, "range": list(self.range)}
 
 
 def choice_option(value: Any, choices: Sequence[Any], role: str) -> Any:

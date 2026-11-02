@@ -93,12 +93,17 @@ import {
 import type { Look } from "./runs.ts";
 import { type CategoryScale, IdentityColors, OrdinalScale } from "./scales.ts";
 import { type SeriesPaint, SeriesStyles } from "./series-styles.ts";
+import { type TreeTextUser, treeText } from "./tree-text.ts";
 
 /** The compiler, with the chart's code it uses. */
 export function featureCompiler(kit: FeatureKit): FeatureCompiler {
+  const trees = treeText(kit);
   return {
-    compile: (config, marks, previous, identities) =>
-      compile(kit, config, marks, previous, identities),
+    compile: (config, marks, previous, identities) => {
+      // Tree marks draw labels of parts and styles with the compiler's code.
+      for (const mark of config.marks) (mark as Partial<TreeTextUser>).useTreeText?.(trees);
+      return compile(kit, config, marks, previous, identities);
+    },
     names: (tables, places, last) => tableNames(kit, tables, places, last),
   };
 }

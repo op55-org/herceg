@@ -1,7 +1,8 @@
 // What treemaps and sunbursts share: the tree a table describes, each node's
-// total, the top-level branch it belongs to, and the legend of branches;
-// the part of it under a node the chart is drilled into, with the path to
-// it; and the rows a node stands for, for row selection.
+// total, the color group it is in (its top-level branch, or its value of
+// the path's `color` field) and the legend of groups; the part of it
+// under a node the chart is drilled into, with the path to it; and the rows
+// a node stands for, for row selection.
 
 import {
   childrenByValue,
@@ -20,6 +21,7 @@ import { formatNumber } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { Rect, TextGeometry } from "../scene/scene.ts";
+import { ChartError } from "../spec/errors.ts";
 import type { InteractionSpec } from "../spec/spec.ts";
 import {
   heldText,
@@ -33,18 +35,23 @@ import {
 } from "./layout-mark.ts";
 import { CATEGORY, requireField } from "./mark.ts";
 
-/** How a spec names a tree: a path of category fields, or node and parent fields. */
+/**
+ * How a spec names a tree (a path of category fields, or node and parent
+ * fields), what colors its items (a field of the path; the top-level
+ * branches by default), and how siblings are ordered.
+ */
 export interface TreeFields {
   path?: readonly string[];
   node?: string;
   parent?: string;
   value?: string;
+  color?: string;
+  sort?: "value" | "input";
 }
 
-/** A top-level node with a value: a legend entry and a color. */
+/** A top-level node with a value, for summaries. */
 export interface Branch {
   node: number;
-  key: string;
   label: string;
 }
 
@@ -70,15 +77,14 @@ export interface TreeView {
   tree: Hierarchy;
   /** Each node's total over the panel's rows. */
   values: Float64Array;
-  /** Each node's top-level ancestor (below the view's root); -1 for the root. */
-  branch: Int32Array;
   /**
-   * The top-level nodes with a value, largest over the whole table first:
-   * the legend's order. `legend` names the legend entry each is colored and
-   * hidden by: its own, or in a drilled view the top-level node of the whole
-   * tree it is under.
+   * Each node's color group, its index in `TreeData.groups`: its own name
+   * at the color field's level, or the name above it there; -1 for nodes
+   * above that level (unfilled), and for the root unless it is below it.
    */
-  tops: readonly { node: number; label: string; legend: string }[];
+  group: Int32Array;
+  /** The top-level nodes with a value, largest over the whole table first. */
+  tops: readonly Branch[];
   /** In a drilled view, the names of the path to its root, which its items' keys begin with. */
   prefix: readonly string[];
   /** Each node's node in the whole tree; undefined for the whole tree. */
@@ -116,6 +122,8 @@ export interface Drill extends DrillRoot {
   pathTo(key: string): DrillStep[];
   /** Whether the node keyed `key` has nodes under it with a value, to drill into. */
   opens(key: string): boolean;
+  /** Whether a click at (`x`, `y`), in pixels, on no item goes up a level: a sunburst's empty center. */
+  out?(x: number, y: number): boolean;
 }
 
 /** What a treemap or sunburst draws its path with: the strip above the tree and its crumbs. */
@@ -153,20 +161,32 @@ export interface Held {
   hits: Int32Array;
   rows: Int32Array;
   values: Float64Array;
+  /** The totals shares are of: the view's, less hidden colors'. */
+  of: Float64Array;
 }
 
 export class TreeData {
   readonly table: Table;
   readonly encoding: HierarchyEncoding;
+  /** The field whose values color the items: the path's at `level`, or the node field. */
+  readonly colorField: string;
+  /** Siblings largest first, or in the table's order; legends list groups so too. */
+  readonly byValue: boolean;
   readonly #value: string | undefined;
+  /** Where in the path the color field is: items at depth `level + 1` name their group. */
+  readonly #level: number;
   /** What highlighted selections hold of each view's nodes, by membership and view. */
   readonly #held = new SelectionCache<Held>();
   /** The one row each node of the whole tree stands for, of each view's rows. */
   readonly #soles = new WeakMap<TreeView, SoleRows>();
-  /** The whole table's tree, and the table version it is for. */
-  #whole: { version: number; view: TreeView } | undefined;
+  /** The whole table's tree, its color groups' names, and the table version they are for. */
+  #whole:
+    | { version: number; view: TreeView; groups: readonly string[]; index: Map<string, number> }
+    | undefined;
   /** The part of the tree each facet panel's rows give a value. */
   readonly #parts = new RowsCache<TreeView>();
+  /** Each node of the whole tree's own rows' weight (rows ending there), per row set. */
+  readonly #own = new RowsCache<Float64Array>();
   /** The subtree last drilled into, for the table version and node of the whole tree. */
   #drilled: { version: number; root: number; view: TreeView } | undefined;
   /** The subtree each facet panel's rows last drilled into, by the rows. */
@@ -188,6 +208,26 @@ export class TreeData {
       this.encoding = { id: fields.node!, parent: fields.parent! };
     }
     if (fields.value !== undefined) requireField(table, fields.value, ["number"], `${role} value`);
+    this.#level = 0;
+    if (fields.color !== undefined) {
+      const fail = (message: string) =>
+        new ChartError({
+          code: "invalid-option",
+          path: "color",
+          message: `${role} color: ${message}`,
+        });
+      if (!fields.path)
+        throw fail(
+          "a tree of node and parent fields is colored by its top-level nodes; give a path to color by one of its levels, or drop color",
+        );
+      this.#level = fields.path.indexOf(fields.color);
+      if (this.#level < 0)
+        throw fail(
+          `"${fields.color}" is not a field of the path; use one of ${fields.path.join(", ")}`,
+        );
+    }
+    this.colorField = fields.path ? fields.path[this.#level]! : fields.node!;
+    this.byValue = fields.sort !== "input";
     this.table = table;
     this.#value = fields.value;
   }
@@ -211,22 +251,45 @@ export class TreeData {
       const tops = Array.from(tree.children.subarray(tree.childStart[0]!, tree.childStart[1]!))
         .filter((node) => values[node]! > 0)
         .sort((a, b) => values[b]! - values[a]! || a - b)
-        .map((node) => ({ node, label: tree.names[node]!, legend: tree.names[node]! }));
+        .map((node) => ({ node, label: tree.names[node]! }));
+      const groups = groupNames(tree, values, this.#level + 1, this.byValue);
+      const index = new Map(groups.map((name, i) => [name, i]));
+      const group = groupsOf(tree, [], this.#level, index);
       this.#whole = {
         version: table.version,
-        view: { tree, values, branch: branchOf(tree), tops, prefix: [] },
+        view: { tree, values, group, tops, prefix: [] },
+        groups,
+        index,
       };
     }
     const whole = this.#whole.view;
     if (!rows) return whole;
+    const { index } = this.#whole;
     return this.#parts.get(table, rows, () => {
       const totals = subtreeValues(whole.tree, this.#weights(), rows);
-      const { tree, values, index, nodes } = pruneHierarchy(whole.tree, totals);
+      const part = pruneHierarchy(whole.tree, totals);
+      const { tree, values, nodes } = part;
       const tops = whole.tops.flatMap((top) =>
-        index[top.node]! > 0 ? [{ ...top, node: index[top.node]! }] : [],
+        part.index[top.node]! > 0 ? [{ ...top, node: part.index[top.node]! }] : [],
       );
-      return { tree, values, branch: branchOf(tree), tops, prefix: [], nodes, rows };
+      const group = groupsOf(tree, [], this.#level, index);
+      return { tree, values, group, tops, prefix: [], nodes, rows };
     });
+  }
+
+  /**
+   * The names of the color groups of the whole tree, in the legend's order:
+   * those at the color field's level with a value, largest total first, or
+   * in the table's order with `sort: "input"`.
+   */
+  groups(): readonly string[] {
+    this.view();
+    return this.#whole!.groups;
+  }
+
+  /** The legend key of the color group named `name`, of the mark `id`. */
+  groupKey(id: string | number, name: string): string {
+    return JSON.stringify([id, name]);
   }
 
   /**
@@ -251,44 +314,82 @@ export class TreeData {
       ({ tree, values } = part);
       nodes = Int32Array.from(part.nodes, (node) => under[node]!);
     }
-    const legend = whole.tree.names[whole.branch[root]!]!;
     // In the order of the whole tree's values, so every panel lists them alike.
     const tops = Array.from(tree.children.subarray(tree.childStart[0]!, tree.childStart[1]!))
       .filter((node) => values[node]! > 0)
       .sort((a, b) => whole.values[nodes[b]!]! - whole.values[nodes[a]!]! || a - b)
-      .map((node) => ({ node, label: tree.names[node]!, legend }));
+      .map((node) => ({ node, label: tree.names[node]! }));
     const prefix = pathOf(whole.tree, root);
-    const view = { tree, values, branch: branchOf(tree), tops, prefix, nodes, rows };
+    const group = groupsOf(tree, prefix, this.#level, this.#whole!.index);
+    const view = { tree, values, group, tops, prefix, nodes, rows };
     if (rows) this.#drilledParts.set(rows, { version, root, view });
     else this.#drilled = { version, root, view };
     return view;
   }
 
-  /** The top-level nodes of `view` (the whole tree's by default) with a value, keyed for the mark `id`. */
-  branches(id: string | number, view = this.view()): Branch[] {
-    return view.tops.map(({ node, label, legend }) => ({
-      node,
-      key: JSON.stringify([id, legend]),
-      label,
-    }));
-  }
-
+  /** The legend: an entry per color group, keyed for the mark `id`. */
   legend(id: string | number, color: (key: string) => string): LegendEntry[] {
-    return this.branches(id).map(({ key, label }) => ({ key, label, color: color(key) }));
+    return this.groups().map((label) => {
+      const key = this.groupKey(id, label);
+      return { key, label, color: color(key) };
+    });
   }
 
-  /** Each node's total in `view`, with the `branches` hidden through the legend counting as nothing. */
-  shown(view: TreeView, branches: readonly Branch[], hidden: ReadonlySet<string>): Float64Array {
-    const { tree, values, branch } = view;
+  /**
+   * Each node's total in `view`, the items of color groups hidden through
+   * the legend counting as nothing, and their ancestors' totals without them.
+   */
+  shown(id: string | number, view: TreeView, hidden: ReadonlySet<string>): Float64Array {
+    const { tree, values, group } = view;
     const out = values.slice();
-    const hiddenNodes = new Set(branches.filter(({ key }) => hidden.has(key)).map((b) => b.node));
-    if (hiddenNodes.size === 0) return out;
-    for (let node = 1; node < tree.size; node++) {
-      if (hiddenNodes.has(branch[node]!)) out[node] = 0;
+    const off = this.hiddenGroups(id, hidden);
+    if (!off) return out;
+    // Totals again from the leaves up (children come after their parents in
+    // `order`): a color group's items, whose subtrees share it, all or
+    // nothing; a node above the color's level its own rows' weight, read
+    // from the rows, and its children's totals. Never a total less what is
+    // hidden, which would round what is left away beside a much larger
+    // hidden group.
+    const own = this.#ownWeights(view.rows);
+    for (let at = tree.size - 1; at >= 0; at--) {
+      const node = tree.order[at]!;
+      const g = group[node]!;
+      if (g >= 0) {
+        out[node] = off[g] ? 0 : values[node]!;
+        continue;
+      }
+      let sum = own[view.nodes ? view.nodes[node]! : node]!;
+      for (let c = tree.childStart[node]!; c < tree.childStart[node + 1]!; c++)
+        sum += out[tree.children[c]!]!;
+      out[node] = sum;
     }
-    out[0] = 0;
-    for (const { node } of branches) out[0] += out[node]!;
     return out;
+  }
+
+  /** Which color groups the legend hides (1) for the mark `id`; undefined where it hides none. */
+  hiddenGroups(id: string | number, hidden: ReadonlySet<string>): Uint8Array | undefined {
+    if (hidden.size === 0) return undefined;
+    const off = Uint8Array.from(this.groups(), (name) =>
+      hidden.has(this.groupKey(id, name)) ? 1 : 0,
+    );
+    return off.includes(1) ? off : undefined;
+  }
+
+  /** Each node of the whole tree's own rows' weight, of `rows` (a facet panel's) or all. */
+  #ownWeights(rows: Uint32Array | undefined): Float64Array {
+    return this.#own.get(this.table, rows, () => {
+      const { tree } = this.view();
+      const weights = this.#weights();
+      const own = new Float64Array(tree.size);
+      const count = rows ? rows.length : tree.nodeOfRow.length;
+      for (let k = 0; k < count; k++) {
+        const row = rows ? rows[k]! : k;
+        const node = tree.nodeOfRow[row]!;
+        const weight = weights ? weights[row]! : 1;
+        if (node >= 0 && !Number.isNaN(weight)) own[node]! += weight;
+      }
+      return own;
+    });
   }
 
   /**
@@ -303,6 +404,14 @@ export class TreeData {
         ? [id, ...view.prefix, ...pathOf(tree, node)]
         : [id, tree.names[node]],
     );
+  }
+
+  /** The key of the parent, in the whole tree, of `view`'s root; undefined at the top level. */
+  parentKey(id: string | number, view: TreeView): string | undefined {
+    if (view.prefix.length < 2) return undefined;
+    const whole = this.view();
+    const parent = whole.tree.parent[childAlong(whole.tree, view.prefix)]!;
+    return parent > 0 ? this.keyOf(id, whole, parent) : undefined;
   }
 
   /** The node of `view` an item key of the mark `id` names; -1 when none does. */
@@ -343,9 +452,15 @@ export class TreeData {
   /**
    * What a tree drilled into `root` (0 for none) of the whole tree, drawn as
    * `view`, tells the chart: its key, its path, the breadcrumbs `crumbs`
-   * drew, and which nodes open in the view.
+   * drew, which nodes open in the view, and where a click on no item goes up (`out`).
    */
-  drill(id: string | number, root: number, view: TreeView, crumbs: Breadcrumbs["crumbs"]): Drill {
+  drill(
+    id: string | number,
+    root: number,
+    view: TreeView,
+    crumbs: Breadcrumbs["crumbs"],
+    out?: (x: number, y: number) => boolean,
+  ): Drill {
     const whole = this.view();
     const pathTo = (node: number): DrillStep[] => {
       const steps: DrillStep[] = [];
@@ -374,6 +489,7 @@ export class TreeData {
           if (view.values[children[c]!]! > 0) return true;
         return false;
       },
+      ...(out && { out }),
     };
   }
 
@@ -501,8 +617,8 @@ export class TreeData {
    * every node's under it, of the view's rows; undefined for none, several,
    * or a key of no node.
    */
-  soleRow(id: string | number, view: TreeView, key: string): number | undefined {
-    const node = this.nodeOf(id, view, key);
+  soleRow(id: string | number, view: TreeView, key: string, known?: number): number | undefined {
+    const node = known ?? this.nodeOf(id, view, key);
     if (node < 0) return undefined;
     let soles = this.#soles.get(view);
     if (!soles) {
@@ -523,61 +639,76 @@ export class TreeData {
     return soles.of(view.nodes?.[node] ?? node);
   }
 
+  /** The one row node `node` of `view` stands for, of its own and those under it (see `soleRow`). */
+  soleRowOf(view: TreeView, node: number): number | undefined {
+    return this.soleRow("", view, "", node);
+  }
+
   /**
    * For each node of `view`, how many of its rows (its own and under it)
    * `selected` holds, how many it has, and the selected rows' total, as
    * `values` totals the node's: a node is drawn with that share of it
-   * selected, and dimmed when none of its rows is.
+   * selected, and dimmed when none of its rows is. Rows of the color groups
+   * `off` hides count for nothing, and shares are of `shown`, the totals
+   * without them.
    */
-  selectedOf(view: TreeView, selected: Uint8Array): Held {
-    // Views are kept while what they are of is the same.
-    return this.#held.get(selected, view, () => {
-      const { tree } = this.view();
-      const { nodeOfRow } = tree;
-      const weights = this.#weights();
-      const hits = new Int32Array(tree.size);
-      const rows = new Int32Array(tree.size);
-      const values = new Float64Array(tree.size);
-      eachRow(view, nodeOfRow.length, (row) => {
-        const node = nodeOfRow[row]!;
-        if (node < 0) return;
-        rows[node]!++;
-        if (!selected[row]) return;
-        hits[node]!++;
-        // As totals weigh rows: one without a weight adds nothing.
-        const weight = weights ? weights[row]! : 1;
-        if (!Number.isNaN(weight)) values[node]! += weight;
-      });
-      for (let at = tree.size - 1; at > 0; at--) {
-        const node = tree.order[at]!;
-        const parent = tree.parent[node]!;
-        hits[parent]! += hits[node]!;
-        rows[parent]! += rows[node]!;
-        values[parent]! += values[node]!;
-      }
-      if (!view.nodes) return { hits, rows, values };
-      const nodes = view.nodes;
-      return {
-        hits: Int32Array.from(nodes, (node) => hits[node]!),
-        rows: Int32Array.from(nodes, (node) => rows[node]!),
-        values: Float64Array.from(nodes, (node) => values[node]!),
-      };
-    });
+  selectedOf(
+    view: TreeView,
+    selected: Uint8Array,
+    off: Uint8Array | undefined,
+    shown: Float64Array,
+  ): Held {
+    // Views are kept while what they are of is the same; with colors hidden,
+    // which leave out their rows, counted again.
+    if (off) return { ...this.#count(view, selected, off), of: shown };
+    return this.#held.get(selected, view, () => ({
+      ...this.#count(view, selected, undefined),
+      of: view.values,
+    }));
   }
 
-  /** The share of a node of `view` that the selection `held` describes holds: of its total. */
-  shareOf(view: TreeView, held: Held, node: number): number {
-    const total = view.values[node]!;
+  /** What `selected` holds of each node of `view`, the rows of the color groups `off` hides left out. */
+  #count(view: TreeView, selected: Uint8Array, off: Uint8Array | undefined): Omit<Held, "of"> {
+    const { tree, group } = this.view();
+    const { nodeOfRow } = tree;
+    const weights = this.#weights();
+    const hits = new Int32Array(tree.size);
+    const rows = new Int32Array(tree.size);
+    const values = new Float64Array(tree.size);
+    eachRow(view, nodeOfRow.length, (row) => {
+      const node = nodeOfRow[row]!;
+      if (node < 0 || (off && group[node]! >= 0 && off[group[node]!])) return;
+      rows[node]!++;
+      if (!selected[row]) return;
+      hits[node]!++;
+      // As totals weigh rows: one without a weight adds nothing.
+      const weight = weights ? weights[row]! : 1;
+      if (!Number.isNaN(weight)) values[node]! += weight;
+    });
+    for (let at = tree.size - 1; at > 0; at--) {
+      const node = tree.order[at]!;
+      const parent = tree.parent[node]!;
+      hits[parent]! += hits[node]!;
+      rows[parent]! += rows[node]!;
+      values[parent]! += values[node]!;
+    }
+    if (!view.nodes) return { hits, rows, values };
+    const nodes = view.nodes;
+    return {
+      hits: Int32Array.from(nodes, (node) => hits[node]!),
+      rows: Int32Array.from(nodes, (node) => rows[node]!),
+      values: Float64Array.from(nodes, (node) => values[node]!),
+    };
+  }
+
+  /** The share of a node that the selection `held` describes holds: of its total. */
+  shareOf(held: Held, node: number): number {
+    const total = held.of[node]!;
     return total > 0 ? Math.min(1, held.values[node]! / total) : 0;
   }
 
   /** The text an item adds for what a highlighted selection holds of its node. */
-  selectedText(
-    view: TreeView,
-    held: Held | undefined,
-    node: number,
-    locale: string | undefined,
-  ): string {
+  selectedText(held: Held | undefined, node: number, locale: string | undefined): string {
     if (!held) return "";
     const value = this.#value;
     return heldText(
@@ -585,14 +716,14 @@ export class TreeData {
       held.rows[node]!,
       value === undefined
         ? undefined
-        : { field: value, held: held.values[node]!, of: view.values[node]! },
+        : { field: value, held: held.values[node]!, of: held.of[node]! },
       (n) => formatNumber(n, locale),
     );
   }
 
   /**
    * Keyboard reading of the drawn nodes of `view`: depth first, each node's
-   * children largest first. The order is worked out when first asked for,
+   * children in the mark's order (largest first by default). The order is worked out when first asked for,
    * and items only one at a time.
    */
   navigation(
@@ -601,7 +732,10 @@ export class TreeData {
     shown: Float64Array,
     drawn: (node: number) => boolean,
     itemOf: (node: number) => LayoutItem,
-  ): Pick<LayoutResult, "count" | "item" | "indexOf"> {
+  ): Pick<LayoutResult, "count" | "item" | "indexOf"> & {
+    /** The node at a place in reading order. */
+    node(index: number): number;
+  } {
     const { tree } = view;
     let order: Int32Array | undefined;
     let place: Int32Array | undefined;
@@ -613,9 +747,11 @@ export class TreeData {
       while (stack.length > 0) {
         const node = stack.pop()!;
         if (node > 0) out.push(node);
-        const children = childrenByValue(tree, shown, node, scratch);
-        if (children.length > scratch.length) scratch = children;
-        // Pushed smallest first, so the largest comes off the stack first.
+        const children = this.byValue
+          ? childrenByValue(tree, shown, node, scratch)
+          : tree.children.subarray(tree.childStart[node]!, tree.childStart[node + 1]!);
+        if (this.byValue && children.length > scratch.length) scratch = children;
+        // Pushed last first, so the first (the largest by value) comes off the stack first.
         for (let i = children.length - 1; i >= 0; i--) {
           const child = children[i]!;
           if (shown[child]! > 0 && drawn(child)) stack.push(child);
@@ -629,6 +765,7 @@ export class TreeData {
         return ordered().length;
       },
       item: (index) => itemOf(ordered()[index]!),
+      node: (index) => ordered()[index]!,
       indexOf: (key) => {
         const node = this.nodeOf(id, view, key);
         if (node < 0) return -1;
@@ -680,15 +817,51 @@ function childAlong(tree: Hierarchy, names: readonly string[]): number {
   return node;
 }
 
-/** Each node's top-level ancestor (itself at the top level); -1 for the root. */
-function branchOf(tree: Hierarchy): Int32Array {
-  const branch = new Int32Array(tree.size).fill(-1);
+/**
+ * The names of the nodes of `tree` at `depth` with a value, once each:
+ * largest total first (`byValue`), or in the order the table first gives
+ * them, nodes being made in that order.
+ */
+function groupNames(
+  tree: Hierarchy,
+  values: Float64Array,
+  depth: number,
+  byValue: boolean,
+): string[] {
+  const totals = new Map<string, { total: number; first: number }>();
+  for (let node = 1; node < tree.size; node++) {
+    if (tree.depth[node] !== depth || !(values[node]! > 0)) continue;
+    const name = tree.names[node]!;
+    const known = totals.get(name);
+    if (known) known.total += values[node]!;
+    else totals.set(name, { total: values[node]!, first: node });
+  }
+  return [...totals]
+    .sort(([, a], [, b]) => (byValue ? b.total - a.total : 0) || a.first - b.first)
+    .map(([name]) => name);
+}
+
+/**
+ * Each node's color group (see `TreeView.group`) in a view of the tree
+ * whose root is under the path `prefix`: the group its name at the color
+ * field's level, `level` in the path, names in `index`.
+ */
+function groupsOf(
+  tree: Hierarchy,
+  prefix: readonly string[],
+  level: number,
+  index: ReadonlyMap<string, number>,
+): Int32Array {
+  const group = new Int32Array(tree.size).fill(-1);
+  // A view drilled below the level is in the group its path names there.
+  if (prefix.length > level) group[0] = index.get(prefix[level]!) ?? -1;
   for (let at = 1; at < tree.size; at++) {
     const node = tree.order[at]!;
-    const parent = tree.parent[node]!;
-    branch[node] = parent === 0 ? node : branch[parent]!;
+    const depth = prefix.length + tree.depth[node]!;
+    if (depth === level + 1) group[node] = index.get(tree.names[node]!) ?? -1;
+    else if (depth > level + 1) group[node] = group[tree.parent[node]!]!;
   }
-  return branch;
+  return group;
 }
 
 /** A sentence's part naming where a drilled tree is: " in Europe / France"; "" for the whole tree. */

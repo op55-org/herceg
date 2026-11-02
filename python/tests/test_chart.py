@@ -1526,6 +1526,129 @@ def test_treemaps_and_sunbursts_send_their_tree():
         hg.Chart(sales).treemap(["revenue"])
 
 
+def test_treemaps_and_sunbursts_send_their_paint_layout_and_labels():
+    sales = {
+        "market": ["A", "A", "B", "C"],
+        "segment": ["x", "y", "x", "z"],
+        "value": [5.0, 3.0, 2.0, 4.0],
+        "owner": ["Ann", "Bo", "Cy", "Di"],
+    }
+    chart = hg.treemap(
+        sales,
+        ["market", "segment"],
+        "value",
+        tile="slice-dice",
+        gap=1,
+        levels=2,
+        sort="input",
+        color="segment",
+        fill_opacity=hg.Measure("share", range=(0.5, 1)),
+        branch=hg.Look(fill_opacity=0.6),
+        leaf={"opacity": 0.8},
+        breadcrumbs=False,
+        labels=hg.TreemapLabels(
+            parents=False,
+            content=[hg.LabelPart(field="owner"), "\n", hg.LabelPart(value=True)],
+        ),
+        width=300,
+        height=200,
+    )
+    spec, _ = chart.to_spec()
+    assert spec["marks"] == [
+        {
+            "type": "treemap",
+            "data": "data",
+            "path": ["market", "segment"],
+            "value": "value",
+            "labels": {"parents": False, "content": [{"field": "owner"}, "\n", {"value": True}]},
+            "tile": "slice-dice",
+            "gap": 1,
+            "sort": "input",
+            "levels": 2,
+            "color": "segment",
+            "fillOpacity": {"measure": "share", "range": [0.5, 1.0]},
+            "leaf": {"opacity": 0.8},
+            "branch": {"fillOpacity": 0.6},
+            "breadcrumbs": False,
+        }
+    ]
+    assert "owner" in spec["data"]["data"]["columns"]
+    assert "Ann" in chart.to_svg()
+    ring = hg.Chart(sales).sunburst(
+        ["market", "segment"],
+        "value",
+        levels=1,
+        inner_radius=1 / 3,
+        center=False,
+        gap=(1, 2),
+        labels=hg.SunburstLabels(rotation="radial"),
+    )
+    assert ring.to_spec()[0]["marks"][0] | {"innerRadius": 0} == {
+        "type": "sunburst",
+        "data": "data",
+        "path": ["market", "segment"],
+        "value": "value",
+        "labels": {"rotation": "radial"},
+        "levels": 1,
+        "innerRadius": 0,
+        "center": False,
+        "gap": {"angular": 1.0, "radial": 2.0},
+    }
+    assert hg.Chart(sales).sunburst(["market"], gap=2).to_spec()[0]["marks"][0]["gap"] == 2
+    assert "<svg" in ring.to_svg()
+
+
+def test_treemaps_and_sunbursts_refuse_paint_and_labels_they_cannot_draw():
+    sales = {"market": ["A", "B"], "segment": ["x", "y"], "value": [1.0, 2.0]}
+    org = {"node": ["root", "a"], "up": [None, "root"]}
+    chart = hg.Chart(sales)
+    with pytest.raises(hg.ChartError, match="treemap color: 'value' is not a column of the path"):
+        chart.treemap(["market", "segment"], color="value")
+    with pytest.raises(hg.ChartError, match="sunburst color: a tree of node and parent columns"):
+        hg.Chart(org).sunburst(node="node", parent="up", color="node")
+    with pytest.raises(
+        hg.ChartError, match="treemap levels: expected a whole number of at least 1"
+    ):
+        chart.treemap(["market"], levels=0)
+    with pytest.raises(hg.ChartError, match="treemap tile: expected"):
+        chart.treemap(["market"], tile="binary")  # type: ignore[arg-type]
+    with pytest.raises(hg.ChartError, match="treemap gap: expected pixels of at least 0"):
+        chart.treemap(["market"], gap=-1)
+    with pytest.raises(hg.ChartError, match='treemap labels: unknown key "rotation"'):
+        chart.treemap(["market"], labels={"rotation": "radial"})
+    with pytest.raises(hg.ChartError, match='sunburst labels: unknown key "at"'):
+        chart.sunburst(["market"], labels={"at": "center"})
+    with pytest.raises(hg.ChartError, match="SunburstLabels content\\[0\\]: names a series"):
+        hg.SunburstLabels(content=[hg.LabelPart(series=True)])
+    with pytest.raises(hg.ChartError, match=r"treemap labels.content\[0\].field: .*'owner'"):
+        chart.treemap(["market"], labels=hg.TreemapLabels(content=[hg.LabelPart(field="owner")]))
+    for written in [
+        hg.Format(time="%Y"),
+        {"minute": "2-digit"},
+        {"timeZone": "UTC"},
+        {"calendar": "gregory"},
+        {"formatMatcher": "basic"},
+    ]:
+        with pytest.raises(hg.ChartError, match=r"treemap labels.content\[0\].format: tree labels"):
+            chart.treemap(
+                ["market"],
+                labels=hg.TreemapLabels(content=[hg.LabelPart(value=True, format=written)]),
+            )
+    with pytest.raises(hg.ChartError, match="sunburst inner_radius: expected a fraction"):
+        chart.sunburst(["market"], inner_radius=1)
+    for gap in [(1, 2, 3), float("inf"), (1, float("inf")), -1]:
+        with pytest.raises(hg.ChartError, match="sunburst gap: expected pixels of at least 0, or"):
+            chart.sunburst(["market"], gap=gap)  # type: ignore[arg-type]
+    with pytest.raises(hg.ChartError, match="Measure measure: expected"):
+        hg.Measure("size", range=(0, 1))  # type: ignore[arg-type]
+    with pytest.raises(hg.ChartError, match=r"Measure range\[1\]"):
+        hg.Measure("share", range=(0, 2))
+    with pytest.raises(hg.ChartError, match="Look opacity"):
+        hg.Look(opacity=2)
+    with pytest.raises(hg.ChartError, match='treemap leaf: unknown key "stroke"'):
+        chart.treemap(["market"], leaf={"stroke": "red"})
+
+
 def test_radars_send_long_or_wide_data():
     scores = {
         "player": ["Ana", "Ana", "Ana", "Bo", "Bo", "Bo"],
