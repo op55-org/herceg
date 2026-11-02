@@ -47,6 +47,7 @@ import type {
   StyleMapSpec,
 } from "./encoding.ts";
 import { ChartError, type ChartErrorCode } from "./errors.ts";
+import type { ItemAnchor, ItemCoordinate, ItemRef } from "./place.ts";
 import {
   type AnimationSpec,
   type AxisGuideSpec,
@@ -1836,8 +1837,65 @@ const coordinate: Check = (v, path) => {
     fail(`${path}.scale`, "absent for fractions and pixels", c.scale);
 };
 
-/** An annotation's place along an axis: a value, a field's name, or a coordinate. */
-const annotationPlace: Check = (v, path) => (isRecord(v) ? coordinate(v, path) : position(v, path));
+/** A layout item's names from the top: category values, or a category field's `{ field }`. */
+const itemNames: Check = (v, path) => {
+  if (!Array.isArray(v) || v.length === 0)
+    fail(path, 'a list of names from the top, such as ["Europe", { field: "country" }]', v);
+  for (const [i, name] of v.entries()) {
+    if (typeof name === "string") continue;
+    if (!isRecord(name)) fail(`${path}[${i}]`, "a name, or { field }", name);
+    checkProperties(name, `${path}[${i}]`, ["field"], { field });
+  }
+};
+
+/** An item of a layout mark: the mark's id and the item's names. */
+const itemRef: Check = (v, path) => {
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["mark", "item"], {
+    mark: string,
+    item: itemNames,
+  } satisfies ChecksOf<ItemRef>);
+};
+
+/** A place on a layout item's box along an axis: its start, middle, or end, with an offset. */
+const itemCoordinate: Check = (v, path) => {
+  checkProperties(v as Record<string, unknown>, path, ["item"], {
+    item: itemRef,
+    at: oneOf("start", "center", "end"),
+    offset: finite,
+  } satisfies ChecksOf<ItemCoordinate>);
+};
+
+/** A coordinate, or a place on a layout item's box. */
+const annotationCoordinate: Check = (v, path) =>
+  isRecord(v) && "item" in v ? itemCoordinate(v, path) : coordinate(v, path);
+
+/** An annotation's place along an axis: a value, a field's name, a coordinate, or a place on an item. */
+const annotationPlace: Check = (v, path) =>
+  isRecord(v) ? annotationCoordinate(v, path) : position(v, path);
+
+/** Text following a layout item: the mark, the item's names, an anchor of its box, and an offset. */
+const itemAnchor: Check = (v, path) => {
+  checkProperties(v as Record<string, unknown>, path, ["mark", "item", "at"], {
+    mark: string,
+    item: itemNames,
+    at: oneOf(
+      "top-left",
+      "top",
+      "top-right",
+      "left",
+      "center",
+      "right",
+      "bottom-left",
+      "bottom",
+      "bottom-right",
+    ),
+    offset: (o, at) => {
+      object(o, at);
+      properties(o as Record<string, unknown>, at, { x: finite, y: finite });
+    },
+  } satisfies ChecksOf<ItemAnchor>);
+};
 
 /** Where a label goes beside what it labels. */
 const labelPlace: Check = (p, at) => {
@@ -2368,7 +2426,7 @@ const MARKS: MarkChecks = {
       strokeOpacity: fraction,
       span: (v, path) => {
         if (!Array.isArray(v) || v.length !== 2) fail(path, "two coordinates", v);
-        for (const [i, c] of v.entries()) coordinate(c, `${path}[${i}]`);
+        for (const [i, c] of v.entries()) annotationCoordinate(c, `${path}[${i}]`);
       },
       label,
       contributeDomain: boolean,
@@ -2407,11 +2465,12 @@ const MARKS: MarkChecks = {
       at: (v, path) => {
         object(v, path);
         checkProperties(v as Record<string, unknown>, path, ["x", "y"], {
-          x: coordinate,
-          y: coordinate,
+          x: annotationCoordinate,
+          y: annotationCoordinate,
         });
       },
-      from: markAnchor,
+      // A series' place, or with `item`, a layout item's.
+      from: (v, path) => (isRecord(v) && "item" in v ? itemAnchor(v, path) : markAnchor(v, path)),
       label: labelOf(textLabelPlace),
       contributeDomain: boolean,
       legend: boolean,
@@ -2427,6 +2486,7 @@ const MARKS: MarkChecks = {
       legend: legended,
       x: rowPositions,
       y: rowPositions,
+      orient: oneOf("x", "y"),
       series: seriesField,
       stack: (v, path) => {
         if (isRecord(v) && "support" in v)
@@ -3209,11 +3269,14 @@ const mark: Check = (v, path) => {
         .join(" or "),
       spec.type,
     );
+  // Text following a series labels it; text by a layout item is at a place.
+  const from = spec.type === "text" ? (spec.from as object | null | undefined) : undefined;
+  const series = typeof from === "object" && from !== null && !("item" in from);
   const checks = {
     ...kind.checks,
     data: field,
     id: string,
-    ...(spec.type === "text" && spec.from !== undefined && { label: followingLabel }),
+    ...(series && { label: followingLabel }),
   };
   required(spec, path, kind.required, [...Object.keys(checks), "type"]);
   properties(spec, path, checks, ["type"]);
@@ -3232,7 +3295,7 @@ const mark: Check = (v, path) => {
     );
   const problem = FORMS[spec.type as MarkSpec["type"]]?.(spec);
   if (problem) throw refusal(path, problem);
-  if (spec.type === "text" && spec.from === undefined && (spec.label as TextLabelSpec).place)
+  if (spec.type === "text" && !series && (spec.label as TextLabelSpec).place)
     throw refusal(
       `${path}.label.place`,
       "text at a place is drawn there; drop place, or follow a series with from",

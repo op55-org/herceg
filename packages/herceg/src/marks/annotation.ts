@@ -16,7 +16,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import type { Drawing, Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { LabelSpec, Overlap } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
-import type { Coordinate } from "../spec/place.ts";
+import type { Coordinate, ItemCoordinate, ItemRef } from "../spec/place.ts";
 import type { AnnotationPosition, AnnotationValue, Frozen } from "../spec/spec.ts";
 import type { StrokeStyle } from "../spec/style.ts";
 import { dashPattern } from "../style/style.ts";
@@ -32,13 +32,31 @@ export type TextField<S extends Schema> = string extends keyof S
   ? string
   : { [K in keyof S & string]: S[K] extends "category" | "number" ? K : never }[keyof S & string];
 
-/** A place as annotations' TypeScript options take it: a value, a Date, a field, or a coordinate. */
-export type PlaceOption<F extends string> =
+/**
+ * A place as annotations' TypeScript options take it: a value, a Date, a
+ * field, a coordinate, or an edge of a layout item's box, its names
+ * constants or category fields `C` of the annotation's table.
+ */
+export type PlaceOption<F extends string, C extends string = never> =
   | number
   | Date
   | F
   | Coordinate
-  | { data: number | string | Date; scale?: string; offset?: number };
+  | { data: number | string | Date; scale?: string; offset?: number }
+  | ItemPlace<C>;
+
+/** An item of a layout mark, its names constants or category fields `C` of the annotation's table. */
+export interface ItemRefOf<C extends string> {
+  /** The `id` of the layout mark. */
+  mark: string;
+  /** The item's names from the top: a tree node's path, a slice's or a stage's category. */
+  item: readonly (string | { field: C })[];
+}
+
+/** An edge of a layout item's box along an axis (see `ItemCoordinate`), its names typed by the table. */
+export interface ItemPlace<C extends string> extends Omit<ItemCoordinate, "item"> {
+  item: ItemRefOf<C>;
+}
 
 /** Epoch milliseconds for dates, in values and coordinates; numbers, fields, and other coordinates pass through. */
 export function position<P>(value: P): Exclude<P, Date> {
@@ -81,7 +99,7 @@ export function valueAt(channel: Channel, item: number): number {
  * one in pixels or a share of a frame always.
  */
 export function inView(place: Place, at: number, axis: "x" | "y", plot: Rect): boolean {
-  if (place.kind === "frame") return true;
+  if (place.kind === "frame" || place.kind === "item") return true;
   const [start, size] = axis === "x" ? [plot.x, plot.width] : [plot.y, plot.height];
   return at >= start - 0.5 && at <= start + size + 0.5;
 }
@@ -89,14 +107,15 @@ export function inView(place: Place, at: number, axis: "x" | "y", plot: Rect): b
 /**
  * A place compiled: a value per item (a constant or a column) on its axis'
  * scale, or on `scale`, one of the chart's own; a category on a band axis;
- * or a share or pixels of the plot or chart (each item's from `channel`
- * when a field gives them); with the coordinate it is, which
- * `coordinateAt` resolves.
+ * a share or pixels of the plot or chart (each item's from `channel` when
+ * a field gives them); or an edge of a layout item's box; with the
+ * coordinate it is, which `coordinateAt` resolves.
  */
-export type Place = { readonly coordinate: Coordinate } & (
+export type Place = { readonly coordinate: Coordinate | ItemCoordinate } & (
   | { readonly kind: "value"; readonly channel: Channel; readonly scale?: string | undefined }
   | { readonly kind: "category"; readonly value: string | undefined }
   | { readonly kind: "frame"; readonly channel?: Channel | undefined }
+  | { readonly kind: "item" }
 );
 
 /** A label's settings, its short form (a string) read as its text. */
@@ -199,9 +218,15 @@ let leaders: Drawing<SegmentGeometry> | undefined;
 /** The field a place reads, if any: its own, or its share's or pixels'. */
 function fieldOf(position: Frozen<AnnotationPosition> | undefined): string | undefined {
   if (typeof position !== "object") return typeof position === "string" ? position : undefined;
+  if ("item" in position) return itemFields(position.item)[0];
   const share =
     "fraction" in position ? position.fraction : "px" in position ? position.px : position;
   return (share as { field?: string }).field;
+}
+
+/** The fields an item reference names its items' names by, in order. */
+export function itemFields(item: Frozen<ItemRef>): string[] {
+  return item.item.flatMap((name) => (typeof name === "object" ? [name.field] : []));
 }
 
 /**
@@ -231,6 +256,11 @@ export class AnnotationData {
   readonly layout: LabelLayout;
   /** Whether a place is on a scale of the chart's own. */
   readonly scaled: boolean;
+  /**
+   * When every place is a layout item's or a frame's, on no scale: the ids
+   * of the layout marks whose items they are on (see `Mark.follows`).
+   */
+  readonly follows: readonly string[] | undefined;
   readonly #role: string;
   /** The scales of the axes places are on, unless they name one of the chart's own. */
   readonly #scales: { readonly x: string; readonly y: string };
@@ -273,6 +303,19 @@ export class AnnotationData {
       scaled ||= scale !== undefined && scale !== own;
     }
     this.scaled = scaled;
+    const places = Object.values(positions).filter((place) => place !== undefined);
+    this.follows = places.every(
+      (place) =>
+        typeof place === "object" && ("item" in place || "fraction" in place || "px" in place),
+    )
+      ? [
+          ...new Set(
+            places.flatMap((place) =>
+              "item" in (place as object) ? [(place as Frozen<ItemCoordinate>).item.mark] : [],
+            ),
+          ),
+        ]
+      : undefined;
     if (!readsTable(Object.values(positions), label, encode)) {
       this.table = undefined;
       return;
@@ -288,6 +331,19 @@ export class AnnotationData {
       );
     }
     for (const [channel, place] of Object.entries(positions)) {
+      // Items are named by categories: a number names none.
+      if (typeof place === "object" && "item" in place) {
+        place.item.item.forEach((name, k) => {
+          if (typeof name === "object")
+            requireField(
+              table,
+              name.field,
+              ["category"],
+              `${role} ${channel}.item.item[${k}].field`,
+            );
+        });
+        continue;
+      }
       const field = fieldOf(place);
       if (field === undefined) continue;
       // Shares and pixels are numbers; places on a scale, numbers, times,
@@ -345,6 +401,7 @@ export class AnnotationData {
     if (typeof position === "number")
       return { kind: "value", channel: position, coordinate: { data: position } };
     if (typeof position === "string") return this.#field(position, { field: position });
+    if ("item" in position) return { kind: "item", coordinate: position as ItemCoordinate };
     const coordinate = position as Coordinate;
     // A scale of the chart's own, rather than the axis'.
     const scale =
@@ -399,7 +456,7 @@ export class AnnotationData {
     axis: "x" | "y",
     item: number,
     scale: PositionScale,
-    frame: Pick<Frame, "plot" | "chart" | "scaleOf">,
+    frame: Pick<Frame, "plot" | "chart" | "scaleOf" | "items">,
     low = false,
   ): number | undefined {
     // A value is on the axis' scale, `scale`, or on one of the chart's own.
@@ -428,6 +485,24 @@ export class AnnotationData {
         place.kind === "category"
           ? this.category(place, item)
           : valueAt((place as { channel: Channel }).channel, item),
+      box: (ref) => {
+        const drawn = frame.items?.(ref.mark);
+        // Item places belong to the panels layout marks draw (model/decorations.ts).
+        if (!drawn)
+          throw new ChartError({
+            code: "invalid-option",
+            path: "item.mark",
+            message: `${this.#role} ${axis}: places on items of "${ref.mark}" need it drawn in the panel; draw the ${this.#role} in its chart, or in its panel`,
+          });
+        const names: string[] = [];
+        for (const name of ref.item) {
+          const value =
+            typeof name === "string" ? name : this.table!.value(name.field as never, item);
+          if (typeof value !== "string") return undefined;
+          names.push(value);
+        }
+        return drawn.named(names)?.box;
+      },
     });
   }
 
@@ -539,7 +614,8 @@ export class AnnotationData {
       total++;
       if (items.length >= SUMMARY_ITEMS) return;
       const text = this.labeled ? this.text(i, locale, undefined, content, valued?.(i)) : "";
-      items.push(text ? `${text} (${at})` : at);
+      // Places on items say nothing of where they are beside the text.
+      items.push(text && at ? `${text} (${at})` : text || at);
     });
     if (total === 0) return undefined;
     const more = total > items.length ? `, and ${total - items.length} more` : "";

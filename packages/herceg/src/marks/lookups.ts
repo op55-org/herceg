@@ -939,7 +939,8 @@ export function boxOf(x0: number, y0: number, x1: number, y1: number): Rect {
 
 /** What a mark's drawing is cut to: the chart with a `clip` of "chart" or false, else the plot. */
 export function clipBox(clip: Clip | undefined, frame: Frame): Readonly<Rect> {
-  return clip === "chart" || clip === false ? (frame.chart ?? frame.plot) : frame.plot;
+  const cut = clip ?? frame.clip;
+  return cut === "chart" || cut === false ? (frame.chart ?? frame.plot) : frame.plot;
 }
 
 /** Whether a point is in a box, edges included. */

@@ -91,6 +91,60 @@ export type Frame = "plot" | "chart";
 
 /** A point: a coordinate on each axis, which may mix kinds (a data y at a fraction of the plot's width). */
 export interface Position {
-  x: Coordinate;
-  y: Coordinate;
+  x: AnnotationCoordinate;
+  y: AnnotationCoordinate;
+}
+
+/** A place an annotation's point or span takes along an axis: a coordinate, or one on a layout item's box. */
+export type AnnotationCoordinate = Coordinate | ItemCoordinate;
+
+/**
+ * One of a layout item's names, from the top: a category's value, or each
+ * row's value of a category field of the mark placed by it.
+ */
+export type ItemName = string | { field: string };
+
+/**
+ * An item a layout mark (a pie, funnel, treemap, or sunburst) drew in the
+ * panel: the mark's `id`, and the item's names from the top (a tree node's
+ * path, a slice's or a stage's category).
+ */
+export interface ItemRef {
+  mark: string;
+  item: readonly ItemName[];
+}
+
+/**
+ * A place along one axis on a layout item's box, as the frame drew it: its
+ * start (left or top, the default), middle, or end, moved by `offset`
+ * pixels, right for x and down for y. A row whose item is not drawn (none
+ * of its names, hidden, or too small) is left out.
+ */
+export interface ItemCoordinate {
+  item: ItemRef;
+  at?: "start" | "center" | "end";
+  offset?: number;
+}
+
+/** A point of a box: a corner, the middle of an edge, or its center. */
+export type BoxAnchor =
+  | "top-left"
+  | "top"
+  | "top-right"
+  | "left"
+  | "center"
+  | "right"
+  | "bottom-left"
+  | "bottom"
+  | "bottom-right";
+
+/**
+ * Text that follows a layout item: at the anchor `at` of its box, moved by
+ * `offset` pixels right and down; its label's block is aligned to the
+ * anchor (its top left corner at "top-left") unless its style says
+ * otherwise.
+ */
+export interface ItemAnchor extends ItemRef {
+  at: BoxAnchor;
+  offset?: { x?: number; y?: number };
 }

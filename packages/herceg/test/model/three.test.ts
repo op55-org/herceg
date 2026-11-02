@@ -811,7 +811,7 @@ describe("3D charts", () => {
     ).not.toThrow();
     expect(
       () => new ChartModel({ marks: [scatter(), line(clusters, { x: "x", y: "y" })] }),
-    ).toThrow(/its chart to itself/);
+    ).toThrow(/a 3D plot's chart has no x and y scales/);
     expect(() => new ChartModel({ marks: [scatter()], interaction: { zoom: "x" } })).toThrow(
       /chart interaction\.zoom: expected true or false in a 3D chart; received "x"/,
     );

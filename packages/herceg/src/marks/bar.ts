@@ -168,6 +168,8 @@ interface BarStyle<S extends Schema> extends ItemKeyed<S> {
 
 /** Vertical bars: positions on x, lengths on y. */
 export interface VerticalBarOptions<S extends Schema> extends BarStyle<S> {
+  /** "x": bars stand on x, their lengths along y, whatever y is; so by default unless y is a category. */
+  orient?: "x";
   /** Category field (one band per value), a numeric or time field, or a coordinate. */
   x: PositionField<S> | FieldCoordinate<S>;
   /**
@@ -178,24 +180,39 @@ export interface VerticalBarOptions<S extends Schema> extends BarStyle<S> {
   y: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
 }
 
-/** Horizontal bars: one band per category of y, lengths on x. */
-export interface HorizontalBarOptions<S extends Schema> extends BarStyle<S> {
+/**
+ * Horizontal bars: positions on y, lengths on x. A category y makes them so
+ * (one band per category); `orient: "y"` on any y, so bars stand on a
+ * number or time y too, such as ranks.
+ */
+export type HorizontalBarOptions<S extends Schema> = BarStyle<S> & {
   /**
    * Bar lengths: one field, or several fields drawn side by side or
    * stacked; or one field as a coordinate (a share of the plot, a scale of
    * the chart's own).
    */
   x: NumericField<S> | readonly NumericField<S>[] | FieldCoordinate<S, NumericField<S>>;
-  /** A category field, or as a coordinate, `{ field }` on y or a scale of the chart's. */
-  y: CategoryField<S> | { field: CategoryField<S>; scale?: string; offset?: number };
   /** Positions along y are on the left axis; only vertical bars use the right one. */
   axis?: "left";
-}
+} & (
+    | {
+        /** "y": bars stand on y, their lengths along x, on any y scale. */
+        orient: "y";
+        /** A category, number, or time field, or a coordinate. */
+        y: PositionField<S> | FieldCoordinate<S>;
+      }
+    | {
+        orient?: never;
+        /** A category field, or as a coordinate, `{ field }` on y or a scale of the chart's. */
+        y: CategoryField<S> | { field: CategoryField<S>; scale?: string; offset?: number };
+      }
+  );
 
 /**
- * A category `y` (its name, or `{ field }`) makes bars horizontal; any other
- * form of position, a frame's share or pixels included, centers vertical
- * bars on x.
+ * Bars stand on x unless a category `y` (its name, or `{ field }`) makes
+ * them horizontal; `orient` says which axis they stand on, whatever the
+ * fields are. Any other form of position, a frame's share or pixels
+ * included, centers vertical bars on x.
  */
 export type BarOptions<S extends Schema> = VerticalBarOptions<S> | HorizontalBarOptions<S>;
 
@@ -386,9 +403,25 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     this.bound = bound;
     const xs = typeof fields.x === "string" ? [fields.x] : fields.x!;
     const ys = typeof fields.y === "string" ? [fields.y] : fields.y!;
-    this.#horizontal = ys.length === 1 && table.has(ys[0]!) && table.kind(ys[0]!) === "category";
+    const { orient } = spec;
+    if (orient !== undefined && orient !== "x" && orient !== "y")
+      throw new RangeError(`bar orient: expected "x" or "y"; received ${JSON.stringify(orient)}`);
+    this.#horizontal = orient
+      ? orient === "y"
+      : ys.length === 1 && table.has(ys[0]!) && table.kind(ys[0]!) === "category";
+    // Bars stand on one axis and measure their lengths along the other, in numbers.
+    const across = orient === "y" ? "x" : "y";
+    const length = (orient === "y" ? xs : orient === "x" ? ys : []).find(
+      (field) => table.has(field) && table.kind(field) === "category",
+    );
+    if (length !== undefined)
+      throw new Error(
+        `bar orient: "${orient}" makes ${across} the lengths, and "${length}" holds categories; give orient: "${across}", or a number field as ${across}`,
+      );
     let lengths: readonly string[];
     if (this.#horizontal) {
+      if (ys.length !== 1)
+        throw new Error("bar y: bars along y stand on one field; give one y field, and several x");
       for (const x of xs) requireField(table, x, NUMERIC, "horizontal bar x");
       this.#position = ys[0]!;
       lengths = xs;
@@ -428,7 +461,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     // Bars of a width of their own reach half of it past their positions
     // along a continuous axis, beyond the half slot their extent keeps.
     const px = spec.width?.px;
-    if (px && !this.#categorical && !this.#horizontal) this.inset = { x: px / 2, y: 0 };
+    if (px && !this.#categorical)
+      this.inset = this.#horizontal ? { x: 0, y: px / 2 } : { x: px / 2, y: 0 };
     this.#split = new SeriesSplitter(
       () => this.rows(),
       this.#categorical ? undefined : this.#position,
@@ -543,10 +577,11 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
         s.y0 = stack.bases[i];
       });
     }
-    // Series are built with positions on x; horizontal bars swap them onto y.
+    // Series are built with positions on x; horizontal bars swap them onto y,
+    // with their order: lengths on x ascend nowhere in particular.
     if (this.#horizontal) {
       for (const s of series) {
-        [s.x, s.y, s.x0, s.y0] = [s.y, s.x, s.y0, undefined];
+        [s.x, s.y, s.x0, s.y0, s.ySorted, s.sorted] = [s.y, s.x, s.y0, undefined, s.sorted, false];
       }
     }
     return series;
@@ -638,8 +673,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
     if (this.#horizontal) {
       return unionExtent(
         series.flatMap((s) => [
-          lengthExtent(s, s.x, log),
-          s.x0 ? lengthExtent(s, s.x0, log) : undefined,
+          lengthExtent(s, s.x, log, this.#categorical),
+          s.x0 ? lengthExtent(s, s.x0, log, this.#categorical) : undefined,
         ]),
       );
     }
@@ -650,8 +685,13 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
   }
 
   yExtent(series: readonly Series[], x0: number, x1: number, log: boolean, breaks?: Breaks) {
-    // Horizontal bars put bands on y, which take their categories instead.
-    if (this.#horizontal) return undefined;
+    if (this.#horizontal) {
+      // Bands on y take their categories instead; positions on a number or
+      // time y leave half a bar slot of room at each end.
+      if (this.#categorical) return undefined;
+      const extent = unionExtent(series.map((s) => positionExtent(s, log)));
+      return extent && this.#slotsOf().pad(extent, log, breaks);
+    }
     if (this.spec.stack === "fill" && !log) return [0, 1] as [number, number];
     // Rows without a band (missing categories, index -1) are not drawn.
     const lo = this.#categorical ? 0 : x0;
@@ -1050,17 +1090,38 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
   }
 }
 
+/** [min, max] of the usable positions of horizontal bars on a number or time y. */
+function positionExtent(s: Series, log: boolean): [number, number] | undefined {
+  let min = Infinity;
+  let max = -Infinity;
+  for (let k = 0; k < s.length; k++) {
+    const at = s.y[rowOf(s, k)]!;
+    if (!(log ? at > 0 && at < Infinity : Number.isFinite(at))) continue;
+    if (at < min) min = at;
+    if (at > max) max = at;
+  }
+  return min <= max ? [min, max] : undefined;
+}
+
 /**
  * [min, max] of the usable `values` (stack ends or bases) of horizontal bars;
- * rows without a band (missing categories, index -1) are not drawn.
+ * rows without a band (missing categories, index -1, when `banded`) or a
+ * position are not drawn.
  */
-function lengthExtent(s: Series, values: NumericArray, log: boolean): [number, number] | undefined {
+function lengthExtent(
+  s: Series,
+  values: NumericArray,
+  log: boolean,
+  banded: boolean,
+): [number, number] | undefined {
   let min = Infinity;
   let max = -Infinity;
   for (let k = 0; k < s.length; k++) {
     const row = rowOf(s, k);
     const value = values[row]!;
-    if (s.y[row]! < 0 || !Number.isFinite(value) || (log && value <= 0)) continue;
+    const at = s.y[row]!;
+    if ((banded ? at < 0 : !Number.isFinite(at)) || !Number.isFinite(value) || (log && value <= 0))
+      continue;
     if (value < min) min = value;
     if (value > max) max = value;
   }
@@ -1626,11 +1687,13 @@ function nans(length: number): Float64Array {
 
 /**
  * Bars. With a category x, each value gets a band; with numeric or time x,
- * bars are centered on their x values. A category y makes bars horizontal.
+ * bars are centered on their x values. A category y makes bars horizontal,
+ * as `orient: "y"` does on any y.
  *
  * ```ts
  * bar(sales, { x: "region", y: ["2025", "2026"] })
  * bar(sales, { x: "revenue", y: "region" })
+ * bar(ranked, { x: "value", y: "rank", orient: "y" })
  * bar(requests, { x: "minute", y: "count", series: "status", stack: true })
  * ```
  */
@@ -1647,6 +1710,7 @@ export function bar<S extends Schema>(
     x: fields(options.x),
     y: fields(options.y),
     ...definedFields(options, [
+      "orient",
       "tooltip",
       "series",
       "stack",

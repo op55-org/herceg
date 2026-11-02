@@ -1,4 +1,4 @@
-import type { PositionField, Schema, Table } from "../data/table.ts";
+import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
 import type { Formatter } from "../format/format.ts";
@@ -107,7 +107,7 @@ export type RegionOptions = RegionStyle &
 /** Regions from a table, one per row; places may also be constants. */
 export type RegionDataOptions<S extends Schema> = RegionStyle &
   ItemKeyed<S> &
-  RegionRange<PlaceOption<PositionField<S>>> & {
+  RegionRange<PlaceOption<PositionField<S>, CategoryField<S>>> & {
     /** Text drawn in every region: constant, or each row's `field`. */
     label?: RuleLabel<TextField<S>, RegionLabelLayout>;
     /**
@@ -246,7 +246,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     // Places that are not values or categories (fractions, pixels) say
     // nothing of where the region is.
     const range = (places: [Place, Place] | undefined, f: Formatter, i: number) => {
-      if (!places || places.some((p) => p.kind === "frame")) return "";
+      if (!places || places.some((p) => p.kind === "frame" || p.kind === "item")) return "";
       const [a, b] = places.map((p) =>
         p.kind === "category"
           ? data.category(p, i)
@@ -290,6 +290,10 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
 
   get scaled() {
     return this.#data.scaled;
+  }
+
+  get follows() {
+    return this.#data.follows;
   }
 
   scaleExtent(name: string, axis: "x" | "y", log: boolean, rows?: RowParts) {
@@ -405,8 +409,9 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
       ? paintedReach(paint, labelHalo(label.style?.halo ?? this.spec.halo, frame))
       : 0;
     let count = 0;
-    // Regions are cut to the plot, or to the chart with a clip of "chart" or false.
-    const clip = this.spec.clip;
+    // Regions are cut to the plot, or to the chart with a clip of "chart" or false
+    // (a decoration's by default).
+    const clip = this.spec.clip ?? frame.clip;
     const box = clip === "chart" || clip === false ? (frame.chart ?? plot) : plot;
     data.each(rows, (i) => {
       // Each region is cut to its box, its label placed in its visible part;

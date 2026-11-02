@@ -83,6 +83,11 @@ export interface DrawnMark {
    * box's layers drawn as one is none of the chart's marks.
    */
   readonly layoutMark?: LayoutMark | undefined;
+  /**
+   * For decorations in facet panels and subplots: the panel's box, which
+   * they are drawn within (`Panel.keep`), and picked within only.
+   */
+  readonly keep?: Readonly<Rect> | undefined;
   /** The chart revision drawn. */
   readonly revision: number;
   /**

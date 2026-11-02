@@ -44,6 +44,10 @@ the generated [capability matrix](../capabilities.md).
   of splitting; dendrograms repeat
   (`facet: "repeat"`); 3D facets are refused (use subplots).
   [Layout](layout.md)
+- **Beside layout marks.** Rules, regions, text, and custom marks share a
+  layout mark's chart, facet panels, or subplot when placed by its items
+  (pies, funnels, treemaps, sunbursts) or in pixels; other marks are
+  refused there. [Hierarchy](hierarchy-and-flow.md#marks-beside-layout-marks)
 - **Right axis.** Marks placed along y (horizontal bars, box plots, boxen,
   violins, histograms, error bars, points on a category y, lines and areas
   along y, rugs along y) stay on the left.

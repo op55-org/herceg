@@ -4,6 +4,7 @@
 // its `$props`, so these lines check what templates check.
 import { type Chart as HercegChart, table, time } from "herceg";
 import {
+  Bar,
   Boxen,
   BoxPlot,
   type Chart,
@@ -201,3 +202,16 @@ Violin({ data: metrics, x: "service", y: "p50", inner: "points" });
 Violin({ data: metrics, x: "service", y: "p50", split: "true" });
 // @ts-expect-error a series field is categorical
 Violin({ data: metrics, x: "service", y: "p50", series: "p50", split: true });
+
+// Bars stand on any y with orient "y"; text and rules follow a layout mark's items.
+const ranked = table({ brand: ["IBM", "Apple"], value: [53, 40], rank: [1, 0] });
+Bar({ data: ranked, x: "value", y: "rank", orient: "y" });
+// @ts-expect-error bars along y measure numbers along x
+Bar({ data: ranked, x: "brand", y: "rank", orient: "y" });
+Text({
+  data: ranked,
+  from: { mark: "cells", item: [{ field: "brand" }], at: "top-left" },
+  label: { field: "brand" },
+});
+// @ts-expect-error items' names are category fields
+Rule({ data: ranked, x: { item: { mark: "cells", item: [{ field: "value" }] } } });

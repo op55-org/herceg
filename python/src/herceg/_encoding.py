@@ -654,9 +654,137 @@ def instant(value: Any, role: str) -> float:
     return ms
 
 
+#: Where a place on an item's box is along an axis: its start (left or top), center, or end.
+ItemAt = Literal["start", "center", "end"]
+_ITEM_AT: tuple[str, ...] = get_args(ItemAt)
+
+#: A point of a box: a corner, the middle of an edge, or its center.
+BoxAnchor = Literal[
+    "top-left",
+    "top",
+    "top-right",
+    "left",
+    "center",
+    "right",
+    "bottom-left",
+    "bottom",
+    "bottom-right",
+]
+_BOX_ANCHORS: tuple[str, ...] = get_args(BoxAnchor)
+
+
+def item_names(mark: Any, item: Any, role: str) -> list[Any]:
+    """A layout item's names from the top as the spec takes them: a name, or
+    ``hg.col(column)``, each row's value of a category column, as
+    ``{"field": column}``. One name is a list of one."""
+    if not isinstance(mark, str) or not mark:
+        raise ChartError(f"{role} mark: expected a layout mark's id; received {shown(mark)}")
+    names = [item] if isinstance(item, (str, Expr)) else item
+    if not listlike(names) or len(names) == 0:
+        raise ChartError(
+            f"{role} item: expected an item's names from the top, each a name or "
+            f"hg.col(column); received {shown(item)}"
+        )
+    out: list[Any] = []
+    for k, name in enumerate(names):
+        json = name.to_json() if isinstance(name, Expr) else None
+        if isinstance(name, str):
+            out.append(name)
+        elif isinstance(json, list) and len(json) == 2 and json[0] == "field":
+            out.append({"field": json[1]})
+        else:
+            raise ChartError(
+                f"{role} item[{k}]: expected a name, or hg.col(column) for each row's; "
+                f"received {shown(name)}"
+            )
+    return out
+
+
+def item_fields(value: Any) -> list[str]:
+    """The columns an item place's names read (``hg.col``), if any."""
+    if not isinstance(value, (ItemCoordinate, ItemAnchor)):
+        return []
+    names = item_names(value.mark, value.item, type(value).__name__)
+    return [name["field"] for name in names if isinstance(name, dict)]
+
+
+@refuses
+@dataclass(frozen=True)
+class ItemCoordinate:
+    """A place along an axis on an item a layout mark draws (a pie's slice,
+    a funnel's stage, a treemap's or sunburst's node): the ``start`` of its
+    box (its left, or its top; the default), its ``center``, or its ``end``,
+    then moved ``offset`` pixels (right for x, down for y). ``mark`` is the
+    layout mark's id, and ``item`` the item's names from the top
+    (``["Auburn, AL", "Almond lovers"]``), each a name or
+    ``hg.col(column)`` for each row's value of a category column. Text,
+    rules, and regions placed so draw beside the layout mark in its panel,
+    in the frame it draws, and leave out rows whose item it does not draw."""
+
+    mark: str
+    item: str | Expr | Sequence[str | Expr]
+    at: ItemAt | None = None
+    offset: float | None = None
+
+    def __post_init__(self) -> None:
+        item_names(self.mark, self.item, "ItemCoordinate")
+        if self.at is not None:
+            _choice(self.at, _ITEM_AT, "ItemCoordinate at")
+        _offset(self.offset, "ItemCoordinate")
+
+    def _spec(self) -> dict[str, Any]:
+        spec = {
+            "item": {"mark": self.mark, "item": item_names(self.mark, self.item, "ItemCoordinate")},
+            "at": self.at,
+            "offset": _offset(self.offset, "ItemCoordinate"),
+        }
+        return {key: value for key, value in spec.items() if value is not None}
+
+
+@refuses
+@dataclass(frozen=True)
+class ItemAnchor:
+    """A point of a layout item's box that text follows (``text(from_=...)``):
+    its ``mark``'s id, the item's names from the top as ``hg.ItemCoordinate``
+    takes them, ``at`` a corner, the middle of an edge, or the center
+    (``"top-left"``), and an ``offset`` of (right, down) pixels. The label's
+    block is aligned to the point (its top left corner at ``"top-left"``)
+    unless its style says otherwise."""
+
+    mark: str
+    item: str | Expr | Sequence[str | Expr]
+    at: BoxAnchor
+    offset: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        item_names(self.mark, self.item, "ItemAnchor")
+        _choice(self.at, _BOX_ANCHORS, "ItemAnchor at")
+        if self.offset is not None and not (listlike(self.offset) and len(self.offset) == 2):
+            raise ChartError(
+                "ItemAnchor offset: expected pixels right and down, such as (3, -16); "
+                f"received {shown(self.offset)}"
+            )
+        for k, value in enumerate(self.offset or ()):
+            if isinstance(value, bool) or not is_number(value) or not np.isfinite(value):
+                raise ChartError(
+                    f"ItemAnchor offset[{k}]: expected a finite number of pixels, right then "
+                    f"down; received {shown(value)}"
+                )
+
+    def _spec(self) -> dict[str, Any]:
+        spec: dict[str, Any] = {
+            "mark": self.mark,
+            "item": item_names(self.mark, self.item, "ItemAnchor"),
+            "at": self.at,
+        }
+        if self.offset is not None:
+            spec["offset"] = {"x": float(self.offset[0]), "y": float(self.offset[1])}
+        return spec
+
+
 #: An annotation's place along an axis: a number or datetime, a column name,
-#: or an ``hg.Fraction``, ``hg.Pixels``, or ``hg.DataPosition``.
-Coordinate = str | float | _dt.date | Fraction | Pixels | DataPosition
+#: or an ``hg.Fraction``, ``hg.Pixels``, ``hg.DataPosition``, or ``hg.ItemCoordinate``.
+Coordinate = str | float | _dt.date | Fraction | Pixels | DataPosition | ItemCoordinate
 
 #: A mark's place for each row along an axis besides a column's name: a
 #: coordinate (a column on a scale of the chart's own, or a share or
@@ -669,7 +797,7 @@ def coordinate_spec(value: Any, role: str) -> Any:
     become epoch milliseconds, and coordinates their tagged forms."""
     if value is None or isinstance(value, str):
         return value
-    if isinstance(value, (Fraction, Pixels, DataPosition)):
+    if isinstance(value, (Fraction, Pixels, DataPosition, ItemCoordinate)):
         return value._spec()
     return instant(value, role)
 

@@ -94,6 +94,7 @@ ys}`.
 | `ax.plot(xs, ys)` | `hg.line(data, x="x", y="y")`, or `chart.line("x", "y")` |
 | `ax.scatter(xs, ys)` | `hg.scatter(data, x="x", y="y")`, or `chart.point("x", "y")` |
 | `ax.bar(categories, heights)` | `hg.bar(data, x="category", y="height")` |
+| `ax.barh(ranks, widths)` | `hg.bar(data, x="width", y="rank", orient="y")` (a category `y` needs no `orient`) |
 | `ax.fill_between(xs, low, high)` | `chart.area(x="x", y1="low", y2="high")` |
 | `ax.axhline(v)` / `ax.axvline(v)` | `chart.rule(y=v)` / `chart.rule(x=v)` |
 | `ax.text(x, y, s)` | `chart.text(x=x, y=y, label=s)` |

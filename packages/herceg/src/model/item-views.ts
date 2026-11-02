@@ -15,8 +15,11 @@ import type { Table } from "../data/table.ts";
 import type { DrawnMark } from "../marks/drawn.ts";
 import type { MovedNodes } from "../marks/graph.ts";
 import {
+  copiesOf,
   drawnHidden,
   hiddenWhole,
+  type ItemInfo,
+  isLayoutMark,
   type LayoutControls,
   type LayoutFrame,
   type LayoutItem,
@@ -24,7 +27,7 @@ import {
   type LayoutResult,
   type Viewport as PlaneViewport,
 } from "../marks/layout-mark.ts";
-import type { ChartMark } from "../marks/mark.ts";
+import type { ChartMark, Frame, Mark, MarkKey } from "../marks/mark.ts";
 import type { LayoutClock, NodePositions } from "../marks/node-positions.ts";
 import type { FieldReader } from "../marks/tooltip-fields.ts";
 import type { DrillRoot } from "../marks/tree-data.ts";
@@ -32,7 +35,9 @@ import type { Guide, Panel, Rect, Scene } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import type { Camera } from "../three/camera.ts";
-import type { ItemInspection } from "./inspect.ts";
+import { checkDecorations, type Decoration, decorate, painted } from "./decorations.ts";
+import type { CompiledFeatures } from "./features.ts";
+import type { ItemInspection, MarkSeries } from "./inspect.ts";
 import type { LegendPart } from "./legend.ts";
 import type {
   ChangeCause,
@@ -43,7 +48,7 @@ import type {
   Viewport,
   ViewReport,
 } from "./model.ts";
-import type { LayoutConfig, LayoutOptions, PanelItem } from "./panel-layout.ts";
+import type { LayoutConfig, LayoutOptions, PanelItem, PanelSplit } from "./panel-layout.ts";
 import type { SelectionOwner } from "./selected-rows.ts";
 
 /**
@@ -132,11 +137,14 @@ export interface ItemPanel {
   plot: Rect;
 }
 
-/** What a layout mark draws with besides its room, identity, rows, and the user's changes. */
+/**
+ * What a layout mark draws with besides its room, identity, rows, and the
+ * user's changes; and its decorations, the marks' compiled features.
+ */
 export type ItemFrame = Omit<
   LayoutFrame,
   "bounds" | "id" | "rows" | "root" | "moved" | "viewport" | "nodePositions" | "clock"
->;
+> & { features?: CompiledFeatures | undefined };
 
 /** The title and legends around a chart, and the room they leave for its mark. */
 export interface Header {
@@ -203,18 +211,37 @@ export class ItemViews {
    */
   static alone(
     layouts: readonly LayoutMark[],
-    marks: readonly unknown[],
+    marks: readonly Mark[],
     config: ChartConfig,
   ): LayoutMark[] {
     const [layout] = layouts as [LayoutMark];
-    // Layers of a map share its chart; they are drawn as one mark.
-    const drawn = layout.join ? [layout.join(layouts, config)] : [...layouts];
-    if (drawn.length > 1 || marks.length > 0)
+    // Layers of a map share its chart; they are drawn as one mark, known by their places.
+    const places = config.marks.flatMap((mark, i) =>
+      layouts.includes(mark as LayoutMark) ? [i] : [],
+    );
+    const drawn = layout.join ? [layout.join(layouts, config, places)] : [...layouts];
+    if (drawn.length > 1)
       throw new Error(
         `${layout.spec.type}: has its chart to itself; draw other marks in another chart`,
       );
+    // Beside it, marks placed by its items or in pixels (model/decorations.ts).
+    checkDecorations(marks, drawn, config.marks);
     ItemViews.interactions(drawn, config, false, layout.spec.type);
     return drawn;
+  }
+
+  /**
+   * Checks marks beside layout marks `drawn` in facet panels, or in subplot
+   * `panel`, as their decorations (model/decorations.ts); `all` are the
+   * chart's marks.
+   */
+  static decorations(
+    marks: readonly Mark[],
+    drawn: readonly LayoutMark[],
+    all: readonly ChartMark[],
+    panel?: string,
+  ): void {
+    checkDecorations(marks, drawn, all, panel === undefined ? { facets: true } : { panel });
   }
 
   /**
@@ -358,6 +385,8 @@ export class ItemViews {
   /** How much layout work this scene allows: set once a chart mounts these, for every scene. */
   #clock: LayoutClock | undefined;
   #mounted = false;
+  /** Scenes decorations drew (`Frame.scene`). */
+  #scenes = 0;
   #reducedMotion: MediaQueryList | undefined;
   /** Settles once a frame drew no layout work left; renewed while some is. */
   #settled: { promise: Promise<void>; resolve: () => void } | undefined;
@@ -681,15 +710,31 @@ export class ItemViews {
   }
 
   /**
-   * The scene of a chart of one layout mark, the chart's `index`th of
-   * `marks`: `header` (its title and legends) above, and the mark in the
-   * room below, drawn with `frame` and the user's changes.
+   * The scene of a chart of one layout mark, `mark` of `marks`: `header`
+   * (its title and legends) above, and the mark in the room below with the
+   * chart's other marks as its decorations, drawn with `frame` and the
+   * user's changes.
    */
   scene(header: Header, mark: LayoutMark, marks: readonly ChartMark[], frame: ItemFrame): Scene {
     const { width, height, pixelRatio } = this.#model;
     this.#begin(false);
     const plot = header.box;
-    const panel = this.#draw({ key: "", label: "", plot }, mark, 0, marks, frame, {}, "");
+    // The chart's other marks are its decorations, of every row.
+    const decorations = marks.flatMap((other, index) =>
+      isLayoutMark(other)
+        ? []
+        : [{ mark: other as Mark, key: other.spec.id ?? index, rows: undefined }],
+    );
+    const panel = this.#draw(
+      { key: "", label: "", plot },
+      mark,
+      this.#indexOf(mark),
+      marks,
+      frame,
+      {},
+      "",
+      decorations,
+    );
     let vertices = 0;
     for (const item of panel.marks) vertices += item.draw.size(item);
     const { theme } = frame;
@@ -698,14 +743,48 @@ export class ItemViews {
   }
 
   /**
+   * The chart's marks beside its one layout mark, as legends read them: its
+   * decorations, which draw no series (annotations list their labels).
+   */
+  get besides(): MarkSeries[] {
+    return this.#model.config.marks.flatMap((mark) =>
+      isLayoutMark(mark) ? [] : [{ mark: mark as Mark, series: [] }],
+    );
+  }
+
+  /** What names the items (and entries) of the chart's one layout mark: its id, or its index. */
+  get layoutId(): MarkKey {
+    const mark = this.#model.layouts[0]!;
+    return mark.spec.id ?? this.#indexOf(mark);
+  }
+
+  /** A layout mark's index among the chart's marks: a map's or a 3D box's first layer's. */
+  #indexOf(mark: LayoutMark): number {
+    return mark.indices?.[0] ?? this.#model.config.marks.indexOf(mark);
+  }
+
+  /**
    * Draws the layout mark `item` names in `panel` of a scene, with the
    * state the facet's panels share, or a subplot's own.
    */
-  panel(panel: ItemPanel, item: PanelItem, frame: ItemFrame): Panel {
-    const { marks, panels, animation } = this.#model.config;
+  panel(
+    panel: ItemPanel,
+    item: PanelItem,
+    frame: ItemFrame,
+    split: Pick<PanelSplit, "panels" | "members">,
+    index: number,
+  ): Panel {
+    const { marks, panels, animation, facet } = this.#model.config;
     const state = panels ? panel.key : "";
     // Charts that animate changed values learn what moves in panels too.
     const keyed = typeof animation === "object" && animation.values === true;
+    // The other marks the split draws in the panel are its decorations,
+    // each known by its place among the chart's marks (a mark listed twice, by both).
+    const members = split.members?.[index];
+    const places = marks.flatMap((mark, i) => (isLayoutMark(mark) ? [] : [i]));
+    const decorations = (split.panels[index] ?? []).flatMap(({ mark, rows }, k) =>
+      members && !members[k] ? [] : [{ mark, key: mark.spec.id ?? places[k]!, rows }],
+    );
     return this.#draw(
       panel,
       item.mark,
@@ -714,6 +793,9 @@ export class ItemViews {
       { ...frame, inPanel: true, keyed },
       item,
       state,
+      decorations,
+      // Decorations draw up to halfway to the panels beside, as far as the gaps given there.
+      decorations.length > 0 ? (facet?.gap ?? {}) : undefined,
     );
   }
 
@@ -725,6 +807,8 @@ export class ItemViews {
     frame: ItemFrame,
     { rows, layerRows, fitRows }: Partial<PanelItem>,
     key: string,
+    decorations: readonly Decoration[] = [],
+    gaps?: { row?: number | undefined; column?: number | undefined },
   ): Panel {
     const { plot } = panel;
     const state = this.#state(key);
@@ -785,7 +869,77 @@ export class ItemViews {
     // Every panel of a state draws the same root and layout: the first says what they are.
     if (this.#views.findIndex((view) => view.state === key) === this.#views.length - 1)
       settle(state, result);
-    return { key: panel.key, plot, grids: [], axes: [], marks: result.geometry };
+    // A mark hidden whole draws no items: what follows them draws nothing either.
+    const list = mark.publishes ? () => result.items?.() ?? [] : undefined;
+    if (decorations.length === 0)
+      return {
+        key: panel.key,
+        plot,
+        grids: [],
+        axes: [],
+        marks: result.geometry,
+        items: { mark: id, list },
+      };
+    // Its decorations, after it in the same frame, and again over each frame a transition draws.
+    const { width, height } = model;
+    const chart = { x: 0, y: 0, width, height };
+    // In facets and subplots, the panel's box: its plot, and up to half the gaps given beside it,
+    // where what is not cut to the plot draws and is picked.
+    const keep =
+      gaps &&
+      clipTo(
+        {
+          x: plot.x - (gaps.column ?? 0) / 2,
+          y: plot.y - (gaps.row ?? 0) / 2,
+          width: plot.width + (gaps.column ?? 0),
+          height: plot.height + (gaps.row ?? 0),
+        },
+        chart,
+      );
+    const drawWith = (items: (() => readonly ItemInfo[]) | undefined) =>
+      decorate(
+        decorations,
+        { id, type: mark.spec.type },
+        items,
+        {
+          plot,
+          chart,
+          pixelRatio: model.pixelRatio,
+          rasterRatio: model.rasterRatio,
+          theme: frame.theme,
+          paint: frame.paint,
+          read: frame.read,
+          surface: frame.surface,
+          locale: frame.locale,
+          hidden: frame.hidden,
+          owner: model,
+          panel: panel.key,
+          scene: ++this.#scenes,
+          clouds: false,
+          measure: frame.measure,
+          features: frame.features,
+          highlighted: model.layoutHighlight,
+          ...POOLS,
+        },
+        model.revision,
+        (other) => model.whileCurrent(other),
+        keep,
+      );
+    const decorated = drawWith(list);
+    this.records.push(...decorated.records);
+    return {
+      key: panel.key,
+      plot,
+      grids: [],
+      axes: [],
+      marks: painted(result.geometry, decorated.geometry),
+      items: {
+        mark: id,
+        list,
+        decorate: (under, items) => painted(under, drawWith(items).geometry),
+      },
+      ...(keep && { keep: [keep] }),
+    };
   }
 
   #state(key: string): ItemState {
@@ -803,6 +957,58 @@ export class ItemViews {
       this.#states.set(key, state);
     }
     return state;
+  }
+
+  /**
+   * The items layout mark `mark` drew in `scene` (the frame on screen),
+   * copied, with `revision`, the revision drawn: in `panel`, which charts
+   * drawing the mark in several panels need; undefined until a frame drew,
+   * and in charts without layout marks (any more). Throws for an id of none
+   * of the chart's layout marks, for marks whose items have no geometry, and
+   * for a panel not drawing it.
+   */
+  getItems(
+    { mark, panel }: { mark: string; panel?: string | undefined },
+    scene: Scene | undefined,
+    revision: number | undefined,
+  ): { revision: number; items: ItemInfo[] } | undefined {
+    if (this.#model.layouts.length === 0) return undefined;
+    const { marks } = this.#model.config;
+    const owner = marks.find((other) => other.spec.id === mark);
+    const fail = (message: string, path = "mark") =>
+      new ChartError({
+        code: owner ? "invalid-option" : "unknown-reference",
+        path,
+        message: `getItems ${path}: ${message}`,
+      });
+    const layouts = marks
+      .filter(isLayoutMark)
+      .flatMap(({ spec }) => (spec.id === undefined ? [] : [`"${spec.id}"`]));
+    if (!owner || !isLayoutMark(owner))
+      throw fail(
+        `${owner ? `"${mark}" is a ${owner.spec.type}, not a layout mark` : `no mark has id "${mark}"`}; name ${layouts.length ? `one of ${layouts.join(", ")}` : "a layout mark by its id"}`,
+      );
+    if (!owner.publishes)
+      throw fail(
+        `"${mark}" is a ${owner.spec.type}, whose items give no geometry; getItems reads pies, funnels, treemaps, and sunbursts`,
+      );
+    if (!scene || revision === undefined) return undefined;
+    const drawing = scene.panels.filter(({ items }) => items?.mark === mark);
+    const names = drawing.map(({ key }) => JSON.stringify(key)).join(", ");
+    const one =
+      panel === undefined
+        ? drawing.length > 1
+          ? undefined
+          : drawing[0]
+        : drawing.find(({ key }) => key === panel);
+    if (!one && (panel !== undefined || drawing.length > 1))
+      throw fail(
+        panel === undefined
+          ? `"${mark}" draws in panels ${names}; name one`
+          : `"${mark}" is drawn in ${names ? `panels ${names}` : "no panel"}, not "${panel}"`,
+        panel === undefined ? "mark" : "panel",
+      );
+    return { revision, items: copiesOf(one?.items?.list?.() ?? []) };
   }
 
   /** What the layout mark drew in `panel` (the first by default). */
@@ -1347,6 +1553,28 @@ function settle(state: ItemState, result: LayoutResult): void {
   if (!moves) return;
   for (const key of state.moved.keys()) if (!moves.owns(key)) state.moved.delete(key);
   if (state.dragged && !moves.owns(state.dragged.key)) state.dragged = undefined;
+}
+
+/**
+ * Buffers decorations draw into: their own each frame, as they are few,
+ * never a mark's pooled ones (model/model.ts).
+ */
+const POOLS: Pick<Frame, "polyline" | "floats" | "doubles" | "bytes"> = {
+  polyline() {
+    throw new Error("decorations draw no lines");
+  },
+  floats: (_key, _stage, length) => new Float32Array(length),
+  doubles: (_key, _stage, length) => new Float64Array(length),
+  bytes: (_key, _stage, length) => new Uint8ClampedArray(length),
+};
+
+/** `box` cut to `within`. */
+function clipTo(box: Rect, within: Rect): Rect {
+  const x = Math.max(box.x, within.x);
+  const y = Math.max(box.y, within.y);
+  const right = Math.min(box.x + box.width, within.x + within.width);
+  const bottom = Math.min(box.y + box.height, within.y + within.height);
+  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
 }
 
 /** The moves to draw: those made, and the node being dragged, which is no move yet. */

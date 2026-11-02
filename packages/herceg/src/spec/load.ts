@@ -56,7 +56,7 @@ import { RuleMark } from "../marks/rule.ts";
 import { SankeyMark } from "../marks/sankey.ts";
 import { SunburstMark } from "../marks/sunburst.ts";
 import { SurfaceMark } from "../marks/surface.ts";
-import { TextMark } from "../marks/text.ts";
+import { itemPlaces, TextMark } from "../marks/text.ts";
 import { TreemapMark } from "../marks/treemap.ts";
 import { ViolinMark } from "../marks/violin.ts";
 import { Facet } from "../model/facet.ts";
@@ -622,12 +622,16 @@ function loadMark(
           spec,
           annotationTable(spec, [spec.x1, spec.x2, spec.y1, spec.y2], tables),
         );
-      case "text":
-        if (spec.from) return new FollowingTextMark(spec);
-        return new TextMark(
-          spec,
-          annotationTable(spec, spec.at ? [spec.at.x, spec.at.y] : [spec.x, spec.y], tables),
-        );
+      case "text": {
+        const { from } = spec;
+        if (from && !("item" in from)) return new FollowingTextMark(spec);
+        const places = from
+          ? itemPlaces(from)
+          : spec.at
+            ? [spec.at.x, spec.at.y]
+            : [spec.x, spec.y];
+        return new TextMark(spec, annotationTable(spec, places, tables));
+      }
     }
     const source = view?.source ?? tableFor(spec.data, tables);
     switch (spec.type) {

@@ -306,7 +306,8 @@
         "selectionOwner": "The widget's selection says where it is drawn (Selection.panels).",
         "viewRevision": "The widget reads and sets views with get_viewport and set_viewport; each change's revision arrives with it, as hg.ViewportEvent's view_revision (on_viewport).",
         "revision": "The chart's revision counts what one browser's chart drew; the widget orders browsers' reports by a transport revision of its own.",
-        "drawnRevision": "Frames are drawn in each browser; the widget orders browsers' reports by a transport revision of its own."
+        "drawnRevision": "Frames are drawn in each browser; the widget orders browsers' reports by a transport revision of its own.",
+        "getItems": "Layout items' geometry is what a browser's frame drew; Python places marks by items with hg.ItemCoordinate and hg.ItemAnchor, which every browser and export resolves."
       },
       "only": {
         "append": "Appends rows to the chart's data, as TypeScript appends to its tables.",
@@ -937,7 +938,7 @@
         "px": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`."
       }
     },
-    "settings AnnotationPosition hg.DataPosition|hg.Fraction|hg.Pixels": {
+    "settings AnnotationPosition hg.DataPosition|hg.Fraction|hg.ItemCoordinate|hg.Pixels": {
       "spelled": {
         "fraction": {
           "as": "value",
@@ -954,7 +955,17 @@
       },
       "untyped": {
         "fraction": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`.",
-        "px": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`."
+        "px": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`.",
+        "item": "Python's hg.ItemCoordinate takes the layout mark's id and the item's names as its own mark and item (`hg.ItemCoordinate(\"cells\", [hg.col(\"market\")])`), where the spec writes `{ item: { mark, item: [{ field: \"market\" }] } }`; a name is text, or hg.col(column) for `{ field }`."
+      },
+      "choices": {
+        "item": {
+          "takes": ["*"],
+          "reason": "As untyped item: Python's item is the item's names, the spec's item.item."
+        }
+      },
+      "only": {
+        "mark": "Python's hg.ItemCoordinate names the layout mark as its own mark, the spec's item.mark."
       }
     },
     "settings LayoutSpec hg.Grid": {
@@ -1005,7 +1016,7 @@
         "px": "As fraction."
       }
     },
-    "settings Coordinate hg.DataPosition|hg.Fraction|hg.Pixels": {
+    "settings AnnotationCoordinate hg.DataPosition|hg.Fraction|hg.ItemCoordinate|hg.Pixels": {
       "spelled": {
         "data": {
           "as": "value",
@@ -1022,7 +1033,17 @@
       },
       "untyped": {
         "fraction": "Python's hg.Fraction and hg.Pixels take a column of shares or pixels as their own field (`hg.Fraction(field=\"share\")`), where the spec writes `{ fraction: { field } }`.",
-        "px": "As fraction."
+        "px": "As fraction.",
+        "item": "Python's hg.ItemCoordinate takes the layout mark's id and the item's names as its own mark and item (`hg.ItemCoordinate(\"cells\", [hg.col(\"market\")])`), where the spec writes `{ item: { mark, item: [{ field: \"market\" }] } }`; a name is text, or hg.col(column) for `{ field }`."
+      },
+      "choices": {
+        "item": {
+          "takes": ["*"],
+          "reason": "As untyped item: Python's item is the item's names, the spec's item.item."
+        }
+      },
+      "only": {
+        "mark": "Python's hg.ItemCoordinate names the layout mark as its own mark, the spec's item.mark."
       }
     },
     "settings XAxisSpec XAxisConfig": {
@@ -1423,6 +1444,12 @@
         "halo": "As font.",
         "background": "As font.",
         "padding": "As font."
+      }
+    },
+    "settings ItemAnchor|MarkAnchorSpec hg.ItemAnchor|hg.MarkAnchor": {
+      "untyped": {
+        "item": "Python's hg.ItemAnchor takes the item's names as text, or hg.col(column) for the spec's `{ field }`.",
+        "offset": "Python's hg.ItemAnchor takes its offset as (right, down) pixels, where the spec writes `{ x, y }`."
       }
     }
   }

@@ -107,6 +107,7 @@ export type {
   Chart,
   CursorOptions,
   CursorPosition,
+  DrawnItemsInfo,
   InspectOptions,
   ItemPositions,
   LegendEntry,
@@ -182,7 +183,7 @@ export { type GeoShapeOptions, geoshape } from "./marks/geoshape.ts";
 export { type GraphOptions, graph } from "./marks/graph.ts";
 export { type HeatmapOptions, heatmap } from "./marks/heatmap.ts";
 export { type HistogramOptions, histogram } from "./marks/histogram.ts";
-export { tablesOf, viewOf } from "./marks/layout-mark.ts";
+export { type ItemInfo, tablesOf, viewOf } from "./marks/layout-mark.ts";
 export { type LineOptions, line } from "./marks/line.ts";
 export { type Line3DOptions, line3d } from "./marks/line3d.ts";
 export type { AxisFormat, ChartMark, MarkIdentity } from "./marks/mark.ts";

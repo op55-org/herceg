@@ -1296,11 +1296,13 @@ def test_pies_send_their_fields_and_have_their_chart_to_themselves():
     assert len(re.findall(r'<path d="M[^"]*A[^"]*Z" fill="#', svg)) == 3
     assert "n" in svg and "e" in svg
     with pytest.raises(
-        ValueError, match="pie: has its chart to itself; draw the line in another chart"
+        ValueError,
+        match="line: a pie's chart has no x and y scales; draw the line in another chart, or "
+        "place text, rules, or regions by the pie's items or in pixels",
     ):
         hg.Chart(sales).pie("region").line(x="revenue", y="revenue")
     with pytest.raises(
-        ValueError, match="pie: has its chart to itself; draw the bar in another chart"
+        ValueError, match="bar: a pie's chart has no x and y scales; draw the bar in another chart"
     ):
         hg.Chart(sales).bar(x="region", y="revenue").pie("region")
     with pytest.raises(
@@ -1424,7 +1426,9 @@ def test_gauges_send_their_dial_and_bands():
     with pytest.raises(hg.ChartError, match="gauge value: no column 'load'"):
         hg.gauge(readings, "load")
     with pytest.raises(
-        ValueError, match="gauge: has its chart to itself; draw the line in another chart"
+        ValueError,
+        match="line: a gauge's chart has no x and y scales; draw the line in another chart, or "
+        "place text, rules, or regions in pixels",
     ):
         hg.Chart(readings).gauge("cpu").line(x="cpu", y="cpu")
     with pytest.raises(ValueError, match="Chart zoom: a gauge has no x axis"):
@@ -1748,7 +1752,7 @@ def test_radars_send_long_or_wide_data():
         hg.Chart(scores).radar("skill", "score", fill_opacity=1.5)
     with pytest.raises(ValueError, match="Chart zoom: a radar has no x axis"):
         hg.Chart(scores, zoom=True).radar("skill", "score")
-    with pytest.raises(ValueError, match="radar: has its chart to itself"):
+    with pytest.raises(ValueError, match="line: a radar's chart has no x and y scales"):
         hg.Chart(scores).radar("skill", "score").line(x="score", y="score")
 
 
@@ -1910,10 +1914,12 @@ def test_facets_draw_a_pie_of_each_panels_rows():
 
 
 def test_facets_of_layout_marks_refuse_what_the_browser_refuses():
-    with pytest.raises(ValueError, match="pie: has each facet panel to itself"):
+    with pytest.raises(ValueError, match="line: a pie's facet panels have no x and y scales"):
         hg.Chart(SALES, facet="region").pie("product").line(x="week", y="revenue")
-    with pytest.raises(ValueError, match="pie: has each facet panel to itself"):
+    with pytest.raises(ValueError, match="line: a pie's facet panels have no x and y scales"):
         hg.Chart(SALES, facet="region").line(x="week", y="revenue").pie("product")
+    with pytest.raises(ValueError, match="pie: has each facet panel to itself"):
+        hg.Chart(SALES, facet="region").pie("product").funnel("product")
     with pytest.raises(ValueError, match="Chart zoom: a pie has no x axis"):
         hg.Chart(SALES, facet="region", zoom=True).pie("product")
     seams = hg.AxisOptions(breaks=[hg.Break(start=4, end=8)], seams=True)
@@ -1976,11 +1982,14 @@ def test_a_layout_marks_panel_is_its_own():
         hg.Chart(SALES, panels=["a", "b"]).pie("product", panel="c")
     with pytest.raises(ValueError, match='funnel panel: a pie has panel "b" to itself'):
         hg.Chart(SALES, panels=["a", "b"]).pie("product", panel="b").funnel("product", panel="b")
-    with pytest.raises(ValueError, match='line panel: a pie has panel "b" to itself'):
+    with pytest.raises(
+        ValueError,
+        match='line panel: panel "b" draws a pie, which has no x and y scales; name another panel',
+    ):
         hg.Chart(SALES, panels=["a", "b"]).pie("product", panel="b").line(
             x="week", y="revenue", panel="b"
         )
-    with pytest.raises(ValueError, match='pie panel: a line draws in panel "b"'):
+    with pytest.raises(ValueError, match='line panel: panel "b" draws a pie'):
         hg.Chart(SALES, panels=["a", "b"]).line(x="week", y="revenue", panel="b").pie(
             "product", panel="b"
         )

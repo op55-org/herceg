@@ -1,9 +1,10 @@
 // Where a `Coordinate` is on screen: a scale's value, a share of a frame,
-// or pixels from its edge, then moved by its offset. Scales stay outside
-// this module: the caller says where a value is on a named scale.
+// pixels from its edge, or an edge of a layout item's box, then moved by
+// its offset. Scales and items stay outside this module: the caller says
+// where a value is on a named scale, and which box an item has.
 
 import type { Rect } from "../scene/scene.ts";
-import type { Coordinate, Position } from "../spec/place.ts";
+import type { Coordinate, ItemCoordinate, ItemRef, Position } from "../spec/place.ts";
 
 /** What coordinates are resolved against. */
 export interface PositionContext {
@@ -19,6 +20,8 @@ export interface PositionContext {
   at(scale: string, value: number | string): number | undefined;
   /** The value of field `field` of the row being placed; undefined when it has none. */
   field?(field: string): number | string | undefined;
+  /** The box of the item `item` names for the row being placed; undefined where none is drawn. */
+  box?(item: ItemRef): Rect | undefined;
 }
 
 /**
@@ -27,12 +30,18 @@ export interface PositionContext {
  * its top as screens do. Undefined when a value or field has no place.
  */
 export function coordinateAt(
-  coordinate: Coordinate,
+  coordinate: Coordinate | ItemCoordinate,
   axis: "x" | "y",
   context: PositionContext,
 ): number | undefined {
   let at: number | undefined;
-  if ("data" in coordinate)
+  if ("item" in coordinate) {
+    const box = context.box?.(coordinate.item);
+    if (!box) return undefined;
+    const [start, length] = axis === "x" ? [box.x, box.width] : [box.y, box.height];
+    const { at: edge } = coordinate;
+    at = start + (edge === "end" ? length : edge === "center" ? length / 2 : 0);
+  } else if ("data" in coordinate)
     at = context.at(coordinate.scale ?? context.scales[axis], coordinate.data);
   else if ("field" in coordinate) {
     const value = context.field?.(coordinate.field);

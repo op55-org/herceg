@@ -20,6 +20,7 @@ import type { Halo } from "../spec/style.ts";
 import { refuseColor } from "./colored.ts";
 import {
   heldText,
+  type ItemInfo,
   type LayoutFrame,
   type LayoutItem,
   type LayoutMark,
@@ -78,6 +79,7 @@ export class FunnelMark implements LayoutMark {
   declare readonly [MARK]: true;
   readonly layout = true;
   readonly views = ItemViews;
+  readonly publishes = true;
   readonly spec: Frozen<FunnelSpec>;
   readonly table: Table;
   readonly measure: string;
@@ -316,8 +318,19 @@ export class FunnelMark implements LayoutMark {
         outline: `M${n(x!)} ${n(y!)}h${n(w!)}v${n(h!)}h${n(-w!)}Z`,
       };
     };
+    let listed: ItemInfo[] | undefined;
     return {
       geometry,
+      // The stages drawn: not those of no width, or none in their 32-bit floats.
+      items: () => {
+        listed ??= stages.flatMap(({ key, label, value }, i) => {
+          const [x, y, width, height] = box(i) as [number, number, number, number];
+          return width > 0 && height > 0
+            ? [{ key, names: [label], label, value, box: { x, y, width, height } }]
+            : [];
+        });
+        return listed;
+      },
       // A stage's whole row answers, so that narrow bars are easy to point at.
       itemAt(px, py) {
         if (!(px >= bounds.x && px <= bounds.x + bounds.width)) return undefined;

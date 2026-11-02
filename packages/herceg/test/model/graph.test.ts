@@ -435,7 +435,7 @@ describe("graph", () => {
     const network = graph(links(), { source: "from", target: "to" });
     const series = table({ t: [1, 2], v: [1, 2] });
     expect(() => build({ marks: [network, line(series, { x: "t", y: "v" })] })).toThrow(
-      "has its chart to itself",
+      "a graph's chart has no x and y scales",
     );
     expect(() => build({ marks: [network], interaction: { zoom: "x" } })).toThrow(
       'graph zoom: expected interaction.zoom true or "xy"',

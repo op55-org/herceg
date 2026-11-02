@@ -3,7 +3,10 @@
 Pies, treemaps, sunbursts, gauges, funnels, radars, Sankey diagrams, and
 networks. These **layout marks** place their own geometry in a panel
 instead of using x and y scales, so each has its chart, each facet panel,
-or a subplot to itself (see [Layout](layout.md#layout-marks-in-panels)).
+or a subplot to itself, with text, rules, regions, and custom marks placed
+by its items or in pixels beside it (see
+[marks beside layout marks](#marks-beside-layout-marks) and
+[Layout](layout.md#layout-marks-in-panels)).
 
 - [Pies and donuts](#pies-and-donuts)
 - [Treemaps and sunbursts](#treemaps-and-sunbursts)
@@ -12,6 +15,7 @@ or a subplot to itself (see [Layout](layout.md#layout-marks-in-panels)).
 - [Radars](#radars)
 - [Sankey diagrams](#sankey-diagrams)
 - [Networks](#networks)
+- [Marks beside layout marks](#marks-beside-layout-marks)
 - [What layout marks share](#what-layout-marks-share)
 
 ## Pies and donuts
@@ -371,11 +375,86 @@ to at most the 50 most connected nodes, hovering a node does not highlight
 its neighbors, links of a pair named differently have no label, and
 settling after a move reaches at most 1,000 nodes.
 
+## Marks beside layout marks
+
+Text, rules, regions, and custom marks draw beside a layout mark in its
+panel when they are placed by its items or in pixels. Pies, funnels,
+treemaps, and sunbursts give their items' geometry: a place
+`{ item: { mark, item }, at, offset }` is on the start (left or top, the
+default), `"center"`, or `"end"` of an item's box along one axis, and text
+`from` an item stands at a point of its box. An item is named by its names
+from the top (a slice's or a stage's category, a tree node's path), each a
+name or `{ field }`, each row's value of a category field of the mark's
+table. A Marimekko's market names above its columns and rules at their
+edges:
+
+```ts
+createChart(element, {
+  padding: { top: 28 },
+  marks: [
+    treemap(sales, { id: "cells", path: ["market", "segment"], value: "value" }),
+    text(markets, {
+      from: { mark: "cells", item: [{ field: "market" }], at: "top-left", offset: { x: 3, y: -16 } },
+      label: { field: "market" },
+    }),
+    rule(markets, { x: { item: { mark: "cells", item: [{ field: "market" }] }, at: "start" } }),
+  ],
+});
+chart.getItems({ mark: "cells" }); // { revision, items: [{ key, names, label, value, box, depth, parent }, ...] }
+```
+
+```python
+(
+    hg.Chart(padding={"top": 28})
+    .treemap(data=sales, path=["market", "segment"], value="value", id="cells")
+    .text(
+        data=markets,
+        from_=hg.ItemAnchor("cells", [hg.col("market")], at="top-left", offset=(3, -16)),
+        label=hg.Label(field="market"),
+    )
+    .rule(data=markets, x=hg.ItemCoordinate("cells", [hg.col("market")], at="start"))
+)
+```
+
+- **Same frame.** They are drawn after the layout mark in each frame, from
+  its items as that frame drew them, so they never lag a frame, during a
+  pie's value transition too. A row whose item is not drawn (hidden, drilled
+  out of view, too small to draw) is left out.
+- **Anchors.** Text `from.at` is a corner (`"top-left"`), an edge's middle
+  (`"top"`), or `"center"`, and the label's block is aligned to it unless
+  its style sets `align` or `verticalAlign`; `offset` moves it right and
+  down.
+- **Paint and picking.** They paint over the layout mark unless `zIndex`
+  says otherwise (its own is 0) and are picked above it, taking their own
+  clicks over a tree that drills; `pick: false` lets the pointer through to
+  the items. Annotations with `legend: true` list their labels after the
+  layout mark's items, in a subplot's legend too. They are not cut by default
+  (`clip: "plot"` or `"chart"` cuts them), so names above a treemap show
+  in the chart's padding; a facet panel's stay within it and half the gap
+  beside it, a subplot's within its plot.
+- **In pixels.** Beside gauges, radars, Sankey diagrams, networks, maps, and
+  3D plots, which give no item geometry, marks are placed in pixels or
+  fractions only.
+- **Refused.** Marks along x and y (a line, bars, text at data values) are
+  refused beside a layout mark, the error naming these ways in, as are
+  places on the items of a mark drawn in another panel or of a mark that
+  gives no item geometry.
+- **Reading items.** `chart.getItems({ mark, panel? })` gives copies of the
+  items the frame on screen drew, in reading order (as the keyboard visits
+  them), with that frame's `revision` (as `render` reports it; interpolated
+  during transitions), or `undefined` before the first frame and in charts
+  without layout marks. Each has its
+  `key`, `names` from the top, `label`, `value`, `box`, a slice's `sector`
+  (center, radii, and angles clockwise from 12 o'clock in radians), and a
+  tree node's `depth` and `parent`. A custom mark reads them while it draws
+  with `context.items(mark)`, in exports too.
+
 ## What layout marks share
 
-- **One per panel.** A layout mark shares no panel with other marks; it
-  does not zoom along axes, brush ranges, or sync. Maps and networks pan
-  and zoom their own plane; trees drill.
+- **One per panel.** A layout mark shares its panel only with marks placed
+  by its items or in pixels ([above](#marks-beside-layout-marks)); it does
+  not zoom along axes, brush ranges, or sync. Maps and networks pan and
+  zoom their own plane; trees drill.
 - **Colors** follow what items stand for: pie slices, top-level branches,
   radar series, and network groups share colors and legend entries with
   other marks of the same field ([Styling](styling.md#colors-follow-what-series-stand-for)).

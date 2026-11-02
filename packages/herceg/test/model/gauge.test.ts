@@ -207,7 +207,7 @@ describe("gauge", () => {
     expect(() => gauge(cpu, { value: "host" as never })).toThrow();
     const dial = gauge(cpu, { value: "cpu" });
     expect(() => build({ marks: [dial, line(cpu, { x: "cpu", y: "cpu" })] })).toThrow(
-      "gauge: has its chart to itself; draw other marks in another chart",
+      "line: a gauge's chart has no x and y scales; draw the line in another chart, or place text, rules, regions, or custom marks in pixels",
     );
     expect(() => build({ marks: [dial], interaction: { brush: "x" } })).toThrow(
       "gauge brush: no axes to brush",

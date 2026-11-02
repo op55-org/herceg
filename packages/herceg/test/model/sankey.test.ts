@@ -260,7 +260,7 @@ describe("sankey", () => {
     const flows = sankey(energy(), { source: "from", target: "to" });
     const series = table({ t: [1, 2], v: [1, 2] });
     expect(() => build({ marks: [flows, line(series, { x: "t", y: "v" })] })).toThrow(
-      "has its chart to itself",
+      "a sankey's chart has no x and y scales",
     );
     expect(() => build({ marks: [flows], interaction: { brush: "x" } })).toThrow(
       "sankey brush: no axes to brush",

@@ -204,6 +204,16 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
     "DataPosition": ("marks[1].y", lambda o: _line().rule(y=o), {"value": 1.0}),
     "Fraction": ("marks[1].y", lambda o: _line().rule(y=o), {"value": 0.5}),
     "Pixels": ("marks[1].y", lambda o: _line().rule(y=o), {"value": 10}),
+    "ItemCoordinate": (
+        "marks[1].x",
+        lambda o: hg.Chart(DATA).pie(category="s", value="v", id="p").rule(x=o),
+        {"mark": "p", "item": ["a"]},
+    ),
+    "ItemAnchor": (
+        "marks[1].from_",
+        lambda o: hg.Chart(DATA).pie(category="s", value="v", id="p").text(label="L", from_=o),
+        {"mark": "p", "item": ["a"], "at": "center"},
+    ),
     "Position": (
         "marks[1].at",
         lambda o: _line().text(label="L", at=o),

@@ -257,6 +257,7 @@ Monotone curves refuse `where`.
 bar(sales, { x: "region", y: ["q1", "q2"] }); // grouped
 bar(sales, { x: "month", y: "units", series: "region", dodge: false }); // overlapping
 bar(sales, { x: "q1", y: "region" }); // a category y gives horizontal bars
+bar(brands, { x: "value", y: "rank", orient: "y" }); // bars along y on a number y: ranks
 bar(requests, { x: "time", y: "latency" }); // bars centered on time values
 bar(sales, { x: "month", y: "units", color: "region" }); // one bar a month, in its region's color
 bar(sales, {
@@ -270,6 +271,7 @@ bar(sales, {
 ```python
 hg.bar(sales, x="region", y=["q1", "q2"])
 hg.bar(sales, x="q1", y="region")
+hg.bar(brands, x="value", y="rank", orient="y")
 hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"}, min_length=24))
 ```
 
@@ -278,6 +280,10 @@ hg.bar(sales, x="region", y="q1", labels=hg.BarLabels(format={"style": "percent"
   band and categories keep their colors and legend entries.
 - **Orientation.** A category `y` makes horizontal bars, which default to
   `"nearest-y"` tooltips. Categories on a y axis run top to bottom.
+  `orient: "y"` stands bars on any y (a number or time field, such as
+  ranks, which a domain such as `[9.5, -0.5]` runs top to bottom), and
+  `orient: "x"` on any x; the other axis' fields are the lengths, in
+  numbers.
 - **Number and time x.** Bars are 80% as wide as the smallest gap between
   neighboring values in view (at most 64 px). `width: { px: 8 }` makes
   every bar that many pixels thick, in either orientation.
@@ -576,10 +582,12 @@ text(peaks, {
 | `{ field, offset? }` | `hg.DataPosition(field=, offset=)` | Each row's value. |
 | `{ fraction, frame?, offset? }` | `hg.Fraction(f, frame=, offset=)` | A share of the plot or chart. |
 | `{ px, frame?, offset? }` | `hg.Pixels(px, frame=, offset=)` | Pixels from the left or top. |
+| `{ item: { mark, item }, at?, offset? }` | `hg.ItemCoordinate(mark, item, at=, offset=)` | The start, center, or end of a layout mark's item's box, beside it ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)). |
 
 A rule takes a place on one axis and a `span` along the other (the plot by
-default); a region one or two pairs of places; text `at: { x, y }` or `x`
-and `y`. On a category axis a number is a band index (0 is the first band's
+default); a region one or two pairs of places; text `at: { x, y }`, `x`
+and `y`, or `from` a point of a layout mark's item (`{ mark, item, at:
+"top-left", offset }`, Python `hg.ItemAnchor`). On a category axis a number is a band index (0 is the first band's
 center), and a category (`{ data: "pear" }`, or a category field's rows) is
 its band's center. Annotations add no bands: a category no other mark
 draws has no place.
@@ -818,6 +826,7 @@ custom(requests, {
 | `item(series, row, draw)` | The shapes `draw` makes are that row's item: picked by their shapes (inside a fill, on a stroke), read by tooltips and the keyboard, dimmed while a selection leaves the row out, and named in events by `itemKey`. |
 | `encoded(channel, row)` | The row's output of an `encode` channel (`color`, `strokeWidth`, `opacity`) through the chart's scales; undefined where the row has none. A `color` of the series' names colors series (`series.color`); widths and opacities read fields, values, or conditions. |
 | `selection(series, row)` | `"selected"`, `"unselected"`, or undefined while no selection is highlighted, for looks of the selected's own. |
+| `items(mark)` | Copies of the items a pie, funnel, treemap, or sunburst drew in the panel, as `getItems` gives them; a custom mark beside it without `x` and `y` draws in pixels by them ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)). |
 
 Range glyphs, A2's comets for example, take part as items:
 

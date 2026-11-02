@@ -35,7 +35,15 @@ import type {
   TicksSpec,
 } from "./guides.ts";
 import type { LayoutSpec } from "./layout.ts";
-import type { Coordinate, Position, RowCoordinate, Side } from "./place.ts";
+import type {
+  AnnotationCoordinate,
+  Coordinate,
+  ItemAnchor,
+  ItemCoordinate,
+  Position,
+  RowCoordinate,
+  Side,
+} from "./place.ts";
 import type {
   AxisStyles,
   Halo,
@@ -1392,9 +1400,9 @@ export type AnnotationValue = number | Field;
  * A place along an axis as annotations take it: a value (a number, or a
  * field's name), or any coordinate: `{ data }` (a category's value too),
  * `{ field }`, `{ fraction }` of the plot, or `{ px }`, each with an offset
- * in pixels.
+ * in pixels; or an edge of a layout item's box (`{ item, at }`).
  */
-export type AnnotationPosition = AnnotationValue | Coordinate;
+export type AnnotationPosition = AnnotationValue | Coordinate | ItemCoordinate;
 
 /** Where rules stand: at `x` (vertical) or at `y` (horizontal). */
 export type RulePosition<P> = { x: P; y?: never } | { y: P; x?: never };
@@ -1426,7 +1434,7 @@ interface RuleStyle extends AnnotationBase, RowItems {
   /** From 0 to 1. */
   strokeOpacity?: number;
   /** Where along the other axis the rule runs, from one place to the other; the plot's whole extent by default. */
-  span?: readonly [Coordinate, Coordinate];
+  span?: readonly [AnnotationCoordinate, AnnotationCoordinate];
   /** Text drawn by every rule: constant, or each row's `field`, placed and styled as it says. */
   label?: string | LabelSpec;
 }
@@ -1525,9 +1533,10 @@ export interface TextSpec extends AnnotationBase, RowItems {
   /**
    * Where the text is on another mark's geometry, following it: the series
    * of mark `from.mark` at `from.at`, such as where a line leaves the view,
-   * one label per series. Not with `x`, `y`, or `at`.
+   * one label per series; or with `from.item`, the item of a layout mark
+   * each row names, at an anchor of its box. Not with `x`, `y`, or `at`.
    */
-  from?: MarkAnchorSpec;
+  from?: MarkAnchorSpec | ItemAnchor;
   label: string | TextLabelSpec;
 }
 
@@ -1535,9 +1544,9 @@ export interface TextSpec extends AnnotationBase, RowItems {
  * Bars. Vertical by default: a category `x` gives one band per category, a
  * number or time `x` centers bars on its values, and `y` holds bar lengths.
  * A category `y` (its name, or as a coordinate `{ field }`) makes them
- * horizontal, with lengths in `x`; any other position, a frame's share or
- * pixels included, centers vertical bars on `x`. Several length fields are
- * drawn side by side or stacked.
+ * horizontal, with lengths in `x`, as `orient: "y"` does on any `y`; any
+ * other position, a frame's share or pixels included, centers vertical
+ * bars on `x`. Several length fields are drawn side by side or stacked.
  */
 export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
   /**
@@ -1549,6 +1558,12 @@ export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
   /** Positions (or lengths, for horizontal bars): fields, or as positions a coordinate. */
   x: RowPosition | readonly Field[];
   y: RowPosition | readonly Field[];
+  /**
+   * The axis bars stand on: "x" (positions on x, lengths along y) or "y"
+   * (positions on y, lengths along x), whatever their fields are; without
+   * it, "y" for a category `y`, else "x".
+   */
+  orient?: Orient;
   /**
    * Category field that splits rows into one bar series per value. Without
    * it, a category field as `color` splits them; `false` splits by

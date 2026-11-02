@@ -1,5 +1,13 @@
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
-import { ArcPath, arcDrawing, inSector, sectorShareRadius, traceSector } from "../draw/arc.ts";
+import {
+  ArcPath,
+  arcDrawing,
+  inSector,
+  sectorInfo,
+  sectorPaints,
+  sectorShareRadius,
+  traceSector,
+} from "../draw/arc.ts";
 import { textDrawing } from "../draw/labels.ts";
 import { segmentDrawing } from "../draw/segments.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
@@ -18,6 +26,7 @@ import type { Frozen, MarkTooltipSpec, PieSpec } from "../spec/spec.ts";
 import { refuseColor } from "./colored.ts";
 import {
   heldText,
+  type ItemInfo,
   type ItemSources,
   type LayoutFrame,
   type LayoutItem,
@@ -66,6 +75,7 @@ export class PieMark implements LayoutMark {
   declare readonly [MARK]: true;
   readonly layout = true;
   readonly views = ItemViews;
+  readonly publishes = true;
   readonly spec: Frozen<PieSpec>;
   readonly table: Table;
   readonly measure: string;
@@ -270,9 +280,32 @@ export class PieMark implements LayoutMark {
         { ...whole, arcs: lit, rims },
       );
     }
+    // Its slices as layout items, at `at` (fractions of the turn) out to `radius`:
+    // those drawn, not those too thin for their gap or in a pie of no room.
+    const placed = (items: readonly PieSlice[], at: Float64Array, radius: number): ItemInfo[] => {
+      const inner = radius * (this.spec.innerRadius ?? 0);
+      const cut = items.length > 1 ? GAP : 0;
+      return items.flatMap(({ key, label, value }, i) => {
+        const a0 = angle(i > 0 ? at[i - 1]! : 0);
+        const a1 = angle(at[i]!);
+        return sectorPaints(inner, radius, a0, a1, cut)
+          ? [{ key, names: [label], label, value, ...sectorInfo(cx, cy, inner, radius, a0, a1) }]
+          : [];
+      });
+    };
     // Charts that animate changed values draw frames between two scenes as this one draws.
-    else if (frame.keyed)
-      (geometry[0] as ArcGeometry).slices = { items: slices, ends, cx, cy, r, labeled, draw };
+    if (!held && frame.keyed)
+      (geometry[0] as ArcGeometry).slices = {
+        items: slices,
+        ends,
+        cx,
+        cy,
+        r,
+        labeled,
+        draw,
+        placed,
+      };
+    let listed: ItemInfo[] | undefined;
 
     const percent = numberFormatter({ style: "percent", maximumFractionDigits: 1 }, locale);
     const middle = (r0 + r) / 2 || r * 0.6;
@@ -313,6 +346,10 @@ export class PieMark implements LayoutMark {
     };
     return {
       geometry,
+      items: () => {
+        listed ??= placed(slices, ends, r);
+        return listed;
+      },
       itemAt(px, py) {
         const distance = Math.hypot(px - cx, py - cy);
         if (!(distance <= r && distance >= r0) || slices.length === 0) return undefined;

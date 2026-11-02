@@ -11,6 +11,7 @@ import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
+import { text } from "../../src/marks/text.ts";
 import { facet } from "../../src/model/facet.ts";
 import type { AxisInspection } from "../../src/model/inspect.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
@@ -655,6 +656,58 @@ describe("panel legends", () => {
       }).scene(estimateText);
       expect(guidesOf(named, "key")).toHaveLength(1);
     }
+  });
+
+  it("know marks after a pie by their places in the chart, and list what is drawn beside it", () => {
+    const shares = table({ k: ["a", "b"], n: [3, 1] });
+    const sized = table({ t: [0, 1, 2], v: [1, 2, 3], n: [1, 5, 9] });
+    const layout = panels(columns([1, 1], [panel("share"), panel("points")]));
+    // The points' own legend keeps their size key, the chart's legend off.
+    const points = model({
+      legend: false,
+      marks: [
+        pie(shares, { category: "k", value: "n", panel: "share" }),
+        point(sized, { x: "t", y: "v", size: "n", panel: "points" }),
+      ],
+      panels: layout,
+      guides: [legend({ panel: "points" })],
+    }).scene(estimateText);
+    expect(guidesOf(points, "key")).toHaveLength(1);
+    // A rule's label beside the pie is in the pie's legend, after its slices.
+    const beside = model({
+      marks: [
+        pie(shares, { category: "k", value: "n", panel: "share" }),
+        rule({ x: { px: 40 }, label: "Target", legend: true, panel: "share" }),
+      ],
+      panels: layout,
+      guides: [legend({ panel: "share" })],
+    }).scene(estimateText);
+    expect(labels(legends(beside).find((g) => g.panel === "share"))).toEqual(["a", "b", "Target"]);
+    expect(labels(legends(beside).find((g) => !g.panel)) ?? []).not.toContain("Target");
+  });
+
+  it("tell a pie's items from the labels of text beside it, hidden by another field", () => {
+    const rows = table({ name: ["Target", "Other"], status: ["off", "on"], value: [1, 2] });
+    const chart = model({
+      marks: [
+        pie(rows, { id: "p", category: "name", value: "value", panel: "b" }),
+        text(rows, {
+          id: "notes",
+          x: { px: 10 },
+          y: { px: 10 },
+          label: { field: "name" },
+          legend: true,
+          panel: "b",
+        }),
+      ],
+      panels: panels([{ id: "b" }]),
+    });
+    chart.hidden.add(JSON.stringify({ mark: "notes", field: "status", equals: "off" }));
+    const entries = legends(chart.scene(estimateText)).flatMap((g) => g.entries);
+    const target = entries.find(
+      ({ key }) => key.startsWith('{"mark":"notes"') && key.includes("Target"),
+    )!;
+    expect([target.hidden, target.mixed]).toEqual([true, undefined]);
   });
 
   it("show a legend's own entries hidden where every series they name is", () => {
