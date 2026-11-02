@@ -7,7 +7,9 @@ declare const element: HTMLElement;
 // Listeners of a fragment's events read their details, on the host and
 // wherever they bubble to.
 element.addEventListener("herceg:select", (event) => {
-  const range: [number, number] | [string, string] | null | undefined = event.detail.selection?.x;
+  const { selection } = event.detail;
+  const range: [number, number] | [string, string] | null | undefined =
+    selection?.kind === "brush" ? selection.x : undefined;
   const panels: string[] = event.detail.owner.panels;
   return [range, panels];
 });

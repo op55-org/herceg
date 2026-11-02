@@ -4,13 +4,18 @@
 // need the guide compiler, which no chart on its page has loaded yet, and
 // every chart is mounted and changed below before any has.
 import { afterAll, expect, it } from "vitest";
+import { selectionStore } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import type { ChartEvents } from "../../src/dom/events.ts";
+import { bar } from "../../src/marks/bar.ts";
 import { graph } from "../../src/marks/graph.ts";
 import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
 import { panels } from "../../src/model/panels.ts";
+import { rowSelection } from "../../src/model/row-selection.ts";
+import { chartState } from "../../src/state.ts";
+import { brushOf } from "../helpers/selections.ts";
 
 const hosts: HTMLDivElement[] = [];
 const charts: Chart[] = [];
@@ -85,7 +90,7 @@ const right = mount("right", {
   interaction: { brush: "y" },
 });
 const rightSelections = heard(right, "select");
-right.select({ x: null, y: [2, 4], lasso: null });
+right.select({ kind: "brush", x: null, y: [2, 4], lasso: null });
 
 // An export of a chart that no longer waits for code draws its first scene.
 const [exporter, importer] = [mount("export"), mount("export")];
@@ -93,6 +98,48 @@ const exported = heard(exporter, "viewport");
 exporter.setViewport([10, 20]);
 exporter.update({ x: {} });
 exporter.toSVG();
+
+// A selection a chart drawing at once shares with one waiting for its first
+// frame, which takes it without sharing it back: the rows the first one's
+// selection wrote stay its own.
+const owned = table({ x: [0, 10, 20, 30, 40], y: [1, 3, 2, 5, 4] });
+const store = selectionStore(owned);
+const owner = mount("own", {
+  x: {},
+  marks: [line(owned, { x: "x", y: "y" })],
+  rowSelection: rowSelection({ store, channel: "focus" }),
+});
+const taker = mount("own");
+owner.select([10, 30]);
+// One cleared before its first frame, after it took one shared then: the
+// clear is shared. An export draws the sharer's first scene, which shares.
+const [sharer, clearer] = [mount("cleared", { x: {} }), mount("cleared")];
+sharer.select([10, 30]);
+sharer.toSVG();
+clearer.select(null);
+// A selection cleared before the first frame, which reports the clear.
+const unselector = mount("unselect");
+const unselected = heard(unselector, "select");
+unselector.select([10, 20]);
+unselector.select(null);
+// So with items, of a chart with state support.
+const itemized = mount("unselect-items", {
+  state: chartState,
+  marks: [line(lines, { id: "l", x: "x", y: "y" })],
+});
+const unitemized = heard(itemized, "select");
+itemized.select({ kind: "series", series: [{ mark: "l", series: "y" }] });
+itemized.select(null);
+// Categories by name, shared along x before the first frame, which draws them.
+const bands = (options: Partial<ChartOptions>) =>
+  mount("bands", {
+    marks: [bar(table({ c: ["a", "b", "c"], v: [1, 2, 3] }), { x: "c", y: "v" })],
+    interaction: { brush: "x", sync: { selection: { group: "bands", scale: "x" } } },
+    ...options,
+  });
+const [namer, named] = [bands({ x: {} }), bands({ x: {}, y: { ticks: { every: 1 } } })];
+namer.select([0, 1]);
+namer.toSVG();
 
 // A view of a subplot's panel, and of a network's plane.
 const subplots = mount("subplots", {
@@ -166,9 +213,9 @@ const [newer, older] = [
   mount("order", { interaction: ordered }),
 ];
 older.setViewport({ y: [2, 4] });
-older.select({ x: [10, 20], y: [2, 3], lasso: null });
+older.select({ kind: "brush", x: [10, 20], y: [2, 3], lasso: null });
 newer.setViewport({ y: [1, 3] });
-newer.select({ x: [0, 5], y: [1, 2], lasso: null });
+newer.select({ kind: "brush", x: [0, 5], y: [1, 2], lasso: null });
 // A view shared with a chart of subplots, which waits for the first frame,
 // on a channel the chart then moves to another group.
 const [mover, moved] = [
@@ -227,7 +274,7 @@ const refusal = (() => {
 it("applies a view and a selection set before the first frame at once, and reports them with it", async () => {
   expect(before.panels).toEqual([]);
   expect(a.getViewport().x).toEqual([10, 30]);
-  expect(a.selection?.x).toEqual([15, 25]);
+  expect(brushOf(a.selection)?.x).toEqual([15, 25]);
   // Reported in the panels the first frame draws.
   expect(before.views).toEqual([]);
   expect(before.selections).toEqual([]);
@@ -247,7 +294,7 @@ it("applies a view and a selection set before the first frame at once, and repor
   expect(a.revision).toBe(counted.selection);
   expect(selections).toHaveLength(1);
   expect(selections[0]).toMatchObject({
-    x: [15, 25],
+    selection: { kind: "brush", x: [15, 25] },
     revision: counted.selection,
     owner: { scales: [{ scale: "x", instance: "", panels: [""] }], panels: [""] },
   });
@@ -257,7 +304,7 @@ it("shares them with synced charts, which draw them in their first frames", asyn
   await Promise.all([a.ready, b.ready, c.ready]);
   expect(b.getViewport().x).toEqual([10, 30]);
   expect(b.getPanels()[0]!.x!.domain).toEqual([10, 30]);
-  expect(b.selection?.x).toEqual([15, 25]);
+  expect(brushOf(b.selection)?.x).toEqual([15, 25]);
   expect(followed).toMatchObject([{ cause: "sync", views: [{ panel: "", x: [10, 30] }] }]);
   // C took A's view, which came after its own: its first frame reports
   // both changes, in order, as the view is now, and every synced chart
@@ -279,7 +326,7 @@ it("takes views and selections shared before its first frame in order with its o
   await Promise.all([teller.ready, kept.ready]);
   for (const chart of [teller, told, kept]) {
     expect(chart.getViewport().x).toEqual([20, 30]);
-    expect(chart.selection?.x).toEqual([21, 29]);
+    expect(brushOf(chart.selection)?.x).toEqual([21, 29]);
   }
   expect(kept.getViewport().y).toEqual([1, 2]);
   await resetter.ready;
@@ -288,9 +335,9 @@ it("takes views and selections shared before its first frame in order with its o
 
 it("selects on the right y axis of a chart drawing only that", async () => {
   await right.ready;
-  expect(right.selection?.y).toEqual([2, 4]);
+  expect(brushOf(right.selection)?.y).toEqual([2, 4]);
   expect(rightSelections).toMatchObject([
-    { y: [2, 4], owner: { scales: [{ scale: "yRight" }], panels: [""] } },
+    { selection: { y: [2, 4] }, owner: { scales: [{ scale: "yRight" }], panels: [""] } },
   ]);
 });
 
@@ -308,15 +355,47 @@ it("reports and shares what changed before an export that drew the first scene",
   expect(importer.getViewport().x).toEqual([10, 20]);
 });
 
+it("takes a selection shared before its first frame without sharing it back", async () => {
+  await Promise.all([owner.ready, taker.ready]);
+  expect(brushOf(taker.selection)?.x).toEqual([10, 30]);
+  expect(store.get("focus")).not.toBeNull();
+  // The rows are still the owner's, which clears them with its selection.
+  owner.select(null);
+  expect(store.get("focus")).toBeNull();
+  expect(taker.selection).toBeNull();
+});
+
+it("shares a clear made before the first frame of a selection shared then", async () => {
+  await Promise.all([sharer.ready, clearer.ready]);
+  expect(clearer.selection).toBeNull();
+  expect(sharer.selection).toBeNull();
+});
+
+it("reports a clear made before the first frame", async () => {
+  await unselector.ready;
+  expect(unselected).toMatchObject([{ selection: null, phase: "commit", cause: "api" }]);
+  expect(unselected[0]!.owner.scales).toHaveLength(1);
+  await itemized.ready;
+  expect(unitemized).toMatchObject([{ selection: null, phase: "commit", cause: "api" }]);
+});
+
+it("takes categories shared by name before the first frame, once it draws them", async () => {
+  await Promise.all([namer.ready, named.ready]);
+  expect(brushOf(named.selection)?.x).toEqual(brushOf(namer.selection)!.x);
+  expect(brushOf(named.selection)?.x).not.toBeNull();
+});
+
 it("sets a view of a subplot's panel, or of a network, set before the first frame with it", async () => {
   await Promise.all([subplots.ready, network.ready]);
   expect(subplots.getViewport({ panel: "p" }).x).toEqual([20, 40]);
   expect(subplots.getViewport({ panel: "q" }).x).not.toEqual([10, 30]);
   expect(subplots.selection).toBeNull();
   expect(network.getViewport()).toMatchObject({ x: [0, 50], y: [0, 50] });
-  // Reported in the order they were made: the last is the newest.
+  // Reported in the order they were made, each as the view is then: the
+  // listener writing them back replays no older one.
   await mixed.ready;
-  expect(netViews.at(-1)).toEqual([10, 40]);
+  expect(netViews.length).toBeGreaterThan(1);
+  expect(new Set(netViews.map(String))).toEqual(new Set(["10,40"]));
   expect(mixed.getViewport({ panel: "net" })).toMatchObject({ x: [10, 40], y: [10, 40] });
   await single.ready;
   expect(single.getViewport({ panel: "only" }).x).toEqual([10, 20]);
@@ -340,7 +419,7 @@ it("shares calls that waited for the first frame only if no newer view or select
     [behind, { panel: "only" }],
   ] as const) {
     expect(chart.getViewport(target).x).toEqual([20, 30]);
-    expect(chart.selection?.x).toEqual([21, 29]);
+    expect(brushOf(chart.selection)?.x).toEqual([21, 29]);
   }
   expect(aheadViews).toMatchObject([{ cause: "api", views: [{ x: [20, 30] }] }]);
 });

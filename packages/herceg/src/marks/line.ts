@@ -6,6 +6,7 @@ import type { Polyline } from "../lod/polyline.ts";
 import { asksFeatures } from "../model/features.ts";
 import type { Geometry, LineGeometry } from "../scene/scene.ts";
 import type { Clip, Curve, Dash, Frozen, LineSpec, SymbolName } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { dashPattern } from "../style/style.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type {
@@ -54,7 +55,7 @@ import { type Series, xExtent, yExtent } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { IndexUse, tracePath, unionExtent } from "./trace.ts";
 
-interface LineStyle<S extends Schema> extends ItemKeyed<S> {
+interface LineStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
@@ -416,6 +417,8 @@ export function line<S extends Schema>(
       "zIndex",
       "pick",
       "inspect",
+      "selected",
+      "unselected",
       ...FEATURES,
     ]),
   } as LineSpec;

@@ -70,11 +70,57 @@ def preset_spec(value: Any, role: Role) -> bool | str | None:
     raise role.error(f'expected True, False, "x", "y", or "xy"; received {shown(value)}')
 
 
-def brush_spec(value: Any, role: Role) -> str | None:
-    """``brush=`` as the spec takes it: "x", "y", "xy", "lasso", or None for none."""
+@hinted
+@dataclass(frozen=True)
+class Brush:
+    """A brush with its settings (``brush=``): its ``shape`` ("x", "y", "xy",
+    or "lasso"). With ``edit``, dragging inside it moves it, its edges and
+    corners resize it, and the wheel over it resizes it (not for lassos).
+    ``clear`` is what clears it: a click off it ("click", the default), a
+    double click ("double-click"), or neither (False); Escape always does."""
+
+    shape: Literal["x", "y", "xy", "lasso"] = "x"
+    edit: bool = False
+    clear: Literal["click", "double-click", False] = "click"
+
+    def _spec(self, role: Role) -> dict[str, Any]:
+        _choice(self.shape, _BRUSHES, role.field("shape"))
+        _flag(self.edit, role.field("edit"))
+        if self.clear is not False:
+            _choice(self.clear, ("click", "double-click"), role.field("clear"))
+        if self.edit and self.shape == "lasso":
+            raise role.field("edit").error("a lasso is not moved or resized; drop edit")
+        return _clean(
+            {
+                "shape": self.shape,
+                "edit": True if self.edit else None,
+                "clear": None if self.clear == "click" else self.clear,
+            }
+        )
+
+
+def brush_shape(value: Any) -> str | None:
+    """The shape of a ``brush=``: its own, or an ``hg.Brush``'s."""
+    return value.shape if isinstance(value, Brush) else value
+
+
+def brush_spec(value: Any, role: Role) -> str | dict[str, Any] | None:
+    """``brush=`` as the spec takes it: "x", "y", "xy", "lasso", an
+    ``hg.Brush`` with its settings, or None for none."""
+    if isinstance(value, Brush):
+        return value._spec(role)
     if value is None or (isinstance(value, str) and value in _BRUSHES):
         return value
-    raise role.error(f'expected "x", "y", "xy", "lasso", or None; received {shown(value)}')
+    raise role.error(
+        f'expected "x", "y", "xy", "lasso", an hg.Brush, or None; received {shown(value)}'
+    )
+
+
+def select_spec(value: Any, role: Role) -> str | None:
+    """``select=``: what a click selects, "items" or "series"; None (or False) for nothing."""
+    if value is None or value is False:
+        return None
+    return _choice(value, ("items", "series"), role)
 
 
 def panel_interaction_spec(
@@ -331,6 +377,26 @@ class MoveItemAction:
         return {"type": "moveItem"}
 
 
+@hinted
+@dataclass(frozen=True)
+class EditBrushAction:
+    """The brush moves with a drag that starts inside it and resizes with one on
+    its edges or corners, or with the wheel over it; elsewhere, later bindings
+    are tried."""
+
+    def _spec(self, role: Role) -> dict[str, Any]:
+        return {"type": "editBrush"}
+
+
+@hinted
+@dataclass(frozen=True)
+class ClearBrushAction:
+    """The brush clears; without one, later bindings are tried."""
+
+    def _spec(self, role: Role) -> dict[str, Any]:
+        return {"type": "clearBrush"}
+
+
 Action = (
     PanAction
     | ZoomAction
@@ -340,11 +406,13 @@ Action = (
     | CursorAction
     | OrbitAction
     | MoveItemAction
+    | EditBrushAction
+    | ClearBrushAction
 )
 
 #: The actions each gesture can perform.
 _ACTIONS: dict[type[Any], tuple[type[Any], ...]] = {
-    WheelGesture: (PanAction, ZoomAction, PageScrollAction),
+    WheelGesture: (PanAction, ZoomAction, PageScrollAction, EditBrushAction),
     DragGesture: (
         PanAction,
         BrushAction,
@@ -352,10 +420,11 @@ _ACTIONS: dict[type[Any], tuple[type[Any], ...]] = {
         CursorAction,
         OrbitAction,
         MoveItemAction,
+        EditBrushAction,
     ),
     PinchGesture: (ZoomAction, PageScrollAction),
-    KeyGesture: (PanAction, ZoomAction, ResetAction),
-    DoubleClickGesture: (ZoomAction, ResetAction),
+    KeyGesture: (PanAction, ZoomAction, ResetAction, ClearBrushAction),
+    DoubleClickGesture: (ZoomAction, ResetAction, ClearBrushAction),
 }
 
 

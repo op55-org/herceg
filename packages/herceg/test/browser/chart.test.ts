@@ -25,6 +25,7 @@ import { treemap } from "../../src/marks/treemap.ts";
 import { panels } from "../../src/model/panels.ts";
 import type { ArcGeometry, ShapesGeometry, TextShape } from "../../src/scene/scene.ts";
 import { resolveTheme } from "../../src/theme.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { brief } from "../helpers/views.ts";
 import { bandBox, labelsOf, MOUSE, modelOf } from "./helpers.ts";
 
@@ -486,13 +487,19 @@ describe("events and brushing", () => {
     // The brush loads on demand.
     await chart.loading;
     const selections: (readonly [number, number] | null)[] = [];
-    chart.on("select", ({ x }) => selections.push(x));
+    const phases: string[] = [];
+    chart.on("select", ({ selection, phase }) => {
+      phases.push(phase);
+      if (phase === "commit") selections.push(brushOf(selection)?.x ?? null);
+    });
     drag(chart, 60_000, 20_000);
     await frame();
-    const [lo, hi] = chart.selection!.x!;
+    const [lo, hi] = brushOf(chart.selection)!.x!;
     expect(lo).toBeCloseTo(20_000, -3);
     expect(hi).toBeCloseTo(60_000, -3);
-    expect(selections).toEqual([chart.selection!.x]);
+    // The first move previews at once; the release commits.
+    expect(phases).toEqual(["preview", "commit"]);
+    expect(selections).toEqual([brushOf(chart.selection)!.x]);
     expect(band(chart)!.getAttribute("visibility")).toBe("visible");
     // A brush selects; it does not zoom.
     expect(chart.getViewport().x).toBeNull();
@@ -559,7 +566,7 @@ describe("events and brushing", () => {
     key("ArrowRight");
     key("ArrowRight", true);
     key("ArrowRight", true);
-    expect(chart.selection?.x).toEqual([0, 2]);
+    expect(brushOf(chart.selection)?.x).toEqual([0, 2]);
     const live = chart.root.querySelector("[aria-live]")!;
     expect(live.textContent).toContain("Selected 0 to 2. Press Enter to zoom to it.");
     key("Enter");
@@ -644,12 +651,12 @@ describe("events and brushing", () => {
     press(chart.root, "pointermove", x.map(2), 150);
     press(chart.root, "pointermove", x.range[1] + 200, 150);
     press(chart.root, "pointerup", x.range[1] + 200, 150);
-    expect(chart.selection!.x![1]).toBeCloseTo(3, 6);
+    expect(brushOf(chart.selection)!.x![1]).toBeCloseTo(3, 6);
     press(chart.root, "pointerdown", x.map(0.5), 150);
     press(chart.root, "pointermove", x.map(2.5), 150);
     press(chart.root, "pointercancel", x.map(2.5), 150);
     press(chart.root, "pointerup", x.map(2.5), 150);
-    expect(chart.selection!.x![0]).toBeCloseTo(1, 6);
+    expect(brushOf(chart.selection)!.x![0]).toBeCloseTo(1, 6);
     chart.destroy();
   });
 
@@ -666,7 +673,7 @@ describe("events and brushing", () => {
     press(chart.root, "pointerdown", x.map(0) + 5, 150);
     press(chart.root, "pointermove", x.map(1), 150);
     press(chart.root, "pointerup", x.map(2) - 5, 150);
-    expect(chart.selection?.x).toEqual([0, 2]);
+    expect(brushOf(chart.selection)?.x).toEqual([0, 2]);
     expect(chart.getViewport().x).toBeNull();
     chart.select([1, 1]);
     await frame();
@@ -687,14 +694,14 @@ describe("events and brushing", () => {
       chart.root.dispatchEvent(new KeyboardEvent("keydown", { key: k, shiftKey, bubbles: true }));
     key("ArrowRight");
     key("ArrowRight", true);
-    expect(chart.selection?.x).toEqual([0, 1]);
+    expect(brushOf(chart.selection)?.x).toEqual([0, 1]);
     chart.select(null);
     key("ArrowRight", true);
-    expect(chart.selection?.x).toEqual([1, 2]);
+    expect(brushOf(chart.selection)?.x).toEqual([1, 2]);
     press(chart.root, "pointermove", 300, 150);
     key("ArrowRight");
     key("ArrowRight", true);
-    expect(chart.selection!.x![0]).toBe(chart.selection!.x![1] - 1);
+    expect(brushOf(chart.selection)!.x![0]).toBe(brushOf(chart.selection)!.x![1] - 1);
     chart.destroy();
   });
 
@@ -708,7 +715,7 @@ describe("events and brushing", () => {
     button.focus();
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(chart.getViewport().x).toBeNull();
-    expect(chart.selection?.x).toEqual([1000, 5000]);
+    expect(brushOf(chart.selection)?.x).toEqual([1000, 5000]);
     chart.destroy();
   });
 
@@ -783,11 +790,11 @@ describe("events and brushing", () => {
       createChart(element, { interaction, marks: [line(data, { x: "t", y: "s0" })] }),
     ) as [Chart, Chart, Chart];
     // B replaces the selection it receives and shares its own.
-    b.on("select", ({ x }) => {
-      if (x?.[0] === 1000) b.select([3000, 4000]);
+    b.on("select", ({ selection }) => {
+      if (brushOf(selection)?.x?.[0] === 1000) b.select([3000, 4000]);
     });
     a.select([1000, 2000]);
-    for (const chart of [a, b, c]) expect(chart.selection?.x).toEqual([3000, 4000]);
+    for (const chart of [a, b, c]) expect(brushOf(chart.selection)?.x).toEqual([3000, 4000]);
     for (const chart of [a, b, c]) chart.destroy();
     for (const element of hosts.slice(1)) element.remove();
   });
@@ -804,7 +811,7 @@ describe("events and brushing", () => {
     await frame();
     press(chart.root, "pointerup", x.map(0.5) + 1, 150);
     await frame();
-    expect(chart.selection?.x).toEqual([1, 2]);
+    expect(brushOf(chart.selection)?.x).toEqual([1, 2]);
     expect(bandBox(band(chart)!).x).toBeCloseTo(x.map(1), 1);
     chart.destroy();
   });
@@ -815,7 +822,7 @@ describe("events and brushing", () => {
     chart.on("select", () => {
       throw new Error("listener failed");
     });
-    const stop = chart.on("select", ({ x }) => seen.push(x));
+    const stop = chart.on("select", ({ selection }) => seen.push(brushOf(selection)?.x ?? null));
     const errors: unknown[] = [];
     const reportError = globalThis.reportError;
     globalThis.reportError = (error) => errors.push(error);
@@ -1725,6 +1732,7 @@ describe("zooming and brushing in two dimensions", () => {
     await chart.loading;
     // A region drawn while zoomed in reaches past the plot once zoomed out.
     chart.select({
+      kind: "brush",
       x: [-20, 30],
       y: [10, 40],
       lasso: [
@@ -1789,6 +1797,7 @@ describe("zooming and brushing in two dimensions", () => {
     const enter = () =>
       b.root.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     a.select({
+      kind: "brush",
       x: [10, 30],
       y: [10, 30],
       lasso: [
@@ -1799,10 +1808,10 @@ describe("zooming and brushing in two dimensions", () => {
     });
     enter();
     expect(b.getViewport()).toEqual({ x: null, y: null, yRight: null });
-    expect(b.selection?.lasso).toHaveLength(3);
+    expect(brushOf(b.selection)?.lasso).toHaveLength(3);
     // A rectangle needs both axes to zoom; an x range only x.
     b.update({ interaction: { brush: "x", zoom: "x", sync: "enter" } });
-    a.select({ x: [10, 30], y: [10, 30], lasso: null });
+    a.select({ kind: "brush", x: [10, 30], y: [10, 30], lasso: null });
     enter();
     expect(b.getViewport()).toEqual({ x: null, y: null, yRight: null });
     a.select([10, 30]);
@@ -1812,12 +1821,12 @@ describe("zooming and brushing in two dimensions", () => {
     // clears one it did not zoom to.
     b.update({ interaction: { zoom: "xy", sync: "enter" } });
     b.setViewport(null);
-    a.select({ x: [10, 30], y: [10, 30], lasso: null });
+    a.select({ kind: "brush", x: [10, 30], y: [10, 30], lasso: null });
     enter();
     expect(b.getViewport().x).toEqual([10, 30]);
     const [y0, y1] = b.getViewport().y!;
     expect([y0, y1].map((y) => y.toFixed(6))).toEqual(["10.000000", "30.000000"]);
-    a.select({ x: [10, 20], y: [10, 20], lasso: null });
+    a.select({ kind: "brush", x: [10, 20], y: [10, 20], lasso: null });
     b.root.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(b.selection).toBeNull();
     a.destroy();
@@ -1835,7 +1844,7 @@ describe("zooming and brushing in two dimensions", () => {
     const live = chart.root.querySelector("[aria-live]")!;
     key("ArrowRight");
     key("ArrowRight", true);
-    expect(chart.selection).toEqual({ x: null, y: [0, 1], lasso: null });
+    expect(chart.selection).toEqual({ kind: "brush", x: null, y: [0, 1], lasso: null });
     expect(live.textContent).toContain("Selected a to b.");
     // Rectangles and lassos take a range along that axis too.
     chart.update({
@@ -1846,7 +1855,7 @@ describe("zooming and brushing in two dimensions", () => {
     key("Escape");
     key("ArrowRight");
     key("ArrowRight", true);
-    expect(chart.selection).toEqual({ x: [0, 1], y: null, lasso: null });
+    expect(chart.selection).toEqual({ kind: "brush", x: [0, 1], y: null, lasso: null });
     chart.destroy();
   });
 
@@ -1883,7 +1892,7 @@ describe("zooming and brushing in two dimensions", () => {
     at(chart, "pointerdown", x.map(10), y.map(40));
     at(chart, "pointermove", x.map(20), y.map(30));
     at(chart, "pointerup", x.map(30), y.map(20));
-    const box = chart.selection!;
+    const box = brushOf(chart.selection)!;
     expect(box.x![0]).toBeCloseTo(10, 6);
     expect(box.x![1]).toBeCloseTo(30, 6);
     expect(box.y![0]).toBeCloseTo(20, 6);
@@ -1901,7 +1910,7 @@ describe("zooming and brushing in two dimensions", () => {
     at(chart, "pointerdown", x.map(10), y.map(10));
     for (const [cx, cy] of corners.slice(1)) at(chart, "pointermove", x.map(cx), y.map(cy));
     at(chart, "pointerup", x.map(10), y.map(40));
-    const lasso = chart.selection!;
+    const lasso = brushOf(chart.selection)!;
     expect(lasso.lasso!.length).toBeGreaterThanOrEqual(4);
     expect(lasso.x![0]).toBeCloseTo(10, 6);
     expect(lasso.y![1]).toBeCloseTo(40, 6);
@@ -1931,9 +1940,9 @@ describe("zooming and brushing in two dimensions", () => {
     const a = createChart(host, options);
     const b = createChart(other, options);
     const seen: (readonly [number, number] | null)[] = [];
-    b.on("select", ({ y }) => seen.push(y));
-    a.select({ x: [5, 15], y: [10, 20], lasso: null });
-    expect(b.selection).toEqual({ x: [5, 15], y: [10, 20], lasso: null });
+    b.on("select", ({ selection }) => seen.push(brushOf(selection)?.y ?? null));
+    a.select({ kind: "brush", x: [5, 15], y: [10, 20], lasso: null });
+    expect(b.selection).toEqual({ kind: "brush", x: [5, 15], y: [10, 20], lasso: null });
     expect(seen).toEqual([[10, 20]]);
     a.select(null);
     expect(b.selection).toBeNull();

@@ -42,6 +42,9 @@ One name per concept, used the same way in code and docs.
 | **Colorbar** | A guide drawing a continuous color scale's colors along its values, with ticks, beside or below the plots. |
 | **Viewport** | What a chart shows when zoomed: `{ x, y, yRight }`, the visible x range (one per x scale when panels have x scales of their own) and the left and right y axes' ranges; null for an axis that is not zoomed, which shows its configured domain or its data. A map's are ranges of its projection's plane; a network's are ranges of its layout, with y increasing downwards. |
 | **Drill root** | The node a treemap or sunburst is drilled into, whose subtree it lays out (`getDrillRoot`, chart state that clicks, keys, and `setDrillRoot` change, shared by facet panels and each subplot's own); null for the whole tree. |
+| **Selection** | What a chart's user selected, one at a time (`ChartSelection`): a brush's ranges and a lasso's outline in data values (`kind: "brush"`), or items or series by their keys (`"items"`, `"series"`). Not a row selection, which is rows a selection store's channel holds; a brush or click can write one. |
+| **Chart state** | What a chart's user changes: the selection, the viewport, what is hidden (visibility), and drill roots; events report it, and with state support (`herceg/state`) state options give it and conditional writes set it. |
+| **Basis** | An opaque name of a chart's state as a report saw it (`basis`), which a conditional write gives as `expected` so that it applies only if that state has not changed since. |
 | **Controls** | What a chart of a 3D, map, tree, or network mark loads to turn, pan and zoom, drill, or move nodes by pointer, keyboard, and toolbar (`dom/controls.ts`). |
 | **Spec** | The portable, JSON-serializable description of a chart (`ChartSpec`). |
 | **Scene** | The render plan for one frame: panels, title, and legend in CSS pixels, with no data references. |

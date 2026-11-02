@@ -12,7 +12,6 @@ import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { facet } from "../../src/model/facet.ts";
-import { Highlighter } from "../../src/model/highlight.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -21,6 +20,7 @@ import { renderSvg } from "../../src/render/svg.ts";
 import { titlesOf } from "../../src/render/titles.ts";
 import { ChartError } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 
 function render(config: Omit<ChartConfig, "locale">, budget?: number) {
   const model = new ChartModel(
@@ -204,7 +204,7 @@ describe("titles in static SVG", () => {
     const rows = table({ x: [1, 2, 3], y: [10, 20, 30] });
     for (const make of [point, bar, line] as const) {
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([
+      const highlighter = channelHighlighter([
         { table: rows as unknown as Table, store: store as never, channel: "focus" },
       ]);
       const model = new ChartModel(

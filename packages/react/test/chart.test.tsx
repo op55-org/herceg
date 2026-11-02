@@ -738,7 +738,12 @@ describe("<Chart>", () => {
       const ref = useRef<HercegChart | null>(null);
       chart = ref.current ?? chart;
       return (
-        <Chart ref={ref} onSelect={({ x }) => seen.push(`${name}:${x?.join("-")}`)}>
+        <Chart
+          ref={ref}
+          onSelect={({ selection }) =>
+            seen.push(`${name}:${selection?.kind === "brush" ? selection.x?.join("-") : ""}`)
+          }
+        >
           <Line data={metrics} x="t" y="a" />
         </Chart>
       );

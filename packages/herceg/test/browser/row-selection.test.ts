@@ -24,13 +24,14 @@ import { boxplot } from "../../src/marks/boxplot.ts";
 import { histogram } from "../../src/marks/histogram.ts";
 import { line } from "../../src/marks/line.ts";
 import type { ChartMark } from "../../src/marks/mark.ts";
+import { DIM } from "../../src/marks/mark.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { facet } from "../../src/model/facet.ts";
-import { DIM } from "../../src/model/highlight.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import type { PointGeometry } from "../../src/scene/scene.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
 const mounted: { destroy(): void }[] = [];
@@ -237,7 +238,7 @@ describe("row selection across charts and grids", () => {
     await frames();
     // A bound brush selects rows rather than zooming.
     expect(a.getViewport().x).toBeNull();
-    const [lo, hi] = a.selection!.x!;
+    const [lo, hi] = brushOf(a.selection)!.x!;
     expect([lo, hi].map((v) => Math.round(v * 1e9) / 1e9)).toEqual([2, 8]);
     store.set("focus", selectRows(new RowSet(source).add(1)));
     await Promise.resolve();
@@ -248,7 +249,7 @@ describe("row selection across charts and grids", () => {
     expect(store.get("focus")).toBe(kept);
     // A listener replacing the rows as the brush writes them: events report where it ends.
     const events: (readonly [number, number] | null)[] = [];
-    a.on("select", ({ x }) => events.push(x));
+    a.on("select", ({ selection }) => events.push(brushOf(selection)?.x ?? null));
     const stop = store.subscribe(() => {
       if (store.get("focus")?.kind === "predicate") store.set("focus", kept);
     });
@@ -261,7 +262,7 @@ describe("row selection across charts and grids", () => {
     a.select([3, 5], { rows: false });
     store.set("focus", selectRows(new RowSet(source).add(2)));
     await Promise.resolve();
-    expect(a.selection?.x).toEqual([3, 5]);
+    expect(brushOf(a.selection)?.x).toEqual([3, 5]);
   });
 
   it("clear the rows of a brush the chart lets go of as its panels change", async () => {
@@ -447,7 +448,7 @@ describe("row selection across charts and grids", () => {
     expect(held?.kind).toBe("rows");
     expect(rowsOf(held, source)).toEqual([0, 1, 2, 3, 4]);
     // B shows the synced outline, but writes nothing of its own.
-    expect(b.selection?.lasso).not.toBeNull();
+    expect(brushOf(b.selection)?.lasso).not.toBeNull();
     expect(store.get("focus")).toBe(held);
   });
 

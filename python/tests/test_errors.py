@@ -84,6 +84,8 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         {},
     ),
     "Navigator": ("navigator", lambda o: hg.Chart(DATA, navigator=o).line(x="t", y="v"), {}),
+    "Brush": ("brush", lambda o: hg.Chart(DATA, brush=o).line(x="t", y="v"), {}),
+    "Look": ("marks[0].selected", lambda o: hg.Chart(DATA).point(x="t", y="v", selected=o), {}),
     "Animation": ("animation", lambda o: hg.Chart(DATA, animation=o).line(x="t", y="v"), {}),
     "Title": ("title", lambda o: hg.Chart(DATA, title=o).line(x="t", y="v"), {"text": "T"}),
     "Tooltip": ("tooltip", lambda o: hg.Chart(DATA, tooltip=o).line(x="t", y="v"), {}),
@@ -346,7 +348,6 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         lambda o: hg.Chart(DATA).sunburst(path=["s"], value="v", labels=o),
         {},
     ),
-    "Look": ("marks[0].leaf", lambda o: hg.Chart(DATA).sunburst(path=["s"], leaf=o), {}),
     "Measure": (
         "marks[0].fill_opacity",
         lambda o: hg.Chart(DATA).treemap(path=["s"], value="v", fill_opacity=o),
@@ -355,11 +356,13 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
 }
 
 # What Python reads of a chart (its events and inspection), which no chart takes.
-READ = {"InspectedField", "InspectedPoint", "Inspection", "RowSelection", "Selection"}
+READ = {"InspectedField", "InspectedPoint", "Inspection", "RowSelection", "BrushSelection"}
 READ |= {"Viewport", "ViewEdge", "ViewportEvent", "ScaleInstance", "ScaleView"}
 READ |= {"SelectEvent", "SelectionOwner", "VisibilityState", "PanelVisibility"}
 READ |= {"InputEvent", "Pointer", "Box", "ItemTarget", "AxisLabelTarget"}
 READ |= {"LegendEntryTarget", "PlotTarget"}
+# Selections, which events report and charts and widgets take.
+READ |= {"ItemSelection", "SeriesSelection", "ItemReference", "SeriesReference"}
 
 
 # Fields that replace what an object is given above, which are refused together.
@@ -926,20 +929,20 @@ def test_widget_viewports_and_selections_take_their_fields_by_their_hints():
             widget.set_viewport(y=(0, np.timedelta64(5, unit)))
         assert raised.value.path == "y[1]"
     with pytest.raises(hg.ChartError) as raised:
-        widget.selection = hg.Selection(lasso=5)
+        widget.selection = hg.BrushSelection(lasso=5)
     assert (raised.value.path, str(raised.value)) == (
         "selection.lasso",
-        "Selection lasso: expected a list of (x, y) points; received 5",
+        "BrushSelection lasso: expected a list of (x, y) points; received 5",
     )
     lasso = [(0, 0), (1, np.timedelta64(1, "s")), (2, 0)]
     with pytest.raises(hg.ChartError) as raised:
-        widget.selection = hg.Selection(lasso=lasso)
+        widget.selection = hg.BrushSelection(lasso=lasso)
     assert raised.value.path == "selection.lasso[1][1]"
     # NumPy's numbers and arrays are taken as Python's.
     widget.set_viewport(hg.Viewport(x=np.array([0, 2.0]), y=(np.int64(1), np.float32(3))))
     assert sent[-1]["viewport"] == {"x": [0.0, 2.0], "y": [1.0, 3.0], "yRight": None, "time": []}
-    widget.selection = hg.Selection(x=(np.float64(0), np.int64(1)))
-    assert widget.selection == hg.Selection(x=(0.0, 1.0))
+    widget.selection = hg.BrushSelection(x=(np.float64(0), np.int64(1)))
+    assert widget.selection == hg.BrushSelection(x=(0.0, 1.0))
 
 
 def test_options_given_as_users_compute_them_are_read_alike():
@@ -958,5 +961,5 @@ def test_options_given_as_users_compute_them_are_read_alike():
         hg.graph({"a": ["x"], "b": ["y"]}, "a", "b", layout=True).to_spec()
     assert raised.value.path == "marks[0].layout"
     widget = hg.Chart(DATA, panels=["p"], brush="x").line(x="t", y="v", panel="p").widget()
-    widget.selection = hg.Selection(x=(0, 1), panels=["p"])
-    assert widget.selection == hg.Selection(x=(0.0, 1.0), panels=("p",))
+    widget.selection = hg.BrushSelection(x=(0, 1), panels=["p"])
+    assert widget.selection == hg.BrushSelection(x=(0.0, 1.0), panels=("p",))

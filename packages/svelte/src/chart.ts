@@ -12,8 +12,14 @@ import {
 import type { Snippet } from "svelte";
 import type { ClassValue } from "svelte/elements";
 
-/** Chart options as props: one left out, or `undefined`, takes its default. */
-export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" | "onError"> {
+/**
+ * Chart options as props: one left out, or `undefined`, takes its default.
+ * The state options (`selection`, `viewport`, `visibility`, `drillRoot`)
+ * set the chart's state when their value changes; bound
+ * (`bind:selection`), they follow the chart's state as each change commits.
+ */
+export interface ChartProps
+  extends Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> {
   /**
    * The tooltip's content (`{#snippet renderTooltip(inspection)}`), in the
    * chart's own box, which keeps its placement, the crosshair, and the
@@ -42,7 +48,11 @@ export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" 
   onviewport?: ChartListener<"viewport"> | undefined;
   /** The view came near an end of what `interaction.limits` allows, as to load more data. */
   onedge?: ChartListener<"edge"> | undefined;
-  /** The selection changed (`interaction.brush`): x and y ranges and a lasso's outline, null when cleared. */
+  /**
+   * The selection changed (a brush, `interaction.select`, `select`): what
+   * it is (null when cleared), and its `phase`, "preview" while a brush
+   * moves, then "commit" or "cancel".
+   */
   onselect?: ChartListener<"select"> | undefined;
   /** What the pointer or keyboard cursor is on, or the data the inspection reads there, changed. */
   onhover?: ChartListener<"hover"> | undefined;

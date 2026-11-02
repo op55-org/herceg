@@ -25,13 +25,10 @@ import {
   rowSelection,
   type SelectionBinding,
 } from "../../src/model/row-selection.ts";
-import {
-  brushedRows,
-  clickedRows,
-  type Brushed as Selection,
-} from "../../src/model/selected-rows.ts";
+import { brushedRows, clickedRows } from "../../src/model/selected-rows.ts";
 import { ChartError } from "../../src/spec/errors.ts";
 import type { BrushSpec, PanelInteractionSpec } from "../../src/spec/spec.ts";
+import type { BrushSelection as Selection } from "../../src/spec/state.ts";
 import { withPicker } from "../helpers/picker.ts";
 
 /** Tables as charts read them, whatever their fields. */
@@ -50,7 +47,7 @@ function drawn(config: ChartConfig): ChartModel {
 function chart() {
   const element = new EventTarget() as never;
   return {
-    selection: { x: [1, 2], y: null, lasso: null } as Selection | null,
+    selection: { kind: "brush", x: [1, 2], y: null, lasso: null } as Selection | null,
     /** The causes it was cleared as. */
     cleared: [] as ChangeCause[],
     clear(cause: ChangeCause) {
@@ -79,13 +76,20 @@ function mounted(
   const changes: RowSelectionChange[] = [];
   // Each change's cause and revision, apart from what it changed.
   const counts: [string, number][] = [];
+  const phases: string[] = [];
   const events = {
     emit: (
       _type: "rowSelection",
-      { cause, revision, ...change }: RowSelectionChange & { cause: string; revision: number },
+      {
+        cause,
+        revision,
+        phase,
+        ...change
+      }: RowSelectionChange & { cause: string; revision: number; phase: string },
     ) => {
       changes.push(change);
       counts.push([cause, revision]);
+      phases.push(phase);
       hear(change);
     },
   };
@@ -111,12 +115,18 @@ function mounted(
     link,
     changes,
     counts,
+    phases,
     redrawn: () => redrawn,
     revision: () => revision,
   };
 }
 
-const brush = (x: readonly [number, number]): Selection => ({ x, y: null, lasso: null });
+const brush = (x: readonly [number, number]): Selection => ({
+  kind: "brush",
+  x,
+  y: null,
+  lasso: null,
+});
 
 /** What `make` refuses: a chart error's code, path, and message. */
 function refusal(make: () => unknown) {
@@ -729,7 +739,7 @@ describe("a mounted chart's row selection", () => {
       [1.5, 6],
       [0.5, 6],
     ];
-    link.brushed({ x: null, y: null, lasso: outline }, null, true, "pointer", 1);
+    link.brushed({ kind: "brush", x: null, y: null, lasso: outline }, null, true, "pointer", 1);
     const held = store.get("focus");
     expect(held?.kind === "rows" && Array.from(held.rows.positions())).toEqual([0]);
     const clear = link.release();

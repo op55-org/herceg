@@ -54,11 +54,13 @@ def live(widget: ChartWidget, state: ChartState) -> None:
     widget.set_viewport(hg.Viewport(x=(1.0, 2.0), y=(0.0, 5.0)))
     widget.set_viewport(y=(0.0, 5.0), panel="latency")
     widget.set_viewport(None)
-    widget.selection = hg.Selection(y=("a", "b"), lasso=((0.0, 1.0), (1.0, 1.0), (1.0, 0.0)))
+    widget.selection = hg.BrushSelection(y=("a", "b"), lasso=((0.0, 1.0), (1.0, 1.0), (1.0, 0.0)))
+    widget.selection = hg.SeriesSelection(series=("auth",))
+    widget.select(hg.ItemSelection(items=(hg.ItemReference("dots", ("row", 1)),)), expected="b:1")
     widget.selection = ("a", "c")
     widget.set_viewport("x")  # type: ignore[arg-type]
     widget.get_viewport().x  # type: ignore[union-attr]  # noqa: B018
-    widget.on_select(lambda selection: selection and selection.lasso)
+    widget.on_select(lambda event: event.phase == "commit" and event.selection)
     widget.on_viewport(lambda event: event.views[""].y_right)
     widget.on_visibility(lambda state: state.hidden_keys)
     widget.on_error(lambda error: error.path)
@@ -76,7 +78,7 @@ def live(widget: ChartWidget, state: ChartState) -> None:
     )
     widget.on_context_menu(lambda event: event.pointer and event.pointer.values.get("x"))
     widget.on_hover(lambda event: isinstance(event.target, hg.ItemTarget) and event.target.row)
-    if state.selection is not None:
+    if isinstance(state.selection, hg.BrushSelection):
         print(state.selection.y)
 
 

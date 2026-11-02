@@ -1006,7 +1006,8 @@ function lineFeatures(
                 ...(dash?.length && { dashOffset }),
                 path,
               };
-              return holed(styles.translucent(piece, opacity), holes);
+              // Translucent outermost, so a look's opacity replaces the run's (see `opaque`).
+              return styles.translucent(holed(piece, holes), opacity);
             });
             if (marker && count > 0) out.push(...runMarkers(series, width));
             count = 0;

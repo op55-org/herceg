@@ -105,12 +105,13 @@ focusFirst(grid);
     const picked = store.get("grid-rows");
     chartRows.restrict(picked?.kind === "rows" ? picked.rows : null);
   });
-  chart.on("select", ({ x }) =>
+  chart.on("select", ({ selection }) => {
+    const x = selection?.kind === "brush" ? selection.x : null;
     gridRows.setQuery({
       ...gridRows.query,
       filter: x ? col("at").ge(x[0]).and(col("at").le(x[1])) : true,
-    }),
-  );
+    });
+  });
 }
 
 // Groups of a view's rows: a table of their aggregates, typed for charts,

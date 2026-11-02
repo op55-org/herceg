@@ -5,6 +5,7 @@ import { visibilityState } from "herceg/spec";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
 import { contractTest } from "../../../packages/herceg/test/helpers/contracts.ts";
+import { brushOf } from "../../../packages/herceg/test/helpers/selections.ts";
 import { MOUSE } from "../../../scripts/browser/mouse.ts";
 import type { Header } from "../streamlit.ts";
 import { itemChart, key } from "./items.ts";
@@ -192,7 +193,7 @@ describe("Streamlit component", () => {
     const [name, value] = state[0]!;
     const { x, ...rest } = value as { x: [number, number] };
     expect(name).toBe("selection");
-    expect(rest).toEqual({ y: null, lasso: null, time: [] });
+    expect(rest).toEqual({ kind: "brush", y: null, lasso: null, time: [] });
     expect(0 < x[0] && x[0] < x[1] && x[1] < 2).toBe(true);
     // A click clears the brush and reports the data under it.
     press(parent, "pointerdown", 0.5);
@@ -597,7 +598,7 @@ describe("Streamlit component", () => {
     // Across the first two of three bands.
     await brush(parent, 0.15, 0.45);
     await frame();
-    const whole = { y: null, lasso: null, time: [] };
+    const whole = { kind: "brush", y: null, lasso: null, time: [] };
     expect(state).toEqual([["selection", { x: ["a", "b"], ...whole }]]);
     // Reordered: the brush covers "a" and "b" where they are now.
     const reordered = run(parent, bars(["b", "a", "c"]));
@@ -958,6 +959,104 @@ describe("Streamlit item interaction", () => {
   });
 });
 
+it("keeps items named by value on a rerun, and lets those named by their rows go", async () => {
+  const listener = vi.spyOn(MountedChart.prototype, "on");
+  try {
+    const parent = host();
+    const points = (title: string) =>
+      payload(
+        {
+          title,
+          width: 400,
+          height: 200,
+          renderer: "svg",
+          interaction: { select: "items" },
+          data: {
+            data: {
+              columns: {
+                x: { type: "number", dtype: "float64", buffer: 0 },
+                y: { type: "number", dtype: "float64", buffer: 1 },
+              },
+            },
+          },
+          marks: [
+            { type: "point", id: "named", x: "x", y: "y", itemKey: "x", data: "data" },
+            { type: "point", id: "rows", x: "x", y: "y", data: "data" },
+          ],
+        },
+        [new Float64Array([0, 1, 2]), new Float64Array([1, 3, 2])],
+        ["select"],
+      );
+    run(parent, points("Before"));
+    await vi.dynamicImportSettled();
+    const before = listener.mock.instances[0] as MountedChart;
+    before.render();
+    before.select({
+      kind: "items",
+      items: [
+        { mark: "named", item: [1] },
+        { mark: "rows", item: ["row", 0, 0, 1] },
+      ],
+    });
+    run(parent, points("After"));
+    await vi.dynamicImportSettled();
+    const after = listener.mock.instances.at(-1) as MountedChart;
+    await expect.poll(() => after.selection).toEqual({ kind: "items", items: ['["named",1]'] });
+  } finally {
+    listener.mockRestore();
+  }
+});
+
+it("keeps a map's chosen places over the same data, and lets them go over new data", async () => {
+  const listener = vi.spyOn(MountedChart.prototype, "on");
+  try {
+    const parent = host();
+    const places = (title: string, lon: number[], epoch: string) =>
+      payload(
+        {
+          title,
+          width: 400,
+          height: 300,
+          renderer: "svg",
+          projection: "equirectangular",
+          interaction: { select: "items" },
+          data: {
+            data: {
+              columns: {
+                lon: { type: "number", dtype: "float64", buffer: 0 },
+                lat: { type: "number", dtype: "float64", buffer: 1 },
+              },
+            },
+          },
+          marks: [{ type: "geopoint", data: "data", longitude: "lon", latitude: "lat" }],
+        },
+        [new Float64Array(lon), new Float64Array([0, 10])],
+        ["select"],
+        3,
+        epoch,
+      );
+    const first = run(parent, places("Before", [0, 10], "e1"));
+    await vi.dynamicImportSettled();
+    const before = listener.mock.instances[0] as MountedChart;
+    before.select({ kind: "items", items: ["[0,0]"] });
+    await frame();
+    expect(first.state.at(-1)).toEqual(["selection", { kind: "items", items: ["[0,0]"] }]);
+    // The same data, restyled: the first place is still the one chosen.
+    const same = run(parent, places("Styled", [0, 10], "e1"));
+    const styled = listener.mock.instances.at(-1) as MountedChart;
+    expect(styled.selection).toEqual({ kind: "items", items: ["[0,0]"] });
+    expect(same.state).toEqual([]);
+    // New data, the places reordered: row 0 is another place now.
+    const next = run(parent, places("Reordered", [10, 0], "e2"));
+    const reordered = listener.mock.instances.at(-1) as MountedChart;
+    await frame();
+    expect(reordered.selection).toBeNull();
+    expect(next.state.at(-1)).toEqual(["selection", null]);
+  } finally {
+    listener.mockRestore();
+  }
+});
+
 it("reports and keeps each subplot tree's root and map's view across reruns", async () => {
   const listener = vi.spyOn(MountedChart.prototype, "on");
   try {
@@ -1085,12 +1184,12 @@ it("keeps a brush along the right y axis of a chart drawing on it alone", async 
     run(parent, right("Before"));
     await vi.dynamicImportSettled();
     const chart = listener.mock.instances[0] as MountedChart;
-    chart.select({ x: null, y: [1.5, 2.5], lasso: null });
+    chart.select({ kind: "brush", x: null, y: [1.5, 2.5], lasso: null });
     await frame();
     run(parent, right("After"));
     const next = listener.mock.instances.at(-1) as MountedChart;
     expect(next).not.toBe(chart);
-    await expect.poll(() => next.selection?.y).toEqual([1.5, 2.5]);
+    await expect.poll(() => brushOf(next.selection)?.y).toEqual([1.5, 2.5]);
   } finally {
     listener.mockRestore();
   }
@@ -1137,7 +1236,7 @@ it("reports each subplot's own x view and the panel of the selection", async () 
     expect(view.x).toBeNull();
     expect(view.panels.latency!.x).toEqual([0, 1]);
     expect(view.panels.errors!.x).toEqual([1, 2]);
-    chart.select({ x: [1.2, 1.8], y: null, lasso: null }, { panel: "errors" });
+    chart.select({ kind: "brush", x: [1.2, 1.8], y: null, lasso: null }, { panel: "errors" });
     await vi.dynamicImportSettled();
     expect(state.findLast(([name]) => name === "selection")![1]).toMatchObject({
       panels: ["errors"],
@@ -1239,12 +1338,12 @@ it("keeps a selection on the panels sharing x when an inset comes before them", 
     run(parent, payload(plain, buffers, ["select"]));
     const chart = listener.mock.instances[0] as MountedChart;
     chart.render();
-    chart.select({ x: [0, 1], y: null, lasso: null });
+    chart.select({ kind: "brush", x: [0, 1], y: null, lasso: null });
     run(parent, payload(laidOut, buffers, ["select"]));
     const next = listener.mock.instances.at(-1) as MountedChart;
     await next.loading;
     await frame();
-    expect(next.selection?.x).toEqual([0, 1]);
+    expect(brushOf(next.selection)?.x).toEqual([0, 1]);
     expect(next.selectionOwner?.panels ?? null).toEqual(["bars"]);
   } finally {
     listener.mockRestore();
@@ -1291,7 +1390,7 @@ it("keeps two map subplots' views and a lasso in one, naming its panel, across r
       [1, 0],
       [1, 1],
     ];
-    chart.select({ x: null, y: null, lasso }, { panel: "b" });
+    chart.select({ kind: "brush", x: null, y: null, lasso }, { panel: "b" });
     expect(first.state.findLast(([name]) => name === "selection")![1]).toMatchObject({
       panels: ["b"],
       lasso,
@@ -1302,7 +1401,7 @@ it("keeps two map subplots' views and a lasso in one, naming its panel, across r
     expect(restored).not.toBe(chart);
     expect(restored.getViewport({ panel: "b" }).x).toEqual([0, 0.1]);
     expect(restored.getViewport({ panel: "a" }).x).toBeNull();
-    expect(restored.selection?.lasso).toEqual(lasso);
+    expect(brushOf(restored.selection)?.lasso).toEqual(lasso);
     expect(restored.selectionOwner?.panels ?? null).toEqual(["b"]);
     expect(next.state).toEqual([]);
     next.cleanup();
@@ -1449,6 +1548,7 @@ it("reports and restores a network's plane, lasso and moved positions across com
     chart.setItemPosition('[0,"East"]', { x: 0, y: 50 });
     chart.render();
     chart.select({
+      kind: "brush",
       x: null,
       y: null,
       lasso: [
@@ -1527,6 +1627,7 @@ it("keeps map plane ranges and lassos through Streamlit redraws", async () => {
     const chart = listener.mock.instances[0] as MountedChart;
     chart.setViewport({ x: [-0.1, 0.1], y: [0.02, 0.08] });
     chart.select({
+      kind: "brush",
       x: null,
       y: null,
       lasso: [

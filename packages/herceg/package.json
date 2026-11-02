@@ -43,6 +43,11 @@
       "import": "./dist/fonts.js",
       "default": "./dist/fonts.js"
     },
+    "./state": {
+      "types": "./dist/state.d.ts",
+      "import": "./dist/state.js",
+      "default": "./dist/state.js"
+    },
     "./grid": {
       "types": "./dist/grid.d.ts",
       "import": "./dist/grid.js",

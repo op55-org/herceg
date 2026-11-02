@@ -13,6 +13,7 @@ import type { Inspection } from "../../../src/model/model.ts";
 import { ChartError } from "../../../src/spec/errors.ts";
 import { cellsOf, defaultsOf, fixtureOf, markOf, neighbor } from "../../contracts/matrix.ts";
 import { contractTest } from "../../helpers/contracts.ts";
+import { brushOf } from "../../helpers/selections.ts";
 import { dateTimes } from "../helpers.ts";
 import { expectChartRefused, hydrate, mount, mountPair } from "./mount.ts";
 import { type Item, itemAt, type Pair, pixel, pixels, press } from "./pointer.ts";
@@ -414,8 +415,10 @@ describe("lifecycle.selection-sync", () => {
       a.select(x);
       // Along categories, a range selects the categories whose middles it holds.
       const banded = !continuous(a.getPanels()[0]!.x);
-      expect(a.selection?.x).toEqual(banded ? [Math.ceil(x[0]) || 0, Math.floor(x[1]) || 0] : x);
-      expect(b.selection?.x).toEqual(a.selection?.x);
+      expect(brushOf(a.selection)?.x).toEqual(
+        banded ? [Math.ceil(x[0]) || 0, Math.floor(x[1]) || 0] : x,
+      );
+      expect(brushOf(b.selection)?.x).toEqual(brushOf(a.selection)?.x);
       expect([fromA.length, fromB.length], "each reports it once").toEqual([1, 1]);
     });
 });

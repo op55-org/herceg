@@ -15,12 +15,11 @@ import { estimateText } from "../../src/layout/text.ts";
 import { area } from "../../src/marks/area.ts";
 import { outputCheck, rowReader } from "../../src/marks/features/channels.ts";
 import { StyleRuns } from "../../src/marks/features/runs.ts";
-import { translucent } from "../../src/marks/features/series-styles.ts";
+import { translucent } from "../../src/marks/features/translucent.ts";
 import { line } from "../../src/marks/line.ts";
 import { rowsOf } from "../../src/marks/rows.ts";
 import type { Series } from "../../src/marks/series.ts";
 import { facet } from "../../src/model/facet.ts";
-import { Highlighter } from "../../src/model/highlight.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { renderSvg } from "../../src/render/svg.ts";
@@ -33,6 +32,7 @@ import type {
   Scene,
 } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 
 function model(config: ChartConfig) {
   const made = new ChartModel(
@@ -859,7 +859,7 @@ describe("style runs", () => {
   it("keep their cuts under a selection, and draw a series' selected values once", () => {
     const highlighted = (rows: Table, selected: number[], filled = false) => {
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
       const options = { x: "t", y: "v", encode: painted } as const;
       const chart = model({
         marks: [
@@ -927,7 +927,7 @@ describe("style runs", () => {
     /** The centers of `rows`' markers, lit and dimmed, with `selected` rows selected. */
     const marked = (rows: Table, selected: number[]) => {
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
       const chart = model({
         legend: false,
         x: { domain: [0, 10], nice: false },
@@ -1124,7 +1124,7 @@ describe("style runs", () => {
       paint: ["#ff0000", "#ff0000", "#0000ff", "#0000ff", "#00ff00"],
     }) as unknown as Table;
     const store = selectionStore(rows);
-    const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
     const chart = model({
       marks: [area(rows, { x: "t", y: "v", line: false, encode: painted })],
     });
@@ -1151,7 +1151,7 @@ describe("style runs", () => {
       paint: ["#ff0000", "#0000ff", "#00ff00"],
     }) as unknown as Table;
     const store = selectionStore(rows);
-    const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
     const chart = model({
       marks: [area(rows, { x: "t", y: "v", line: false, encode: painted })],
     });
@@ -1168,7 +1168,7 @@ describe("style runs", () => {
       paint: ["#ff0000", "#ff0000", "#0000ff"],
     }) as unknown as Table;
     const store = selectionStore(rows);
-    const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
     const chart = model({
       marks: [line(rows, { x: "t", y: "v", opacity: 0.5, encode: painted })],
     });
@@ -1186,7 +1186,7 @@ describe("style runs", () => {
     const rows = table({ t: [1, 3, 7, 9] }) as unknown as Table;
     const ids = (["x", "y"] as const).map((orient) => {
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
       const [along, across] = [{ domain: [0, 10] as const }, { domain: [0, 20] as const }];
       const chart = model({
         legend: false,
@@ -1227,7 +1227,7 @@ describe("style runs", () => {
         paint: Array.from({ length: n }, (_, i) => (i % 2 ? "#ff0000" : "#0000ff")),
       }) as unknown as Table;
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
       const [along, across] = [{ domain: [0, n] as const }, { domain: [0, 10] as const }];
       const chart = model({
         legend: false,
@@ -1283,7 +1283,7 @@ describe("style runs", () => {
       w: [1, 20, 20],
     }) as unknown as Table;
     const store = selectionStore(rows);
-    const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
     const chart = model({
       legend: false,
       theme: { style: { line: { strokeWidth: 20 } } },
@@ -1316,7 +1316,7 @@ describe("style runs", () => {
       paint: Array.from({ length: n }, (_, i) => (i % 2 ? "#ff0000" : "#0000ff")),
     }) as unknown as Table;
     const store = selectionStore(rows);
-    const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
     const chart = model({
       x: { domain: [0, n], nice: false },
       marks: [line(rows, { x: "t", y: "v", opacity: 0.5, encode: painted })],
@@ -1348,7 +1348,7 @@ describe("style runs", () => {
       paint: ["#ff0000", "#ff0000", "#0000ff", "#0000ff", "#00ff00"],
     }) as unknown as Table;
     const store = selectionStore(rows);
-    const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
     const chart = model({
       marks: [
         area(rows, {

@@ -15,6 +15,7 @@ import { facet } from "../../../src/model/facet.ts";
 import { panels } from "../../../src/model/panels.ts";
 import type { InteractionSpec, SyncSpec } from "../../../src/spec/spec.ts";
 import { contractTest } from "../../helpers/contracts.ts";
+import { brushOf } from "../../helpers/selections.ts";
 import { modelOf } from "../helpers.ts";
 import { drag, frame, heard, key, mount, pointer, rows, wheel, within } from "./helpers.ts";
 
@@ -215,7 +216,7 @@ describe("selections synced through a panel", () => {
         ]);
       };
       brushIn("b");
-      expect(one.selection?.x).toEqual(many.selection!.x);
+      expect(brushOf(one.selection)?.x).toEqual(brushOf(many.selection)!.x);
       // A brush in a, of its own x, is not the channel's: b's selection,
       // which it takes the place of, goes from the other chart too.
       brushIn("a");
@@ -223,7 +224,7 @@ describe("selections synced through a panel", () => {
       expect(one.selection).toBeNull();
       // What the other chart sends belongs to the channel's panel.
       one.select([2, 3]);
-      expect(many.selection?.x).toEqual([2, 3]);
+      expect(brushOf(many.selection)?.x).toEqual([2, 3]);
       expect(many.selectionOwner?.panels).toEqual(["b"]);
     },
     "a selection channel naming a subplot carries that subplot's brushes",
@@ -252,7 +253,7 @@ describe("selections of categories", () => {
       // "a", the first of the sender's categories, and the receiver's second now.
       one.select([0, 0]);
       many.render();
-      expect(many.selection?.x).toEqual([1, 1]);
+      expect(brushOf(many.selection)?.x).toEqual([1, 1]);
       expect(many.selectionOwner?.panels).toEqual(scope === "chart" ? ["a", "b"] : ["b"]);
     }
   });

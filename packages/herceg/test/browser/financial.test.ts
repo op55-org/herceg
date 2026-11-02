@@ -14,6 +14,7 @@ import { panels } from "../../src/model/panels.ts";
 import { paintCanvas } from "../../src/render/canvas.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { SegmentGeometry } from "../../src/scene/scene.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
 /** Without a background, the canvas holds what marks paint alone. */
@@ -215,7 +216,7 @@ describe("time axes with breaks", () => {
     const start = scale.map(utc(2025, 10, 13));
     drag(chart, start, start + 40);
     await frame();
-    expect(chart.selection!.x![0]).toBe(utc(2025, 10, 13));
+    expect(brushOf(chart.selection)!.x![0]).toBe(utc(2025, 10, 13));
     chart.destroy();
   });
 

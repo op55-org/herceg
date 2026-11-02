@@ -17,10 +17,17 @@ import type { SvgSizing } from "../render/svg.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { PlotRect } from "../scene/scene.ts";
 import type { CameraSpec, CursorShowSpec } from "../spec/spec.ts";
+import type { ChartSelection } from "../spec/state.ts";
 import type { Camera } from "../three/camera.ts";
-import type { Selection } from "./brushed.ts";
 import type { ChartUpdate } from "./chart.ts";
-import type { ChartEvents, ChartListener, PanelTarget, PanelVisibility } from "./events.ts";
+import type {
+  Basis,
+  ChartEvents,
+  ChartListener,
+  Conditional,
+  PanelTarget,
+  PanelVisibility,
+} from "./events.ts";
 
 /** A panel's axis: x, the left y axis, or the right one. */
 export type Axis = "x" | "y" | "yRight";
@@ -138,9 +145,10 @@ export interface Chart {
    * networks layout units (y increases downwards); node radii stay in
    * pixels. Facet panels of maps or networks share one view; a map or
    * network subplot has its own, which needs its `panel` (unless the chart
-   * has no other view).
+   * has no other view). With `expected`, only if the views it sets have not
+   * changed since that report (see `Conditional`).
    */
-  setViewport(view: ViewChange, target?: PanelTarget): void;
+  setViewport(view: ViewChange, target?: PanelTarget & Conditional): void;
   /**
    * What `panel` shows along each axis, null where it is not zoomed or it
    * has no such axis; without a panel, along each axis every panel shares
@@ -164,8 +172,18 @@ export interface Chart {
    * fails).
    */
   readonly drawnRevision: number | undefined;
-  /** What is brushed (x and y ranges, epoch ms for time axes, and a lasso's outline), or null. */
-  readonly selection: Selection | null;
+  /**
+   * The chart's state as of now, for conditional writes: give it, or a
+   * report's `basis`, as a setter's `expected` (see `Conditional`).
+   */
+  readonly basis: Basis;
+  /**
+   * What is selected, or null: a brush's ranges (epoch ms for time axes)
+   * and a lasso's outline, or items or series by their keys. While a
+   * gesture draws a brush, the selection before it: `select` events
+   * report what the gesture shows.
+   */
+  readonly selection: ChartSelection | null;
   /**
    * What the selection belongs to, or null without one: the scale
    * instances it has ranges on, and the panels drawing them all, which
@@ -173,17 +191,19 @@ export interface Chart {
    */
   readonly selectionOwner: SelectionOwner | null;
   /**
-   * Sets or clears (null) the selection, as if the user had brushed it in
-   * `panel`; an x range alone may be given as a pair. It belongs to the
-   * instances it has ranges on in that panel (an x range's x, a y range's
-   * y, a lasso's both), or without a panel to those every panel shares,
-   * or the only panel's. With `rowSelection`, it writes the rows it
-   * covers, unless `rows` is false: a selection another view made and
-   * wrote, shown here too.
+   * Sets or clears (null) the selection. A brush as if the user had brushed
+   * it in `panel` (or the panel it names); an x range alone may be given as
+   * a pair. It belongs to the instances it has ranges on in that panel (an
+   * x range's x, a y range's y, a lasso's both), or without a panel to
+   * those every panel shares, or the only panel's. Items and series by
+   * their keys, or by references naming a mark by its `id`. With
+   * `rowSelection`, it writes the rows it covers, unless `rows` is false:
+   * a selection another view made and wrote, shown here too. With
+   * `expected`, only if the selection has not changed since that report.
    */
   select(
-    selection: Selection | readonly [number, number] | null,
-    target?: PanelTarget & { rows?: boolean },
+    selection: ChartSelection | readonly [number, number] | null,
+    target?: PanelTarget & { rows?: boolean } & Conditional,
   ): void;
   /** A copy of the camera of a 3D subplot (or the chart); multiple cameras require a panel. */
   getCamera(target?: PanelTarget): Camera | undefined;
@@ -192,7 +212,7 @@ export interface Chart {
    * null goes back to the configured camera. A `camera` event follows on
    * the next frame.
    */
-  setCamera(camera: CameraSpec | null, target?: PanelTarget): void;
+  setCamera(camera: CameraSpec | null, target?: PanelTarget & Conditional): void;
   /**
    * The node a treemap or sunburst is drilled into (null for the whole
    * tree) and the path to it from the top level, as set though not drawn
@@ -210,7 +230,7 @@ export interface Chart {
    * Throws for a node the tree does not have, for charts without trees,
    * and without `panel` when several subplots draw trees.
    */
-  setDrillRoot(node: string | readonly string[] | null, target?: PanelTarget): void;
+  setDrillRoot(node: string | readonly string[] | null, target?: PanelTarget & Conditional): void;
   /**
    * The nodes the chart's user moved (dragged, moved with keys, or put with
    * `setItemPosition`), by item key, where each is in the network's layout
@@ -245,7 +265,7 @@ export interface Chart {
   setItemPosition(
     key: string,
     position: { x: number; y: number } | null,
-    target?: PanelTarget,
+    target?: PanelTarget & Conditional,
   ): void;
   /** The panels of the last frame, in reading order. */
   getPanels(): readonly PanelInfo[];
@@ -294,7 +314,10 @@ export interface Chart {
    * a `visibility` event reports them (so its state sets again in one
    * change); without, what panels' legends set goes.
    */
-  setHiddenKeys(keys: readonly string[], options?: { panels?: PanelVisibility | undefined }): void;
+  setHiddenKeys(
+    keys: readonly string[],
+    options?: { panels?: PanelVisibility | undefined } & Conditional,
+  ): void;
   /**
    * Shows or hides series or items by key, as their legend entries do: in
    * every panel, letting go of what panels' legends set of them; or with
@@ -303,7 +326,7 @@ export interface Chart {
   setVisibility(
     keys: string | readonly string[],
     visible: boolean,
-    options?: { panel?: string | undefined },
+    options?: { panel?: string | undefined } & Conditional,
   ): void;
   /**
    * Shows the cursor at a value, as a synced chart's cursor shows: a
@@ -326,7 +349,9 @@ export interface Chart {
    * called.
    *
    * ```ts
-   * chart.on("select", ({ x }) => x && other.setViewport(x));
+   * chart.on("select", ({ selection, phase }) => {
+   *   if (phase === "commit" && selection?.kind === "brush" && selection.x) other.setViewport(selection.x);
+   * });
    * ```
    */
   on<K extends keyof ChartEvents>(type: K, listener: ChartListener<K>): () => void;

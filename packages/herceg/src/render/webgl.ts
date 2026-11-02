@@ -249,7 +249,8 @@ class Painter implements CloudPainter {
     owner: object,
   ): boolean {
     const cloud = mark.cloud;
-    if (!cloud || !this.usable) return false;
+    // Sprites are fills: points with rings (a look's outline) are drawn on the CPU.
+    if (!cloud || mark.ring || !this.usable) return false;
     const radius = mark.radius * pixelRatio;
     // Sprites larger than the device allows would be cut off.
     const size = 2 * radius + 2;

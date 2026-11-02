@@ -156,7 +156,7 @@ true satisfies Takes<PropsOf<typeof Legend>, Omit<LegendGuideOptions, "type">>;
  * and `events vue` in test/contracts/api.json).
  */
 type Props = InstanceType<typeof Chart>["$props"];
-type Options = Omit<ChartOptions, "marks" | "renderTooltip" | "onError">;
+type Options = Omit<ChartOptions, "marks" | "renderTooltip" | "onError" | "state">;
 // Vue's emits make listeners returning any; input listeners are props, so
 // that the chart knows whether it is listened to.
 type Listener<E> = (_: E) => ReturnType<NonNullable<Props["onRender"]>>;

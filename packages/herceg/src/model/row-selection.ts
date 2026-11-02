@@ -12,17 +12,27 @@ import {
   type SelectionChange,
   type SelectionStore,
   selectRows,
+  selectWhere,
 } from "../data/selection.ts";
 import type { Schema, Table } from "../data/table.ts";
+import { unmappable } from "../lod/m4.ts";
+import { shareSquares } from "../marks/cell-selection.ts";
 import { type LayoutMark, tablesOf } from "../marks/layout-mark.ts";
-import type { Mark } from "../marks/mark.ts";
+import { DIM, type Mark } from "../marks/mark.ts";
 import { offAxis } from "../marks/row-bindings.ts";
+import { placeAt, rowOf } from "../marks/series.ts";
+import { CLOUD_POINTS } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { BrushSpec, SelectionGesture } from "../spec/spec.ts";
-import { Highlighter, highlights, membership } from "./highlight.ts";
+import type { ChartSelection, ItemSelection, Phase, SeriesSelection } from "../spec/state.ts";
+import { shapeOf } from "./bindings.ts";
+import { conditionsOf } from "./conditions.ts";
+import { GUIDE_KIT } from "./guides.ts";
+import { Highlighter, type HighlightKit, highlights } from "./highlight.ts";
+import { itemResolver } from "./items.ts";
+import { channelSelection, channelsChosen, membership } from "./memberships.ts";
 import type { ChangeCause, ChartConfig, ChartModel } from "./model.ts";
 import {
-  type Brushed,
   brushedRows,
   clickedRows,
   cursorRows,
@@ -30,6 +40,23 @@ import {
   type SelectionOwner,
   selects,
 } from "./selected-rows.ts";
+
+/**
+ * The phase of the gesture whose rows a binding is writing: charts hearing
+ * the write as another writer's report it (a live brush's previews).
+ */
+let writingPhase: Phase = "commit";
+
+/** What highlighting draws with: bindings load it with them, squares of cells' selected shares too. */
+export const HIGHLIGHT_KIT: HighlightKit = {
+  placeAt,
+  rowOf,
+  unmappable,
+  guides: GUIDE_KIT,
+  dim: DIM,
+  cloudPoints: CLOUD_POINTS,
+  squares: shareSquares,
+};
 
 /** A chart's binding to a channel of a table's selection store. */
 export interface SelectionBinding<S extends Schema = Schema> {
@@ -45,6 +72,11 @@ export interface SelectionBinding<S extends Schema = Schema> {
   events?: readonly SelectionGesture[];
   /** "highlight" (the default) dims the rows the channel does not hold; "none" leaves them. */
   effect?: "highlight" | "none";
+  /**
+   * The channel hears a brush's previews as it is drawn, moved, or resized
+   * (one write a frame), and its cancel; by default, what is committed only.
+   */
+  live?: boolean;
 }
 
 /**
@@ -79,7 +111,7 @@ export interface KeyPress extends Modifiers {
  * what the chart shows.
  */
 export interface BrushedChart {
-  readonly selection: Brushed | null;
+  readonly selection: ChartSelection | null;
   clear(cause: ChangeCause): void;
   render(): void;
   readonly root: {
@@ -99,7 +131,7 @@ export interface Cursor {
 interface Reporter {
   emit(
     type: "rowSelection",
-    change: RowSelectionChange & { cause: ChangeCause; revision: number },
+    change: RowSelectionChange & { cause: ChangeCause; revision: number; phase: Phase },
   ): void;
 }
 
@@ -110,6 +142,7 @@ interface Bound {
   channel: string;
   events: ReadonlySet<SelectionGesture>;
   highlight: boolean;
+  live: boolean;
 }
 
 const GESTURES: readonly SelectionGesture[] = ["brush", "lasso", "click"];
@@ -152,7 +185,7 @@ export class RowSelection {
     if (bindings.length === 0)
       throw refused("rowSelection", "rowSelection: expected a binding, { store, channel }");
     this.bindings = bindings.map(
-      ({ store, channel, events = GESTURES, effect = "highlight" }, i) => {
+      ({ store, channel, events = GESTURES, effect = "highlight", live = false }, i) => {
         // Paths as the spec's: a binding's index among several.
         const at = bindings.length > 1 ? `rowSelection[${i}]` : "rowSelection";
         if (typeof store?.get !== "function" || !store.source)
@@ -176,15 +209,21 @@ export class RowSelection {
             `${at}.effect`,
             `rowSelection effect: expected "highlight" or "none"; received ${JSON.stringify(effect)}`,
           );
-        return Object.freeze({ store, channel, events: Object.freeze([...events]), effect });
+        if (typeof live !== "boolean")
+          throw refused(
+            `${at}.live`,
+            `rowSelection live: expected true or false; received ${JSON.stringify(live)}`,
+          );
+        return Object.freeze({ store, channel, events: Object.freeze([...events]), effect, live });
       },
     );
-    this.#bound = this.bindings.map(({ store, channel, events, effect }) => ({
+    this.#bound = this.bindings.map(({ store, channel, events, effect, live }) => ({
       store,
       table: store.source,
       channel,
       events: new Set(events),
       highlight: effect === "highlight",
+      live,
     }));
     const tables = this.#bound.map(({ table }) => table);
     if (tables.some((table, i) => tables.indexOf(table) !== i))
@@ -239,11 +278,16 @@ export class RowSelection {
   highlight(model: ChartModel): () => void {
     const highlighted = this.#bound.filter((b) => b.highlight);
     if (highlighted.length === 0) return () => {};
-    const highlighter = new Highlighter(highlighted);
+    const highlighter = new Highlighter(HIGHLIGHT_KIT, channelsChosen(highlighted));
+    // What no bound channel highlights draws the chart's own selection in its looks.
     const draw: NonNullable<ChartModel["highlight"]> = (mark, series, frame, key, rows) =>
       highlighter.geometry(mark, series, frame, key, rows) ??
+      model.looks?.(mark, series, frame, key, rows) ??
       mark.geometry(series, frame, key, rows);
-    const layout = (table: Table) => highlighter.selected(table);
+    const layout: NonNullable<ChartModel["layoutHighlight"]> = (table, mark, series) => {
+      const selection = channelSelection(highlighted, table);
+      return selection ? membership(table, selection) : model.layoutLooks?.(table, mark, series);
+    };
     model.highlight = draw;
     model.layoutHighlight = layout;
     return () => {
@@ -317,13 +361,13 @@ export class RowSelection {
    * same while it binds the same stores (by identity), channels, events, and effects.
    */
   toJSON(): unknown {
-    return this.bindings.map(({ store, channel, events, effect }) => {
+    return this.bindings.map(({ store, channel, events, effect, live }) => {
       let id = storeIds.get(store);
       if (id === undefined) {
         id = nextStore++;
         storeIds.set(store, id);
       }
-      return [id, channel, events, effect];
+      return [id, channel, events, effect, live];
     });
   }
 }
@@ -336,11 +380,12 @@ let nextStore = 0;
  */
 function brushesOver(mark: Mark, config: ChartConfig): [BrushSpec, string][] {
   const { interaction, panels } = config;
-  if (!panels) return interaction?.brush ? [[interaction.brush, "interaction.brush"]] : [];
+  const shape = shapeOf(interaction?.brush);
+  if (!panels) return shape ? [[shape, "interaction.brush"]] : [];
   const found: [BrushSpec, string][] = [];
   for (const [i, { id, interaction: own }] of panels.list.entries()) {
     if (mark.spec.panel !== id && mark.spec.panel !== "*") continue;
-    const brush = panels.interactionOf(interaction, id)?.brush;
+    const brush = shapeOf(panels.interactionOf(interaction, id)?.brush);
     if (brush)
       found.push([brush, own?.brush ? `${panels.path(i)}.interaction.brush` : "interaction.brush"]);
   }
@@ -452,9 +497,26 @@ export class RowLink {
    * the brush clears while the channel still holds it, unchanged.
    */
   readonly #brushed = new Map<Bound, ReturnType<typeof seen>>();
+  /**
+   * What live channels held before a gesture's first preview, what the
+   * brush had written there, and what the previews last wrote there: the
+   * gesture's cancel puts back the first where they still hold the last.
+   */
+  #held = new Map<
+    Bound,
+    {
+      selection: DataSelection | null;
+      brushed: ReturnType<typeof seen> | undefined;
+      wrote?: ReturnType<typeof seen>;
+    }
+  >();
   readonly #stops: (() => void)[] = [];
   /** How deep in writes of the chart's own selections, which leave its brush in place. */
   #writing = 0;
+  /** A gesture previews a brush: Escape is its cancel, not a clear of the channels. */
+  #previewing = false;
+  /** A key has just undone a gesture, until the key's listeners are done: no clear either. */
+  #escaped = false;
   /**
    * The chart's own write in progress: the store and the revision its
    * change takes there, by whom, and the chart's revision of it (its count
@@ -466,7 +528,7 @@ export class RowLink {
     | {
         store: SelectionStore;
         revision: number;
-        by: { cause: ChangeCause; revision: number | undefined };
+        by: { cause: ChangeCause; revision: number | undefined; phase: Phase };
       }
     | undefined;
   #disposed = false;
@@ -503,55 +565,113 @@ export class RowLink {
 
   /**
    * Takes over what the brush wrote through the link this one replaces, in
-   * channels both bind, so clearing the brush still clears them.
+   * channels both bind, so clearing the brush still clears them, and a
+   * gesture's previews there, which its cancel still undoes.
    */
   adopt(previous: RowLink): void {
+    const sameAs = (b: Bound) =>
+      this.#bound.find((own) => own.store === b.store && own.channel === b.channel);
     for (const [b, written] of previous.#brushed) {
-      const same = this.#bound.find((own) => own.store === b.store && own.channel === b.channel);
+      const same = sameAs(b);
       if (same) this.#brushed.set(same, written);
     }
+    for (const [b, held] of previous.#held) {
+      const same = sameAs(b);
+      if (same?.live) this.#held.set(same, held);
+    }
+    this.#previewing = previous.#previewing;
     // The replaced link's pending check of another writer's change is this one's now.
     if (this.#brushed.size > 0) queueMicrotask(() => this.#reconcile("sync"));
   }
 
   /** Whether the brush (or lasso) of panel `key` writes rows, and so never zooms. */
   brushes(key: string | undefined): boolean {
-    const brush = this.#model.interactionOf(key)?.brush;
+    const brush = shapeOf(this.#model.interactionOf(key)?.brush);
     const gesture = brush === "lasso" ? "lasso" : "brush";
     return brush !== undefined && this.#bound.some((b) => b.events.has(gesture));
   }
 
   /**
-   * The chart's brushed selection changed, in the panels of `owner`
-   * (every panel's, for null), by `cause` at `revision` (the chart's
-   * count of it): with `write`, writes the rows it covers, or clears what
-   * the brush wrote. The changes made, for the `select` event; undefined
-   * for none.
+   * The chart's selection changed (a brush in the panels of `owner`, items,
+   * or series), by `cause` at `revision` (the chart's count of it): with
+   * `write`, writes the rows it covers, or clears what the brush wrote. A
+   * gesture's `preview` goes to live bindings only, and its `cancel` puts
+   * back there what they held before its first preview, where they still
+   * hold what the preview wrote. The changes made, for the `select` event;
+   * undefined for none.
    */
   brushed(
-    selection: Brushed | null,
+    selection: ChartSelection | null,
     owner: SelectionOwner | null,
     write: boolean,
     cause: ChangeCause,
     revision: number,
+    phase: Phase = "commit",
   ): Written | undefined {
+    this.#previewing = phase === "preview";
+    // An Escape that undid a gesture is that key's whole work: the chart may
+    // hear it before or after this binding does (see `#key`).
+    if (phase === "cancel" && cause === "keyboard") {
+      this.#escaped = true;
+      queueMicrotask(() => {
+        this.#escaped = false;
+      });
+    }
     // A selection shown without writing (a synced chart's, another view's)
     // replaces the brush: what that wrote is no longer the chart's to clear.
     if (!write) {
       this.#brushed.clear();
       return undefined;
     }
-    if (!selection) return this.release()(cause, revision);
-    const gesture = selection.lasso ? "lasso" : "brush";
+    const commits = phase === "commit";
+    const bound = this.#bound.filter(
+      (b) => commits || (b.live && (phase === "preview" || this.#holds(b))),
+    );
+    const held = this.#held;
+    if (phase === "preview") {
+      for (const b of bound)
+        if (!held.has(b))
+          held.set(b, { selection: b.store.get(b.channel), brushed: this.#brushed.get(b) });
+    } else this.#held = new Map();
+    if (phase === "cancel") {
+      const back = [...held].filter(([b, { wrote }]) => wrote && holds(b, wrote));
+      for (const [b, { brushed }] of back)
+        if (brushed) this.#brushed.set(b, brushed);
+        else this.#brushed.delete(b);
+      const changes = back.map(([bound, { selection }]) => ({ bound, selection }));
+      return written(this.#write(changes, cause, revision, phase));
+    }
+    // Writes, keeping what a preview wrote, which its gesture's cancel takes back while it is there.
+    const apply = (changes: { bound: Bound; selection: DataSelection | null }[]) => {
+      if (phase === "preview")
+        for (const { bound, selection } of changes) held.get(bound)!.wrote = seen(selection);
+      return written(this.#write(changes, cause, revision, phase));
+    };
+    if (!selection) {
+      if (commits) return this.release()(cause, revision);
+      const holding = bound.filter((b) => this.#holds(b));
+      for (const b of bound) this.#brushed.delete(b);
+      return apply(holding.map((b) => ({ bound: b, selection: null })));
+    }
+    const gesture = selection.kind !== "brush" ? "click" : selection.lasso ? "lasso" : "brush";
     // Every table's rows are found before any channel changes.
-    const changes = this.#bound.flatMap((bound) => {
-      if (!bound.events.has(gesture)) return [];
-      const rows = brushedRows(this.#model, bound.table, selection, owner);
-      return rows ? [{ bound, selection: rows }] : [];
+    const changes = bound.flatMap((b) => {
+      if (!b.events.has(gesture)) return [];
+      const rows =
+        selection.kind === "brush"
+          ? brushedRows(this.#model, b.table, selection, owner)
+          : chosenRows(this.#model, b.table, selection);
+      return rows ? [{ bound: b, selection: rows }] : [];
     });
-    this.#brushed.clear();
+    if (commits) this.#brushed.clear();
     for (const { bound, selection } of changes) this.#brushed.set(bound, seen(selection));
-    return written(this.#write(changes, cause, revision));
+    return apply(changes);
+  }
+
+  /** Whether a channel holds what the chart's brush last wrote there. */
+  #holds(bound: Bound): boolean {
+    const wrote = this.#brushed.get(bound);
+    return wrote !== undefined && holds(bound, wrote);
   }
 
   /**
@@ -605,7 +725,7 @@ export class RowLink {
     const clickable = this.#bound.filter((b) => b.events.has("click"));
     if (event.target !== this.#chart.root || clickable.length === 0) return;
     if (event.key === "Escape") {
-      this.#pick(clickable, undefined, "only", "keyboard");
+      if (!this.#previewing && !this.#escaped) this.#pick(clickable, undefined, "only", "keyboard");
       return;
     }
     if (event.key !== " " || !this.#cursor()) return;
@@ -665,8 +785,11 @@ export class RowLink {
     changes: readonly { bound: Bound; selection: DataSelection | null }[],
     cause: ChangeCause,
     revision?: number,
+    phase: Phase = "commit",
   ): RowSelectionChange[] {
-    const by = { cause, revision };
+    const by = { cause, revision, phase };
+    const outer = writingPhase;
+    writingPhase = phase;
     this.#writing++;
     try {
       for (const { bound, selection } of changes) {
@@ -680,6 +803,7 @@ export class RowLink {
       }
     } finally {
       this.#writing--;
+      writingPhase = outer;
     }
     // A listener may have replaced what the brush wrote while it was written.
     if (this.#writing === 0) this.#reconcile(cause);
@@ -699,12 +823,13 @@ export class RowLink {
    */
   #changed(store: SelectionStore, change: SelectionChange) {
     // The chart's own write reports its cause and revision; any other
-    // (another chart's, a grid's, the application's, a listener's) is "sync".
+    // (another chart's, a grid's, the application's, a listener's) is
+    // "sync", in the phase of the gesture writing it, if a chart's.
     const own = this.#own;
     const by =
       own?.store === store && own.revision === change.revision
         ? own.by
-        : { cause: "sync" as const, revision: undefined };
+        : { cause: "sync" as const, revision: undefined, phase: writingPhase };
     for (const bound of this.#bound) {
       if (bound.store !== store || bound.channel !== change.channel) continue;
       // Counted even when a later change heard first already shows what it made.
@@ -720,6 +845,7 @@ export class RowLink {
         selection: now.selection,
         cause: by.cause,
         revision: by.revision,
+        phase: by.phase,
       });
     }
     // Another writer's change is checked once it has been reported and
@@ -735,6 +861,62 @@ export class RowLink {
     this.#brushed.clear();
     this.#chart.clear(cause);
   }
+}
+
+/**
+ * What items or series hold of `table`'s rows, as a channel takes them:
+ * their condition where one says it; else the rows their keys name (items
+ * named by row identities, layout items by the rows their layout gives
+ * them), or of series of a mark of one series or of one per value field,
+ * every row; of what marks over views draw, only rows their views show.
+ * Null where they hold none of its rows.
+ */
+function chosenRows(
+  model: ChartModel,
+  table: Table,
+  selection: ItemSelection | SeriesSelection,
+): DataSelection | null {
+  const condition = conditionsOf(model, selection, null).find((c) => c.table === table);
+  if (condition) return selectWhere(condition.condition);
+  const marks = model.config.marks as readonly Mark[];
+  const keys = (selection.kind === "items" ? selection.items : selection.series) as string[];
+  const named = keys.flatMap((key) => {
+    // Keys as events give them; others name no mark.
+    let parts: unknown[] = [];
+    try {
+      parts = JSON.parse(key);
+    } catch {}
+    const mark = marks.find((m, i) => (m.spec.id ?? i) === parts[0]);
+    return mark?.table === table ? [{ key, source: parts[1], mark }] : [];
+  });
+  const rows = new RowSet(table);
+  if (selection.kind === "series") {
+    if (named.length === 0) return null;
+    // Over whole tables, a series of one per value field (or the one) holds every row.
+    if (named.every(({ mark }) => !mark.view)) return selectWhere(true);
+    for (const { source, mark } of named) {
+      const split = mark.wide ? undefined : mark.identity?.field;
+      const { codes, dictionary } = split ? table.categories(split as never) : {};
+      const code = dictionary?.indexOf(source as string);
+      const { indices, length } = mark.view?.read() ?? { length: table.length };
+      for (let i = 0; i < length; i++) {
+        const row = indices ? indices[i]! : i;
+        if (code === undefined || codes![row] === code) rows.add(row);
+      }
+    }
+    return rows.size > 0 ? selectRows(rows) : null;
+  }
+  const resolver = itemResolver(marks.map((mark, i) => ({ mark, key: mark.spec.id ?? i })));
+  for (const key of keys) {
+    const laid = model.items?.rowsOfItem(key, table);
+    if (laid) for (const of of laid.rows) rows.addAll(of);
+    else {
+      const view = named.find((entry) => entry.key === key)?.mark.view;
+      const of = resolver.rowsOf(key, table);
+      rows.addAll(view ? of.filter((row) => view.indexOf(row) >= 0) : of);
+    }
+  }
+  return rows.size > 0 ? selectRows(rows) : null;
 }
 
 /** A channel's selection as last seen, with its row set's version. */

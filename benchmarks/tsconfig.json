@@ -11,6 +11,7 @@
       "herceg/pdf": ["../packages/herceg/src/pdf.ts"],
       "herceg/image": ["../packages/herceg/src/image.ts"],
       "herceg/fonts": ["../packages/herceg/src/fonts.ts"],
+      "herceg/state": ["../packages/herceg/src/state.ts"],
       "herceg/spec": ["../packages/herceg/src/from-spec.ts"],
       "herceg/grid": ["../packages/herceg/src/grid.ts"],
       "herceg/layout": ["../packages/herceg/src/layout.ts"],

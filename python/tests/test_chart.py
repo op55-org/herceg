@@ -1649,8 +1649,12 @@ def test_treemaps_and_sunbursts_refuse_paint_and_labels_they_cannot_draw():
         hg.Measure("share", range=(0, 2))
     with pytest.raises(hg.ChartError, match="Look opacity"):
         hg.Look(opacity=2)
-    with pytest.raises(hg.ChartError, match='treemap leaf: unknown key "stroke"'):
+    with pytest.raises(hg.ChartError, match="treemap leaf: a tree's look takes .*; drop stroke"):
         chart.treemap(["market"], leaf={"stroke": "red"})
+    with pytest.raises(hg.ChartError, match="sunburst branch: .*; drop radius"):
+        chart.sunburst(["market"], branch=hg.Look(radius=3))
+    with pytest.raises(hg.ChartError, match='treemap leaf: unknown key "size"'):
+        chart.treemap(["market"], leaf={"size": 2})
 
 
 def test_radars_send_long_or_wide_data():

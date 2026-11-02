@@ -12,8 +12,11 @@
 
 import {
   type AxisInfo,
+  type BrushSelection,
   type Camera,
   type Chart,
+  type ChartMark,
+  type ChartSelection,
   createChart,
   type PanelInfo,
   type RowSelectionChange,
@@ -206,6 +209,7 @@ function mount(component: Component, data: Uint8Array, previous: Instance | unde
   const followsApp = header.spec.theme === undefined;
   const theme = followsApp ? appTheme(element) : undefined;
   const kept = previous && keptView(previous.chart, previous, previous.planeKeys);
+  if (kept) kept.selection = carried(kept.selection, config.marks, same);
   if (previous?.itemFrame !== undefined) cancelAnimationFrame(previous.itemFrame);
   const chart = createChart(element, followsApp ? { ...config, theme: appColors(theme) } : config);
   // What the legends hid, of what the chart still draws; restoring waits for what it loads.
@@ -511,9 +515,16 @@ function restorePlanesAndSelection(
     return;
   }
   const panels = chart.getPanels().filter((panel) => panel.x);
+  // Items and series carry by their keys (those `carried` kept).
+  const chosen = kept.selection;
+  if (chosen && chosen.kind !== "brush") {
+    chart.select(chosen);
+    return;
+  }
   // The selection carries to a panel it was in, through its scales, or to
   // the scale every panel shares.
-  const { selection, selectionPanels } = kept;
+  const { selectionPanels } = kept;
+  const selection = kept.selection as BrushSelection | null;
   const from = kept.panels.find(({ key }) => selectionPanels?.includes(key));
   const at =
     panels.find(({ key }) => selectionPanels?.includes(key)) ??
@@ -523,6 +534,7 @@ function restorePlanesAndSelection(
   const next = selection &&
     from &&
     at && {
+      kind: "brush" as const,
       x: carry(selection.x, from.x, at.x),
       y: carry(selection.y, vertical(from), vertical(at)),
       lasso: selection.lasso,
@@ -563,6 +575,48 @@ function sameCategories(from: AxisInfo | undefined, to: AxisInfo | undefined): b
   const [a, b] = [from?.categories, to?.categories];
   if (!a || !b) return a === b;
   return a.length === b.length && a.every((label, i) => label === b[i]);
+}
+
+/**
+ * Whether an item key names its row by identity: `"row"`, then its table's
+ * token, generation, and identity (an item with no name of its own), which
+ * no table loaded again shares.
+ */
+function namedByRow(key: string, byPosition: ReadonlySet<unknown>, same: boolean): boolean {
+  let parts: unknown[];
+  try {
+    parts = JSON.parse(key);
+  } catch {
+    return false;
+  }
+  const at = parts.length - 4;
+  return (
+    (at >= 1 &&
+      parts[at] === "row" &&
+      parts.slice(at + 1).every((part) => typeof part === "number")) ||
+    (!same && parts.length === 2 && byPosition.has(parts[0]))
+  );
+}
+
+/**
+ * The selection a chart drawn from new bytes takes of the last one's: items
+ * named by their rows go (see `namedByRow`), the others, series, and brushes
+ * as they were; null for none left. Maps' items are named by their rows'
+ * positions, which name the same rows only in the same data (`same`).
+ */
+function carried(
+  selection: ChartSelection | null,
+  marks: readonly ChartMark[],
+  same: boolean,
+): ChartSelection | null {
+  if (selection?.kind !== "items") return selection;
+  const byPosition = new Set(
+    marks.flatMap((mark, i) =>
+      mark.spec.type === "geopoint" || mark.spec.type === "geoshape" ? [mark.spec.id ?? i] : [],
+    ),
+  );
+  const items = selection.items.filter((key) => !namedByRow(key as string, byPosition, same));
+  return items.length > 0 ? { kind: "items", items } : null;
 }
 
 /** Sends the chart's selection to the script, unless the script has it already. */

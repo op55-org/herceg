@@ -73,6 +73,8 @@ export type PlaneViewChange = Omit<ViewReport, "viewRevision">;
 export interface Controls {
   /** Follows the chart's options, as its model has them now. */
   update(): void;
+  /** Ends a gesture changing state `name` (a state option's), which an option changes instead. */
+  end?(name: string): void;
   draw(scene: Scene): void;
   readonly busy: boolean;
   dispose(): void;
@@ -156,6 +158,12 @@ export interface Header {
 
 /** What a layout mark has that a method needs: a tree to drill, nodes to move, a plane to view. */
 type Has = "drill" | "moves" | "plane";
+
+/** A layout mark's layout of a panel, and whether it is of the mark's data and options still. */
+interface Laid {
+  readonly result: LayoutResult;
+  readonly current: () => boolean;
+}
 const WHAT: Record<Has, string> = {
   drill: "treemap or sunburst",
   moves: "network",
@@ -325,7 +333,8 @@ export class ItemViews {
             ? `zoom: expected ${at}.zoom true; received ${JSON.stringify(zoom)}`
             : `zoom: no axes to zoom; drop ${at}.zoom`,
       );
-    if (brush && !axes && !(brush === "lasso" && takes.has("lasso")))
+    const shape = typeof brush === "object" ? brush.shape : brush;
+    if (brush && !axes && !(shape === "lasso" && takes.has("lasso")))
       throw refuse(
         `${at}.brush`,
         takes.has("lasso")
@@ -359,6 +368,13 @@ export class ItemViews {
   /** The chart whose layout marks these are. */
   readonly #model: ChartModel;
   #views: ItemView[] = [];
+  /**
+   * Each layout mark's layouts this frame, and last frame's, by the mark's
+   * key and panel, with whether each is still of the mark's data and
+   * options: what the rows of its items are read from (see `rowsOfItem`).
+   */
+  #laid = new Map<string | number, Map<string, Laid>>();
+  #laidBefore = new Map<string | number, Map<string, Laid>>();
   /** What the scene's layout marks drew, as drawn-mark records (marks/drawn.ts). */
   records: DrawnMark[] = [];
   /** Whether a scene has drawn a layout mark, whose views say which states stay (see `#begin`). */
@@ -504,6 +520,46 @@ export class ItemViews {
   }
 
   /**
+   * The rows of `table` the layout item keyed `key` stands for in each
+   * panel its mark is laid out in (`LayoutResult.rowsOf`): as this frame's
+   * layout there gives them, or one panel not drawn yet, the last frame's,
+   * where that is of the mark's data and options still; `whole` is false
+   * where one was not, whose rows a frame after this one finds. Undefined
+   * for a key of no layout mark.
+   */
+  rowsOfItem(key: string, table: Table): { rows: ArrayLike<number>[]; whole: boolean } | undefined {
+    let mark: unknown;
+    try {
+      mark = (JSON.parse(key) as unknown[])[0];
+    } catch {
+      return undefined;
+    }
+    const now = this.#laid.get(mark as string | number);
+    const before = this.#laidBefore.get(mark as string | number);
+    if (!now && !before) return undefined;
+    const rows: ArrayLike<number>[] = [];
+    let whole = true;
+    for (const panel of new Set([...(now?.keys() ?? []), ...(before?.keys() ?? [])])) {
+      const laid = now?.get(panel) ?? before!.get(panel)!;
+      if (!laid.current()) whole = false;
+      else {
+        const of = laid.result.rowsOf?.(key, table);
+        if (of) rows.push(of);
+      }
+    }
+    return { rows, whole };
+  }
+
+  /**
+   * The chart's revision of a change of `panel`'s camera not reported yet
+   * (Infinity for a gesture's, counted when reported); undefined for none.
+   */
+  pendingCamera(panel?: string): number | undefined {
+    const camera = this.#cameraOwner(panel, "setCamera")?.[1];
+    return camera?.pending ? (camera.revision ?? Number.POSITIVE_INFINITY) : undefined;
+  }
+
+  /**
    * Reports each camera once per frame; reentrant setters remain pending for
    * the next frame. A camera options replaced reports `revision`, the
    * frame's, taken before any listener counts another change.
@@ -581,6 +637,11 @@ export class ItemViews {
   /** The controls of a family: undefined while loading or not asked for, null when they failed to load. */
   controls(kind: LayoutControls["kind"]): Controls | null | undefined {
     return this.#controls.get(kind)?.controls;
+  }
+
+  /** Ends the controls' gestures changing state `name` (see `Controls.end`). */
+  endGestures(name: string): void {
+    for (const { controls } of this.#controls.values()) controls?.end?.(name);
   }
 
   /** Pending while controls load, and while a network's layout has work left. */
@@ -698,6 +759,7 @@ export class ItemViews {
       for (const state of this.#states.keys())
         if (!used.has(state) && !this.#states.get(state)?.camera) this.#states.delete(state);
     this.#views = [];
+    [this.#laidBefore, this.#laid] = [this.#laid, new Map()];
     this.records = [];
     this.#named = named;
     // A mounted chart's scenes share a frame's time with drawing; others
@@ -817,7 +879,7 @@ export class ItemViews {
     const id = mark.spec.id ?? index;
     const laid = mark.draw({
       ...frame,
-      selected: model.layoutHighlight,
+      selected: model.layoutHighlight ?? model.layoutLooks,
       drillable: !!model.config.interaction?.zoom,
       id,
       bounds: plot,
@@ -842,6 +904,22 @@ export class ItemViews {
       ? layers.every((layer, k) => hiddenWhole(layer, layer.spec.id ?? indices![k]!, frame))
       : hiddenWhole(mark, id, frame);
     const result = hidden ? drawnHidden(laid) : laid;
+    // Of these options and data: what makes its items' rows (see `rowsOfItem`).
+    const config = model.config;
+    const tables = [mark.table, ...(mark.otherTables ?? [])].flatMap((table) =>
+      table ? [[table, table.version, table.generation] as const] : [],
+    );
+    const current = () =>
+      model.config === config &&
+      tables.every(
+        ([table, version, generation]) =>
+          table.version === version && table.generation === generation,
+      );
+    // A map's layers joined are laid out once, their items keyed by each layer.
+    for (const key of layers ? layers.map((layer, k) => layer.spec.id ?? indices![k]!) : [id]) {
+      const panels = this.#laid.get(key) ?? new Map<string, Laid>();
+      this.#laid.set(key, panels.set(panel.key, { result: laid, current }));
+    }
     this.#drew = true;
     // Its items are picked through `itemAt` (model/pick.ts, `pickLayout`).
     this.records.push({
@@ -1052,6 +1130,17 @@ export class ItemViews {
   /** The panels a change of a state belongs to, when they are a subplot's. */
   #scope(view: ItemView): { panels?: readonly string[] } {
     return view.state === "" ? {} : { panels: [view.key] };
+  }
+
+  /**
+   * The subplot whose own tree (`drill`), network (`moves`), or 3D camera a
+   * write naming `panel`, or none, changes, as its reports name it; "" for
+   * the chart's. Throws as the write would for a panel of none.
+   */
+  scopeOf(has: "drill" | "moves" | "camera", panel: string | undefined): string {
+    if (has === "camera") return this.#cameraOwner(panel, "setCamera")?.[0] ?? "";
+    const method = has === "drill" ? "setDrillRoot" : "setItemPosition";
+    return this.#scope(this.#owner(has, panel, method)).panels?.[0] ?? "";
   }
 
   /**
@@ -1314,6 +1403,13 @@ export class ItemViews {
     };
   }
 
+  /** Every plane's x and y (see `#plane`), which a reset of every view resets. */
+  get planes(): ScaleInstance[] {
+    return [...new Set(this.#views.filter(planar).map(({ state }) => state))].flatMap((state) =>
+      this.#plane(state),
+    );
+  }
+
   /**
    * The instances of x and y a plane is, keyed by its state, with the
    * panels drawing it: its axes are "linear", in its units.
@@ -1396,6 +1492,20 @@ export class ItemViews {
     if (joined) return made;
     this.changed?.("viewport", made);
     return undefined;
+  }
+
+  /** A change of view reported after it was made (`change`): its planes' views as they are now. */
+  current(change: PlaneViewChange): PlaneViewChange {
+    const now = (panel: string) =>
+      this.#state(this.#owner("plane", panel, "setViewport").state).view;
+    return {
+      ...change,
+      scales: change.scales.map((scale) => ({
+        ...scale,
+        view: now(scale.panels[0]!)[scale.scale as "x" | "y"],
+      })),
+      views: change.views.map((view) => ({ ...view, ...now(view.panel) })),
+    };
   }
 
   /** The panels drawn, in order, with what was drawn there and the key of their state. */

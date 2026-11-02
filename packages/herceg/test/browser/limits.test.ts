@@ -11,6 +11,7 @@ import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
 import { panels } from "../../src/model/panels.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { MOUSE } from "./helpers.ts";
 
 let hosts: HTMLDivElement[] = [];
@@ -380,8 +381,8 @@ describe("sync channels", () => {
       interaction: { brush: "x", sync: "names" },
     });
     // a's first two categories, a and b, are b's last two.
-    a.select({ x: [0, 1], y: null, lasso: null });
-    expect(b.selection?.x).toEqual([1, 2]);
+    a.select({ kind: "brush", x: [0, 1], y: null, lasso: null });
+    expect(brushOf(b.selection)?.x).toEqual([1, 2]);
     b.showCursor({ x: "b" });
     await b.loading;
     await frame();

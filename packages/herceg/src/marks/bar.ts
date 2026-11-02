@@ -25,6 +25,7 @@ import type { BarLabelPlaceSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Side } from "../spec/place.ts";
 import type { BarLabelsSpec, BarSpec, BarStack, Clip, Dash, Frozen } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import type { Halo, TextStyle } from "../spec/style.ts";
 import { dashPattern, type TextPaint, textPaint } from "../style/style.ts";
 import { surface, type Theme } from "../theme.ts";
@@ -89,7 +90,7 @@ import {
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-interface BarStyle<S extends Schema> extends ItemKeyed<S> {
+interface BarStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** The outline that keeps text readable: "auto" (the default), false for none, or a color of its own. */
   halo?: Halo;
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
@@ -1732,6 +1733,8 @@ export function bar<S extends Schema>(
       "labels",
       "halo",
       "id",
+      "selected",
+      "unselected",
       "itemKey",
       "axis",
       "facet",

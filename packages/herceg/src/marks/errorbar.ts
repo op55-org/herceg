@@ -8,6 +8,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import type { Rect, SegmentGeometry } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, ErrorBarSpec, Frozen } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
@@ -43,7 +44,7 @@ import { boxOf, clipBox, distanceToCut, paintedLater } from "./shapes.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-interface ErrorBarStyle<S extends Schema> extends ItemKeyed<S> {
+interface ErrorBarStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -653,6 +654,8 @@ export function errorbar<S extends Schema>(
       "label",
       "legend",
       "id",
+      "selected",
+      "unselected",
       "itemKey",
       "axis",
       "facet",

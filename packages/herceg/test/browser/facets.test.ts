@@ -17,6 +17,7 @@ import { point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
 import { facet } from "../../src/model/facet.ts";
 import { panels } from "../../src/model/panels.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { brief } from "../helpers/views.ts";
 import { bandBox, MOUSE, modelOf } from "./helpers.ts";
 
@@ -134,8 +135,8 @@ describe("facets in the browser", () => {
     pointer(chart.root, "pointermove", b!.x.map(4), y);
     // Past the panel's edge, the drag stops at it.
     pointer(chart.root, "pointerup", b!.plot.x + b!.plot.width + 30, y);
-    expect(chart.selection!.x![0]).toBeCloseTo(2, 6);
-    expect(chart.selection!.x![1]).toBeCloseTo(9, 6);
+    expect(brushOf(chart.selection)!.x![0]).toBeCloseTo(2, 6);
+    expect(brushOf(chart.selection)!.x![1]).toBeCloseTo(9, 6);
     await frame();
     const bands = [...chart.root.querySelectorAll('svg path[fill-opacity="0.18"]')].filter(
       (r) => r.getAttribute("visibility") === "visible",
@@ -567,7 +568,7 @@ describe("facet panels with x scales of their own", () => {
     pointer(chart.root, "pointerdown", b!.x.map(102), y);
     pointer(chart.root, "pointermove", b!.x.map(104), y);
     pointer(chart.root, "pointerup", b!.x.map(104), y);
-    expect(chart.selection!.x![0]).toBeCloseTo(102, 6);
+    expect(brushOf(chart.selection)!.x![0]).toBeCloseTo(102, 6);
     expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
     expect(selections.at(-1)!.owner.panels).toEqual(["b"]);
     expect(selections.at(-1)!.owner.scales.map(({ scale, panels }) => [scale, panels])).toEqual([
@@ -589,9 +590,7 @@ describe("facet panels with x scales of their own", () => {
     chart.render();
     expect(chart.selection).toBeNull();
     expect(selections.at(-1)).toMatchObject({
-      x: null,
-      y: null,
-      lasso: null,
+      selection: null,
       owner: { panels: ["a"] },
     });
     chart.destroy();
@@ -607,8 +606,8 @@ describe("facet panels with x scales of their own", () => {
     });
     chart.select([102, 104], { panel: "b" });
     // Clearing the selection, which Enter does first, takes b away.
-    chart.on("select", ({ x }) => {
-      if (x) return;
+    chart.on("select", ({ selection }) => {
+      if (selection) return;
       data.reset({ t: [0, 1], v: [1, 2], region: ["a", "a"] });
       chart.render();
     });
@@ -638,8 +637,8 @@ describe("facet panels with x scales of their own", () => {
     chart.on("viewport", (event) => events.push(event));
     chart.select([102, 104], { panel: "b" });
     // The listener changes the data and leaves drawing to the next frame.
-    chart.on("select", ({ x }) => {
-      if (!x) data.reset({ t: [0, 1], v: [1, 2], region: ["a", "a"] });
+    chart.on("select", ({ selection }) => {
+      if (!selection) data.reset({ t: [0, 1], v: [1, 2], region: ["a", "a"] });
     });
     key(chart, "Enter");
     expect(events).toEqual([]);
@@ -658,7 +657,7 @@ describe("facet panels with x scales of their own", () => {
     chart.select([100, 100.5], { panel: "b" });
     chart.render();
     expect(chart.getViewport().x).toEqual([100, 101]);
-    expect(chart.selection!.x).toEqual([100, 100.5]);
+    expect(brushOf(chart.selection)!.x).toEqual([100, 100.5]);
     expect(chart.selectionOwner?.panels ?? null).toEqual(["a", "b"]);
     chart.update({ x: { scope: "panel" } });
     chart.setViewport([1, 2], { panel: "a" });
@@ -681,7 +680,7 @@ describe("facet panels with x scales of their own", () => {
     data.reset({ t: [0, 1, 2], v: [1, 2, 3], region: ["b", "c", "d"] });
     chart.render();
     expect(chart.selectionOwner?.panels ?? null).toEqual(["b", "c", "d"]);
-    expect(chart.selection!.x).toEqual([1, 2]);
+    expect(brushOf(chart.selection)!.x).toEqual([1, 2]);
     chart.destroy();
   });
 
@@ -709,13 +708,13 @@ describe("facet panels with x scales of their own", () => {
     key(chart, "End");
     shift("ArrowLeft");
     expect(chart.selectionOwner?.panels ?? null).toEqual(["a"]);
-    expect(chart.selection!.x).toEqual([8, 9]);
+    expect(brushOf(chart.selection)!.x).toEqual([8, 9]);
     // Down to b, at the same place across its plot: 8 of 0..9 is 108 of 100..109.
     key(chart, "ArrowDown");
     expect(live.textContent).toMatch(/^b: 108\. /);
     // A range does not reach from a's values into b's.
     shift("ArrowLeft");
-    expect(chart.selection!.x).toEqual([107, 108]);
+    expect(brushOf(chart.selection)!.x).toEqual([107, 108]);
     expect(chart.selectionOwner?.panels ?? null).toEqual(["b"]);
     key(chart, "Enter");
     expect(views(chart)).toEqual([null, [107, 108]]);
@@ -738,7 +737,7 @@ describe("facet panels with x scales of their own", () => {
     split.setViewport([2, 3], { panel: "a" });
     split.select([4, 5], { panel: "a" });
     expect(plain.getViewport().x).toEqual([100, 105]);
-    expect(plain.selection!.x).toEqual([101, 102]);
+    expect(brushOf(plain.selection)!.x).toEqual([101, 102]);
     // A cursor at 104 shows in b, whose scale holds it, and not in a.
     pointer(plain.root, "pointermove", plain.toPixel(104, { axis: "x" })!, 150);
     await frame();
@@ -814,7 +813,7 @@ describe("facet panels with categories of their own", () => {
     pointer(chart.root, "pointerdown", s!.x.map(0) - 5, y);
     pointer(chart.root, "pointermove", s!.x.map(1), y);
     pointer(chart.root, "pointerup", s!.x.map(1), y);
-    expect(chart.selection!.x).toEqual([0, 1]);
+    expect(brushOf(chart.selection)!.x).toEqual([0, 1]);
     expect(chart.selectionOwner?.panels ?? null).toEqual(["S"]);
     await frame();
     const bands = [...chart.root.querySelectorAll('svg path[fill-opacity="0.18"]')].filter(
@@ -831,7 +830,7 @@ describe("facet panels with categories of their own", () => {
         .panels()
         .map((p) => p.key),
     ).toEqual(["S", "E"]);
-    expect(chart.selection!.x).toEqual([0, 1]);
+    expect(brushOf(chart.selection)!.x).toEqual([0, 1]);
     expect(chart.selectionOwner?.panels ?? null).toEqual(["S"]);
     // Its own changing, band 1 would be another category (b keeps its place
     // in the table's dictionary, before a): it is cleared.
@@ -840,9 +839,7 @@ describe("facet panels with categories of their own", () => {
     expect(modelOf(chart).panels()[0]!.x.categories).toEqual(["b", "a", "c"]);
     expect(chart.selection).toBeNull();
     expect(selections.at(-1)).toMatchObject({
-      x: null,
-      y: null,
-      lasso: null,
+      selection: null,
       owner: { panels: ["S"] },
     });
     chart.destroy();
@@ -1164,7 +1161,7 @@ describe("right axes in panels", () => {
     pointer(selecting.root, "pointerdown", c!.x.map(0.5), top);
     pointer(selecting.root, "pointermove", c!.x.map(1.5), bottom);
     pointer(selecting.root, "pointerup", c!.x.map(1.5), bottom);
-    expect(selecting.selection!.y![1]).toBeCloseTo(c!.y.invert(top), 4);
+    expect(brushOf(selecting.selection)!.y![1]).toBeCloseTo(c!.y.invert(top), 4);
     selecting.destroy();
   });
 

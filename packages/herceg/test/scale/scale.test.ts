@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { numberTickLabels, timeTickLabels } from "../../src/format/format.ts";
 import { fromWall, toWall, zoneOffset } from "../../src/format/zone.ts";
-import { alphaOf, isLightColor } from "../../src/scale/color.ts";
+import { alphaOf } from "../../src/scale/alpha.ts";
+import { isLightColor } from "../../src/scale/color.ts";
 import { BandScale, LinearScale, LogScale, niceLogDomain } from "../../src/scale/scale.ts";
 import { linearTicks, niceDomain, tickStep } from "../../src/scale/ticks.ts";
 import { chooseInterval, niceTimeDomain, TimeScale, timeTicks } from "../../src/scale/time.ts";

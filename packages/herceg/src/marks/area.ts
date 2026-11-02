@@ -18,6 +18,7 @@ import type {
   StackSpec,
   StackSupport,
 } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type {
   AreaLabels,
@@ -100,7 +101,7 @@ import {
   UnionStack,
 } from "./union-stack.ts";
 
-interface AreaCommon<S extends Schema> extends ItemKeyed<S> {
+interface AreaCommon<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
@@ -1179,6 +1180,8 @@ export function area<S extends Schema>(
       "label",
       "legend",
       "id",
+      "selected",
+      "unselected",
       "itemKey",
       "axis",
       "facet",

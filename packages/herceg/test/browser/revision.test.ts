@@ -17,6 +17,7 @@ import { point3d } from "../../src/marks/point3d.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { frame, heard, key, mount, mountNow, pointer, within } from "./interaction/helpers.ts";
 
 function sales() {
@@ -194,7 +195,7 @@ describe("chart revision", () => {
     expect(changes.at(-1)).toMatchObject({ cause: "sync", revision: ++at });
     await Promise.resolve();
     expect(chart.selection).toBeNull();
-    expect(selects.at(-1)).toMatchObject({ x: null, cause: "sync", revision: ++at });
+    expect(selects.at(-1)).toMatchObject({ selection: null, cause: "sync", revision: ++at });
   });
 
   it("counts options it applies, not options it refuses", async () => {
@@ -220,7 +221,7 @@ describe("chart revision", () => {
     pointer(chart, "pointerup", x1, y);
     expect(selects.at(-1)).toMatchObject({ cause: "pointer", revision: chart.revision });
     key(chart, "Escape");
-    expect(selects.at(-1)).toMatchObject({ x: null, cause: "keyboard" });
+    expect(selects.at(-1)).toMatchObject({ selection: null, cause: "keyboard" });
     const button = chart.root.querySelector<HTMLButtonElement>("[aria-label=Legend] button");
     // A button pressed from the keyboard clicks with no count; the mouse's counts one.
     button?.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
@@ -502,7 +503,7 @@ describe("chart revision", () => {
     const options = chart.revision;
     chart.render();
     expect(views.at(-1)).toMatchObject({ cause: "options", revision: options });
-    expect(selects.at(-1)).toMatchObject({ x: null, cause: "options", revision: options });
+    expect(selects.at(-1)).toMatchObject({ selection: null, cause: "options", revision: options });
     expect(chart.revision).toBe(options + 1);
   });
 
@@ -539,7 +540,7 @@ describe("chart revision", () => {
     expect(held).not.toBeNull();
     expect(held).not.toBe(fromB);
     // The selection in a took the place of b's going.
-    expect(selects.map(({ x }) => x)).toEqual([[1, 2]]);
+    expect(selects.map(({ selection }) => brushOf(selection)?.x ?? null)).toEqual([[1, 2]]);
   });
 
   it("reports no selection an update retires once a listener selected and cleared since", async () => {
@@ -568,7 +569,7 @@ describe("chart revision", () => {
       marks: [line(rows, { x: "t", y: "a", panel: "a" })],
     });
     chart.render();
-    expect(selects.map(({ x, cause }) => [x, cause])).toEqual([
+    expect(selects.map(({ selection, cause }) => [brushOf(selection)?.x ?? null, cause])).toEqual([
       [[1, 2], "api"],
       [null, "api"],
     ]);

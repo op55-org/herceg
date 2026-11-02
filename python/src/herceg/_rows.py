@@ -37,7 +37,10 @@ class SelectionBinding:
     select (all three by default; none for a chart that only shows what
     others select), where the chart's ``brush`` draws a brush or a lasso;
     a brush that selects rows never zooms. ``effect="none"`` leaves rows
-    the channel does not hold undimmed. ``data`` is the table, an object
+    the channel does not hold undimmed. With ``live``, the channel hears a
+    brush's previews while it moves, and its cancel, as well as its commit:
+    the channel follows the brush (a widget's views, and other views of
+    the data, then change as it moves). ``data`` is the table, an object
     given to the chart or one of its marks; by default, the chart's data.
     ``fields`` are more of its columns to send with the chart than its
     marks read, so that conditions set from Python (``widget.row_selection
@@ -54,8 +57,13 @@ class SelectionBinding:
     data: Any = field(default=None, repr=False)
     fields: Sequence[str] = ()
     selection: Any = field(default=None, repr=False)
+    live: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.live, bool):
+            raise ChartError(
+                f"SelectionBinding live: expected True or False; received {shown(self.live)}"
+            )
         if not isinstance(self.channel, str) or not self.channel:
             raise ChartError(
                 f"SelectionBinding channel: expected a name; received {shown(self.channel)}"
@@ -96,6 +104,8 @@ class SelectionBinding:
             spec["events"] = list(self.events)
         if self.effect != "highlight":
             spec["effect"] = self.effect
+        if self.live:
+            spec["live"] = True
         if self.selection is not None:
             selection, buffers = encode(self.selection, length, "SelectionBinding selection")
             if selection is not None:

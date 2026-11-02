@@ -38,6 +38,7 @@ import {
 import { resolveCamera, sameCamera } from "../../packages/herceg/src/three/camera.ts";
 import {
   CAMERAS,
+  type ChosenPayload,
   chartSelection,
   chartViewport,
   DRILLS,
@@ -100,7 +101,7 @@ export interface ViewportRequest {
 /** Interaction state shared by Python and every display. */
 interface ViewStates {
   camera: Camera | null;
-  select: SelectionPayload | null;
+  select: SelectionPayload | ChosenPayload | null;
   viewport: ViewsPayload | null;
   drill: DrillPayload | null;
   itemMove: ItemPositionsPayload;
@@ -591,9 +592,18 @@ class Widget {
     };
     const waiting = this.#waiting(chart) ? chart.loading : undefined;
     if (!waiting) restore();
-    chart.on("select", (selection) =>
-      this.#report("select", view, selectionReport(selection, selection.owner)),
-    );
+    // Python hears every phase, with the basis it may write back on; the
+    // commit or cancel ending a gesture even of what its last preview
+    // showed, not an echo of a selection shown here.
+    let previewed = false;
+    chart.on("select", ({ selection, owner, phase, basis }) => {
+      const ending = previewed && phase !== "preview";
+      previewed = phase === "preview";
+      this.#report("select", view, selectionReport(selection, owner), "", ending, undefined, {
+        phase,
+        ...(basis && { basis }),
+      });
+    });
     // Python reads the views as the engine does, by scale instance and
     // panel, beside the planes of subplots' maps and networks. A change
     // made while the chart takes the views agreed on goes to no one: what
@@ -910,6 +920,7 @@ class Widget {
     panel = "",
     resend = false,
     change?: ViewportEventPayload,
+    said: Record<string, unknown> = {},
   ) {
     const key = stateKey(event, panel);
     const same = valuesOf(event, payload) === valuesOf(event, this.#state(event, panel));
@@ -931,6 +942,7 @@ class Widget {
     const report: Record<string, unknown> = {
       type: event,
       ...value,
+      ...said,
       origin: this.#origin,
       revision: this.#revision,
     };
@@ -992,7 +1004,13 @@ class Widget {
       return;
     }
     if (event === "select") {
-      const selection = payload as SelectionPayload | null;
+      // Items and series are named by their keys, in every display alike.
+      const chosen = payload as SelectionPayload | ChosenPayload | null;
+      if (chosen?.kind === "items" || chosen?.kind === "series") {
+        chart.select(chosen, { rows: false });
+        return;
+      }
+      const selection = chosen;
       if (namesCategories(selection) || selection?.lasso) chart.render();
       // A subplot's map or network's lasso is its panel's.
       const target = selection?.panels?.[0];
@@ -1037,7 +1055,8 @@ class Widget {
    * when they move.
    */
   #learnCategories(chart: Chart, selection: SelectionPayload) {
-    const categories = selectionPayload(chart.selection, chart.selectionOwner)?.categories;
+    const brushed = chart.selection?.kind === "brush" ? chart.selection : null;
+    const categories = selectionPayload(brushed, chart.selectionOwner)?.categories;
     if (!categories) return;
     const known = { ...selection, categories };
     this.#states.set("select", known);
@@ -1260,7 +1279,7 @@ class Widget {
    */
   #keepCategorySelection() {
     const selection = this.#state("select");
-    if (!namesCategories(selection)) return;
+    if (selection?.kind !== "brush" || !namesCategories(selection)) return;
     for (const view of this.#views) if (this.#ready(view)) this.#show(view, "select", selection);
   }
 
@@ -1291,7 +1310,9 @@ class Widget {
             : { ...agreed, planes: { ...agreed.planes, [panel]: fitted } },
         );
       }
-      if (panel !== "" && !this.#state("select")?.panels?.includes(panel)) continue;
+      const selected = this.#state("select");
+      if (panel !== "" && !(selected?.kind === "brush" && selected.panels?.includes(panel)))
+        continue;
       this.#outbox.cancel("select");
       this.#report("select", undefined, null);
     }
@@ -1455,7 +1476,12 @@ function valuesOf(event: ViewEvent, state: ViewState): string {
     return JSON.stringify(views && [{ ...views.axes, viewRevision: 0 }, views.planes]);
   }
   if (event === "itemMove") return positionsValue(state as ItemPositionsPayload);
-  const selection = state as SelectionPayload | null;
+  const selection = state as SelectionPayload | ChosenPayload | null;
+  if (selection && selection.kind !== "brush") {
+    // Items and series are sets of keys (or references, from Python): in one order.
+    const keys = selection.kind === "items" ? selection.items : selection.series;
+    return JSON.stringify([selection.kind, keys.map((key) => JSON.stringify(key)).sort()]);
+  }
   const { x = null, y = null, lasso = null, panels } = selection ?? {};
   return JSON.stringify([x, y, lasso, panels]);
 }

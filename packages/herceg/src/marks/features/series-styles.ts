@@ -8,7 +8,7 @@
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import type { FeatureKit } from "../../model/features.ts";
-import type { Drawing, Geometry } from "../../scene/scene.ts";
+import type { Geometry } from "../../scene/scene.ts";
 import type { ChannelSpec, EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
 import type { Dash } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
@@ -26,6 +26,7 @@ import {
 } from "./channels.ts";
 import type { Where } from "./compile.ts";
 import { firstAfter, type Look, type RunPart, type Runs, StyleRuns, subset } from "./runs.ts";
+import { translucent } from "./translucent.ts";
 
 /** The paint a series takes from the features, over its mark's flat paint. */
 export interface SeriesPaint {
@@ -619,47 +620,4 @@ export class SeriesStyles {
  */
 function held(checked: Checked, rowOffset: number): boolean {
   return (checked.value === undefined ? checked.seen : checked.evidence) >= rowOffset;
-}
-
-const translucents = new WeakMap<Drawing<Geometry>, Map<number, Drawing<Geometry>>>();
-/**
- * How many opacities of one drawing are kept: drawings such as lines' live
- * as long as the page, and opacities streaming in would otherwise stay.
- */
-const KEPT_OPACITIES = 256;
-
-/** A drawing of the same geometry at `opacity`, the same while it is among the last opacities asked for. */
-export function translucent(draw: Drawing<Geometry>, opacity: number): Drawing<Geometry> {
-  let byOpacity = translucents.get(draw);
-  if (!byOpacity) {
-    byOpacity = new Map();
-    translucents.set(draw, byOpacity);
-  }
-  let made = byOpacity.get(opacity);
-  if (made) return made;
-  // The opacity asked for longest ago goes first.
-  if (byOpacity.size >= KEPT_OPACITIES) byOpacity.delete(byOpacity.keys().next().value!);
-  const { elements, canvas: paint } = draw;
-  made = {
-    ...draw,
-    opacity: (draw.opacity ?? 1) * opacity,
-    svg: (geometry, context) => `<g opacity="${opacity}">${draw.svg(geometry, context)}</g>`,
-    elements:
-      elements &&
-      ((geometry, context) =>
-        elements(geometry, context)?.map(({ tag, attributes }) => ({
-          tag,
-          attributes: { ...attributes, opacity: String(opacity * Number(attributes.opacity ?? 1)) },
-        }))),
-    canvas:
-      paint &&
-      ((context, geometry, options) => {
-        const alpha = context.globalAlpha;
-        context.globalAlpha = alpha * opacity;
-        paint(context, geometry, options);
-        context.globalAlpha = alpha;
-      }),
-  } as Drawing<Geometry>;
-  byOpacity.set(opacity, made);
-  return made;
 }

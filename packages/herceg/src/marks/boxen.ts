@@ -331,6 +331,8 @@ export function boxen<S extends Schema>(
       "pick",
       "inspect",
       "id",
+      "selected",
+      "unselected",
     ]),
   };
   if (table.name !== undefined) spec.data = table.name;

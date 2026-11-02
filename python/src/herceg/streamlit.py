@@ -29,10 +29,10 @@ from ._chart import Camera
 from ._derive import Expr
 from ._errors import ChartError, shown
 from ._events import (
+    ChartSelection,
     DrillRoot,
     InputEvent,
     ItemPositions,
-    Selection,
     Viewport,
     checked,
     decode_drill_root,
@@ -59,9 +59,10 @@ Reaction = Literal["ignore", "rerun"] | Callable[[], Any]
 class ChartState:
     """What the user did with a chart, as of this script run."""
 
-    #: What is brushed (x and y ranges, a lasso's outline), or None; it stays
-    #: until the user changes it.
-    selection: Selection | None = None
+    #: What is selected (a brush's x and y ranges and lasso's outline, or
+    #: items or series by their keys), or None; it stays until the user
+    #: changes it.
+    selection: ChartSelection | None = None
     #: Visible ranges: along each axis, of the scale every panel shares (None
     #: where panels have scales of their own; see ``panel_viewports``), or a
     #: map's or network's plane, in projected or layout units.

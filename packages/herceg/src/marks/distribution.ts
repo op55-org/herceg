@@ -15,6 +15,7 @@ import {
 import { clearDomain } from "../model/clearance.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
 import type { BoxenSpec, BoxPlotSpec, Clip, Frozen, ViolinSpec } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
@@ -94,7 +95,7 @@ export type DistributionOptions<S extends Schema> = (
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
   id?: string;
-};
+} & SelectionLooks;
 
 export const STATS = ["q1", "median", "q3", "low", "high", "count"] as const;
 export type Stat = (typeof STATS)[number];

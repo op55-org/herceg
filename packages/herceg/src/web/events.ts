@@ -4,7 +4,7 @@
 // are named, so readers can make dates of epoch milliseconds, and category
 // positions are their labels rather than band indices.
 
-import type { Selection } from "../dom/brushed.ts";
+import type { BrushSelection } from "../dom/brushed.ts";
 import { MountedChart } from "../dom/chart.ts";
 import type {
   Box,
@@ -20,6 +20,7 @@ import type { DrawnPanel, Inspection, Viewport, ViewSet } from "../model/model.t
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Expression } from "../spec/spec.ts";
+import type { Phase } from "../spec/state.ts";
 
 type Ends = [number, number] | [string, string];
 type Range = readonly [number, number];
@@ -33,8 +34,9 @@ export interface ViewportPayload {
   time?: Axis[];
 }
 
-/** A selection: x and y ranges and a lasso's outline. */
+/** A brush's selection (`BrushSelection`): x and y ranges and a lasso's outline. */
 export interface SelectionPayload {
+  kind: "brush";
   /** The panels it belongs to (`SelectionOwner.panels`), whose axes read its ranges. */
   panels?: string[];
   x: Ends | null;
@@ -113,15 +115,23 @@ export interface SelectionOwnerPayload {
   panels: string[];
 }
 
+/** Items or series selected, by their keys (see `ItemSelection`, `SeriesSelection`). */
+export type ChosenPayload =
+  | { kind: "items"; items: string[] }
+  | { kind: "series"; series: string[] };
+
 /**
- * A `select` event: the selection, null once cleared, what it belongs to
- * (or, cleared, belonged to), what made it, and the chart's revision then.
+ * A `select` event: the selection (a brush's, or items or series), null
+ * once cleared, what it belongs to (or, cleared, belonged to), the
+ * gesture's phase, what made it, the chart's revision then, and its basis.
  */
 export interface SelectEventPayload {
   owner: SelectionOwnerPayload;
-  selection: SelectionPayload | null;
+  selection: SelectionPayload | ChosenPayload | null;
+  phase: Phase;
   cause: ChangeCause;
   revision: number;
+  basis?: string;
 }
 
 /** An `edge` event: the scale instance, the end its view came near, and what moved it there. */
@@ -477,11 +487,19 @@ function ownerPayload({ scales, panels }: SelectionOwner): SelectionOwnerPayload
  * which carry their categories as the event was made, and what it belongs to.
  */
 export function selectEventPayload(event: ChartEvents["select"]): SelectEventPayload {
+  const chosen = event.selection;
   return {
     owner: ownerPayload(event.owner),
-    selection: selectionPayload(event, event.owner),
+    selection:
+      chosen?.kind === "items"
+        ? { kind: "items", items: chosen.items as string[] }
+        : chosen?.kind === "series"
+          ? { kind: "series", series: chosen.series as string[] }
+          : selectionPayload(chosen, event.owner),
+    phase: event.phase,
     cause: event.cause,
     revision: event.revision,
+    ...(event.basis !== undefined && { basis: event.basis }),
   };
 }
 
@@ -558,7 +576,7 @@ export function chartViewport(
  * `select` events and `chart.selectionOwner` give it), or null for none.
  */
 export function selectionPayload(
-  selection: Selection | null,
+  selection: BrushSelection | null,
   owner: SelectionOwner | null,
 ): SelectionPayload | null {
   if (!selection || !(selection.x || selection.y || selection.lasso)) return null;
@@ -572,6 +590,7 @@ export function selectionPayload(
       y?.categories ? [...y.categories] : null,
     ];
   return {
+    kind: "brush",
     ...(owner && { panels: [...owner.panels] }),
     x: ends(selection.x, x),
     y: ends(selection.y, y),
@@ -586,7 +605,10 @@ export function selectionPayload(
  * category labels, where the categories are now, and null when a range's
  * categories are gone, since part of a selection is another selection.
  */
-export function chartSelection(chart: Chart, payload: SelectionPayload | null): Selection | null {
+export function chartSelection(
+  chart: Chart,
+  payload: SelectionPayload | null,
+): BrushSelection | null {
   if (!payload) return null;
   // A lasso whose categories moved would outline others.
   if (payload.lasso && payload.categories) {
@@ -597,7 +619,7 @@ export function chartSelection(chart: Chart, payload: SelectionPayload | null): 
   const y = chartRange(payload.y, scales.y);
   if ((payload.x && !x) || (payload.y && !y)) return null;
   const lasso = payload.lasso?.map(([px, py]) => [px, py] as const) ?? null;
-  return x || y || lasso ? { x, y, lasso } : null;
+  return x || y || lasso ? { kind: "brush", x, y, lasso } : null;
 }
 
 /**

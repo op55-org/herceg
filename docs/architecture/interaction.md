@@ -10,6 +10,7 @@ do, see the [Interaction guide](../guide/interaction.md).
 - [Bindings](#bindings)
 - [Views](#views)
 - [Brushes](#brushes)
+- [Selections and chart state](#selections-and-chart-state)
 - [Sync channels](#sync-channels)
 - [Tooltips and crosshair labels](#tooltips-and-crosshair-labels)
 - [Layout controls](#layout-controls)
@@ -254,6 +255,111 @@ drawn in the pointer overlay, clipped to each plot.
   brushes that write rows never zoom.
 - With `tooltip.axisLabels`, crosshair labels come from
   `dom/axis-labels.ts` ([below](#tooltips-and-crosshair-labels)).
+- **Phases.** A drag, move, or resize hands each frame's selection to the
+  chart as a preview (`InteractionHost.preview`), which reports it as a
+  `select` event of phase `"preview"` without changing `chart.selection`
+  or writing rows (but to `live` bindings). The first move between two
+  frames previews at once (`frameCount`), so the charts a live binding
+  reaches draw it on the coming frame rather than the one after; later
+  moves preview after their frame draws. Release commits through the
+  ordinary `select` path; Escape, a lost pointer, a release where the
+  brush began, or an option changing the selection meanwhile reports a
+  `cancel` of the selection there is. A binding hearing another chart's
+  write reports that writer's phase (`writingPhase`), and ignores the
+  Escape that cancelled a gesture whichever hears the key first. Editing (`brush.edit`) is the `editBrush` binding: the brush
+  finds the handle under the pointer (`Brush.handleAt`: inside moves,
+  within 5 px of an edge or corner resizes), and the wheel over it
+  resizes about the pointer. `clear` is a `clearBrush` binding on a
+  double click, or the click that clears by default.
+
+## Selections and chart state
+
+A chart has one selection (`ChartSelection`, `spec/state.ts`): a brush's
+ranges, or items or series by their keys. Core keeps it, draws brushes,
+and reports changes; everything else about state lives in an opt-in module,
+`herceg/state` (`state/chart-state.ts`), given as `state: chartState`, so a
+line chart carries none of it. Core keeps only the rule: without the
+module it refuses state options, `interaction.select`, selections of items
+and series, `expected`, `chart.basis`, and reading `select` events'
+`conditions`, each with an error naming the import (`needsState`).
+
+**What the module does.** Attached once at creation (`attach(host)`), it
+wraps the chart's setters and its event emitter rather than adding hooks
+to each:
+
+- **Setters** take `expected` and references to items and series
+  (`{ mark, item }`, `{ mark, series }`), which it turns into keys sorted
+  into one order, so selections equal by value are equal as written.
+- **`update`** of state options alone applies them as options do, without
+  the chart comparing or rebuilding its marks and settings.
+- **Reports** gain each state's whole value as its option takes it
+  (`state`), a `basis`, and for `select`, `conditions`.
+- **State options** apply through the public setters with cause
+  `"options"` (`StateHost.as`, which also ends a gesture changing that
+  state with a `cancel`; maps' and networks' lassos and pans end through
+  their controls, `Controls.end`). A value equal to the one last given, or to what
+  the chart last reported (a select event's previews included, so writing
+  a preview back does not end the gesture), changes nothing: write-back
+  from adapters' and applications' state never loops. Drill roots wait
+  for the first frame's trees.
+- **Bases** are the chart's token and a revision. The module records the
+  revision of the last change of each scope (the selection, each view's
+  scale instance, what is hidden, each tree's root, each camera and moved
+  node): a setter's as it makes it (`#mutated`, of the scopes found before
+  it writes, so a reset's are those it resets), and every report's as it
+  is emitted, before any listener hears it (and may change the state
+  again), a newer one never replaced by an older; views' reports, which
+  the chart makes only for listeners, always have one. A state a call
+  waiting for the first frame writes refuses every conditional write
+  until that frame (`#waiting`). Cameras a gesture turned and not
+  reported yet are read from the item views (`pendingCamera`).
+  A write naming no panel is checked in the scope its setter resolves
+  (`ItemViews.scopeOf`). A conditional write is refused if its scopes
+  changed after its basis, and reports the state again with cause
+  `"api"` through the chart's own `emit`, unrecorded: that report is no
+  change; a change not reported yet reports itself. A basis of another
+  chart is refused outright.
+- **Looks** of items and series load on first use
+  (`selectionLooks` in `model/highlight.ts`, through `LOOKS_KIT`): the
+  highlighter replaces marks' geometry with what a selection holds of
+  each (`chosenIn`, cached per selection, mark, and table version), drawn
+  in the marks' `selected` and `unselected` looks (`paintOf`, named
+  dashes through `dashPattern`), the same paint row-selection
+  highlighting uses. Custom marks read their own series' membership
+  through `Frame.highlighted(table, mark, series)`, so an item is only its
+  own mark's and series'. Layout marks take the rows of their selected
+  items from the layouts that drew them, in every panel
+  (`ItemViews.rowsOfItem`, over `LayoutResult.rowsOf`): this frame's
+  where drawn, else the last frame's where it is of the same options and
+  data; a frame that found one of neither draws again. Each panel draws
+  its items' shares of its own rows. A look's stroke gives points and
+  rectangles an outline they did not have. Annotations take no looks.
+- **Conditions** (`model/conditions.ts`) translate a selection into an
+  expression per table: a brush's ranges on the fields its marks place
+  along the brushed axes, within each panel's facet values where the
+  facet splits the mark (`within`), items through their keys' names and
+  what an aggregate groups by (`Mark.groupsOf`), series through their
+  field; each within its mark's view filter (`viewed`). A table gets none
+  rather than an approximation; rows written then come from the marks'
+  views.
+
+**Static exports** call `state.exported` (`render/static-state.ts`):
+hidden keys apply before the first draw; views and drill roots need a
+drawn scene's scales, planes, and trees, so a first draw is followed by a
+second. Maps' and networks' views go to their planes.
+A selection is refused: exports draw no brush overlay, and a selection's
+looks are a live chart's. Without the module, static options with state
+are refused as live charts' are.
+
+**Adapters** import the module and pass state props as options; when only
+state props change, they pass just those to `update`, which the module
+applies alone. Vue's `v-model` and
+Svelte's `bind:` follow commits. Python's widget starts from the chart's
+first selection and hidden keys, and answers its own conditional writes:
+it compares `expected` with the latest select report's basis, and its own
+writes invalidate every earlier basis. Streamlit carries selections across
+the reruns that remount a chart, but items named only by their rows,
+whose keys name the tables of the chart before.
 
 ## Sync channels
 
@@ -275,9 +381,13 @@ the view, and the selection, each on one of the chart's scales.
   shares wait for the frame (`#early` and `#reports` in `dom/chart.ts`).
   On charts of facets, subplots, maps, or networks, whose panels and
   planes that frame draws, calls and what synced charts share wait too,
-  and the frame makes them in order. The reports come after them,
+  and the frame makes them in order; selections received wait on every
+  chart, since their categories are named. The reports come after them,
   sharing each channel's state then, so a newer value a synced chart
-  sent is not overwritten by an older local one.
+  sent is not overwritten by an older local one: one received is selected
+  again without sharing it back (its sender's rows stay its own), a local
+  change is shared with the selection it replaced (a clear included), and
+  planes' views are read again (`ItemViews.current`) as the axes' are.
 - **Values as data.** Numbers and times as they are, categories by name
   (`#encode`, `#decode` in `dom/chart.ts`), so charts with other
   categories show the same one. A chart shares and shows cursors along the

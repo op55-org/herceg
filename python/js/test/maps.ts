@@ -36,6 +36,7 @@ export function focusMap(chart: Chart) {
   chart.setViewport({ x: [cx - hx, cx + hx], y: [cy - hy, cy + hy] });
   chart.render();
   chart.select({
+    kind: "brush",
     x: null,
     y: null,
     lasso: [

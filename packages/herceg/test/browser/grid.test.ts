@@ -10,6 +10,7 @@ import { createGrid, type Grid, type GridOptions } from "../../src/dom/grid.ts";
 import { createGridModel, type GridColumn, type GridModel } from "../../src/grid/model.ts";
 import { point } from "../../src/marks/point.ts";
 import { resolveTheme } from "../../src/theme.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { collectGarbage, modelOf } from "./helpers.ts";
 
 const hosts: HTMLElement[] = [];
@@ -606,9 +607,10 @@ describe("grids linked to charts", () => {
       const selected = store.get("grid-rows");
       chartView.restrict(selected?.kind === "rows" ? selected.rows : null);
     });
-    chart.on("select", ({ x }) =>
-      gridView.setQuery({ filter: x ? col("x").ge(x[0]).and(col("x").le(x[1])) : true }),
-    );
+    chart.on("select", ({ selection }) => {
+      const x = brushOf(selection)?.x;
+      gridView.setQuery({ filter: x ? col("x").ge(x[0]).and(col("x").le(x[1])) : true });
+    });
     await userEvent.click(rowAt(grid, 2)!.querySelector("[role=gridcell]")!);
     await userEvent.click(rowAt(grid, 5)!.querySelector("[role=gridcell]")!, {
       modifiers: ["Shift"],

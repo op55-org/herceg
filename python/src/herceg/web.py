@@ -37,10 +37,10 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from ._errors import ChartError, shown
 from ._events import (
+    ChartSelection,
     InputEvent,
     Inspection,
     SelectEvent,
-    Selection,
     ViewEdge,
     Viewport,
     ViewportEvent,
@@ -253,7 +253,7 @@ def _check_chart(chart: Any, location: str) -> None:
         )
 
 
-def selection(value: str | Mapping[str, Any] | None) -> Selection | None:
+def selection(value: str | Mapping[str, Any] | None) -> ChartSelection | None:
     """A selection a page posts back: a ``herceg:select`` event's
     ``detail.selection``, as JSON text or parsed; None for none."""
     return _read("web.selection", lambda value: decode_selection(checked("select", value)), value)

@@ -14,6 +14,7 @@ import type { Table } from "../../../src/data/table.ts";
 import type { Chart } from "../../../src/dom/chart.ts";
 import type { RowSelectionChange } from "../../../src/model/row-selection.ts";
 import type { BrushSpec, SelectionGesture } from "../../../src/spec/spec.ts";
+import type { BrushSelection } from "../../../src/spec/state.ts";
 import {
   cellsOf,
   defaultsOf,
@@ -24,6 +25,7 @@ import {
   paintsOf,
 } from "../../contracts/matrix.ts";
 import { contractTest } from "../../helpers/contracts.ts";
+import { brushOf } from "../../helpers/selections.ts";
 import { canvasPixels, expectChartRefused, mount, mountLoaded, sceneOf } from "./mount.ts";
 import {
   around,
@@ -260,12 +262,15 @@ async function expectLineAlone(
 
 const SHAPES = { "brush-x": "x", "brush-y": "y", "brush-xy": "xy", lasso: "lasso" } as const;
 
-type Brushed = { x: Pair | null; y: Pair | null; lasso: Pair[] | null; rows?: unknown };
+type Brushed = BrushSelection & { rows?: unknown };
 
-/** Drags a path, and the one select event it reports. */
+/** Drags a path, and the brush of the one select event committing it (previews come before). */
 function brush(chart: Chart, path: Pair[]): Brushed {
   const events: Brushed[] = [];
-  const off = chart.on("select", (event) => events.push(event as Brushed));
+  const off = chart.on("select", ({ selection, rows, phase }) => {
+    if (phase === "commit")
+      events.push({ ...brushOf(selection)!, ...(rows !== undefined && { rows }) });
+  });
   drag(chart, path);
   off();
   expect(events).toHaveLength(1);
@@ -287,7 +292,7 @@ for (const [gesture, shape] of Object.entries(SHAPES) as [keyof typeof SHAPES, B
         const event = brush(chart, dragged);
         // What it covers: the ranges dragged, or the outline drawn; nothing else.
         if (gesture === "lasso") {
-          expectOutline(chart, event.lasso, dragged);
+          expectOutline(chart, event.lasso as Pair[] | null, dragged);
         } else {
           expect(event.lasso).toBeNull();
           if (gesture === "brush-y") expect(event.x).toBeNull();
@@ -296,7 +301,12 @@ for (const [gesture, shape] of Object.entries(SHAPES) as [keyof typeof SHAPES, B
           else expectRange(chart, event.y, selecting.y!, "y");
         }
         expect(event.rows, "no store, no rows").toBeUndefined();
-        expect(chart.selection).toEqual({ x: event.x, y: event.y, lasso: event.lasso });
+        expect(chart.selection).toEqual({
+          kind: "brush",
+          x: event.x,
+          y: event.y,
+          lasso: event.lasso,
+        });
       });
   });
 
@@ -352,8 +362,10 @@ describe("selection.click", () => {
           table: source,
           channel: "focus",
           selection: store.get("focus"),
+          phase: "commit",
           cause: "pointer",
           revision: chart.revision,
+          basis: expect.any(String),
         },
       ]);
     });
@@ -446,8 +458,10 @@ describe("selection.receive", () => {
           table: source,
           channel: "focus",
           selection: store.get("focus"),
+          phase: "commit",
           cause: "sync",
           revision: chart.revision,
+          basis: expect.any(String),
         },
       ]);
       // The chart counts the rows it highlights in its text alternative.

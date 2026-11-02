@@ -16,6 +16,7 @@ import { facet } from "../../../src/model/facet.ts";
 import { panels } from "../../../src/model/panels.ts";
 import { rowSelection } from "../../../src/model/row-selection.ts";
 import { contractTest } from "../../helpers/contracts.ts";
+import { brushOf } from "../../helpers/selections.ts";
 import { modelOf } from "../helpers.ts";
 import { drag, heard, mount, placements, rows, within } from "./helpers.ts";
 
@@ -199,11 +200,11 @@ describe("selections along a right axis alone", () => {
 
   it("belong to the panels drawing the right y, in its values", async () => {
     const chart = await mount(sides());
-    chart.select({ x: null, y: [110, 150], lasso: null }, { panel: "b" });
+    chart.select({ kind: "brush", x: null, y: [110, 150], lasso: null }, { panel: "b" });
     const owner = chart.selectionOwner!;
     expect(owner.scales.map(({ scale }) => scale)).toEqual(["yRight"]);
     expect(owner.panels).toEqual(["b"]);
-    expect(chart.selection!.y).toEqual([110, 150]);
+    expect(brushOf(chart.selection)!.y).toEqual([110, 150]);
   });
 
   it("refuse a y range without a panel where panels have left y scales of their own", async () => {
@@ -212,7 +213,7 @@ describe("selections along a right axis alone", () => {
       marks: [...sides().marks, line(data, { x: "t", y: "v", panel: "b" })],
       y: { scope: "panel" },
     });
-    expect(() => chart.select({ x: null, y: [12, 20], lasso: null })).toThrow(
+    expect(() => chart.select({ kind: "brush", x: null, y: [12, 20], lasso: null })).toThrow(
       expect.objectContaining({ code: "invalid-option", path: "y" }),
     );
   });

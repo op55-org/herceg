@@ -2,7 +2,7 @@ import { rectDrawing } from "../draw/rect.ts";
 import type { BarMark } from "../marks/bar.ts";
 import type { Frame, MarkKey } from "../marks/mark.ts";
 import { rowOf, type Series } from "../marks/series.ts";
-import { alphaOf } from "../scale/color.ts";
+import { alphaOf } from "../scale/alpha.ts";
 import type { Geometry, RectGeometry } from "../scene/scene.ts";
 import type { RowPaint } from "./features.ts";
 

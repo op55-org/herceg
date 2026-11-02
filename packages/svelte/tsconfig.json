@@ -6,7 +6,8 @@
     "types": [],
     "paths": {
       "herceg": ["../herceg/src/index.ts"],
-      "herceg/layout": ["../herceg/src/layout.ts"]
+      "herceg/layout": ["../herceg/src/layout.ts"],
+      "herceg/state": ["../herceg/src/state.ts"]
     }
   },
   "include": ["src", "test", "vitest.config.ts"]

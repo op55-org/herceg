@@ -21,6 +21,8 @@ import { treemap } from "../../src/marks/treemap.ts";
 import { ChartModel, type ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
+import { chartState } from "../../src/state.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { accessibilityTree, MOUSE, modelOf, pageOrigin, realMouse } from "./helpers.ts";
 
 const mounted: Chart[] = [];
@@ -440,7 +442,7 @@ describe("maps", () => {
     const held = store.get("picked");
     expect(held?.kind === "rows" && [...held.rows.positions()]).toEqual([2, 3, 4]);
     expect(selects).toHaveLength(1);
-    expect(selects[0]!.lasso).not.toBeNull();
+    expect(brushOf(selects[0]!.selection)?.lasso).not.toBeNull();
     // The lasso is drawn on the map, and stays there as it pans.
     const outline = () => chart.root.querySelector("path[d^='M'][fill-opacity], g path[d$='Z']");
     expect(outline()).not.toBeNull();
@@ -460,7 +462,8 @@ describe("maps", () => {
   });
 
   it("draw the lasso selected as it changes, with no row selection to draw a scene", async () => {
-    const chart = await map({ interaction: { brush: "lasso" } });
+    // A brush given with its settings lassos as one given by its shape alone.
+    const chart = await map({ interaction: { brush: { shape: "lasso" } } });
     const { x, y } = plane(chart);
     const [top, bottom] = [y.map(4 * radians), y.map(-4 * radians)];
     const [left, right] = [x.map(22 * radians), x.map(48 * radians)];
@@ -474,7 +477,7 @@ describe("maps", () => {
       await mouse(chart, "mouseMoved", px, py);
     await mouse(chart, "mouseReleased", left, bottom);
     await frame();
-    const lasso = chart.selection!.lasso!;
+    const lasso = brushOf(chart.selection)!.lasso!;
     // The map's lasso outlines, shown or not.
     const shown = () =>
       [...chart.root.querySelectorAll("path[clip-path^='url(#herceg-map-lasso']")].some(
@@ -486,9 +489,63 @@ describe("maps", () => {
     await frame();
     expect(chart.selection).toBeNull();
     expect(shown()).toBe(false);
-    chart.select({ x: null, y: null, lasso });
+    chart.select({ kind: "brush", x: null, y: null, lasso });
     await frame();
     expect(shown()).toBe(true);
+  });
+
+  it("clear a lasso as its bindings say: a double-click, or a key", async () => {
+    const chart = await map({
+      interaction: {
+        brush: { shape: "lasso", clear: "double-click" },
+        bindings: [{ gesture: { type: "key", key: "Delete" }, action: { type: "clearBrush" } }],
+      },
+    });
+    const { x, y } = plane(chart);
+    const lasso: [number, number][] = [
+      [0, 0],
+      [0.5, 0],
+      [0.5, 0.5],
+    ];
+    const [px, py] = [x.map(30 * radians), y.map(0)];
+    chart.select({ kind: "brush", x: null, y: null, lasso });
+    expect(brushOf(chart.selection)?.lasso).toEqual(lasso);
+    await mouse(chart, "mousePressed", px, py);
+    await mouse(chart, "mouseReleased", px, py);
+    await mouse(chart, "mousePressed", px, py, { clickCount: 2 });
+    await mouse(chart, "mouseReleased", px, py, { clickCount: 2 });
+    await frame();
+    expect(chart.selection).toBeNull();
+    // Nothing selected, a double-click does what it did before: the view is whole still.
+    expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: null });
+    chart.select({ kind: "brush", x: null, y: null, lasso });
+    chart.root.focus();
+    await userEvent.keyboard("{Delete}");
+    expect(chart.selection).toBeNull();
+  });
+
+  it("end a lasso being drawn when a selection option takes its place", async () => {
+    const chart = await map({ state: chartState, interaction: { brush: "lasso" } });
+    const { x, y } = plane(chart);
+    const [top, bottom] = [y.map(4 * radians), y.map(-4 * radians)];
+    const [left, right] = [x.map(22 * radians), x.map(48 * radians)];
+    await mouse(chart, "mouseMoved", left, top);
+    await mouse(chart, "mousePressed", left, top);
+    await mouse(chart, "mouseMoved", right, top);
+    const given = [
+      [0, 0],
+      [0.1, 0],
+      [0.1, 0.1],
+    ] as [number, number][];
+    chart.update({ selection: { kind: "brush", x: null, y: null, lasso: given } });
+    for (const [px, py] of [
+      [right, bottom],
+      [left, bottom],
+    ] as const)
+      await mouse(chart, "mouseMoved", px, py);
+    await mouse(chart, "mouseReleased", left, bottom);
+    await frame();
+    expect(brushOf(chart.selection)?.lasso).toEqual(given);
   });
 
   it("keep a lasso and its rows when a click lands on a layer of another table", async () => {
@@ -527,7 +584,7 @@ describe("maps", () => {
     await click(chart, x.map(65 * radians), y.map(0));
     await frame();
     expect(picked()).toEqual([0, 1]);
-    expect(chart.selection?.lasso).toBeTruthy();
+    expect(brushOf(chart.selection)?.lasso).toBeTruthy();
     // A click off the data clears both.
     await click(chart, x.map(85 * radians), y.map(30 * radians));
     await frame();
@@ -569,7 +626,7 @@ describe("maps", () => {
     expect(cut()).toBeGreaterThan(1);
     await mouse(chart, "mouseReleased", ...at(0.6, 0.61));
     await frame();
-    expect(chart.selection?.lasso).toBeTruthy();
+    expect(brushOf(chart.selection)?.lasso).toBeTruthy();
     expect(cut()).toBeGreaterThan(1);
   });
 });
@@ -1050,7 +1107,7 @@ describe("networks", () => {
       await frame();
       const held = store.get("picked");
       expect(held?.kind === "rows" && [...held.rows.positions()]).toEqual([0, 4]);
-      expect(chart.selection?.lasso).toHaveLength(5);
+      expect(brushOf(chart.selection)?.lasso).toHaveLength(5);
       expect(moved).toEqual([]);
       expect(chart.toSVG()).toContain('stroke-opacity="0.1125"');
       const selected = chart.selection;

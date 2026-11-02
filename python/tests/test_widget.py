@@ -398,26 +398,26 @@ def test_appended_categories_join_in_row_order_as_in_the_browser():
 
 def test_selections_from_the_browser_become_properties_and_callbacks():
     widget, browser = live(brush="xy")
-    selections = []
-    widget.on_select(selections.append)
+    events: list[hg.SelectEvent] = []
+    widget.on_select(events.append)
     payload = {"x": [MS0, MS0 + 60_000], "y": [1.0, 2.0], "lasso": None, "time": ["x"]}
     browser.reply({"type": "select", "selection": payload})
     browser.reply({"type": "select", "selection": payload})  # another view echoing it
-    rectangle = hg.Selection(x=(T0, T0 + dt.timedelta(minutes=1)), y=(1.0, 2.0))
-    assert selections == [rectangle]
+    rectangle = hg.BrushSelection(x=(T0, T0 + dt.timedelta(minutes=1)), y=(1.0, 2.0))
+    assert [event.selection for event in events] == [rectangle]
     assert widget.selection == rectangle
     browser.reply({"type": "select", "selection": None})
-    assert selections[-1] is None and widget.selection is None
+    assert events[-1].selection is None and widget.selection is None
     lasso = {"x": [0.0, 2.0], "y": [1.0, 3.0], "lasso": [[0, 1], [2, 1], [2, 3]], "time": []}
     browser.reply({"type": "select", "selection": lasso})
-    assert widget.selection == hg.Selection(
+    assert widget.selection == hg.BrushSelection(
         x=(0.0, 2.0), y=(1.0, 3.0), lasso=((0, 1), (2, 1), (2, 3))
     )
-    widget.on_select(selections.append, remove=True)
+    widget.on_select(events.append, remove=True)
     browser.reply({"type": "select", "selection": payload})
-    assert len(selections) == 3
+    assert len(events) == 3
     # New browsers start from the current selection.
-    assert widget.get_state()["_chart"]["selection"] == payload
+    assert widget.get_state()["_chart"]["selection"] == {"kind": "brush", **payload}
 
 
 def views(x=None, y=None, y_right=None, *, time=("x",), revision=1):
@@ -574,7 +574,7 @@ def test_a_lassos_categories_stay_known():
     selections = []
     widget.on_select(selections.append)
     outline = [[0, 0], [1, 0], [1, 1]]
-    widget.selection = hg.Selection(x=("a", "b"), lasso=[tuple(p) for p in outline])
+    widget.selection = hg.BrushSelection(x=("a", "b"), lasso=[tuple(p) for p in outline])
     # A browser drawing it tells which categories it is over: kept, without a callback.
     learned = {
         "x": ["a", "b"],
@@ -604,8 +604,8 @@ def test_malformed_reports_from_the_browser_change_nothing():
         "x",
     ):
         browser.reply({"type": "select", "selection": bad})
-    assert widget.selection == hg.Selection(x=(0, 1), y=(0, 1), lasso=((0, 0), (1, 0), (1, 1)))
-    assert widget.get_state()["_chart"]["selection"] == good
+    assert widget.selection == hg.BrushSelection(x=(0, 1), y=(0, 1), lasso=((0, 0), (1, 0), (1, 1)))
+    assert widget.get_state()["_chart"]["selection"] == {"kind": "brush", **good}
     # A selection of nothing is none.
     browser.reply({"type": "select", "selection": {"x": None, "y": None, "lasso": None}})
     assert widget.selection is None
@@ -818,7 +818,9 @@ def test_event_payloads_decode_to_python_values():
     )
     assert decode_viewport(None) == hg.Viewport()
     times = {"x": [MS0, MS0], "y": [MS0, MS0], "lasso": [[MS0, MS0]] * 3, "time": ["y"]}
-    assert decode_selection(times) == hg.Selection(x=(MS0, MS0), y=(T0, T0), lasso=((MS0, T0),) * 3)
+    assert decode_selection(times) == hg.BrushSelection(
+        x=(MS0, MS0), y=(T0, T0), lasso=((MS0, T0),) * 3
+    )
     assert decode_selection(None) is None
     category = decode_inspection(
         {"axis": "y", "value": "west", "time": False, "label": "west", "panel": "eu", "points": []}
@@ -832,33 +834,38 @@ def test_viewports_and_selections_encode_for_the_browser():
     assert encode_viewport(hg.Viewport(y_right=stamps))["yRight"] == [MS0, MS0 + 60_000]
     assert encode_viewport(None) == {"x": None, "y": None, "yRight": None, "time": []}
     assert encode_selection(("b", "a")) == {
+        "kind": "brush",
         "x": ["b", "a"],
         "y": None,
         "lasso": None,
         "time": [],
     }
-    lasso = encode_selection(hg.Selection(lasso=[(T0, 1), (T0, 2), (stamps[1], 2)]))
+    lasso = encode_selection(hg.BrushSelection(lasso=[(T0, 1), (T0, 2), (stamps[1], 2)]))
     assert lasso == {
+        "kind": "brush",
         "x": None,
         "y": None,
         "lasso": [[MS0, 1.0], [MS0, 2.0], [MS0 + 60_000, 2.0]],
         "time": ["x"],
     }
     # A selection of nothing is none.
-    assert encode_selection(hg.Selection()) is None
+    assert encode_selection(hg.BrushSelection()) is None
     with pytest.raises(
         ValueError, match="Viewport x: expected a \\(start, end\\) pair or None; received 5"
     ):
         encode_viewport(5)
     with pytest.raises(
         ValueError,
-        match=r"Selection x: a range of categories needs two category labels; received \('a', 1\)",
+        match=r"BrushSelection x: a range of categories needs two category labels; "
+        r"received \('a', 1\)",
     ):
         encode_selection(("a", 1))
     with pytest.raises(ValueError, match="Viewport x: expected finite values; received nan"):
         encode_viewport((0, float("nan")))
-    with pytest.raises(ValueError, match="Selection lasso: expected at least 3 points; received 2"):
-        encode_selection(hg.Selection(lasso=[(0, 0), (1, 1)]))
+    with pytest.raises(
+        ValueError, match="BrushSelection lasso: expected at least 3 points; received 2"
+    ):
+        encode_selection(hg.BrushSelection(lasso=[(0, 0), (1, 1)]))
 
 
 @pytest.mark.parametrize("kind", ["treemap", "sunburst"])

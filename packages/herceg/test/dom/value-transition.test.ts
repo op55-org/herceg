@@ -42,7 +42,6 @@ import { planAxis } from "../../src/model/axis.ts";
 import { axisGuide } from "../../src/model/axis-guide.ts";
 import { facet } from "../../src/model/facet.ts";
 import { GUIDE_KIT } from "../../src/model/guides.ts";
-import { Highlighter } from "../../src/model/highlight.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -69,6 +68,7 @@ import {
 } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 
 const clock = vi.hoisted(() => ({ frame: 0 }));
 vi.mock("../../src/dom/scheduler.ts", () => ({ lastFrameTime: () => clock.frame }));
@@ -346,7 +346,7 @@ describe("bars changing values", () => {
         });
         const store = selectionStore(data);
         store.set("focus", selectRows(new RowSet(data).addAll([1])));
-        const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+        const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
         model.highlight = (mark, series, frame, key) =>
           highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
         const { tween } = change(model, () => {
@@ -375,7 +375,7 @@ describe("bars changing values", () => {
     });
     const store = selectionStore(data);
     store.set("focus", selectRows(new RowSet(data).addAll([1])));
-    const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
     model.highlight = (mark, series, frame, key) =>
       highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
     expect(change(model, () => data.setColumn("a", [2, 8, NaN])).tween).toBe(undefined);
@@ -411,7 +411,7 @@ describe("bars changing values", () => {
         if (highlighted) {
           const store = selectionStore(data);
           store.set("focus", selectRows(new RowSet(data).addAll([0, 1])));
-          const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+          const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
           model.highlight = (mark, series, frame, key) =>
             highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
         }
@@ -1307,7 +1307,7 @@ describe("lines and areas changing values", () => {
           const store = selectionStore(data);
           const firsts = [0, 1, 3, 4].filter((row) => row < data.length);
           store.set("focus", selectRows(new RowSet(data).addAll(firsts)));
-          const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+          const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
           model.highlight = (mark, series, frame, key) =>
             highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
         }

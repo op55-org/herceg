@@ -446,7 +446,14 @@ export class ChartModel {
    * Which of a table's rows the selection a chart highlights holds, for
    * layout marks drawing them (maps, trees, networks): set as `highlight` is.
    */
-  declare layoutHighlight: ((table: Table) => Uint8Array | undefined) | undefined;
+  declare layoutHighlight: Frame["highlighted"];
+  /**
+   * Draws the chart's own selection of items or series in its marks' looks,
+   * and of layout marks' rows, where no store's highlight does: set by a
+   * chart once it has loaded what draws them (see `selectionLooks`).
+   */
+  declare looks: typeof geometryOf | undefined;
+  declare layoutLooks: Frame["highlighted"];
   /**
    * Reads the fields marks' tooltips show of rows (`tooltip.fields`) for
    * inspections: set by a chart once it has loaded what reads them.
@@ -2521,7 +2528,7 @@ export class ChartModel {
     const views: PanelView[] = [];
     const headers: HeaderGuide[] = [];
     const all: (ItemPanel & { items: boolean })[] = [];
-    const draw = this.highlight ?? geometryOf;
+    const draw = this.highlight ?? this.looks ?? geometryOf;
     // Axes the guides list deeper with the panels' own x plans, or with y
     // labels reaching further as planned (once), or legends beside panels
     // wrapped wider than their plots took (twice, by when the plots hold
@@ -2680,7 +2687,7 @@ export class ChartModel {
           ((placement?.edge(i, true) ?? true) && head.labels[1]) ||
             plot.x + plot.width + (rightLabels.labeled[i] ? rightLabels.room : 0) + GAP,
         ],
-        highlighted: this.layoutHighlight,
+        highlighted: this.layoutHighlight ?? this.layoutLooks,
         ...this.#pools(i),
       };
       // Marks on the right axis draw with its scale.

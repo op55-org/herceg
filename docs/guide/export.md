@@ -16,7 +16,7 @@ and binary payloads.
 ## Exporting a chart
 
 A mounted chart exports what it shows now: its size, zoom, hidden series,
-and highlighted rows. Static options export the same way without a DOM, on
+selected items, and highlighted rows. Static options export the same way without a DOM, on
 servers, in workers, and in build scripts.
 
 ```ts
@@ -61,6 +61,11 @@ pdf = chart.to_pdf()
   background, else white.
 - With `rowSelection`, static exports draw what its stores hold, as a
   mounted chart would.
+- Static options draw the first view, hidden series, and drill root their
+  [state options](interaction.md#chart-state) give, with `state:
+  chartState` from `herceg/state` (charts from specs have it). They
+  refuse a `selection`, which they do not draw: export selected rows
+  through `rowSelection`.
 - Node has no raster backend: on a server, write SVG or PDF, or images
   from Python. See the [roadmap](../roadmap.md).
 - Python's images are rasterized by resvg and encoded by Pillow (`pip
@@ -315,6 +320,8 @@ spec, buffers = chart.to_spec()
 - **Marks** are the same objects as a TypeScript mark's `spec`, with `data`
   naming their table. A mark's `spec` is frozen: to change a mark, build a
   new one and `update({ marks })`.
+- **State options** (`selection`, `viewport`, `visibility`, `drillRoot`)
+  give the chart's [first state](interaction.md#chart-state).
 - **Row selections** are bindings with `data` naming the table:
   `{ "data": "trips", "channel": "focus", "events": ["brush", "click"] }`,
   optionally with a starting `selection` (a condition, or rows by
@@ -373,7 +380,7 @@ Fragments report through DOM events that bubble and cross shadow roots
 | `herceg:ready` | `{ id }` |
 | `herceg:error` | `{ id, error }`; `preventDefault()` keeps it out of the console |
 | `herceg:click` | `{ id, panel?, pointer, target, inspection, cause, revision }`: an input event ([Events](interaction.md#events)), its axis values in `pointer.time` and an axis label's in `target.time` marked as times |
-| `herceg:select` | `{ id, owner, selection, cause, revision }` |
+| `herceg:select` | `{ id, owner, selection, phase, cause, revision, basis }`, once a selection is committed (not while a brush moves): a brush's (`kind: "brush"`, ranges as below) or items or series by their keys |
 | `herceg:viewport` | `{ id, viewRevision, revision, cause, panel?, scales, views }` |
 | `herceg:edge` | `{ id, scale, instance, time, panels, side, domain, bound, cause }` |
 | `herceg:rowselection` | `{ id, data, channel, selection, cause, revision }` |

@@ -9,7 +9,7 @@ import type { Fonts } from "../fonts/registry.ts";
 import { type RasterSource, sizedRoot } from "../image/raster.ts";
 import { estimateText, type MeasureText } from "../layout/text.ts";
 import { describeChart } from "../model/describe.ts";
-import { type ChartConfig, ChartModel, STATIC_RASTER_RATIO } from "../model/model.ts";
+import { ChartModel, STATIC_RASTER_RATIO } from "../model/model.ts";
 import { isLightColor } from "../scale/color.ts";
 import { cssColor } from "../scale/css-color.ts";
 import type { Scene } from "../scene/scene.ts";
@@ -27,11 +27,12 @@ import { checkCoverage } from "./coverage.ts";
 import { EXPORT_FONTS, EXPORT_SCENE, type ExportsScene } from "./export-scene.ts";
 import { NO_PAGE } from "./fallbacks.ts";
 import { pngDataUrl } from "./png.ts";
+import { drawInState, type StatefulConfig } from "./static-state.ts";
 import { checkSizing, renderSvg, type SvgSizing } from "./svg.ts";
 import { type SvgTitles, titlesOf } from "./titles.ts";
 
 /** A chart's options for output without a page: SVG, images, and PDF. */
-export interface StaticOptions extends ChartConfig {
+export interface StaticOptions extends StatefulConfig {
   /** CSS pixels the chart is laid out in, unless an export's `size` says otherwise. */
   width: number;
   height: number;
@@ -135,7 +136,7 @@ export function checkMounted(
  * text measured with `fonts` (whose coverage is checked) or `measure`.
  */
 export function drawStatic(
-  options: ChartConfig,
+  options: StatefulConfig,
   width: number,
   height: number,
   fonts: Fonts | undefined,
@@ -147,7 +148,7 @@ export function drawStatic(
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);
   if (fonts) measure = fonts.measure;
-  const scene = model.scene(measure, false, NO_PAGE);
+  const scene = drawInState(model, options, () => model.scene(measure, false, NO_PAGE));
   // What the fonts do not cover is refused, as PDF export refuses it.
   if (fonts) checkCoverage(scene, fonts.measure);
   return { scene, model, measure };

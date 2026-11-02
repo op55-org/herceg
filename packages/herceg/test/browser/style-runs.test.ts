@@ -12,7 +12,6 @@ import { area } from "../../src/marks/area.ts";
 import { line } from "../../src/marks/line.ts";
 import { DIM } from "../../src/marks/mark.ts";
 import { facet } from "../../src/model/facet.ts";
-import { Highlighter } from "../../src/model/highlight.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { paintCanvas } from "../../src/render/canvas.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
@@ -20,6 +19,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import { renderSvg } from "../../src/render/svg.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 
 let host: HTMLDivElement;
 
@@ -250,7 +250,7 @@ describe("style runs", () => {
       model.setSize(400, 300, 1);
       const source = rows as unknown as Table;
       const store = selectionStore(source);
-      const highlighter = new Highlighter([{ table: source, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: source, store, channel: "focus" }]);
       model.highlight = (mark, series, frame, key) =>
         highlighter.geometry(mark, series, frame, key) ?? mark.geometry(series, frame, key);
       store.set("focus", selectRows(new RowSet(source).addAll(on)));

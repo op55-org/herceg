@@ -46,7 +46,7 @@ import { treemap } from "../src/marks/treemap.ts";
 import { UnionStack } from "../src/marks/union-stack.ts";
 import { facet } from "../src/model/facet.ts";
 import { GUIDE_KIT } from "../src/model/guides.ts";
-import { membership } from "../src/model/highlight.ts";
+import { membership } from "../src/model/memberships.ts";
 import { ChartModel } from "../src/model/model.ts";
 import { overviewBars } from "../src/model/navigator-bars.ts";
 import { panels } from "../src/model/panels.ts";

@@ -1,5 +1,7 @@
 import {
   type AxisFormat,
+  type ChartEvents,
+  type ChartSelection,
   type CustomSeries,
   col,
   createChart,
@@ -22,6 +24,7 @@ import {
   table,
   time,
   timeBreaks,
+  type ViewportState,
 } from "herceg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -751,14 +754,16 @@ describe("<Chart>", () => {
   it("emits chart events to the listener of the latest render", async () => {
     const { view, chart } = chartRef();
     const seen: string[] = [];
-    const handler = shallowRef((event: { x: readonly [number, number] | null }) =>
-      seen.push(`one:${event.x?.join("-")}`),
+    const brushed = ({ selection }: ChartEvents["select"]) =>
+      selection?.kind === "brush" ? selection.x?.join("-") : undefined;
+    const handler = shallowRef((event: ChartEvents["select"]) =>
+      seen.push(`one:${brushed(event)}`),
     );
     mount(
       `<Chart ref="view" @select="handler"><Line :data="metrics" x="t" y="a" /></Chart>`,
       () => ({ metrics, view, handler }),
     );
-    handler.value = (event) => seen.push(`two:${event.x?.join("-")}`);
+    handler.value = (event) => seen.push(`two:${brushed(event)}`);
     await nextTick();
     chart().select([1, 2]);
     expect(seen).toEqual(["two:1-2"]);
@@ -854,7 +859,7 @@ describe("<Chart>", () => {
     chart().select([1, 2]);
     // `click` is the chart's event, not the element's.
     host.firstElementChild!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(seen).toMatchObject([{ x: [0, 1], y: null, lasso: null }]);
+    expect(seen).toMatchObject([{ selection: { kind: "brush", x: [0, 1], y: null, lasso: null } }]);
     expect(seen).toHaveLength(1);
   });
 
@@ -1471,4 +1476,34 @@ it.each([
   const strokes = host.querySelectorAll('[stroke-dasharray]:not([stroke-dasharray=""])');
   expect(strokes).toHaveLength(expected ? 3 : 0);
   for (const stroke of strokes) expect(stroke.getAttribute("stroke-dasharray")).toBe(expected);
+});
+
+describe("v-model state", () => {
+  it("follows the selection and the view as they commit, and sets them, with no loop", async () => {
+    const { view, chart } = chartRef();
+    const selection = shallowRef<ChartSelection | null>(null);
+    const viewport = shallowRef<ViewportState | undefined>(undefined);
+    mount(
+      `<Chart ref="view" v-model:selection="selection" v-model:viewport="viewport"
+        :interaction="{ brush: 'x', zoom: 'x' }">
+        <Line :data="metrics" x="t" y="a" />
+      </Chart>`,
+      () => ({ metrics, view, selection, viewport }),
+    );
+    await nextTick();
+    const events: ChartEvents["select"][] = [];
+    chart().on("select", (event) => events.push(event));
+    chart().select([1, 2]);
+    chart().setViewport([0, 3]);
+    await nextTick();
+    expect(selection.value).toEqual({ kind: "brush", x: [1, 2], y: null, lasso: null });
+    expect(viewport.value).toEqual({ x: [0, 3], y: null, yRight: null });
+    await nextTick();
+    expect(events.map(({ cause }) => cause)).toEqual(["api"]);
+    // The application's value applies, as an option.
+    selection.value = { kind: "brush", x: [0, 1], y: null, lasso: null };
+    await nextTick();
+    expect(chart().selection).toEqual(selection.value);
+    expect(events.map(({ cause }) => cause)).toEqual(["api", "options"]);
+  });
 });

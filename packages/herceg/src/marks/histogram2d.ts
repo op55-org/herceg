@@ -28,6 +28,7 @@ import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, niceTimeDomain, timeTicks } from "../scale/time.ts";
 import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { BinSpec, Clip, Frozen, Histogram2DSpec } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
@@ -54,7 +55,7 @@ import { type MarkRows, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
 
 /** A histogram of x and y both: cells counting pairs of values. */
-export interface Histogram2DOptions<S extends Schema> {
+export interface Histogram2DOptions<S extends Schema> extends SelectionLooks {
   /** Number or time field binned along x. */
   x: NumericField<S>;
   /** Number or time field binned along y. */
@@ -594,7 +595,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
       },
       key,
     );
-    return [...whole, ...(squares ?? this.#image(s, frame, cells, colors, picked.values, key))];
+    const drawn = squares ?? this.#image(s, frame, cells, colors, picked.values, key);
+    return [...whole, ...drawn.map(drawing.shown)];
   }
 
   /** The scale coloring cells: over `colorDomain`, or from 0 to the fullest cell. */

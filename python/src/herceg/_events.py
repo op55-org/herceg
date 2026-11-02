@@ -8,6 +8,7 @@ functions turn it into Python values, with datetimes for times, and back.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -53,7 +54,7 @@ class Viewport:
 
 
 @dataclass(frozen=True)
-class Selection:
+class BrushSelection:
     """What is brushed: the ``x`` and ``y`` ranges (None along an axis the brush
     leaves alone; a lasso's extent) and a ``lasso``'s outline as ``(x, y)``
     points. The outline's points are numbers or datetimes; on a category axis
@@ -64,6 +65,45 @@ class Selection:
     y: Range | None = None
     lasso: tuple[tuple[float | _dt.datetime, float | _dt.datetime], ...] | None = None
     panels: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
+class ItemReference:
+    """An item of the mark whose ``id`` is ``mark``: the parts of its key
+    after the mark's, as events' item keys write them."""
+
+    mark: str
+    item: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class SeriesReference:
+    """A series of the mark whose ``id`` is ``mark``, by its name."""
+
+    mark: str
+    series: str
+
+
+@dataclass(frozen=True)
+class ItemSelection:
+    """Items selected (``select="items"``): by their keys, as events and
+    inspections name them, or by ``hg.ItemReference``. The chart reports
+    them by their keys."""
+
+    items: tuple[str | ItemReference, ...]
+
+
+@dataclass(frozen=True)
+class SeriesSelection:
+    """Series selected (``select="series"``): by their keys, as events and
+    the legend name them, or by ``hg.SeriesReference``. The chart reports
+    them by their keys."""
+
+    series: tuple[str | SeriesReference, ...]
+
+
+#: The chart's selection: a brush's, or items or series.
+ChartSelection = BrushSelection | ItemSelection | SeriesSelection
 
 
 @dataclass(frozen=True)
@@ -473,11 +513,16 @@ class SelectionOwner:
 
 @dataclass(frozen=True)
 class SelectEvent:
-    """A change of what is brushed: the ``selection``, None once cleared, and
-    its ``owner`` (for a cleared selection, what it belonged to)."""
+    """A change of the selection: the ``selection``, None once cleared; a
+    gesture's ``phase`` ("preview" while a brush moves, then "commit" or
+    "cancel"; "commit" for every other change); the ``basis`` to write back
+    on (``widget.select(..., expected=event.basis)``); and, from pages, its
+    ``owner`` (for a cleared brush, what it belonged to)."""
 
-    selection: Selection | None
-    owner: SelectionOwner
+    selection: ChartSelection | None
+    owner: SelectionOwner | None = None
+    phase: Literal["preview", "commit", "cancel"] = "commit"
+    basis: str | None = None
 
 
 @dataclass(frozen=True)
@@ -665,9 +710,16 @@ def decode_select_event(payload: Any) -> SelectEvent:
     for scale in scales:
         name, instance, panels, _ = _scale_instance(scale)
         instances.append(ScaleInstance(name, instance, panels))
+    phase, basis = payload.get("phase", "commit"), payload.get("basis")
+    if phase not in ("preview", "commit", "cancel") or not (
+        basis is None or isinstance(basis, str)
+    ):
+        raise ValueError(f"a select event has a phase and a basis, not {phase!r} and {basis!r}")
     return SelectEvent(
         selection=decode_selection(checked("select", payload.get("selection"))),
         owner=SelectionOwner(tuple(instances), _keys(owner.get("panels"))),
+        phase=phase,
+        basis=basis,
     )
 
 
@@ -703,6 +755,82 @@ def encode_drill_root(
             f"{name}: expected a tuple of item keys or None; use the path reported by on_drill"
         )
     return {"path": list(value)} if value else None
+
+
+def check_selection(value: Any, name: str, path: str) -> None:
+    """Refuses, as `name` at `path`, what is no selection, an x range, or None."""
+    kinds = (BrushSelection, ItemSelection, SeriesSelection)
+    if not (value is None or isinstance(value, kinds) or (listlike(value) and len(value) == 2)):
+        raise ChartError(
+            f"{name}: expected an hg.BrushSelection, hg.ItemSelection, or "
+            f"hg.SeriesSelection, or an x range; received {shown(value)}",
+            path=path,
+        )
+
+
+def selection_option(value: Any) -> dict[str, Any] | None:
+    """``Chart(selection=...)`` as the spec takes it: the chart's first selection."""
+    check_selection(value, "Chart selection", "selection")
+    encoded = encode_selection(value)
+    if encoded is None or encoded["kind"] != "brush":
+        return encoded
+    if any(isinstance(end, str) for axis in ("x", "y") for end in encoded[axis] or ()):
+        raise ChartError(
+            "Chart selection: a brush over categories is set on a live chart "
+            "(widget.selection); give numbers or datetimes",
+            path="selection",
+        )
+    panels = encoded.get("panels")
+    return {
+        "kind": "brush",
+        "x": encoded["x"],
+        "y": encoded["y"],
+        "lasso": encoded["lasso"],
+        **({"panel": panels[0]} if panels else {}),
+    }
+
+
+def viewport_option(value: Any) -> dict[str, Any] | None:
+    """``Chart(viewport=...)`` as the spec takes it: the chart's first view, an
+    ``hg.Viewport`` or an x range; axes left out are not zoomed."""
+    if value is None:
+        return None
+    if not (isinstance(value, Viewport) or (listlike(value) and len(value) == 2)):
+        raise ChartError(
+            f"Chart viewport: expected an hg.Viewport or an x range; received {shown(value)}",
+            path="viewport",
+        )
+    view = encode_viewport(value)
+    return {axis: view[axis] for axis in ("x", "y", "yRight") if view[axis] is not None}
+
+
+def visibility_option(value: Any) -> dict[str, Any] | None:
+    """``Chart(visibility=...)`` as the spec takes it: keys hidden (an
+    ``hg.VisibilityState``, as ``on_visibility`` reports it, or a list)."""
+    if value is None:
+        return None
+    if isinstance(value, VisibilityState):
+        panels = {
+            key: {"hidden": list(own.hidden), "shown": list(own.shown)}
+            for key, own in value.panels.items()
+        }
+        return {"hidden": list(value.hidden_keys), **({"panels": panels} if panels else {})}
+    if isinstance(value, str) or not listlike(value) or not all(isinstance(k, str) for k in value):
+        raise ChartError(
+            "Chart visibility: expected an hg.VisibilityState or a list of series and item "
+            f"keys; received {shown(value)}",
+            path="visibility",
+        )
+    return {"hidden": list(value)}
+
+
+def drill_root_option(value: Any) -> str | None:
+    """``Chart(drill_root=...)`` as the spec takes it: the key of the node a
+    tree is drilled into, from the path ``on_drill`` reports (or the key)."""
+    if value is None or isinstance(value, str):
+        return value
+    path = encode_drill_root(value, "Chart drill_root")
+    return path["path"][-1] if path else None
 
 
 def decode_item_positions(payload: dict[str, Any] | None) -> ItemPositions:
@@ -751,14 +879,19 @@ def encode_viewport(value: Any) -> dict[str, Any]:
     }
 
 
-def decode_selection(payload: Any) -> Selection | None:
-    """A selection from the browser: ``{"x", "y", "lasso", "time"}``, or null for none."""
+def decode_selection(payload: Any) -> ChartSelection | None:
+    """A selection from the browser: a brush's ``{"x", "y", "lasso", "time"}``,
+    items or series by their keys, or null for none."""
     if not payload:
         return None
+    if payload.get("kind") == "items":
+        return ItemSelection(tuple(map(_reference, payload["items"])))
+    if payload.get("kind") == "series":
+        return SeriesSelection(tuple(map(_reference, payload["series"])))
     time = payload.get("time", ())
     lasso = payload.get("lasso")
     panels = payload.get("panels")
-    return Selection(
+    return BrushSelection(
         x=_range(payload.get("x"), "x" in time),
         y=_range(payload.get("y"), "y" in time),
         lasso=None
@@ -768,25 +901,41 @@ def decode_selection(payload: Any) -> Selection | None:
     )
 
 
+def _reference(entry: Any) -> Any:
+    """A key as it is, and a reference set from Python, which the chart has
+    not reported by its key yet, as ``hg.ItemReference`` or
+    ``hg.SeriesReference``."""
+    if not isinstance(entry, Mapping):
+        return entry
+    if "series" in entry:
+        return SeriesReference(entry["mark"], entry["series"])
+    return ItemReference(entry["mark"], tuple(entry["item"]))
+
+
 def encode_selection(value: Any) -> dict[str, Any] | None:
-    """A selection set from Python, as the browser takes it: a ``Selection``, an x
-    range, or None for none (as is a selection of nothing)."""
+    """A selection set from Python, as the browser takes it: a ``BrushSelection``, an x
+    range, items or series, or None for none (as is a selection of nothing)."""
     if value is None:
         return None
-    if not isinstance(value, Selection):
-        value = Selection(x=value)
+    if isinstance(value, (ItemSelection, SeriesSelection)):
+        return _encode_chosen(value)
+    if not isinstance(value, BrushSelection):
+        value = BrushSelection(x=value)
     value, later = _fields_taken(value)
-    x, x_time = _encode_range(value.x, "Selection x")
-    y, y_time = _encode_range(value.y, "Selection y")
+    x, x_time = _encode_range(value.x, "BrushSelection x")
+    y, y_time = _encode_range(value.y, "BrushSelection y")
     lasso = None
     if value.lasso is not None:
         if not listlike(value.lasso):
             raise ChartError(
-                f"Selection lasso: expected a list of (x, y) points; received {shown(value.lasso)}"
+                "BrushSelection lasso: expected a list of (x, y) points; "
+                f"received {shown(value.lasso)}"
             )
         points = [_vertex(point) for point in value.lasso]
         if len(points) < 3:
-            raise ChartError(f"Selection lasso: expected at least 3 points; received {len(points)}")
+            raise ChartError(
+                f"BrushSelection lasso: expected at least 3 points; received {len(points)}"
+            )
         lasso = [[px, py] for (px, _), (py, _) in points]
         x_time = x_time or any(px_time for (_, px_time), _ in points)
         y_time = y_time or any(py_time for _, (_, py_time) in points)
@@ -795,20 +944,51 @@ def encode_selection(value: Any) -> dict[str, Any] | None:
         isinstance(panels, tuple) and panels and all(isinstance(p, str) for p in panels)
     ):
         raise ChartError(
-            "Selection panels: expected a tuple of panel ids, or None for the chart's own; "
+            "BrushSelection panels: expected a tuple of panel ids, or None for the chart's own; "
             f"received {shown(panels)}"
         )
-    check_hints("Selection", vars(value), later)
+    check_hints("BrushSelection", vars(value), later)
     if x is None and y is None and lasso is None:
         return None
     time = [axis for axis, flag in (("x", x_time), ("y", y_time)) if flag]
     return {
+        "kind": "brush",
         "x": x,
         "y": y,
         "lasso": lasso,
         "time": time,
         **({"panels": list(panels)} if panels else {}),
     }
+
+
+def _encode_chosen(value: ItemSelection | SeriesSelection) -> dict[str, Any] | None:
+    """Items or series as the browser takes them: keys, and references as objects."""
+    kind, name = (
+        ("items", "ItemSelection")
+        if isinstance(value, ItemSelection)
+        else (
+            "series",
+            "SeriesSelection",
+        )
+    )
+    entries = getattr(value, kind)
+    if not listlike(entries):
+        raise ChartError(f"{name} {kind}: expected a list of keys; received {shown(entries)}")
+    encoded: list[Any] = []
+    for i, entry in enumerate(entries):
+        if isinstance(entry, str):
+            encoded.append(entry)
+        elif isinstance(entry, ItemReference) and kind == "items":
+            parts = [part.item() if hasattr(part, "item") else part for part in entry.item]
+            encoded.append({"mark": entry.mark, "item": parts})
+        elif isinstance(entry, SeriesReference) and kind == "series":
+            encoded.append({"mark": entry.mark, "series": entry.series})
+        else:
+            reference = "hg.ItemReference" if kind == "items" else "hg.SeriesReference"
+            raise ChartError(
+                f"{name} {kind}[{i}]: expected a key or an {reference}; received {shown(entry)}"
+            )
+    return {"kind": kind, kind: encoded} if encoded else None
 
 
 #: The axes each kind of state has ranges on.
@@ -840,6 +1020,14 @@ def checked(event: str, payload: Any) -> dict[str, Any] | None:
         return encode_item_positions(payload)
     if event == "click":
         return _checked_inspection(payload)
+    kind = payload.get("kind")
+    if event == "select" and kind in ("items", "series"):
+        keys = payload.get(kind)
+        if not (isinstance(keys, list) and keys and all(isinstance(key, str) for key in keys)):
+            raise ValueError(f"{kind} are named by their keys, not {keys!r}")
+        return {"kind": kind, kind: list(keys)}
+    if event == "select" and kind not in (None, "brush"):
+        raise ValueError(f'a selection is of kind "brush", "items", or "series", not {kind!r}')
     axes = _AXES[event]
     out: dict[str, Any] = {axis: _checked_range(payload.get(axis)) for axis in axes}
     time = payload.get("time", [])
@@ -857,6 +1045,7 @@ def checked(event: str, payload: Any) -> dict[str, Any] | None:
             if not (isinstance(panels, list) and all(isinstance(p, str) for p in panels)):
                 raise ValueError(f"panels are panel ids, not {panels!r}")
             out["panels"] = panels
+        out = {"kind": "brush", **out}
     out["time"] = time
     return out
 
@@ -954,7 +1143,11 @@ def same_values(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
     axes hold times: a no-zoom viewport is no viewport."""
 
     def values(payload: dict[str, Any] | None) -> list[Any]:
-        return [(payload or {}).get(key) for key in ("x", "y", "yRight", "lasso", "panels")]
+        held = payload or {}
+        # Items and series are sets of keys or references: in one order.
+        chosen = held.get("items", held.get("series"))
+        keys = None if chosen is None else sorted(json.dumps(key, sort_keys=True) for key in chosen)
+        return [held.get(key) for key in ("kind", "x", "y", "yRight", "lasso", "panels")] + [keys]
 
     return values(a) == values(b)
 
@@ -994,7 +1187,7 @@ def decode_inspection(payload: Any) -> Inspection | None:
     )
 
 
-_Set = TypeVar("_Set", Viewport, Selection)
+_Set = TypeVar("_Set", Viewport, BrushSelection)
 
 
 def _fields_taken(value: _Set) -> tuple[_Set, dict[str, Hint]]:
@@ -1046,11 +1239,11 @@ def _vertex(point: Any) -> tuple[tuple[float, bool], tuple[float, bool]]:
         x, y = point
     except (TypeError, ValueError):
         raise ChartError(
-            f"Selection lasso: expected (x, y) pairs; received {shown(point)}"
+            f"BrushSelection lasso: expected (x, y) pairs; received {shown(point)}"
         ) from None
     return (
-        (_milliseconds(x, "Selection lasso"), not is_number(x)),
-        (_milliseconds(y, "Selection lasso"), not is_number(y)),
+        (_milliseconds(x, "BrushSelection lasso"), not is_number(x)),
+        (_milliseconds(y, "BrushSelection lasso"), not is_number(y)),
     )
 
 

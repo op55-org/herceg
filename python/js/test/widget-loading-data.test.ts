@@ -5,6 +5,7 @@
 
 import { afterEach, expect, it, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
+import { brushOf } from "../../../packages/herceg/test/helpers/selections.ts";
 import widgetModule, { type Snapshot } from "../widget.ts";
 import { itemChart } from "./items.ts";
 import { MockModel, number, snapshot } from "./widget-model.ts";
@@ -59,7 +60,7 @@ it("keeps node positions, a category selection, and data sent before the panels 
   model.receive({
     type: "select",
     revision: 2,
-    selection: { x: ["b", "c"], y: null, lasso: null, panels: ["a"], time: [] },
+    selection: { kind: "brush", x: ["b", "c"], y: null, lasso: null, panels: ["a"], time: [] },
   });
   const again = {
     c: { type: "category" as const, codes: 0, dictionary: ["a", "b", "c"] },
@@ -74,7 +75,7 @@ it("keeps node positions, a category selection, and data sent before the panels 
   await frame();
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(chart.getItemPositions({ panel: "g" })['[0,"East"]']).toEqual({ x: 10, y: 20 });
-  expect(chart.selection?.x).toEqual([1, 2]);
+  expect(brushOf(chart.selection)?.x).toEqual([1, 2]);
   expect(chart.selectionOwner?.panels ?? null).toEqual(["a"]);
   await new Promise((resolve) => setTimeout(resolve, 150));
   // Python heard nothing of the node moving back or the selection going.

@@ -16,6 +16,7 @@ import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/co
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, RasterGeometry } from "../scene/scene.ts";
 import type { CellReduce, Clip, Frozen, HeatmapSpec, Weekday } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import type { PaintReader, Theme } from "../theme.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { type Calendar, type CalendarLayout, placeCalendar } from "./heatmap-calendar.ts";
@@ -57,7 +58,7 @@ import { type BandPlaces, placeAt, rowOf, type Series } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-interface HeatmapCommon<S extends Schema> {
+interface HeatmapCommon<S extends Schema> extends SelectionLooks {
   /** Number or time field: each cell's value, mapped to color. */
   color: NumericField<S>;
   /**
@@ -894,7 +895,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       },
       key,
     );
-    return [...whole, ...(squares ?? this.#image(s, frame, colors, key, held))];
+    return [...whole, ...(squares ?? this.#image(s, frame, colors, key, held)).map(drawing.shown)];
   }
 
   /** The pixels a cell spans along an axis: its band, or between its edges. */
@@ -1442,6 +1443,8 @@ export function heatmap<S extends Schema>(
     "label",
     "legend",
     "id",
+    "selected",
+    "unselected",
     "facet",
     "panel",
     "clip",

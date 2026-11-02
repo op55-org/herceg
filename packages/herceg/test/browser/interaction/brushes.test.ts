@@ -11,6 +11,7 @@ import { line } from "../../../src/marks/line.ts";
 import { panels } from "../../../src/model/panels.ts";
 import type { BrushSpec } from "../../../src/spec/spec.ts";
 import { contractTest } from "../../helpers/contracts.ts";
+import { brushOf } from "../../helpers/selections.ts";
 import {
   drag,
   heard,
@@ -59,7 +60,7 @@ function valuesBetween(chart: Chart, key: string, axis: Axis, a: number, b: numb
  * them all.
  */
 function expectOwned(chart: Chart, key: string, shape: BrushSpec) {
-  const selection = chart.selection!;
+  const selection = brushOf(chart.selection)!;
   expect(selection).not.toBeNull();
   const [[x0, y0], [x1, y1]] = corners(chart, key);
   const owned: Axis[] = shape === "lasso" || shape === "xy" ? ["x", "y"] : [shape];
@@ -124,8 +125,9 @@ describe("brush variants", () => {
       expectOwned(chart, "a", "xy");
       // Cleared, the event names what it belonged to.
       chart.select(null);
-      expect(selects.map(({ owner }) => owner.panels)).toEqual([["b"], ["a"], ["a"]]);
-      expect(selects.at(-1)!.x).toBeNull();
+      const commits = selects.filter(({ phase }) => phase === "commit");
+      expect(commits.map(({ owner }) => owner.panels)).toEqual([["b"], ["a"], ["a"]]);
+      expect(selects.at(-1)!.selection).toBeNull();
       expect(chart.selectionOwner).toBeNull();
     },
     "a rectangle belongs to the panels drawing both its scales, and moves with the next brush",
@@ -150,7 +152,7 @@ describe("brush variants", () => {
       expectOwned(chart, "b", "y");
       const [[, y0], [, y1]] = corners(chart, "b");
       const right = valuesBetween(chart, "b", "yRight", y0, y1);
-      expect(chart.selection!.y![0]).not.toBeCloseTo(right[0]!, 1);
+      expect(brushOf(chart.selection)!.y![0]).not.toBeCloseTo(right[0]!, 1);
     },
     "a y brush in a subplot with a right axis selects along its left y",
   );
@@ -179,8 +181,8 @@ describe("brush variants", () => {
         ["yRight", instancesOf(chart, "b").yRight],
       ]);
       expect(owners).toContain("b");
-      expect(chart.selection!.y![0]).toBeCloseTo(right[0]!, 6);
-      expect(chart.selection!.y![1]).toBeCloseTo(right[1]!, 6);
+      expect(brushOf(chart.selection)!.y![0]).toBeCloseTo(right[0]!, 6);
+      expect(brushOf(chart.selection)!.y![1]).toBeCloseTo(right[1]!, 6);
       chart.render();
       expect(chart.selection).not.toBeNull();
     },
@@ -204,7 +206,7 @@ describe("brush variants", () => {
       expectOwned(chart, "b", "lasso");
       expect(chart.selectionOwner!.scales[0]!.type).toBe("band");
       // Around band positions of b's categories, not a's numbers.
-      for (const [x] of chart.selection!.lasso!) {
+      for (const [x] of brushOf(chart.selection)!.lasso!) {
         expect(x).toBeGreaterThan(-0.5);
         expect(x).toBeLessThan(1.5);
       }

@@ -73,7 +73,7 @@ export const options: ChartProps = {
   y: { title: "ms" },
   interaction: { zoom: true },
   legend: true,
-  onSelect: ({ x }) => x?.[0].toFixed(),
+  onSelect: ({ selection }) => selection?.kind === "brush" && selection.x?.[0].toFixed(),
   onViewport: ({ scales, views }) => [scales[0]?.view, views[0]?.yRight],
   onHover: ({ inspection }) => inspection?.points.map(({ mark, row }) => [mark, row]),
 };

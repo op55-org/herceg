@@ -7,7 +7,10 @@ describe("selection payloads", () => {
       scales: [{ scale: "yRight" as const, instance: "", type: "time" as const, panels: ["b"] }],
       panels: ["b"],
     };
-    const payload = selectionPayload({ x: null, y: [0, 86_400_000], lasso: null }, owner);
-    expect(payload).toMatchObject({ y: [0, 86_400_000], time: ["y"] });
+    const payload = selectionPayload(
+      { kind: "brush", x: null, y: [0, 86_400_000], lasso: null },
+      owner,
+    );
+    expect(payload).toMatchObject({ kind: "brush", y: [0, 86_400_000], time: ["y"] });
   });
 });

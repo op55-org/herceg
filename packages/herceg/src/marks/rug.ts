@@ -4,6 +4,7 @@ import { segmentDrawing } from "../draw/segments.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { SegmentGeometry } from "../scene/scene.ts";
 import type { Clip, Frozen, RugSpec } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import type { CssColor, ItemKeyed } from "./encoding.ts";
@@ -34,7 +35,7 @@ import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-interface RugStyle<S extends Schema> extends ItemKeyed<S> {
+interface RugStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   series?: CategoryField<S>;
   /**
    * A category field naming the series, whose values color them (as
@@ -411,6 +412,8 @@ export function rug<S extends Schema>(
       "pick",
       "inspect",
       "id",
+      "selected",
+      "unselected",
       "itemKey",
     ]),
   } as RugSpec;
