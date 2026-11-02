@@ -43,7 +43,7 @@ from ._style import StrokeStyle
 
 if TYPE_CHECKING:
     from ._chart import AxisOptions, Camera, Panel
-    from ._interaction import Binding, ViewLimits
+    from ._interaction import Binding, Brush, ViewLimits
     from ._style import Style, Title
 
 
@@ -407,7 +407,7 @@ class Cell:
         style: Style | dict[str, Any] | None = None,
         zoom: bool | Literal["x", "y", "xy"] | None = None,
         pan: bool | Literal["x", "y", "xy"] | None = None,
-        brush: Literal["x", "y", "xy", "lasso"] | None = None,
+        brush: Literal["x", "y", "xy", "lasso"] | Brush | None = None,
         bindings: Sequence[Binding] | None = None,
         limits: Mapping[str, ViewLimits] | None = None,
         rotate: bool | None = None,

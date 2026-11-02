@@ -10,8 +10,9 @@ import numpy as np
 
 from .._chart import AxisOptions, Chart, HelperOptions, Panel
 from .._data import Column, Matrix
-from .._errors import ChartError
+from .._errors import ChartError, located
 from .._layout import Grid
+from .._style import Look, look_spec
 from . import _numerics as numerics
 from . import _regression as regression
 from ._common import (
@@ -62,6 +63,8 @@ def pairplot(
     palette: Sequence[str] | None = None,
     diag_kind: Literal["auto", "hist", "kde"] | None = "auto",
     corner: bool = False,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     **options: Unpack[HelperOptions],
 ) -> Chart:
     """A grid of subplots: each pair of ``vars`` (by default every number
@@ -75,7 +78,9 @@ def pairplot(
     scales of their own. ``corner=True`` leaves out the grid's upper
     triangle. Rows missing a value are left out of the plots that use it.
     The chart is 150 pixels per panel unless ``width`` and ``height`` say
-    otherwise.
+    otherwise. ``selected`` and ``unselected`` are the scatter plots' looks
+    (``hg.Look``) where a selection holds their points (a brush's rows,
+    with ``brush=`` and ``row_selection=``), or does not.
     """
     if diag_kind not in ("auto", "hist", "kde", None):
         raise ChartError(
@@ -83,6 +88,9 @@ def pairplot(
             f"received {shown(diag_kind)}"
         )
     refuse_facets(options, "pairplot", "pairplot lays out panels of its own")
+    # Checked as pairplot's own, before its points take them.
+    located("selected", lambda: look_spec(selected, "pairplot selected"))
+    located("unselected", lambda: look_spec(unselected, "pairplot unselected"))
     source = Source(data)
     names = (
         list(vars)
@@ -170,6 +178,8 @@ def pairplot(
                 radius=2,
                 panel=id,
                 label=label,
+                selected=selected,
+                unselected=unselected,
             )
             continue
         name = names[i]

@@ -43,13 +43,15 @@ from ._errors import (
 )
 from ._events import (
     _UNSET,
+    BrushSelection,
+    ChartSelection,
     DrillRoot,
     InputEvent,
     Inspection,
     ItemPositions,
     PanelVisibility,
     Range,
-    Selection,
+    SelectEvent,
     Value,
     ViewEdge,
     Viewport,
@@ -58,6 +60,7 @@ from ._events import (
     _fields_taken,
     _milliseconds,
     chart_view,
+    check_selection,
     checked,
     checked_views,
     decode_drill_root,
@@ -89,7 +92,7 @@ __all__ = [
     "Inspection",
     "ItemPositions",
     "RowSelection",
-    "Selection",
+    "BrushSelection",
     "Viewport",
 ]
 
@@ -168,6 +171,20 @@ class ChartWidget(anywidget.AnyWidget):
         self._states: dict[StateKey, dict[str, Any] | None] = {
             key: {} if key[0] == "itemMove" else None for key in keys
         }
+        # The chart's first selection, hidden keys, and drill root, which a
+        # browser mounting it shows: not None, which would clear them.
+        self._states[("select", "")] = encode_selection(chart._settings.get("selection"))
+        hidden = chart._options.get("visibility")
+        if hidden is not None:
+            self._states[("visibility", "")] = {
+                "hiddenKeys": hidden["hidden"],
+                **({"panels": hidden["panels"]} if "panels" in hidden else {}),
+            }
+        root = chart._options.get("drillRoot")
+        trees = [key for key in keys if key[0] == "drill"]
+        if isinstance(root, str) and len(trees) == 1:
+            # The tree's one: a browser restoring it walks the path from its end.
+            self._states[trees[0]] = {"path": [root]}
         # Who changed each (a browser's origin, None for Python) and at which
         # revision. A browser's report based on an earlier revision than
         # someone else's change was made without seeing it, and is dropped.
@@ -181,6 +198,10 @@ class ChartWidget(anywidget.AnyWidget):
         self._requests = 0
         # Whether what the legends hide was agreed on for a chart drawn before this one.
         self._visibility_carried = False
+        # The basis of the last report of the selection, which a conditional
+        # write names (`select(..., expected=)`); None once Python set it since.
+        self._select_basis: str | None = None
+        self._select_phase = "commit"
         # What a browser last refused of what Python asked.
         self._error: ChartError | None = None
         names: list[str | StateKey] = [
@@ -419,23 +440,55 @@ class ChartWidget(anywidget.AnyWidget):
             self._callbacks[key](_decoded("camera", self._states[key]))
 
     @property
-    def selection(self) -> Selection | None:
-        """What is brushed (x and y ranges, a lasso's outline), with the panels
-        it was brushed in, or None. Setting a ``Selection``, or an x range as a
-        ``(start, end)`` pair, brushes the chart: in the panel ``panels``
+    def selection(self) -> ChartSelection | None:
+        """What is selected, or None: what is brushed (x and y ranges, a
+        lasso's outline, with the panels it was brushed in), or items or
+        series by their keys. Setting a ``BrushSelection``, or an x range as
+        a ``(start, end)`` pair, brushes the chart: in the panel ``panels``
         names first (a subplot's id, or a facet panel's key), on the scales it
-        draws, or without one on those every panel shares; None clears it.
-        What the browser cannot brush comes back as an error (see
+        draws, or without one on those every panel shares; an
+        ``hg.ItemSelection`` or ``hg.SeriesSelection`` selects those; None
+        clears it. What the browser cannot select comes back as an error (see
         ``on_error``). In a chart with ``row_selection``, setting it draws the
         brush only: set ``row_selection`` to select rows."""
         return decode_selection(self._states[("select", "")])
 
     @selection.setter
-    def selection(self, value: Selection | Range | None) -> None:
+    def selection(self, value: ChartSelection | Range | None) -> None:
+        check_selection(value, "widget.selection", "selection")
+        self._select(value, None)
+
+    def select(self, value: ChartSelection | Range | None, *, expected: str | None = None) -> None:
+        """Sets the selection, as assigning ``selection`` does. With
+        ``expected``, a report's ``basis`` (``SelectEvent.basis``), only if
+        the selection has not changed since that report: an answer that took
+        time never undoes what the user selected meanwhile. A refused write
+        changes nothing, and ``on_select`` callbacks hear the selection as it
+        is again."""
+        check_selection(value, "widget.select value", "value")
+        self._select(value, expected)
+
+    def _select(self, value: ChartSelection | Range | None, expected: str | None) -> None:
         payload = encode_selection(value)
         for panel in payload.get("panels", []) if payload else []:
             self._check_panel(panel, "widget.selection panels")
-        self._set(("select", ""), payload)
+        if expected is not None and not isinstance(expected, str):
+            raise ChartError(
+                f"widget.select expected: expected a report's basis; received {shown(expected)}",
+                path="expected",
+            )
+        key: StateKey = ("select", "")
+        # Checked and made at once: a browser's report between them would be lost.
+        with self._lock:
+            basis = self._select_basis
+            refused = expected is not None and expected != basis
+            if not refused:
+                self._select_basis = None
+                changed = self._change(key, payload, None)
+        if refused:
+            self._callbacks[key](SelectEvent(self.selection, basis=basis))
+        elif changed:
+            self._callbacks[key](SelectEvent(decode_selection(payload)))
 
     def get_viewport(self, *, panel: str | None = None) -> Viewport | None:
         """What the chart shows along each axis, None along an axis not
@@ -762,8 +815,11 @@ class ChartWidget(anywidget.AnyWidget):
         position in the data as it is now), a brush's condition, or nothing."""
         self._listen("rowSelection", callback, remove)
 
-    def on_select(self, callback: Callable[[Selection | None], Any], remove: bool = False) -> None:
-        """Calls ``callback(selection)`` when what is brushed changes."""
+    def on_select(self, callback: Callable[[SelectEvent], Any], remove: bool = False) -> None:
+        """Calls ``callback(event)`` when the selection changes, in a browser
+        or from Python: an ``hg.SelectEvent`` of the selection, a brush's
+        ``phase`` ("preview" while it moves, then "commit" or "cancel"), and
+        the ``basis`` to write back on (``select(..., expected=)``)."""
         self._listen(("select", ""), callback, remove)
 
     def on_viewport(
@@ -1016,7 +1072,11 @@ class ChartWidget(anywidget.AnyWidget):
         with self._lock:
             changed = self._change(key, payload, None)
         if changed:
-            self._callbacks[key](_decoded(key[0], payload))
+            self._callbacks[key](
+                SelectEvent(decode_selection(payload))
+                if key[0] == "select"
+                else _decoded(key[0], payload)
+            )
 
     def _change(self, key: StateKey, payload: dict[str, Any] | None, origin: str | None) -> bool:
         """Records interaction state and sends it to every browser, unless its
@@ -1114,7 +1174,24 @@ class ChartWidget(anywidget.AnyWidget):
                 changed = not stale and self._change(key, payload, origin)
                 if changed and kind == "visibility":
                     self._visibility_carried = False
-            if changed and kind == "viewport":
+                phase, basis = content.get("phase", "commit"), content.get("basis")
+                reported = (
+                    kind == "select"
+                    and not stale
+                    and phase in ("preview", "commit", "cancel")
+                    and (basis is None or isinstance(basis, str))
+                )
+                if reported:
+                    # With the selection it is the basis of, as Python's writes check it.
+                    self._select_basis = basis
+                    previewed, self._select_phase = self._select_phase == "preview", phase
+            if kind == "select" and not stale:
+                if not reported:
+                    return
+                # A commit or a cancel of what the last preview showed is news too.
+                if changed or (previewed and phase != "preview"):
+                    self._callbacks[key](SelectEvent(decode_selection(payload), None, phase, basis))
+            elif changed and kind == "viewport":
                 self._viewport_changed(event)
             elif changed:
                 self._callbacks[key](_decoded(kind, payload))
@@ -1238,7 +1315,7 @@ def _setting(name: str, set: Callable[[Any, Any], None]) -> Callable[[Any, Any],
 
     @functools.wraps(set)
     def setting(self: Any, value: Any) -> None:
-        fields = (type(value).__name__,) if isinstance(value, (Viewport, Selection)) else ()
+        fields = (type(value).__name__,) if isinstance(value, (Viewport, BrushSelection)) else ()
         with refusing((f"widget.{name}", *fields), None, name):
             set(self, value if hint is None else take(at, hint, value))
 
@@ -1262,7 +1339,7 @@ def _held(
 
 def _decoded(
     event: str, payload: dict[str, Any] | None
-) -> Selection | DrillRoot | ItemPositions | Camera | VisibilityState | None:
+) -> ChartSelection | DrillRoot | ItemPositions | Camera | VisibilityState | None:
     """Interaction state as Python reads it."""
     if event == "camera":
         return _decode_camera(payload)

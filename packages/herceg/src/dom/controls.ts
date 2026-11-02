@@ -12,7 +12,7 @@
 import type { Bindings } from "../model/bindings.ts";
 import type { Controls } from "../model/item-views.ts";
 import type { ChartModel } from "../model/model.ts";
-import type { normalize, Selection } from "./brushed.ts";
+import type { BrushSelection, normalize } from "./brushed.ts";
 import type { Chart } from "./handle.ts";
 import type { Press } from "./toolbar.ts";
 
@@ -42,7 +42,7 @@ export interface ControlsHost {
   /** How a selection's ends sit on a panel's scales, for a brush of the controls' own (brushed.ts). */
   readonly normalize: typeof normalize;
   /** Selects as `Chart.select` does, as the gesture `cause` names (a lasso's pointer, Escape's keyboard). */
-  select(selection: Selection | null, panel: string | undefined, cause: Press): void;
+  select(selection: BrushSelection | null, panel: string | undefined, cause: Press): void;
 }
 
 export type { Controls };

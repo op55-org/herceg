@@ -20,6 +20,7 @@ import { facet } from "../../src/model/facet.ts";
 import type { ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { brief } from "../helpers/views.ts";
 import { accessibilityTree, MOUSE, modelOf, pageOrigin, realMouse } from "./helpers.ts";
 
@@ -399,6 +400,7 @@ describe("maps in subplots", () => {
     const selects = heard(chart, "select");
     chart.select(
       {
+        kind: "brush",
         x: null,
         y: null,
         lasso: [
@@ -423,6 +425,7 @@ describe("maps in subplots", () => {
       interaction: { brush: "lasso" },
     });
     const lasso = {
+      kind: "brush" as const,
       x: null,
       y: null,
       lasso: [
@@ -493,7 +496,7 @@ describe("planes following their subplot's settings", () => {
     ] as const)
       await mouse(chart, "move", x, y);
     await mouse(chart, "release", bx - 30, by + 20);
-    expect(chart.selection?.lasso).toBeDefined();
+    expect(brushOf(chart.selection)?.lasso).toBeDefined();
     expect(chart.selectionOwner?.panels).toEqual(["b"]);
     const zoomed = chart.getViewport({ panel: "a" }).x!;
     const [ax, ay] = middle(a);
@@ -595,7 +598,7 @@ describe("maps in facet panels", () => {
     await mouse(chart, "press", ...points[0]!);
     for (const point of [...points.slice(1), points[0]!]) await mouse(chart, "move", ...point);
     await mouse(chart, "release", ...points[0]!);
-    expect(selections.at(-1)?.lasso).not.toBeNull();
+    expect(brushOf(selections.at(-1)?.selection)?.lasso).not.toBeNull();
     expect(selections.at(-1)).not.toHaveProperty("panels");
     expect(chart.selectionOwner?.panels ?? null).toEqual(["2023", "2024"]);
     // Every region of both panels is inside the shared plane's lasso.

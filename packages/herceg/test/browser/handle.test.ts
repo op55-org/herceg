@@ -15,6 +15,7 @@ import { facet } from "../../src/model/facet.ts";
 import { renderToPDF } from "../../src/pdf.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import { imageFacts } from "../helpers/image.ts";
+import { brushOf } from "../helpers/selections.ts";
 
 let host: HTMLDivElement;
 const charts: Chart[] = [];
@@ -473,7 +474,7 @@ describe("the pointer and keyboard", () => {
       );
     key("ArrowRight");
     key("ArrowRight");
-    expect(chart.selection?.x).not.toBeNull();
+    expect(brushOf(chart.selection)?.x).not.toBeNull();
   });
 
   it("draw pending changes before the keyboard moves", () => {

@@ -7,7 +7,7 @@
 </script>
 
 <script lang="ts">
-  import { type Chart as HercegChart, table, time } from "herceg";
+  import { type ChartSelection, type Chart as HercegChart, table, time } from "herceg";
   import { onMount } from "svelte";
   import { Chart, Custom, Line, Region, Rule, Text } from "../src/index.js";
 
@@ -17,7 +17,7 @@
   const deploys = table({ at: time([Date.now()]), version: ["v2"] });
 
   let chart = $state<HercegChart | null>(null);
-  let range = $state<readonly [number, number] | null>(null);
+  let selection = $state<ChartSelection | null>(null);
   export const exportSvg = () => chart?.toSVG();
 
   const data = table({ time: time([]), cpu: [] as number[] }, { maxRows: 3_000 });
@@ -32,7 +32,7 @@
   <Rule y={250} label="SLO" />
 </Chart>
 
-<Chart bind:chart interaction={{ brush: "x" }} onselect={({ x }) => (range = x)}>
+<Chart bind:chart bind:selection interaction={{ brush: "x" }}>
   <Line data={metrics} x="time" y="p50" />
 </Chart>
 

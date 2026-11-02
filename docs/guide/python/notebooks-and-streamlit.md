@@ -61,11 +61,11 @@ live.selection = (start, end)  # brush an x range; None clears it
 ## Views, selections, and events
 
 ```python
-live.selection  # an hg.Selection, or None
+live.selection  # an hg.BrushSelection, hg.ItemSelection, hg.SeriesSelection, or None
 live.get_viewport()  # an hg.Viewport: x, y, y_right, each None when not zoomed
 live.hidden_keys  # what the legends hide
 
-live.on_select(lambda selection: print(selection))
+live.on_select(lambda event: print(event.phase, event.selection))
 live.on_viewport(lambda event: print(event.cause, event.views[""].x))
 live.on_visibility(lambda state: print(state.hidden_keys))
 live.on_hover(lambda event: print(event.target, event.inspection))
@@ -88,7 +88,9 @@ live.show_cursor(x=when)  # hide_cursor() hides it
 | Value | Holds |
 | --- | --- |
 | `hg.Viewport` | `x`, `y`, `y_right` ranges, None where not zoomed. A pair sets x alone. |
-| `hg.Selection` | Brushed `x` and `y` ranges, a `lasso` outline, and the `panels` it is in. |
+| `hg.BrushSelection` | Brushed `x` and `y` ranges, a `lasso` outline, and the `panels` it is in. |
+| `hg.ItemSelection`, `hg.SeriesSelection` | Items or series a click selected (`select="items"` or `"series"`), by their keys; set them by keys or by `hg.ItemReference(mark, item)` and `hg.SeriesReference(mark, series)` naming a mark's `id`. |
+| `hg.SelectEvent` | What `on_select` hears: the `selection`, its `phase` (`"preview"` while a brush moves, then `"commit"` or `"cancel"`), `owner`, and the `basis` to write back on. |
 | `hg.ViewportEvent` | One change of view: `scales` changed, every panel's `views` (by panel key, `""` for one panel), `cause` (`"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, `"options"`), and `panel`. |
 | `hg.ViewEdge` | `scale`, `side`, `domain`, `bound`, `panels`, `cause`. |
 | `hg.InputEvent` | What `on_hover`, `on_click`, and `on_context_menu` hear: `pointer` (`hg.Pointer`: `x`, `y`, `panel`, `in_plot`, its `values` by axis, datetimes on time axes, and `categories`; None for the keyboard), `target` (`hg.ItemTarget`, `hg.AxisLabelTarget`, `hg.LegendEntryTarget`, or `hg.PlotTarget`, by `kind`; None over nothing), `inspection`, `cause`, and `revision`. |
@@ -102,6 +104,10 @@ live.show_cursor(x=when)  # hide_cursor() hides it
 - Hover, zoom, and selection reach Python at most every 100 ms, ending
   with the latest. Hover and click are sent only while a callback listens.
   Selection and viewport callbacks run for Python's own changes too.
+- **Writing back.** `live.select(value, expected=event.basis)` applies
+  only if the selection has not changed since that report, so an answer
+  that took time never undoes what the user brushed meanwhile; refused, it
+  changes nothing and `on_select` hears the selection as it is.
 - `set_viewport` asks every browser showing the widget; what one refuses
   comes to `on_error` as an `hg.ChartError`.
 - **Panels.** `get_viewport(panel="latency")`, `panel_viewports`,
@@ -212,7 +218,7 @@ import herceg.streamlit as hst
 chart = hg.Chart(df, brush="x").line(x="time", y="latency")
 state = hst.chart(chart, key="latency", on_select="rerun", on_click="rerun")
 
-if state.selection and state.selection.x:
+if isinstance(state.selection, hg.BrushSelection) and state.selection.x:
     start, end = state.selection.x
     st.dataframe(df[df["time"].between(start, end)])
 if state.click and state.click.inspection:
@@ -221,7 +227,7 @@ if state.click and state.click.inspection:
 
 | Reaction | State | Reports |
 | --- | --- | --- |
-| `on_select` | `state.selection` (`hg.Selection`) | Brushing |
+| `on_select` | `state.selection` (`hg.BrushSelection`, `hg.ItemSelection`, or `hg.SeriesSelection`) | Brushes and clicks that select, once released; a rerun that redraws the chart keeps them, but items named only by their rows (marks without `item_key`) |
 | `on_click` | `state.click` (`hg.InputEvent`, this run only) | Clicks |
 | `on_viewport` | `state.viewport`, `state.panel_viewports` | Pan and zoom |
 | `on_row_selection` | `state.row_selection` (`hg.RowSelection`) | Rows of one `row_selection` binding |

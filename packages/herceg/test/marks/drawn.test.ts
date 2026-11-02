@@ -36,7 +36,6 @@ import { text } from "../../src/marks/text.ts";
 import { traceBand } from "../../src/marks/trace.ts";
 import { violin } from "../../src/marks/violin.ts";
 import { facet } from "../../src/model/facet.ts";
-import { Highlighter } from "../../src/model/highlight.ts";
 import { itemResolver } from "../../src/model/items.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { pickLayout as pickItem } from "../../src/model/pick.ts";
@@ -51,6 +50,7 @@ import type {
   RectGeometry,
   SegmentGeometry,
 } from "../../src/scene/scene.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 import { LOOKUPS as lookups } from "../helpers/picker.ts";
 
 /** A panel of a chart drawn here, with its scales. */
@@ -296,7 +296,7 @@ describe("drawn-mark records", () => {
     );
     model.setSize(400, 300, 1);
     const stores = [selectionStore(values), selectionStore(sorted)];
-    const highlighter = new Highlighter([
+    const highlighter = channelHighlighter([
       { table: values, store: stores[0]!, channel: "focus" },
       { table: sorted, store: stores[1]!, channel: "focus" },
     ]);
@@ -338,7 +338,7 @@ describe("drawn-mark records", () => {
       );
       model.setSize(400, 300, 1);
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
       model.highlight = (m, series, frame, key) =>
         highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
       const set = new RowSet(rows);
@@ -762,7 +762,7 @@ describe("drawn-mark records", () => {
       const model = new ChartModel({ marks: [mark], locale: "en-US" });
       model.setSize(400, 300, 1);
       const store = selectionStore(data);
-      const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
       model.highlight = (m, series, frame, key) =>
         highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
       model.layoutHighlight = (t) => highlighter.selected(t);
@@ -811,7 +811,7 @@ describe("drawn-mark records", () => {
     });
     model.setSize(400, 300, 1);
     const store = selectionStore(prices);
-    const highlighter = new Highlighter([{ table: prices, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: prices, store, channel: "focus" }]);
     model.highlight = (m, series, frame, key) =>
       highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
     model.layoutHighlight = (t) => highlighter.selected(t);
@@ -962,7 +962,7 @@ describe("drawn-mark records", () => {
       });
       model.setSize(400, 300, 1);
       const store = selectionStore(points);
-      const highlighter = new Highlighter([{ table: points, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: points, store, channel: "focus" }]);
       model.highlight = (m, series, frame, key) =>
         highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
       model.layoutHighlight = (t) => highlighter.selected(t);
@@ -1434,7 +1434,7 @@ describe("drawn-mark records", () => {
       });
       model.setSize(400, 300, 1);
       const store = selectionStore(rows);
-      const highlighter = new Highlighter([{ table: rows, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: rows, store, channel: "focus" }]);
       model.highlight = (m, series, frame, key) =>
         highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
       model.layoutHighlight = (t) => highlighter.selected(t);
@@ -1471,7 +1471,7 @@ describe("drawn-mark records", () => {
       const model = new ChartModel({ marks: [mark], locale: "en-US" });
       model.setSize(400, 300, 1);
       const store = selectionStore(data);
-      const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+      const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
       model.highlight = (m, series, frame, key) =>
         highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
       model.layoutHighlight = (t) => highlighter.selected(t);
@@ -1689,7 +1689,7 @@ describe("drawn-mark records", () => {
         });
         model.setSize(400, 300, 1);
         const store = selectionStore(data);
-        const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+        const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
         model.highlight = (m, series, frame, key) =>
           highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
         model.layoutHighlight = (t) => highlighter.selected(t);
@@ -1752,7 +1752,7 @@ describe("drawn-mark records", () => {
           if (highlighted) {
             // Group 500's rows selected: its statistics drawn over it, narrower.
             const store = selectionStore(data);
-            const highlighter = new Highlighter([{ table: data, store, channel: "focus" }]);
+            const highlighter = channelHighlighter([{ table: data, store, channel: "focus" }]);
             model.highlight = (m, series, frame, key) =>
               highlighter.geometry(m, series, frame, key) ?? m.geometry(series, frame, key);
             model.layoutHighlight = (t) => highlighter.selected(t);

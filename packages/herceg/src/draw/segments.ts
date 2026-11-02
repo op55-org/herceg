@@ -24,6 +24,7 @@ function paintSegments(context: CanvasRenderingContext2D, mark: SegmentGeometry)
   }
   context.strokeStyle = mark.stroke;
   context.lineWidth = mark.strokeWidth;
+  if (mark.dash) context.setLineDash(mark.dash);
   context.globalAlpha *= mark.opacity ?? 1;
   context.stroke();
   context.restore();
@@ -36,6 +37,7 @@ function segmentElements(mark: SegmentGeometry): SvgElement[] {
     stroke: mark.stroke,
     "stroke-width": String(mark.strokeWidth),
   };
+  if (mark.dash?.length) attributes["stroke-dasharray"] = mark.dash.join(" ");
   if (mark.opacity !== undefined && mark.opacity < 1)
     attributes["stroke-opacity"] = String(mark.opacity);
   return [{ tag: "path", attributes }];

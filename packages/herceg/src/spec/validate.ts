@@ -53,6 +53,7 @@ import {
   type AxisGuideSpec,
   type AxisSpec,
   type BinaryColumnSpec,
+  type BrushOptions,
   type CameraSpec,
   type CategoryColumnSpec,
   type ChartAxisSpec,
@@ -109,6 +110,7 @@ import {
   type WrappedFacetSpec,
   type XAxisSpec,
 } from "./spec.ts";
+import type { Look } from "./state.ts";
 
 type Check = (value: unknown, path: string) => void;
 
@@ -380,11 +382,11 @@ const modifiers: Check = (v, path) => {
 
 /** The actions each gesture can perform (see `BindingSpec`). */
 const ACTIONS: Record<string, readonly string[]> = {
-  wheel: ["pan", "zoom", "pageScroll"],
-  drag: ["pan", "brush", "pageScroll", "cursor", "orbit", "moveItem"],
+  wheel: ["pan", "zoom", "pageScroll", "editBrush"],
+  drag: ["pan", "brush", "pageScroll", "cursor", "orbit", "moveItem", "editBrush"],
   pinch: ["zoom", "pageScroll"],
-  key: ["pan", "zoom", "reset"],
-  doubleClick: ["zoom", "reset"],
+  key: ["pan", "zoom", "reset", "clearBrush"],
+  doubleClick: ["zoom", "reset", "clearBrush"],
 };
 
 const binding: Check = (v, path) => {
@@ -515,11 +517,134 @@ function syncChannel(cursor: boolean, ...scales: readonly string[]): Check {
   };
 }
 
-/** What a chart's `interaction` and a panel's own check alike: all but `sync`, the chart's. */
+const brushShape = oneOf("x", "y", "xy", "lasso");
+
+/** A range of a selection or a view: two finite numbers, or null for none. */
+const ends: Check = (v, path) => {
+  if (v === null) return;
+  if (!Array.isArray(v) || v.length !== 2 || !v.every((x) => Number.isFinite(x)))
+    fail(path, "two finite numbers, or null", v);
+};
+
+/** A list of keys, or of references to a mark's items or series (`ItemReference`, `SeriesReference`). */
+function keysOr(reference: "item" | "series"): Check {
+  return (v, path) => {
+    if (!Array.isArray(v)) fail(path, `a list of keys, or of { mark, ${reference} }`, v);
+    for (const [i, entry] of v.entries()) {
+      const at = `${path}[${i}]`;
+      if (typeof entry === "string") continue;
+      object(entry, at);
+      checkProperties(entry as Record<string, unknown>, at, ["mark", reference], {
+        mark: string,
+        [reference]:
+          reference === "series"
+            ? string
+            : (parts: unknown, where: string) => {
+                if (!Array.isArray(parts))
+                  fail(where, "the parts of the item's name after its mark's", parts);
+              },
+      });
+    }
+  };
+}
+
+/** The chart's selection (`ChartSelection`), or null for none. */
+const selection: Check = (v, path) => {
+  if (v === null) return;
+  object(v, path);
+  const kind = (v as { kind?: unknown }).kind;
+  if (kind !== "brush" && kind !== "items" && kind !== "series")
+    fail(`${path}.kind`, '"brush", "items", or "series"', kind);
+  const checks: Record<string, Record<string, Check>> = {
+    brush: {
+      x: ends,
+      y: ends,
+      lasso: (l, at) => {
+        if (l === null) return;
+        if (!Array.isArray(l)) fail(at, "a list of [x, y] pairs, or null", l);
+        for (const [i, point] of l.entries()) ends(point, `${at}[${i}]`);
+      },
+      panel: string,
+    },
+    items: { items: keysOr("item") },
+    series: { series: keysOr("series") },
+  };
+  checkProperties(
+    v as Record<string, unknown>,
+    path,
+    kind === "brush" ? ["kind"] : ["kind", kind],
+    {
+      kind: string,
+      ...checks[kind],
+    },
+  );
+};
+
+/** A state of the chart's, or one per panel (`{ panels }`), each as `each` checks it. */
+function scoped(each: Check): Check {
+  return (v, path) => {
+    if (isRecord(v) && "panels" in v) {
+      checkProperties(v, path, ["panels"], {
+        panels: (p, at) => {
+          object(p, at);
+          for (const [key, state] of Object.entries(p as Record<string, unknown>))
+            each(state, `${at}.${key}`);
+        },
+      });
+    } else each(v, path);
+  };
+}
+
+/** A view (`ViewState`): a range per axis, or null where not zoomed. */
+const view: Check = (v, path) => {
+  object(v, path);
+  properties(v as Record<string, unknown>, path, { x: ends, y: ends, yRight: ends });
+};
+
+/** What is hidden (`VisibilityState`). */
+const visibility: Check = (v, path) => {
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["hidden"], {
+    hidden: strings,
+    panels: (p, at) => {
+      object(p, at);
+      for (const [key, own] of Object.entries(p as Record<string, unknown>)) {
+        object(own, `${at}.${key}`);
+        checkProperties(own as Record<string, unknown>, `${at}.${key}`, ["hidden", "shown"], {
+          hidden: strings,
+          shown: strings,
+        });
+      }
+    },
+  });
+};
+
+/** A drill root: an item key, names from the top, or null. */
+const drillRoot: Check = (v, path) => {
+  if (v !== null && typeof v !== "string") strings(v, path);
+};
+
+/** A brush: its shape, or its shape with its settings (`BrushOptions`). */
+const brush: Check = (v, path) => {
+  if (typeof v === "string") return brushShape(v, path);
+  object(v, path);
+  checkProperties(v as Record<string, unknown>, path, ["shape"], {
+    shape: brushShape,
+    edit: boolean,
+    clear: (c, at) => {
+      if (c !== false) oneOf("click", "double-click")(c, at);
+    },
+  } satisfies ChecksOf<BrushOptions>);
+  const { shape, edit } = v as BrushOptions;
+  if (shape === "lasso" && edit)
+    throw refusal(`${path}.edit`, "lassos are not moved or resized; drop edit");
+};
+
+/** What a chart's `interaction` and a panel's own check alike: all but `sync` and `select`, the chart's. */
 const interactionChecks = {
   pan: axesPreset,
   zoom: axesPreset,
-  brush: oneOf("x", "y", "xy", "lasso"),
+  brush,
   bindings: (v, at) => {
     if (!Array.isArray(v)) fail(at, "a list of bindings", v);
     for (const [k, item] of v.entries()) binding(item, `${at}[${k}]`);
@@ -1764,6 +1889,17 @@ const clip: Check = (v, path) => {
  * here though their specs leave it out, so that their marks refuse the
  * right axis with why.
  */
+/** A mark's look where a selection holds it, or does not (`selected`, `unselected`). */
+const look: Check = (v, path) => {
+  object(v, path);
+  properties(v as Record<string, unknown>, path, {
+    ...strokeChecks,
+    fill: string,
+    fillOpacity: fraction,
+    strokeOpacity: fraction,
+    radius: positive,
+  } satisfies ChecksOf<Look>);
+};
 const placement = {
   axis: side,
   facet: repeat,
@@ -1773,6 +1909,8 @@ const placement = {
   pick: boolean,
   inspect: boolean,
 };
+/** Looks of marks drawing rows, items, and series a selection holds (annotations draw none). */
+const looks = { selected: look, unselected: look };
 /**
  * A 3D mark's `zIndex`, which its spec leaves out: read, so that its mark
  * refuses any but 0 with why (checkDepthOrder).
@@ -2316,6 +2454,7 @@ const MARKS: MarkChecks = {
       itemKey: field,
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: rowPositions,
       y: rowPositions,
@@ -2344,6 +2483,7 @@ const MARKS: MarkChecks = {
       itemKey: field,
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: rowPositions,
       y: rowPositions,
@@ -2483,6 +2623,7 @@ const MARKS: MarkChecks = {
       halo,
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: rowPositions,
       y: rowPositions,
@@ -2556,6 +2697,7 @@ const MARKS: MarkChecks = {
     checks: {
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: rowPosition,
       y: rowPosition,
@@ -2604,6 +2746,7 @@ const MARKS: MarkChecks = {
     checks: {
       color: string,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       y: field,
@@ -2776,6 +2919,7 @@ const MARKS: MarkChecks = {
     checks: {
       color: string,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       y: field,
@@ -2803,6 +2947,7 @@ const MARKS: MarkChecks = {
     checks: {
       color: string,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       y: field,
@@ -2826,6 +2971,7 @@ const MARKS: MarkChecks = {
     checks: {
       color: string,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       y: field,
@@ -2844,6 +2990,7 @@ const MARKS: MarkChecks = {
       itemKey: field,
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       open: field,
@@ -2863,6 +3010,7 @@ const MARKS: MarkChecks = {
       color: string,
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       y: field,
@@ -2881,6 +3029,7 @@ const MARKS: MarkChecks = {
       color: string,
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: rowPosition,
       y: rowPosition,
@@ -2948,6 +3097,7 @@ const MARKS: MarkChecks = {
     checks: {
       tooltip,
       ...placement,
+      ...looks,
       legend: legended,
       x: field,
       y: field,
@@ -3650,6 +3800,9 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
         object(i, path);
         properties(i as Record<string, unknown>, path, {
           ...interactionChecks,
+          select: (v, at) => {
+            if (v !== false) oneOf("items", "series")(v, at);
+          },
           sync: (v, at) => {
             if (typeof v === "string") return;
             object(v, at);
@@ -3714,6 +3867,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
               for (const [k, event] of (e as string[]).entries()) gesture(event, `${where}[${k}]`);
             },
             effect: oneOf("highlight", "none"),
+            live: boolean,
             selection: (selection, where) => {
               object(selection, where);
               const kind = (selection as { kind?: unknown }).kind;
@@ -3746,6 +3900,10 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       },
       camera,
       boxAspect,
+      selection,
+      viewport: scoped(view),
+      visibility,
+      drillRoot: scoped(drillRoot),
     } satisfies ChecksOf<Omit<ChartSpec, "marks" | "version">>,
     ["marks", "version"],
   );

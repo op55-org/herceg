@@ -10,6 +10,8 @@ navigator; animation; and reading panels and pixels.
 - [Sync](#sync)
 - [Tooltips](#tooltips)
 - [Events](#events)
+- [Selections](#selections)
+- [Chart state](#chart-state)
 - [Selected rows](#selected-rows)
 - [Range navigator](#range-navigator)
 - [Animation](#animation)
@@ -25,7 +27,8 @@ options) says what input does. Its presets cover the common cases:
 | --- | --- | --- |
 | `pan` | `true` (x), `"x"`, `"y"`, `"xy"`, `false` | Dragging pans; the horizontal wheel (or Shift with the wheel) pans x; double-click resets. Category axes do not pan. |
 | `zoom` | `true` (x), `"x"`, `"y"`, `"xy"` | The wheel with Ctrl or ⌘, a pinch, and `+`/`-` zoom; `0` and double-click reset; dragging pans unless `pan: false`. Maps and networks zoom both ways (with the wheel and keys), 3D charts magnify, treemaps and sunbursts drill into nodes. |
-| `brush` | `"x"`, `"y"`, `"xy"`, `"lasso"` | Dragging selects a range, rectangle, or freehand region (a `select` event); a click clears. Where `zoom` covers its axes, it zooms instead (a lasso still selects), and Shift-drag pans. |
+| `brush` | `"x"`, `"y"`, `"xy"`, `"lasso"`, or `{ shape, edit?, clear? }` | Dragging selects a range, rectangle, or freehand region (`select` events); a click clears. Where `zoom` covers its axes, it zooms instead (a lasso still selects), and Shift-drag pans. Its settings ([Selections](#selections)) let it be moved and resized. |
+| `select` | `"items"`, `"series"`, `false` | A click or Enter selects the item, or its series ([Selections](#selections)). |
 | `bindings` | `[{ gesture, action }]` | Gestures of your own ([below](#bindings)). |
 | `limits` | `{ x?, y?, yRight? }` | How far views may go ([below](#view-limits)). |
 | `sync` | a group's name, or channels | What the chart shares ([below](#sync)). |
@@ -50,8 +53,8 @@ Ctrl or ⌘ held (which trackpads send for a pinch) or sideways. Touch swipes
 along an axis the chart does not pan or brush scroll the page; pinches zoom the page
 unless the chart zooms. Maps and networks take every touch.
 
-- Escape during a drag ends it: a brush is dropped, a pan returns, a moved
-  node goes back.
+- Escape during a drag ends it: a brush goes back to the selection before
+  it, a pan returns, a moved node goes back.
 - Interaction code loads right after the first frame; input arriving
   earlier is kept and handled in order once it loads.
 - Drags prevent page text selection; static chart text stays selectable.
@@ -92,11 +95,11 @@ hg.Chart(df, zoom="x", bindings=[
 
 | Gesture (Python) | Options | Actions |
 | --- | --- | --- |
-| `wheel` (`hg.WheelGesture`) | `axis` (`"x"`, `"y"`), `focused` | `pan`, `zoom`, `pageScroll` |
-| `drag` (`hg.DragGesture`) | `button` (0, 1, 2), `pointer` (`"mouse"`, `"touch"`, `"pen"`) | `pan`, `brush`, `cursor`, `orbit`, `moveItem`, `pageScroll` |
+| `wheel` (`hg.WheelGesture`) | `axis` (`"x"`, `"y"`), `focused` | `pan`, `zoom`, `pageScroll`, `editBrush` |
+| `drag` (`hg.DragGesture`) | `button` (0, 1, 2), `pointer` (`"mouse"`, `"touch"`, `"pen"`) | `pan`, `brush`, `cursor`, `orbit`, `moveItem`, `pageScroll`, `editBrush` |
 | `pinch` (`hg.PinchGesture`) | | `zoom`, `pageScroll` |
-| `key` (`hg.KeyGesture`) | `key` as `KeyboardEvent.key` names it | `pan`, `zoom`, `reset` |
-| `doubleClick` (`hg.DoubleClickGesture`) | | `zoom`, `reset` |
+| `key` (`hg.KeyGesture`) | `key` as `KeyboardEvent.key` names it | `pan`, `zoom`, `reset`, `clearBrush` |
+| `doubleClick` (`hg.DoubleClickGesture`) | | `zoom`, `reset`, `clearBrush` |
 
 Every gesture but a pinch takes `modifiers`, matched exactly (`["shift"]`,
 `["ctrl"]`, `["alt"]`, `["meta"]`). A gesture may be bound once. Keys the
@@ -109,6 +112,8 @@ can be bound only with Ctrl, Alt, or Meta.
 | `zoom` (`hg.ZoomAction`) | `axes`, `factor` (2 for double clicks, 1.25 for keys) | Zooms about the pointer, or keys about the plot's middle |
 | `brush` (`hg.BrushAction`) | `shape` (`"x"`, `"y"`, `"xy"`, `"lasso"`), `zoom: true` | Selects, or zooms to the range on release |
 | `reset` (`hg.ResetAction`) | | The configured view |
+| `editBrush` (`hg.EditBrushAction`) | | Moves the brush (a drag inside it) or resizes it (a drag on its edges or corners, the wheel over it); elsewhere later bindings are tried |
+| `clearBrush` (`hg.ClearBrushAction`) | | Clears the brush; without one, later bindings are tried |
 | `cursor` (`hg.CursorAction`) | | Moves the cursor and tooltip with the drag |
 | `orbit`, `moveItem` | | Turns a 3D chart; moves a network node |
 | `pageScroll` (`hg.PageScrollAction`) | | Leaves the gesture to the page |
@@ -220,7 +225,11 @@ createChart(month, { marks: [line(hours, { x: "at", y: "load" })], interaction: 
   networks, whose panels and planes that frame draws, views and selections
   apply with it, in the order they were set; reading a panel's back
   (`getViewport({ panel })`) waits for `chart.ready`. What synced charts
-  share before then takes its place in the same order.
+  share before then takes its place in the same order (selections, whose
+  categories that frame draws, always wait for it), and is not shared
+  back. The frame reports and shares each state as it is then: a
+  selection cleared before it is shared as cleared, and a map's or
+  network's view is reported as it is, like the axes' views.
 - **Groups.** Each channel's groups are its own: `{ cursor: "all",
   viewport: "pair" }` shares the cursor with every chart of "all" and the
   view with those of "pair".
@@ -349,7 +358,9 @@ hg.Chart(daily).line(x="time", y="p99", tooltip=hg.Tooltip(fields=["requests"]))
 report changes only.
 
 ```ts
-const stop = chart.on("select", ({ x }) => x && detail.setViewport(x));
+const stop = chart.on("select", ({ selection, phase }) => {
+  if (phase === "commit" && selection?.kind === "brush" && selection.x) detail.setViewport(selection.x);
+});
 chart.on("viewport", ({ views, cause }) => cause !== "sync" && save(views));
 chart.on("click", ({ target }) => {
   if (target?.kind === "item" && target.markId === "orders" && target.row !== undefined)
@@ -361,15 +372,15 @@ chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer
 
 | Event | Reports |
 | --- | --- |
-| `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`). A map's or network's view is its plane's ranges. |
-| `select` | The selection (`x`, `y`, `lasso`), its `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table. |
+| `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`); with state support, `state`. A map's or network's view is its plane's ranges. |
+| `select` | The `selection` ([Selections](#selections)), its `phase` (`"preview"`, `"commit"`, `"cancel"`), a brush's `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table; with [state support](#chart-state), `basis`, `state`, and `conditions`. |
 | `hover` | What the pointer or keyboard cursor is on, or what inspection reads there, changed: an input event (below). A cursor another chart shares (cause `"sync"`) or `showCursor` shows (`"api"`) reports once drawn. |
 | `click` | A press released without moving on a plot, an item, an axis label, or a legend entry, or Enter on the keyboard cursor (cause `"keyboard"`): an input event; with `rowSelection`, `rows`. |
 | `contextMenu` | A secondary press (a right click, a long press): an input event with its `pointer`. While a listener listens, the browser's own menu stays off the plots and items (not off axes or legends). |
 | `edge` | A view near an end of its extent: `scale`, `instance`, `panels`, `side`, `domain`, `bound`, `cause`. |
-| `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`, `cause` (this chart's gesture, click, or key, or `"sync"` for another writer), and `revision`. |
-| `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, and `panels` for panels' own legends. |
-| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled; a network node moved, each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
+| `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`, `phase` (the writing gesture's, another chart's live brush's too), `cause` (this chart's gesture, click, or key, or `"sync"` for another writer), and `revision`. |
+| `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, and `panels` for panels' own legends; with state support, `state`. |
+| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled (with state support, its `state`); a network node moved, each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
 | `render` | A frame of the data, or a selection over it, was drawn, for overlays that follow the panels: the `revision` on screen. |
 | `error` | A `ChartError`, once per failed change. |
 
@@ -382,7 +393,8 @@ that change's cause: a click's, a key's, or `"sync"`. `chart.revision` counts ch
 (views, selection, bound row selections, visibility, drill roots,
 cameras, moved nodes); each state event carries the revision its change
 made, `render` the revision a frame drew, and `hover` and `click` the
-revision of the frame the pointer or key acted on. A change is on screen
+revision of the frame the pointer or key acted on. With [state support](#chart-state), each state event also carries the
+`basis` a conditional write gives as `expected`. A change is on screen
 once a `render` of its revision or a later one arrives
 (`chart.drawnRevision` reads the last, undefined until a frame draws; a
 change that fails to draw never renders):
@@ -447,6 +459,194 @@ clears. Selections are announced. Without a selection to zoom to, Enter
 is a `click` on the keyboard cursor's point (cause `"keyboard"`, no
 `pointer`).
 
+## Selections
+
+A chart has one selection at a time (`ChartSelection`), of one of three
+kinds; each replaces the others.
+
+| `kind` | Made by | Holds |
+| --- | --- | --- |
+| `"brush"` | Dragging with `interaction.brush`, Shift with the arrow keys, `select` | `x` and `y` ranges in data values (epoch ms on time axes, band indices on category axes), a lasso's outline (`lasso`), and the `panel` it was drawn in where panels have scales of their own |
+| `"items"` | A click or Enter with `interaction.select: "items"` | `items`: the keys of bars, points, a line's observations, bins, cells, and layout items |
+| `"series"` | A click or Enter on an item with `interaction.select: "series"` | `series`: series keys |
+
+```ts
+import { createChart, point } from "herceg";
+import { chartState } from "herceg/state";
+
+const chart = createChart(element, {
+  state: chartState, // items and series need state support (see Chart state)
+  marks: [
+    point(cars, {
+      id: "cars",
+      x: "weight",
+      y: "mpg",
+      series: "origin",
+      selected: { stroke: "#111", strokeWidth: 2 },
+      unselected: { opacity: 0.1 },
+    }),
+  ],
+  interaction: { select: "series", brush: { shape: "xy", edit: true, clear: "double-click" } },
+});
+chart.on("select", ({ selection, phase }) => {
+  if (phase === "commit" && selection?.kind === "series") showOrigins(selection.series);
+});
+chart.select({ kind: "series", series: [{ mark: "cars", series: "Europe" }] });
+```
+
+```python
+chart = hg.Chart(cars, select="series", brush=hg.Brush("xy", edit=True, clear="double-click"))
+chart.point(x="weight", y="mpg", series="origin", id="cars",
+            selected=hg.Look(stroke="#111", stroke_width=2), unselected=hg.Look(opacity=0.1))
+```
+
+- **Clicks.** With `select`, a click selects the item under the pointer,
+  or its series, alone; Shift with a click adds or removes it. A click on
+  the only one selected, or off the data, clears (a brush is cleared as
+  its own `clear` says). Enter on the keyboard cursor's point does what a
+  click does. An item is only its mark's: another mark's point of the
+  same row is not selected.
+- **Setting it.** `chart.select` takes a selection of any kind; a brush's
+  x range alone may be a pair (`chart.select([from, to])`). Items and
+  series are named by the keys events give (`target.item`,
+  `target.series`), or by references to a mark's `id`:
+  `{ mark: "bars", item: ["Coca-Cola"] }` (a bar keyed by its category),
+  `{ mark: "delays", item: [[0, 10]] }` (a histogram's bin from 0 to 10),
+  `{ mark: "cars", series: "Europe" }`. The chart keeps and reports keys,
+  in one order; an empty list is no selection.
+- **Looks.** A mark's `selected` and `unselected` looks (`fill`,
+  `stroke`, `strokeWidth`, `dash`, `opacity`, `fillOpacity`,
+  `strokeOpacity`, and a point's `radius`) are laid over its paint where
+  a selection holds its items or series, and where a
+  [row selection](#selected-rows) highlights its rows. What is not
+  selected is drawn at a quarter of its opacity by default; marks the
+  selection names nothing of are drawn as they are. A look's paint
+  replaces the mark's own (a line's `opacity` too), and its `stroke`
+  outlines points and bars that have no outline of their own (a pixel
+  wide unless it gives `strokeWidth`). A brush draws its
+  outline and changes no mark's look unless it writes rows. Lines, areas,
+  bars, points, rugs, error bars, candlesticks, histograms, heatmaps,
+  box plots, boxen, and violins take looks; annotations, contours, and
+  dendrograms take none, layout marks (pies, trees, maps, networks) draw
+  a selected item's share and dim the rest, and custom marks read
+  `ctx.selection(series, row)`. Heatmaps and 2D histograms draw their
+  selected cells in the `selected` look over the others.
+
+**Phases.** A gesture reports the changes it makes as it goes: a brush
+being drawn, moved, or resized reports `select` with `phase: "preview"`
+once a frame (the first move after a frame at once, so the charts it
+reaches draw it on the next), then `"commit"` on release, or `"cancel"`
+on Escape, a lost pointer, or a release where it began, which goes back
+to the selection before it. Every other change is a `"commit"`. `chart.selection` stays the committed selection
+while a gesture previews another. Listeners that query a server or write
+rows wait for the commit; row selections hear only commits unless bound
+`live`:
+
+```ts
+chart.on("select", ({ selection, phase }) => {
+  if (phase === "preview") drawCount(selection); // cheap, once a frame
+  else if (phase === "commit") runQuery(selection);
+});
+```
+
+**Editing a brush.** `brush: { shape, edit, clear }` gives a brush its
+settings. With `edit: true`, a drag inside the brush moves it, one on its
+edges or corners resizes it, and the wheel over it resizes it about the
+pointer; elsewhere drags and the wheel do what they did. Lassos are not
+edited. `clear` says what clears it: a click off it (`"click"`, the
+default), a double click (`"double-click"`), or neither (`false`); Escape
+always does. Both are [bindings](#bindings) (`editBrush`, `clearBrush`),
+which `bindings` can give other gestures.
+
+## Chart state
+
+A chart's state is what its user changes: the selection, the view, what
+is hidden, and a tree's drill root. Charts report it in events. With
+state support they also take it as options, and take writes that apply
+only if the user has not changed it meanwhile. State support is a module
+of its own, so charts that never set their state from outside do not
+load it:
+
+```ts
+import { createChart } from "herceg";
+import { chartState } from "herceg/state";
+
+createChart(element, {
+  state: chartState,
+  marks,
+  viewport: { x: saved.range },
+  visibility: { hidden: saved.hidden },
+});
+```
+
+React, Vue, Svelte, and Python's live charts include it, as do charts
+from specs (`loadSpec`). A chart without it refuses what needs it, naming
+the import: the state options, `interaction.select`, selections of items
+and series, `expected`, `chart.basis`, and reading `select` events'
+`conditions`.
+
+**State options.** `selection`, `viewport`, `visibility`, and `drillRoot`
+set the chart's first state. They are not values the chart holds to: the
+user's input changes the state. An option given again applies only when
+its value is not the one last given (compared by value, key lists as
+sets), as the matching method would (`select`, `setViewport`,
+`setHiddenKeys`, `setDrillRoot`) with cause `"options"`; a gesture
+changing that state ends with a `cancel`. A value equal to what the chart
+last reported changes nothing, so writing what events report back into
+the options never loops. Given as `undefined`, an option is forgotten.
+
+| Option | Takes | Reported by |
+| --- | --- | --- |
+| `selection` | A `ChartSelection`, or null | `select`: `selection`, with previews; `state`, the selection committed |
+| `viewport` | `{ x?, y?, yRight? }` (ranges; null for not zoomed), or `{ panels: { [key]: view } }` | `viewport`'s `state` |
+| `visibility` | `{ hidden, panels? }`: keys hidden, and per subplot what its legend hid and showed | `visibility`'s `state` |
+| `drillRoot` | An item key or a path of names, null for the whole tree, or `{ panels }` | `drill`'s `state` |
+
+With state support, state events carry the whole state as its option
+takes it (`state`). Drill roots apply once the first frame has drawn the
+trees.
+
+**Conditional writes.** Each state event carries a `basis`, and
+`chart.basis` names the chart's state now. Given as `expected`, a setter
+applies only if the state it writes, where it writes it (the views it
+sets, the selection, what is hidden), has not changed since, whether that
+change has been reported yet or not (before the first frame, inside a
+listener); otherwise it changes nothing and the chart reports that state
+again, with cause `"api"` (or the change's own report, still to come,
+does). An answer that took time, a server's or a Python kernel's, never
+undoes what the user did in the meantime:
+
+```ts
+chart.on("select", async ({ selection, phase, basis }) => {
+  if (phase !== "commit" || selection?.kind !== "brush") return;
+  const snapped = await server.snap(selection);
+  chart.select(snapped, { expected: basis }); // dropped if the user brushed again
+});
+```
+
+A basis of another chart, or of one since destroyed, is refused.
+
+**Conditions.** A `select` event's `conditions` say what the selection
+holds on each table its marks read, as a condition on that table's fields:
+a brush's ranges on the fields its marks place along the brushed axes
+(and in a facet's panel, its facet's values), items by what names them (their `itemKey`, a bar's category and
+series, what an aggregate groups by), series by their field's value;
+of a mark over a row view, within the view's filter. A
+table whose rows no condition says exactly (a lasso's, a stack's tops, a
+view restricted to a row set) gets none. A
+[row view](data.md#row-views) or a query takes one:
+
+```ts
+// A chart of one table: its condition filters a row view of the table.
+chart.on("select", ({ conditions, phase }) => {
+  if (phase === "commit") list.setQuery({ filter: conditions[0]?.condition ?? true });
+});
+```
+
+A table is left out where no condition says exactly which rows the
+selection holds: lassos, stacks' tops, summaries' statistics, and items
+named only by their row.
+
 ## Selected rows
 
 A chart bound to a channel of a [selection store](data.md#row-sets-and-selection-stores)
@@ -484,6 +684,7 @@ notebook chart or Streamlit chart (see
 | `store`, `channel` | The store and channel to write and highlight. One binding per table the marks read. |
 | `events` | Gestures that write: `"brush"`, `"lasso"`, `"click"` (all by default); `[]` highlights only. |
 | `effect` | `"none"` writes without dimming. |
+| `live` | The channel hears a brush's previews while it moves, and its cancel, which gives back what the channel held before the gesture; commits only by default. |
 | `selection` | (specs) The channel's starting selection. |
 
 A brush that writes rows selects rather than zooms (Ctrl/⌘+wheel, pinches,
@@ -505,6 +706,11 @@ before drawing: `store.set("focus", selectWhere(col("fare").gt(20)))`.
   or violin group; a heatmap cell's rows. Shift adds, Ctrl or Cmd toggles,
   a click off the data clears. With the keyboard cursor on a point, Space
   acts as a click and announces the count.
+- **Items and series** ([Selections](#selections)) write the rows they
+  stand for: an item's rows (a layout item's, such as a slice's or a
+  node's subtree's, in every panel it is drawn in), a series' condition on
+  its field, or for a series of a mark's several value fields, every row
+  the mark draws (its row view's).
 
 Lassos and clicks write `RowSet`s, which keep their rows while others are
 appended and dropped. `chart.select(selection, { rows: false })` shows a
@@ -512,8 +718,10 @@ selection without writing rows, as when mirroring another view's brush.
 
 ### How marks highlight
 
-Rows the channel does not hold are dimmed to a quarter of their opacity; an
-empty selection dims every row.
+Rows the channel does not hold are dimmed to a quarter of their opacity,
+or drawn in the mark's `unselected` look and the rows it holds in its
+`selected` look ([Selections](#selections)); an empty selection dims every
+row.
 
 | Mark | Highlight |
 | --- | --- |

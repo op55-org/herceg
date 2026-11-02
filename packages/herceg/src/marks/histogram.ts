@@ -35,6 +35,7 @@ import type {
   Histogram2DSpec,
   HistogramSpec,
 } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
@@ -66,7 +67,7 @@ import {
 import { isRowView, type MarkRows, rowAt, rowCount, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
 
-interface HistogramStyle<S extends Schema> {
+interface HistogramStyle<S extends Schema> extends SelectionLooks {
   /** Approximate bin count, fixed width/start, or exact finite increasing edges (2–1001). */
   bins?: BinSpec;
   /** Category field: one histogram per value. */
@@ -1338,6 +1339,8 @@ export function histogram<S extends Schema>(
         "pick",
         "inspect",
         "id",
+        "selected",
+        "unselected",
       ]),
     } as Histogram2DSpec;
     const { colors, colorDomain } = options as Histogram2DOptions<S>;
@@ -1373,6 +1376,8 @@ export function histogram<S extends Schema>(
       "pick",
       "inspect",
       "id",
+      "selected",
+      "unselected",
     ]),
   } as unknown as Histogram1DSpec;
   if (table.name !== undefined) spec.data = table.name;

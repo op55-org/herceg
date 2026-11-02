@@ -13,11 +13,12 @@ import { candlestick } from "../../src/marks/candlestick.ts";
 import { errorbar } from "../../src/marks/errorbar.ts";
 import { line } from "../../src/marks/line.ts";
 import type { ChartMark } from "../../src/marks/mark.ts";
+import { DIM } from "../../src/marks/mark.ts";
 import { point } from "../../src/marks/point.ts";
 import { rug } from "../../src/marks/rug.ts";
 import { describeChart } from "../../src/model/describe.ts";
 import { facet } from "../../src/model/facet.ts";
-import { DIM, Highlighter, membership } from "../../src/model/highlight.ts";
+import { membership } from "../../src/model/memberships.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { clickedRows } from "../../src/model/selected-rows.ts";
@@ -34,6 +35,7 @@ import type {
   SegmentGeometry,
 } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 import { withPicker } from "../helpers/picker.ts";
 
 /** Tables as charts read them, whatever their fields. */
@@ -43,7 +45,7 @@ const table = (columns: Record<string, ColumnInput>, options?: { maxRows?: numbe
 /** A chart highlighting what `channel` of a store of `source` selects. */
 function highlighted(source: Table, marks: ChartMark[]) {
   const store = selectionStore(source);
-  const highlighter = new Highlighter([{ table: source, store, channel: "focus" }]);
+  const highlighter = channelHighlighter([{ table: source, store, channel: "focus" }]);
   const model = new ChartModel({ marks, locale: "en-US", timeZone: "UTC" });
   model.setSize(600, 400, 1);
   model.highlight = (mark, series, frame, key) =>
@@ -62,7 +64,7 @@ const clipSpan = (x: number, y: number, width: number, height?: number) =>
 describe("highlighting marks' features", () => {
   function featured(source: Table, marks: ChartMark[]) {
     const store = selectionStore(source);
-    const highlighter = new Highlighter([{ table: source, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: source, store, channel: "focus" }]);
     const model = new ChartModel(
       { marks, locale: "en-US", timeZone: "UTC" },
       undefined,
@@ -428,7 +430,7 @@ describe("highlighting", () => {
     });
     const mark = area(source, { x: "v", y: "cat", series: "g", stack: true });
     const store = selectionStore(source);
-    const highlighter = new Highlighter([{ table: source, store, channel: "focus" }]);
+    const highlighter = channelHighlighter([{ table: source, store, channel: "focus" }]);
     const model = new ChartModel({
       marks: [mark],
       facet: facet("half"),

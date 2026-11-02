@@ -15,6 +15,7 @@ import { type DocumentInfo, PdfWriter } from "./render/pdf-document.ts";
 import { measurePdfText } from "./render/pdf-fonts.ts";
 import { type PdfPageOptions, paperPage } from "./render/pdf-paper.ts";
 import type { StaticOptions } from "./render/static.ts";
+import { drawInState } from "./render/static-state.ts";
 import type { Scene } from "./scene/scene.ts";
 
 export type { PdfPageOptions } from "./render/pdf-paper.ts";
@@ -125,7 +126,8 @@ export function renderToPDF(
       model.setSize(options.width, options.height, 1, STATIC_RASTER_RATIO);
       // What the bound stores hold now is drawn as a mounted chart draws it.
       options.rowSelection?.highlight(model);
-      const scene = model.scene(resolver?.measure ?? measurePdfText, false, NO_PAGE);
+      const measure = resolver?.measure ?? measurePdfText;
+      const scene = drawInState(model, options, () => model.scene(measure, false, NO_PAGE));
       add(scene, model, page);
     }
   }

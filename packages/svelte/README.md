@@ -41,6 +41,8 @@ made per data point.
   directly: `data.appendRow(...)` draws on the next frame.
 - **Events** are callback props (`onselect`, `onviewport`, `onhover`,
   `onclick`, `oncontextmenu`, ...); `bind:chart` gives herceg's chart handle.
+- **State** binds with `bind:selection`, `bind:viewport`, `bind:visibility`,
+  and `bind:drillRoot`.
 - **Tooltips** of your own render in a `renderTooltip` snippet.
 - **Errors** show in the chart's place, or with `errorMode="throw"` are
   thrown to the nearest `<svelte:boundary>`.

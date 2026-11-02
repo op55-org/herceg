@@ -8,6 +8,7 @@ import { type Nearest, settle } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Geometry, Rect, RectGeometry, SegmentGeometry } from "../scene/scene.ts";
 import type { CandlestickSpec, Clip, Frozen } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { refuseColor } from "./colored.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import type { ItemKeyed } from "./encoding.ts";
@@ -45,7 +46,7 @@ import { FILL, Slots } from "./slots.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
 
-export interface CandlestickOptions<S extends Schema> extends ItemKeyed<S> {
+export interface CandlestickOptions<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** Time, number, or category field the candles stand at. */
   x: PositionField<S>;
   open: NumericField<S>;
@@ -666,6 +667,8 @@ export function candlestick<S extends Schema>(
       "pick",
       "inspect",
       "id",
+      "selected",
+      "unselected",
       "itemKey",
     ]),
   };

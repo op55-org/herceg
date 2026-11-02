@@ -5,14 +5,14 @@ import { type Table, table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { point } from "../../src/marks/point.ts";
-import { Highlighter } from "../../src/model/highlight.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import type { PointGeometry, RectGeometry } from "../../src/scene/scene.ts";
+import { channelHighlighter } from "../helpers/highlight.ts";
 
 it("keeps the placement of hidden values' series when a selection splits them", () => {
   const source = table({ day: ["thu", "thu"], sex: ["f", "m"], value: [1, 2] }) as unknown as Table;
   const store = selectionStore(source);
-  const highlighter = new Highlighter([{ table: source, store, channel: "focus" }]);
+  const highlighter = channelHighlighter([{ table: source, store, channel: "focus" }]);
   const model = new ChartModel({
     marks: [
       bar(source, { x: "day", y: "value", series: "sex" }),

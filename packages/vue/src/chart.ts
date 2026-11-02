@@ -4,8 +4,10 @@ import {
   type ChartListener,
   type ChartMark,
   type ChartOptions,
+  type ChartSelection,
   chartError,
   createChart,
+  type DrillState,
   type GuideOptions,
   type Chart as HercegChart,
   type Hydration,
@@ -14,8 +16,11 @@ import {
   type RenderTooltip,
   showFailure,
   tablesOf,
+  type ViewportState,
+  type VisibilityState,
   viewOf,
 } from "herceg";
+import { chartState } from "herceg/state";
 import {
   Comment,
   defineComponent,
@@ -41,7 +46,7 @@ import { markBuilder, plain } from "./marks.ts";
  * Options as props: the tooltip's content of your own is the `renderTooltip`
  * slot, and what keeps the chart from drawing the `error` event.
  */
-type Options = Omit<ChartOptions, "marks" | "renderTooltip" | "onError">;
+type Options = Omit<ChartOptions, "marks" | "renderTooltip" | "onError" | "state">;
 type Option<K extends keyof Options> = PropType<NonNullable<Options[K]>>;
 
 /**
@@ -78,7 +83,16 @@ const optionProps = {
   boxAspect: Array as unknown as Option<"boxAspect">,
   fonts: Object as Option<"fonts">,
   errorMode: String as Option<"errorMode">,
+  // State options, set when their value changes; `v-model:selection` and
+  // the others keep them in the application's state.
+  selection: Object as PropType<ChartSelection | null>,
+  viewport: Object as Option<"viewport">,
+  visibility: Object as Option<"visibility">,
+  drillRoot: [String, Array, Object] as PropType<DrillState>,
 } satisfies { [K in keyof Options]-?: unknown };
+
+/** The state options, which change the chart's state alone when only they change. */
+const STATES = ["selection", "viewport", "visibility", "drillRoot"] as const;
 
 const OPTION_KEYS = Object.keys(optionProps) as (keyof Options)[];
 /** Every option unset, so options no longer passed go back to their defaults. */
@@ -95,7 +109,11 @@ const emits = {
   viewport: (_: ChartEvents["viewport"]) => true,
   /** The view came near an end of what `interaction.limits` allows, as to load more data. */
   edge: (_: ChartEvents["edge"]) => true,
-  /** The selection changed (`interaction.brush`): x and y ranges and a lasso's outline, null when cleared. */
+  /**
+   * The selection changed (a brush, `interaction.select`, `select`): what
+   * it is (null when cleared), and its `phase`, "preview" while a brush
+   * moves, then "commit" or "cancel".
+   */
   select: (_: ChartEvents["select"]) => true,
   /** A channel `rowSelection` binds changed, by any chart or grid: what it holds now. */
   rowSelection: (_: ChartEvents["rowSelection"]) => true,
@@ -116,6 +134,14 @@ const emits = {
    * place; with "throw", it is thrown in render, for `onErrorCaptured`.
    */
   error: (_: ChartError) => true,
+  /** `v-model:selection`: the selection, as each change commits. */
+  "update:selection": (_: ChartSelection | null) => true,
+  /** `v-model:viewport`: the whole view, as it changes. */
+  "update:viewport": (_: ViewportState) => true,
+  /** `v-model:visibility`: what is hidden, as it changes. */
+  "update:visibility": (_: VisibilityState) => true,
+  /** `v-model:drill-root`: the trees' drill roots, as they change. */
+  "update:drillRoot": (_: DrillState) => true,
 };
 
 /** What a chart's slot adds to its options: marks, guides, and (from layout components) its panels. */
@@ -252,6 +278,7 @@ function holds(basis: Basis, marks: readonly ChartMark[]): boolean {
 interface View {
   marks: readonly ChartMark[];
   options: Options & { renderTooltip?: RenderTooltip };
+  /** The options but the state options, as `canonical` writes them. */
   key: string;
 }
 
@@ -408,12 +435,14 @@ export const Chart = defineComponent({
           ...((options.guides as GuideOptions[] | undefined) ?? []),
           ...parts.guides,
         ];
+      const settings = { ...options };
+      for (const key of STATES) delete settings[key];
       return {
         marks: parts.marks,
         options: { ...(options as Options), ...(rendered && { renderTooltip }) },
         // The tooltip's renderer is the chart's own, calling the slot: the key
         // says whether there is one.
-        key: `${canonical(options)}${rendered ? " rendered tooltip" : ""}`,
+        key: `${canonical(settings)}${rendered ? " rendered tooltip" : ""}`,
       };
     }
 
@@ -474,18 +503,31 @@ export const Chart = defineComponent({
       const next = rendered!;
       const last = applied;
       if (!chart.value || !last) {
-        const config = { ...next.options, marks: next.marks, onError };
+        const config = { ...next.options, marks: next.marks, onError, state: chartState };
         const created = snapshot
           ? snapshot.hydrate(snapshotHost.value!, config)
           : createChart(container.value!, config);
-        created.on("viewport", (event) => emit("viewport", event));
+        // Bindings hear of states as they commit; previews come as events.
+        created.on("viewport", (event) => {
+          emit("viewport", event);
+          emit("update:viewport", event.state!);
+        });
         created.on("edge", (event) => emit("edge", event));
-        created.on("select", (event) => emit("select", event));
+        created.on("select", (event) => {
+          emit("select", event);
+          if (event.phase === "commit") emit("update:selection", event.selection);
+        });
         created.on("rowSelection", (event) => emit("rowSelection", event));
         created.on("camera", (event) => emit("camera", event));
-        created.on("drill", (event) => emit("drill", event));
+        created.on("drill", (event) => {
+          emit("drill", event);
+          emit("update:drillRoot", event.state!);
+        });
         created.on("itemMove", (event) => emit("itemMove", event));
-        created.on("visibility", (event) => emit("visibility", event));
+        created.on("visibility", (event) => {
+          emit("visibility", event);
+          emit("update:visibility", event.state!);
+        });
         created.on("render", (event) => emit("render", event));
         chart.value = created;
         for (const listen of listenToInput) listen();
@@ -503,7 +545,16 @@ export const Chart = defineComponent({
       });
       const sameMarks =
         marks.length === last.marks.length && marks.every((mark, i) => mark === last.marks[i]);
-      if (sameMarks && next.key === last.key) return;
+      // State options changing alone change the chart's state alone.
+      if (sameMarks && next.key === last.key) {
+        const states = STATES.filter(
+          (key) => canonical(next.options[key]) !== canonical(last.options[key]),
+        );
+        applied = { ...last, options: next.options };
+        if (states.length > 0)
+          chart.value.update(Object.fromEntries(states.map((key) => [key, next.options[key]])));
+        return;
+      }
       // Props are the whole configuration: options no longer passed go back
       // to their defaults rather than keeping their previous values.
       chart.value.update({ ...UNSET, renderTooltip: undefined, ...next.options, marks, onError });

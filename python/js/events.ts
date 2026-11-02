@@ -3,16 +3,22 @@
 // engine's web module shares with pages' DOM events.
 
 import type {
+  BrushSelection,
   Chart,
   ChartOptions,
+  ChartSelection,
   DrillRoot,
   PanelTarget,
-  Selection,
   SelectionOwner,
 } from "herceg";
-import { type SelectionPayload, selectionPayload } from "../../packages/herceg/src/web/events.ts";
+import {
+  type ChosenPayload,
+  type SelectionPayload,
+  selectionPayload,
+} from "../../packages/herceg/src/web/events.ts";
 
 export {
+  type ChosenPayload,
   chartSelection,
   chartViewport,
   edgePayload,
@@ -33,15 +39,17 @@ export {
 } from "../../packages/herceg/src/web/events.ts";
 
 /**
- * A selection as Python reads it: naming its panels only where they are
- * not the chart's own, of instances every panel shares (a subplot's lasso,
- * or panels' own scales).
+ * A selection as Python reads it: items and series by their keys; a brush
+ * naming its panels only where they are not the chart's own, of instances
+ * every panel shares (a subplot's lasso, or panels' own scales).
  */
 export function selectionReport(
-  selection: Selection | null,
+  selection: ChartSelection | null,
   owner: SelectionOwner | null,
-): SelectionPayload | null {
-  const payload = selectionPayload(selection, owner);
+): SelectionPayload | ChosenPayload | null {
+  if (selection?.kind === "items" || selection?.kind === "series")
+    return JSON.parse(JSON.stringify(selection)) as ChosenPayload;
+  const payload = selectionPayload(selection as BrushSelection | null, owner);
   if (payload && !owner?.scales.some(({ instance }) => instance !== "")) delete payload.panels;
   return payload;
 }

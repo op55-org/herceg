@@ -6,6 +6,7 @@
 
 import type {
   BindingSpec,
+  BrushOptions,
   BrushSpec,
   DragGesture,
   InteractionSpec,
@@ -14,6 +15,11 @@ import type {
   WheelGesture,
   ZoomSpec,
 } from "../spec/spec.ts";
+
+/** A brush's shape, as `interaction.brush` gives it alone or with its settings. */
+export function shapeOf(brush: BrushSpec | BrushOptions | undefined): BrushSpec | undefined {
+  return typeof brush === "object" ? brush.shape : brush;
+}
 
 /** A binding as input is matched against it: its gesture's modifiers as a mask (see `modifiersOf`). */
 export type Binding = BindingSpec & { mods: number };
@@ -179,8 +185,20 @@ function compile(interaction: InteractionSpec, brushesRows: boolean, path: strin
   const panAxes = axesOf(panning);
   const zoomAxes = axesOf(zoom);
   const panX = panning && panAxes !== "y";
-  if (brush) {
-    const action = { type: "brush", shape: brush, zoom: covers(zoom, brush) } as const;
+  const shape = shapeOf(brush);
+  if (shape) {
+    const { edit, clear } = typeof brush === "object" ? brush : {};
+    if (edit) {
+      if (shape === "lasso")
+        throw new Error(`${path}.brush.edit: lassos are not moved or resized; drop edit`);
+      // Before the brush's own drag, which a drag off the brush still takes.
+      const action = { type: "editBrush" } as const;
+      add({ gesture: { type: "drag" }, action });
+      add({ gesture: { type: "wheel", axis: "y" }, action });
+    }
+    if (clear === "double-click")
+      add({ gesture: { type: "doubleClick" }, action: { type: "clearBrush" } });
+    const action = { type: "brush", shape, zoom: covers(zoom, shape) } as const;
     add({ gesture: { type: "drag" }, action });
     // Shift-drag pans a chart that pans, and brushes the others.
     if (!panning) add({ gesture: { type: "drag", modifiers: ["shift"] }, action });
@@ -190,7 +208,7 @@ function compile(interaction: InteractionSpec, brushesRows: boolean, path: strin
     const action = { type: "pan", ...(panAxes && { axes: panAxes }) } as const;
     // With a brush, Shift-drag pans; a map's lasso brushes only when its
     // toolbar says so, and dragging pans otherwise.
-    if (!brush || brush === "lasso") add({ gesture: { type: "drag" }, action });
+    if (!shape || shape === "lasso") add({ gesture: { type: "drag" }, action });
     add({ gesture: { type: "drag", modifiers: ["shift"] }, action });
   }
   if (rotate) add({ gesture: { type: "drag" }, action: { type: "orbit" } });

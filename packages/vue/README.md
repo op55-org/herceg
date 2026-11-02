@@ -46,6 +46,8 @@ const metrics = table({ time: time(timestamps), p50, p99 });
   (`@hover`, `@click`, `@context-menu`) are listener props, which the chart
   listens for only while given. A template ref's `chart` is herceg's chart
   handle.
+- **State** binds with `v-model:selection`, `v-model:viewport`,
+  `v-model:visibility`, and `v-model:drill-root`.
 - **Tooltips** of your own render in the `renderTooltip` slot.
 - **Errors** show in the chart's place, or with `error-mode="throw"` are
   thrown for `onErrorCaptured` or the app's `errorHandler`.

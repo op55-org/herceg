@@ -66,6 +66,7 @@ import { Panels } from "../model/panels.ts";
 import { type RowSelection, rowSelection } from "../model/row-selection.ts";
 import { timeBreaks } from "../scale/breaks.ts";
 import { scheme } from "../scale/schemes.ts";
+import { type ChartStateSupport, chartState } from "../state/chart-state.ts";
 import { within } from "./errors.ts";
 import type {
   AnnotationPosition,
@@ -87,8 +88,11 @@ import { describeUnknown, findUnknown, unknownRefusal } from "./validate.ts";
 export type SpecBuffer = ArrayBuffer | ArrayBufferView;
 
 export interface LoadedSpec {
-  /** Chart options with marks, ready for `createChart` or `renderToSVG`. */
-  config: ChartConfig & { width?: number; height?: number };
+  /**
+   * Chart options with marks, ready for `createChart` or `renderToSVG`,
+   * with state support (`chartState`), which the spec's state options need.
+   */
+  config: ChartConfig & { width?: number; height?: number; state: ChartStateSupport };
   /** The spec's tables by name; changing them updates charts built from the spec. */
   tables: Map<string, Table>;
   /** The spec's views of tables' rows (`{ source, view }` entries) by name; changing their queries updates charts. */
@@ -199,6 +203,7 @@ export function loadSpec(
     config: {
       ...chart,
       marks,
+      state: chartState,
       ...(xAxis && { x: xAxis }),
       ...(facet && { facet }),
       ...(subplots && { panels: subplots }),

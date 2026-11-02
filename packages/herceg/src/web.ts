@@ -4,6 +4,7 @@
 // Importing it changes nothing on the page: `observe` starts mounting.
 
 export type {
+  ChosenPayload,
   EdgePayload,
   InputEventPayload,
   InspectionPayload,

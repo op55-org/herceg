@@ -752,7 +752,13 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
     const seriesOf = new Map(views.map((view, i) => [view, shown[i]!]));
     // Items as `item` calls draw them, and which rows a selection holds.
     const table = this.table;
-    const selected = table && frame.highlighted?.(table);
+    // Which rows a selection holds, of each series: items and series are a series' own.
+    const held = new Map<Series, Uint8Array | undefined>();
+    const selectedIn = (s: Series) => {
+      if (!table || !frame.highlighted) return undefined;
+      if (!held.has(s)) held.set(s, frame.highlighted(table, this, s));
+      return held.get(s);
+    };
     const itemSeries: Series[] = [];
     const positions: number[] = [];
     const starts: number[] = [];
@@ -814,6 +820,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
         }
         if (shapes.length === start) return;
         // An item a selection leaves out is dimmed, whatever draw made of it.
+        const selected = selectedIn(s);
         if (selected && !selected[row])
           for (let i = start; i < shapes.length; i++) {
             const shape = shapes[i]!;
@@ -837,7 +844,7 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
         return copiesOf(drawn.all);
       },
       selection: (view, row) => {
-        ownerOf(view, "selection");
+        const selected = selectedIn(ownerOf(view, "selection"));
         return selected ? (selected[row] ? "selected" : "unselected") : undefined;
       },
     };

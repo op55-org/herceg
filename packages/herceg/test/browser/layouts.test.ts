@@ -9,6 +9,7 @@ import { columns, inset, panel, rows } from "../../src/layout.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { panels } from "../../src/model/panels.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -196,12 +197,12 @@ describe("layouts in the browser", () => {
     expect(chart.getViewport({ panel: "detail" }).x).toBeNull();
     expect(chart.getViewport().x).toEqual([2, 4]);
     // A selection of the inset's scale is not the synced chart's.
-    chart.select({ x: [120, 130], y: null, lasso: null }, { panel: "detail" });
+    chart.select({ kind: "brush", x: [120, 130], y: null, lasso: null }, { panel: "detail" });
     await frame();
     expect(synced.selection).toBeNull();
-    chart.select({ x: [2, 3], y: null, lasso: null }, { panel: "main" });
+    chart.select({ kind: "brush", x: [2, 3], y: null, lasso: null }, { panel: "main" });
     await frame();
-    expect(synced.selection?.x).toEqual([2, 3]);
+    expect(brushOf(synced.selection)?.x).toEqual([2, 3]);
     // Giving every panel an x scale of its own while limits move the inset's view.
     chart.setViewport([120, 130], { panel: "detail" });
     expect(() =>
@@ -426,7 +427,7 @@ describe("layouts in the browser", () => {
     });
     await chart.loading;
     for (const x of [[1, 2] as const, [2, 3] as const]) {
-      chart.select({ x, y: null, lasso: null }, { panel: "main" });
+      chart.select({ kind: "brush", x, y: null, lasso: null }, { panel: "main" });
       chart.render();
       await frame();
     }

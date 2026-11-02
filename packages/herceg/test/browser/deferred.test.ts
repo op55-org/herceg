@@ -10,6 +10,7 @@ import { type Chart, createChart, forgetInteraction } from "../../src/dom/chart.
 import { line } from "../../src/marks/line.ts";
 import { point3d } from "../../src/marks/point3d.ts";
 import type { ChartError } from "../../src/spec/errors.ts";
+import { brushOf } from "../helpers/selections.ts";
 
 let host: HTMLDivElement;
 
@@ -276,7 +277,7 @@ describe("the interaction controller", () => {
     pointer(brushed, "pointerup", 400, 150, { button: 0 });
     expect(brushed.selection).toBeNull();
     await brushed.loading;
-    const x = brushed.selection?.x;
+    const x = brushOf(brushed.selection)?.x;
     expect(x).toBeDefined();
     expect(x![0]).toBeLessThan(x![1]);
     brushed.destroy();

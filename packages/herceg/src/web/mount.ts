@@ -185,8 +185,12 @@ async function start(
       ...inputEventPayload(chart, event),
     }),
   );
-  chart.on("select", (event) =>
-    dispatch(host, "herceg:select", { id, ...selectEventPayload(event) }),
+  // Commits only: a page posting each selection would post every frame of a brush.
+  chart.on(
+    "select",
+    (event) =>
+      event.phase === "commit" &&
+      dispatch(host, "herceg:select", { id, ...selectEventPayload(event) }),
   );
   chart.on("viewport", (event) =>
     dispatch(host, "herceg:viewport", { id, ...viewportEventPayload(event) }),

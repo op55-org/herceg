@@ -12,7 +12,7 @@ import type { MeasureText } from "../layout/text.ts";
 import type { AxisFormat, Mark, MarkKey } from "../marks/mark.ts";
 import type { Series, samePositions, xAt } from "../marks/series.ts";
 import type { AxisPlan } from "../model/axis.ts";
-import { type Binding, Bindings } from "../model/bindings.ts";
+import { type Binding, Bindings, shapeOf } from "../model/bindings.ts";
 import type { ItemResolver } from "../model/items.ts";
 import {
   cursorAxis,
@@ -36,10 +36,11 @@ import type {
   tickLabelGap,
 } from "../scene/scene.ts";
 import type { BrushSpec, CursorShowSpec, Snap, ZoomSpec } from "../spec/spec.ts";
+import type { ChartSelection } from "../spec/state.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
-import type { Selection } from "./brushed.ts";
+import type { BrushSelection } from "./brushed.ts";
 import type { ChartOptions } from "./chart.ts";
 import type {
   AxisLabelTarget,
@@ -52,6 +53,7 @@ import type {
   Target,
 } from "./events.ts";
 import type { CursorPosition } from "./handle.ts";
+import { frameCount } from "./scheduler.ts";
 import type { svgElement } from "./svg-layer.ts";
 import { describeInspection, Tooltip } from "./tooltip.ts";
 
@@ -136,9 +138,20 @@ export interface InteractionHost {
   animated(change: () => void): void;
   /** One change of view, made in `panel` (by default, in none), reported once and shared with synced charts. */
   changeView(change: () => void, cause: ChangeCause, panel?: string): void;
-  /** Sets the selection in panel `at`, as one of the chart's own, sharing it with synced charts. */
-  select(selection: Selection | null, at?: DrawnPanel, cause?: "pointer" | "keyboard"): void;
-  selection(): Selection | null;
+  /** Sets the selection (a brush in panel `at`), as one of the chart's own, sharing it with synced charts. */
+  select(selection: ChartSelection | null, at?: DrawnPanel, cause?: ChangeCause): void;
+  /**
+   * Reports what a gesture making a brush in `at` shows (a `preview`), or
+   * that it was undone (`cancel`, going back to the selection there is), as
+   * a change of `cause`.
+   */
+  preview(
+    selection: BrushSelection | null,
+    at: DrawnPanel,
+    phase: "preview" | "cancel",
+    cause: ChangeCause,
+  ): void;
+  selection(): ChartSelection | null;
   owner(): SelectionOwner | null;
   rows(): RowLink | undefined;
   /** The brush, once loaded: it draws drags and the selection. */
@@ -199,10 +212,12 @@ interface Press {
   x: number;
   y: number;
   panel: DrawnPanel;
-  mode: "pan" | "brush" | "cursor" | "click";
+  mode: "pan" | "brush" | "edit" | "cursor" | "click";
   /** What the press's binding does. */
   action: Binding["action"] | undefined;
   moved: boolean;
+  /** What a brush's gesture last reported it shows (as JSON); undefined before it reported any. */
+  previewed?: string | undefined;
   /** The view when it started and the last its pan set, which Escape goes back from to the first. */
   from: View;
   last?: View;
@@ -353,6 +368,8 @@ export class Interaction {
     null;
   #keyboard: KeyboardCursor | null = null;
   #press: Press | null = null;
+  /** The frame count when a brush's move last reported its preview at once (see `frameCount`). */
+  #previewedIn = -1;
   /** Where each touch is, for pinches. */
   readonly #touches = new Map<number, { x: number; y: number }>();
   #pinch: Pinch | null = null;
@@ -421,7 +438,7 @@ export class Interaction {
   /** The panels a brush being dragged would select in: those drawing its instances. */
   get dragged(): readonly string[] | undefined {
     const press = this.#press;
-    if (press?.mode !== "brush") return undefined;
+    if (press?.mode !== "brush" && press?.mode !== "edit") return undefined;
     // The panels drawing its instances: y is the right one's in a panel without a left.
     const scales = shapeScales(this.#shape(press)).map((scale) =>
       scale === "y" && !press.panel.drawsY ? "yRight" : scale,
@@ -441,7 +458,53 @@ export class Interaction {
   /** The shape a press brushes: its binding's, else its panel's `interaction.brush`. */
   #shape({ action, panel }: Press): BrushSpec {
     const shape = action?.type === "brush" ? action.shape : undefined;
-    return shape ?? this.#host.model.interactionOf(panel.key)?.brush ?? "x";
+    return shape ?? shapeOf(this.#host.model.interactionOf(panel.key)?.brush) ?? "x";
+  }
+
+  /**
+   * Ends a gesture changing `state` (the chart's options set it anew), as
+   * a change of `cause`: a brush drawn, moved, or resized reports `cancel`.
+   */
+  end(state: "selection" | "viewport" | "visibility" | "drillRoot", cause: ChangeCause): void {
+    const mode = this.#press?.mode;
+    if (
+      state === "selection"
+        ? mode === "brush" || mode === "edit"
+        : state === "viewport" && mode === "pan"
+    )
+      this.#cancelPress(false, cause);
+  }
+
+  /** The chart's brush in `panel`, and what a press at a pixel would move of it, when it is on it. */
+  #brushAt(panel: DrawnPanel, x: number, y: number) {
+    const host = this.#host;
+    const selection = host.selection();
+    const brush = host.brush();
+    const shown = selection?.kind === "brush" && host.owner()?.panels.includes(panel.key);
+    const handle = shown ? brush?.handleAt(x, y, selection, panel) : undefined;
+    return handle && { brush: brush!, selection: selection as BrushSelection, handle };
+  }
+
+  /**
+   * Reports what a brush being drawn, moved, or resized selects now, when
+   * that changed since it last did: once a frame. Brushes that zoom when
+   * released select nothing, and report nothing.
+   */
+  #preview(): void {
+    const press = this.#press;
+    const brush = this.#host.brush();
+    if (!press?.moved || !brush?.dragging) return;
+    if (press.mode !== "edit" && (press.mode !== "brush" || this.#zoomsOnRelease(press))) return;
+    const selection = brush.current();
+    const shown = JSON.stringify(selection);
+    if (shown === (press.previewed ?? "null")) return;
+    press.previewed = shown;
+    this.#host.preview(selection, press.panel, "preview", "pointer");
+  }
+
+  /** Whether a press's brush zooms to its ranges on release rather than selecting them. */
+  #zoomsOnRelease(press: Press): boolean {
+    return press.action?.type === "brush" && !!press.action.zoom;
   }
 
   /**
@@ -507,6 +570,7 @@ export class Interaction {
       this.#picking !== undefined ||
       this.#pickingLoad ||
       (!host.rows() &&
+        !host.options().interaction?.select &&
         !(["hover", "click", "contextMenu"] as const).some((t) => host.events.has(t)))
     )
       return;
@@ -967,6 +1031,8 @@ export class Interaction {
     // A listener may destroy the chart: what is left of the input goes with it.
     for (const emit of due) if (!this.#disposed) emit();
     if (this.#disposed) return;
+    // What a brush being drawn shows is reported once a frame.
+    this.#preview();
     const captured = this.#captured;
     this.#captured = null;
     const resolved = captured?.scene === scene;
@@ -1575,6 +1641,20 @@ export class Interaction {
             brush.start(press.x, press.y, press.panel);
           }
           brush.move(x, y);
+        } else if (press.moved && press.mode === "edit" && brush) {
+          if (!brush.dragging) {
+            // What it moves, as it was where the press landed.
+            const at = this.#brushAt(press.panel, press.x, press.y);
+            if (at) brush.edit(at.handle, at.selection, press.x, press.y, press.panel);
+          }
+          brush.move(x, y);
+        }
+        // A brush's first move between two frames reports what it shows at
+        // once, so that every chart its rows reach draws it on the coming
+        // frame; later moves report with that frame (see `draw`).
+        if (press.moved && this.#previewedIn !== frameCount()) {
+          this.#previewedIn = frameCount();
+          this.#preview();
         }
       }
       host.schedule();
@@ -1583,10 +1663,8 @@ export class Interaction {
     on("pointerleave", (event) => {
       this.#pointer = this.#reading = this.#pointerShared = this.#over = null;
       // A captured drag leaves only when released; any other press ends here.
-      this.#press = null;
+      this.#cancelPress();
       if (this.#tap?.pointer === event.pointerId) this.#tap = null;
-      host.brush()?.cancel();
-      host.schedule();
       host.shareCursor(null);
     });
 
@@ -1602,7 +1680,18 @@ export class Interaction {
           this.#panelAt(point.x, point.y) ??
           host.model.panels().find(({ xGroup }) => xGroup === "");
         const focused = root.ownerDocument.activeElement === root;
-        const action = panel && this.#bindingsIn(panel).match("wheel", event, OWN, focused)?.action;
+        // The wheel over the brush resizes it, where a binding says so.
+        const over = panel && this.#brushAt(panel, point.x, point.y);
+        const takes = (a: Binding["action"]) => OWN(a) && (a.type !== "editBrush" || !!over);
+        const action =
+          panel && this.#bindingsIn(panel).match("wheel", event, takes, focused)?.action;
+        if (action?.type === "editBrush" && over) {
+          event.preventDefault();
+          const factor = Math.exp(event.deltaY * (event.deltaMode === 1 ? 16 : 1) * 0.002);
+          const { x, y } = point;
+          host.select(over.brush.resized(over.selection, panel!, x, y, factor), panel, "wheel");
+          return;
+        }
         if (!action || (action.type !== "pan" && action.type !== "zoom")) return;
         event.preventDefault();
         // Steps faster than frames add up, each from the view the last asked for.
@@ -1646,9 +1735,17 @@ export class Interaction {
           this.#tap = { pointer: event.pointerId, x, y, moved: false, label: true };
         return;
       }
-      const action = this.#bindingsIn(panel).match("drag", event, OWN)?.action;
+      // A drag that starts on the brush moves or resizes it, where a binding says so.
+      const on = (a: Binding["action"]) =>
+        OWN(a) && (a.type !== "editBrush" || !!this.#brushAt(panel, x, y));
+      const action = this.#bindingsIn(panel).match("drag", event, on)?.action;
       const type = action?.type;
-      const mode = type === "pan" || type === "brush" || type === "cursor" ? type : "click";
+      const mode =
+        type === "pan" || type === "brush" || type === "cursor"
+          ? type
+          : type === "editBrush"
+            ? "edit"
+            : "click";
       // Other buttons click nothing.
       if (mode === "click" && event.button !== 0) return;
       this.#press = { x, y, panel, mode, action, moved: false, from: this.#view(panel) };
@@ -1680,7 +1777,7 @@ export class Interaction {
         if (event.button === 0 && press.mode !== "cursor") this.#click(local(event), event);
         return;
       }
-      if (press.mode !== "brush") return;
+      if (press.mode !== "brush" && press.mode !== "edit") return;
       // The release point ends the brush, wherever the last move was.
       const end = local(event);
       const brush = host.brush();
@@ -1688,16 +1785,23 @@ export class Interaction {
       const selection = brush?.end() ?? null;
       // The drag outline goes, whether or not the brush selects anything.
       host.schedule();
-      // A panel that went while dragging (its facet value did) selects nothing.
-      if (!selection || !this.#still(press.panel)) return;
-      const zooms = press.action?.type === "brush" && press.action.zoom;
-      if (zooms && this.#zoomable(selection, press.panel)) {
+      // A panel that went while dragging (its facet value did) selects nothing;
+      // a brush that showed something and selects nothing went back.
+      if (!selection || !this.#still(press.panel)) {
+        if (press.previewed !== undefined) host.preview(null, press.panel, "cancel", "pointer");
+        return;
+      }
+      if (this.#zoomsOnRelease(press) && this.#zoomable(selection, press.panel)) {
         this.#zoomTo(selection, press.panel);
         return;
       }
+      const before = host.selection();
       host.select(selection, press.panel);
       const selected = host.selection();
-      if (selected) {
+      // Released where it began, the brush changed nothing: its previews end as undone.
+      if (selected === before && press.previewed !== undefined)
+        host.preview(null, press.panel, "cancel", "pointer");
+      if (selected?.kind === "brush") {
         const format = host.model.formatsOf(undefined, press.panel.key);
         host.live.textContent = describeSelection(selected, format);
       }
@@ -1738,8 +1842,11 @@ export class Interaction {
       const { x, y } = local(event);
       if (this.#onItems(x, y)) return;
       const panel = this.#panelAt(x, y);
-      const action = this.#bindingsIn(panel).match("doubleClick", event, OWN)?.action;
-      if (action?.type === "reset") this.#reset(panel);
+      const brushed = host.selection()?.kind === "brush";
+      const takes = (a: Binding["action"]) => OWN(a) && (a.type !== "clearBrush" || brushed);
+      const action = this.#bindingsIn(panel).match("doubleClick", event, takes)?.action;
+      if (action?.type === "clearBrush") host.select(null);
+      else if (action?.type === "reset") this.#reset(panel);
       else if (action?.type === "zoom" && panel)
         this.#zoomAt(this.#shown(panel), { x, y }, 1 / (action.factor ?? 2), action.axes);
     });
@@ -1938,7 +2045,7 @@ export class Interaction {
    * Whether a selection can be zoomed to: ranges (a lasso cannot), on
    * axes that zoom, in a chart whose brushes do not select rows.
    */
-  #zoomable(selection: Selection, panel: DrawnPanel): boolean {
+  #zoomable(selection: BrushSelection, panel: DrawnPanel): boolean {
     if (selection.lasso || !(selection.x || selection.y) || this.#host.rows()?.brushes(panel.key))
       return false;
     return (!selection.x || panel.x.type !== "band") && (!selection.y || panel.y.type !== "band");
@@ -1949,7 +2056,7 @@ export class Interaction {
    * from a synced chart): when the chart zooms along every axis it has a
    * range on, and it can be zoomed to.
    */
-  #zooms(selection: Selection, panel: DrawnPanel): boolean {
+  #zooms(selection: BrushSelection, panel: DrawnPanel): boolean {
     const axes = this.#bindingsIn(panel)
       .list.map(({ action }) => (action.type === "zoom" ? (action.axes ?? "x") : ""))
       .join("");
@@ -2004,11 +2111,13 @@ export class Interaction {
    * panel went. With `back` (Escape), a pan goes back to where it started,
    * unless the view changed since in another way (`setViewport`, a synced chart).
    */
-  #cancelPress(back = false) {
+  #cancelPress(back = false, cause: ChangeCause = "pointer") {
     const press = this.#press;
     this.#press = null;
     this.#host.brush()?.cancel();
     this.#host.schedule();
+    // A brush that reported what it showed reports going back.
+    if (press?.previewed !== undefined) this.#host.preview(null, press.panel, "cancel", cause);
     if (!back || !press?.last || !this.#still(press.panel)) return;
     const { panel, from, last } = press;
     const now = this.#view(panel);
@@ -2030,7 +2139,7 @@ export class Interaction {
   }
 
   /** Zooms to a brushed selection. */
-  #zoomTo(selection: Selection, panel: DrawnPanel) {
+  #zoomTo(selection: BrushSelection, panel: DrawnPanel) {
     const host = this.#host;
     const { x, y } = selection;
     host.animated(() =>
@@ -2138,16 +2247,69 @@ export class Interaction {
     // A press off the panels clicks an axis label, or nothing.
     if (label && !this.#axisLabel(x, y)) return () => {};
     const payload = host.events.has("click") ? this.#pressed(x, y, event, revision) : undefined;
-    // Row selections pick with the reach of its pointer, as its event does.
-    const select = this.#pressing(event, () => host.rows()?.clicked(x, y, event));
-    const brushed = !!host.model.interactionOf(this.#panelAt(x, y)?.key)?.brush;
+    // Items or series a click selects (`interaction.select`), which write
+    // bound rows in turn; else row selections pick with the reach of its
+    // pointer, as its event does.
+    const picks = !!host.options().interaction?.select;
+    const target = picks
+      ? (payload?.target ?? this.#pressing(event, () => this.#targetAt(x, y, event.target)))
+      : undefined;
+    const chosen = picks ? this.#chosen(target, event.shiftKey) : undefined;
+    const select = picks
+      ? undefined
+      : this.#pressing(event, () => host.rows()?.clicked(x, y, event));
+    const panel = this.#panelAt(x, y);
+    const brush = host.model.interactionOf(panel?.key)?.brush;
+    // A click clears the brush where it says so (by default), but not one on the brush it moves.
+    const settings = typeof brush === "object" ? brush : undefined;
+    const clears =
+      !!brush &&
+      (settings?.clear ?? "click") === "click" &&
+      !(settings?.edit && panel && this.#brushAt(panel, x, y));
     return () => {
       const written = select?.();
+      if (chosen !== undefined) host.select(chosen);
       // A click on an item standing for none of the bound rows keeps the brush too.
-      if (brushed && written !== null) host.select(null);
+      else if (clears && written !== null && host.selection()?.kind === "brush") host.select(null);
       // Onto the event captured, which keeps the panels it was captured with.
       if (payload) host.events.emit("click", Object.assign(payload, written));
     };
+  }
+
+  /**
+   * What a click or Enter on `target` selects where the chart asks
+   * (`interaction.select`): the item, or its series, alone; with `shift`,
+   * added or taken out. On the only one selected, or on a plot where no
+   * item is, none (but with `shift`, or over a brush, which clears as it
+   * says). Undefined where it changes nothing: an item of no series
+   * selecting series, axis labels, legends.
+   */
+  #chosen(target: Target | undefined, shift: boolean): ChartSelection | null | undefined {
+    const host = this.#host;
+    const select = host.options().interaction?.select;
+    if (!select || (target?.kind !== "item" && target?.kind !== "plot")) return undefined;
+    const key = target.kind === "item" ? (select === "items" ? target.item : target.series) : null;
+    if (key === undefined) return undefined;
+    const current = host.selection();
+    // A click off the data leaves a brush to its own `clear`.
+    if (key === null) return shift || current?.kind === "brush" ? undefined : null;
+    const held: readonly unknown[] =
+      current?.kind === "items" && select === "items"
+        ? current.items
+        : current?.kind === "series" && select === "series"
+          ? current.series
+          : [];
+    const keys = shift
+      ? held.includes(key)
+        ? held.filter((k) => k !== key)
+        : [...held, key]
+      : held.length === 1 && held[0] === key
+        ? []
+        : [key];
+    if (keys.length === 0) return null;
+    return select === "items"
+      ? { kind: "items", items: keys as string[] }
+      : { kind: "series", series: keys as string[] };
   }
 
   /** A secondary press's event, captured now, to emit. */
@@ -2234,7 +2396,11 @@ export class Interaction {
       cause: "keyboard",
       revision,
     });
-    return () => host.events.emit("click", payload);
+    const chosen = this.#chosen(payload.target, false);
+    return () => {
+      if (chosen !== undefined) host.select(chosen, undefined, "keyboard");
+      if (host.events.has("click")) host.events.emit("click", payload);
+    };
   }
 
   /**
@@ -2275,11 +2441,11 @@ export class Interaction {
     // Escape ends a drag, a pan going back to where it started.
     if (event.key === "Escape" && this.#press) {
       event.preventDefault();
-      this.#cancelPress(true);
+      this.#cancelPress(true, "keyboard");
       return;
     }
     // A selection cleared since (by a click, a synced chart, `select`) starts afresh.
-    if (!host.selection()) this.#brushAnchor = null;
+    if (host.selection()?.kind !== "brush") this.#brushAnchor = null;
     // Keys move through what the chart shows once pending changes (a series
     // hidden, new options, values on their way) are drawn, and values that
     // render listeners changed meanwhile do not move.
@@ -2291,9 +2457,10 @@ export class Interaction {
       const selection = host.selection();
       const owner = host.owner();
       const at = owner?.plane ? undefined : panels.find(({ key }) => owner?.panels.includes(key));
-      if (!selection || !at || !this.#zooms(selection, at)) {
-        // Else Enter on the keyboard cursor clicks what it is on, as the pointer would.
-        if (this.#keyboard && host.events.has("click")) {
+      if (selection?.kind !== "brush" || !at || !this.#zooms(selection, at)) {
+        // Else Enter on the keyboard cursor clicks what it is on, as the pointer
+        // would, and selects it where the chart asks.
+        if (this.#keyboard && (host.events.has("click") || host.options().interaction?.select)) {
           event.preventDefault();
           if (this.#fresh()) this.#enter()();
           else {
@@ -2439,7 +2606,7 @@ export class Interaction {
     // keyboard cannot draw. A range does not go on into a panel with
     // another scale along that axis.
     const axis = inspection.axis;
-    const brush = model.interactionOf(panel)?.brush;
+    const brush = shapeOf(model.interactionOf(panel)?.brush);
     // Nor does it go on along another axis.
     const crossed = axis !== "item" && from?.[`${axis}Group`] !== to?.[`${axis}Group`];
     if (crossed || (this.#brushAnchor && this.#brushAnchor.axis !== axis)) this.#brushAnchor = null;
@@ -2453,12 +2620,17 @@ export class Interaction {
       const range = [this.#brushAnchor.value, inspection.value] as const;
       // In the panel as drawn: what listeners changed since waits for the next frame.
       host.select(
-        { x: axis === "x" ? range : null, y: axis === "y" ? range : null, lasso: null },
+        {
+          kind: "brush",
+          x: axis === "x" ? range : null,
+          y: axis === "y" ? range : null,
+          lasso: null,
+        },
         to,
         "keyboard",
       );
       const selection = host.selection();
-      const zooms = selection && this.#zooms(selection, to!);
+      const zooms = selection?.kind === "brush" && this.#zooms(selection, to!);
       const hint = zooms ? " Press Enter to zoom to it." : "";
       text = `Selected ${this.#brushAnchor.label} to ${inspection.label}.${hint} ${text}`;
     } else {
@@ -2475,9 +2647,15 @@ export class Interaction {
     const host = this.#host;
     const panels = host.model.panels();
     const at = panels.find(({ key }) => key === this.#keyboard?.panel) ?? panels[0];
-    const action = this.#bindingsIn(at).match("key", event, OWN)?.action;
+    const brushed = host.selection()?.kind === "brush";
+    const takes = (a: Binding["action"]) => OWN(a) && (a.type !== "clearBrush" || brushed);
+    const action = this.#bindingsIn(at).match("key", event, takes)?.action;
     if (!action || !at) return false;
     event.preventDefault();
+    if (action.type === "clearBrush") {
+      host.select(null, undefined, "keyboard");
+      return true;
+    }
     const shown = this.#shown(at);
     const { plot } = shown.panel;
     if (action.type === "pan") {
@@ -2606,7 +2784,7 @@ function nearestTo(
 }
 
 /** A sentence announcing a selection, with values as the axes label them. */
-function describeSelection(selection: Selection, format: AxisFormat): string {
+function describeSelection(selection: BrushSelection, format: AxisFormat): string {
   if (selection.lasso) return "Selected a freehand region.";
   const { x, y } = selection;
   const ranges: string[] = [];

@@ -45,7 +45,7 @@ hx.lineplot(fmri, x="timepoint", y="signal", series="event", errorbar=("se", 1))
 # A live notebook chart that streams rows and reports brushing
 live = hg.Chart(df, brush="x").line(x="time", y="cpu").widget()
 live.append(new_rows, max_rows=10_000)
-live.on_select(lambda selection: print(selection.x))
+live.on_select(lambda event: print(event.selection))
 ```
 
 In Streamlit:

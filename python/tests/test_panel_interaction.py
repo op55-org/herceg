@@ -114,12 +114,12 @@ def test_trees_in_facets_drill_and_select_rows():
 
 
 def test_a_lasso_names_the_subplot_it_is_drawn_in():
-    selection = hg.Selection(lasso=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)), panels=("map",))
+    selection = hg.BrushSelection(lasso=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)), panels=("map",))
     encoded = encode_selection(selection)
     assert encoded is not None and encoded["panels"] == ["map"]
     assert decode_selection(encoded) == selection
-    with pytest.raises(ValueError, match="Selection panels: expected a tuple of panel ids"):
-        encode_selection(hg.Selection(lasso=selection.lasso, panels=("map", 1)))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="BrushSelection panels: expected a tuple of panel ids"):
+        encode_selection(hg.BrushSelection(lasso=selection.lasso, panels=("map", 1)))  # type: ignore[arg-type]
 
 
 pytest.importorskip("anywidget")
@@ -418,18 +418,18 @@ def test_live_subplots_keep_each_panels_view_and_selection():
         {"x": [0.5, 1.5], "y": [100.0, 200.0], "time": []},
     )
     with pytest.raises(ValueError, match="widget.selection panels: no panel 'p50'"):
-        widget.selection = hg.Selection(x=(0.0, 1.0), panels=("p50",))
+        widget.selection = hg.BrushSelection(x=(0.0, 1.0), panels=("p50",))
     # A brush in a panel is the selection, of that panel; Python brushes another.
     selections = []
-    widget.on_select(selections.append)
+    widget.on_select(lambda event: selections.append(event.selection))
     brushed = {"x": [1, 2], "y": None, "lasso": None, "panels": ["errors"], "time": []}
     browser.reply({"type": "select", "selection": brushed})
-    assert widget.selection == hg.Selection(x=(1.0, 2.0), panels=("errors",))
-    widget.selection = hg.Selection(y=(100.0, 150.0), panels=("latency",))
+    assert widget.selection == hg.BrushSelection(x=(1.0, 2.0), panels=("errors",))
+    widget.selection = hg.BrushSelection(y=(100.0, 150.0), panels=("latency",))
     assert browser.messages[-1]["selection"]["panels"] == ["latency"]
     assert selections == [
-        hg.Selection(x=(1.0, 2.0), panels=("errors",)),
-        hg.Selection(y=(100.0, 150.0), panels=("latency",)),
+        hg.BrushSelection(x=(1.0, 2.0), panels=("errors",)),
+        hg.BrushSelection(y=(100.0, 150.0), panels=("latency",)),
     ]
 
 

@@ -1,16 +1,45 @@
 // Events a chart emits to the application.
 
+import type { SelectionCondition } from "../model/conditions.ts";
 import type { ItemChanges } from "../model/item-views.ts";
 import type { PanelVisibility } from "../model/legend.ts";
 import type { ChangeCause, Inspection, ViewReport } from "../model/model.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import type { ChartError } from "../spec/errors.ts";
-import type { Selection } from "./brushed.ts";
+import type {
+  ChartSelection,
+  DrillState,
+  Phase,
+  ViewportState,
+  VisibilityState,
+} from "../spec/state.ts";
 import type { ScaleInstance, SelectionOwner } from "./handle.ts";
 import { report } from "./scheduler.ts";
 
+export type { SelectionCondition } from "../model/conditions.ts";
 export type { PanelVisibility } from "../model/legend.ts";
 export type { ChangeCause, PanelViewport, ScaleView } from "../model/model.ts";
+
+/**
+ * An opaque name of one chart's state as one of its reports saw it (each
+ * state event's `basis`, and `chart.basis` now), for conditional writes:
+ * charts with state support (`herceg/state`) report it.
+ */
+export type Basis = string & { readonly __basis: unique symbol };
+
+/**
+ * A write that applies only if the state it writes, where it writes it (a
+ * panel's view, the chart's selection), has not changed since the report
+ * whose `basis` is `expected` (a chart's creation counts as a change):
+ * otherwise it changes nothing and the state is reported again, with
+ * cause "api". So an answer that took time (a server's, a Streamlit
+ * rerun's) never undoes what the user did meanwhile. A basis of another
+ * chart, or of one since destroyed, is refused. It needs state support
+ * (`herceg/state`), as bases do.
+ */
+export interface Conditional {
+  expected?: Basis | undefined;
+}
 
 /**
  * Where the pointer is, unsnapped: in pixels, and in data on the axes of
@@ -126,22 +155,62 @@ export interface InputEvent {
 
 /**
  * What every change of the chart's state reports with it: what made it,
- * and the chart's `revision` once it applied.
+ * the chart's `revision` once it applied, and with state support
+ * (`herceg/state`) the basis a write answering the report gives as
+ * `expected`.
  */
 export interface StateChange {
   cause: ChangeCause;
   revision: number;
+  basis?: Basis;
 }
 
-/** A change of view, with the chart's `revision` once it applied (see `ChartEvents.viewport`). */
+/**
+ * A change of view, with the chart's `revision` once it applied and, with
+ * state support, its basis and the chart's whole view after it (`state`,
+ * as the `viewport` option takes it) (see `ChartEvents.viewport`).
+ */
 export interface ViewportEvent extends ViewReport {
   readonly revision: number;
+  readonly basis?: Basis;
+  readonly state?: ViewportState;
+}
+
+/** What a `select` event reports (see `ChartEvents.select`). */
+export interface SelectEvent extends StateChange {
+  /**
+   * The selection now: with a `preview`, the one a gesture is making; null
+   * when cleared, or when a `cancel` went back to none. Items and series
+   * are named by their keys.
+   */
+  selection: ChartSelection | null;
+  /** A gesture still moving (`preview`, once a frame), done (`commit`), or undone (`cancel`); `commit` for every other change. */
+  phase: Phase;
+  /** A brush's: what it belongs to; for a clear, what it belonged to; empty for items and series. */
+  owner: SelectionOwner;
+  /** With state support: the selection committed, which a gesture's previews leave as it was. */
+  state?: ChartSelection | null;
+  /**
+   * What the selection holds on each table its marks read, as a condition
+   * on that table's fields: for filtering row views, or a product's
+   * queries. A table is left out where no condition says it exactly (a
+   * lasso, a stack's tops, rows without names). It needs state support:
+   * without, reading it throws, naming `herceg/state`.
+   */
+  conditions: readonly SelectionCondition[];
+  /**
+   * With `rowSelection`, what the selection wrote to the channels it
+   * binds: per table, the rows it covers (a condition for brushes, rows
+   * for lassos), or null where clearing it cleared them. Selections from
+   * synced charts write nothing.
+   */
+  rows?: readonly RowSelectionChange[];
 }
 
 /** The panel a view or selection is set in, for charts whose panels have scales of their own. */
 export interface PanelTarget {
   /** A panel's key: its facet value (both, in a grid, as a JSON array) or subplot id. */
-  panel?: string;
+  panel?: string | undefined;
 }
 
 /** Chart events by name, with what their listeners receive. */
@@ -154,21 +223,11 @@ export interface ChartEvents {
    */
   viewport: ViewportEvent;
   /**
-   * The selection changed: its x and y ranges and a lasso's outline, all
-   * null when the selection was cleared.
+   * The selection changed, or a gesture is changing it: a brush drawn,
+   * moved, or resized reports `preview` once a frame, `commit` on release,
+   * and `cancel` on Escape or a lost pointer (see `SelectEvent`).
    */
-  select: Selection &
-    StateChange & {
-      /** What it belongs to: for a cleared selection, what it belonged to. */
-      owner: SelectionOwner;
-      /**
-       * With `rowSelection`, what the selection wrote to the channels it
-       * binds: per table, the rows it covers (a condition for brushes, rows
-       * for lassos), or null where clearing it cleared them. Selections from
-       * synced charts write nothing.
-       */
-      rows?: readonly RowSelectionChange[];
-    };
+  select: SelectEvent;
   /**
    * The view came near an end of what `interaction.limits` lets its scale
    * show: within `edge.threshold` of its span of the extent's end, or, on
@@ -213,7 +272,7 @@ export interface ChartEvents {
    * cause of this chart's write (its gesture's, a click's, a key's), or
    * "sync" for another writer's, and the revision that counted it.
    */
-  rowSelection: RowSelectionChange & StateChange;
+  rowSelection: RowSelectionChange & StateChange & { phase: Phase };
   /**
    * A 3D chart's camera moved: dragged, zoomed, reset, turned by keys or
    * buttons, or set with `setCamera`; once per camera per frame at most.
@@ -225,7 +284,11 @@ export interface ChartEvents {
    * Enter, Backspace, a breadcrumb, or `setDrillRoot`): the node's item key,
    * null for the whole tree, and the path to it.
    */
-  drill: ItemChanges["drill"] & StateChange;
+  drill: ItemChanges["drill"] &
+    StateChange & {
+      /** With state support: the whole state, as the `drillRoot` option takes it. */
+      state?: DrillState;
+    };
   /**
    * A network's node was moved (dragged, Shift with the arrow keys, or
    * `setItemPosition`), or put back where the layout puts it (null): its
@@ -241,6 +304,8 @@ export interface ChartEvents {
   visibility: StateChange & {
     hiddenKeys: readonly string[];
     panels?: PanelVisibility;
+    /** With state support: the whole state, as the `visibility` option takes it. */
+    state?: VisibilityState;
   };
   /**
    * The chart drew a frame of its data, axes, and legend (a cursor or

@@ -11,6 +11,7 @@ export const HERCEG_ALIAS = {
   "herceg/pdf": join(ROOT, "..", "packages", "herceg", "src", "pdf.ts"),
   "herceg/image": join(ROOT, "..", "packages", "herceg", "src", "image.ts"),
   "herceg/fonts": join(ROOT, "..", "packages", "herceg", "src", "fonts.ts"),
+  "herceg/state": join(ROOT, "..", "packages", "herceg", "src", "state.ts"),
   "herceg/spec": join(ROOT, "..", "packages", "herceg", "src", "from-spec.ts"),
   "herceg/grid": join(ROOT, "..", "packages", "herceg", "src", "grid.ts"),
   "herceg/layout": join(ROOT, "..", "packages", "herceg", "src", "layout.ts"),

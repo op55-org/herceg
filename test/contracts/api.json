@@ -129,7 +129,8 @@
         "fonts": "Fonts the browser loads for Canvas text and exports, by URL: not part of a portable spec.",
         "renderTooltip": "A JavaScript function rendering the tooltip's content: specs hold no functions.",
         "errorMode": "Whether the chart shows its errors in its place or throws them: the page's concern, not the spec's.",
-        "onError": "A JavaScript function told of errors: specs hold no functions."
+        "onError": "A JavaScript function told of errors: specs hold no functions.",
+        "state": "State support, herceg/state's chartState: code the chart attaches, which specs do not hold; loadSpec gives it to charts from specs."
       },
       "untyped": {
         "facet": "TypeScript takes facet()'s Facet, an instance, made and checked once.",
@@ -145,6 +146,9 @@
         "style": "The chart's element's style.",
         "ref": "The chart's handle, once mounted.",
         "initial": "The server's snapshot to hydrate (hydration(snapshot)): read when the chart mounts."
+      },
+      "without": {
+        "state": "The adapter attaches state support (herceg/state) itself."
       }
     },
     "chart svelte": {
@@ -154,11 +158,15 @@
         "style": "The chart's element's style.",
         "chart": "The chart's handle, bound once mounted (bind:chart).",
         "initial": "The server's snapshot to hydrate (hydration(snapshot)): read when the chart mounts."
+      },
+      "without": {
+        "state": "The adapter attaches state support (herceg/state) itself."
       }
     },
     "chart vue": {
       "without": {
-        "renderTooltip": "Vue renders the tooltip's content in the chart's renderTooltip slot."
+        "renderTooltip": "Vue renders the tooltip's content in the chart's renderTooltip slot.",
+        "state": "The adapter attaches state support (herceg/state) itself."
       },
       "only": {
         "initial": "The server's snapshot to hydrate (hydration(snapshot)): read when the chart mounts."
@@ -189,11 +197,16 @@
         "panels": {
           "takes": ["*"],
           "reason": "Python takes a panel's id alone for a panel of its defaults: panels=['a', 'b']."
+        },
+        "visibility": {
+          "takes": ["*"],
+          "reason": "Python takes the hidden keys as a list too: visibility=['[0,\"b\"]']."
         }
       },
       "untyped": {
         "data": "Python takes each table as a data frame, an Arrow table, NumPy arrays, or a mapping of columns, which it writes as the spec's tables.",
-        "facet.gap": "As a layout grid's gap: Python takes the gaps between rows and between columns as a pair, (row, column), where the spec writes { row, column }."
+        "facet.gap": "As a layout grid's gap: Python takes the gaps between rows and between columns as a pair, (row, column), where the spec writes { row, column }.",
+        "drillRoot": "Python takes one tree's root, as a key or the hg.DrillRoot on_drill reports, which it writes as the key; roots per subplot are not offered yet."
       }
     },
     "chart update": {
@@ -205,7 +218,12 @@
         "fonts": "TypeScript's alone (see chart typescript).",
         "renderTooltip": "TypeScript's alone (see chart typescript).",
         "errorMode": "TypeScript's alone (see chart typescript).",
-        "onError": "TypeScript's alone (see chart typescript)."
+        "onError": "TypeScript's alone (see chart typescript).",
+        "state": "TypeScript's alone (see chart typescript).",
+        "selection": "A widget sets its selection through its selection property and select().",
+        "viewport": "A widget sets its view with set_viewport().",
+        "visibility": "A widget sets what is hidden through its hidden_keys property.",
+        "drillRoot": "A widget sets its drill root through its drill_root property."
       },
       "spread": {
         "interaction": {
@@ -288,7 +306,6 @@
     "handle python": {
       "without": {
         "root": "The chart's element is the browser's.",
-        "select": "The widget's selection is set through its selection property.",
         "setItemPosition": "The widget sets item positions through its item_positions property.",
         "getPanels": "Panels' pixel geometry is the browser's.",
         "toPixel": "Pixels are the browser's.",
@@ -307,6 +324,7 @@
         "viewRevision": "The widget reads and sets views with get_viewport and set_viewport; each change's revision arrives with it, as hg.ViewportEvent's view_revision (on_viewport).",
         "revision": "The chart's revision counts what one browser's chart drew; the widget orders browsers' reports by a transport revision of its own.",
         "drawnRevision": "Frames are drawn in each browser; the widget orders browsers' reports by a transport revision of its own.",
+        "basis": "A widget's write names the report it answers by that report's basis (SelectEvent.basis); the widget keeps no basis of its own.",
         "getItems": "Layout items' geometry is what a browser's frame drew; Python places marks by items with hg.ItemCoordinate and hg.ItemAnchor, which every browser and export resolves."
       },
       "only": {
@@ -615,7 +633,9 @@
         "kind": "Not offered yet."
       },
       "only": {
-        "color": "One color for a chart without series (seaborn's plot_kws)."
+        "color": "One color for a chart without series (seaborn's plot_kws).",
+        "selected": "The points' look where a selection holds them, or does not (hg.Look), as the point mark takes it.",
+        "unselected": "As selected."
       }
     },
     "express pointplot options": {
@@ -811,6 +831,15 @@
     "vue flags Area": {
       "without": {
         "where": "An expression, whose true is a literal (every row): a bare where is no condition."
+      }
+    },
+    "settings TreeLook hg.Look": {
+      "only": {
+        "stroke": "Python's one hg.Look serves selections and trees; a tree's leaf or branch look refuses what trees do not draw (`treemap leaf: a tree's look takes fill, fill_opacity, and opacity; drop stroke`).",
+        "stroke_width": "As stroke.",
+        "dash": "As stroke.",
+        "stroke_opacity": "As stroke.",
+        "radius": "As stroke."
       }
     },
     "settings SeriesLabelsSpec hg.SeriesLabels": {
@@ -1396,6 +1425,12 @@
         "hover": "Vue takes its listener as the onHover prop, which @hover passes, not as an emitted event: the chart listens, and loads what reads what input is on, only while a parent listens, which an emitted event cannot tell it.",
         "click": "Vue takes its listener as the onClick prop, which @click passes, not as an emitted event: the chart listens, and loads what reads what input is on, only while a parent listens, which an emitted event cannot tell it.",
         "contextMenu": "Vue takes its listener as the onContextMenu prop, which @context-menu passes, not as an emitted event: the chart listens, and keeps the browser's own menu off its plots, only while a parent listens, which an emitted event cannot tell it."
+      },
+      "only": {
+        "update:selection": "v-model's event for a state prop: the selection, as each change commits.",
+        "update:viewport": "v-model's event for a state prop: the whole view, as it changes.",
+        "update:visibility": "v-model's event for a state prop: what is hidden, as it changes.",
+        "update:drillRoot": "v-model's event for a state prop: the trees' drill roots, as they change."
       }
     },
     "chart python inspection within": {
@@ -1444,6 +1479,52 @@
         "halo": "As font.",
         "background": "As font.",
         "padding": "As font."
+      }
+    },
+    "settings ChartSelection hg.BrushSelection|hg.ItemSelection|hg.SeriesSelection": {
+      "without": {
+        "kind": "Python's selections are three classes, whose class is the kind; the spec's kind is written from it.",
+        "panel": "Python names the panels a brush is drawn in (panels), as its events report them; it is set in the first."
+      },
+      "choices": {
+        "x": {
+          "takes": ["*"],
+          "reason": "Python takes datetimes on time axes, and category labels, as a range's ends."
+        },
+        "y": {
+          "takes": ["*"],
+          "reason": "As x."
+        }
+      },
+      "only": {
+        "panels": "As panel."
+      }
+    },
+    "settings ViewportState hg.Viewport": {
+      "choices": {
+        "x": {
+          "takes": ["*"],
+          "reason": "Python takes datetimes on time axes as a range's ends."
+        },
+        "y": {
+          "takes": ["*"],
+          "reason": "As x."
+        },
+        "yRight": {
+          "takes": ["*"],
+          "reason": "As x."
+        }
+      },
+      "without": {
+        "panels": "Python's first view is the chart's; a widget sets each panel's with set_viewport(..., panel=)."
+      }
+    },
+    "settings VisibilityState hg.VisibilityState": {
+      "without": {
+        "hidden": "Python's hg.VisibilityState names the hidden keys hidden_keys, as on_visibility reports them."
+      },
+      "only": {
+        "hidden_keys": "As hidden."
       }
     },
     "settings ItemAnchor|MarkAnchorSpec hg.ItemAnchor|hg.MarkAnchor": {

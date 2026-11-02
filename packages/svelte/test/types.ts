@@ -103,7 +103,7 @@ export const options: ChartProps = {
   title: "Request latency",
   y: { title: "ms" },
   interaction: { zoom: true },
-  onselect: ({ x }) => x?.[0].toFixed(),
+  onselect: ({ selection }) => selection?.kind === "brush" && selection.x?.[0].toFixed(),
   onviewport: ({ scales, views }) => [scales[0]?.view, views[0]?.yRight],
   onhover: ({ inspection }) => inspection?.points.map(({ mark, row }) => [mark, row]),
 };

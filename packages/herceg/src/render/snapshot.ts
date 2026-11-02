@@ -10,7 +10,7 @@ import { checkFonts } from "../fonts/prepared.ts";
 import type { Fonts } from "../fonts/registry.ts";
 import { estimateText, type MeasureText } from "../layout/text.ts";
 import { chartDescription } from "../model/describe.ts";
-import { type ChartConfig, ChartModel } from "../model/model.ts";
+import { ChartModel } from "../model/model.ts";
 import { titleText } from "../model/titles.ts";
 import { eachPainted } from "../scene/paint.ts";
 import {
@@ -30,6 +30,7 @@ import {
   type SnapshotGeometry,
   type SnapshotState,
 } from "./snapshot-format.ts";
+import { drawInState, type StatefulConfig } from "./static-state.ts";
 import { cutToChart, guidesMarkup, underMarkup } from "./svg.ts";
 
 export type { ChartSnapshot, SnapshotGeometry, SnapshotState } from "./snapshot-format.ts";
@@ -70,7 +71,7 @@ const HIDDEN_TEXT =
  * // In the page: initial.html; in the browser: hydrateChart(host, options, initial).
  * ```
  */
-export function renderToSnapshot(options: ChartConfig, env: SnapshotOptions): ChartSnapshot {
+export function renderToSnapshot(options: StatefulConfig, env: SnapshotOptions): ChartSnapshot {
   const { width, height, idPrefix, fonts } = env;
   for (const [name, value] of [
     ["width", width],
@@ -95,7 +96,8 @@ export function renderToSnapshot(options: ChartConfig, env: SnapshotOptions): Ch
   model.setSize(width, height, 1);
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);
-  const scene = model.scene(fonts ? pageMeasure(fonts) : estimateText, false, NO_PAGE);
+  const measure = fonts ? pageMeasure(fonts) : estimateText;
+  const scene = drawInState(model, options, () => model.scene(measure, false, NO_PAGE));
   const document = new ShimDocument();
   const encodeRaster: SvgContext["encodeRaster"] = (raster) =>
     pngDataUrl(raster.columns, raster.rows, raster.pixels);

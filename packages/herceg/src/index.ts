@@ -79,15 +79,16 @@ export type {
   TableOptions,
 } from "./data/table.ts";
 export { fromRows, Table, table } from "./data/table.ts";
-export type { Selection } from "./dom/brushed.ts";
 export { type ChartOptions, type ChartUpdate, createChart } from "./dom/chart.ts";
 export { showFailure } from "./dom/errors.ts";
 export type {
   AxisLabelTarget,
+  Basis,
   Box,
   ChangeCause,
   ChartEvents,
   ChartListener,
+  Conditional,
   InputEvent,
   ItemTarget,
   LegendEntryTarget,
@@ -96,6 +97,8 @@ export type {
   PlotTarget,
   Pointer,
   ScaleView,
+  SelectEvent,
+  SelectionCondition,
   StateChange,
   Target,
   ViewportEvent,
@@ -245,5 +248,6 @@ export {
 export type { ExportFormat, ExportSettings, LengthUnit } from "./spec/export.ts";
 export type * from "./spec/spec.ts";
 export { SPEC_VERSION } from "./spec/spec.ts";
+export type * from "./spec/state.ts";
 export type { Theme } from "./theme.ts";
 export type { Camera } from "./three/camera.ts";

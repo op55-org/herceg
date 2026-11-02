@@ -21,6 +21,7 @@
     tablesOf,
     viewOf,
   } from "herceg";
+  import { chartState } from "herceg/state";
   import { untrack } from "svelte";
   import { type Basis, basisOf, type ChartProps, canonical, holds, sameMark } from "./chart.js";
   import { type Entry, type LayoutEntry, plain, provideMarks } from "./marks.js";
@@ -46,6 +47,10 @@
     onrender,
     onerror,
     renderTooltip,
+    selection = $bindable(),
+    viewport = $bindable(),
+    visibility = $bindable(),
+    drillRoot = $bindable(),
     ...options
   }: ChartProps = $props();
 
@@ -104,9 +109,13 @@
   interface View {
     marks: readonly ChartMark[];
     options: Options;
+    /** The options but the state options, as `canonical` writes them. */
     key: string;
     refused?: ChartError | undefined;
   }
+
+  /** The state options, which change the chart's state alone when only they change. */
+  const STATES = ["selection", "viewport", "visibility", "drillRoot"] as const;
 
   /** With errorMode "throw", what kept the chart from drawing, thrown in the template. */
   let thrown = $state.raw<ChartError | null>(null);
@@ -183,9 +192,10 @@
     // The tooltip's renderer is the chart's own, calling the prop: the key
     // says whether there is one.
     const rendered = renderTooltip !== undefined;
+    const states = plain({ selection, viewport, visibility, drillRoot }) as Options;
     return {
       marks: next,
-      options: rendered ? { ...view, renderTooltip: showTooltip } : view,
+      options: { ...view, ...states, ...(rendered && { renderTooltip: showTooltip }) },
       key: `${canonical(view)}${rendered ? " rendered tooltip" : ""}`,
       refused,
     };
@@ -256,8 +266,22 @@
     const config = {
       ...(Object.fromEntries(given) as Omit<ChartOptions, "marks">),
       marks: view.marks,
+      state: chartState,
     };
     current = snapshot ? snapshot.hydrate(snapshotHost!, config) : createChart(container, config);
+    // Bound state follows the chart's as each change commits; previews come as events.
+    current.on("select", (event) => {
+      if (event.phase === "commit") selection = event.selection;
+    });
+    current.on("viewport", (event) => {
+      viewport = event.state;
+    });
+    current.on("visibility", (event) => {
+      visibility = event.state;
+    });
+    current.on("drill", (event) => {
+      drillRoot = event.state;
+    });
     chart = current;
     applied = view;
   }
@@ -278,7 +302,16 @@
     });
     const sameMarks =
       next.length === last.marks.length && next.every((mark, i) => mark === last.marks[i]);
-    if (sameMarks && view.key === last.key) return;
+    // State options changing alone change the chart's state alone.
+    if (sameMarks && view.key === last.key) {
+      const states = STATES.filter(
+        (key) => canonical(view.options[key]) !== canonical(last.options[key]),
+      );
+      applied = { ...last, options: view.options };
+      if (states.length > 0)
+        current.update(Object.fromEntries(states.map((key) => [key, view.options[key]])));
+      return;
+    }
     // Props are the whole configuration: options no longer passed go back
     // to their defaults rather than keeping their previous values.
     const cleared = Object.keys(last.options).filter((key) => !(key in view.options));

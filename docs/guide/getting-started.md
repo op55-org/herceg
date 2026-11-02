@@ -126,7 +126,8 @@ methods of their own (see [Notebooks](python/notebooks-and-streamlit.md)).
 | `loading` | A promise while code loads (compilers a configuration needs before it draws; after the first frame, interaction, the GPU painter, animation, controls, fonts); `undefined` otherwise. |
 | `on(event, listener)` | Listens to events; returns a function that stops listening ([Events](interaction.md#events)). |
 | `setViewport`, `getViewport` | The view of the axes ([below](#views-and-selections)). |
-| `select`, `selection`, `selectionOwner` | The brushed or lassoed selection. |
+| `select`, `selection`, `selectionOwner` | The selection: brushed, lassoed, or of items or series ([Interaction](interaction.md#selections)). |
+| `basis` | The state now, for writes that apply only if it has not changed ([Chart state](interaction.md#chart-state)). |
 | `getLegend`, `getHiddenKeys`, `setHiddenKeys`, `setVisibility` | Series shown and hidden ([Interaction](interaction.md#hiding-series)). |
 | `getPanels`, `toPixel`, `fromPixel`, `formatValue`, `inspect` | Panels and pixel mapping ([Interaction](interaction.md#panels-and-pixels)). |
 | `showCursor`, `hideCursor` | Move the cursor from outside ([Sync](interaction.md#sync)). |
@@ -176,10 +177,17 @@ One `setViewport` call is one change of view: one animation and one
 `viewport` event. In charts whose panels have scales of their own, pass
 `{ panel }`. A range on a category axis is refused.
 
-`chart.selection` is `{ x, y, lasso }` or null, in data values: the brushed
-ranges (null along an axis the brush leaves alone) and a lasso's outline as
-`[x, y]` pairs. `selectionOwner` says which scale instances and panels it
-belongs to. `chart.select(selection | [from, to] | null)` sets it.
+`chart.selection` is null or a selection of one `kind`. A brush's
+(`kind: "brush"`) holds, in data values, the brushed ranges `x` and `y`
+(null along an axis the brush leaves alone) and a lasso's outline as
+`[x, y]` pairs; `selectionOwner` says which scale instances and panels it
+belongs to. Items and series a click selected (`kind: "items"`,
+`"series"`) are held by their keys. `chart.select(selection | [from, to] | null)`
+sets it ([Selections](interaction.md#selections)).
+
+A chart's state, its selection, views, hidden series, and drill root, can
+also be given as options and written back from its events, with state
+support from `herceg/state` ([Chart state](interaction.md#chart-state)).
 
 ## When a chart cannot draw
 

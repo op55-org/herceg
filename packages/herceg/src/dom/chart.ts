@@ -56,15 +56,25 @@ import {
 } from "../scene/scene.ts";
 import { ChartError, type ChartErrorPhase, chartError } from "../spec/errors.ts";
 import type { CameraSpec } from "../spec/spec.ts";
+import {
+  type BrushSelection,
+  type ChartSelection,
+  needsState,
+  type Phase,
+  STATE_OPTIONS,
+} from "../spec/state.ts";
+import type { AttachedState, ChartStateSupport } from "../state/chart-state.ts";
 import { surface, themeReadsPage } from "../theme.ts";
 import type { Camera } from "../three/camera.ts";
 import type { AdoptedChart } from "./adopt.ts";
 import type { Brush } from "./brush.ts";
-import { ascending, DRAG_THRESHOLD, normalize, type Selection } from "./brushed.ts";
+import { ascending, DRAG_THRESHOLD, normalize } from "./brushed.ts";
 import {
+  type Basis,
   type ChangeCause,
   type ChartEvents,
   type ChartListener,
+  type Conditional,
   Emitter,
   type PanelTarget,
   type PanelViewport,
@@ -130,6 +140,13 @@ export interface ChartOptions extends ChartConfig {
   errorMode?: "inline" | "throw" | undefined;
   /** Called with what keeps the chart from drawing, as "error" listeners are. */
   onError?: ((error: ChartError) => void) | undefined;
+  /**
+   * State support, `chartState` from `herceg/state`, which state options
+   * (`selection`, `viewport`, `visibility`, `drillRoot`), conditional
+   * writes (`expected`), `select` events' conditions, and selections of
+   * items and series need. Once given, the chart keeps it.
+   */
+  state?: ChartStateSupport | undefined;
 }
 
 /**
@@ -151,7 +168,7 @@ type Range = readonly [number, number];
 type SharedSelection = [
   along: Range | readonly string[] | null,
   across: Range | readonly string[] | null,
-  lasso: Selection["lasso"],
+  lasso: BrushSelection["lasso"],
 ];
 
 /** Above this many drawn points, "auto" moves marks from SVG to Canvas. */
@@ -370,14 +387,16 @@ export class MountedChart implements Chart, ExportsScene {
         schedule(this.#scheduled);
         return;
       }
-      // Before the first frame, a panel's channel, and y (left or right as
-      // the chart draws), wait for it, taken if the chart syncs them as it did.
+      // Before the first frame, a panel's channel, y (left or right as the
+      // chart draws), and selections (categories by name) wait for it, taken
+      // if the chart syncs them as it did.
       const later = () => {
         const now = this.#channels[channel];
         if (now?.group === group && now.scale === scale && now.panel === panel)
           this.#member.receive(channel, value);
       };
-      if (this.#later(panel !== undefined || scale !== "x", later)) return;
+      if (this.#later(panel !== undefined || scale !== "x" || channel === "selection", later))
+        return;
       const take = () => {
         // A view or a selection is of the scales of the channel's panel, or
         // those every panel shares; a chart without either takes none.
@@ -428,8 +447,8 @@ export class MountedChart implements Chart, ExportsScene {
   #describeTimer: ReturnType<typeof setTimeout> | 0 = 0;
   /** The navigator's sliders, which load when the chart first has a navigator. */
   #navigator: NavigatorControls | undefined;
-  /** What is selected, in data values; the brush draws it once loaded. */
-  #selection: Selection | null = null;
+  /** What is selected: a brush's ranges in data values (the brush draws it once loaded), items, or series. */
+  #selection: ChartSelection | null = null;
   /** Drags and draws selections; loaded the first time a chart brushes or selects. */
   #brush: Brush | undefined;
   #brushLoading: Promise<void> | undefined;
@@ -439,6 +458,10 @@ export class MountedChart implements Chart, ExportsScene {
   #owner: SelectionOwner | null = null;
   /** Writes the rows gestures select to the stores `rowSelection` binds, and highlights theirs. */
   #rows: RowLink | undefined;
+  /** State support, attached by the `state` option for the chart's life (state/chart-state.ts). */
+  #state: AttachedState | undefined;
+  /** What makes the next method call: state support applying an option sets "options" (see `#asked`). */
+  #by: ChangeCause = "api";
   readonly #events = new Emitter();
   /** What last changed the view or what bounds it, for `edge` events. */
   #cause: ChangeCause = "options";
@@ -579,9 +602,12 @@ export class MountedChart implements Chart, ExportsScene {
       );
       this.#gate();
       try {
+        this.#attachState(options);
         this.#useFonts(options.fonts);
         this.#applyOptions();
         this.#loadCompilers();
+        // The first state, which the first frame draws.
+        if (refused === undefined) this.#state?.options(options);
       } catch (error) {
         refused ??= error;
       }
@@ -669,6 +695,7 @@ export class MountedChart implements Chart, ExportsScene {
     try {
       // Bindings the controller refuses, fonts the page refuses, and options
       // the model refuses leave the chart as it was.
+      this.#attachState(next as unknown as ChartOptions);
       this.#controller?.check(next as unknown as ChartOptions);
       this.#useFonts(next.fonts);
       this.#options = next as unknown as ChartOptions;
@@ -720,15 +747,66 @@ export class MountedChart implements Chart, ExportsScene {
     // Limits that changed moved views inside them; the views of instances
     // no longer drawn go with the next frame (see `#finishFrame`).
     this.#changeView(() => {}, "options", undefined, undefined, views);
+    this.#state?.options(options);
   }
 
-  setViewport(view: ViewChange, target: PanelTarget = {}): void {
-    if (this.#later(target.panel !== undefined, () => this.setViewport(view, target))) return;
+  /**
+   * Attaches the state support `options` give, once, for the chart's life;
+   * without it, refuses what needs it.
+   */
+  #attachState(options: ChartOptions): void {
+    this.#state ??= options.state?.attach({
+      chart: this,
+      model: this.#model,
+      events: this.#events,
+      as: (name, change) => {
+        const apply = () => {
+          this.#controller?.end(name, "options");
+          this.#by = "options";
+          try {
+            change();
+          } finally {
+            this.#by = "api";
+          }
+        };
+        // Drill roots wait for the first frame's trees.
+        (name === "drillRoot" && this.#later(true, apply)) || apply();
+      },
+      invalidate: () => this.#invalidate(false),
+    });
+    if (this.#state) return;
+    const name = STATE_OPTIONS.find((key) => options[key] !== undefined);
+    if (name) throw needsState(name);
+    // Selections of items and series are state support's.
+    if (options.interaction?.select) throw needsState("interaction.select");
+  }
+
+  /**
+   * What made the call of a setter: "api", or "options" where state
+   * support applies an option through it. Read once, by the setter called,
+   * which refuses its `target`'s `expected` without state support (state
+   * support makes writes conditional: it wraps the setters).
+   */
+  #asked(target: Conditional): ChangeCause {
+    if (target.expected !== undefined && !this.#state) throw needsState("expected");
+    const by = this.#by;
+    this.#by = "api";
+    return by;
+  }
+
+  setViewport(view: ViewChange, target: PanelTarget & Conditional = {}): void {
+    this.#setViewport(view, target, this.#asked(target));
+  }
+
+  /** `setViewport`, as `cause` made it: a method or an option. */
+  #setViewport(view: ViewChange, target: PanelTarget, cause: ChangeCause): void {
+    if (this.#later(target.panel !== undefined, () => this.#setViewport(view, target, cause)))
+      return;
     const { panel } = target;
     const plane = this.#plane();
     // Maps' and networks' planes keep views of their own.
     if (plane?.ownsView(panel)) {
-      this.#animated(() => plane.setView(view, panel));
+      this.#animated(() => plane.setView(view, panel, cause));
       return;
     }
     this.#current(panel, "setViewport");
@@ -737,11 +815,11 @@ export class MountedChart implements Chart, ExportsScene {
     this.#animated(() =>
       this.#changeView(
         () => this.#model.applyViews(changes),
-        "api",
+        cause,
         panel,
         // null resets the planes too, in the same change.
         view === null && panel === undefined
-          ? plane?.setView(null, undefined, "api", true)
+          ? plane?.setView(null, undefined, cause, true)
           : undefined,
       ),
     );
@@ -834,7 +912,7 @@ export class MountedChart implements Chart, ExportsScene {
     if (share && channel) broadcast("cursor", channel.group, this.#member, null);
   }
 
-  get selection(): Selection | null {
+  get selection(): ChartSelection | null {
     return this.#selection;
   }
 
@@ -842,35 +920,46 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#owner;
   }
 
-  select(
-    selection: Selection | readonly [number, number] | null,
-    target: PanelTarget & { rows?: boolean } = {},
-  ): void {
-    this.#selectAs(selection, target, "api");
+  /** State support's, which defines it on the chart it attaches to. */
+  get basis(): Basis {
+    throw needsState("basis");
   }
 
-  /** `select`, as `cause` made it: a method, or the gesture of a map's or network's controls. */
+  select(
+    selection: ChartSelection | readonly [number, number] | null,
+    target: PanelTarget & { rows?: boolean } & Conditional = {},
+  ): void {
+    this.#selectAs(selection, target, this.#asked(target));
+  }
+
+  /** `select`, as `cause` made it: a method, an option, or the gesture of a map's or network's controls. */
   #selectAs(
-    selection: Selection | readonly [number, number] | null,
+    selection: ChartSelection | readonly [number, number] | null,
     target: PanelTarget & { rows?: boolean },
     cause: ChangeCause,
   ): void {
-    const later = () => this.#selectAs(selection, target, cause);
-    if (this.#later(target.panel !== undefined, later)) return;
+    const given: ChartSelection | null = Array.isArray(selection)
+      ? { kind: "brush", x: selection as readonly [number, number], y: null, lasso: null }
+      : (selection as ChartSelection | null);
+    // A brush keeps the panel it was drawn in, where that panel's scales are its own.
+    const panel = target.panel ?? (given as BrushSelection | null)?.panel;
+    const later = () => this.#selectAs(given, { ...target, panel }, cause);
+    if (this.#later(panel !== undefined, later)) return;
     // A map's or network's lasso belongs to its plane; clearing names one only to check it.
     const plane =
-      selection || target.panel !== undefined ? this.#plane()?.select(target.panel) : undefined;
-    const at = plane ? undefined : this.#current(target.panel, "select", true);
-    this.#selectIn(selection, at, target.rows, plane, cause);
+      given?.kind === "brush" || panel !== undefined ? this.#plane()?.select(panel) : undefined;
+    const at = plane ? undefined : this.#current(panel, "select", true);
+    this.#selectIn(given, at, target.rows, plane, cause);
   }
 
   /**
    * Selects in a panel of the last scene, or on a map's or network's
-   * `plane` (writing its rows), and shares a selection of the sync
-   * channel's scales with synced charts.
+   * `plane` (writing its rows), and shares a brush of the sync channel's
+   * scales with synced charts, or a clear where the one it replaces was
+   * of them.
    */
   #selectIn(
-    selection: Selection | readonly [number, number] | null,
+    selection: ChartSelection | null,
     panel?: DrawnPanel,
     rows = true,
     plane?: SelectionOwner | null,
@@ -882,69 +971,47 @@ export class MountedChart implements Chart, ExportsScene {
     const channel = this.#channels.selection;
     const at = channel && this.#endpoint(channel);
     // What a selection of other instances (an inset's, another facet's) was or is is the chart's alone.
-    const owner = this.#owner ?? was;
     const shares = (owner: SelectionOwner | null) =>
       !owner?.plane &&
       owner?.scales.every((scale) => scale.instance === at?.[`${scale.scale}Group`]);
     if (!channel || !at || plane || this.#reports) return;
-    if (shares(owner))
+    if (shares(this.#owner))
       broadcast("selection", channel.group, this.#member, this.#encode(channel.scale, at));
-    // One taking the place of the channel's clears what the charts show.
+    // One taking the place of the channel's (items, series, another panel's brush) clears what the charts show.
     else if (shares(was)) broadcast("selection", channel.group, this.#member, null);
   }
 
   /**
-   * Sets the selection, in panel `at` (by default, the one drawing the
-   * scales every panel shares) or on a `plane`; one of the chart's own
-   * (`local`), not a synced chart's, writes its rows. A selection the first
-   * frame selects again counted when it was set, and reports the revision
-   * it `made` then.
+   * Sets the selection: a brush in panel `at` (by default, the one drawing
+   * the scales every panel shares) or on a `plane`, or items or series. One
+   * of the chart's own (`local`), not a synced chart's, writes its rows. A
+   * selection the first frame selects again counted when it was set, and
+   * reports the revision it `made` then.
    */
   #select(
-    selection: Selection | readonly [number, number] | null,
+    selection: ChartSelection | null,
     at?: DrawnPanel,
     local = false,
     plane?: SelectionOwner | null,
     cause: ChangeCause = "api",
     made?: number,
   ) {
-    const given = Array.isArray(selection)
-      ? { x: selection as readonly [number, number], y: null, lasso: null }
-      : (selection as Selection | null);
-    const has = given && (given.x || given.y || given.lasso);
-    // A selection is of the scales it has ranges on: a lasso's, both; a y
-    // range of the right y in a panel (or a chart) without a left one.
-    const model = this.#model;
-    // Without a panel, the right y only where no panel draws a left one.
-    const drawn = [...model.instances.values()].map(({ scale }) => scale);
-    const vertical: ScaleName = (at ? !at.drawsY : drawn.includes("yRight") && !drawn.includes("y"))
-      ? "yRight"
-      : "y";
-    const scales: ScaleName[] = has
-      ? [
-          ...(given.x || given.lasso ? (["x"] as const) : []),
-          ...(given.y || given.lasso ? [vertical] : []),
-        ]
-      : [];
-    // Without a panel, of the instances every panel shares, or the only ones.
-    const owner = has
-      ? (plane ??
-        this.#ownerOf(
-          scales.map((scale) =>
-            viewKey(scale, at?.[`${scale}Group`] ?? model.instanceOf(scale, undefined, "select")!),
-          ),
-        ))
-      : null;
-    const panel = at ?? model.panels().find(({ key }) => owner?.panels.includes(key));
-    const fit = (range: readonly [number, number] | null, scale: PositionScale | undefined) =>
-      range && (scale ? normalize(scale, range[0], range[1]) : ascending(...range));
-    const next = has
-      ? { x: fit(given.x, panel?.x), y: fit(given.y, panel?.y), lasso: given.lasso }
-      : null;
-    // A selection is drawn by the brush.
-    if (next) this.#loadBrush();
+    let next: ChartSelection | null = null;
+    let owner: SelectionOwner | null = null;
+    const kind = selection?.kind;
+    if (kind === "brush") {
+      [next, owner] = this.#brushOf(selection as BrushSelection, at, plane);
+      // A brush is drawn by the brush.
+      if (next) this.#loadBrush();
+    } else if (selection) {
+      // Items and series are state support's, which names them by their keys and checks kinds.
+      if (!this.#state) throw needsState("selection");
+      next = selection;
+    }
+    const replaced = this.#selection;
     const before = this.#owner;
-    if (sameSelection(next, this.#selection) && sameOwner(owner, before)) {
+    // Equal by value: brushes are made in one order of fields, and state support sorts keys.
+    if (JSON.stringify(next) === JSON.stringify(this.#selection) && sameOwner(owner, before)) {
       // Shown without writing, even unchanged, it is no longer the brush's own.
       if (!local) this.#rows?.brushed(null, null, false, cause, this.#revision);
       return;
@@ -955,11 +1022,23 @@ export class MountedChart implements Chart, ExportsScene {
     const revision = made ?? ++this.#revision;
     schedule(this.#scheduled);
     if (this.#reports) {
-      // Selected again in the first frame's panels, unless changed since.
+      // Selected again in the first frame's panels, unless changed since,
+      // in the place of what it replaced (reported, a clear too): one
+      // received is not shared again; one of the chart's own is shared as
+      // it is then, a clear of what it showed included.
       this.#reports.push(() => {
         if (this.#selection !== next) return;
-        this.#selection = this.#owner = null;
-        this.#selectIn(next, at, local, plane, cause, revision);
+        this.#selection = replaced;
+        this.#owner = before;
+        (cause === "sync" ? this.#select : this.#selectIn).call(
+          this,
+          next,
+          at,
+          local,
+          plane,
+          cause,
+          revision,
+        );
       });
       return;
     }
@@ -967,6 +1046,51 @@ export class MountedChart implements Chart, ExportsScene {
     // A listener may have changed the selection as its rows were written: that change reported itself.
     if (this.#selection === next)
       this.#emitSelection(next, owner ?? before, cause, written, revision);
+  }
+
+  /**
+   * A brush as the chart keeps it, and what it belongs to: in panel `at`
+   * (by default, of the instances every panel shares) or on a `plane`;
+   * nulls for one of no range.
+   */
+  #brushOf(
+    given: BrushSelection | null,
+    at?: DrawnPanel,
+    plane?: SelectionOwner | null,
+  ): [BrushSelection | null, SelectionOwner | null] {
+    if (!given || !(given.x || given.y || given.lasso)) return [null, null];
+    const model = this.#model;
+    // A selection is of the scales it has ranges on: a lasso's, both; a y
+    // range of the right y in a panel (or a chart) without a left one.
+    const drawn = [...model.instances.values()].map(({ scale }) => scale);
+    const vertical: ScaleName = (at ? !at.drawsY : drawn.includes("yRight") && !drawn.includes("y"))
+      ? "yRight"
+      : "y";
+    const scales: ScaleName[] = [
+      ...(given.x || given.lasso ? (["x"] as const) : []),
+      ...(given.y || given.lasso ? [vertical] : []),
+    ];
+    // Without a panel, of the instances every panel shares, or the only ones.
+    const owner =
+      plane ??
+      this.#ownerOf(
+        scales.map((scale) =>
+          viewKey(scale, at?.[`${scale}Group`] ?? model.instanceOf(scale, undefined, "select")!),
+        ),
+      );
+    const panel = at ?? model.panels().find(({ key }) => owner.panels.includes(key));
+    const fit = (range: readonly [number, number] | null, scale: PositionScale | undefined) =>
+      range && (scale ? normalize(scale, range[0], range[1]) : ascending(...range));
+    // It names its panel where that panel's scales are not every panel's.
+    const own = owner.scales.some(({ instance }) => instance !== "") && owner.panels[0];
+    const next: BrushSelection = {
+      kind: "brush",
+      x: fit(given.x, panel?.x),
+      y: fit(given.y, panel?.y),
+      lasso: given.lasso,
+      ...(typeof own === "string" && { panel: own }),
+    };
+    return [next, owner];
   }
 
   /**
@@ -981,22 +1105,31 @@ export class MountedChart implements Chart, ExportsScene {
     return { scales: [first!, ...others], panels };
   }
 
-  /** Reports a selection with what it belongs to (the cleared one's, for none) and the rows it wrote (`written`). */
+  /**
+   * Reports a selection (the one a gesture makes, with `phase` "preview")
+   * with what it belongs to (the cleared one's, for none), what it stands
+   * for, and the rows it wrote (`written`).
+   */
   #emitSelection(
-    selection: Selection | null,
+    selection: ChartSelection | null,
     owner: SelectionOwner | null,
     cause: ChangeCause,
     written?: { rows: readonly RowSelectionChange[] } | false,
     revision = this.#revision,
+    phase: Phase = "commit",
   ) {
-    this.#events.emit("select", {
-      ...(selection ?? { x: null, y: null, lasso: null }),
+    const event = {
+      selection,
+      phase,
       // As it is now: a plane's panels follow its subplots.
       owner: owner ? { ...owner } : { scales: [], panels: [] },
       cause,
       revision,
       ...written,
-    });
+    };
+    // What a selection stands for is state support's (its `extend`); without, asking says what to import.
+    if (!this.#state) Object.setPrototypeOf(event, UNCONDITIONED);
+    this.#events.emit("select", event as ChartEvents["select"]);
   }
 
   /**
@@ -1005,7 +1138,7 @@ export class MountedChart implements Chart, ExportsScene {
    * `at`: categories by name.
    */
   #encode(scale: ChannelOf["scale"], at: DrawnPanel): SharedSelection | null {
-    const selection = this.#selection;
+    const selection = this.#selection as BrushSelection | null;
     const named = (axis: "x" | "y") => {
       const range = selection![axis];
       const categories = at[axis].categories;
@@ -1024,7 +1157,7 @@ export class MountedChart implements Chart, ExportsScene {
     shared: SharedSelection | null,
     scale: ChannelOf["scale"],
     at: DrawnPanel | undefined,
-  ): Selection | null {
+  ): BrushSelection | null {
     const ranged = (values: SharedSelection[0], axis: "x" | "y"): Range | null => {
       const categories = at?.[axis].categories;
       if (!values || !categories !== (typeof values[0] === "number")) return null;
@@ -1038,6 +1171,7 @@ export class MountedChart implements Chart, ExportsScene {
     const bands = at?.x.categories || at?.y.categories;
     return (
       shared && {
+        kind: "brush",
         x: scale === "y" ? null : ranged(shared[0], "x"),
         y: scale === "x" ? null : ranged(shared[xy ? 1 : 0], "y"),
         lasso: xy && !bands ? shared[2] : null,
@@ -1056,6 +1190,7 @@ export class MountedChart implements Chart, ExportsScene {
       ...(this.#controller?.loading ?? []),
       this.#model.items?.controlsLoading,
       this.#brushLoading,
+      this.#state?.loading,
       this.#navigator?.loading,
     ].filter((loading) => loading !== undefined);
     return pending.length > 1
@@ -1067,9 +1202,10 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#model.getCamera(target?.panel);
   }
 
-  setCamera(camera: CameraSpec | null, target?: PanelTarget): void {
+  setCamera(camera: CameraSpec | null, target: PanelTarget & Conditional = {}): void {
+    this.#asked(target);
     // Its report, made after the frame, carries the count it made.
-    if (!this.#model.setCamera(camera, target?.panel, this.#revision + 1)) return;
+    if (!this.#model.setCamera(camera, target.panel, this.#revision + 1)) return;
     this.#revision++;
     this.#invalidate(false);
   }
@@ -1078,8 +1214,12 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#model.items?.drillRoot(target?.panel);
   }
 
-  setDrillRoot(node: string | readonly string[] | null, target?: PanelTarget): void {
-    this.#items().setDrillRoot(node, target?.panel);
+  setDrillRoot(
+    node: string | readonly string[] | null,
+    target: PanelTarget & Conditional = {},
+  ): void {
+    const items = this.#items();
+    items.by(this.#asked(target), () => items.setDrillRoot(node, target.panel));
   }
 
   getItemPositions(target?: PanelTarget): ItemPositions {
@@ -1093,9 +1233,10 @@ export class MountedChart implements Chart, ExportsScene {
   setItemPosition(
     key: string,
     position: { x: number; y: number } | null,
-    target?: PanelTarget,
+    target: PanelTarget & Conditional = {},
   ): void {
-    this.#items().setItemPosition(key, position, target?.panel);
+    this.#asked(target);
+    this.#items().setItemPosition(key, position, target.panel);
   }
 
   /**
@@ -1179,7 +1320,11 @@ export class MountedChart implements Chart, ExportsScene {
     return this.#options.panels?.hiddenKeys(hidden, panel) ?? [...hidden];
   }
 
-  setHiddenKeys(keys: readonly string[], { panels }: { panels?: PanelVisibility } = {}): void {
+  setHiddenKeys(
+    keys: readonly string[],
+    target: { panels?: PanelVisibility } & Conditional = {},
+  ): void {
+    const { panels } = target;
     const own =
       panels && Object.keys(panels).length
         ? this.#options.panels?.own(panels, this.#model.hidden.panels)
@@ -1190,15 +1335,15 @@ export class MountedChart implements Chart, ExportsScene {
         path: "panels",
         message: "setHiddenKeys panels: the chart has no subplots; drop panels",
       });
-    this.#hide(keys, own);
+    this.#hide(keys, own, this.#asked(target));
   }
 
   setVisibility(
     keys: string | readonly string[],
     visible: boolean,
-    { panel }: { panel?: string | undefined } = {},
+    target: { panel?: string | undefined } & Conditional = {},
   ): void {
-    this.#setVisibility(keys, visible, panel, "api");
+    this.#setVisibility(keys, visible, target.panel, this.#asked(target));
   }
 
   #setVisibility(
@@ -1527,7 +1672,7 @@ export class MountedChart implements Chart, ExportsScene {
       // to draw, which leaves what was on screen.
       const shown = drawn
         ? revision
-        : !this.#dirty && !this.#failing && (!this.#selection || this.#brush)
+        : !this.#dirty && !this.#failing && (this.#selection?.kind !== "brush" || this.#brush)
           ? this.#revision
           : this.#shown;
       const rendered = drawn || shown !== this.#shown;
@@ -1585,7 +1730,7 @@ export class MountedChart implements Chart, ExportsScene {
     brush?.draw(
       keys ? panels.filter(({ key }) => keys.includes(key)) : panels,
       scene.theme,
-      this.#selection,
+      this.#selection?.kind === "brush" ? this.#selection : null,
     );
   }
 
@@ -1617,12 +1762,22 @@ export class MountedChart implements Chart, ExportsScene {
     } finally {
       this.#changingView = false;
     }
-    const changed = this.#changed(before);
+    const changed = this.#viewsChanged(before);
     if (changed.length === 0 && !plane) return;
     const revision = made ?? ++this.#revision;
     this.#invalidate(false);
     if (this.#reports) {
-      this.#reports.push(() => this.#changeView(() => {}, cause, panel, plane, before, revision));
+      // Reported as the views are then, planes' as axes'.
+      this.#reports.push(() =>
+        this.#changeView(
+          () => {},
+          cause,
+          panel,
+          plane && this.#model.items!.current(plane),
+          before,
+          revision,
+        ),
+      );
       return;
     }
     this.#reportViews(changed, cause, panel, [], plane, revision);
@@ -1631,7 +1786,7 @@ export class MountedChart implements Chart, ExportsScene {
   }
 
   /** The instances (by `viewKey`) whose views are not what they were `before`. */
-  #changed(before: ReadonlyMap<string, Range>): string[] {
+  #viewsChanged(before: ReadonlyMap<string, Range>): string[] {
     const now = this.#model.views();
     return [...new Set([...before.keys(), ...now.keys()])].filter(
       (key) => !sameRange(before.get(key) ?? null, now.get(key) ?? null),
@@ -1656,8 +1811,9 @@ export class MountedChart implements Chart, ExportsScene {
   /**
    * Reports a change of view: the instances `changed` (by `viewKey`) as
    * they are now, or the `retired` ones, and every panel still drawing one
-   * of them, with a `plane`'s change made with them. Delivered once the
-   * change before it reached every listener.
+   * of them, with a `plane`'s change made with them; `again`, the view of
+   * a write refused, which changed nothing. Delivered once the change
+   * before it reached every listener.
    */
   #reportViews(
     changed: readonly string[],
@@ -1909,7 +2065,7 @@ export class MountedChart implements Chart, ExportsScene {
     this.#leaveSync?.();
     this.#channels = channelsOf(options.interaction?.sync);
     this.#leaveSync = join(this.#channels, this.#member);
-    if (this.#brush) this.#brush.mode = options.interaction?.brush ?? "x";
+    if (this.#brush) this.#brush.mode = options.interaction?.brush;
     // The chart's settings, and subplots' own, which may brush or pan where the chart's do not.
     const settings = [
       options.interaction,
@@ -2402,6 +2558,13 @@ export class MountedChart implements Chart, ExportsScene {
       animated: (change) => this.#animated(change),
       changeView: (change, cause, panel) => this.#changeView(change, cause, panel),
       select: (selection, at, cause) => this.#selectIn(selection, at, true, undefined, cause),
+      preview: (selection, at, phase, cause) => {
+        // A cancel reports the selection there is; with live bindings, it is written back.
+        const [shown, owner] =
+          phase === "cancel" ? [this.#selection, this.#owner] : this.#brushOf(selection, at);
+        const written = this.#rows?.brushed(shown, owner, true, cause, this.#revision, phase);
+        this.#emitSelection(shown, owner, cause, written, this.#revision, phase);
+      },
       selection: () => this.#selection,
       owner: () => this.#owner,
       rows: () => this.#rows,
@@ -2436,7 +2599,7 @@ export class MountedChart implements Chart, ExportsScene {
       .then(({ Brush }) => {
         if (this.#destroyed) return;
         this.#brush = new Brush(this.#brushLayer, `${this.#id}-brush`, normalize);
-        this.#brush.mode = this.#options.interaction?.brush ?? "x";
+        this.#brush.mode = this.#options.interaction?.brush;
         // A selection made while it loaded shows now, or when the chart is
         // back on screen if it left while the brush loaded.
         if (this.#selection) this.#invalidate(false);
@@ -2524,18 +2687,12 @@ export class MountedChart implements Chart, ExportsScene {
   }
 }
 
-/** Two selections cover the same values, or are both null. */
-function sameSelection(a: Selection | null, b: Selection | null): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  const sameLasso =
-    a.lasso === b.lasso ||
-    (a.lasso !== null &&
-      b.lasso !== null &&
-      a.lasso.length === b.lasso.length &&
-      a.lasso.every(([x, y], i) => x === b.lasso![i]![0] && y === b.lasso![i]![1]));
-  return sameRange(a.x, b.x) && sameRange(a.y, b.y) && sameLasso;
-}
+/** What `select` events of charts without state support inherit: reading their conditions throws. */
+const UNCONDITIONED = {
+  get conditions(): never {
+    throw needsState("select conditions", "conditions");
+  },
+};
 
 /** Two viewports show the same ranges. */
 /** A panel's whole view, with the types of the axes it has. */

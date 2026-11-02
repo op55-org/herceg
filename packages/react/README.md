@@ -46,6 +46,9 @@ export function Latency() {
 - **Events** are props (`onSelect`, `onViewport`, `onHover`, `onClick`,
   `onContextMenu`, ...); a `ref` gives herceg's chart handle for `setViewport`, `toSVG`,
   and the rest.
+- **State props** (`selection`, `viewport`, `visibility`, `drillRoot`) set
+  the chart's state when their value changes; what events report can be
+  written back without a loop.
 - **Tooltips** of your own: `renderTooltip` returns React content,
   rendered with your app's context in the chart's tooltip box.
 - **Errors** show in the chart's place, or with `errorMode="throw"` are

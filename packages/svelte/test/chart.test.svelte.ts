@@ -1,4 +1,6 @@
 import {
+  type ChartEvents,
+  type ChartSelection,
   custom,
   type DrawContext,
   facet,
@@ -15,11 +17,13 @@ import {
   table,
   time,
   timeBreaks,
+  type ViewportState,
 } from "herceg";
 import { type Component, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EXPORT_SCENE, type ExportsScene } from "../../herceg/src/render/export-scene.ts";
 import Annotations from "./Annotations.svelte";
+import Bound from "./Bound.svelte";
 import Channels from "./Channels.svelte";
 import Dendrograms from "./Dendrograms.svelte";
 import Encodings from "./Encodings.svelte";
@@ -64,6 +68,9 @@ afterEach(() => {
 });
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+/** A brush's x range as text; empty for other selections. */
+const brushed = (selection: ChartSelection | null) =>
+  selection?.kind === "brush" ? (selection.x?.join("-") ?? "") : "";
 const metrics = table({ t: [0, 1, 2, 3], a: [1, 2, 3, 4], b: [4, 3, 2, 1] });
 const paths = () => host.querySelectorAll("svg path:is([clip-path], [clip-path] *)");
 
@@ -409,14 +416,14 @@ describe("<Chart>", () => {
 
   it("calls the current handler without resubscribing", () => {
     const seen: string[] = [];
-    const props = lines({ onselect: ({ x }) => seen.push(`one:${x?.join("-")}`) });
+    const props = lines({ onselect: ({ selection }) => seen.push(`one:${brushed(selection)}`) });
     const on = props.chart.on.bind(props.chart);
     let subscriptions = 0;
     props.chart.on = (type, listener) => {
       subscriptions++;
       return on(type, listener);
     };
-    props.onselect = ({ x }) => seen.push(`two:${x?.join("-")}`);
+    props.onselect = ({ selection }) => seen.push(`two:${brushed(selection)}`);
     flushSync();
     props.chart.select([1, 2]);
     expect(seen).toEqual(["two:1-2"]);
@@ -476,7 +483,7 @@ describe("<Chart>", () => {
     props.onselect = undefined;
     flushSync();
     props.chart.select([2, 3]);
-    expect(seen).toMatchObject([{ x: [1, 2], y: null, lasso: null }]);
+    expect(seen).toMatchObject([{ selection: { kind: "brush", x: [1, 2], y: null, lasso: null } }]);
     expect(seen).toHaveLength(1);
   });
 
@@ -840,4 +847,31 @@ it.each([
   const strokes = host.querySelectorAll('[stroke-dasharray]:not([stroke-dasharray=""])');
   expect(strokes).toHaveLength(expected ? 3 : 0);
   for (const stroke of strokes) expect(stroke.getAttribute("stroke-dasharray")).toBe(expected);
+});
+
+describe("bound state", () => {
+  it("follows the selection and the view as they commit, and sets them, with no loop", () => {
+    const props = $state({
+      data: metrics,
+      chart: null as HercegChart | null,
+      selection: null as ChartSelection | null,
+      viewport: undefined as ViewportState | undefined,
+    });
+    render(Bound, props);
+    const chart = props.chart!;
+    const events: ChartEvents["select"][] = [];
+    chart.on("select", (event) => events.push(event));
+    chart.select([1, 2]);
+    chart.setViewport([0, 3]);
+    flushSync();
+    expect(props.selection).toEqual({ kind: "brush", x: [1, 2], y: null, lasso: null });
+    expect(props.viewport).toEqual({ x: [0, 3], y: null, yRight: null });
+    flushSync();
+    expect(events.map(({ cause }) => cause)).toEqual(["api"]);
+    // The application's value applies, as an option.
+    props.selection = { kind: "brush", x: [0, 1], y: null, lasso: null };
+    flushSync();
+    expect(chart.selection).toEqual({ kind: "brush", x: [0, 1], y: null, lasso: null });
+    expect(events.map(({ cause }) => cause)).toEqual(["api", "options"]);
+  });
 });

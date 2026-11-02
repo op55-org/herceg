@@ -131,6 +131,8 @@ export interface SelectionDrawing {
   lit(parts: readonly Series[]): Geometry[];
   /** A geometry dimmed, for geometry the mark makes itself: one or two (an area's fill and outline). */
   dim(geometry: Geometry): Geometry[];
+  /** A geometry the mark makes itself of what is selected (cells' squares or image), in the mark's `selected` look. */
+  shown(geometry: Geometry): Geometry;
   /**
    * For marks of cells (heatmaps, 2D histograms): a square in each of
    * `cells` covering its share of the cell, in its color, keyed from `key`;
@@ -217,9 +219,12 @@ export interface Frame {
   /**
    * With a selection highlighted, which of `table`'s rows it holds, 1 each:
    * drawn over the others (model/highlight.ts), so that of points equally
-   * near, picking takes those.
+   * near, picking takes those. Of items and series, those of `mark` where
+   * it is given (a custom mark's own), in `series`, else of the table's marks.
    */
-  highlighted?: ((table: Table) => Uint8Array | undefined) | undefined;
+  highlighted?:
+    | ((table: Table, mark?: Mark, series?: Series) => Uint8Array | undefined)
+    | undefined;
   /**
    * A polyline buffer reused across frames, one per series key and stage
    * (for example "line", "upper", "upper-step").

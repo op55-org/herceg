@@ -135,7 +135,7 @@ def test_what_pages_post_back_reads_as_python_values():
     selection = web.selection(
         json.dumps({"x": [ms, ms + 60_000], "y": None, "lasso": None, "time": ["x"]})
     )
-    assert selection == hg.Selection(x=(t0, t0 + dt.timedelta(minutes=1)))
+    assert selection == hg.BrushSelection(x=(t0, t0 + dt.timedelta(minutes=1)))
     assert web.selection("null") is None
     assert web.selection(None) is None
     assert web.viewport({"x": ["a", "c"], "y": None, "yRight": None}) == hg.Viewport(x=("a", "c"))
@@ -232,7 +232,7 @@ def test_page_events_details_read_as_the_widget_hears_them():
         )
     )
     assert selected.owner == hg.SelectionOwner((hg.ScaleInstance("x", "", ("a", "b")),), ("a", "b"))
-    assert selected.selection == hg.Selection(x=(t0, t0 + dt.timedelta(seconds=1)))
+    assert selected.selection == hg.BrushSelection(x=(t0, t0 + dt.timedelta(seconds=1)))
     near = web.edge(
         {
             **shared,

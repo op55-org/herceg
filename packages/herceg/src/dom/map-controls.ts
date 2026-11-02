@@ -14,7 +14,7 @@
 // the panel the keyboard reads.
 
 import type { LayoutResult, PlaneView } from "../marks/layout-mark.ts";
-import type { Binding } from "../model/bindings.ts";
+import { type Binding, shapeOf } from "../model/bindings.ts";
 import type { ItemPanel } from "../model/item-views.ts";
 import type { ChangeCause } from "../model/model.ts";
 import type { Rect, Scene } from "../scene/scene.ts";
@@ -191,8 +191,15 @@ export class Controls implements ChartControls {
       zooms: !!zoom,
       pans: pan === undefined ? !!zoom : pan !== false,
       // A binding of its own may brush too, which on a plane lassos.
-      lassos: brush === "lasso" || !!bindings?.some(({ action }) => action.type === "brush"),
+      lassos:
+        shapeOf(brush) === "lasso" || !!bindings?.some(({ action }) => action.type === "brush"),
     };
+  }
+
+  /** A lasso ends with the selection given instead, a pan with the viewport. */
+  end(name: string): void {
+    const press = this.#press;
+    if (press && name === (press.mode === "pan" ? "viewport" : "selection")) this.#cancel();
   }
 
   contains(target: EventTarget | null): boolean {
@@ -306,7 +313,7 @@ export class Controls implements ChartControls {
   /** Draws the chart's lasso in the panels of the family it belongs to. */
   #drawLasso(): void {
     const { chart } = this.#host;
-    const selection = chart.selection;
+    const selection = chart.selection?.kind === "brush" ? chart.selection : null;
     const owners = chart.selectionOwner?.panels ?? [];
     if (!this.#brush || !this.#theme) return;
     const panels = selection?.lasso ? this.#planes().filter(({ key }) => owners.includes(key)) : [];
@@ -546,13 +553,19 @@ export class Controls implements ChartControls {
       this.#cause = "pointer";
       const at = this.#point(event);
       const panel = this.#onPlot(event) ? this.#planeAt(at.x, at.y) : undefined;
-      const action = panel && this.#host.bindings(panel.key).match("doubleClick", event)?.action;
-      if (action?.type === "reset") this.#reset(panel!.key, false);
+      const action =
+        panel && this.#host.bindings(panel.key).match("doubleClick", event, this.#clears)?.action;
+      if (action?.type === "clearBrush") this.#host.select(null, undefined, "pointer");
+      else if (action?.type === "reset") this.#reset(panel!.key, false);
       else if (action?.type === "zoom") this.#zoomBy(panel!.key, action.factor ?? 2, at, false);
     });
     // Ahead of the chart's keys, which read the map's items with the arrows.
     on("keydown", (event) => this.#key(event), { capture: true });
   }
+
+  /** A binding that clears applies while a lasso is selected; others always. */
+  #clears = ({ type }: Binding["action"]) =>
+    type !== "clearBrush" || this.#host.chart.selection?.kind === "brush";
 
   /**
    * Keys the bindings bind (plus and minus zoom, 0 shows the whole map, with
@@ -570,7 +583,7 @@ export class Controls implements ChartControls {
     const panel = cursor ? cursor.panel : first?.state === "" ? first.key : undefined;
     const plane = panel === undefined ? undefined : this.#planeOf(panel);
     if (!plane) return;
-    const action = this.#host.bindings(panel).match("key", event)?.action;
+    const action = this.#host.bindings(panel).match("key", event, this.#clears)?.action;
     const { zooms, pans } = this.#can(panel);
     if (!(action || ((zooms || pans) && !event.altKey))) return;
     const steps: Record<string, [number, number, string]> = {
@@ -582,7 +595,8 @@ export class Controls implements ChartControls {
     // Shift alone: with Ctrl, ⌘, or Alt, the arrows are the page's (or a node's, with Alt).
     const plain = !(event.altKey || event.ctrlKey || event.metaKey);
     const step = event.shiftKey && plain && pans ? steps[event.key] : undefined;
-    if (action?.type === "zoom") this.#zoomBy(panel!, action.factor ?? ZOOM);
+    if (action?.type === "clearBrush") this.#host.select(null, undefined, "keyboard");
+    else if (action?.type === "zoom") this.#zoomBy(panel!, action.factor ?? ZOOM);
     else if (action?.type === "reset") this.#reset(panel!, true);
     else if (action?.type === "pan") {
       // Fractions of the room across and up, along the axes it names (both by default).

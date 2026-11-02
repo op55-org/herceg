@@ -30,6 +30,7 @@ import { type ChannelName, outputProblem } from "../spec/channels.ts";
 import type { ChannelSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, PointSpec } from "../spec/spec.ts";
+import type { SelectionLooks } from "../spec/state.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
 import type { Channel, Encodings, FieldCoordinate, ItemKeyed, MappedField } from "./encoding.ts";
@@ -142,7 +143,7 @@ export function pointSizeForm(spec: {
 
 export type PointOptions<S extends Schema> = PointStyle<S> & PointSize<S>;
 
-interface PointStyle<S extends Schema> extends ItemKeyed<S> {
+interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** The y axis the values are on: "left" (default) or "right", the chart's `yRight`. */
   axis?: "left" | "right";
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
@@ -1402,6 +1403,8 @@ export function point<S extends Schema>(
       "label",
       "legend",
       "id",
+      "selected",
+      "unselected",
       "axis",
       "facet",
       "panel",

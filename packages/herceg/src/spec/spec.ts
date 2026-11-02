@@ -44,6 +44,7 @@ import type {
   RowCoordinate,
   Side,
 } from "./place.ts";
+import type { Look, SelectionLooks, StateSpec } from "./state.ts";
 import type {
   AxisStyles,
   Halo,
@@ -81,7 +82,12 @@ export type Frozen<T> = T extends Expression
     ? { readonly [K in keyof T]: Frozen<T[K]> }
     : T;
 
-export interface ChartSpec {
+/**
+ * A chart's options; its state options (`selection`, `viewport`,
+ * `visibility`, `drillRoot`; see `StateSpec`) give its first state, which
+ * static exports draw.
+ */
+export interface ChartSpec extends StateSpec {
   /** Spec format version; 1, the only one so far, when omitted. */
   version?: 1;
   /**
@@ -294,7 +300,7 @@ export interface PanelSpec {
 }
 
 /** A panel's own `interaction`: the chart's settings but `sync`. */
-export type PanelInteractionSpec = Omit<InteractionSpec, "sync">;
+export type PanelInteractionSpec = Omit<InteractionSpec, "sync" | "select">;
 
 export interface WrappedFacetSpec extends FacetLayoutSpec {
   field: Field;
@@ -729,11 +735,20 @@ export interface InteractionSpec {
   zoom?: boolean | ZoomSpec;
   /**
    * Drag to select: a range along x or y, a rectangle ("xy"), or a freehand
-   * region ("lasso"), reported as a `select` event; a click clears it. With
-   * `zoom` on along the brush's axes, a brush zooms to what it covers
-   * instead (Shift-drag pans); lassos only select. Maps and networks take "lasso".
+   * region ("lasso"), reported as `select` events while it is drawn and when
+   * released; a click clears it. With `zoom` on along the brush's axes, a
+   * brush zooms to what it covers instead (Shift-drag pans); lassos only
+   * select. Maps and networks take "lasso". With its settings, a brush that
+   * can be moved and resized, and cleared otherwise (see `BrushOptions`).
    */
-  brush?: BrushSpec;
+  brush?: BrushSpec | BrushOptions;
+  /**
+   * What a click or Enter selects (see `ChartSelection`): the item picked
+   * ("items"), or its series ("series"); nothing by default (`false`).
+   * Shift with a click adds or removes it; a click on the one selected, or
+   * off the data, clears.
+   */
+  select?: "items" | "series" | false;
   /**
    * Gestures bound to actions, matched in order before the presets'
    * bindings: the first whose gesture matches the input, and whose action
@@ -755,6 +770,22 @@ export interface InteractionSpec {
   rotate?: boolean;
   /** Dragging a network's node moves it, and it stays where it is dropped. */
   drag?: boolean;
+}
+
+/** A brush with its settings (`interaction.brush`). */
+export interface BrushOptions {
+  shape: BrushSpec;
+  /**
+   * Dragging inside the brush moves it, its edges and corners resize it,
+   * and the wheel over it resizes it about the pointer (elsewhere the wheel
+   * does what it did); not for lassos. These are bindings: `editBrush`.
+   */
+  edit?: boolean;
+  /**
+   * What clears it: a click off it (the default), a double click
+   * (`clearBrush` bound to it), or neither (`false`); Escape always does.
+   */
+  clear?: "click" | "double-click" | false;
 }
 
 /** A key held with a gesture. */
@@ -863,9 +894,23 @@ export interface MoveItemAction {
   type: "moveItem";
 }
 
+/**
+ * The brush moves with a drag that starts inside it, and resizes with one
+ * that starts on its edges or corners; the wheel over it resizes it about
+ * the pointer. Elsewhere, later bindings are tried.
+ */
+export interface EditBrushAction {
+  type: "editBrush";
+}
+
+/** The brush clears, where the chart has one; elsewhere, later bindings are tried. */
+export interface ClearBrushAction {
+  type: "clearBrush";
+}
+
 /** A gesture and what it does: only actions the gesture can perform. */
 export type BindingSpec =
-  | { gesture: WheelGesture; action: PanAction | ZoomAction | PageScrollAction }
+  | { gesture: WheelGesture; action: PanAction | ZoomAction | PageScrollAction | EditBrushAction }
   | {
       gesture: DragGesture;
       action:
@@ -874,11 +919,12 @@ export type BindingSpec =
         | PageScrollAction
         | CursorAction
         | OrbitAction
-        | MoveItemAction;
+        | MoveItemAction
+        | EditBrushAction;
     }
   | { gesture: PinchGesture; action: ZoomAction | PageScrollAction }
-  | { gesture: KeyGesture; action: PanAction | ZoomAction | ResetAction }
-  | { gesture: DoubleClickGesture; action: ZoomAction | ResetAction };
+  | { gesture: KeyGesture; action: PanAction | ZoomAction | ResetAction | ClearBrushAction }
+  | { gesture: DoubleClickGesture; action: ZoomAction | ResetAction | ClearBrushAction };
 
 /** Limits of the views of the position scales, by name. */
 export interface ViewLimitsSpec {
@@ -980,6 +1026,8 @@ export interface RowSelectionSpec {
   events?: readonly SelectionGesture[];
   /** "highlight" (the default) dims the rows the channel does not hold; "none" leaves them. */
   effect?: "highlight" | "none";
+  /** The channel hears a brush's previews while it moves, and its cancel; commits only by default. */
+  live?: boolean;
   /**
    * What the channel holds once loaded, in a store `loadSpec` makes (a
    * store given in its options keeps what it holds), which static exports
@@ -1102,7 +1150,7 @@ export type MarkSpec =
  */
 export type Clip = "plot" | "chart" | false;
 
-interface MarkBase {
+interface MarkBase extends SelectionLooks {
   /**
    * What the mark's drawing is cut to. Without it, data is cut to the plot,
    * and labels, rules, and text are drawn whole (those of values outside
@@ -1410,8 +1458,8 @@ export type RulePosition<P> = { x: P; y?: never } | { y: P; x?: never };
 /** Horizontal (y) or vertical (x) reference lines. */
 export type RuleSpec = RuleStyle & RulePosition<AnnotationPosition>;
 
-/** What annotations have besides their places. */
-interface AnnotationBase extends MarkBase {
+/** What annotations have besides their places: no selection looks, which they do not draw. */
+interface AnnotationBase extends Omit<MarkBase, keyof SelectionLooks> {
   /**
    * Whether the annotation's values count toward the axes' domains, so the
    * view widens to keep them in it; false by default, so annotations show
@@ -1439,7 +1487,7 @@ interface RuleStyle extends AnnotationBase, RowItems {
   label?: string | LabelSpec;
 }
 /** A SciPy-layout linkage tree, whose leaves stand on category bands. */
-export interface DendrogramSpec extends Omit<MarkBase, "axis"> {
+export interface DendrogramSpec extends Omit<MarkBase, "axis" | keyof SelectionLooks> {
   type: "dendrogram";
   first: Field;
   second: Field;
@@ -1933,12 +1981,11 @@ export type ItemMeasure = "share" | "value" | "depth";
  */
 export type TreeOpacity = number | { measure: ItemMeasure; range: readonly [number, number] };
 
-/** A look laid over tree items' paint: a fill, a fill opacity, and an opacity it is multiplied by. */
-export interface TreeLook {
-  fill?: string;
-  fillOpacity?: number;
-  opacity?: number;
-}
+/**
+ * A look laid over tree items' paint: of a `Look`, a fill, a fill opacity,
+ * and an opacity it is multiplied by.
+ */
+export type TreeLook = Pick<Look, "fill" | "fillOpacity" | "opacity">;
 
 /**
  * How tree items look and are ordered: `color`, a field of the path whose
@@ -2552,7 +2599,7 @@ export type CellReduce = "last" | "mean" | "sum" | "min" | "max";
  * points; points without a value leave holes. Contours end where the grid
  * does.
  */
-export interface ContourSpec extends Omit<MarkBase, "axis">, Legended {
+export interface ContourSpec extends Omit<MarkBase, "axis" | keyof SelectionLooks>, Legended {
   type: "contour";
   /** Number or time field: each grid point's x. */
   x: Field;

@@ -169,5 +169,5 @@ type Listeners = {
 } & { onerror?: ((error: ChartError) => void) | undefined };
 true satisfies Takes<
   Omit<PropsOf<typeof Chart>, Own>,
-  Omit<ChartUpdate, "marks" | "renderTooltip" | "onError"> & Listeners
+  Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> & Listeners
 >;

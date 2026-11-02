@@ -9,6 +9,7 @@ import { getChart, mount, unmount } from "../../src/web/mount.ts";
 import { observe } from "../../src/web/observe.ts";
 import { encodePayload } from "../../src/web/payload.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { MOUSE } from "./helpers.ts";
 
 const spec: ChartSpec = {
   width: 400,
@@ -135,23 +136,67 @@ describe("fragments", () => {
     "web.events.select",
     async () => {
       const { chart, of } = await told("d");
-      chart.select({ x: [0.5, 1.5], y: null, lasso: null });
+      chart.select({ kind: "brush", x: [0.5, 1.5], y: null, lasso: null });
       chart.select(null);
       const owner = { scales: [x], panels: [""] };
       expect(of("select")).toEqual([
         {
           id: "d",
           owner,
-          selection: { panels: [""], x: [0.5, 1.5], y: null, lasso: null, time: [] },
+          selection: {
+            kind: "brush",
+            panels: [""],
+            x: [0.5, 1.5],
+            y: null,
+            lasso: null,
+            time: [],
+          },
+          phase: "commit",
           cause: "api",
           revision: chart.revision - 1,
+          basis: expect.any(String),
         },
         // A cleared selection names what it belonged to.
-        { id: "d", owner, selection: null, cause: "api", revision: chart.revision },
+        {
+          id: "d",
+          owner,
+          selection: null,
+          phase: "commit",
+          cause: "api",
+          revision: chart.revision,
+          basis: expect.any(String),
+        },
       ]);
     },
     "tell the page of selections as JSON, with what they belong to",
   );
+
+  it("tell the page of a brush once released, not as it moves", async () => {
+    const { chart, of } = await told("d2");
+    const rect = chart.root.getBoundingClientRect();
+    const { plot } = chart.getPanels()[0]!;
+    const send = (type: string, x: number) =>
+      chart.root.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          clientX: rect.left + chart.toPixel(x, { axis: "x" })!,
+          clientY: rect.top + plot.y + plot.height / 2,
+          pointerId: MOUSE,
+          button: 0,
+          buttons: type === "pointerup" ? 0 : 1,
+        }),
+      );
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    send("pointerdown", 0.5);
+    for (const x of [1, 1.5]) {
+      send("pointermove", x);
+      await frame();
+    }
+    send("pointerup", 1.5);
+    const selects = of("select") as { phase: string; selection: { x: number[] } }[];
+    expect(selects.map(({ phase }) => phase)).toEqual(["commit"]);
+    expect(selects[0]!.selection.x[0]).toBeCloseTo(0.5);
+  });
 
   const limited: Partial<ChartSpec> = {
     legend: true,
@@ -182,7 +227,7 @@ describe("fragments", () => {
     "web.events.row-selection",
     async () => {
       const { chart, of } = await told("f", limited);
-      chart.select({ x: [0.5, 1.5], y: null, lasso: null });
+      chart.select({ kind: "brush", x: [0.5, 1.5], y: null, lasso: null });
       expect(of("rowselection")).toEqual([
         {
           id: "f",
@@ -203,7 +248,14 @@ describe("fragments", () => {
       const { chart, of } = await told("g", limited);
       chart.setHiddenKeys(["b"]);
       expect(of("visibility")).toEqual([
-        { id: "g", hiddenKeys: ["b"], cause: "api", revision: chart.revision },
+        {
+          id: "g",
+          hiddenKeys: ["b"],
+          cause: "api",
+          revision: chart.revision,
+          basis: expect.any(String),
+          state: { hidden: ["b"] },
+        },
       ]);
     },
     "tell the page of series hidden and shown",

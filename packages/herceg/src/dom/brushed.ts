@@ -3,19 +3,12 @@
 // (brush.ts) load the first time a chart brushes or shows a selection.
 
 import type { PositionScale } from "../scale/scale.ts";
+import type { BrushSelection } from "../spec/state.ts";
+
+export type { BrushSelection };
 
 /** Below this many pixels, a press is a click rather than a drag. */
 export const DRAG_THRESHOLD = 3;
-
-/** What a brush selected, in data values. */
-export interface Selection {
-  /** The x range, ascending; null for brushes along y. */
-  x: readonly [number, number] | null;
-  /** The y range, ascending; null for brushes along x. */
-  y: readonly [number, number] | null;
-  /** A lasso's outline as x, y pairs; null for other brushes, whose ranges say it all. */
-  lasso: readonly (readonly [number, number])[] | null;
-}
 
 export function ascending(a: number, b: number): readonly [number, number] {
   return a <= b ? [a, b] : [b, a];

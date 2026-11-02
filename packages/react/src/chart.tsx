@@ -17,6 +17,7 @@ import {
   tablesOf,
   viewOf,
 } from "herceg";
+import { chartState } from "herceg/state";
 import {
   Children,
   type CSSProperties,
@@ -34,8 +35,15 @@ import {
 import { createPortal } from "react-dom";
 import { markBuilder } from "./marks.tsx";
 
-/** Chart options as props: one left out, or `undefined`, takes its default. */
-export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" | "onError"> {
+/**
+ * Chart options as props: one left out, or `undefined`, takes its default.
+ * The state options (`selection`, `viewport`, `visibility`, `drillRoot`)
+ * set the chart's state when their value changes: give back what the
+ * chart reports (`onSelect={(e) => setSelection(e.selection)}`, the
+ * events' `state` for the others) to keep it in the application's state.
+ */
+export interface ChartProps
+  extends Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> {
   /**
    * The tooltip's content, rendered by React (with the application's
    * context) into the chart's own box, which keeps its placement, the
@@ -67,7 +75,11 @@ export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" 
   onViewport?: ChartListener<"viewport"> | undefined;
   /** The view came near an end of what `interaction.limits` allows, as to load more data. */
   onEdge?: ChartListener<"edge"> | undefined;
-  /** The selection changed (`interaction.brush`): x and y ranges and a lasso's outline, null when cleared. */
+  /**
+   * The selection changed (a brush, `interaction.select`, `select`): what
+   * it is (null when cleared), and its `phase`, "preview" while a brush
+   * moves, then "commit" or "cancel".
+   */
   onSelect?: ChartListener<"select"> | undefined;
   /** What the pointer or keyboard cursor is on, or the data the inspection reads there, changed. */
   onHover?: ChartListener<"hover"> | undefined;
@@ -238,6 +250,15 @@ function sameMark(a: ChartMark, b: ChartMark): boolean {
 
 type Options = Omit<ChartUpdate, "marks">;
 
+/** The state options, which change the chart's state alone when only they change. */
+const STATES = ["selection", "viewport", "visibility", "drillRoot"] as const;
+
+/** The options but the state options, as `canonical` writes them. */
+function settingsKey(options: Options): string {
+  const { selection: _s, viewport: _v, visibility: _vi, drillRoot: _d, ...settings } = options;
+  return canonical(settings);
+}
+
 /** What an inspection is made on (`basisOf`). */
 interface Basis {
   marks: readonly ChartMark[];
@@ -351,6 +372,7 @@ function useTooltip(
 interface Applied {
   marks: readonly ChartMark[];
   options: Options;
+  /** The options but the state options (`settingsKey`). */
   key: string;
 }
 
@@ -478,13 +500,17 @@ export function Chart({
   const options: Options = tooltip.option ? { ...shown, renderTooltip: tooltip.option } : shown;
   // The tooltip's renderer is new when its version is: canonical JSON
   // compares functions by identity.
-  const optionsKey = canonical(options);
+  const optionsKey = settingsKey(options);
 
   // The chart is created once its marks are; later prop changes go through update().
   const create = () => {
     // Options given as undefined take their defaults, as if left out.
     const given = Object.entries(options).filter(([, value]) => value !== undefined);
-    const config = { ...(Object.fromEntries(given) as Omit<ChartOptions, "marks">), marks };
+    const config = {
+      ...(Object.fromEntries(given) as Omit<ChartOptions, "marks">),
+      marks,
+      state: chartState,
+    };
     // A second mount (React's strict mode) finds the markup taken: it mounts afresh.
     const created =
       snapshot && !hydrated.current
@@ -552,7 +578,14 @@ export function Chart({
     });
     const sameMarks =
       next.length === last.marks.length && next.every((mark, i) => mark === last.marks[i]);
-    if (sameMarks && optionsKey === last.key) return;
+    // State options changing alone change the chart's state alone.
+    const states = STATES.filter((key) => canonical(options[key]) !== canonical(last.options[key]));
+    if (sameMarks && optionsKey === last.key) {
+      applied.current = { ...last, options };
+      if (states.length > 0)
+        chart.current.update(Object.fromEntries(states.map((key) => [key, options[key]])));
+      return;
+    }
     // Props are the whole configuration: options no longer passed go back
     // to their defaults rather than keeping their previous values.
     const cleared = Object.keys(last.options).filter((key) => !(key in options));

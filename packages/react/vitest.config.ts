@@ -16,6 +16,7 @@ export default defineConfig({
       { find: /^herceg$/, replacement: engine("index.ts") },
       { find: /^herceg\/grid$/, replacement: engine("grid.ts") },
       { find: /^herceg\/layout$/, replacement: engine("layout.ts") },
+      { find: /^herceg\/state$/, replacement: engine("state.ts") },
     ],
   },
   test: {

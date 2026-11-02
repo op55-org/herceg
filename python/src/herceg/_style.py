@@ -359,20 +359,42 @@ class StrokeStyle:
 @refuses
 @dataclass(frozen=True)
 class Look:
-    """A look laid over a mark's paint: its ``fill``, its ``fill_opacity``,
-    and an ``opacity`` the fill opacity is multiplied by. Treemaps' and
-    sunbursts' ``leaf=`` and ``branch=`` take one for items without and with
-    children::
+    """Paint laid over a mark's own, and a point's ``radius`` in pixels.
+
+    Marks' ``selected=`` and ``unselected=`` take one for what a selection
+    holds of them (items or series selected, or the rows a row selection
+    highlights) and what it does not (by default at a quarter of their
+    opacity). Treemaps' and sunbursts' ``leaf=`` and ``branch=`` take one,
+    of ``fill``, ``fill_opacity``, and ``opacity``, for items without and
+    with children::
 
         chart.sunburst(path=["ring1", "ring2"], leaf=hg.Look(fill_opacity=0.4))
     """
 
     fill: str | None = None
-    fill_opacity: float | None = None
+    stroke: str | None = None
+    stroke_width: float | None = None
+    dash: Sequence[float] | Literal["-", "--", ":", "-."] | None = None
     opacity: float | None = None
+    fill_opacity: float | None = None
+    stroke_opacity: float | None = None
+    radius: float | None = None
 
     def __post_init__(self) -> None:
-        _checked(self, "Look", colors=("fill",), fractions=("fill_opacity", "opacity"))
+        _checked(
+            self,
+            "Look",
+            colors=("fill", "stroke"),
+            widths=("stroke_width", "radius"),
+            fractions=("opacity", "fill_opacity", "stroke_opacity"),
+        )
+        StrokeStyle(dash=self.dash)
+
+
+def look_spec(value: Any, role: str) -> Any:
+    """The spec of a mark's ``selected=`` or ``unselected=``: an ``hg.Look``,
+    or a dict of its arguments."""
+    return None if value is None else _spec(_built(value, Look, role))
 
 
 @refuses

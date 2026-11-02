@@ -60,6 +60,8 @@ type BoxPlotStyleOptions<S extends Schema> = Pick<
   | "pick"
   | "inspect"
   | "id"
+  | "selected"
+  | "unselected"
 >;
 
 type BoxPlotRawOptions<S extends Schema> = DistributionOptions<S> &
@@ -518,6 +520,8 @@ export function boxplot<S extends Schema>(
       "pick",
       "inspect",
       "id",
+      "selected",
+      "unselected",
     ]),
   } as unknown as BoxPlotSpec;
   if (table.name !== undefined) spec.data = table.name;

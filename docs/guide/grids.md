@@ -135,9 +135,11 @@ store.subscribe(() => {
   const picked = store.get("grid-rows");
   chartRows.restrict(picked?.kind === "rows" ? picked.rows : null); // none selected: all rows
 });
-chart.on("select", ({ x }) =>
-  gridRows.setQuery({ ...gridRows.query, filter: x ? col("time").ge(x[0]).and(col("time").le(x[1])) : true }),
-);
+chart.on("select", ({ selection, phase }) => {
+  if (phase !== "commit") return;
+  const x = selection?.kind === "brush" ? selection.x : null;
+  gridRows.setQuery({ ...gridRows.query, filter: x ? col("time").ge(x[0]).and(col("time").le(x[1])) : true });
+});
 ```
 
 How they link is the application's choice; nothing filters automatically.

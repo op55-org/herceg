@@ -53,7 +53,7 @@ export function carryNodePositions(from: Chart, to: Chart): void {
 }
 
 /** What a chart hides, as its `visibility` events report it (see `restoreVisibility`). */
-export type VisibilityState = Omit<ChartEvents["visibility"], keyof StateChange>;
+export type VisibilityState = Omit<ChartEvents["visibility"], keyof StateChange | "state">;
 
 /** The states `restoreVisibility` waits to restore, by chart: what those charts hide meanwhile. */
 const restoring = new WeakMap<Chart, VisibilityState>();

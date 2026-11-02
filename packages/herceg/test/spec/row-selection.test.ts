@@ -5,7 +5,7 @@ import { selectionStore, selectRows } from "../../src/data/selection.ts";
 import { Table } from "../../src/data/table.ts";
 import { specToPDF, specToSVG } from "../../src/from-spec.ts";
 import { estimateText } from "../../src/layout/text.ts";
-import { membership } from "../../src/model/highlight.ts";
+import { membership } from "../../src/model/memberships.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec, RowSelectionSpec } from "../../src/spec/spec.ts";
@@ -30,7 +30,13 @@ describe("row selections in specs", () => {
     const store = made.stores.get("trips")!;
     expect(store.source).toBe(made.tables.get("trips"));
     expect(made.config.rowSelection?.bindings).toEqual([
-      { store, channel: "focus", events: ["brush", "lasso", "click"], effect: "highlight" },
+      {
+        store,
+        channel: "focus",
+        events: ["brush", "lasso", "click"],
+        effect: "highlight",
+        live: false,
+      },
     ]);
     // Given tables and stores are used in place of the spec's own.
     // Tables loaded from another spec, as a dashboard shares them.

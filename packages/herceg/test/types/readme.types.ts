@@ -4,6 +4,7 @@ import {
   area,
   bar,
   boxplot,
+  type ChartSelection,
   candlestick,
   category,
   col,
@@ -22,12 +23,12 @@ import {
   renderToSVG,
   rowView,
   rule,
-  type Selection,
   table,
   text,
   time,
 } from "../../src/index.ts";
 import { renderToPDF } from "../../src/pdf.ts";
+import { chartState } from "../../src/state.ts";
 
 declare const timestamps: Float64Array;
 declare const p50Latency: Float64Array;
@@ -479,11 +480,55 @@ errorbar(sales, { x: "region", y1: "team", y2: "q2" });
 errorbar(sales, { y: "region", x1: "q1", x2: "q2", axis: "right" });
 
 // Events and selections
-chart.select({ x: [0, 1], y: [10, 20], lasso: null });
+chart.select({ kind: "brush", x: [0, 1], y: [10, 20], lasso: null });
 chart.select([0, 1]);
-const selected: Selection | null = chart.selection;
-const brushed: readonly [number, number] | null | undefined = selected?.x;
-chart.on("select", ({ x, y, lasso }) => [x, y, lasso, brushed]);
+const selected: ChartSelection | null = chart.selection;
+const brushed: readonly [number, number] | null | undefined =
+  selected?.kind === "brush" ? selected.x : undefined;
+chart.on("select", ({ selection, phase }) => [selection, phase, brushed]);
+
+// Selections of items and series, in looks
+declare const showOrigins: (series: readonly (string | object)[]) => void;
+const fleet = table({ weight: latencies, mpg: latencies, origin: serviceNames });
+const picking = createChart(element, {
+  state: chartState,
+  marks: [
+    point(fleet, {
+      id: "cars",
+      x: "weight",
+      y: "mpg",
+      series: "origin",
+      selected: { stroke: "#111", strokeWidth: 2 },
+      unselected: { opacity: 0.1 },
+    }),
+  ],
+  interaction: { select: "series", brush: { shape: "xy", edit: true, clear: "double-click" } },
+});
+picking.on("select", ({ selection, phase }) => {
+  if (phase === "commit" && selection?.kind === "series") showOrigins(selection.series);
+});
+picking.select({ kind: "series", series: [{ mark: "cars", series: "Europe" }] });
+picking.select({ kind: "items", items: [{ mark: "cars", item: ["3"] }] });
+
+// Chart state and conditional writes
+declare const saved: { range: [number, number]; hidden: string[] };
+declare const server: { snap(selection: ChartSelection): Promise<ChartSelection> };
+const stateful = createChart(element, {
+  state: chartState,
+  marks: [line(metrics, { x: "time", y: "p50" })],
+  viewport: { x: saved.range },
+  visibility: { hidden: saved.hidden },
+});
+stateful.on("select", async ({ selection, phase, basis }) => {
+  if (phase !== "commit" || selection?.kind !== "brush") return;
+  const snapped = await server.snap(selection);
+  stateful.select(snapped, { expected: basis });
+});
+const list = rowView(metrics);
+stateful.on("select", ({ conditions, phase }) => {
+  if (phase === "commit") list.setQuery({ filter: conditions[0]?.condition ?? true });
+});
+stateful.setViewport([0, 1], { expected: stateful.basis });
 
 // Panels and pixels
 declare const event: PointerEvent;

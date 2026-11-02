@@ -8,6 +8,7 @@ bypass the framework entirely.
 - [A chart](#a-chart)
 - [Marks as components](#marks-as-components)
 - [Events and the chart handle](#events-and-the-chart-handle)
+- [Chart state](#chart-state)
 - [Live data](#live-data)
 - [Layouts](#layouts)
 - [Tooltips](#tooltips)
@@ -134,15 +135,19 @@ rest ([Getting started](getting-started.md#the-chart-handle)).
 
 ```vue
 <script setup lang="ts">
+import type { SelectEvent } from "herceg";
 import { shallowRef, useTemplateRef } from "vue";
 
 const view = useTemplateRef("view");
 const range = shallowRef<readonly [number, number] | null>(null);
 const exportSvg = () => view.value?.chart?.toSVG();
+const brushed = ({ selection, phase }: SelectEvent) => {
+  if (phase === "commit") range.value = selection?.kind === "brush" ? selection.x : null;
+};
 </script>
 
 <template>
-  <Chart ref="view" :interaction="{ brush: 'x' }" @select="({ x }) => (range = x)">
+  <Chart ref="view" :interaction="{ brush: 'x' }" @select="brushed">
     <Line :data="metrics" x="time" y="p50" />
   </Chart>
 </template>
@@ -151,6 +156,52 @@ const exportSvg = () => view.value?.chart?.toSVG();
 A `rowSelection` binding made again each render is the same binding while
 it binds the same stores and channels, so it neither updates nor
 resubscribes the chart.
+
+## Chart state
+
+The chart's [state options](interaction.md#chart-state), `selection`,
+`viewport`, `visibility`, and `drillRoot`, are props. The adapters include
+state support, so they need no `state` prop. A state prop sets the
+chart's state when its value changes (by value), and the user's input
+changes it too: writing what the chart reports back into the prop
+changes nothing and never loops. When only state props change, the chart
+is told of those alone, and neither rebuilds nor redraws its marks.
+
+```tsx
+function Explorer() {
+  const [selection, setSelection] = useState<ChartSelection | null>(null);
+  const [viewport, setViewport] = useState<ViewportState>();
+  return (
+    <Chart
+      interaction={{ brush: "x", zoom: "x" }}
+      selection={selection}
+      viewport={viewport}
+      onSelect={(event) => event.phase === "commit" && setSelection(event.selection)}
+      onViewport={(event) => setViewport(event.state)}
+    >
+      <Line data={metrics} x="time" y="p50" />
+    </Chart>
+  );
+}
+```
+
+```vue
+<Chart v-model:selection="selection" v-model:viewport="viewport" :interaction="{ brush: 'x', zoom: 'x' }">
+  <Line :data="metrics" x="time" y="p50" />
+</Chart>
+```
+
+```svelte
+<Chart bind:selection bind:viewport interaction={{ brush: "x", zoom: "x" }}>
+  <Line data={metrics} x="time" y="p50" />
+</Chart>
+```
+
+Vue's `v-model:selection`, `v-model:viewport`, `v-model:visibility`, and
+`v-model:drill-root`, and Svelte's `bind:` of the same props, follow each
+change as it commits; a brush's previews come as `select` events. In
+React, keep previews out of state that re-renders the page: they arrive
+once a frame while a brush moves.
 
 ## Live data
 

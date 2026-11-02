@@ -23,57 +23,57 @@
 // Memberships, splits, and masked values depend only on the selection and
 // the data, so charts showing one selection share them.
 
-import { compileExpression, type Expression } from "../data/expression.ts";
-import type { DataSelection, SelectionStore } from "../data/selection.ts";
 import type { Table } from "../data/table.ts";
-import { pointDrawing } from "../draw/point.ts";
-import { unmappable } from "../lod/m4.ts";
-import { shareSquares } from "../marks/cell-selection.ts";
-import { STILL } from "../marks/dodge.ts";
+import type { unmappable } from "../lod/m4.ts";
 import { copiedFrom, drawingRows, tracing } from "../marks/drawn.ts";
-import {
-  DIM,
-  type Frame,
-  type Mark,
-  type MarkKey,
-  type RowParts,
-  type SelectionDrawing,
-} from "../marks/mark.ts";
-import { placeAt, rowOf, type Series } from "../marks/series.ts";
-import { alphaOf } from "../scale/color.ts";
-import {
-  type AreaGeometry,
-  CLOUD_POINTS,
-  type Drawing,
-  type Geometry,
-  type LineGeometry,
-  type PointGeometry,
-  type RectGeometry,
+import { opaque } from "../marks/features/translucent.ts";
+import type { Frame, Mark, MarkKey, RowParts, SelectionDrawing } from "../marks/mark.ts";
+import type { placeAt, rowOf, Series } from "../marks/series.ts";
+import { alphaOf } from "../scale/alpha.ts";
+import type {
+  AreaGeometry,
+  Drawing,
+  Geometry,
+  LineGeometry,
+  PointGeometry,
+  RasterGeometry,
+  RectGeometry,
+  SvgElement,
 } from "../scene/scene.ts";
+import type { ChartSelection, Look, SelectionLooks } from "../spec/state.ts";
+import { dashPattern } from "../style/style.ts";
 import type { DotLook } from "./features.ts";
-
-export { DIM };
-
-/** A store channel whose selection a chart highlights, for the marks over its table. */
-export interface HighlightedChannel {
-  table: Table;
-  store: SelectionStore;
-  channel: string;
-}
+import type { GuideKit } from "./guides.ts";
+import { itemResolver } from "./items.ts";
+import type { ChartModel } from "./model.ts";
 
 /**
- * Whether each of a table's rows is selected, by position: 1 or 0, as of
- * the table's version and, for rows, the set's.
+ * The chart's code highlighting draws with, handed in (as the
+ * controller's is) by what loads this module: `rowSelection()`'s bindings
+ * with it, or a chart with its first selection of items or series, which
+ * loads it apart. Imported here, that code would leave the chart's first
+ * chunk for one it shares with this module.
  */
-interface Membership {
-  version: number;
-  generation: number;
-  modified: number;
-  rowOffset: number;
-  /** The row set's version; -1 for a condition. */
-  rows: number;
-  selected: Uint8Array;
+export interface HighlightKit {
+  placeAt: typeof placeAt;
+  rowOf: typeof rowOf;
+  unmappable: typeof unmappable;
+  /** The markup helpers dots are drawn with (`dotDrawing`). */
+  guides: GuideKit;
+  /** The fraction of their opacity unselected things are drawn at (`DIM`). */
+  dim: number;
+  /** Point series of this many rows or more draw on the GPU, as clouds (`CLOUD_POINTS`). */
+  cloudPoints: number;
+  /**
+   * Squares of the share of each cell its selected rows are, for heatmaps
+   * and 2D histograms (`shareSquares`). Without, they draw an image of the
+   * cells holding selected rows, as items and series, whole cells, need.
+   */
+  squares?: SelectionDrawing["squares"];
 }
+
+/** No shift: a series drawn at its values' place. */
+const STILL: readonly [number, number] = [0, 0];
 
 /** Positions of a series' rows, split into the selected and the others. */
 interface Split {
@@ -81,8 +81,6 @@ interface Split {
   off: Uint32Array;
 }
 
-/** Memberships by table and selection, kept while either lives. */
-const memberships = new WeakMap<Table, WeakMap<DataSelection, Membership>>();
 /**
  * Splits by membership, then by series rows (the membership itself for
  * series of whole columns), and values with unselected rows missing by
@@ -109,51 +107,6 @@ const OFF = "\u0001off";
 /** Marks drawing a glyph per row, each drawn dimmed or not. */
 const ROWS = new Set(["point", "bar", "errorbar", "rug"]);
 
-/**
- * Which of a table's rows a selection holds, by position. Rows still in the
- * table keep their membership when rows were only appended or dropped
- * since: only appended rows are tested.
- */
-export function membership(table: Table, selection: DataSelection): Uint8Array {
-  let byTable = memberships.get(table);
-  if (!byTable) {
-    byTable = new WeakMap();
-    memberships.set(table, byTable);
-  }
-  const known = byTable.get(selection);
-  const rows = selection.kind === "rows" ? selection.rows.version : -1;
-  const same = known?.generation === table.generation && known.rows === rows;
-  if (same && known.version === table.version) return known.selected;
-  const selected = new Uint8Array(table.length);
-  let from = 0;
-  if (same && known.modified === table.modifiedVersion && table.rowOffset >= known.rowOffset) {
-    const kept = known.selected.subarray(table.rowOffset - known.rowOffset);
-    from = Math.min(kept.length, selected.length);
-    selected.set(kept.subarray(0, from));
-  }
-  if (selection.kind === "rows") {
-    const set = selection.rows;
-    for (let row = from; row < selected.length; row++) if (set.has(row)) selected[row] = 1;
-  } else if (from < selected.length) {
-    // Compiled first in any case, which checks it against the table.
-    const { at } = compileExpression(selection.expression, table);
-    if (!fill(selection.expression, table, from, selected.subarray(from))) {
-      selected.fill(0, from);
-      for (let row = from; row < selected.length; row++) if (at(row) === true) selected[row] = 1;
-    }
-  }
-  byTable.set(selection, {
-    version: table.version,
-    generation: table.generation,
-    modified: table.modifiedVersion,
-    rowOffset: table.rowOffset,
-    rows,
-    selected,
-  });
-  return selected;
-}
-
-/** Comparisons of a number field with a literal, which conditions test a column at a time. */
 /** Whether a mark draws the rows a channel selects highlighted; others draw every row as before. */
 export function highlights(mark: Mark): boolean {
   const type = mark.spec.type;
@@ -168,164 +121,34 @@ export function highlights(mark: Mark): boolean {
   );
 }
 
-const COMPARE = new Set(["==", "!=", "<", "<=", ">", ">="]);
-const FLIP: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=" };
-
-/** How a test's results go into what is there: in place of it, or and-ed or or-ed with it. */
-type Into = "set" | "and" | "or";
-
 /**
- * Whether each of rows `from` on (as many as `out` holds) meets condition
- * `e`, 1 or 0 into `out`: worked out a column at a time, for the
- * conditions brushes write (number fields compared with numbers, category
- * fields among labels, and conjunctions, disjunctions, and negations of
- * them), about ten times faster than testing row by row. False, with `out`
- * in any state, for any other condition. It gives what the compiled
- * condition gives: a missing value compares false, though unequal.
+ * Which rows of a mark's series a selection holds (1 each, by row of its
+ * table: `selected`), and what caches of what is drawn of them key by
+ * (`key`, and `version`, a row set's or -1); for the series of no one
+ * selection (`undefined`), every series' (summaries, drawn as one).
  */
-function fill(
-  e: Expression,
-  table: Table,
-  from: number,
-  out: Uint8Array,
-  into: Into = "set",
-): boolean {
-  const n = out.length;
-  if (typeof e === "boolean") {
-    const bit = e ? 1 : 0;
-    if (into === "set" || (into === "and" && !e) || (into === "or" && e)) out.fill(bit);
-    return true;
-  }
-  if (!Array.isArray(e)) return false;
-  const [op, ...args] = e as readonly [string, ...Expression[]];
-  const name = (arg: Expression | undefined) =>
-    Array.isArray(arg) && arg[0] === "field" && typeof arg[1] === "string" ? arg[1] : undefined;
-  // A field between two numbers, as brushes write ranges: one pass.
-  const range = op === "and" && args.length === 2 && rangeOf(args[0]!, args[1]!, table);
-  if (range) {
-    const [v, lo, hi] = range;
-    // Without branches: a branch on scattered values mispredicts every other row.
-    if (into === "set")
-      for (let i = 0; i < n; i++) out[i] = +(v[from + i]! >= lo) & +(v[from + i]! <= hi);
-    else if (into === "and")
-      for (let i = 0; i < n; i++) out[i]! &= +(v[from + i]! >= lo) & +(v[from + i]! <= hi);
-    else for (let i = 0; i < n; i++) out[i]! |= +(v[from + i]! >= lo) & +(v[from + i]! <= hi);
-    return true;
-  }
-  if ((op === "and" || op === "or") && args.length > 0) {
-    // Each part goes straight into `out` when it combines as the node does.
-    if (into === op || into === "set")
-      return args.every((arg, i) => fill(arg, table, from, out, i === 0 ? into : op));
-    const own = new Uint8Array(n);
-    if (!fill(e, table, from, own)) return false;
-    combine(out, own, into);
-    return true;
-  }
-  if (op === "not" && args.length === 1) {
-    const own = new Uint8Array(n);
-    if (!fill(args[0]!, table, from, own)) return false;
-    for (let i = 0; i < n; i++) own[i]! ^= 1;
-    combine(out, own, into);
-    return true;
-  }
-  if (COMPARE.has(op) && args.length === 2) {
-    const compared = comparisonOf(op, args[0]!, args[1]!, table);
-    if (!compared) return false;
-    const [v, test, c] = compared;
-    const own = into === "set" ? out : new Uint8Array(n);
-    // A loop per comparison, without branches: these run over every row.
-    if (test === "==") for (let i = 0; i < n; i++) own[i] = +(v[from + i] === c);
-    else if (test === "!=") for (let i = 0; i < n; i++) own[i] = +(v[from + i] !== c);
-    else if (test === "<") for (let i = 0; i < n; i++) own[i] = +(v[from + i]! < c);
-    else if (test === "<=") for (let i = 0; i < n; i++) own[i] = +(v[from + i]! <= c);
-    else if (test === ">") for (let i = 0; i < n; i++) own[i] = +(v[from + i]! > c);
-    else for (let i = 0; i < n; i++) own[i] = +(v[from + i]! >= c);
-    if (own !== out) combine(out, own, into);
-    return true;
-  }
-  const field = name(args[0]);
-  if (op !== "in" || field === undefined || table.kind(field) !== "category") return false;
-  const candidates = args.slice(1);
-  if (!candidates.every((v) => typeof v === "string" || v === null)) return false;
-  // Whether each category is a candidate, then each row's.
-  const { codes, dictionary } = table.categories(field as never);
-  const labels = new Set(candidates);
-  const member = Uint8Array.from(dictionary, (label) => (labels.has(label) ? 1 : 0));
-  const missing = labels.has(null) ? 1 : 0;
-  const own = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const code = codes[from + i]!;
-    own[i] = code < 0 ? missing : member[code]!;
-  }
-  combine(out, own, into);
-  return true;
-}
+export type Chosen = (series: Series | undefined) => {
+  readonly selected: Uint8Array;
+  readonly key: object;
+  readonly version: number;
+};
 
-/**
- * A comparison of a number field with a number, as a test of the field's
- * values with a literal on the right; undefined for other comparisons.
- */
-function comparisonOf(
-  op: string,
-  left: Expression,
-  right: Expression,
-  table: Table,
-): [values: ArrayLike<number>, op: string, literal: number] | undefined {
-  // A literal on the left is the same comparison turned around.
-  const flipped = typeof left === "number";
-  const [arg, c] = flipped ? [right, left] : [left, right];
-  const field = Array.isArray(arg) && arg[0] === "field" ? arg[1] : undefined;
-  if (typeof field !== "string" || typeof c !== "number" || table.kind(field) === "category")
-    return undefined;
-  return [table.numbers(field as never), flipped ? (FLIP[op] ?? op) : op, c];
-}
-
-/** A field from one number to another, inclusive (`>=` one and `<=` the other); undefined otherwise. */
-function rangeOf(
-  a: Expression,
-  b: Expression,
-  table: Table,
-): [values: ArrayLike<number>, lo: number, hi: number] | undefined {
-  if (!Array.isArray(a) || !Array.isArray(b)) return undefined;
-  const first = comparisonOf(a[0] as string, a[1]!, a[2]!, table);
-  const second = comparisonOf(b[0] as string, b[1]!, b[2]!, table);
-  if (!first || !second || first[0] !== second[0] || a.length !== 3 || b.length !== 3)
-    return undefined;
-  const low = first[1] === ">=" ? first : second[1] === ">=" ? second : undefined;
-  const high = first[1] === "<=" ? first : second[1] === "<=" ? second : undefined;
-  return low && high && low !== high ? [first[0], low[2], high[2]] : undefined;
-}
-
-/** `own` into `out`, as `into` says. */
-function combine(out: Uint8Array, own: Uint8Array, into: Into): void {
-  if (into === "set") out.set(own);
-  else if (into === "and") for (let i = 0; i < out.length; i++) out[i]! &= own[i]!;
-  else for (let i = 0; i < out.length; i++) out[i]! |= own[i]!;
+/** How a mark draws what a selection holds and what it does not, by its looks. */
+interface Paint {
+  /** Whether a look of the mark's own replaces dimming. */
+  looked: boolean;
+  dim(geometry: Geometry): Geometry[];
+  lit(geometry: Geometry): Geometry;
 }
 
 export class Highlighter {
-  readonly #channels: readonly HighlightedChannel[];
+  readonly #kit: HighlightKit;
+  /** What a mark's series hold: its table's channel's selection, or the chart's; undefined for none. */
+  readonly #of: (mark: Mark) => Chosen | undefined;
 
-  constructor(channels: readonly HighlightedChannel[]) {
-    this.#channels = channels;
-  }
-
-  /**
-   * Which of `table`'s rows its channel's selection holds, 1 each, for
-   * layout marks to draw highlighted; undefined when it holds none (or
-   * rows of a table since reset), or no channel is of the table.
-   */
-  selected(table: Table): Uint8Array | undefined {
-    const selection = this.#selection(table);
-    return selection && membership(table, selection);
-  }
-
-  /** The selection `table`'s channel holds; undefined for none, or rows of a table since reset. */
-  #selection(table: Table): DataSelection | undefined {
-    const channel = this.#channels.find((c) => c.table === table);
-    const selection = channel?.store.get(channel.channel);
-    if (!selection || (selection.kind === "rows" && !selection.rows.current)) return undefined;
-    return selection;
+  constructor(kit: HighlightKit, chosen: (mark: Mark) => Chosen | undefined) {
+    this.#kit = kit;
+    this.#of = chosen;
   }
 
   /**
@@ -345,8 +168,11 @@ export class Highlighter {
     // Custom marks dim their own items, reading `Frame.highlighted`.
     if (!highlights(mark) || type === "custom") return undefined;
     const table = mark.table;
-    const selected = table && this.selected(table);
-    if (!selected) return undefined;
+    const chosen = table && this.#of(mark);
+    if (!chosen) return undefined;
+    const kit = this.#kit;
+    const selectedOf = (s: Series) => chosen(s).selected;
+    const paint = paintOf(kit, mark, frame);
     // Parts of series draw into buffers and keys of their own, hidden as their series are.
     const hidden = (suffix: string) =>
       frame.hidden.size === 0
@@ -359,34 +185,35 @@ export class Highlighter {
       const parts = (list: readonly Series[], suffix: string) =>
         list.map((p) => ({ ...p, key: p.key + suffix, whole: p.whole ?? byKey.get(p.key) }));
       const drawing: SelectionDrawing = {
-        selected,
-        dimmed: (list) => mark.geometry(parts(list, OFF), own(OFF), key, rows).flatMap(dimLayer),
-        lit: (list) => mark.geometry(parts(list, ON), own(ON), key, rows),
-        dim: dimLayer,
-        squares: shareSquares,
+        selected: chosen(undefined).selected,
+        dimmed: (list) => mark.geometry(parts(list, OFF), own(OFF), key, rows).flatMap(paint.dim),
+        lit: (list) => mark.geometry(parts(list, ON), own(ON), key, rows).map(paint.lit),
+        dim: paint.dim,
+        shown: paint.lit,
+        squares: kit.squares ?? (() => undefined),
       };
       return mark.selectedGeometry(series, frame, drawing);
     }
-    const selection = this.#selection(table)!;
     if (ROWS.has(type)) {
       // Every series' dimmed rows, then every series' selected rows: picking
       // finds those on top (`Frame.highlighted`).
       const dimClouds: Geometry[] = [];
       const litClouds: Geometry[] = [];
       let rest = series;
-      if (type === "point" && frame.clouds && series.some((s) => s.length >= CLOUD_POINTS)) {
-        const big = series.filter((s) => s.length >= CLOUD_POINTS);
+      if (type === "point" && frame.clouds && series.some((s) => s.length >= kit.cloudPoints)) {
+        const big = series.filter((s) => s.length >= kit.cloudPoints);
         const drawn = (mark.geometry(big, frame, key) as PointGeometry[]).filter((g) => g.cloud);
         for (const g of drawn) {
           const s = big.find(({ key }) => key === g.key)!;
-          const [off, on] = lightClouds(g, split(s, selected), selection, table);
+          const held = chosen(s);
+          const [off, on] = lightClouds(kit, g, split(kit, s, held.selected), held, table, paint);
           dimClouds.push(off);
           litClouds.push(on);
         }
         const done = new Set(drawn.map((g) => g.key));
         rest = series.filter((s) => !done.has(s.key));
       }
-      const parts = rest.map((s) => split(s, selected));
+      const parts = rest.map((s) => split(kit, s, selectedOf(s)));
       const off = rest.map((s, i) => part(s, OFF, parts[i]!.off));
       const on = rest.map((s, i) => part(s, ON, parts[i]!.on));
       // Clouds are drawn into the canvas in turn: each part in its series' place.
@@ -394,8 +221,8 @@ export class Highlighter {
       const of = ({ key }: Geometry) => place.get(key.slice(0, key.indexOf("\u0001"))) ?? 0;
       const inOrder = (parts: Geometry[]) => parts.sort((a, b) => of(a) - of(b));
       return [
-        ...inOrder([...dimClouds, ...mark.geometry(off, own(OFF), key).map(dim)]),
-        ...inOrder([...litClouds, ...mark.geometry(on, own(ON), key)]),
+        ...inOrder([...dimClouds, ...mark.geometry(off, own(OFF), key).flatMap(paint.dim)]),
+        ...inOrder([...litClouds, ...mark.geometry(on, own(ON), key).map(paint.lit)]),
       ];
     }
     const drawn = mark.geometry(series, frame, key);
@@ -409,14 +236,14 @@ export class Highlighter {
       frame[along === "x" ? "y" : "x"].type === "log";
     const found = new Map<Series, Runs>();
     const runs = (s: Series) =>
-      found.get(s) ?? found.set(s, runsOf(s, selected, frame, low, along)).get(s)!;
+      found.get(s) ?? found.set(s, runsOf(kit, s, selectedOf(s), frame, low, along)).get(s)!;
     // A series' runs' ends, which its pieces (style runs', markers) share.
     const endsOf = new Map<Series, number[] | undefined>();
     const seriesEnds = (s: Series) => {
       if (!endsOf.has(s)) {
         // Dodged series are drawn off their bands' centers.
         const shift = shiftOf(mark, s, frame)[along === "x" ? 0 : 1];
-        endsOf.set(s, runEnds(s, runs(s), frame, shift, along));
+        endsOf.set(s, runEnds(kit, s, runs(s), frame, shift, along));
       }
       return endsOf.get(s);
     };
@@ -432,14 +259,16 @@ export class Highlighter {
     const litKey = (g: Geometry, on = "") =>
       g.of === undefined ? g.key + on : `${g.of}${on}|${outlined(g) ? "outline" : g.kind}`;
     if (others.size > 0) {
-      const maskedSeries = [...others].map((s) => masked(s, selected, along === "y"));
+      const maskedSeries = [...others].map((s) => masked(s, selectedOf(s), along === "y"));
       for (const g of mark.geometry(maskedSeries, own(ON), key)) {
         // Picking reads which rows a path draws, and where its runs end, of the series it traced.
         const name = g.of ?? g.key;
         const traced = maskedSeries.find((m) => name === m.key || name.startsWith(`${m.key}|`));
         if (traced) tracing(g, traced);
         const parts = lit.get(litKey(g)) ?? lit.set(litKey(g), []).get(litKey(g))!;
-        parts.push(...over(g).map((copy) => (copy === g ? g : copiedFrom(copy, g))));
+        // A look replaces paint once; without, a translucent copy shows the mark's own over it dimmed.
+        const shown = paint.looked ? [paint.lit(g)] : over(kit, g);
+        parts.push(...shown.map((copy) => (copy === g ? g : copiedFrom(copy, g))));
       }
     }
     // A series drawn in pieces (sharing `of`: markers, style runs'): each
@@ -458,8 +287,8 @@ export class Highlighter {
       // which they mark in place of dots.
       const rows = ends && g.kind === "point" && s.features?.markerRows?.(g);
       if (rows) {
-        const [inside, outside] = pointsIn(g as PointGeometry, rows, selected);
-        out.push(...dimLayer(outside), inside);
+        const [inside, outside] = pointsIn(g as PointGeometry, rows, selectedOf(s));
+        out.push(...paint.dim(outside), paint.lit(inside));
         continue;
       }
       if (ends) {
@@ -483,12 +312,12 @@ export class Highlighter {
         const [outside, inside] =
           lo <= hi ? [reaching(off, lo, hi), reaching(spans, lo, hi)] : [off, spans];
         if (outside.length > 0)
-          for (const dimmed of dimLayer(g)) out.push(clipped(dimmed, outside, frame, along, OFF));
-        if (inside.length > 0) out.push(clipped(g, inside, frame, along, ON));
+          for (const dimmed of paint.dim(g)) out.push(clipped(dimmed, outside, frame, along, OFF));
+        if (inside.length > 0) out.push(clipped(paint.lit(g), inside, frame, along, ON));
         continue;
       }
       // Dimmed, then its selected rows' values over it, part by part.
-      const [under, values] = [dimLayer(g), lit.get(litKey(g, ON)) ?? []];
+      const [under, values] = [paint.dim(g), lit.get(litKey(g, ON)) ?? []];
       const last = lastPiece.get(litKey(g, ON));
       if (last) {
         out.push(...under);
@@ -525,6 +354,7 @@ export class Highlighter {
     const marked = new Set(drawn.map((g) => (g.kind === "point" ? g.of : undefined)));
     const dotsOf = new Map<string, PointGeometry[]>();
     for (const d of dots(
+      kit,
       series.filter((s) => !marked.has(s.key)),
       table,
       runs,
@@ -593,7 +423,8 @@ function shiftOf(mark: Mark, s: Series, frame: Frame): readonly [number, number]
 }
 
 /** A series' positions split by whether their rows are selected. */
-function split(s: Series, selected: Uint8Array): Split {
+function split(kit: HighlightKit, s: Series, selected: Uint8Array): Split {
+  const { rowOf } = kit;
   const kept = within(splits, selected);
   const key = s.rows ?? selected;
   const known = kept.get(key);
@@ -640,10 +471,12 @@ function part(s: Series, suffix: string, rows: Uint32Array): Series {
  * its upload takes appended points rather than being made again.
  */
 function lightClouds(
+  { dim }: HighlightKit,
   g: PointGeometry,
   { on, off }: Split,
-  selection: DataSelection,
+  held: ReturnType<Chosen>,
   table: Table,
+  paint: Paint,
 ): [dimmed: PointGeometry, lit: PointGeometry] {
   const cloud = g.cloud!;
   const rows = (side: "on" | "off", of: Uint32Array, opacity: number): PointGeometry => ({
@@ -657,10 +490,15 @@ function lightClouds(
       rows: of,
       start: 0,
       end: of.length,
-      stream: cloud.stream && partStream(cloud.stream.key, side, of, selection, table),
+      stream: cloud.stream && partStream(cloud.stream.key, side, of, held, table),
     },
   });
-  return [rows("off", off, g.fillOpacity * DIM), rows("on", on, g.fillOpacity)];
+  if (!paint.looked) return [rows("off", off, g.fillOpacity * dim), rows("on", on, g.fillOpacity)];
+  const [dimmed, lit] = [
+    paint.dim(rows("off", off, g.fillOpacity))[0],
+    paint.lit(rows("on", on, g.fillOpacity)),
+  ];
+  return [dimmed as PointGeometry, lit as PointGeometry];
 }
 
 /** What a streaming cloud's part was last drawn of, by its cloud's stream key. */
@@ -680,10 +518,7 @@ interface PartUpload {
 }
 
 /** Cloud parts' uploads by selection, then by their cloud's stream key, kept while both live. */
-const partUploads = new WeakMap<
-  DataSelection,
-  WeakMap<object, { on?: PartUpload; off?: PartUpload }>
->();
+const partUploads = new WeakMap<object, WeakMap<object, { on?: PartUpload; off?: PartUpload }>>();
 
 /**
  * A cloud part's stream (see `PointCloud.stream`): rows dropped from the
@@ -694,7 +529,7 @@ function partStream(
   base: object,
   side: "on" | "off",
   rows: Uint32Array,
-  selection: DataSelection,
+  { key: selection, version }: ReturnType<Chosen>,
   table: Table,
 ): NonNullable<NonNullable<PointGeometry["cloud"]>["stream"]> {
   let bySelection = partUploads.get(selection);
@@ -708,7 +543,6 @@ function partStream(
     bySelection.set(base, parts);
   }
   const known = parts[side];
-  const version = selection.kind === "rows" ? selection.rows.version : -1;
   let next: PartUpload;
   if (
     known &&
@@ -795,12 +629,14 @@ interface Runs {
  * per run, beyond a scan of the membership.
  */
 function runsOf(
+  kit: HighlightKit,
   s: Series,
   selected: Uint8Array,
   frame: Frame,
   low: boolean,
   along: "x" | "y",
 ): Runs {
+  const { placeAt, rowOf, unmappable } = kit;
   const { rows, edges } = s;
   const across = along === "x" ? "y" : "x";
   const bases = along === "x" ? s.y0 : s.x0;
@@ -894,6 +730,7 @@ function runsAlong(s: Series, frame: Frame, along: "x" | "y"): boolean {
  * drawn as a run across, all selected or some at a run's end.
  */
 function runEnds(
+  { placeAt, rowOf }: HighlightKit,
   s: Series,
   found: Runs,
   frame: Frame,
@@ -1100,6 +937,7 @@ function hash(text: string): string {
  * x, y pixels per row; with `positions`, the position of each in it too.
  */
 function loneRows(
+  { placeAt, rowOf }: HighlightKit,
   s: Series,
   runs: (s: Series) => Runs,
   frame: Frame,
@@ -1128,6 +966,7 @@ function loneRows(
  * over what is drawn under it as translucent points do.
  */
 function dots(
+  kit: HighlightKit,
   series: readonly Series[],
   table: Table,
   runs: (s: Series) => Runs,
@@ -1139,7 +978,7 @@ function dots(
   for (const s of series) {
     if (frame.hidden.has(s.key)) continue;
     const positions: number[] = [];
-    const coords = loneRows(s, runs, frame, shift, positions);
+    const coords = loneRows(kit, s, runs, frame, shift, positions);
     if (coords.length === 0) continue;
     const lookAt = looks(s);
     // In observation order, each in its own look: later dots over earlier
@@ -1169,12 +1008,12 @@ function dots(
       ? {
           table,
           generation: table.generation,
-          ids: Float64Array.from(positions, (k) => table.identity(rowOf(s, k))),
+          ids: Float64Array.from(positions, (k) => table.identity(kit.rowOf(s, k))),
         }
       : undefined;
     const dot: PointGeometry = {
       kind: "point",
-      draw: pointDrawing,
+      draw: dotDrawing(kit),
       key: `${s.key}${ON}-dots`,
       of: s.key,
       ...(items && { items }),
@@ -1190,15 +1029,64 @@ function dots(
     out.push(
       drawingRows(
         dot,
-        Uint32Array.from(positions, (k) => rowOf(s, k)),
+        Uint32Array.from(positions, (k) => kit.rowOf(s, k)),
       ),
     );
   }
   return out;
 }
 
+const dotDrawings = new WeakMap<HighlightKit, Drawing<PointGeometry>>();
+
+/**
+ * The drawing of dots (circles, as PDF reads their fields too), made once
+ * per kit: each in its own color, opacity, and radius where the geometry
+ * gives them per dot, in order, so later dots draw over earlier ones.
+ */
+function dotDrawing(kit: HighlightKit): Drawing<PointGeometry> {
+  let drawing = dotDrawings.get(kit);
+  if (drawing) return drawing;
+  const { n, markupOf } = kit.guides;
+  const lookOf = (dots: PointGeometry, i: number) => ({
+    fill: dots.colors ? dots.colors.palette[dots.colors.index[i]!]! : dots.fill,
+    opacity: dots.opacities ? dots.opacities[i]! : dots.fillOpacity,
+    r: dots.radii ? dots.radii[i]! : dots.radius,
+  });
+  const elements = (dots: PointGeometry): SvgElement[] =>
+    Array.from({ length: dots.count }, (_, i) => {
+      const { fill, opacity, r } = lookOf(dots, i);
+      const [x, y, d] = [dots.coords[i * 2]!, dots.coords[i * 2 + 1]!, n(r * 2)];
+      const arc = `${n(r)} ${n(r)} 0 1 1`;
+      const attributes: Record<string, string> = {
+        d: `M${n(x - r)} ${n(y)}a${arc} ${d} 0a${arc} -${d} 0`,
+        fill,
+      };
+      if (opacity !== 1) attributes["fill-opacity"] = String(opacity);
+      return { tag: "path", attributes };
+    });
+  drawing = {
+    size: (dots) => dots.count,
+    elements,
+    svg: (dots) => markupOf(elements(dots)),
+    canvas(context, dots) {
+      const alpha = context.globalAlpha;
+      for (let i = 0; i < dots.count; i++) {
+        const { fill, opacity, r } = lookOf(dots, i);
+        context.beginPath();
+        context.arc(dots.coords[i * 2]!, dots.coords[i * 2 + 1]!, r, 0, Math.PI * 2);
+        context.globalAlpha = alpha * opacity;
+        context.fillStyle = fill;
+        context.fill();
+      }
+      context.globalAlpha = alpha;
+    },
+  };
+  dotDrawings.set(kit, drawing);
+  return drawing;
+}
+
 /** A point's or bar's geometry with its opacity dimmed; anything else (labels) drawn dimmed. */
-function dim(geometry: Geometry): Geometry {
+function dim({ dim: DIM }: HighlightKit, geometry: Geometry): Geometry {
   if (geometry.kind === "point") {
     const points = geometry as PointGeometry;
     const dimmed: PointGeometry = {
@@ -1244,8 +1132,9 @@ function outlined(geometry: Geometry): boolean {
  * at full opacity (and set the canvas' alpha, which a faded drawing would
  * multiply).
  */
-function dimLayer(geometry: Geometry): Geometry[] {
-  if (geometry.kind !== "area") return [dim(geometry)];
+function dimLayer(kit: HighlightKit, geometry: Geometry): Geometry[] {
+  const DIM = kit.dim;
+  if (geometry.kind !== "area") return [dim(kit, geometry)];
   const area = geometry as AreaGeometry;
   // An outline of no fill (a style run's) dims as drawn, keeping where it is cut.
   if (outlined(area))
@@ -1259,7 +1148,7 @@ function dimLayer(geometry: Geometry): Geometry[] {
         fillOpacity: area.fillOpacity * DIM,
         strokeOpacity: (area.strokeOpacity ?? 1) * DIM,
       };
-  return area.stroke ? [fill, ...dimLayer(outlineOf(area))] : [fill];
+  return area.stroke ? [fill, ...dimLayer(kit, outlineOf(area))] : [fill];
 }
 
 /**
@@ -1310,7 +1199,8 @@ function faded(draw: Drawing<Geometry>, fraction: number): Drawing<Geometry> {
  * drawn apart, an area of no fill (`outlineOf`), so each is drawn at its
  * own alpha.
  */
-function over(geometry: Geometry): Geometry[] {
+function over(kit: HighlightKit, geometry: Geometry): Geometry[] {
+  const DIM = kit.dim;
   const at = (a: number) => (a >= 1 ? 1 : ((1 - DIM) * a) / (1 - DIM * a));
   if (geometry.kind === "line") {
     const line = geometry as LineGeometry;
@@ -1357,5 +1247,282 @@ function over(geometry: Geometry): Geometry[] {
     stroke: null,
     ...(area.stroke && { strokeWidth: 0 }),
   };
-  return area.stroke ? [fill, ...over(outlineOf(area))] : [fill];
+  return area.stroke ? [fill, ...over(kit, outlineOf(area))] : [fill];
+}
+
+/**
+ * Draws `model`'s scenes with the chart's selection of items or series
+ * (`selection()`) in its marks' looks: what it holds as drawn (or in the
+ * `selected` look), the other items and series of the same marks dimmed
+ * (or in the `unselected` look); marks holding none of it draw as they
+ * are. Layout marks dim the items whose rows it does not hold. Returns
+ * what undoes it.
+ */
+export function selectionLooks(
+  kit: HighlightKit,
+  model: ChartModel,
+  selection: () => ChartSelection | null,
+  again: () => void,
+): () => void {
+  const highlighter = new Highlighter(kit, (mark) => chosenIn(model, mark, selection()));
+  const draw: NonNullable<ChartModel["looks"]> = (mark, series, frame, key, rows) =>
+    highlighter.geometry(mark, series, frame, key, rows) ?? mark.geometry(series, frame, key, rows);
+  // A custom mark's own items and series; a layout mark's, of its table's marks.
+  const layout = (table: Table, mark?: Mark, series?: Series) => {
+    const chosen = selection();
+    if (!chosen || chosen.kind === "brush") return undefined;
+    if (!mark && chosen.kind === "items") {
+      const laid = layoutRows(model, chosen.items as readonly string[], table, again);
+      if (laid) return laid;
+    }
+    const marks = mark
+      ? [mark]
+      : (model.config.marks as readonly Mark[]).filter((m) => m.table === table);
+    const held = marks.map((m) => chosenIn(model, m, chosen)?.(series).selected);
+    return held.find((selected) => selected !== undefined);
+  };
+  model.looks = draw;
+  model.layoutLooks = layout;
+  return () => {
+    if (model.looks === draw) model.looks = undefined;
+    if (model.layoutLooks === layout) model.layoutLooks = undefined;
+  };
+}
+
+/**
+ * The rows of `table` layout items keyed `keys` stand for, as their marks'
+ * layouts give them in every panel (a slice's rows, a node's subtree's);
+ * undefined where no key is a layout item's. Rows a layout not drawn yet
+ * holds are drawn `again`, on the next frame.
+ */
+function layoutRows(
+  model: ChartModel,
+  keys: readonly string[],
+  table: Table,
+  again: () => void,
+): Uint8Array | undefined {
+  let held: Uint8Array | undefined;
+  for (const key of keys) {
+    const found = model.items?.rowsOfItem(key, table);
+    if (!found) continue;
+    if (!found.whole) queueMicrotask(again);
+    if (found.rows.length === 0) continue;
+    held ??= new Uint8Array(table.length);
+    for (const rows of found.rows) for (let i = 0; i < rows.length; i++) held[rows[i]!] = 1;
+  }
+  return held;
+}
+
+/** What each selection holds of each mark's series, kept while both live, as of a version of its table and view, and its key. */
+const chosenRows = new WeakMap<
+  ChartSelection,
+  WeakMap<
+    Mark,
+    {
+      version: number;
+      generation: number;
+      view: number | undefined;
+      own: string | number;
+      chosen: Chosen | undefined;
+    }
+  >
+>();
+
+/**
+ * What the chart's items or series selection holds of `mark`'s series:
+ * of items, the rows their keys name, in the series of their value field
+ * for a mark drawing one per row; of series, every row of those it names
+ * and none of the others. Undefined where it names nothing of the mark.
+ */
+function chosenIn(
+  model: ChartModel,
+  mark: Mark,
+  selection: ChartSelection | null,
+): Chosen | undefined {
+  const table = mark.table;
+  if (!table || !selection || selection.kind === "brush") return undefined;
+  let byMark = chosenRows.get(selection);
+  if (!byMark) {
+    byMark = new WeakMap();
+    chosenRows.set(selection, byMark);
+  }
+  const known = byMark.get(mark);
+  const view = mark.view?.revision;
+  const marks = model.config.marks as readonly Mark[];
+  // The mark's key: its id, else its place, which an update can change.
+  const own = mark.spec.id ?? marks.indexOf(mark);
+  if (
+    known?.version === table.version &&
+    known.generation === table.generation &&
+    known.view === view &&
+    known.own === own
+  )
+    return known.chosen;
+  const keys = (selection.kind === "items" ? selection.items : selection.series) as string[];
+  // Each key's parts: its mark's first.
+  const mine = keys.flatMap((key) => {
+    try {
+      const parts = JSON.parse(key) as unknown[];
+      return parts[0] === own ? [{ key, source: parts[1] }] : [];
+    } catch {
+      return [];
+    }
+  });
+  let chosen: Chosen | undefined;
+  if (mine.length > 0) {
+    // A series by its source, the second part of its key (see `seriesKey`); one of every row for a mark of one per row.
+    const sourceOf = (s: Series | undefined) =>
+      s && mark.wide ? (JSON.parse(s.key) as unknown[])[1] : undefined;
+    const byKind = new Map<unknown, Uint8Array>();
+    const rowsOf = (source: unknown): Uint8Array => {
+      let selected = byKind.get(source);
+      if (selected) return selected;
+      selected = new Uint8Array(table.length);
+      if (selection.kind === "items") {
+        const resolver = itemResolver(marks.map((m, i) => ({ mark: m, key: m.spec.id ?? i })));
+        for (const { key, source: from } of mine)
+          if (source === undefined || from === source)
+            for (const row of resolver.rowsOf(key, table)) selected[row] = 1;
+      } else {
+        const split = mark.identity?.field;
+        const sources = new Set(mine.map(({ source }) => source));
+        if (source !== undefined) selected.fill(sources.has(source) ? 1 : 0);
+        else if (split === undefined) selected.fill(1);
+        else {
+          // The rows of each series named, by its value of the series field.
+          const { codes, dictionary } = table.categories(split as never);
+          const named = Uint8Array.from(dictionary, (label) => (sources.has(label) ? 1 : 0));
+          for (let row = 0; row < selected.length; row++)
+            selected[row] = codes[row]! < 0 ? 0 : named[codes[row]!]!;
+        }
+      }
+      byKind.set(source, selected);
+      return selected;
+    };
+    chosen = (s) => {
+      // A series selection of a mark of several series holds whole series.
+      const source =
+        selection.kind === "series" && s && mark.identity?.field !== undefined
+          ? (JSON.parse(s.key) as unknown[])[1]
+          : sourceOf(s);
+      return { selected: rowsOf(source), key: selection, version: -1 };
+    };
+  }
+  byMark.set(mark, { version: table.version, generation: table.generation, view, own, chosen });
+  return chosen;
+}
+
+/** Rasters' pixels in a look's fill, by the buffer of the pixels they cover. */
+const fills = new WeakMap<ArrayBufferLike, Uint8ClampedArray<ArrayBuffer>>();
+
+/**
+ * A raster's pixels in `color` where they show, as the browser reads the
+ * color (as they are without a canvas to read it): a copy, the raster's
+ * own pixels left as they are.
+ */
+function filled(raster: RasterGeometry, color: string): Uint8ClampedArray<ArrayBuffer> {
+  const { pixels } = raster;
+  const context =
+    typeof OffscreenCanvas === "undefined" ? null : new OffscreenCanvas(1, 1).getContext("2d");
+  if (!context) return pixels;
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data as unknown as number[];
+  let out = fills.get(pixels.buffer);
+  if (out?.length !== pixels.length) {
+    out = new Uint8ClampedArray(pixels.length);
+    fills.set(pixels.buffer, out);
+  }
+  for (let i = 0; i < pixels.length; i += 4) {
+    out[i] = r!;
+    out[i + 1] = g!;
+    out[i + 2] = b!;
+    out[i + 3] = (pixels[i + 3]! * a!) / 255;
+  }
+  return out;
+}
+
+/** How `mark` draws what a selection holds and what it does not: its looks, else dimmed and as drawn. */
+function paintOf(kit: HighlightKit, mark: Mark, frame: Frame): Paint & { looked: boolean } {
+  const { selected, unselected } = mark.spec as SelectionLooks;
+  return {
+    looked: !!(selected || unselected),
+    dim: unselected ? (g) => [inLook(g, unselected, frame)] : (g) => dimLayer(kit, g),
+    lit: selected ? (g) => inLook(g, selected, frame) : (g) => g,
+  };
+}
+
+/**
+ * A geometry in a look: the paint the look gives in place of its own
+ * (colors read as the mark reads its own), the rest as drawn.
+ */
+function inLook(geometry: Geometry, look: Look, frame: Frame): Geometry {
+  const color = (value: string | undefined, part: string) =>
+    value === undefined ? undefined : frame.paint(value, `${geometry.kind} ${part}`);
+  const { fill, stroke, strokeWidth, dash, opacity, radius } = look;
+  const fillOpacity = look.fillOpacity ?? opacity;
+  const strokeOpacity = look.strokeOpacity ?? opacity;
+  const g = { ...geometry } as Geometry & Record<string, unknown>;
+  const set = (name: string, value: unknown) => {
+    if (value !== undefined) g[name] = value;
+  };
+  if (geometry.kind === "point") {
+    set("fill", color(fill, "fill"));
+    if (fill !== undefined) g.colors = undefined;
+    set("fillOpacity", fillOpacity);
+    if (fillOpacity !== undefined) g.opacities = undefined;
+    // Overlaps paint once only where the look leaves the points opaque.
+    if (fill !== undefined || fillOpacity !== undefined) {
+      const p = g as unknown as PointGeometry;
+      p.opaque =
+        !p.opacities &&
+        p.fillOpacity >= 1 &&
+        (p.colors?.palette ?? [p.fill]).every((c) => alphaOf(c) >= 1);
+    }
+    set("radius", radius);
+    if (radius !== undefined) g.radii = undefined;
+    // An outline of its own, or the one a look's stroke gives (a pixel wide by default).
+    const ring = (geometry as PointGeometry).ring;
+    if (ring || stroke !== undefined)
+      g.ring = {
+        color: color(stroke, "stroke") ?? ring!.color,
+        width: strokeWidth ?? ring?.width ?? 1,
+        opacity: strokeOpacity ?? ring?.opacity,
+      };
+  } else if (geometry.kind === "rect") {
+    set("fill", color(fill, "fill"));
+    set("fillOpacity", fillOpacity);
+    const edge = (geometry as RectGeometry).edge;
+    if (edge || stroke !== undefined) {
+      const width = strokeWidth ?? edge?.width ?? 1;
+      g.edge = {
+        ...edge,
+        stroke: color(stroke, "stroke") ?? edge!.stroke,
+        width,
+        opacity: strokeOpacity ?? edge?.opacity ?? 1,
+        // Named dashes in proportion to the width drawn.
+        dash: dashPattern(dash, width) ?? edge?.dash,
+      };
+    }
+  } else if (geometry.kind === "area") {
+    set("fill", color(fill, "fill"));
+    set("fillOpacity", fillOpacity);
+    set("stroke", color(stroke, "stroke"));
+    set("strokeWidth", strokeWidth);
+    set("strokeOpacity", strokeOpacity);
+  } else if (geometry.kind === "raster") {
+    // An image of cells: in the fill where it shows, faded by the fill opacity.
+    const paint = color(fill, "fill");
+    if (paint !== undefined) g.pixels = filled(geometry as RasterGeometry, paint);
+    if (fillOpacity !== undefined)
+      (g as Record<string, unknown>).draw = faded(opaque(geometry.draw), fillOpacity);
+  } else {
+    set("stroke", color(stroke, "stroke"));
+    set("strokeWidth", strokeWidth);
+    set("dash", dashPattern(dash, (g as { strokeWidth?: number }).strokeWidth ?? 1));
+    // A line is its stroke: its stroke opacity, in place of the series' own, is its drawing's.
+    if (strokeOpacity !== undefined)
+      (g as Record<string, unknown>).draw = faded(opaque(geometry.draw), strokeOpacity);
+  }
+  return copiedFrom(g, geometry);
 }

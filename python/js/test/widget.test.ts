@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { MountedChart } from "../../../packages/herceg/src/dom/chart.ts";
 import { contractTest } from "../../../packages/herceg/test/helpers/contracts.ts";
+import { brushOf } from "../../../packages/herceg/test/helpers/selections.ts";
 import { MOUSE } from "../../../scripts/browser/mouse.ts";
 import type { SelectionPayload, ViewportEventPayload } from "../events.ts";
 import widgetModule, { type Snapshot, type ViewsPayload } from "../widget.ts";
@@ -905,7 +906,7 @@ describe("notebook widget", () => {
     model.receive({
       type: "select",
       revision: 1,
-      selection: { x: [0.5, 1], y: null, lasso: null },
+      selection: { kind: "brush", x: [0.5, 1], y: null, lasso: null },
     });
     await frame();
     expect(model.messages("select")).toHaveLength(1);
@@ -1182,7 +1183,7 @@ describe("notebook widget", () => {
     model.receive({
       type: "select",
       revision: 1,
-      selection: { x: null, y: ["b", "b"], lasso: null },
+      selection: { kind: "brush", x: null, y: ["b", "b"], lasso: null },
     });
     // The selection shows once the brush code has loaded.
     await expect.poll(() => band(host!)?.getAttribute("visibility")).toBe("visible");
@@ -1195,6 +1196,7 @@ describe("notebook widget", () => {
     ];
     // As a browser reports it: with the categories its outline is over.
     const lasso = {
+      kind: "brush" as const,
       x: [0, 2] as [number, number],
       y: ["a", "b"] as [string, string],
       lasso: outline,
@@ -1307,6 +1309,7 @@ describe("notebook widget", () => {
         new DataView(new Float64Array([1, 2]).buffer),
       ],
       selection: {
+        kind: "brush",
         x: ["a", "b"],
         y: [0, 1],
         lasso: [
@@ -1536,7 +1539,7 @@ describe("notebook widget", () => {
     model.receive({
       type: "select",
       revision: 1,
-      selection: { x: ["a", "a"], y: null, lasso: null },
+      selection: { kind: "brush", x: ["a", "a"], y: null, lasso: null },
     });
     // The brush that draws the selection loads on demand.
     await vi.dynamicImportSettled();
@@ -1553,7 +1556,7 @@ describe("notebook widget", () => {
     model.receive({
       type: "select",
       revision: 4,
-      selection: { x: ["d", "d"], y: null, lasso: null },
+      selection: { kind: "brush", x: ["d", "d"], y: null, lasso: null },
     });
     await frame();
     await expect.poll(() => band(host!)?.getAttribute("visibility")).toBe("visible");
@@ -1754,7 +1757,7 @@ describe("widget item interaction", () => {
     expect(chart.getViewport({ panel: "latency" })).toMatchObject({ x: [0.25, 0.75], y: [1, 2] });
     expect(chart.getViewport({ panel: "errors" })).toMatchObject({ x: [1, 2], y: null });
     // A brush is the selection of the panel brushed, and Python's goes in the panel it names.
-    chart.select({ x: null, y: [1.5, 2.5], lasso: null }, { panel: "errors" });
+    chart.select({ kind: "brush", x: null, y: [1.5, 2.5], lasso: null }, { panel: "errors" });
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(model.messages("select").at(-1)!.selection).toMatchObject({
       panels: ["errors"],
@@ -1763,10 +1766,10 @@ describe("widget item interaction", () => {
     model.receive({
       type: "select",
       revision: 2,
-      selection: { x: null, y: [1, 1.5], lasso: null, panels: ["latency"] },
+      selection: { kind: "brush", x: null, y: [1, 1.5], lasso: null, panels: ["latency"] },
     });
     expect(chart.selectionOwner?.panels ?? null).toEqual(["latency"]);
-    expect(chart.selection?.y).toEqual([1, 1.5]);
+    expect(brushOf(chart.selection)?.y).toEqual([1, 1.5]);
   });
 
   it("sends back a change of view the chart refuses, in the engine's words", async () => {
@@ -1956,7 +1959,7 @@ describe("widget item interaction", () => {
       [1, 0],
       [1, 1],
     ];
-    chart.select({ x: null, y: null, lasso }, { panel: "b" });
+    chart.select({ kind: "brush", x: null, y: null, lasso }, { panel: "b" });
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(model.messages("select").at(-1)!.selection).toMatchObject({ panels: ["b"], lasso });
     // Points far north change panel a's inferred projection, and only its view goes.
@@ -1997,9 +2000,10 @@ describe("widget item interaction", () => {
     const model = new MockModel({ _chart: beside, _listening: [] });
     mount(model);
     const chart = listener.mock.instances[0] as MountedChart;
-    chart.select({ x: [0.01, 0.15], y: [0.2, 0.3], lasso: null }, { panel: "map" });
+    chart.select({ kind: "brush", x: [0.01, 0.15], y: [0.2, 0.3], lasso: null }, { panel: "map" });
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(model.messages("select").at(-1)!.selection).toEqual({
+      kind: "brush",
       panels: ["map"],
       x: [0.01, 0.15],
       y: [0.2, 0.3],
@@ -2009,9 +2013,15 @@ describe("widget item interaction", () => {
     model.receive({
       type: "select",
       revision: 1,
-      selection: { panels: ["map"], x: [0.4, 0.5], y: null, lasso: null, time: [] },
+      selection: { kind: "brush", panels: ["map"], x: [0.4, 0.5], y: null, lasso: null, time: [] },
     });
-    expect(chart.selection).toEqual({ x: [0.4, 0.5], y: null, lasso: null });
+    expect(chart.selection).toEqual({
+      kind: "brush",
+      x: [0.4, 0.5],
+      y: null,
+      lasso: null,
+      panel: "map",
+    });
     expect(chart.selectionOwner?.panels ?? null).toEqual(["map"]);
   });
 

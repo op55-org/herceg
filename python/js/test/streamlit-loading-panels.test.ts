@@ -62,7 +62,7 @@ it("lets a panel's view, brush, and drill root go when a run before loading take
     await first.loading;
     first.render();
     first.setViewport({ x: [1.5, 3] }, { panel: "a" });
-    first.select({ x: [1.6, 2.5], y: null, lasso: null }, { panel: "a" });
+    first.select({ kind: "brush", x: [1.6, 2.5], y: null, lasso: null }, { panel: "a" });
     first.setDrillRoot('[1,"East"]', { panel: "t" });
     expect(first.getDrillRoot({ panel: "t" })).not.toBeUndefined();
     // a's line and the tree go, then come back: two runs while the compiler loads.

@@ -37,6 +37,7 @@ import { facet } from "../../src/model/facet.ts";
 import { rangeNavigator } from "../../src/model/navigator.ts";
 import { panels } from "../../src/model/panels.ts";
 import { renderToSVG } from "../../src/render/static.ts";
+import { brushOf } from "../helpers/selections.ts";
 import { dateTimes, MOUSE, accessibilityTree as treeUnder } from "./helpers.ts";
 
 const RULES: axe.RunOptions = {
@@ -737,7 +738,7 @@ describe("the keyboard", () => {
     chart.root.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowDown", shiftKey: true, bubbles: true }),
     );
-    expect(chart.selection?.y).toEqual([0, 0]);
+    expect(brushOf(chart.selection)?.y).toEqual([0, 0]);
   });
 });
 

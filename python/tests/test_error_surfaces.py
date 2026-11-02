@@ -449,6 +449,7 @@ def _calls(tmp: Path) -> dict[str, Call]:
         "on_viewport": {"callback": print},
         "get_viewport": {},
         "set_viewport": {"view": (0.0, 1.0)},
+        "select": {"value": (0.0, 1.0)},
         "on_visibility": {"callback": print},
         "on_error": {"callback": print},
         "on_row_selection": {"callback": print},

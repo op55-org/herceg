@@ -101,7 +101,7 @@ def test_the_result_decodes_to_python_values():
             },
         }
     )
-    assert state.selection == hg.Selection(x=(T0, T0 + dt.timedelta(minutes=1)), y=("a", "b"))
+    assert state.selection == hg.BrushSelection(x=(T0, T0 + dt.timedelta(minutes=1)), y=("a", "b"))
     point = hg.InspectedPoint("a", 1.0, "1", row=1, mark=0, key='[0,"a"]')
     click = state.click
     assert click is not None and click.target == hg.PlotTarget("")

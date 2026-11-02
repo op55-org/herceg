@@ -98,6 +98,16 @@ from ._errors import (
     tuplable,
     tupled,
 )
+from ._events import (
+    ChartSelection,
+    DrillRoot,
+    Viewport,
+    VisibilityState,
+    drill_root_option,
+    selection_option,
+    viewport_option,
+    visibility_option,
+)
 from ._guides import (
     ChannelScale,
     Format,
@@ -124,14 +134,17 @@ from ._guides import _instant as _domain_end
 from ._interaction import (
     SNAPS,
     Binding,
+    Brush,
     Snap,
     Sync,
     ViewLimits,
     bindings_spec,
+    brush_shape,
     brush_spec,
     limits_spec,
     panel_interaction_spec,
     preset_spec,
+    select_spec,
     sync_spec,
 )
 from ._layout import (
@@ -167,6 +180,7 @@ from ._style import (
     built_spec,
     halo_spec,
     insets,
+    look_spec,
     style_spec,
     theme_spec,
     title_spec,
@@ -1023,7 +1037,8 @@ class _SharedOptions(TypedDict, total=False):
     tooltip: bool | Tooltip | None
     zoom: bool | Literal["x", "y", "xy"] | None
     pan: bool | Literal["x", "y", "xy"] | None
-    brush: Literal["x", "y", "xy", "lasso"] | None
+    brush: Literal["x", "y", "xy", "lasso"] | Brush | None
+    select: Literal["items", "series"] | None
     bindings: Sequence[Binding] | None
     limits: Mapping[str, ViewLimits] | None
     sync: str | Sync | None
@@ -1054,6 +1069,16 @@ class _BindingOptions(TypedDict, total=False):
     row_selection: SelectionBinding | Sequence[SelectionBinding] | None
 
 
+class _StateOptions(TypedDict, total=False):
+    """The chart's first state, which its use changes: live, the widget's
+    ``selection``, ``viewport``, ``hidden_keys``, and ``drill_root``."""
+
+    selection: ChartSelection | None
+    viewport: Viewport | None
+    visibility: VisibilityState | Sequence[str] | None
+    drill_root: DrillRoot | str | None
+
+
 class ChartUpdate(_SharedOptions, total=False):
     """Chart options a live chart can change (``widget.update``): those of
     ``Chart`` but data, facets, and panels. ``None`` takes an option's default."""
@@ -1063,13 +1088,13 @@ class ChartUpdate(_SharedOptions, total=False):
     z: AxisOptions | dict[str, Any] | None
 
 
-class ChartOptions(ChartUpdate, _LayoutOptions, _BindingOptions, total=False):
+class ChartOptions(ChartUpdate, _LayoutOptions, _BindingOptions, _StateOptions, total=False):
     """``Chart``'s keyword arguments. ``None`` takes an option's default."""
 
     layout: Grid | Mapping[str, Any] | None
 
 
-class HelperOptions(_SharedOptions, _LayoutOptions, _BindingOptions, total=False):
+class HelperOptions(_SharedOptions, _LayoutOptions, _BindingOptions, _StateOptions, total=False):
     """Chart options as the one-call helpers (``hg.line``, ``hg.scatter``, ...)
     take them, after their own: ``x_axis``, ``y_axis``, and ``z_axis`` are the
     chart's ``x``, ``y``, and ``z``, since the helpers' ``x``, ``y``, and ``z``
@@ -1315,7 +1340,8 @@ class Chart:
         tooltip: bool | Tooltip | None = True,
         zoom: bool | Literal["x", "y", "xy"] | None = False,
         pan: bool | Literal["x", "y", "xy"] | None = None,
-        brush: Literal["x", "y", "xy", "lasso"] | None = None,
+        brush: Literal["x", "y", "xy", "lasso"] | Brush | None = None,
+        select: Literal["items", "series"] | None = None,
         bindings: Sequence[Binding] | None = None,
         limits: Mapping[str, ViewLimits] | None = None,
         sync: str | Sync | None = None,
@@ -1332,6 +1358,10 @@ class Chart:
         drag: bool | None = None,
         navigator: bool | Navigator | dict[str, Any] | None = None,
         row_selection: SelectionBinding | Sequence[SelectionBinding] | None = None,
+        selection: ChartSelection | None = None,
+        viewport: Viewport | None = None,
+        visibility: VisibilityState | Sequence[str] | None = None,
+        drill_root: DrillRoot | str | None = None,
     ) -> None:
         if facet_columns is not None and facet is None:
             raise ChartError("Chart facet_columns: wraps the panels of facet; give facet")
@@ -1459,6 +1489,7 @@ class Chart:
             "zoom": zoom,
             "pan": pan,
             "brush": brush,
+            "select": select,
             "bindings": bindings,
             "limits": limits,
             "sync": sync,
@@ -1474,6 +1505,10 @@ class Chart:
             "rotate": rotate,
             "drag": drag,
             "navigator": navigator,
+            "selection": selection,
+            "viewport": viewport,
+            "visibility": visibility,
+            "drill_root": drill_root,
         }
         self._options = spec_options(self._settings)
         # Bindings to channels of row selections, one per table (see SelectionBinding).
@@ -1745,6 +1780,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -1822,6 +1859,8 @@ class Chart:
                 "tooltip": self._mark_tooltip(table, tooltip, "line"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "line selected"),
+                "unselected": look_spec(unselected, "line unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "line"),
                 "id": id,
@@ -1867,6 +1906,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2029,6 +2070,8 @@ class Chart:
                 "tooltip": self._mark_tooltip(table, tooltip, "area"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "area selected"),
+                "unselected": look_spec(unselected, "area unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "area"),
                 "id": id,
@@ -2070,6 +2113,8 @@ class Chart:
         orient: Orient | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2218,6 +2263,8 @@ class Chart:
                 "orient": orient,
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "bar selected"),
+                "unselected": look_spec(unselected, "bar unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "bar"),
                 "id": id,
@@ -2247,6 +2294,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2306,6 +2355,8 @@ class Chart:
                 "tooltip": self._mark_tooltip(table, tooltip, "rug"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "rug selected"),
+                "unselected": look_spec(unselected, "rug unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "rug"),
                 "id": id,
@@ -2341,6 +2392,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2453,6 +2506,8 @@ class Chart:
                 "tooltip": self._mark_tooltip(table, tooltip, "errorbar"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "errorbar selected"),
+                "unselected": look_spec(unselected, "errorbar unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "errorbar"),
                 "id": id,
@@ -2495,6 +2550,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2676,6 +2733,8 @@ class Chart:
                 "tooltip": self._mark_tooltip(table, tooltip, "point"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "point selected"),
+                "unselected": look_spec(unselected, "point unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "point"),
                 "id": id,
@@ -2713,6 +2772,8 @@ class Chart:
         clip: Clip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -2797,6 +2858,8 @@ class Chart:
                     "clip": _clip(clip, "histogram"),
                     "zIndex": z_index,
                     "pick": pick,
+                    "selected": look_spec(selected, "histogram selected"),
+                    "unselected": look_spec(unselected, "histogram unselected"),
                     "inspect": inspect,
                     "id": id,
                 },
@@ -2885,6 +2948,8 @@ class Chart:
                 "clip": _clip(clip, "histogram"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "histogram selected"),
+                "unselected": look_spec(unselected, "histogram unselected"),
                 "inspect": inspect,
                 "id": id,
             },
@@ -2913,6 +2978,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         item_key: str | None = None,
         id: str | None = None,
@@ -2955,6 +3022,8 @@ class Chart:
                 "tooltip": self._mark_tooltip(table, tooltip, "candlestick"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "candlestick selected"),
+                "unselected": look_spec(unselected, "candlestick unselected"),
                 "inspect": inspect,
                 "itemKey": self._item_key(table, item_key, "candlestick"),
                 "id": id,
@@ -3142,6 +3211,8 @@ class Chart:
         clip: Clip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3228,6 +3299,8 @@ class Chart:
                 "clip": _clip(clip, "boxplot"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "boxplot selected"),
+                "unselected": look_spec(unselected, "boxplot unselected"),
                 "inspect": inspect,
             },
             x,
@@ -3266,6 +3339,8 @@ class Chart:
         clip: Clip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3326,6 +3401,8 @@ class Chart:
                 "clip": _clip(clip, "boxen"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "boxen selected"),
+                "unselected": look_spec(unselected, "boxen unselected"),
                 "inspect": inspect,
             },
             x,
@@ -3362,6 +3439,8 @@ class Chart:
         clip: Clip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -3408,6 +3487,8 @@ class Chart:
                 "clip": _clip(clip, "violin"),
                 "zIndex": z_index,
                 "pick": pick,
+                "selected": look_spec(selected, "violin selected"),
+                "unselected": look_spec(unselected, "violin unselected"),
                 "inspect": inspect,
             },
             x,
@@ -4596,6 +4677,8 @@ class Chart:
         tooltip: Tooltip | None = None,
         z_index: float | None = None,
         pick: bool | None = None,
+        selected: Look | Mapping[str, Any] | None = None,
+        unselected: Look | Mapping[str, Any] | None = None,
         inspect: bool | None = None,
         id: str | None = None,
     ) -> Chart:
@@ -4677,6 +4760,8 @@ class Chart:
             "tooltip": self._mark_tooltip(table, tooltip, "heatmap"),
             "zIndex": z_index,
             "pick": pick,
+            "selected": look_spec(selected, "heatmap selected"),
+            "unselected": look_spec(unselected, "heatmap unselected"),
             "inspect": inspect,
             "id": id,
         }
@@ -5869,7 +5954,7 @@ class Chart:
     def _check_brush(self, binding: SelectionBinding, name: str) -> None:
         """Brushes along a summary's statistics (a histogram's counts, a box
         plot's values), and lassos over summaries, select no rows yet."""
-        brush = self._settings["brush"]
+        brush = brush_shape(self._settings["brush"])
         if brush is None or ("lasso" if brush == "lasso" else "brush") not in binding.events:
             return
         for mark, table in self._marks:
@@ -7233,7 +7318,7 @@ class Panel:
     style: Style | dict[str, Any] | None = None
     zoom: bool | Literal["x", "y", "xy"] | None = None
     pan: bool | Literal["x", "y", "xy"] | None = None
-    brush: Literal["x", "y", "xy", "lasso"] | None = None
+    brush: Literal["x", "y", "xy", "lasso"] | Brush | None = None
     bindings: Sequence[Binding] | None = None
     limits: Mapping[str, ViewLimits] | None = None
     rotate: bool | None = None
@@ -7298,7 +7383,7 @@ class Panel:
         style: Style | dict[str, Any] | None = None,
         zoom: bool | Literal["x", "y", "xy"] | None = None,
         pan: bool | Literal["x", "y", "xy"] | None = None,
-        brush: Literal["x", "y", "xy", "lasso"] | None = None,
+        brush: Literal["x", "y", "xy", "lasso"] | Brush | None = None,
         bindings: Sequence[Binding] | None = None,
         limits: Mapping[str, ViewLimits] | None = None,
         rotate: bool | None = None,
@@ -7689,7 +7774,7 @@ OPTIONS = (
     *("title", "description", "width", "height", "x", "y", "y_right", "legend", "padding"),
     *("scales", "guides"),
     *("inspection", "tooltip"),
-    *("zoom", "pan", "brush", "bindings", "limits", "sync", "animation"),
+    *("zoom", "pan", "brush", "select", "bindings", "limits", "sync", "animation"),
     *("renderer", "theme"),
     *("locale", "time_zone", "projection", "z", "camera", "box_aspect", "rotate", "navigator"),
     "drag",
@@ -7754,7 +7839,7 @@ def _check_alone(settings: Mapping[str, Any], kind: str) -> None:
     treemap or sunburst drills with ``zoom=True``; maps and networks pan and
     zoom both ways (``zoom=True`` or ``"xy"``) and take a ``"lasso"`` brush;
     only a network's nodes drag; nothing syncs or has x seams."""
-    zoom, brush, pan = settings.get("zoom"), settings.get("brush"), settings.get("pan")
+    zoom, brush, pan = settings.get("zoom"), brush_shape(settings.get("brush")), settings.get("pan")
     if kind in _MAP_MARKS:
         if zoom in ("x", "y"):
             raise ChartError(
@@ -7805,7 +7890,7 @@ def _check_subplots(settings: Mapping[str, Any], layouts: Sequence[Mapping[str, 
     """What subplots that all draw layout marks, so that no panel has axes,
     take: trees drill with ``zoom=True``; maps and networks pan and zoom both
     ways and take lassos."""
-    zoom, brush, pan = settings.get("zoom"), settings.get("brush"), settings.get("pan")
+    zoom, brush, pan = settings.get("zoom"), brush_shape(settings.get("brush")), settings.get("pan")
     kinds = {mark["type"] for mark in layouts}
     planes = kinds & {"graph", *_MAP_MARKS}
     takes = {
@@ -7863,6 +7948,7 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
         for key, value in {
             "zoom": preset_spec(settings["zoom"], _CHART.field("zoom")) or None,
             "brush": brush_spec(settings["brush"], _CHART.field("brush")),
+            "select": select_spec(settings.get("select"), _CHART.field("select")),
             "bindings": bindings_spec(settings.get("bindings"), _CHART.field("bindings")),
             "limits": limits_spec(settings.get("limits"), _CHART.field("limits")),
             "sync": sync_spec(settings["sync"], _CHART.field("sync")),
@@ -7923,6 +8009,19 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
         "navigator": located(
             "navigator", lambda: _navigator(settings.get("navigator")), "Navigator"
         ),
+        # The first state, which the chart changes as it is used.
+        "selection": located(
+            "selection",
+            lambda: selection_option(settings.get("selection")),
+            "BrushSelection",
+            "ItemSelection",
+            "SeriesSelection",
+        ),
+        "viewport": located(
+            "viewport", lambda: viewport_option(settings.get("viewport")), "Viewport"
+        ),
+        "visibility": located("visibility", lambda: visibility_option(settings.get("visibility"))),
+        "drillRoot": located("drill_root", lambda: drill_root_option(settings.get("drill_root"))),
     }
     return {key: value for key, value in options.items() if value is not None}
 
@@ -8880,10 +8979,17 @@ def _midpoint(
 
 
 def _tree_look(look: Any, role: str) -> dict[str, Any] | None:
-    """A tree's ``leaf`` or ``branch`` look as the spec takes it."""
+    """A tree's ``leaf`` or ``branch`` look as the spec takes it: of a
+    ``Look``'s fields, trees draw ``fill``, ``fill_opacity``, and ``opacity``."""
     if look is None:
         return None
-    return cast("dict[str, Any]", _spec(_built(look, Look, role)))
+    built = _built(look, Look, role)
+    for name in ("stroke", "stroke_width", "dash", "stroke_opacity", "radius"):
+        if getattr(built, name) is not None:
+            raise ChartError(
+                f"{role}: a tree's look takes fill, fill_opacity, and opacity; drop {name}"
+            )
+    return cast("dict[str, Any]", _spec(built))
 
 
 def _flag(value: Any, role: str) -> bool | None:
@@ -9096,6 +9202,8 @@ def line(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -9129,6 +9237,8 @@ def line(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
@@ -9170,6 +9280,8 @@ def area(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -9215,6 +9327,8 @@ def area(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
@@ -9251,6 +9365,8 @@ def bar(
     orient: Orient | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -9287,6 +9403,8 @@ def bar(
         orient=orient,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         item_key=item_key,
         id=id,
@@ -9324,6 +9442,8 @@ def scatter(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9359,6 +9479,8 @@ def scatter(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         tooltip=tooltip,
         id=id,
@@ -9523,6 +9645,8 @@ def heatmap(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9555,6 +9679,8 @@ def heatmap(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         tooltip=tooltip,
         id=id,
@@ -9713,6 +9839,8 @@ def histogram(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9743,6 +9871,8 @@ def histogram(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         id=id,
     )
@@ -9856,6 +9986,8 @@ def boxplot(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9883,6 +10015,8 @@ def boxplot(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         id=id,
     )
@@ -9909,6 +10043,8 @@ def boxen(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9932,6 +10068,8 @@ def boxen(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         id=id,
     )
@@ -9956,6 +10094,8 @@ def violin(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],
@@ -9977,6 +10117,8 @@ def violin(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         id=id,
     )
@@ -10301,6 +10443,8 @@ def candlestick(
     clip: Clip | None = None,
     z_index: float | None = None,
     pick: bool | None = None,
+    selected: Look | Mapping[str, Any] | None = None,
+    unselected: Look | Mapping[str, Any] | None = None,
     inspect: bool | None = None,
     item_key: str | None = None,
     id: str | None = None,
@@ -10324,6 +10468,8 @@ def candlestick(
         clip=clip,
         z_index=z_index,
         pick=pick,
+        selected=selected,
+        unselected=unselected,
         inspect=inspect,
         tooltip=tooltip,
         item_key=item_key,
