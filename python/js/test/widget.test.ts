@@ -1608,8 +1608,12 @@ describe("notebook widget", () => {
   it("sends a 3D chart's camera and its points' values when Python listens", async () => {
     const chart = snapshot();
     chart.spec.marks = [{ type: "point3d", x: "t", y: "v", z: "v", data: "data" }];
+    const listener = vi.spyOn(MountedChart.prototype, "on");
     const model = new MockModel({ _chart: chart, _listening: ["camera", "click"] });
     const [host] = mount(model);
+    // The 3D module and the controller load first, however slow the machine.
+    const mounted = listener.mock.instances[0] as MountedChart;
+    for (let loading = mounted.loading; loading; loading = mounted.loading) await loading;
     const rect = host!.getBoundingClientRect();
     const drag = (type: string, x: number) =>
       host!.querySelector<HTMLElement>("[role=figure]")!.dispatchEvent(
@@ -1621,7 +1625,6 @@ describe("notebook widget", () => {
           clientY: rect.top + 100,
         }),
       );
-    await new Promise((resolve) => setTimeout(resolve, 50));
     drag("pointerdown", 200);
     drag("pointermove", 220);
     drag("pointerup", 220);

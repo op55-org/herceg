@@ -927,14 +927,21 @@ describe("Streamlit item interaction", () => {
       const at = model.inspectItem(JSON.stringify([0, name]))!.points[0]!;
       return model.items!.result()!.moves!.toLayout(JSON.stringify([0, name]), at.px, at.py);
     };
+    // Each chart's network layout and modules load first, however slow the machine.
+    const settled = async () => {
+      await vi.dynamicImportSettled();
+      const chart = charts().at(-1)!;
+      for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+      await frame();
+    };
     const parent = host();
     run(parent, ring(false));
-    await vi.dynamicImportSettled();
+    await settled();
     charts().at(-1)!.setItemPosition('[0,"n20"]', { x: 5, y: 6 });
     await frame();
     const far = place("n10");
     const again = run(parent, ring(true));
-    await frame();
+    await settled();
     // The node far from the change, and the moved one, are where they were.
     expect(place("n10")[0]).toBeCloseTo(far[0], 6);
     expect(place("n10")[1]).toBeCloseTo(far[1], 6);
