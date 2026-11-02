@@ -212,8 +212,10 @@ export interface Frame {
    */
   outside?: readonly [left: number, right: number] | undefined;
   /**
-   * The chart animates changed values: bars say what identifies each and
-   * where it ends (BarItems), points the row each shows (PointItems).
+   * The chart animates changed values: bars say what names each and where
+   * it ends (BarItems), points the row or key each shows (PointItems),
+   * labels what names each and the number it writes (LabelItems), and
+   * sunbursts their sectors (SunburstSectors).
    */
   keyed?: boolean;
   /**

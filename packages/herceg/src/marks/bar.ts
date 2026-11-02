@@ -41,6 +41,7 @@ import type {
 import type { ContentWriter } from "./features/content.ts";
 import type { PartText } from "./features/part-text.ts";
 import { withoutHidden } from "./hidden.ts";
+import { namesBy } from "./item-names.ts";
 import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -745,9 +746,10 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       (look.fillOpacity ?? spec.fillOpacity ?? 1) * (look.opacity ?? spec.opacity ?? 1);
     const edge = this.#edge(frame);
     const radius = frame.theme.style.bar.radius;
-    // Charts that animate changed values learn where each bar stands and
+    // Charts that animate changed values learn each bar's name and where it
     // ends; bars of several looks and log axes show their new values at once.
     const keyed = frame.keyed && across.type !== "log";
+    const nameOf = keyed ? this.#names(along) : undefined;
     // Labels past the bars' ends, or inside them where their place says.
     const place = this.#labelOptions.place;
     const inside = !!spec.stack || place?.outside === false;
@@ -786,7 +788,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           ? rects.map((r, part) => frame.bytes(keyOf(part), "ends", Math.ceil(r.length / 4)))
           : undefined;
       const items = keyed && parts === 1 && end - start <= MOVING_BARS;
-      const shown = items ? frame.doubles(s.key, "at", end - start) : undefined;
+      const names: (string | number)[] | undefined = items ? [] : undefined;
       const span = items ? frame.floats(s.key, "span", (end - start) * 2) : undefined;
       const counts = new Uint32Array(parts);
       // The row each bar draws, for drawn-mark records and titles.
@@ -825,8 +827,8 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
               ? TOP
               : BOTTOM;
         drawnRows[part]![count] = row;
-        if (shown) {
-          shown[count] = at;
+        if (names) {
+          names[count] = nameOf!(row, at);
           span![count * 2] = root;
           span![count * 2 + 1] = tip;
         }
@@ -848,6 +850,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
             alpha,
             cap,
             place,
+            names && { name: names[count]!, value, row, series: s.label },
           );
         }
       }
@@ -863,7 +866,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           rects: rects[part]!,
           count: counts[part]!,
           rounded: rounding && !square[part] ? { radius, ends: rounding[part]! } : undefined,
-          bars: shown && { horizontal, at: shown, span: span! },
+          bars: names && { horizontal, names, keyed: this.#keyed(along), span: span! },
           rows: drawnRows[part],
         };
         const outline = outlines[part];
@@ -873,6 +876,38 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       if (labeled) out.push(...labeled.flush(s.key));
     });
     return out;
+  }
+
+  /**
+   * How a value transition names a row's bar: by its `itemKey` value, else
+   * by its position's (a category's name, or `at`, its place's value).
+   */
+  #names(along: PositionScale): (row: number, at: number) => string | number {
+    const { itemKey } = this.spec;
+    if (itemKey !== undefined) {
+      const named = namesBy(this.table, itemKey);
+      return (row) => named(row);
+    }
+    if (!this.#categorical) return (_row, at) => at;
+    const categories = along.categories;
+    const named = namesBy(this.table, this.#position);
+    // A panel's own categories are read through their places: name by the row's.
+    return (row, at) => categories?.[at] ?? named(row);
+  }
+
+  /**
+   * For bars named by `itemKey`, which move between positions: where those
+   * coming and going cross the end of the position axis `along` (where its
+   * greatest value is drawn), and which way is out of the plot.
+   */
+  #keyed(along: PositionScale): NonNullable<RectGeometry["bars"]>["keyed"] {
+    if (this.spec.itemKey === undefined) return undefined;
+    // Where the axis' least and greatest values are drawn: a band scale's range's ends.
+    const [a, b] = along.domain;
+    const [low, high] =
+      along.type === "band" ? along.range : [along.map(Math.min(a, b)), along.map(Math.max(a, b))];
+    const { table } = this;
+    return { end: high, out: high >= low ? 1 : -1, table, generation: table.generation };
   }
 
   /**
@@ -1148,6 +1183,28 @@ interface LabelGroup {
   fill: string;
   halo: boolean;
   items: { x: number; y: number; text: Written }[];
+  /**
+   * In charts that animate changed values, per label: its bar's name, the
+   * value it shows, its row, and where its text starts along x; and the
+   * series it is of.
+   */
+  named?:
+    | {
+        names: (string | number)[];
+        values: number[];
+        rows: number[];
+        starts: number[];
+        series: string;
+      }
+    | undefined;
+}
+
+/** In charts that animate changed values, a label's bar's name, the value it shows, its row, and its series. */
+interface NamedLabel {
+  name: string | number;
+  value: number;
+  row: number;
+  series: string;
 }
 
 /** A label's text, or its parts where they have looks of their own. */
@@ -1187,6 +1244,10 @@ class ValueLabels {
   /** With `overlap` "hide", the labels placed so far, as painted, which later ones may not cover. */
   readonly #placed: LabelBoxSet | undefined;
   #groups = new Map<string, LabelGroup>();
+  /** The name of the label being added, in charts that animate changed values. */
+  #named: NamedLabel | undefined;
+  /** The bars' table, whose row identities name bars missing their `itemKey` value. */
+  readonly #table: Table;
 
   constructor(
     format: Formatter,
@@ -1201,6 +1262,7 @@ class ValueLabels {
     const { theme } = frame;
     this.#format = format;
     this.#frame = frame;
+    this.#table = table;
     this.#horizontal = horizontal;
     this.#stacked = stacked;
     this.#halo = halo;
@@ -1269,7 +1331,9 @@ class ValueLabels {
     opacity: number,
     cap: number,
     place: Frozen<BarLabelPlaceSpec> | undefined,
+    named?: NamedLabel,
   ) {
+    this.#named = named;
     if (this.#stacked || place?.outside === false)
       this.inside(
         label,
@@ -1282,6 +1346,7 @@ class ValueLabels {
         place?.attachment ?? (this.#stacked ? "center" : "end"),
       );
     else this.outside(label, middle, root, tip, spacing, fill, opacity, width, cap);
+    this.#named = undefined;
   }
 
   /**
@@ -1407,9 +1472,23 @@ class ValueLabels {
       const halo = group.halo
         ? labelHalo(this.#halo, box ? { ...frame, surface: box.fill } : frame)
         : undefined;
+      // Labels named for value transitions, which count through the values
+      // between, unless they write a field; their text written for another.
+      const { named } = group;
+      const record = named && {
+        names: named.names,
+        table: this.#table,
+        generation: this.#table.generation,
+        of: key,
+        starts: named.starts,
+        anchor: group.anchor,
+        values: !this.#field || this.#styled ? named.values : undefined,
+      };
+      const write = (i: number, value: number) =>
+        this.text(value, named!.rows[i]!, named!.series)();
       if (!this.#plain) {
         const paint = { ...this.#paint, color: group.fill };
-        const items = group.items.flatMap(({ x, y, text }) => {
+        const itemsAt = (text: Written, x: number, y: number) => {
           // Parts are drawn in their block, its middle at the label's place.
           if (typeof text !== "string")
             return text.items(text.box(x, y, group.anchor, paint), group.anchor, paint, halo);
@@ -1423,6 +1502,12 @@ class ValueLabels {
             frame.measure,
           );
           return [halo ? { ...made, halo } : made];
+        };
+        const owners: number[] = [];
+        const items = group.items.flatMap(({ x, y, text }, i) => {
+          const made = itemsAt(text, x, y);
+          if (record) for (const _ of made) owners.push(i);
+          return made;
         });
         const labels: LabelsGeometry = {
           kind: "labels",
@@ -1430,6 +1515,13 @@ class ValueLabels {
           key: `${key}|${stage}`,
           items,
         };
+        if (record)
+          labels.named = {
+            ...record,
+            at: group.items.flatMap(({ x, y }) => [x, y]),
+            owners,
+            write: (i, value, x, y) => itemsAt(write(i, value), x, y),
+          };
         out.push(labels);
         continue;
       }
@@ -1450,6 +1542,7 @@ class ValueLabels {
         labels: group.items.map((item) => item.text as string),
         count: group.items.length,
       };
+      if (record) text.named = { ...record, write: (i, value) => write(i, value) as string };
       out.push(text);
     }
     this.#groups = new Map();
@@ -1548,6 +1641,17 @@ class ValueLabels {
       this.#groups.set(stage, group);
     }
     group.items.push({ x, y, text });
+    const named = this.#named;
+    if (named) {
+      const { name, value, row, series } = named;
+      group.named ??= { names: [], values: [], rows: [], starts: [], series };
+      group.named.names.push(name);
+      group.named.values.push(value);
+      group.named.rows.push(row);
+      // Where its text starts, by its anchor's share of its width.
+      const share = anchor === "start" ? 0 : anchor === "middle" ? 0.5 : 1;
+      group.named.starts.push(x - share * this.#width(text));
+    }
   }
 }
 

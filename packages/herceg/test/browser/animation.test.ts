@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import { SvgLayer } from "../../src/dom/svg-layer.ts";
+import { sectorsOf } from "../../src/dom/value-sectors.ts";
 import { ValueAnimation } from "../../src/dom/value-transition.ts";
 import { area } from "../../src/marks/area.ts";
 import { bar } from "../../src/marks/bar.ts";
@@ -15,7 +16,10 @@ import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
 import { point } from "../../src/marks/point.ts";
 import { rule } from "../../src/marks/rule.ts";
+import { sunburst } from "../../src/marks/sunburst.ts";
+import { text } from "../../src/marks/text.ts";
 import { panels } from "../../src/model/panels.ts";
+import type { ArcGeometry, RectGeometry, Scene, TextGeometry } from "../../src/scene/scene.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
 const charts: Chart[] = [];
@@ -658,6 +662,43 @@ describe("value transitions", () => {
     expect(await settled()).toBe(path(moving));
   });
 
+  it("move on under a pointer that reads nothing, and show the new values once a hover listener reads", async () => {
+    const data = sales();
+    const moving = await mount({
+      animation: VALUES,
+      inspection: false,
+      tooltip: false,
+      marks: [bar(data, { x: "region", y: "sales" })],
+      y: { domain: [0, 40] },
+    });
+    const still = await bars(data, false);
+    await controlTime();
+    const rect = moving.root.getBoundingClientRect();
+    const at = {
+      bubbles: true,
+      clientX: rect.left + 300,
+      clientY: rect.top + 150,
+      pointerId: MOUSE,
+    };
+    moving.root.dispatchEvent(new PointerEvent("pointermove", at));
+    change([moving], [30, 20, 10]);
+    tick(16);
+    tick(100);
+    moving.root.dispatchEvent(new PointerEvent("pointermove", { ...at, clientX: at.clientX + 5 }));
+    tick(16);
+    // Between, under the pointer, and done in time.
+    expect(path(moving)).not.toBe(path(still));
+    tick(400);
+    expect(path(moving)).toBe(path(still));
+
+    // Hover listeners read what is under the pointer: the new values show first.
+    moving.on("hover", () => {});
+    change([moving], [10, 20, 30]);
+    tick(50);
+    moving.root.dispatchEvent(new PointerEvent("pointermove", at));
+    expect(path(moving)).toBe(path(still));
+  });
+
   it("show the new values when the pointer or keyboard comes before the change draws", async () => {
     const data = sales();
     const moving = await bars(data);
@@ -818,7 +859,7 @@ describe("value transitions", () => {
     expect(arcs(moving)).toEqual(arcs(still));
   });
 
-  it("show changes at once while inspected, in export, after render, and while frequent", async () => {
+  it("show changes at once while inspected, in export, after render, and after appends", async () => {
     const data = sales();
     const moving = await bars(data);
     const still = await bars(data, false);
@@ -853,19 +894,26 @@ describe("value transitions", () => {
     expect(path(moving)).toBe(path(still));
     tick(400);
 
-    // A change while values move ends the motion, and changes soon after show at once.
+    // A change while values move moves on from where they are.
     change([moving], [10, 20, 30]);
     tick(50);
+    const passing = path(moving);
     change([moving], [30, 20, 10]);
     tick(16);
+    expect(path(moving)).not.toBe(passing);
+    expect(path(moving)).not.toBe(path(still));
+    tick(400);
     expect(path(moving)).toBe(path(still));
-    tick(100);
-    change([moving], [20, 20, 20]);
+    // Rows appended show at once, and so do changes until the data has been still.
+    data.append({ region: ["W"], sales: [5] });
+    tick(16);
+    expect(path(moving)).toBe(path(still));
+    change([moving], [20, 20, 20, 5]);
     tick(16);
     expect(path(moving)).toBe(path(still));
     // Once the data is still for a while, changes move again.
     tick(400);
-    change([moving], [10, 20, 30]);
+    change([moving], [10, 20, 30, 5]);
     tick(50);
     expect(path(moving)).not.toBe(path(still));
   });
@@ -1007,5 +1055,319 @@ describe("value transitions", () => {
     moving.destroy();
     expect(animations[0]?.playing).toBe(false);
     expect(() => tick(400)).not.toThrow();
+  });
+});
+
+describe("keyed transitions", () => {
+  /** Every scene the chart draws from now on. */
+  function drawn(chart: Chart): Scene[] {
+    const scenes: Scene[] = [];
+    const render = SvgLayer.prototype.render;
+    vi.spyOn(SvgLayer.prototype, "render").mockImplementation(function (this: SvgLayer, ...args) {
+      if (chart.root.contains(this.svg)) scenes.push(args[0]);
+      return render.apply(this, args);
+    });
+    return scenes;
+  }
+  const barsOf = (scene: Scene) =>
+    scene.panels[0]!.marks.filter(
+      (m): m is RectGeometry => m.kind === "rect" && !!(m as RectGeometry).bars,
+    );
+  /** Each named bar's middle across its thickness and its tip, as a scene draws it. */
+  const placesOf = (scene: Scene) => {
+    const places = new Map<string | number, { middle: number; length: number }>();
+    for (const mark of barsOf(scene))
+      mark.bars!.names.forEach((name, i) => {
+        const [, y, width, height] = mark.rects.subarray(i * 4, i * 4 + 4);
+        places.set(name, { middle: y! + height! / 2, length: width! });
+      });
+    return places;
+  };
+
+  it("race bars between ranks with a reset every 250 ms, as one motion", async () => {
+    const brands = ["A", "B", "C", "D", "E", "F"];
+    // Each keyframe's top four, ranked; brands trade places and come and go.
+    const keyframe = (k: number) => {
+      const values = brands.map((_, i) => 100 + 60 * Math.sin(i * 1.3 + k * 0.6) + i * 5);
+      const order = brands
+        .map((_, i) => i)
+        .sort((a, b) => values[b]! - values[a]!)
+        .slice(0, 4);
+      return {
+        brand: order.map((i) => brands[i]!),
+        value: order.map((i) => values[i]!),
+        rank: order.map((_, r) => r),
+      };
+    };
+    const data = table(keyframe(0));
+    const chart = await mount({
+      animation: { values: true, duration: 250 },
+      marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "rank", labels: true })],
+      y: { domain: [3.5, -0.5] },
+    });
+    await controlTime();
+    const scenes = drawn(chart);
+    const { plot } = modelOf(chart).panels()[0]!;
+    const below = plot.y + plot.height;
+    let entered = 0;
+    let between = 0;
+    let counted = 0;
+    let axis = 0;
+    for (let k = 1; k <= 8; k++) {
+      const last = scenes.at(-1);
+      const before = last && placesOf(last);
+      const ticks =
+        last && last.panels[0]!.axes.find((a) => a.scale === "x")!.ticks.map((t) => t.position);
+      const next = keyframe(k);
+      data.reset(next);
+      tick(16);
+      const first = placesOf(scenes.at(-1)!);
+      // Continuous at each new start: no bar jumps from where it was drawn.
+      if (before)
+        for (const [name, place] of first) {
+          const was = before.get(name);
+          if (was) expect(Math.abs(place.middle - was.middle)).toBeLessThan(plot.height / 4);
+          else if (place.middle - 0 > below) entered++;
+        }
+      tick(110);
+      const middle = scenes.at(-1)!;
+      const ranks = new Map(next.brand.map((brand, r) => [brand, r]));
+      for (const [name, place] of placesOf(middle)) {
+        const r = ranks.get(name as string);
+        const at = (rank: number) => plot.y + ((rank + 0.5) / 4) * plot.height;
+        if (r !== undefined && Math.abs(place.middle - at(r)) > 2 && place.middle < below)
+          between++;
+      }
+      // Labels write values between their two.
+      for (const mark of middle.panels[0]!.marks) {
+        const labels = (mark as TextGeometry).named;
+        if (!labels?.values) continue;
+        (mark as TextGeometry).labels?.forEach((text) => {
+          const value = Number(text.replace(/,/g, ""));
+          if (Number.isFinite(value) && !next.value.some((v) => Math.abs(v - value) < 0.5))
+            counted++;
+        });
+      }
+      // The value axis moves with the leader's value.
+      const now = middle.panels[0]!.axes.find((a) => a.scale === "x")!.ticks.map((t) => t.position);
+      if (ticks && JSON.stringify(now) !== JSON.stringify(ticks)) axis++;
+      tick(124);
+    }
+    expect(entered).toBeGreaterThan(0);
+    expect(between).toBeGreaterThan(0);
+    expect(counted).toBeGreaterThan(0);
+    expect(axis).toBeGreaterThan(0);
+    // Once the keyframes stop, it settles at the last one, as drawn without animation.
+    tick(400);
+    const still = await mount({
+      animation: false,
+      marks: [bar(data, { itemKey: "brand", orient: "y", x: "value", y: "rank", labels: true })],
+      y: { domain: [3.5, -0.5] },
+    });
+    expect(path(chart)).toBe(path(still));
+  });
+
+  const path = (chart: Chart) =>
+    chart.root.querySelector(`[data-kind="rect"]`)?.getAttribute("d") ?? "";
+
+  /** A sunburst that drills, with its names, and text placed on one of its sectors. */
+  async function burst(extra: Partial<ChartOptions> = {}) {
+    const rows = table({
+      top: ["a", "a", "a", "b", "b", "c"],
+      leaf: ["a1", "a2", "a3", "b1", "b2", "c1"],
+      size: [10, 20, 30, 15, 25, 40],
+    });
+    return mount({
+      animation: { values: true, duration: 750 },
+      interaction: { zoom: true },
+      legend: false,
+      marks: [
+        sunburst(rows, { id: "tree", path: ["top", "leaf"], value: "size" }),
+        text({ from: { mark: "tree", item: ["a"], at: "top-left" }, label: "here" }),
+      ],
+      ...extra,
+    });
+  }
+  const recordOf = (scene: Scene) =>
+    (scene.panels[0]!.marks.find((m) => (m as ArcGeometry).sectors) as ArcGeometry).sectors!;
+
+  it("drill a sunburst gradually, its sectors and labels moving, under the pointer too", async () => {
+    const chart = await burst();
+    const still = await burst({ animation: false });
+    await controlTime();
+    const scenes = drawn(chart);
+    const items = () => chart.getItems({ mark: "tree" })!.items;
+    const a = items().find(({ names }) => names.join() === "a")!;
+    for (const each of [chart, still]) each.setDrillRoot(["a"]);
+    tick(16);
+    tick(234);
+    // A third of the way: "a" is between its sector and the middle disc.
+    const middle = items().find(({ key }) => key === a.key)!;
+    expect(middle.sector!.innerRadius).toBeLessThan(a.sector!.innerRadius);
+    expect(middle.sector!.innerRadius).toBeGreaterThan(0);
+    expect(middle.sector!.endAngle - middle.sector!.startAngle).toBeGreaterThan(
+      a.sector!.endAngle - a.sector!.startAngle,
+    );
+    // Labels fade: "b" and "c" go out, faded, still drawn.
+    const faded = sectorsOf(recordOf(scenes.at(-1)!)).filter(
+      (s) => s.label && s.shown > 0 && s.shown < 1,
+    );
+    expect(faded.length).toBeGreaterThan(0);
+    // The pointer passing does not stop it; hovering reads the frame's sectors.
+    const hovered: (string | undefined)[] = [];
+    chart.on("hover", ({ target }) =>
+      hovered.push(target?.kind === "item" ? target.item : undefined),
+    );
+    const rect = chart.root.getBoundingClientRect();
+    const [cx, cy] = [middle.sector!.cx, middle.sector!.cy];
+    chart.root.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + cx + 1,
+        clientY: rect.top + cy + 1,
+        pointerId: MOUSE,
+      }),
+    );
+    tick(100);
+    const later = items().find(({ key }) => key === a.key)!;
+    expect(later.sector!.innerRadius).toBeLessThan(middle.sector!.innerRadius);
+    expect(later.sector!.innerRadius).toBeGreaterThan(0);
+    // The text placed on "a" follows it.
+    const here = () =>
+      [...chart.root.querySelectorAll("svg text")]
+        .find((t) => t.textContent === "here")!
+        .getBoundingClientRect();
+    const box = here();
+    tick(100);
+    expect(here().left).not.toBe(box.left);
+    // The pointer reads it where it is drawn.
+    const drawnText = scenes
+      .at(-1)!
+      .panels[0]!.marks.find(
+        (m): m is TextGeometry => m.kind === "text" && (m as TextGeometry).labels?.[0] === "here",
+      )!;
+    const record = modelOf(chart)
+      .drawnMarks()
+      .flatMap(({ geometry }) => geometry)
+      .find((m) => m.key === drawnText.key) as TextGeometry;
+    expect(Array.from(record.coords.subarray(0, 2))).toEqual(
+      Array.from(drawnText.coords.subarray(0, 2)),
+    );
+    // Export draws where the drill goes.
+    expect(chart.toSVG().replace(/herceg-\d+/g, "")).toBe(still.toSVG().replace(/herceg-\d+/g, ""));
+    tick(800);
+    expect(arcs(chart)).toEqual(arcs(still));
+  });
+
+  const arcs = (chart: Chart) =>
+    [...chart.root.querySelectorAll('[data-kind="arc"]')].map((arc) => arc.getAttribute("d"));
+
+  it("drill back out with siblings coming in from the edges, and end when destroyed", async () => {
+    const chart = await burst();
+    await controlTime();
+    chart.setDrillRoot(["a"]);
+    tick(900);
+    const scenes = drawn(chart);
+    chart.setDrillRoot(null);
+    tick(16);
+    tick(100);
+    const frame = sectorsOf(recordOf(scenes.at(-1)!));
+    const b = frame.find(({ info }) => info?.().label === "b")!;
+    // On its way in from the circle's end.
+    expect(b.start).toBeGreaterThan(0.5);
+    const items = modelOf(chart).items!;
+    expect(items.transitionItems).toBeDefined();
+    chart.destroy();
+    expect(items.transitionItems).toBeUndefined();
+    expect(modelOf(chart).drilled).toBeUndefined();
+    expect(() => tick(900)).not.toThrow();
+  });
+
+  it("click the sector a drill draws, and drill on from there", async () => {
+    const chart = await burst();
+    await controlTime();
+    const drills: (string | null)[] = [];
+    chart.on("drill", ({ key }) => drills.push(key));
+    chart.setDrillRoot(["a"]);
+    tick(16);
+    tick(100);
+    // "a", on its way to the middle, is clicked where it is drawn: the tree goes back up.
+    const a = chart.getItems({ mark: "tree" })!.items.find(({ names }) => names.join() === "a")!;
+    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle } = a.sector!;
+    const [middle, along] = [(startAngle + endAngle) / 2, (innerRadius + outerRadius) / 2];
+    const rect = chart.root.getBoundingClientRect();
+    const at = {
+      bubbles: true,
+      button: 0,
+      pointerId: MOUSE,
+      clientX: rect.left + cx + along * Math.sin(middle),
+      clientY: rect.top + cy - along * Math.cos(middle),
+    };
+    chart.root.dispatchEvent(new PointerEvent("pointerdown", at));
+    chart.root.dispatchEvent(new PointerEvent("pointerup", at));
+    tick(16);
+    expect(drills).toEqual([a.key, null]);
+    // Going back up moves on from the frame drawn.
+    expect(modelOf(chart).items!.transitionItems).toBeDefined();
+  });
+
+  it("drill into a sibling on its way out, clicked where a drill draws it", async () => {
+    const chart = await burst();
+    await controlTime();
+    const drills: (string | null)[] = [];
+    chart.on("drill", ({ key }) => drills.push(key));
+    chart.setDrillRoot(["a"]);
+    tick(16);
+    tick(100);
+    const b = chart.getItems({ mark: "tree" })!.items.find(({ names }) => names.join() === "b")!;
+    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle } = b.sector!;
+    const [middle, along] = [(startAngle + endAngle) / 2, (innerRadius + outerRadius) / 2];
+    const rect = chart.root.getBoundingClientRect();
+    const at = {
+      bubbles: true,
+      button: 0,
+      pointerId: MOUSE,
+      clientX: rect.left + cx + along * Math.sin(middle),
+      clientY: rect.top + cy - along * Math.cos(middle),
+    };
+    chart.root.dispatchEvent(new PointerEvent("pointerdown", at));
+    chart.root.dispatchEvent(new PointerEvent("pointerup", at));
+    tick(16);
+    expect(drills).toEqual([expect.any(String), b.key]);
+  });
+
+  it("drill gradually the first time, with no frame drawn since its code loaded", async () => {
+    // Its code is loaded already, as on a page where other charts loaded it.
+    await import("../../src/dom/value-transition.ts");
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:0;top:0;width:600px;height:300px";
+    document.body.append(host);
+    const chart = createChart(host, {
+      animation: { values: true, duration: 750 },
+      interaction: { zoom: true },
+      legend: false,
+      marks: [
+        sunburst(
+          table({ top: ["a", "a", "b", "c"], leaf: ["a1", "a2", "b1", "c1"], size: [1, 2, 3, 4] }),
+          { id: "tree", path: ["top", "leaf"], value: "size" },
+        ),
+      ],
+    });
+    try {
+      await chart.loading;
+      await frame();
+      const a = () =>
+        chart.getItems({ mark: "tree" })!.items.find(({ names }) => names.join() === "a")!;
+      const before = a().sector!.innerRadius;
+      chart.setDrillRoot(["a"]);
+      await frame();
+      await frame();
+      // On its way to the middle, not there at once.
+      expect(a().sector!.innerRadius).toBeGreaterThan(0);
+      expect(a().sector!.innerRadius).toBeLessThan(before);
+    } finally {
+      chart.destroy();
+      host.remove();
+    }
   });
 });

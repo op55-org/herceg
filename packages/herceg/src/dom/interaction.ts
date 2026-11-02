@@ -527,9 +527,18 @@ export class Interaction {
     if (asked) this.#pinAsked({ at: asked.at, cause: "api" });
   }
 
-  /** Whether the pointer or keyboard is on the chart, or a press is in progress. */
+  /**
+   * Whether the pointer reading what is under it or the keyboard is on the
+   * chart, or a press is in progress. A pointer that reads nothing
+   * (`inspection: false`, no hover listener) lets changed values move.
+   */
   get busy(): boolean {
-    return !!(this.#pointer || this.#keyboard || this.#press || this.#tap);
+    return !!((this.#pointer && this.#reads()) || this.#keyboard || this.#press || this.#tap);
+  }
+
+  /** Whether the pointer reads what is under it: by inspection, or picking for hover listeners. */
+  #reads(): boolean {
+    return this.#host.options().inspection !== false || this.#host.events.has("hover");
   }
 
   get keyboard(): KeyboardCursor | null {
@@ -2440,8 +2449,10 @@ export class Interaction {
         }
         return;
       }
-      // Inspection reads the new values: they show first.
-      host.showValues();
+      // Inspection reads the new values: they show first, but a drill plays
+      // on (the frames' items are read meanwhile), as values do under a
+      // pointer that reads nothing.
+      if (!host.model.items?.transitionItems && this.#reads()) host.showValues();
       this.#pointer = local(event);
       this.#touch = event.pointerType === "touch";
       this.#over = event.target;
@@ -2575,9 +2586,11 @@ export class Interaction {
       )
         return;
       // A drag starts from the view it lands in, not one passing by, and
-      // from values as they are.
-      host.settle();
-      host.current();
+      // from values as they are; a drill plays on, its frame's items read.
+      if (!host.model.items?.transitionItems) {
+        host.settle();
+        host.current();
+      }
       const { x, y } = local(event);
       if (event.pointerType === "touch") {
         this.#touches.set(event.pointerId, { x, y });
@@ -3217,8 +3230,12 @@ export class Interaction {
     const panel = target.panel || undefined;
     const drill = model.interactionOf(panel)?.zoom ? model.items?.result(panel)?.drill : undefined;
     if (!drill) return false;
+    // While a drill plays, a sector leaving the view opens too.
+    const leaving = !!model.items?.transitionItems;
     return target.kind === "item"
-      ? target.item === drill.key || drill.opens(target.item)
+      ? target.item === drill.key ||
+          drill.opens(target.item) ||
+          (leaving && drill.opensInTree(target.item))
       : !!drill.out?.(x, y);
   }
 

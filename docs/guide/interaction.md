@@ -960,29 +960,56 @@ widget = chart.widget()
 widget.replace(next_data)  # points with matching ids move, even reordered
 ```
 
+A bar race is bars keyed by `itemKey` on a rank axis, reset each keyframe:
+
+```ts
+const race = createChart(element, {
+  marks: [bar(brands, { itemKey: "brand", orient: "y", x: "value", y: "rank", labels: true })],
+  y: { domain: [11.5, -0.5] }, // ranks 0 to 11 shown, the first at the top
+  animation: { values: true, duration: 750 },
+});
+brands.reset(nextKeyframe); // bars change places, come and go past the last rank, labels count
+```
+
 | Mark | Moves |
 | --- | --- |
-| Bars (stacked, labeled, histograms') | Matched by series and position; appearing bars grow from the base, a bar changing sign passes through the baseline. |
+| Bars (stacked, labeled, histograms') | Matched within their series by `itemKey`, else by position (a category's name, a number, a time). Bars move between places on a category axis whose categories change order (its labels move with them) and along a continuous position axis. Bars keyed by `itemKey` come in and go out past the end of the position axis (below the last rank above); others grow from and shrink to their base. A bar changing sign passes through the baseline. |
+| Value labels, text | A bar's label moves with its bar. Text is matched by `itemKey`, else by row. Labels writing a number count through the values between, in their format. |
 | Pie slices, gauges | Slices turn to new sizes, always making a whole pie; a gauge turns its dial. |
-| Points | Matched by row, or with `itemKey: "id"` by a number, time, or category field (across `reset` and reordered data). Missing or duplicate keys show that series at once. |
+| Sunbursts | Sectors matched by path move their angles and rings, new ones growing out of their parent; drilling moves the rings to the new root ([drilling](hierarchy-and-flow.md#drilling-into-trees)). Labels fade in and out where they are drawn at one end only. |
+| Points | Matched by row, or with `itemKey: "id"` by a number, time, or category field (across `reset` and reordered data). |
 | Lines, areas along x | When both scenes draw every row through the same positions (no level of detail, missing values, or breaks). |
-| Error bars, candlesticks, regions, text | When both scenes draw as many at the same places along one axis. |
+| Error bars, candlesticks, regions | When both scenes draw as many at the same places along one axis. |
 | Heatmap and 2D histogram cells | Fade to new colors over the same grid. |
 
-**Refused.** Box plots, boxen, violins, rugs, contours, dendrograms, custom
-marks, treemaps, sunbursts, funnels, radars, Sankey diagrams, networks,
-maps, and 3D marks refuse `values` with a `ChartError` (`unsupported`,
-path `animation.values`).
+A bar or text label whose key is missing matches its row while the table
+keeps its rows (not across `reset`); a point whose key is missing, and
+items sharing a key, show at once while the rest of their series moves.
 
-**Shown at once instead:** appended and dropped rows; changes while values
-move and until data has been still for a change's duration (so streams
-never animate forever); changes of options or hidden series; scenes over
-2,000 bars, slices, and rules or 10,000 points (of points or lines); point
-clouds, sampled points, marks over row views; charts with a navigator or
-`sync`, off screen, under the pointer or keyboard, or slow (over 10 ms a
-frame); pages preferring reduced motion. Charts of several panels or with `sync`
-do not animate their views. Only the drawing moves: data, tooltips, and events have the
-new values at once.
+A change arriving while values move moves on from what is on screen:
+bars, points, labels, and sectors keep moving from where they are, so a
+reset every 250 ms with a 750 ms duration plays as one motion. The picture
+then trails the data until changes stop.
+
+**Refused.** Box plots, boxen, violins, rugs, contours, dendrograms, custom
+marks, treemaps, funnels, radars, Sankey diagrams, networks, maps, and 3D
+marks refuse `values` with a `ChartError` (`unsupported`, path
+`animation.values`).
+
+**Shown at once instead:** appended and dropped rows, and changes until
+data has been still for a change's duration after them (so streams never
+animate forever); changes of options or hidden series; category axes
+gaining or losing categories, and lines and areas over categories that
+change order; pies whose kept slices change order; scenes over 2,000 bars,
+slices, sectors, and rules or 10,000 points (of points or lines), counting
+items going; point clouds, sampled points, marks over row views;
+charts with a navigator or `sync`, off screen, read by the pointer or
+keyboard, or slow (over 10 ms a frame); pages preferring reduced motion. A
+pointer reads a chart unless it has `inspection: false` and no hover
+listener; drills play on under it. Charts of several panels or with `sync`
+do not animate their views. Only the drawing moves: data, tooltips, and
+events have the new values at once (during a drill, the pointer reads the
+sectors as drawn).
 
 ## Hiding series
 

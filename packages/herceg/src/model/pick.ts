@@ -35,6 +35,7 @@ import type {
   TextGeometry,
   TextItem,
 } from "../scene/scene.ts";
+import type { ItemViews } from "./item-views.ts";
 import type { KeyPart } from "./items.ts";
 import type { Nearest } from "./nearest.ts";
 
@@ -132,14 +133,18 @@ export class Picker {
       // By zIndex, ties as painted: the last is on top.
       painted.sort((a, b) => a.z - b.z);
       for (let k = painted.length - 1; k >= 0; k--) {
-        const found = this.#pickPainted(painted[k]!, query);
+        const found = this.#pickPainted(painted[k]!, query, model.items);
         if (found) return found;
       }
     }
     return undefined;
   }
 
-  #pickPainted({ drawn, mark, g }: Painted, query: PickQuery): Picked | undefined {
+  #pickPainted(
+    { drawn, mark, g }: Painted,
+    query: PickQuery,
+    items: ItemViews | undefined,
+  ): Picked | undefined {
     // Nothing is picked outside the box a decoration's panel draws it within.
     if (drawn.keep && !inside(drawn.keep, query.x, query.y)) return undefined;
     if (!mark || g < 0) {
@@ -147,7 +152,7 @@ export class Picker {
       const clipped =
         mark && !(drawn.frame && inside(clipBox(mark.spec.clip, drawn.frame), query.x, query.y));
       const item = !mark
-        ? pickLayout(drawn, query)
+        ? pickLayout(drawn, query, items)
         : clipped
           ? undefined
           : mark.pickItem
@@ -955,8 +960,16 @@ function turned(box: Rect, { x, y, angle }: { x: number; y: number; angle: numbe
  * holds one layout mark, so no distance ranks its items against another
  * mark's.
  */
-export function pickLayout(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
-  const item = drawn.layout?.itemAt(query.x, query.y);
+export function pickLayout(
+  drawn: DrawnMark,
+  query: PickQuery,
+  items?: ItemViews,
+): PickedItem | undefined {
+  const { layout } = drawn;
+  // While a drill plays, as its frame draws the items.
+  const item =
+    layout &&
+    (items ? items.itemAt(drawn.panel, layout, query.x, query.y) : layout.itemAt(query.x, query.y));
   return item && layoutItem(drawn, item);
 }
 

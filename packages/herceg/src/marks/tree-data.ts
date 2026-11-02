@@ -122,6 +122,8 @@ export interface Drill extends DrillRoot {
   pathTo(key: string): DrillStep[];
   /** Whether the node keyed `key` has nodes under it with a value, to drill into. */
   opens(key: string): boolean;
+  /** Whether the node keyed `key` has nodes under it in the whole tree, in the view or not (one a drill's frames still draw). */
+  opensInTree(key: string): boolean;
   /** Whether a click at (`x`, `y`), in pixels, on no item goes up a level: a sunburst's empty center. */
   out?(x: number, y: number): boolean;
 }
@@ -468,6 +470,15 @@ export class TreeData {
         steps.push({ key: this.keyOf(id, whole, at), label: whole.tree.names[at]! });
       return steps.reverse();
     };
+    // Whether a node of `tree` has nodes under it there.
+    const opens = (tree: TreeView, key: string) => {
+      const at = this.nodeOf(id, tree, key);
+      const { childStart, children } = tree.tree;
+      if (at <= 0) return false;
+      for (let c = childStart[at]!; c < childStart[at + 1]!; c++)
+        if (tree.values[children[c]!]! > 0) return true;
+      return false;
+    };
     return {
       key: root > 0 ? this.keyOf(id, whole, root) : null,
       path: pathTo(root),
@@ -481,14 +492,9 @@ export class TreeData {
         const at = this.nodeOf(id, whole, key);
         return at > 0 ? pathTo(at) : [];
       },
-      opens: (key) => {
-        const at = this.nodeOf(id, view, key);
-        const { childStart, children } = view.tree;
-        if (at <= 0) return false;
-        for (let c = childStart[at]!; c < childStart[at + 1]!; c++)
-          if (view.values[children[c]!]! > 0) return true;
-        return false;
-      },
+      opens: (key) => opens(view, key),
+      // The panel's whole tree: its own rows', not the table's.
+      opensInTree: (key) => opens(this.view(view.rows), key),
       ...(out && { out }),
     };
   }

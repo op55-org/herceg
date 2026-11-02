@@ -12,11 +12,18 @@ import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { INNER_CUT, OUTER_CUT, type RingGeometry, ringDrawing } from "../draw/rings.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { layoutPartition } from "../layout/partition.ts";
-import { labelFor, oneLineText } from "../layout/text.ts";
+import { labelFor, oneLineText, textItem } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
-import type { Geometry, LabelsGeometry, TextGeometry, TextItem } from "../scene/scene.ts";
+import type {
+  Geometry,
+  LabelsGeometry,
+  SectorLabel,
+  SunburstKit,
+  TextGeometry,
+  TextItem,
+} from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Frozen, InteractionSpec, SunburstSpec } from "../spec/spec.ts";
 import type { TextStyle } from "../spec/style.ts";
@@ -35,7 +42,6 @@ import {
 } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { type ChartMark, DIM, frozen, type MARK } from "./mark.ts";
-import { refuseValues } from "./still.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { count, drillControls, TreeData, type TreeView, where } from "./tree-data.ts";
 import { TreeLabels } from "./tree-labels.ts";
@@ -116,6 +122,17 @@ const HOLE = 0.18;
 const CENTER_OPACITY = 0.3;
 /** The narrowest a name may be cut to, in pixels, besides its ellipsis. */
 const LEAST_NAME = 12;
+
+/** What value transitions draw and pick a sunburst's frames with (scene.ts SunburstKit). */
+const KIT: SunburstKit = {
+  rings: ringDrawing,
+  labels: labelsDrawing,
+  whole: INNER_CUT | OUTER_CUT,
+  ArcPath,
+  traceSector,
+  inSector,
+  sectorInfo,
+};
 
 export class SunburstMark implements LayoutMark {
   declare readonly [MARK]: true;
@@ -206,7 +223,6 @@ export class SunburstMark implements LayoutMark {
   }
 
   draw(frame: LayoutFrame): LayoutResult {
-    refuseValues(frame.keyed, this.spec.type);
     const { theme, locale } = frame;
     const data = this.#data;
     // A facet panel draws the part of the tree its rows give a value; a
@@ -439,21 +455,36 @@ export class SunburstMark implements LayoutMark {
       } as RingGeometry);
     }
 
+    // Charts that animate changed values learn each sector's label, to move it.
+    const labeled = frame.keyed ? new Map<number, SectorLabel>() : undefined;
     if (this.#labels.on)
       geometry.push(
-        ...this.#drawLabels(byDepth, view, shown, radii, angles, fills, opacities, frame, {
-          cx,
-          cy,
-          hole,
-          centered,
-          centerColor,
-          centerOpacity: center.opacity,
-        }),
+        ...this.#drawLabels(
+          byDepth,
+          view,
+          shown,
+          radii,
+          angles,
+          fills,
+          opacities,
+          frame,
+          {
+            cx,
+            cy,
+            hole,
+            centered,
+            centerColor,
+            centerOpacity: center.opacity,
+          },
+          labeled,
+        ),
       );
 
     const percent = numberFormatter({ style: "percent", maximumFractionDigits: 1 }, locale);
     const total = shown[0]!;
     const rootKey = root > 0 ? data.keyOf(frame.id, view, 0) : undefined;
+    // The middle's parent is the root's own, in the whole tree, read as drawn.
+    const above = data.parentKey(frame.id, view);
     const itemOf = (node: number): LayoutItem => {
       const outline = new ArcPath();
       const label = [...view.prefix, ...pathOf(tree, node)].join(" / ");
@@ -496,8 +527,6 @@ export class SunburstMark implements LayoutMark {
       const r1 = node === 0 ? hole : r0 + ring;
       const [a0, a1] = node === 0 ? [START, START + TAU] : angles(node);
       const parent = tree.parent[node]!;
-      // The center's parent is the root's own, in the whole tree.
-      const above = node === 0 ? data.parentKey(frame.id, view) : rootKey;
       return {
         key: data.keyOf(frame.id, view, node),
         names,
@@ -505,7 +534,7 @@ export class SunburstMark implements LayoutMark {
         value: shown[node]!,
         ...sectorInfo(cx, cy, r0, r1, a0, a1),
         depth: tree.depth[node]!,
-        parent: parent > 0 ? data.keyOf(frame.id, view, parent) : above,
+        parent: node === 0 ? above : parent > 0 ? data.keyOf(frame.id, view, parent) : rootKey,
       };
     };
     const navigation = data.navigation(frame.id, view, shown, paints, itemOf);
@@ -513,6 +542,39 @@ export class SunburstMark implements LayoutMark {
     const first = centered ? 1 : 0;
     const centerKey = centered ? rootKey : undefined;
     let infos: ItemInfo[] | undefined;
+    const drawer = labeled && geometry.find((mark): mark is RingGeometry => mark.kind === "arc");
+    if (drawer) {
+      // Charts that animate changed values learn every sector, which value
+      // transitions make of its node (the middle's paint at node 0).
+      fills[0] = centerColor;
+      opacities[0] = center.opacity;
+      drawer.sectors = {
+        sectors: {
+          nodes: [...(centered ? [0] : []), ...byDepth.slice(1).flat()],
+          spans,
+          depth: tree.depth,
+          parent: tree.parent,
+          fills,
+          opacities,
+          labels: labeled!,
+          above,
+          key: (node) => data.keyOf(frame.id, view, node),
+          info: infoOf,
+          item: itemOf,
+        },
+        root: rootKey,
+        cx,
+        cy,
+        radius: r,
+        hole,
+        ring,
+        crumbs: path?.geometry ?? [],
+        id: JSON.stringify(frame.id),
+        gap: angular,
+        ringGap: radial,
+        kit: KIT,
+      };
+    }
     return {
       geometry,
       // The center, when painted, then each drawn sector, in reading order.
@@ -600,6 +662,7 @@ export class SunburstMark implements LayoutMark {
       centerColor: string;
       centerOpacity: number;
     },
+    labeled?: Map<number, SectorLabel>,
   ): Geometry[] {
     const { theme, measure, locale } = frame;
     const labels = this.#labels;
@@ -617,6 +680,22 @@ export class SunburstMark implements LayoutMark {
       contrastingText(fill ?? backdrop, fill === undefined ? 1 : opacity, backdrop) || theme.text;
     const write = (node: number) =>
       labels.parts(view, node, shown[node]!, () => this.#data.soleRowOf(view, node), locale);
+    // A node's label for value transitions: its items at its middle, as drawn.
+    const keep = (
+      node: number,
+      made: readonly TextItem[],
+      x: number,
+      y: number,
+      angle: number,
+      turns = false,
+    ) => labeled?.set(node, { items: made, x, y, angle, turns });
+    const plainAt = (text: string, x: number, y: number, ink: string) =>
+      textItem(
+        text,
+        { x, y, anchor: "middle", baseline: "middle", angle: 0 },
+        labels.paint(frame, ink),
+        backdrop,
+      );
     if (middle.centered) {
       // The root's name across the center, its corners inside the disc.
       const disc = hole - this.#gap.radial / 2 - 2;
@@ -625,7 +704,10 @@ export class SunburstMark implements LayoutMark {
       if (!labels.styled) {
         const room = across(lineHeight);
         const name = room >= 8 && labelFor(view.prefix.at(-1) ?? "", room, measure, font);
-        if (name) plain.set(ink, { coords: [cx, cy], labels: [name] });
+        if (name) {
+          plain.set(ink, { coords: [cx, cy], labels: [name] });
+          if (labeled) keep(0, [plainAt(name, cx, cy, ink)], cx, cy, 0);
+        }
       } else {
         const parts = write(0);
         const paint = parts && labels.paint(frame, ink);
@@ -633,7 +715,11 @@ export class SunburstMark implements LayoutMark {
           const [padX, padY] = labels.padding(paint);
           const whole = labels.block(parts, paint, frame);
           const block = whole.fit(across(whole.lines.height + padY) - padX);
-          if (block) items.push(...labels.items(block, cx, cy, 0, paint, frame));
+          if (block) {
+            const made = labels.items(block, cx, cy, 0, paint, frame);
+            items.push(...made);
+            keep(0, made, cx, cy, 0);
+          }
         }
       }
     }
@@ -669,7 +755,9 @@ export class SunburstMark implements LayoutMark {
           if (block.lines.height + padY > thick) continue;
           const turn = (mid * 180) / Math.PI;
           const angle = Math.cos(mid) < 0 ? turn + 180 : turn;
-          items.push(...labels.items(block, x, y, angle, paint, frame));
+          const made = labels.items(block, x, y, angle, paint, frame);
+          items.push(...made);
+          keep(node, made, x, y, mid, true);
           continue;
         }
         // Across the sector, centered: the longest that keeps its box (corners
@@ -701,6 +789,7 @@ export class SunburstMark implements LayoutMark {
           }
           batch.coords.push(x, y);
           batch.labels.push(text);
+          if (labeled) keep(node, [plainAt(text, x, y, ink)], x, y, mid);
           continue;
         }
         const parts = write(node);
@@ -718,7 +807,11 @@ export class SunburstMark implements LayoutMark {
           if (!cut) break;
           if (fits(cut.lines.width + padX, tall)) block = cut;
         }
-        if (block) items.push(...labels.items(block, x, y, 0, paint, frame));
+        if (block) {
+          const made = labels.items(block, x, y, 0, paint, frame);
+          items.push(...made);
+          keep(node, made, x, y, mid);
+        }
       }
     }
     const geometry: Geometry[] = [...plain].map(

@@ -304,7 +304,7 @@
     },
     "lifecycle.view-animation": {
       "title": "View animation",
-      "works": "With animation on, a view asked for moves gradually (setViewport along a continuous axis, a map's or network's view, a treemap's or sunburst's drill): mid-way the mark draws neither where it was nor where it goes, and it ends as a chart without animation draws it.",
+      "works": "With animation on, a view asked for moves gradually (setViewport along a continuous axis, a map's or network's view): mid-way the mark draws neither where it was nor where it goes, and it ends as a chart without animation draws it.",
       "na": "A chart of items without axes or a view of its own (a pie, gauge, funnel, radar, Sankey diagram, or 3D chart, whose camera gestures turn and magnify at once) has no view to move: setViewport refuses the axes it lacks, and its drawing stays.",
       "suite": "herceg-browser"
     },

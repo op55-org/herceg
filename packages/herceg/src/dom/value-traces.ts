@@ -157,16 +157,19 @@ function movePath(
     to[i] = next.coords[i * 2 + axis]!;
     moves ||= from[i] !== to[i];
   }
+  // Frames trace every row, as both scenes do, so a change arriving then moves on from them.
   const blank = (length: number) => {
     const line = new Polyline();
     line.coords = new Float32Array(length * 2);
     line.starts = next.starts.slice();
     line.count = length;
+    line.whole = true;
     return line;
   };
   // A monotone line or area (only those curve) is curved again through each frame's points.
   const curved = !layered && (shown.curved || next.curved);
   const out = curved ? new Polyline() : blank(count);
+  out.whole = true;
   const points = curved ? blank(count) : undefined;
   const curve = curved ? monotonePolyline : undefined;
   return { path: { count, axis, x, from, to, out, points, curve }, moves };
@@ -283,7 +286,11 @@ export function moveStacks(
       positions: Array.from({ length: boundaries }, floats),
       tangents: Array.from({ length: boundaries }, floats),
       curves: floats(),
-      edges: layers.map(() => ({ upper: new Polyline(), lower: new Polyline() })),
+      edges: layers.map(() => {
+        const [upper, lower] = [new Polyline(), new Polyline()];
+        upper.whole = lower.whole = true;
+        return { upper, lower };
+      }),
     });
   }
   return moving;

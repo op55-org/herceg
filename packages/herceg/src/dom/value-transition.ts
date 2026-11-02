@@ -1,14 +1,16 @@
 // Moving marks from the values a chart showed to changed ones (`animation:
 // { values: true }`): bars, pie slices, a gauge's value, points, small
-// lines and areas, lists drawn in row order (error bars, candles, regions,
-// text), and heatmaps' cells, in every panel, with the axes when the change
-// moves their domains. Charts load this module only when they ask for it.
-// The data is current at once; what moves is a picture of the change. When
-// a table's values change, the chart keeps a copy of what is on screen,
-// matched by identity to the next scene's; frames between draw that scene
-// with its marks, axes, and grid lines between the two. A change that moves
-// a plot, the bands, or anything that cannot move with the axes, or that
-// adds or drops rows, shows at once.
+// lines and areas, labels, lists drawn in row order (error bars, candles,
+// regions), and heatmaps' cells, in every panel, with the axes when the
+// change moves their domains or reorders their categories. Charts load this
+// module only when they ask for it. The data is current at once; what moves
+// is a picture of the change. When a table's values change, the chart keeps
+// a copy of what is on screen, a scene or a frame between two, matched by
+// item names (docs/architecture/marks.md "Items") to the next scene's;
+// frames between draw that scene with its marks, axes, and grid lines
+// between the two. A change that moves a plot, changes the bands, or moves
+// anything that cannot move with the axes, or that adds or drops rows,
+// shows at once.
 
 import type { TableChange } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
@@ -17,6 +19,7 @@ import type { Mark, MarkKey } from "../marks/mark.ts";
 import type { planAxis } from "../model/axis.ts";
 import type { axisGuide } from "../model/axis-guide.ts";
 import type { ChartConfig, ChartModel, DrawnPanel } from "../model/model.ts";
+import type { PositionScale } from "../scale/scale.ts";
 import type {
   ArcGeometry,
   AreaGeometry,
@@ -34,10 +37,12 @@ import type {
   RectGeometry,
   RuleGeometry,
   Scene,
+  SunburstSectors,
   TextGeometry,
 } from "../scene/scene.ts";
 import type { AnimationSpec } from "../spec/spec.ts";
 import { lastFrameTime } from "./scheduler.ts";
+import { barsAt, copyBars, type MovingBars, moveBars, type ShownBars } from "./value-bars.ts";
 import {
   copyList,
   copyRaster,
@@ -52,15 +57,20 @@ import {
   type ShownRaster,
 } from "./value-items.ts";
 import {
+  copyLabels,
+  labelsAt,
+  type MovingLabels,
+  moveLabels,
+  named,
+  type ShownLabels,
+} from "./value-labels.ts";
+import {
   type AxesMotion,
   type Axis,
-  after,
   axesAt,
-  type Blend,
-  before,
-  blend,
   blendAt,
   motionOf,
+  planAt,
   plannable,
   type ScaleMotion,
 } from "./value-motion.ts";
@@ -71,6 +81,7 @@ import {
   pointsAt,
   type ShownPoints,
 } from "./value-points.ts";
+import { countOf, type MovingSunburst, moveSunburst, sunburstAt } from "./value-sectors.ts";
 import {
   copyRule,
   copyTrace,
@@ -132,19 +143,6 @@ export const MOVING_POINTS = 10_000;
  */
 export const MOVING_VERTICES = 10_000;
 
-/**
- * One series' bars as drawn, owned: per bar its position, and along,
- * thickness, root, tip; and which end is rounded (draw/rect.ts), if any is.
- */
-interface ShownBars {
-  kind: "bars";
-  horizontal: boolean;
-  count: number;
-  at: Float64Array;
-  parts: Float32Array;
-  ends: Uint8ClampedArray | undefined;
-}
-
 /** A pie as drawn: its slices are made afresh for each scene, so they are kept as they are. */
 interface ShownPie {
   items: readonly PieSlice[];
@@ -155,9 +153,16 @@ interface ShownPie {
 
 /**
  * What can move of one geometry as drawn: a series' bars, points, line, or
- * area, a rule, a list drawn in row order, or a raster.
+ * area, a rule, labels, a list drawn in row order, or a raster.
  */
-type ShownItem = ShownBars | ShownPoints | ShownTrace | ShownRule | ShownList | ShownRaster;
+type ShownItem =
+  | ShownBars
+  | ShownPoints
+  | ShownTrace
+  | ShownRule
+  | ShownLabels
+  | ShownList
+  | ShownRaster;
 
 /** What a chart showed when its data changed: where a change of values starts. */
 export interface Shown {
@@ -190,25 +195,17 @@ interface ShownPanel {
   pie: ShownPie | undefined;
   /** A gauge's value as drawn. */
   dial: number | undefined;
+  /** A sunburst's sectors as drawn (each scene's and frame's own, never written over). */
+  sunburst: SunburstSectors | undefined;
+  /**
+   * In a frame between two scenes, each category's place along a category
+   * axis whose categories changed order, which its scale does not give.
+   */
+  places: Places | undefined;
 }
 
-/**
- * One series' bars moving: per bar of both scenes, along, thickness, root,
- * and tip at each end, and the rounded end at each.
- */
-interface MovingBars {
-  /** The geometry's place among its panel's. */
-  index: number;
-  mark: RectGeometry;
-  /** The scale bars' lengths are on: x for horizontal bars. */
-  along: Axis;
-  count: number;
-  from: Float32Array;
-  to: Float32Array;
-  rounded: Uint8ClampedArray | undefined;
-  rects: Float32Array;
-  ends: Uint8ClampedArray | undefined;
-}
+/** Categories' places in pixels, by name, along the category axes they stand on. */
+type Places = Partial<Record<Axis, ReadonlyMap<string, number>>>;
 
 /** A pie moving: the slices of both scenes in one order, with their widths and values at each end. */
 interface MovingPie {
@@ -235,6 +232,10 @@ interface MovingDial {
 export interface Tween {
   start: number;
   duration: number;
+  /** It plays a drill, the tree's view, which the pointer does not stop. */
+  drill?: boolean;
+  /** What frames place axes with. */
+  builders: Builders;
   /** The scene of the new values, which the last frame shows as it is. */
   scene: Scene;
   /** How each panel's marks and axes move, in the scene's order. */
@@ -248,6 +249,11 @@ export interface PanelTween {
   /** The axes moving, when any scale does. */
   axes: AxesMotion | undefined;
   bars: MovingBars[];
+  labels: MovingLabels[];
+  /** Category axes whose categories changed order: each axis' place among the panel's, and its ticks' places before. */
+  bands: { index: number; from: Float64Array }[];
+  /** On those axes, whether drawn or not: their categories, in the new order, and each one's place at both ends. */
+  places: { axis: Axis; names: readonly string[]; from: Float64Array; to: Float64Array }[];
   points: MovingPoints[];
   traces: MovingTrace[];
   /** Layers of monotone bands and stacks, which frames curve together. */
@@ -257,6 +263,7 @@ export interface PanelTween {
   rasters: MovingRaster[];
   pie: MovingPie | undefined;
   dial: MovingDial | undefined;
+  sunburst: MovingSunburst | undefined;
 }
 
 /**
@@ -281,13 +288,31 @@ export class ValueAnimation {
   #tween: Tween | undefined;
   /** The last scene the chart was given is a frame between two scenes, not one the model built. */
   #between = false;
+  /** That frame, and how far into its change it is: a change arriving now moves on from it. */
+  #frame: { scene: Scene; elapsed: number } | undefined;
+  /** The scene or frame the chart drew last, which a drill moves from. */
+  #last: Scene | undefined;
+  /** What was shown is copied for a drill: the pointer does not stop the change it plays. */
+  #drill = false;
 
-  /** `drawn`: whether the chart's last scene shows its current options and hidden keys. */
-  constructor(model: ChartModel, window: Window | null, drawn: boolean, builders: Builders) {
+  /**
+   * `drawn`: the chart's last scene, if it shows its current options and
+   * hidden keys, which a drill before the next frame moves from.
+   */
+  constructor(
+    model: ChartModel,
+    window: Window | null,
+    drawn: Scene | undefined,
+    builders: Builders,
+  ) {
     this.#model = model;
     this.#builders = builders;
     this.#reducedMotion = window?.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
-    if (drawn) this.#drawn = drawnWith(model);
+    if (drawn) {
+      this.#drawn = drawnWith(model);
+      this.#last = drawn;
+    }
+    model.drilled = () => this.#drilled();
   }
 
   get playing(): boolean {
@@ -303,41 +328,78 @@ export class ValueAnimation {
    */
   changed(scene: Scene | undefined, change: TableChange | undefined, frameTime: number): void {
     const now = performance.now();
-    const { config } = this.#model;
-    const duration = durationOf(config.animation);
-    // Rows streaming in, out, or into place, and changes while values move or soon after,
-    // show at once until the data has been still for a change's duration.
+    const duration = durationOf(this.#model.config.animation);
+    // Rows streaming in, out, or into place, a view's rows changing, and
+    // changes soon after, show at once until the data has been still for a
+    // change's duration. Changes of values while values move move on from
+    // the frame on screen.
     const busy =
-      this.#tween !== undefined ||
       now < this.#quiet ||
       !change ||
       change.appended > 0 ||
       change.dropped > 0 ||
       !!change.inserted;
     if (busy) this.#quiet = now + duration;
-    this.#tween = undefined;
-    const current = drawnWith(this.#model);
-    if (
-      busy ||
-      !scene ||
-      duration === 0 ||
-      config !== this.#drawn?.config ||
-      current.hidden !== this.#drawn.hidden ||
-      config.interaction?.sync ||
-      // A navigator's strip draws the marks over the whole x domain, which does not move.
-      config.navigator ||
-      this.#reducedMotion?.matches ||
-      frameTime > SLOW_FRAME ||
-      lastFrameTime() > SLOW_FRAME
-    ) {
+    if (busy || !scene || this.#still(frameTime)) {
+      this.#ended();
       this.#shown = undefined;
       this.#blocked = true;
       return;
     }
+    this.#copy(scene, now);
+  }
+
+  /**
+   * Whether a change now shows at once: the chart does not animate values,
+   * its options or hidden series changed since its last scene, it is
+   * linked, has a navigator, prefers reduced motion, or draws slowly (its
+   * frames took `frameTime`).
+   */
+  #still(frameTime: number): boolean {
+    const model = this.#model;
+    const { config } = model;
+    return (
+      durationOf(config.animation) === 0 ||
+      config !== this.#drawn?.config ||
+      drawnWith(model).hidden !== this.#drawn.hidden ||
+      !!config.interaction?.sync ||
+      // A navigator's strip draws the marks over the whole x domain, which does not move.
+      !!config.navigator ||
+      !!this.#reducedMotion?.matches ||
+      frameTime > SLOW_FRAME ||
+      lastFrameTime() > SLOW_FRAME
+    );
+  }
+
+  /**
+   * Copies `scene`, the scene or frame on screen, once until the next scene
+   * is drawn: the next scene moves from it. A frame between two scenes is
+   * copied with its scales as it drew them, and the change it played ends.
+   */
+  #copy(scene: Scene, now: number): void {
+    const tween = this.#tween;
+    const frame = this.#frame;
+    this.#ended();
     if (this.#blocked || this.#shown) return;
-    this.#shown = snapshot(scene, this.#model.panels(), now);
+    const between = tween && frame?.scene === scene;
+    const panels = this.#model.panels();
+    this.#shown = between
+      ? snapshot(scene, panelsAt(tween, frame.elapsed, panels), now, placesAt(tween, frame.elapsed))
+      : snapshot(scene, panels, now);
     if (this.#shown) this.#shown.cost = performance.now() - now;
     else this.#blocked = true;
+  }
+
+  /**
+   * Hears that a tree's drill root is about to change: the next scene moves
+   * from what is drawn, which the pointer and the click that drilled do not
+   * stop (a drill is the tree's view).
+   */
+  #drilled(): void {
+    const scene = this.#last;
+    if (!scene || this.#still(0)) return;
+    this.#copy(scene, performance.now());
+    this.#drill = this.#shown !== undefined;
   }
 
   /**
@@ -345,7 +407,8 @@ export class ValueAnimation {
    * the scene `build` makes, moving to it from what was shown if it can.
    */
   frame(build: () => Scene, frameTime: number): Scene {
-    return this.step(frameTime) ?? this.start(build(), frameTime);
+    this.#last = this.step(frameTime) ?? this.start(build(), frameTime);
+    return this.#last;
   }
 
   /**
@@ -355,7 +418,9 @@ export class ValueAnimation {
    */
   start(scene: Scene, frameTime: number): Scene {
     const shown = this.#shown;
+    const drill = this.#drill;
     this.#shown = undefined;
+    this.#drill = false;
     this.#blocked = false;
     this.#between = false;
     this.#drawn = drawnWith(this.#model);
@@ -373,6 +438,7 @@ export class ValueAnimation {
       followedOf(config),
       positionsOf(config),
     );
+    if (this.#tween) this.#tween.drill = drill;
     return this.step(frameTime) ?? scene;
   }
 
@@ -400,12 +466,37 @@ export class ValueAnimation {
       lastFrameTime() > SLOW_FRAME ||
       this.#reducedMotion?.matches
     ) {
-      this.#tween = undefined;
+      this.#ended();
       this.#between = false;
       return stale ? undefined : scene;
     }
     this.#between = true;
-    return frameAt(tween, elapsed);
+    const frame = frameAt(tween, elapsed);
+    this.#frame = { scene: frame, elapsed };
+    // While a drill plays, the pointer reads the items as its frames draw them.
+    const items = this.#model.items;
+    if (tween.drill && items) {
+      items.transitionItems = new Map(
+        frame.panels.flatMap(({ key, items }) => (items?.pick ? [[key, items.pick]] : [])),
+      );
+      items.transitionRecords = new Map(
+        frame.panels.flatMap(({ key, items }) => (items?.records ? [[key, items.records]] : [])),
+      );
+    }
+    return frame;
+  }
+
+  /** Forgets the change playing, and the frames' items the pointer read. */
+  #ended(): void {
+    this.#tween = undefined;
+    this.#frame = undefined;
+    const items = this.#model.items;
+    if (items) items.transitionItems = items.transitionRecords = undefined;
+  }
+
+  /** Whether a drill plays, which the pointer passing does not stop. */
+  get drilling(): boolean {
+    return this.#tween?.drill === true;
   }
 
   /**
@@ -418,9 +509,17 @@ export class ValueAnimation {
   settle(): boolean {
     const between = this.#between;
     if (between || this.#shown) this.#blocked = true;
-    this.#tween = undefined;
+    this.#ended();
     this.#shown = undefined;
+    this.#drill = false;
     return between;
+  }
+
+  /** Ends what plays and lets go of the scene drawn last, for a chart destroyed. */
+  dispose(): void {
+    this.settle();
+    this.#last = undefined;
+    this.#model.drilled = undefined;
   }
 }
 
@@ -532,10 +631,11 @@ function tracked(mark: Geometry): boolean {
 
 /** A copy of what can move of a geometry, if any can. */
 function copyOf(mark: Geometry): ShownItem | undefined {
+  if (named(mark)) return copyLabels(mark);
   if (listed(mark)) return copyList(mark);
   switch (mark.kind) {
     case "rect":
-      return barsOf(mark as RectGeometry);
+      return copyBars(mark as RectGeometry);
     case "raster":
       return copyRaster(mark as RasterGeometry);
     case "point":
@@ -558,9 +658,12 @@ export function snapshot(
   scene: Scene,
   panels: readonly DrawnPanel[],
   time: number,
+  places?: ReadonlyMap<string, Places>,
 ): Shown | undefined {
   if (!movable(scene.panels)) return undefined;
-  const shown = scene.panels.map((drawn) => shownOf(drawn, panelOf(panels, drawn)));
+  const shown = scene.panels.map((drawn) =>
+    shownOf(drawn, panelOf(panels, drawn), places?.get(drawn.key)),
+  );
   return { time, cost: 0, theme: scene.theme, panels: shown };
 }
 
@@ -569,7 +672,11 @@ function panelOf(panels: readonly DrawnPanel[], drawn: Panel): DrawnPanel | unde
   return panels.find(({ key }) => key === drawn.key);
 }
 
-function shownOf(drawn: Panel, panel: DrawnPanel | undefined): ShownPanel {
+function shownOf(
+  drawn: Panel,
+  panel: DrawnPanel | undefined,
+  places: Places | undefined,
+): ShownPanel {
   const items = new Map<string, ShownItem>();
   const keys = new Set<string>();
   // A pie or a gauge is kept as its slices or its value, from which frames draw it all.
@@ -588,17 +695,19 @@ function shownOf(drawn: Panel, panel: DrawnPanel | undefined): ShownPanel {
   };
   const dial = drawer?.dial?.value;
   const { key, plot, axes } = drawn;
-  return { key, plot, panel, axes, items, keys, pie, dial };
+  return { key, plot, panel, axes, items, keys, pie, dial, sunburst: drawer?.sectors, places };
 }
 
-/** The sectors of a pie or of a gauge in its panel, which draw all of it again for each frame. */
+/** The sectors of a pie, a gauge, or a sunburst in its panel, which draw all of it again for each frame. */
 function drawerOf(panel: Panel): ArcGeometry | undefined {
   return panel.marks.find(draws);
 }
 
 function draws(mark: Geometry): mark is ArcGeometry {
-  const { slices, dial } = mark as ArcGeometry;
-  return mark.kind === "arc" && (slices !== undefined || dial !== undefined);
+  const { slices, dial, sectors } = mark as ArcGeometry;
+  return (
+    mark.kind === "arc" && (slices !== undefined || dial !== undefined || sectors !== undefined)
+  );
 }
 
 /**
@@ -631,7 +740,7 @@ function movable(panels: readonly Panel[]): boolean {
       items++;
       any = true;
     } else if (draws(mark)) {
-      items += mark.slices?.items.length ?? 1;
+      items += mark.slices?.items.length ?? (mark.sectors ? countOf(mark.sectors) : 1);
       any = true;
     } else {
       vertices += mark.draw.size(mark);
@@ -646,23 +755,6 @@ function movable(panels: readonly Panel[]): boolean {
     }
   }
   return any && items <= MOVING_ITEMS && points <= MOVING_POINTS && vertices <= MOVING_VERTICES;
-}
-
-/** A copy of a bar geometry's bars: position, along, thickness, root, tip, rounded end. */
-function barsOf(mark: RectGeometry): ShownBars {
-  const { count, rects } = mark;
-  const { horizontal, at, span } = mark.bars!;
-  // Bars stand along x, unless horizontal.
-  const along = horizontal ? 1 : 0;
-  const parts = new Float32Array(count * 4);
-  for (let i = 0; i < count; i++) {
-    parts[i * 4] = rects[i * 4 + along]!;
-    parts[i * 4 + 1] = rects[i * 4 + 2 + along]!;
-    parts[i * 4 + 2] = span[i * 2]!;
-    parts[i * 4 + 3] = span[i * 2 + 1]!;
-  }
-  const ends = mark.rounded?.ends.slice(0, count);
-  return { kind: "bars", horizontal, count, at: at.slice(0, count), parts, ends };
 }
 
 /** How each scale of a panel moves between two scenes; undefined when one cannot. */
@@ -710,8 +802,9 @@ export function plan(
   )
     return undefined;
   const roles = { sides, followed, positions };
-  // Points at most in a frame across the chart, with those still and going.
+  // Points, and bars, at most in a frame across the chart, with those still and going.
   const budget = {
+    bars: 0,
     points: scene.panels.reduce(
       (count, { marks }) =>
         marks.reduce(
@@ -730,7 +823,7 @@ export function plan(
     tweens.push(planned.tween);
     moves ||= planned.moves;
   }
-  return moves ? { start: shown.time, duration, scene, panels: tweens } : undefined;
+  return moves ? { start: shown.time, duration, builders, scene, panels: tweens } : undefined;
 }
 
 /**
@@ -743,7 +836,7 @@ function planPanel(
   panel: DrawnPanel | undefined,
   builders: Builders,
   { sides, followed, positions }: Roles,
-  budget: { points: number },
+  budget: { bars: number; points: number },
 ): { tween: PanelTween; moves: boolean } | undefined {
   // A panel of another facet value, or drawn elsewhere or otherwise, is another picture.
   const same = drawn.key === shown.key;
@@ -766,10 +859,22 @@ function planPanel(
   // a moving scale, nor one of the chart's own, which moves on its own.
   if (drawn.axes.some((guide) => guide.layers && (motions[guide.scale as Axis]?.moves ?? true)))
     return undefined;
+  // Category axes whose categories changed order move their ticks to their new places.
+  const bands = bandsOf(shown, drawn, panel);
+  if (!bands) return undefined;
+  // Categories in another order, whether an axis shows them or not: what
+  // matches by order or stands at fixed places cannot follow them.
+  const places = placesOf(shown, panel);
+  const reordered = places.length > 0;
+  // Marks that cannot move show their new values, unless axes move: they would stand apart.
+  const moving = scales || reordered;
   const tween: PanelTween = {
     motions,
     axes: axes || undefined,
     bars: [],
+    labels: [],
+    bands,
+    places,
     points: [],
     traces: [],
     stacks: [],
@@ -778,12 +883,24 @@ function planPanel(
     rasters: [],
     pie: undefined,
     dial: undefined,
+    sunburst: undefined,
   };
-  // A pie or a gauge draws its panel again for each frame, from its slices or its value.
+  // A pie, a gauge, or a sunburst draws its panel again for each frame, from its slices, value, or sectors.
   const drawer = drawerOf(drawn);
+  if (drawer?.sectors) {
+    const moving =
+      shown.sunburst && moveSunburst(shown.sunburst, drawer.sectors, MOVING_ITEMS - budget.bars);
+    if (!moving) return undefined;
+    // Sectors count toward the chart's budget, as bars do.
+    budget.bars += moving.sunburst.sectors.length;
+    tween.sunburst = moving.sunburst;
+    return { tween, moves: moving.moves };
+  }
   if (drawer?.slices) {
     const moving = shown.pie && movePie(shown.pie, drawer.slices);
-    if (!moving) return undefined;
+    // Slices, those going too, count toward the chart's budget, as bars do.
+    if (!moving || moving.pie.items.length > MOVING_ITEMS - budget.bars) return undefined;
+    budget.bars += moving.pie.items.length;
     tween.pie = moving.pie;
     return { tween, moves: moving.moves };
   }
@@ -803,7 +920,9 @@ function planPanel(
   // Whether points and lines move, read once those shown at once are left out.
   const pieceMoves = new Map<MovingPoints | MovingTrace, boolean>();
   // Moving scales move the axes and grid lines, whatever marks do.
-  let moves = scales;
+  let moves = moving;
+  // Labels, by the mark (or bar series, `of`) whose labels they are: matched among them all.
+  const labels = new Map<string, { index: number; mark: TextGeometry | LabelsGeometry }[]>();
   for (const [index, mark] of drawn.marks.entries()) {
     // Seams of time breaks (scale/breaks.ts names them) follow x alone: they
     // stay put while only y moves.
@@ -818,9 +937,29 @@ function planPanel(
     // Marks placed otherwise change at once, and what moves beside them with them.
     if (!side) return undefined;
     let moved: { moves: boolean } | undefined;
-    if (item?.kind === "bars" && mark.kind === "rect" && (mark as RectGeometry).bars) {
-      const bars = moveBars(index, item, mark as RectGeometry, motions, side);
-      if (bars) tween.bars.push(bars.moving);
+    if (named(mark) && !followed(of)) {
+      const pool = mark.named!.of ?? mark.key;
+      labels.set(pool, [...(labels.get(pool) ?? []), { index, mark }]);
+      continue;
+    }
+    if (
+      mark.kind === "rect" &&
+      (mark as RectGeometry).bars &&
+      (item?.kind === "bars" || (!item && !shown.keys.has(mark.key)))
+    ) {
+      // A series that came has its bars come.
+      const bars = moveBars(
+        index,
+        item as ShownBars | undefined,
+        mark as RectGeometry,
+        motions,
+        side,
+        MOVING_ITEMS - budget.bars,
+      );
+      if (bars) {
+        budget.bars += bars.moving.count;
+        tween.bars.push(bars.moving);
+      }
       moved = bars;
     } else if (item?.kind === "points" && mark.kind === "point") {
       const target = mark as PointGeometry;
@@ -840,9 +979,14 @@ function planPanel(
         pieceMoves.set(points.moving, points.moves);
         continue;
       }
-    } else if (item?.kind === "trace" && (mark.kind === "line" || mark.kind === "area")) {
+    } else if (
+      item?.kind === "trace" &&
+      (mark.kind === "line" || mark.kind === "area") &&
+      !reordered
+    ) {
       // Lines move along their values' axis only: points along their
-      // positions' would need other rows.
+      // positions' would need other rows, and categories changing order
+      // other positions.
       const trace = mark as LineGeometry | AreaGeometry;
       const along = positions(of);
       const values: Axis = along === "x" ? side : "x";
@@ -860,15 +1004,19 @@ function planPanel(
         pieceMoves.set(moving.moving, moving.moves);
         continue;
       }
-    } else if (item?.kind === "rule" && mark.kind === "rule") {
+    } else if (item?.kind === "rule" && mark.kind === "rule" && budget.bars < MOVING_ITEMS) {
       const rule = moveRule(index, item, mark as RuleGeometry, side);
-      if (rule) tween.rules.push(rule.moving);
+      if (rule) {
+        budget.bars++;
+        tween.rules.push(rule.moving);
+      }
       moved = rule;
-    } else if (item?.kind === "list" && listed(mark)) {
+    } else if (item?.kind === "list" && listed(mark) && !reordered) {
+      // Lists match by order, which reordered categories would not keep.
       const list = moveList(index, item, mark, side);
       if (list) tween.lists.push(list.moving);
       moved = list;
-    } else if (item?.kind === "raster" && mark.kind === "raster") {
+    } else if (item?.kind === "raster" && mark.kind === "raster" && !reordered) {
       const raster = moveRaster(index, item, mark as RasterGeometry);
       if (raster) tween.rasters.push(raster.moving);
       moved = raster;
@@ -879,7 +1027,7 @@ function planPanel(
     }
     // What cannot move shows its new values, unless the axes move: it
     // would stand apart from them. Series that came have nothing to move from.
-    if (scales || (tracked(mark) && !shown.keys.has(mark.key))) return undefined;
+    if (moving || (tracked(mark) && !shown.keys.has(mark.key))) return undefined;
     atOnce.add(seriesOf(of));
     if (mark.kind === "area") still.add(ownerOf(of));
   }
@@ -909,77 +1057,136 @@ function planPanel(
   tween.points = tween.points.filter((points) => !shownAtOnce(points));
   tween.traces = tween.traces.filter((trace) => !shownAtOnce(trace));
   for (const piece of [...tween.points, ...tween.traces]) moves ||= pieceMoves.get(piece) ?? false;
-  // Series that went have nothing to move to.
   const keys = new Set(drawn.marks.map(({ key }) => key));
-  for (const key of shown.keys) if (!keys.has(key)) return undefined;
+  for (const key of shown.keys) {
+    if (keys.has(key)) continue;
+    const item = shown.items.get(key);
+    // Bars and labels of a series that went go; other series that went have nothing to move to.
+    if (item?.kind === "labels") continue;
+    if (item?.kind !== "bars") return undefined;
+    const bars = moveBars(
+      -1,
+      item,
+      undefined,
+      motions,
+      sides(key) ?? "y",
+      MOVING_ITEMS - budget.bars,
+    );
+    if (!bars) return undefined;
+    budget.bars += bars.moving.count;
+    tween.bars.push(bars.moving);
+    moves = true;
+  }
+  // Labels last, as bars' labels come and go with their bars.
+  const pools = new Set(labels.keys());
+  const shownLabels = new Map<string, ShownLabels[]>();
+  for (const [key, item] of shown.items) {
+    if (item.kind !== "labels" || followed(item.mark.of ?? key)) continue;
+    const pool = item.of ?? key;
+    shownLabels.set(pool, [...(shownLabels.get(pool) ?? []), item]);
+    pools.add(pool);
+  }
+  for (const pool of pools) {
+    const next = labels.get(pool) ?? [];
+    const side = sides(pool);
+    if (!side) return undefined;
+    const bars = tween.bars.find(({ mark }) => mark.key === pool);
+    const moved = moveLabels(
+      shownLabels.get(pool) ?? [],
+      next,
+      motions.x,
+      motions[side],
+      side,
+      bars,
+    );
+    tween.labels.push(...moved.moving);
+    moves ||= moved.moves;
+  }
   return { tween, moves };
 }
 
 /**
- * How a series' bars move: matched by position, their lengths along the
- * scale `along` (as it moves), across a scale that must stay.
+ * The category axes of `drawn` whose ticks stand elsewhere than in `shown`
+ * (their categories changed order), each with its ticks' places in `shown`,
+ * found by their categories (a category not labeled there, on an axis
+ * thinning its labels, by its band); undefined when one cannot move so:
+ * other categories, an axis the guides list, or grid lines along it that
+ * moved.
  */
-function moveBars(
-  index: number,
-  shown: ShownBars,
-  mark: RectGeometry,
-  motions: Record<Axis, ScaleMotion>,
-  side: "y" | "yRight",
-): { moving: MovingBars; moves: boolean } | undefined {
-  const next = barsOf(mark);
-  if (next.horizontal !== shown.horizontal) return undefined;
-  const along = next.horizontal ? "x" : side;
-  const value = motions[along];
-  // Bars whose positions move would need slots of their own.
-  if (motions[next.horizontal ? side : "x"].moves) return undefined;
-  const was = new Map<number, number>();
-  for (let i = 0; i < shown.count; i++) {
-    if (was.has(shown.at[i]!)) return undefined;
-    was.set(shown.at[i]!, i);
+function bandsOf(
+  shown: ShownPanel,
+  drawn: Panel,
+  panel: DrawnPanel | undefined,
+): PanelTween["bands"] | undefined {
+  const bands: PanelTween["bands"] = [];
+  for (const [index, guide] of drawn.axes.entries()) {
+    const axis = guide.scale as Axis;
+    const before = shown.axes.find(({ key }) => key === guide.key);
+    const [was, is] = [shown.panel?.[axis]?.categories, panel?.[axis]?.categories];
+    if (!before || !was || !is || panel![axis]!.type !== "band") continue;
+    const at = new Map(before.ticks.map((tick) => [was[tick.value], tick.position]));
+    // Ticks stand as far from their categories' places as each other.
+    const place = placeOf(shown, axis);
+    const first = before.ticks[0];
+    const offset = first ? first.position - place(was[first.value]!) : Number.NaN;
+    const from = Float64Array.from(guide.ticks, (tick) => {
+      const name = is[tick.value]!;
+      return at.get(name) ?? place(name) + offset;
+    });
+    if (from.length === before.ticks.length && from.every((p, i) => p === guide.ticks[i]!.position))
+      continue;
+    const along = guide.side === "top" || guide.side === "bottom" ? "x" : "y";
+    const gridded = drawn.grids.some((batch) => batch.along === along && batch.at.length > 0);
+    if (guide.layers || gridded || from.some(Number.isNaN)) return undefined;
+    bands.push({ index, from });
   }
-  const kept = new Set<number>();
-  for (let j = 0; j < next.count; j++) {
-    if (kept.has(next.at[j]!)) return undefined;
-    kept.add(next.at[j]!);
+  return bands;
+}
+
+/**
+ * Where `shown` drew each category along `axis` (its scale's place for
+ * the category, or in a frame between two scenes, the place it had then).
+ */
+function placeOf(shown: ShownPanel, axis: Axis): (name: string) => number {
+  const places = shown.places?.[axis];
+  const scale = shown.panel![axis]!;
+  const index = new Map(scale.categories?.map((name, i) => [name, i]));
+  return (name) => places?.get(name) ?? scale.map(index.get(name) ?? Number.NaN);
+}
+
+/**
+ * The category axes of `panel`, drawn or not, whose categories are those
+ * `shown` drew in another order, or still on their way to their places
+ * (`shown` a frame of a change reordering them): each one's categories in
+ * the new order, and their places before and after.
+ */
+function placesOf(shown: ShownPanel, panel: DrawnPanel | undefined): PanelTween["places"] {
+  const places: PanelTween["places"] = [];
+  for (const axis of ["x", "y", "yRight"] as const) {
+    const [was, is] = [shown.panel?.[axis]?.categories, panel?.[axis]?.categories];
+    const moving = shown.places?.[axis] !== undefined;
+    if (!was || !is || (!moving && !was.some((name, i) => is[i] !== name))) continue;
+    const place = placeOf(shown, axis);
+    const scale = panel![axis]!;
+    const from = Float64Array.from(is, (name) => place(name));
+    places.push({ axis, names: is, from, to: Float64Array.from(is, (_, i) => scale.map(i)) });
   }
-  let exits = 0;
-  for (let i = 0; i < shown.count; i++) if (!kept.has(shown.at[i]!)) exits++;
-  const count = next.count + exits;
-  const from = new Float32Array(count * 4);
-  const to = new Float32Array(count * 4);
-  const rounded = next.ends && new Uint8ClampedArray(count * 2);
-  // Bars of the new scene in its order, matched by position; new ones grow
-  // from their root, where it was on the scale before. Bars that went shrink
-  // to theirs, where it is after, drawn last.
-  for (let j = 0; j < next.count; j++) {
-    const target = next.parts.subarray(j * 4, j * 4 + 4);
-    to.set(target, j * 4);
-    const i = was.get(next.at[j]!);
-    if (i === undefined) {
-      from.set(target, j * 4);
-      from[j * 4 + 2] = from[j * 4 + 3] = before(value, target[2]!);
-    } else {
-      from.set(shown.parts.subarray(i * 4, i * 4 + 4), j * 4);
-    }
-    if (rounded) {
-      rounded[j * 2] = (i !== undefined && shown.ends?.[i]) || next.ends![j]!;
-      rounded[j * 2 + 1] = next.ends![j]!;
-    }
-  }
-  let k = next.count;
-  for (let i = 0; i < shown.count; i++) {
-    if (kept.has(shown.at[i]!)) continue;
-    const source = shown.parts.subarray(i * 4, i * 4 + 4);
-    from.set(source, k * 4);
-    to.set(source, k * 4);
-    to[k * 4 + 2] = to[k * 4 + 3] = after(value, source[2]!);
-    if (rounded) rounded.fill(shown.ends?.[i] ?? 0, k * 2, k * 2 + 2);
-    k++;
-  }
-  const moves = exits > 0 || value.moves || from.some((part, i) => part !== to[i]);
-  const ends = rounded && new Uint8ClampedArray(count);
-  const rects = new Float32Array(count * 4);
-  return { moving: { index, mark, along, count, from, to, rounded, rects, ends }, moves };
+  return places;
+}
+
+/** Categories' places along axes whose categories change order, `elapsed` ms into a change, by panel. */
+export function placesAt(tween: Tween, elapsed: number): Map<string, Places> {
+  const t = progress(tween, elapsed);
+  const byPanel = new Map<string, Places>();
+  tween.scene.panels.forEach(({ key }, i) => {
+    const list = tween.panels[i]?.places ?? [];
+    if (list.length === 0) return;
+    const places: Places = {};
+    for (const { axis, names, from, to } of list)
+      places[axis] = new Map(names.map((name, j) => [name, from[j]! + (to[j]! - from[j]!) * t]));
+    byPanel.set(key, places);
+  });
+  return byPanel;
 }
 
 /** How a gauge moves from the value `shown` to its dial's; undefined when it gains or loses one. */
@@ -1050,37 +1257,87 @@ function movePie(shown: ShownPie, next: PieSlices): { pie: MovingPie; moves: boo
   return { pie, moves };
 }
 
+/** Eased progress `elapsed` ms into a change. */
+function progress(tween: Tween, elapsed: number): number {
+  return ease(Math.min(1, Math.max(0, elapsed / tween.duration)));
+}
+
+/**
+ * The panels a frame `elapsed` ms into a change drew with: `panels`, the
+ * new scene's, with the scales and axis plans of moving axes between. A
+ * change arriving then moves on from them.
+ */
+export function panelsAt(
+  tween: Tween,
+  elapsed: number,
+  panels: readonly DrawnPanel[],
+): DrawnPanel[] {
+  const t = progress(tween, elapsed);
+  return panels.map((panel) => {
+    const at = tween.scene.panels.findIndex(({ key }) => key === panel.key);
+    const axes = tween.panels[at]?.axes;
+    if (!axes) return panel;
+    const plans = { ...panel.plans };
+    const moved: Partial<Record<Axis, PositionScale>> = {};
+    for (const axis of ["x", "y", "yRight"] as const) {
+      const after = panel.plans[axis];
+      if (!axes.motions[axis].moves || !after) continue;
+      const plan = planAt(axes, axis, t);
+      plans[axis] = plan;
+      if (panel.plans.grid === after) plans.grid = plan;
+      moved[axis] = plan.scale;
+    }
+    return { ...panel, ...moved, plans };
+  });
+}
+
 /**
  * The scene `elapsed` ms into a change: the new one, with its marks on their
  * way, and the axes and grid lines of moving scales between.
  */
 export function frameAt(tween: Tween, elapsed: number): Scene {
-  const t = ease(Math.min(1, Math.max(0, elapsed / tween.duration)));
+  const t = progress(tween, elapsed);
   const { scene } = tween;
-  const panels = scene.panels.map((panel, i) => panelAt(panel, tween.panels[i]!, t));
+  const panels = scene.panels.map((panel, i) =>
+    panelAt(panel, tween.panels[i]!, t, tween.builders),
+  );
   // Insets paint panels in an order of their own.
   const moved = new Map(scene.panels.map((panel, i) => [panel, panels[i]!]));
   const painted = scene.painted?.map((panel) => moved.get(panel) ?? panel);
   return { ...scene, panels, ...(painted && { painted }) };
 }
 
-/** A panel at eased progress `t` of its tween. */
-function panelAt(panel: Panel, tween: PanelTween, t: number): Panel {
+/** A panel at eased progress `t` of its tween, `builders` placing its axes. */
+function panelAt(panel: Panel, tween: PanelTween, t: number, builders: Builders): Panel {
   const { x, y, yRight } = tween.motions;
   const blends = { x: blendAt(x, t), y: blendAt(y, t), yRight: blendAt(yRight, t) };
-  const { pie, dial } = tween;
+  const { pie, dial, sunburst } = tween;
   let { items } = panel;
   let marks: Geometry[];
-  if (pie) {
+  if (sunburst) {
+    const [drawn, placed, pick] = sunburstAt(sunburst, t);
+    const decorated = items?.decorate?.(drawn, placed);
+    items = items && { ...items, list: placed, pick, records: decorated?.records };
+    marks = decorated?.marks ?? drawn;
+  } else if (pie) {
     const [drawn, placed] = pieAt(pie, t);
     // Its items as this frame draws them, and what is placed by them over them.
     items = items && { ...items, list: placed };
-    marks = items?.decorate ? items.decorate(drawn, placed) : drawn;
+    marks = items?.decorate?.(drawn, placed).marks ?? drawn;
   } else if (dial) {
     const drawn = dial.draw(dial.from + (dial.to - dial.from) * t);
-    marks = items?.decorate ? items.decorate(drawn, undefined) : drawn;
+    marks = items?.decorate?.(drawn, undefined).marks ?? drawn;
   } else marks = panel.marks.slice();
-  for (const bars of tween.bars) marks[bars.index] = barsAt(bars, t, blends[bars.along]);
+  // What went is drawn after the panel's own geometry, in its paint order too.
+  const gone: Geometry[] = [];
+  const put = (index: number, geometry: Geometry) => {
+    if (index < 0) gone.push(geometry);
+    else marks[index] = geometry;
+  };
+  for (const bars of tween.bars)
+    put(bars.index, barsAt(bars, blends[bars.along], blends[bars.place]));
+  for (const labels of tween.labels)
+    put(labels.index, labelsAt(labels, t, blends.x, blends[labels.side]));
   for (const points of tween.points)
     marks[points.index] = pointsAt(points, t, blends.x, blends[points.side]);
   for (const trace of tween.traces)
@@ -1094,40 +1351,38 @@ function panelAt(panel: Panel, tween: PanelTween, t: number): Panel {
   for (const rule of tween.rules) marks[rule.index] = ruleAt(rule, blends[rule.along]);
   for (const list of tween.lists) marks[list.index] = listAt(list, blends.x, blends[list.side]);
   for (const raster of tween.rasters) marks[raster.index] = rasterAt(raster, t);
-  const guides = tween.axes && axesAt(panel, tween.axes, t);
-  return { ...panel, ...guides, marks, items };
+  let guides = tween.axes && axesAt(panel, tween.axes, t);
+  if (tween.bands.length > 0) {
+    // Category axes' ticks move from their places to their new ones.
+    const axes = (guides?.axes ?? panel.axes).slice();
+    for (const { index, from } of tween.bands) {
+      const guide = axes[index]!;
+      const ticks = guide.ticks.map((tick, i) => ({
+        ...tick,
+        position: from[i]! + (tick.position - from[i]!) * t,
+      }));
+      axes[index] = builders.axisGuide(
+        guide.key,
+        guide.scale,
+        guide,
+        ticks,
+        guide.title,
+        builders.measure,
+      );
+    }
+    guides = { axes, grids: guides?.grids ?? panel.grids };
+  }
+  let { paint } = panel;
+  if (gone.length > 0 && paint) {
+    const first = panel.grids.length + marks.length;
+    paint = [...paint, ...gone.map((_, i) => first + i)];
+  }
+  return { ...panel, ...guides, marks: [...marks, ...gone], items, ...(paint && { paint }) };
 }
 
 /** Starts quickly and settles without overshooting (cubic ease-out), as views move. */
 function ease(t: number): number {
   return 1 - (1 - t) ** 3;
-}
-
-/** Bars at eased progress `t`, their roots and tips on the frame's scale `value`. */
-function barsAt(moving: MovingBars, t: number, value: Blend): RectGeometry {
-  const { mark, count, from, to, rounded, rects, ends } = moving;
-  const horizontal = mark.bars!.horizontal;
-  for (let i = 0; i < count; i++) {
-    const at = i * 4;
-    const along = from[at]! + (to[at]! - from[at]!) * t;
-    const thickness = from[at + 1]! + (to[at + 1]! - from[at + 1]!) * t;
-    // Roots and tips move rather than tops and heights: a bar changing sign
-    // shrinks to its root and grows on the other side.
-    const root = blend(value, from[at + 2]!, to[at + 2]!);
-    const tip = blend(value, from[at + 3]!, to[at + 3]!);
-    const low = Math.min(root, tip);
-    const length = Math.abs(tip - root);
-    rects[at] = horizontal ? low : along;
-    rects[at + 1] = horizontal ? along : low;
-    rects[at + 2] = horizontal ? length : thickness;
-    rects[at + 3] = horizontal ? thickness : length;
-    // The rounded end is at the tip: the new scene's once the tip has
-    // passed to the side of the root it ends on, until then the old one's.
-    if (ends) ends[i] = rounded![i * 2 + ((tip - root) * (to[at + 3]! - to[at + 2]!) > 0 ? 1 : 0)]!;
-  }
-  // A frame's bars are not the scene's: nothing moves from them.
-  const corners = ends && { radius: mark.rounded!.radius, ends };
-  return { ...mark, rects, count, rounded: corners, bars: undefined };
 }
 
 /** A pie's geometry at eased progress `t`, and the items it draws. */

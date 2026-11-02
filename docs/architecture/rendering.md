@@ -260,34 +260,54 @@ double-click reset, a map's or network's plane) is shown gradually by
 ## Animated values
 
 With `animation: { values: true }`, `dom/value-transition.ts` (with
-`value-motion.ts`, `value-points.ts`, `value-traces.ts`, `value-items.ts`)
-also moves marks to changed values, and their axes. It loads separately.
-The data is current at once; what moves is a picture of the change.
+`value-motion.ts` for scales, `value-bars.ts`, `value-labels.ts`,
+`value-sectors.ts`, `value-points.ts`, `value-traces.ts`, and
+`value-items.ts`) also moves marks to changed values, and their axes. It
+loads separately. The data is current at once; what moves is a picture of
+the change.
 
-**Identity.** Scenes of such charts carry what identifies each item: bars
-(`BarItems`: position and pixel root and tip), points (`PointItems`: the
-table generation and row identity, or an `itemKey` field's values),
-pie slices (`PieSlices`), and gauge dials (`GaugeDial`). Traced polylines
-say whether they are `whole` (every row traced). Panels keep their axis
-plans (`PanelPlans`). The lazy module imports no engine code; the chart
-hands it `planAxis`, `Polyline`, and `monotonePolyline`, since esbuild would
-otherwise split shared modules into chunks that compress worse.
+**Identity.** Scenes of such charts (`frame.keyed`) carry what names each
+item: bars (`BarItems`: each bar's name, its pixel root and tip, and for
+bars keyed by `itemKey` where the position axis ends), points
+(`PointItems`: the table generation and row identity, or an `itemKey`
+field's values), labels (`LabelItems`: each label's name, the bar series
+it belongs to, and the number it writes, with how to write another), a
+sunburst's sectors (`SunburstSectors`: the nodes drawn, with the mark's
+own arrays of angles, depths, and paint, each node's label as drawn, and
+where the sunburst is drawn), pie slices (`PieSlices`), and gauge dials
+(`GaugeDial`). Marks record only what drawing knows (names, the numbers
+labels show, where their text starts, labels' places); the lazy module
+makes sectors of a sunburst's nodes and draws, lists, and picks its
+frames. A name is the `itemKey` value, else a bar's position value (a
+category's name, not its band) or a text row's identity; a missing one
+is NAMELESS and the row's identity, which matches only within one table
+generation (`marks/item-names.ts`). Traced polylines say whether they are
+`whole` (every row traced). Panels keep their axis plans (`PanelPlans`).
+The lazy module imports no engine code; the chart hands it `planAxis`,
+`Polyline`, and `monotonePolyline`, and a sunburst's record the arc and
+label code its frames need (`SunburstKit`), since esbuild would otherwise
+split shared modules into chunks that compress worse.
 
 **Snapshot and match.** When a table reports values changed in place or a
-reset, the chart copies, in pixels, the frame's bars, slices, points, whole
-lines and areas, rules, lists drawn in row order (error bars, candles,
-regions, annotations), and rasters, with each panel's scales, because the
-model reuses geometry buffers and the table has already changed. The next
-frame builds the new scene once and matches:
+reset, the chart copies, in pixels, what is on screen that can move, with
+each panel's scales, because the model reuses geometry buffers and the
+table has already changed. The next frame builds the new scene once and
+matches:
 
 | Item | Matched by |
 | --- | --- |
-| Bars | Series key and position (a series repeating a position shows at once) |
-| Points | Series key and row identity within one generation, or equal explicit keys (numbers without coercion, labels as strings, times numerically; missing or duplicate keys show at once) |
+| Bars | Name within their series' geometry; a bar whose series changes leaves one and enters the other |
+| Labels | Name, within a text mark's labels or a bar series' value labels across their groups |
+| Points | Row identity within one generation, or equal explicit keys (numbers without coercion, labels as strings, times numerically), within their series |
+| Sunburst sectors | Item key (the path from the top) |
 | Lines, areas | Series key, when both scenes trace the same position pixels in the same runs |
 | Lists | Geometry key, when both draw as many items at the same places along one axis |
 | Rasters | The same grid in the same place; colors move in RGB |
 | Rules, slices | Key (slices in one order merging both pies') |
+
+A name shared by items at either end matches nothing: those items show at
+once, placed on the frame's scales, and the rest of their series moves. So
+do points whose key is missing (their ids hold key values only).
 
 **Moving scales.** A scale both scenes draw with the same type and range
 (and unchanged bands and breaks) moves its domain evenly in mapped terms.
@@ -296,35 +316,98 @@ Something at `p0` before and `p1` after is drawn at
 `b = t S1 / S(t)` (`S` the domains' spans, `r0` the range's start): the
 value between, placed by the scale between, without reading data. Axes
 are planned anew each frame with `planAxis`, so ticks are those the chart
-would choose for that domain. Bars move roots and tips (a bar changing sign
+would choose for that domain. A band scale whose categories are the same
+set in another order stays still: bars on it move in pixels, and its
+ticks move from their categories' old places (a category the axis did
+not label before, as it thins its labels, from its band). Bars move their
+places along the position axis, roots, and tips (a bar changing sign
 shrinks to the baseline and grows past it); slices move widths, so they
 always make a whole turn; points move centers, radii, opacities, and ramp
-positions, growing from or shrinking to nothing as they appear or go;
-monotone curves are curved again each frame (stacks jointly). A mark's
-areas, or a series' pieces, move together or not at all.
+positions; monotone curves are curved again each frame (stacks jointly).
+A mark's areas, or a series' pieces, move together or not at all.
 
-**When a change shows at once.** Different panels, theme, or series; a scale
-that cannot move while geometry in its panel cannot follow; appended or
-dropped rows; row view changes; changes until the data has been still for
-a change's duration (so streaming never animates forever); charts that are
-inspected, off screen, linked, with a navigator, or slow; endpoint scenes
-over 2,000 bars, slices, and rules, 10,000 points, or 10,000 points of lines
-and areas, or holding a point cloud. One transition plays at a time; input
-settles values first.
+**Coming and going.** Bars named by position grow from their root and
+shrink to it; bars keyed by `itemKey` slide in from past the end of their
+position axis and out past it (the end where its domain's last value is
+drawn, so reversed ranges are respected), clipped by the plot. Points grow
+from and shrink to nothing. A bar's value label comes and goes with its
+bar, keeping its place on it (between root and tip, or past the tip), cut
+to the plot as scenes leave out labels outside it; one moving inside or
+outside its bar keeps where its text starts (`LabelItems.starts`); a
+text mark's label without a match shows or goes at once (labels are not
+attached to other marks' items by equal names). Labels writing a
+finite number at both ends write the values between through their own
+format each frame, measured again. A sunburst's sectors move their angles
+and depths; radii follow depths through each frame's shape (the center
+disc is depth 0 to 1): its center, outer radius, middle, and ring width,
+between the two scenes' (breadcrumbs coming or going move it). Through a
+drill, the new root's old sector (drilling in) or the old root's new
+sector (drilling out) maps every sector of either scene into the other's
+partition, so siblings squeeze to the edges; otherwise a sector coming starts at the outer edge of its
+nearest ancestor drawn in both, and one going ends there. Angles and
+depths stay unclamped in frames and are clamped as drawn, in one order,
+which picking follows. Labels drawn at one end only fade, a sector shown
+nowhere (past the turn's end) shows none, and a label turns between along
+the radius and level as its sector takes or leaves the middle.
+
+**Retargeting.** Frames keep the records scenes do (names, roots and tips,
+point keys, label numbers, sectors) in buffers of their own, and each
+category's place along axes whose categories change order. A change
+arriving while values move copies the frame on screen once, with its
+scales as it drew them (`panelsAt`), and the next scene moves from that
+copy: positions stay continuous, speeds do not. At most one transition and
+one copy exist. There is no timing threshold, since timing cannot tell a
+stream of values from keyframes.
+
+**Drills.** A sunburst's drill root changing calls `model.drilled` before
+the state changes, which copies what is drawn; `dom/drill.ts` announces
+the drill once the first frame draws. While a drill plays the pointer and
+clicks do not stop it: `ItemViews.transitionItems` holds each frame's
+`PanelItems.pick`, which picking and inspection read, giving the sector
+drawn under the pointer as its own scene describes it, pointed at and
+outlined where the frame draws it, and decorations as the frame draws
+them. Sectors leaving are items while drawn, standing for the rows (and
+tooltip fields) the layout before the drill gave them, and a click on one
+drills into it as the whole tree has it. `getItems` and decorations
+placed by items (`PanelItems.decorate`) read a pie's or sunburst's frame.
+
+**Input.** In charts along axes, input that picks or inspects draws the
+new values first, then reads the frame on screen; no map from destination
+geometry to frame geometry is kept. A pointer over a chart with
+`inspection: false` and no hover listener reads nothing and lets values
+move. Static SVG, PNG, and PDF draw the destination.
+
+**When a change shows at once.** Different panels or theme; series coming
+or going other than bars'; a scale that cannot move while geometry in its
+panel cannot follow; a band scale gaining or losing categories; lines,
+areas, lists, and rasters over categories that change order; appended
+or dropped rows; row view changes; changes until the data has been still
+for a change's duration after those (so streaming never animates
+forever); charts that are read by the pointer or keyboard, off screen,
+linked, with a navigator, or slow; frames over 2,000 bars, slices,
+sectors, and rules, 10,000 points (both counting items going), or 10,000
+points of lines and areas, or holding a point cloud. Marks keep no records for a
+series over those; a sunburst's record holds only arrays the mark keeps
+anyway, and no sectors are made of one over them.
 
 Marks that cannot move to changed values (box plots, boxen, violins, rugs,
-contours, dendrograms, custom marks, layout marks other than pies and
-gauges) refuse `animation.values` as they draw (`marks/still.ts`, a
-`ChartError` with code `unsupported`, path `animation.values`): a check in
-the model would put code in every chart's first chunk.
+contours, dendrograms, custom marks, layout marks other than pies,
+sunbursts, and gauges) refuse `animation.values` as they draw
+(`marks/still.ts`, a `ChartError` with code `unsupported`, path
+`animation.values`): a check in the model would put code in every chart's
+first chunk.
 
-**Cost.** Preparing a change takes about 0.03 ms for 100 bars, 0.2–0.3 ms
-for 2,000, 0.1 ms for 1,000 points, 0.9 ms for 10,000, and 0.02 ms for a
-2,000-point line (Node). Each later frame takes about 0.2–0.7 ms of
-JavaScript for 10 to 2,000 bars, 0.3–0.9 ms for 5 to 100 slices, 0.2–0.6 ms
-for 1,000 points, and 0.5–0.6 ms for 10,000 on a canvas (headless Chrome,
-Apple M6, DPR 1), about what the change costs drawn at once. The limits come
-from these measurements: 10,000 points take less JavaScript a frame than the
-change drawn at once. Copies and frame buffers hold about 40 bytes a point
-(56 with sizes), 28 a point of a line, and 76 a bar, released when the
-change ends; marks bound each series before keeping anything for it.
+**Cost.** Preparing a change (copying and matching) takes about 0.04 ms
+for 100 bars, 0.2 ms for 2,000, 0.07 ms for 100 bars changing order on a
+category axis, 0.03 ms for a 40-bar race with 40 labels, 0.06 ms for 1,000
+keyed points, 0.7 ms for 10,000, 0.17 ms for a 240-leaf sunburst, and
+0.12 ms for its drill, which make both scenes' sectors (Node). In headless Chrome (Apple M6, DPR 1, an
+800×500 chart) each later frame takes about 0.6 ms of JavaScript for 100
+bars, 2.8 ms for 2,000, 1.1 ms for 100 bars changing order, 0.7 ms for
+the race, 0.7 ms for 1,000 points and 2.5 ms for 10,000 on a canvas, and
+1.9 ms for the sunburst; the first frame, which builds the new scene too,
+takes about 1 to 3 ms more than drawing the change at once. The limits
+come from these measurements. Copies hold about 25 bytes a bar and 16 a
+point; a transition's buffers and frame records about 67 a bar, 32 a
+point, and with value labels about 150 a bar, released when the change
+ends (a retarget holds one copy and one transition).
