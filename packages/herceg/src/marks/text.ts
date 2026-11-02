@@ -1,6 +1,6 @@
 import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
-import type { Formatter } from "../format/format.ts";
+import { type Formatter, formatNumber } from "../format/format.ts";
 import {
   type LabelledMark,
   type LabelPlacement,
@@ -8,7 +8,7 @@ import {
   placePanel,
 } from "../layout/placer.ts";
 import { lineCount } from "../layout/text.ts";
-import type { Geometry, Rect } from "../scene/scene.ts";
+import { type Geometry, type LabelItems, NAMELESS, type Rect } from "../scene/scene.ts";
 import type { LabelLayoutSpec, MarkAnchorSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { FormatSpec } from "../spec/guides.ts";
@@ -31,6 +31,7 @@ import type { DrawnMark, PartBuilders } from "./drawn.ts";
 import type { ItemKeyed, LabelPartOf } from "./encoding.ts";
 import type { PartText } from "./features/part-text.ts";
 import { FollowingTextMark } from "./following.ts";
+import { namesBy } from "./item-names.ts";
 import {
   labelPaint,
   labelsGeometry,
@@ -586,6 +587,8 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     });
     return {
       items,
+      write,
+      styled: content !== undefined,
       plot,
       chart: frame.chart ?? plot,
       room,
@@ -618,7 +621,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
   #drawn(
     frame: Frame,
     key: MarkKey,
-    { paint, plain, haloOption }: TextLabels,
+    { paint, plain, haloOption, write, styled }: TextLabels,
     drawn: PlacedLabel[],
     rows: number[],
     leaders: number[],
@@ -644,8 +647,49 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
       labels,
       plain ? Uint32Array.from(rows) : Uint32Array.from(owners, (k) => rows[k]!),
     );
+    if (frame.keyed) {
+      const text = (value: number) => (write ?? ((v) => formatNumber(v, frame.locale)))(value);
+      // A label placed again for a number between two, in its paint.
+      const again = (i: number, value: number, x: number, y: number) =>
+        labelsGeometry(id, [{ ...drawn[i]!, text: text(value), x, y }], paint, haloOption, frame)
+          .items;
+      labels.named = {
+        ...this.#named(rows, styled),
+        ...(labels.kind === "labels" && {
+          at: drawn.flatMap(({ x, y }) => [x, y]),
+          owners,
+        }),
+        write: (i, value, x, y) => (labels.kind === "text" ? text(value) : again(i, value, x, y)),
+      };
+    }
     out.push(labels);
     return out;
+  }
+
+  /**
+   * In charts that animate changed values, the names of the labels of
+   * `rows` (their `itemKey` values, else row identities; places' indexes
+   * for text without a table), and the numbers they write, unless written
+   * by parts (`styled`).
+   */
+  #named(rows: readonly number[], styled: boolean): LabelItems {
+    const { table } = this;
+    const field = this.#data.label?.field;
+    const numbers =
+      !styled && table && field !== undefined && table.kind(field) !== "category"
+        ? table.numbers(field as never)
+        : undefined;
+    const name = table
+      ? this.spec.itemKey !== undefined
+        ? namesBy(table, this.spec.itemKey)
+        : (row: number) => NAMELESS + table.identity(row)
+      : (row: number) => row;
+    return {
+      names: rows.map(name),
+      table,
+      generation: table?.generation ?? 0,
+      values: numbers && rows.map((row) => numbers[row]!),
+    };
   }
 }
 
@@ -656,6 +700,9 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
  */
 interface TextLabels {
   readonly items: readonly TextItemLabel[];
+  /** How numbers in the labels are written, unless the locale's default; whether labels are written by parts. */
+  readonly write: Formatter | undefined;
+  readonly styled: boolean;
   readonly plot: Rect;
   readonly chart: Rect;
   readonly room: number;

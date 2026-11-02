@@ -50,7 +50,9 @@ const STILL: ScaleMotion = { r0: 0, extent: 1, from: [0, 1], to: [0, 1], log: fa
 /**
  * How a scale moves from `before` to `after`; undefined when it cannot
  * move between them: a scale coming or going, another type or range,
- * changed bands or breaks, or a domain turning around.
+ * bands gaining, losing, or resizing categories, changed breaks, or a
+ * domain turning around. Bands keep still: what stands on reordered
+ * categories moves in pixels, and their ticks with it.
  */
 export function motionOf(
   before: PositionScale | undefined,
@@ -58,14 +60,15 @@ export function motionOf(
 ): ScaleMotion | undefined {
   if (!before || !after) return before === after ? STILL : undefined;
   if (before.type !== after.type || !same(before.range, after.range)) return undefined;
-  // Bands, and time with breaks left out, would need their own motions.
-  if (before.type === "band" || before.breaks || after.breaks)
+  if (before.type === "band")
     return same(before.domain, after.domain) &&
-      before.breaks === after.breaks &&
       before.bandwidth === after.bandwidth &&
-      same(before.categories ?? [], after.categories ?? [])
+      sameSet(before.categories ?? [], after.categories ?? [])
       ? STILL
       : undefined;
+  // Time with breaks left out would need motions of its own.
+  if (before.breaks || after.breaks)
+    return same(before.domain, after.domain) && before.breaks === after.breaks ? STILL : undefined;
   const log = before.type === "log";
   const from = linear(before.domain, log);
   const to = linear(after.domain, log);
@@ -82,6 +85,11 @@ function linear(domain: readonly [number, number], log: boolean): [number, numbe
 
 function same(a: readonly unknown[], b: readonly unknown[]): boolean {
   return a.length === b.length && a.every((value, i) => value === b[i]);
+}
+
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  const set = new Set(a);
+  return a.length === b.length && set.size === a.length && b.every((value) => set.has(value));
 }
 
 /** The blend of a scale at eased progress `t`. */
@@ -202,7 +210,7 @@ export function axesAt(panel: Panel, motion: AxesMotion, t: number): Pick<Panel,
 }
 
 /** A moving axis' plan at `t`: its domain, and the part ticks are chosen in, between the scenes'. */
-function planAt(motion: AxesMotion, axis: Axis, t: number): AxisPlan {
+export function planAt(motion: AxesMotion, axis: Axis, t: number): AxisPlan {
   const { log } = motion.motions[axis];
   const before = motion.before[axis]!;
   const after = motion.after[axis]!;

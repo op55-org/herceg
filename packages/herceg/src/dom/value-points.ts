@@ -1,10 +1,16 @@
 // Points moving to changed values (value-transition.ts): matched by row
 // identity or explicit key values, their centers moving with the scales,
 // their encoded size, color, and opacity changing with them, and points that come or go
-// growing from or shrinking to nothing.
+// growing from or shrinking to nothing. A key missing or shared by points
+// of the series at either end matches nothing: those points show at once,
+// on the frame's scales.
 
 import type { PointGeometry, PointItems } from "../scene/scene.ts";
 import { after, type Blend, before, blend, type ScaleMotion } from "./value-motion.ts";
+
+/** A new point's match: none, so it grows from nothing, or none it may have, so it shows at once. */
+const COMES = -1;
+const AT_ONCE = -2;
 
 /** One series' points as drawn, owned: centers, rows, and what they encode. */
 export interface ShownPoints {
@@ -84,6 +90,8 @@ export interface MovingPoints {
   opacities: Float32Array | undefined;
   /** What a frame draws: centers, and radii, colors, opacities, and shapes where they vary. */
   out: Pick<PointGeometry, "coords" | "radii" | "colors" | "opacities" | "symbols">;
+  /** Each point's key in frames, which a change arriving then moves on from. */
+  items: PointItems;
 }
 
 /**
@@ -107,7 +115,6 @@ export function movePoints(
   if (
     !next ||
     !sameIdentity(shown, next) ||
-    !next.radii !== !shown.radii ||
     !next.tones !== !shown.tones ||
     next.categorical !== shown.categorical ||
     !next.opacities !== !shown.opacities ||
@@ -115,46 +122,63 @@ export function movePoints(
     !samePalette(next.palette, shown.palette)
   )
     return undefined;
-  // Explicit keys must be valid and unique in each rendered series.
-  const was = new Map<number | string, number>();
-  for (let i = 0; i < shown.count; i++) {
-    const key = shown.ids[i];
-    if (!validKey(key) || was.has(key)) return undefined;
-    was.set(key, i);
-  }
-  const kept = new Set<number | string>();
+  const was = indexOf(shown);
+  const is = indexOf(next);
+  // Keys missing or shared at either end match nothing, and their points show at once.
+  const shared = was.shared.size + is.shared.size > 0;
+  const unique = (key: number | string | undefined): key is number | string =>
+    validKey(key) && !(shared && (was.shared.has(key) || is.shared.has(key)));
+  // Each new point's match among those shown: its index, COMES, or AT_ONCE.
+  const source = new Int32Array(next.count).fill(AT_ONCE);
+  const taken = new Uint8Array(shown.count);
+  let enters = 0;
   for (let j = 0; j < next.count; j++) {
     const key = next.ids[j];
-    if (!validKey(key) || kept.has(key)) return undefined;
-    kept.add(key);
+    if (!unique(key)) continue;
+    const i = was.at.get(key);
+    if (i === undefined) {
+      source[j] = COMES;
+      enters++;
+    } else {
+      source[j] = i;
+      taken[i] = 1;
+    }
   }
   let exits = 0;
-  for (let i = 0; i < shown.count; i++) if (!kept.has(shown.ids[i]!)) exits++;
-  const enters = next.count - (shown.count - exits);
+  for (let i = 0; i < shown.count; i++) if (!taken[i] && unique(shown.ids[i])) exits++;
   const count = next.count + exits;
   if (count > budget) return undefined;
   const from = new Float32Array(count * 2);
   const to = new Float32Array(count * 2);
-  // Points that come or go change size, whether or not their sizes are encoded.
-  const radii = next.radii || enters > 0 || exits > 0 ? new Float32Array(count * 2) : undefined;
+  // Points that come or go change size, whether or not their sizes are encoded,
+  // as do those of a frame where points came or went.
+  const radii =
+    next.radii || shown.radii || enters > 0 || exits > 0 ? new Float32Array(count * 2) : undefined;
   const tones = next.tones && new Float32Array(count * 2);
   const opacities = next.opacities && new Float32Array(count * 2);
   const symbols = next.symbols && new Uint8ClampedArray(count);
+  // Each point's key in frames, so that a later change moves from them.
+  const ids =
+    next.ids instanceof Float64Array
+      ? new Float64Array(count)
+      : new Array<string | undefined>(count);
   const radiusOf = (points: ShownPoints, i: number) => points.radii?.[i] ?? points.radius;
   for (let j = 0; j < next.count; j++) {
-    const i = was.get(next.ids[j]!);
+    const i = source[j]!;
     const px = next.coords[j * 2]!;
     const py = next.coords[j * 2 + 1]!;
     to[j * 2] = px;
     to[j * 2 + 1] = py;
+    ids[j] = next.ids[j] as never;
     if (radii) radii[j * 2 + 1] = radiusOf(next, j);
     if (tones) tones[j * 2 + 1] = next.tones![j]!;
     if (opacities) opacities[j * 2 + 1] = next.opacities![j]!;
     if (symbols) symbols[j] = next.symbols![j]!;
-    if (i === undefined) {
-      // From nothing, where its values were on the scales before.
+    if (i < 0) {
+      // Where its values were on the scales before: from nothing, or at once as it is.
       from[j * 2] = before(x, px);
       from[j * 2 + 1] = before(y, py);
+      if (radii && i === AT_ONCE) radii[j * 2] = radii[j * 2 + 1]!;
       if (tones) tones[j * 2] = next.tones![j]!;
       if (opacities) opacities[j * 2] = next.opacities![j]!;
       continue;
@@ -170,7 +194,9 @@ export function movePoints(
   }
   let k = next.count;
   for (let i = 0; i < shown.count; i++) {
-    if (kept.has(shown.ids[i]!)) continue;
+    const key = shown.ids[i];
+    if (taken[i] || !unique(key)) continue;
+    ids[k] = key as never;
     // To nothing, where its values are on the scales after.
     const px = shown.coords[i * 2]!;
     const py = shown.coords[i * 2 + 1]!;
@@ -209,8 +235,25 @@ export function movePoints(
     opacities: opacities && new Float32Array(count),
     symbols,
   };
-  const moving = { index, mark, side, count, from, to, radii, tones, opacities, out };
+  const items = { ...mark.items!, ids } as PointItems;
+  const moving = { index, mark, side, count, from, to, radii, tones, opacities, out, items };
   return { moving, moves };
+}
+
+/** Each key's point, and the keys of more than one point, which match nothing. */
+function indexOf(points: ShownPoints): {
+  at: Map<number | string, number>;
+  shared: Set<number | string>;
+} {
+  const at = new Map<number | string, number>();
+  const shared = new Set<number | string>();
+  for (let i = 0; i < points.count; i++) {
+    const key = points.ids[i];
+    if (!validKey(key)) continue;
+    if (at.has(key)) shared.add(key);
+    else at.set(key, i);
+  }
+  return { at, shared };
 }
 
 /** Explicit keys supersede row identity; neither side can silently change its key. */
@@ -261,6 +304,5 @@ export function pointsAt(moving: MovingPoints, t: number, x: Blend, y: Blend): P
     for (let i = 0; i < count; i++)
       out.opacities![i] = opacities[i * 2]! + (opacities[i * 2 + 1]! - opacities[i * 2]!) * t;
   }
-  // A frame's points are not the scene's: nothing moves from them.
-  return { ...mark, ...out, count, radius, items: undefined };
+  return { ...mark, ...out, count, radius, items: moving.items };
 }

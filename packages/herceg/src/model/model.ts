@@ -491,6 +491,12 @@ export class ChartModel {
   declare drills:
     | ((item: string | undefined, panel: string, x: number, y: number, cause: ChangeCause) => void)
     | undefined;
+  /**
+   * Hears that a tree's drill root is about to change (set while value
+   * transitions are loaded, dom/value-transition.ts), so that the change
+   * moves from what is drawn.
+   */
+  declare drilled: (() => void) | undefined;
   /** What instances of the position scales show when zoomed, by scale and instance (`viewKey`). */
   readonly #viewports = new Map<string, readonly [number, number]>();
   /** The instances of the position scales the last scene drew, by `viewKey`. */
@@ -1206,7 +1212,7 @@ export class ChartModel {
    * picker tests (marks/drawn.ts), read only while they are `current()`.
    */
   drawnMarks(): readonly DrawnMark[] {
-    const laid = this.#items?.records;
+    const laid = this.#items?.drawnRecords();
     return laid?.length ? [...this.#records, ...laid] : this.#records;
   }
 

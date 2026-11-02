@@ -39,7 +39,8 @@ hg.pie(sales, "region", "revenue", inner_radius=0.6)
   them off).
 - The legend toggles slices; the rest fill the circle. Tooltips report a
   slice's value and share of the slices shown.
-- Pies animate value changes (`animation: { values: true }`).
+- Pies animate value changes (`animation: { values: true }`), as do
+  sunbursts (see [drilling](#drilling-into-trees)).
 
 ## Treemaps and sunbursts
 
@@ -157,7 +158,12 @@ hg.Chart(sales, zoom=True).treemap(path=["region", "country"], value="revenue")
   the table) lose the drilled node and the tree shows its nearest remaining
   ancestor.
 - Facet panels share one drill root; each subplot's tree has its own.
-  Drilling shows the new layout at once (no animation).
+- With `animation: { values: true }`, a sunburst drills gradually: the
+  drilled node moves to the middle, its children fill the circle, and its
+  siblings squeeze out to the edges (and back in, going up). The pointer
+  does not stop it; meanwhile hovering, clicks, `getItems`, and text
+  placed on items read the sectors as drawn. Treemaps show the new layout
+  at once.
 
 ## Gauges
 

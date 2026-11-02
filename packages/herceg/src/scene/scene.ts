@@ -7,10 +7,12 @@
 // the view changes.
 
 import type { NumericArray } from "../data/column.ts";
+import type { ArcPath, inSector, sectorInfo, traceSector } from "../draw/arc.ts";
 import type { SymbolName } from "../draw/symbols.ts";
 import type { Mapping } from "../lod/m4.ts";
 import type { Polyline } from "../lod/polyline.ts";
-import type { ItemInfo } from "../marks/layout-mark.ts";
+import type { DrawnMark } from "../marks/drawn.ts";
+import type { ItemInfo, LayoutItem } from "../marks/layout-mark.ts";
 import type { LegendAction } from "../spec/guides.ts";
 import type { Clip } from "../spec/spec.ts";
 import type { PlotPaint, ResolvedHalo, StrokePaint, TextPaint } from "../style/style.ts";
@@ -253,6 +255,8 @@ export interface TextGeometry extends Geometry {
   coords: Float32Array;
   labels: string[];
   count: number;
+  /** In scenes of charts that animate changed values: what names each label, and the number it writes. */
+  named?: LabelItems | undefined;
 }
 
 /**
@@ -263,6 +267,48 @@ export interface LabelsGeometry extends Geometry {
   kind: "labels";
   draw: Drawing<LabelsGeometry>;
   items: readonly TextItem[];
+  /** In scenes of charts that animate changed values: what names each label, and the number it writes. */
+  named?: LabelItems | undefined;
+}
+
+/**
+ * What a value transition (`animation.values`) needs of labels (a text
+ * mark's rows, a bar's value labels), which marks give only in scenes of
+ * charts that ask for it: per label its name, which matches it between
+ * scenes, where it stands, and the number it writes, which frames count
+ * through.
+ */
+export interface LabelItems {
+  /**
+   * Per label, as BarItems' names: a text mark's `itemKey` value, else its
+   * row identity (NAMELESS and it) or, for text without a table, its place;
+   * a bar's label, its bar's name.
+   */
+  names: readonly (string | number)[];
+  /** The table and generation row identities are of; undefined for text without a table. */
+  table: object | undefined;
+  generation: number;
+  /** For bars' labels: the key of the bars they label, with which they come and go. */
+  of?: string | undefined;
+  /**
+   * For bars' labels: where each one's text starts along x (its place less
+   * its anchor's share of its width), so that a label anchored otherwise as
+   * it moves inside or outside its bar keeps its place.
+   */
+  starts?: ArrayLike<number> | undefined;
+  /** For bars' labels: how their text is anchored at their places, which the runs of parts do not say. */
+  anchor?: "start" | "middle" | "end" | undefined;
+  /** For labels geometry: each label's place (x, y), and the label each of its items draws. */
+  at?: ArrayLike<number> | undefined;
+  owners?: ArrayLike<number> | undefined;
+  /**
+   * Per label, the number it writes (NaN, or none: other text), and its
+   * text, or its items placed at (x, y), writing `value`.
+   */
+  values?: ArrayLike<number> | undefined;
+  write?:
+    | ((label: number, value: number, x: number, y: number) => string | readonly TextItem[])
+    | undefined;
 }
 
 /** Line segments of one series, such as error bars: x1, y1, x2, y2 per segment. */
@@ -313,18 +359,33 @@ export interface RectGeometry extends Geometry {
 /**
  * What a value transition (`animation.values`) needs of a series' bars,
  * which marks give only in scenes of charts that ask for it. Per rectangle:
- * the position it stands at, which identifies it in its series (a band
- * index on a category axis, else the value), and where it starts and ends
+ * its name, which matches it between scenes, and where it starts and ends
  * along the value axis, which its rectangle does not say: root (its base)
  * and tip (its value), in pixels.
  */
 export interface BarItems {
   /** Positions on y, lengths along x. */
   horizontal: boolean;
-  at: Float64Array;
+  /**
+   * Per rectangle, its item's name (docs/architecture/marks.md "Items")
+   * without its mark's key: its `itemKey` value, else its position's value
+   * (a category's name, a number, a bin's start); for a row whose
+   * `itemKey` value is missing, NAMELESS and its row identity.
+   */
+  names: readonly (string | number)[];
+  /**
+   * For bars named by `itemKey`, which move between positions: where those
+   * coming and going cross the position axis' end (the end its greatest
+   * value is drawn at, in pixels, and the way out from the plot, 1 or -1),
+   * and the table and generation row identities are of.
+   */
+  keyed?: { end: number; out: number; table: object; generation: number } | undefined;
   /** Root and tip per rectangle. */
   span: Float32Array;
 }
+
+/** Starts the name of an item whose own name is missing: its row identity follows. */
+export const NAMELESS = "\u0000";
 
 /** Circles of one series, such as scatter points: x, y per point. */
 export interface PointGeometry extends Geometry {
@@ -500,6 +561,8 @@ export interface ArcGeometry extends Geometry {
   rims?: Float32Array | undefined;
   /** A pie's slices in scenes of charts that animate changed values. */
   slices?: PieSlices | undefined;
+  /** A sunburst's sectors in scenes of charts that animate changed values. */
+  sectors?: SunburstSectors | undefined;
   /** A gauge's value in scenes of charts that animate changed values. */
   dial?: GaugeDial | undefined;
 }
@@ -544,6 +607,113 @@ export interface PieSlices {
   draw(items: readonly PieSlice[], ends: Float64Array, r: number, labeled: boolean): Geometry[];
   /** The layout items `draw` draws (see `PanelItems`). */
   placed(items: readonly PieSlice[], ends: Float64Array, r: number): readonly ItemInfo[];
+}
+
+/**
+ * One sector of a sunburst, as a value transition moves it: its item's key
+ * and its parent's (undefined under the whole tree's root), its angles as
+ * fractions of the turn clockwise from 12 o'clock, and its ring depths (the
+ * middle disc from 0 to 1, the first ring from 1 to 2), unclamped in frames
+ * between two scenes; its paint (no fill: not painted), its label as drawn,
+ * how opaque it is, and how far it lies along the radius (1 along it, 0
+ * across, between in frames), and the item it draws for `getItems`, if
+ * any, with that item as its scene's pointer reads it (both made when read).
+ */
+export interface Sector {
+  readonly key: string;
+  readonly parent: string | undefined;
+  readonly start: number;
+  readonly end: number;
+  readonly inner: number;
+  readonly outer: number;
+  readonly fill: string | undefined;
+  readonly opacity: number;
+  readonly label: SectorLabel | undefined;
+  readonly shown: number;
+  readonly radial: number;
+  readonly info: (() => ItemInfo) | undefined;
+  readonly item: (() => LayoutItem) | undefined;
+}
+
+/**
+ * A sector's label: its items, placed at its middle (x, y), which stands at
+ * `angle` (radians, as drawn); labels along the radius (`turns`) turn with
+ * their sector.
+ */
+export interface SectorLabel {
+  readonly items: readonly TextItem[];
+  readonly x: number;
+  readonly y: number;
+  readonly angle: number;
+  readonly turns: boolean;
+}
+
+/**
+ * A scene's sunburst sectors by tree node, read from the mark's own arrays,
+ * which value transitions make `Sector`s of (dom/value-sectors.ts): the
+ * nodes drawn (the middle, node 0, first when painted, then ring by ring),
+ * per node its angles as fractions of the turn (start and end), depth,
+ * parent, paint (the middle's at node 0), and label, the key of the
+ * middle's parent in the whole tree, and each node's key and items.
+ */
+export interface SectorNodes {
+  readonly nodes: readonly number[];
+  readonly spans: Float64Array;
+  readonly depth: ArrayLike<number>;
+  readonly parent: ArrayLike<number>;
+  readonly fills: readonly (string | undefined)[];
+  readonly opacities: Float64Array;
+  readonly labels: ReadonlyMap<number, SectorLabel>;
+  readonly above: string | undefined;
+  key(node: number): string;
+  info(node: number): ItemInfo;
+  item(node: number): LayoutItem;
+}
+
+/**
+ * Where a sunburst is drawn, in pixels: its center, its outer radius, the
+ * empty middle's radius, and each ring's width.
+ */
+export interface SunburstShape {
+  readonly cx: number;
+  readonly cy: number;
+  readonly radius: number;
+  readonly hole: number;
+  readonly ring: number;
+}
+
+/**
+ * The engine code value transitions draw, list, and pick a sunburst's
+ * frames with, which their chunk does not import (dom/value-transition.ts):
+ * how rings and labels draw, the cuts of a whole sector, and arcs' paths,
+ * hit tests, and item geometry.
+ */
+export interface SunburstKit {
+  readonly rings: Drawing<ArcGeometry>;
+  readonly labels: Drawing<LabelsGeometry>;
+  readonly whole: number;
+  readonly ArcPath: typeof ArcPath;
+  readonly traceSector: typeof traceSector;
+  readonly inSector: typeof inSector;
+  readonly sectorInfo: typeof sectorInfo;
+}
+
+/**
+ * What a value transition (`animation.values`) needs of a sunburst, which
+ * it gives only in scenes of charts that ask for it: its sectors drawn (a
+ * frame's, or a scene's by node), the key of the node in its middle (its
+ * drill root; undefined at the whole tree), where it is drawn, and what
+ * frames draw with: the breadcrumbs, the mark's key, the gaps between
+ * sectors (radians) and rings (pixels), and the engine code.
+ */
+export interface SunburstSectors extends SunburstShape {
+  readonly sectors: readonly Sector[] | SectorNodes;
+  readonly root: string | undefined;
+  readonly crumbs: readonly Geometry[];
+  readonly id: string;
+  readonly gap: number;
+  readonly ringGap: number;
+  readonly kit: SunburstKit;
 }
 
 /** One shape of a polygons geometry: rings of points, filled together. */
@@ -1099,14 +1269,23 @@ export interface Panel {
  * drawn again by `decorate`, over the mark's geometry `under` and items
  * `items` (made when a mark reads them; none for marks that give none) of
  * a frame a value transition draws: the panel's geometry then, in paint
- * order.
+ * order, and the decorations' drawn-mark records.
  */
 export interface PanelItems {
   readonly mark: string | number;
   readonly list: (() => readonly ItemInfo[]) | undefined;
   readonly decorate?:
-    | ((under: Geometry[], items: (() => readonly ItemInfo[]) | undefined) => Geometry[])
+    | ((
+        under: Geometry[],
+        items: (() => readonly ItemInfo[]) | undefined,
+      ) => { marks: Geometry[]; records: readonly DrawnMark[] })
     | undefined;
+  /**
+   * In a frame of a sunburst's value transition, the item drawn at (px, py)
+   * and what decorations drew, as the pointer reads them.
+   */
+  readonly pick?: ((px: number, py: number) => LayoutItem | undefined) | undefined;
+  readonly records?: readonly DrawnMark[] | undefined;
 }
 
 export interface Scene {

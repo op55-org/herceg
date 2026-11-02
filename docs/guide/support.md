@@ -23,7 +23,7 @@ the generated [capability matrix](../capabilities.md).
 | rule, region, text | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | · | · | · | · | ◐ | · | ✓ |
 | custom | ◐ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ◐ | · | ✓ | ◐ | ◐ | — |
 | pie | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | ✓ |
-| treemap, sunburst | ✓ | ✓ | ✓ | · | · | drilling | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | — |
+| treemap, sunburst | ✓ | ✓ | ✓ | · | · | drilling | — | — | ✓ | ✓ | ✓ | · | ✓ | ✓ | ◐ | ◐ |
 | radar | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | ✓ | · | ✓ | ✓ | ✓ | — |
 | funnel, sankey | ✓ | ✓ | ✓ | · | · | — | — | — | ✓ | ✓ | · | · | · | ✓ | ◐ | — |
 | gauge | ✓ | ✓ | ✓ | · | · | — | — | — | — | — | · | · | · | ✓ | ✓ | ✓ |
@@ -82,7 +82,8 @@ the generated [capability matrix](../capabilities.md).
   not. Network nodes drag with `interaction.drag`.
   [Dragging rules](interaction.md#dragging-rules)
 - **Value animation.** Lines and areas move when no labels follow them and
-  their rows stay; areas along y show changes at once.
+  their rows stay; areas along y show changes at once. Sunbursts move
+  their sectors and drills; treemaps refuse value animation.
   [Animation](interaction.md#animation)
 - **Everywhere.** Marks on the chart's scales take `clip`, `zIndex`
   ([Paint order](styling.md#paint-order)), and `legend: false`; lines,

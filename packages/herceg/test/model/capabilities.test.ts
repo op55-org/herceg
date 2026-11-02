@@ -409,7 +409,7 @@ const layouts: MarkCase[] = [
     name: "sunburst",
     make: (p) => sunburst(samples, { path: ["group", "category"], value: "y", ...p }),
     kind: "arc",
-    still: true,
+    animates: true,
     facets: true,
     navigates: "drill",
     selects: true,

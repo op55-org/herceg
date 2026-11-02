@@ -3086,6 +3086,7 @@
         "export.png",
         "lifecycle.hydration",
         "reading.fields",
+        "lifecycle.value-animation",
         "integration.react",
         "integration.vue",
         "integration.svelte"
@@ -3224,17 +3225,6 @@
             "proofs": ["sunburst.reading.nearest"]
           }
         },
-        "lifecycle.value-animation": {
-          "error": {
-            "code": "unsupported",
-            "path": "animation.values",
-            "message": "animation.values: sunburst does not move to new values; leave values out, and new values show at once"
-          },
-          "alternative": {
-            "text": "Leave animation.values out: changed values show at once.",
-            "proofs": ["sunburst.lifecycle.value-animation.off"]
-          }
-        },
         "lifecycle.cursor-sync": {
           "error": {
             "code": "unsupported",
@@ -3270,7 +3260,7 @@
         }
       },
       "na": {
-        "lifecycle.view-animation": "A drill lays the tree out anew and shows at once; the chart has no axes to move a view along."
+        "lifecycle.view-animation": "A drill shows at once with animation alone (with animation.values it moves as values do); the chart has no axes to move a view along."
       }
     },
     "gauge": {

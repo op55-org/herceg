@@ -125,6 +125,27 @@ describe("trees in facet panels", () => {
     expect(drill.opens('[0,"Europe"]')).toBe(false);
   });
 
+  it("open a node outside the view, as a drill's frames draw it, as each panel's rows have it", () => {
+    // Asia has nothing under it in 2023, and Japan in 2024.
+    const data = table({
+      year: ["2023", "2023", "2024", "2024"],
+      region: ["Europe", "Asia", "Europe", "Asia"],
+      country: ["France", null, "France", "Japan"],
+      revenue: [1, 2, 3, 4],
+    });
+    const { model } = build({
+      marks: [treemap(data, { path: ["region", "country"], value: "revenue" })],
+      facet: facet("year"),
+      ...zoom,
+    });
+    model.items!.setDrillRoot(["Europe"]);
+    model.scene(estimateText);
+    const asia = '[0,"Asia"]';
+    expect(model.items!.result("2023")!.drill!.opens(asia)).toBe(false);
+    expect(model.items!.result("2023")!.drill!.opensInTree(asia)).toBe(false);
+    expect(model.items!.result("2024")!.drill!.opensInTree(asia)).toBe(true);
+  });
+
   it("give way to the nearest ancestor only when the whole tree loses the root", () => {
     const data = table({ year: ["a", "b"], region: ["X", "Y"], country: ["x1", "y1"] });
     const { model } = build({

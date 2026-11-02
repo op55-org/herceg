@@ -13,7 +13,7 @@ between TypeScript, Python, and the adapters, and why.
 - ✗1 refused: asking for it fails with note 1's message, which names an alternative tested to work.
 - ·2 not applicable, for note 2's reason.
 
-Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refused, and 119 not applicable.
+Of 1896 cells: 1254 proved to work, 211 supported but not yet proved, 312 refused, and 119 not applicable.
 
 [By mark](#by-mark) · [Placement](#placement) · [Selection](#selection) · [Legends](#legends) · [Reading](#reading) · [Rendering](#rendering) · [Lifecycle](#lifecycle) · [Export](#export) · [Integration](#integration) · [Express recipes](#express-recipes) · [Interaction in panels](#interaction-in-panels) · [GPU paths](#gpu-paths)
 
@@ -49,7 +49,7 @@ Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refuse
 | custom | 40 | 0 | 2 | 4 |
 | pie | 27 | 3 | 15 | 1 |
 | treemap | 26 | 3 | 16 | 1 |
-| sunburst | 26 | 3 | 16 | 1 |
+| sunburst | 27 | 3 | 15 | 1 |
 | gauge | 21 | 3 | 17 | 5 |
 | funnel | 23 | 3 | 15 | 5 |
 | radar | 23 | 3 | 19 | 1 |
@@ -388,7 +388,7 @@ Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refuse
 
 ## Lifecycle
 
-- **View animation**: With animation on, a view asked for moves gradually (setViewport along a continuous axis, a map's or network's view, a treemap's or sunburst's drill): mid-way the mark draws neither where it was nor where it goes, and it ends as a chart without animation draws it. Proved in [lifecycle.test.ts](../packages/herceg/test/browser/contracts/lifecycle.test.ts).
+- **View animation**: With animation on, a view asked for moves gradually (setViewport along a continuous axis, a map's or network's view): mid-way the mark draws neither where it was nor where it goes, and it ends as a chart without animation draws it. Proved in [lifecycle.test.ts](../packages/herceg/test/browser/contracts/lifecycle.test.ts).
 - **Value animation**: With animation.values, a value changed in place (Table.set) moves the mark gradually: mid-way it draws neither the old value nor the new, and it ends as a chart without animation draws it, inside a layout's panels as alone (a shared proof). Proved in [lifecycle.test.ts](../packages/herceg/test/browser/contracts/lifecycle.test.ts).
 - **Cursor sync**: Two charts in a cursor group: the pointer on one shows the cursor at that value in the other, though it shows another range (its crosshair at the value's pixel), once and without echo; a channel naming a panel carries that panel's cursor only (a shared proof). Proved in [lifecycle.test.ts](../packages/herceg/test/browser/contracts/lifecycle.test.ts).
 - **Viewport sync**: Two charts in a viewport group: a view set on one (setViewport) is the other's at once, along x or, where x shows categories, along y; each reports it once. Proved in [lifecycle.test.ts](../packages/herceg/test/browser/contracts/lifecycle.test.ts).
@@ -425,25 +425,26 @@ Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refuse
 | custom | ✓ | ✗66 | ✓ | ✓ | ✓ | ✓ |
 | pie | ·68 | ✓ | ✗69 | ✗69 | ✗69 | ✓ |
 | treemap | ·70 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| sunburst | ·70 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| gauge | ·68 | ✓ | ✗71 | ✗71 | ✗71 | ✓ |
+| sunburst | ·71 | ✓ | ✗69 | ✗69 | ✗69 | ✓ |
+| gauge | ·68 | ✓ | ✗72 | ✗72 | ✗72 | ✓ |
 | funnel | ·68 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| radar | ·68 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
+| radar | ·68 | ✗66 | ✗72 | ✗72 | ✗72 | ✓ |
 | sankey | ·68 | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
 | graph (network) | ✓ | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
 | geoshape | ✓ | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
 | geopoint | ✓ | ✗66 | ✗69 | ✗69 | ✗69 | ✓ |
-| point3d | ·72 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
-| line3d | ·72 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
-| surface | ·72 | ✗66 | ✗71 | ✗71 | ✗71 | ✓ |
+| point3d | ·73 | ✗66 | ✗72 | ✗72 | ✗72 | ✓ |
+| line3d | ·73 | ✗66 | ✗72 | ✗72 | ✗72 | ✓ |
+| surface | ·73 | ✗66 | ✗72 | ✗72 | ✗72 | ✓ |
 
 - ✗66 Refused: `animation.values: boxplot does not move to new values; leave values out, and new values show at once` (for boxplot). Instead: Leave animation.values out: changed values show at once.
 - ·67 Not applicable: It draws given values, not a table's.
 - ·68 Not applicable: It has no axes or view of its own to move.
 - ✗69 Refused: `pie sync: no axes to sync; drop interaction.sync` (for pie). Instead: Link it to the synced charts through a selection store: what one selects, the others highlight. ([selection.test.ts](../packages/herceg/test/browser/contracts/selection.test.ts))
 - ·70 Not applicable: A drill lays the tree out anew and shows at once; the chart has no axes to move a view along.
-- ✗71 Refused: `gauge sync: no axes to sync; drop interaction.sync` (for gauge). Instead: Draw the values along axes, as points, which sync.
-- ·72 Not applicable: Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.
+- ·71 Not applicable: A drill shows at once with animation alone (with animation.values it moves as values do); the chart has no axes to move a view along.
+- ✗72 Refused: `gauge sync: no axes to sync; drop interaction.sync` (for gauge). Instead: Draw the values along axes, as points, which sync.
+- ·73 Not applicable: Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.
 
 ## Export
 
@@ -529,7 +530,7 @@ Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refuse
 | regions of a table | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | text (constant) | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | text of a table | ✓ | ✓ | ✓ | ○ | ○ | ○ |
-| custom | ✓ | ✓ | ✓ | ·73 | ·73 | ·73 |
+| custom | ✓ | ✓ | ✓ | ·74 | ·74 | ·74 |
 | pie | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | treemap | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | sunburst | ✓ | ✓ | ✓ | ○ | ○ | ○ |
@@ -544,7 +545,7 @@ Of 1896 cells: 1253 proved to work, 211 supported but not yet proved, 313 refuse
 | line3d | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 | surface | ✓ | ✓ | ✓ | ○ | ○ | ○ |
 
-- ·73 Not applicable: It is a TypeScript function: a spec sent from Python cannot hold it. ([contracts.test.ts](../python/js/test/contracts.test.ts))
+- ·74 Not applicable: It is a TypeScript function: a spec sent from Python cannot hold it. ([contracts.test.ts](../python/js/test/contracts.test.ts))
 
 ## Express recipes
 
@@ -569,12 +570,12 @@ Each recipe is all the marks it draws, proved together in Python.
 | rugplot | ○ | ○ | ○ | ○ | ○ | ○ |
 | regplot (points, fit, and band) | ○ | ○ | ○ | ○ | ○ | ○ |
 | residplot | ○ | ○ | ○ | ○ | ○ | ○ |
-| pairplot (grid of panels) | ✗74 | ○ | ○ | ○ | ○ | ○ |
-| jointplot (joint and marginal panels) | ✗74 | ○ | ○ | ○ | ○ | ○ |
-| clustermap (heatmap and dendrograms) | ✗74 | ·75 | ○ | ○ | ○ | ○ |
+| pairplot (grid of panels) | ✗75 | ○ | ○ | ○ | ○ | ○ |
+| jointplot (joint and marginal panels) | ✗75 | ○ | ○ | ○ | ○ | ○ |
+| clustermap (heatmap and dendrograms) | ✗75 | ·76 | ○ | ○ | ○ | ○ |
 
-- ✗74 Refused: `pairplot panel: draws several panels, in a chart of its own; drop panel` (for pairplot (grid of panels)). Instead: Draw it as a chart of its own, which a page or dashboard places beside others. ([test_capabilities.py](../python/tests/test_capabilities.py))
-- ·75 Not applicable: It colors cells by value, which its colorbar explains: it draws no series a legend entry could hide. ([test_capabilities.py](../python/tests/test_capabilities.py))
+- ✗75 Refused: `pairplot panel: draws several panels, in a chart of its own; drop panel` (for pairplot (grid of panels)). Instead: Draw it as a chart of its own, which a page or dashboard places beside others. ([test_capabilities.py](../python/tests/test_capabilities.py))
+- ·76 Not applicable: It colors cells by value, which its colorbar explains: it draws no series a legend entry could hide. ([test_capabilities.py](../python/tests/test_capabilities.py))
 
 ## Interaction in panels
 

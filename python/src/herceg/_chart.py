@@ -882,13 +882,18 @@ class Animation:
     milliseconds, and ``values``, with which marks also move to changed
     values when a live chart's data is replaced, the axes with them, besides
     the axes moving to views asked for: bars (stacked, labeled, and
-    histograms'), pie slices, gauges, points, lines and areas along x (lines
-    along y too) whose rows stay, error bars, candlesticks, regions, text,
-    and heatmaps' and 2D histograms' cells, in every panel. Charts with box plots, boxen plots,
-    violins, rugs, contours, dendrograms, custom marks, treemaps, sunbursts,
-    funnels, radars, Sankey diagrams, networks, maps, or 3D marks refuse
-    ``values`` as they draw. ``animation=True`` is ``Animation()``, and a
-    number is a duration."""
+    histograms'), value labels and text, pie slices, gauges, sunbursts (and
+    their drills), points, lines and areas along x (lines along y too) whose
+    rows stay, error bars, candlesticks, regions, and heatmaps' and 2D
+    histograms' cells, in every panel. Items are matched by ``item_key``,
+    else by position (bars) or row: bars change places as categories change
+    order or ranks change, keyed bars come and go past the end of their
+    position axis, and labels count through the numbers between. A change
+    arriving meanwhile moves on from what is drawn. Charts with box plots,
+    boxen plots, violins, rugs, contours, dendrograms, custom marks,
+    treemaps, funnels, radars, Sankey diagrams, networks, maps, or 3D marks
+    refuse ``values`` as they draw. ``animation=True`` is ``Animation()``,
+    and a number is a duration."""
 
     duration: float = 250
     values: bool = False

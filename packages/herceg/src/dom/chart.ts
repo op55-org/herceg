@@ -1508,7 +1508,7 @@ export class MountedChart implements Chart, ExportsScene {
     // A transition waiting for its first frame leaves the frame's batch;
     // values let go of what they moved.
     this.#animation?.settle();
-    this.#values?.settle();
+    this.#values?.dispose();
     this.#events.clear();
     this.#model.dispose();
     this.#scene = undefined;
@@ -2646,7 +2646,7 @@ export class MountedChart implements Chart, ExportsScene {
             this.#model,
             this.root.ownerDocument.defaultView,
             // The scene on screen shows the chart's options, unless a frame is pending.
-            !this.#dirty,
+            this.#dirty ? undefined : this.#scene,
             {
               planAxis,
               axisGuide,

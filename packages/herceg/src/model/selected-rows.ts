@@ -45,11 +45,11 @@ import { type DataSelection, selectRows, selectWhere } from "../data/selection.t
 import type { Table } from "../data/table.ts";
 import type { BarMark } from "../marks/bar.ts";
 import { STILL } from "../marks/dodge.ts";
-import type { LayoutResult } from "../marks/layout-mark.ts";
 import type { BandList, Frame, Mark } from "../marks/mark.ts";
 import { rowField } from "../marks/row-bindings.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "../marks/series.ts";
 import type { PositionScale } from "../scale/scale.ts";
+import type { ItemViews } from "./item-views.ts";
 import type { ChartModel, DrawnPanel, ScaleInstance } from "./model.ts";
 
 /**
@@ -704,20 +704,28 @@ export interface PointRows {
 }
 
 /**
- * What a layout mark drew in the panel holding a pixel (anywhere in a chart
- * of one), which says what its items stand for.
+ * The key of the panel holding a pixel (anywhere in a chart of one) that a
+ * layout mark drew, whose layout says what its items stand for.
  */
-function layoutAt(model: ChartModel, px: number, py: number): LayoutResult | undefined {
-  if (model.layout) return model.items?.result();
-  return model.items?.panels.find(
-    ({ key, plot }) => contains(plot, px, py) && !model.coveredAt(key, px, py),
-  )?.result;
+function layoutAt(model: ChartModel, px: number, py: number): string | undefined {
+  const panels = model.items?.panels ?? [];
+  if (model.layout) return panels[0]?.key;
+  return panels.find(({ key, plot }) => contains(plot, px, py) && !model.coveredAt(key, px, py))
+    ?.key;
 }
 
-/** The rows of one of `tables` that a layout mark's item stands for, or null for none of theirs. */
-function itemRows(layout: LayoutResult, tables: ReadonlySet<Table>, key: string): PointRows | null {
+/**
+ * The rows of one of `tables` that a layout mark's item drawn in `panel`
+ * stands for, or null for none of theirs.
+ */
+function itemRows(
+  items: ItemViews,
+  panel: string,
+  tables: ReadonlySet<Table>,
+  key: string,
+): PointRows | null {
   for (const table of tables) {
-    const rows = layout.rowsOf?.(key, table);
+    const rows = items.rowsAt(key, table, panel);
     if (rows) return { table, rows: Uint32Array.from(rows) };
   }
   return null;
@@ -737,9 +745,11 @@ export function clickedRows(
   py: number,
 ): PointRows | null | undefined {
   const layout = layoutAt(model, px, py);
-  if (layout) {
+  if (layout !== undefined) {
     const inspection = model.inspect(px, py);
-    return inspection?.axis === "item" ? itemRows(layout, tables, inspection.key) : undefined;
+    return inspection?.axis === "item"
+      ? itemRows(model.items!, layout, tables, inspection.key)
+      : undefined;
   }
   const picked = model.picker?.(
     px,
@@ -803,8 +813,9 @@ export function cursorRows(
   cursor: { panel: string; key: string; position: number },
 ): PointRows | undefined {
   // A layout mark's panel: its item's rows there.
-  const layout = model.items?.panels.find(({ key }) => key === cursor.panel)?.result;
-  if (layout) return itemRows(layout, tables, cursor.key) ?? undefined;
+  const { items } = model;
+  if (items?.panels.some(({ key }) => key === cursor.panel))
+    return itemRows(items, cursor.panel, tables, cursor.key) ?? undefined;
   const panel = model.panels().find(({ key }) => key === cursor.panel);
   const drawn = panel && drawnIn(model, [panel]).find((d) => d.series.key === cursor.key);
   if (!drawn?.mark.table || !tables.has(drawn.mark.table) || drawn.hidden) return undefined;

@@ -379,6 +379,8 @@ export class ItemViews {
   #laidBefore = new Map<string | number, Map<string, Laid>>();
   /** What the scene's layout marks drew, as drawn-mark records (marks/drawn.ts). */
   records: DrawnMark[] = [];
+  /** Of those, what marks placed by items (decorations) drew. */
+  readonly #decorations = new Set<DrawnMark>();
   /** Whether a scene has drawn a layout mark, whose views say which states stay (see `#begin`). */
   #drew = false;
   /** Whether the panels are facets or subplots, whose inspections name them, not a chart's one. */
@@ -392,6 +394,26 @@ export class ItemViews {
    * draw instead of theirs while dom/transition.ts plays one.
    */
   transitionViews: ReadonlyMap<string, PlaneViewport> | undefined;
+  /**
+   * The item drawn at a point in the frames a drill's value transition
+   * draws, by panel, which the pointer reads while it plays
+   * (dom/value-transition.ts).
+   */
+  transitionItems:
+    | ReadonlyMap<string, (px: number, py: number) => LayoutItem | undefined>
+    | undefined;
+  /** What decorations draw in those frames, by panel, which the pointer reads instead of the scene's. */
+  transitionRecords: ReadonlyMap<string, readonly DrawnMark[]> | undefined;
+
+  /** The records the pointer reads: `records`, with a drill's frame's decorations while one plays. */
+  drawnRecords(): readonly DrawnMark[] {
+    const frame = this.transitionRecords;
+    if (!frame) return this.records;
+    const scene = this.records.filter(
+      (record) => !(this.#decorations.has(record) && frame.has(record.panel)),
+    );
+    return [...scene, ...[...frame.values()].flat()];
+  }
 
   /** Controls attached by the DOM runtime, by family; absent for model-only consumers. */
   readonly #controls = new Map<
@@ -545,11 +567,39 @@ export class ItemViews {
       const laid = now?.get(panel) ?? before!.get(panel)!;
       if (!laid.current()) whole = false;
       else {
-        const of = laid.result.rowsOf?.(key, table);
+        const of =
+          laid.result.rowsOf?.(key, table) ?? this.#leaving(key, panel)?.rowsOf?.(key, table);
         if (of) rows.push(of);
       }
     }
     return { rows, whole };
+  }
+
+  /**
+   * The rows of `table` the item keyed `key` drawn in `panel` stands for
+   * (`LayoutResult.rowsOf`); while a drill plays, a sector going that its
+   * frames still draw stands for those of the layout before it.
+   */
+  rowsAt(key: string, table: Table, panel: string): ArrayLike<number> | undefined {
+    const result = this.#view(panel)?.result;
+    return result?.rowsOf?.(key, table) ?? this.#leaving(key, panel)?.rowsOf?.(key, table);
+  }
+
+  /**
+   * While a drill plays, the layout before it in `panel` of the mark of the
+   * item keyed `key`, whose sectors leaving its frames still draw (and the
+   * pointer picks). A scene laid out meanwhile (a resize) makes it the
+   * drilled tree's.
+   */
+  #leaving(key: string, panel: string): LayoutResult | undefined {
+    if (!this.transitionItems) return undefined;
+    let mark: unknown;
+    try {
+      mark = (JSON.parse(key) as unknown[])[0];
+    } catch {
+      return undefined;
+    }
+    return this.#laidBefore.get(mark as string | number)?.get(panel)?.result;
   }
 
   /**
@@ -763,6 +813,7 @@ export class ItemViews {
     this.#views = [];
     [this.#laidBefore, this.#laid] = [this.#laid, new Map()];
     this.records = [];
+    this.#decorations.clear();
     this.#named = named;
     // A mounted chart's scenes share a frame's time with drawing; others
     // (exports without a DOM, where there may be no clock) lay out at once.
@@ -1007,6 +1058,7 @@ export class ItemViews {
       );
     const decorated = drawWith(list);
     this.records.push(...decorated.records);
+    for (const record of decorated.records) this.#decorations.add(record);
     return {
       key: panel.key,
       plot,
@@ -1016,7 +1068,10 @@ export class ItemViews {
       items: {
         mark: id,
         list,
-        decorate: (under, items) => painted(under, drawWith(items).geometry),
+        decorate: (under, items) => {
+          const { geometry, records } = drawWith(items);
+          return { marks: painted(under, geometry), records };
+        },
       },
       ...(keep && { keep: [keep] }),
     };
@@ -1219,6 +1274,7 @@ export class ItemViews {
     const state = this.#state(view.state);
     // Against the root set, though a frame may not have drawn it yet.
     if (key === state.root.key) return undefined;
+    this.#model.drilled?.();
     const root = { key, path: key === null ? [] : drill.pathTo(key) };
     state.root = root;
     state.rootChanges++;
@@ -1540,7 +1596,16 @@ export class ItemViews {
             ({ key, plot }) =>
               !this.#named || (inside(plot, px, py) && !this.#model.coveredAt(key, px, py)),
           );
-    return view && this.#inspection(view, view.result.itemAt(px, py));
+    return view && this.#inspection(view, this.itemAt(view.key, view.result, px, py));
+  }
+
+  /**
+   * The item `result` laid out in panel `key` under a pixel: as a drill's
+   * frame draws it while one plays, else as laid out.
+   */
+  itemAt(key: string, result: LayoutResult, px: number, py: number): LayoutItem | undefined {
+    const pick = this.transitionItems?.get(key);
+    return pick ? pick(px, py) : result.itemAt(px, py);
   }
 
   /** The item keyed `key` in `panel` (the first panel by default). */
@@ -1619,7 +1684,10 @@ export class ItemViews {
     // An item summing rows (a slice, a tree's node, a link) has fields where it is one row.
     const one =
       row ??
-      (owner?.spec.tooltip && owner.table ? view.result.soleRow?.(key, owner.table) : undefined);
+      (owner?.spec.tooltip && owner.table
+        ? (view.result.soleRow?.(key, owner.table) ??
+          this.#leaving(key, view.key)?.soleRow?.(key, owner.table))
+        : undefined);
     const fields =
       one === undefined ? undefined : this.fields?.(owner?.table, owner?.spec.tooltip, one);
     return {

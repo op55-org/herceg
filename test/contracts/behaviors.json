@@ -310,7 +310,6 @@
     "scale.scope.forms.python": "python",
     "scale.settings.malformed.factory": "herceg-unit",
     "scale.settings.malformed.python": "python",
-    "sunburst.lifecycle.value-animation.off": "herceg-browser",
     "surface.lifecycle.value-animation.off": "herceg-browser",
     "svg.titles.bars": "herceg-unit",
     "svg.titles.budget": "herceg-unit",

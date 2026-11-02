@@ -137,7 +137,12 @@ export class Controls implements ChartControls {
     if (!drill) return;
     // A sunburst's middle is its root: a click there goes up.
     if (key === drill.key) this.#up(panel, cause);
-    else if (drill.opens(key)) this.#open(key, panel, cause);
+    // While a drill plays, a sector leaving the view opens too.
+    else if (
+      drill.opens(key) ||
+      (this.#host.model.items?.transitionItems && drill.opensInTree(key))
+    )
+      this.#open(key, panel, cause);
   }
 
   /** Drills panel `panel`'s tree into the node keyed `key` (null: the whole tree), and says where it is now. */
@@ -145,13 +150,25 @@ export class Controls implements ChartControls {
     const { chart, model } = this.#host;
     const items = model.items;
     items?.by(cause, () => items.setDrillRoot(key, panel));
-    // Drawn now, so what is said is what the chart shows.
+    const say = () => {
+      const path = model.items?.drillRoot(panel)?.path ?? [];
+      const where = path.length > 0 ? path.map(({ label }) => label).join(" / ") : "The whole tree";
+      // Facet panels share the root: one goes, they all go.
+      const shared = model.config.facet ? ", in every panel" : "";
+      this.#host.announce(`${where}${shared}. ${model.layoutSummary(panel) ?? ""}`.trim());
+    };
+    // What is said is what the chart shows: drawn now, or as the drill
+    // starts to move (`animation.values`), which drawing now would stop.
+    const animation = model.config.animation;
+    if (typeof animation === "object" && animation.values && model.drilled) {
+      const stop = chart.on("render", () => {
+        stop();
+        say();
+      });
+      return;
+    }
     chart.render();
-    const path = model.items?.drillRoot(panel)?.path ?? [];
-    const where = path.length > 0 ? path.map(({ label }) => label).join(" / ") : "The whole tree";
-    // Facet panels share the root: one goes, they all go.
-    const shared = model.config.facet ? ", in every panel" : "";
-    this.#host.announce(`${where}${shared}. ${model.layoutSummary(panel) ?? ""}`.trim());
+    say();
   }
 
   /** Goes up a level from the root set in panel `panel`, which a frame may not have drawn yet. */
