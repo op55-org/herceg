@@ -3922,10 +3922,10 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color",
-            "message": "marks[0].color: not a property of herceg's spec format; the mark chooses its colors itself; remove it (fill or stroke, where it takes them, set one)"
+            "message": "marks[0]: treemap color: \"y\" is not a field of the path; use one of kind, category"
           },
           "alternative": {
-            "text": "Color it by a category field, which the legend lists.",
+            "text": "Color it by a level of its path, which the legend lists; fillOpacity { measure: \"value\" } shows each item's value.",
             "proofs": ["treemap.legend.categorical"]
           },
           "proofs": ["treemap.legend.colorbar"]
@@ -4178,10 +4178,10 @@
           "error": {
             "code": "invalid-option",
             "path": "marks[0].color",
-            "message": "marks[0].color: not a property of herceg's spec format; the mark chooses its colors itself; remove it (fill or stroke, where it takes them, set one)"
+            "message": "marks[0]: sunburst color: \"y\" is not a field of the path; use one of kind, category"
           },
           "alternative": {
-            "text": "Color it by a category field, which the legend lists.",
+            "text": "Color it by a level of its path, which the legend lists; fillOpacity { measure: \"value\" } shows each item's value.",
             "proofs": ["sunburst.legend.categorical"]
           },
           "proofs": ["sunburst.legend.colorbar"]
