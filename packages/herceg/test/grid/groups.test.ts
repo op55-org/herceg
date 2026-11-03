@@ -1,8 +1,8 @@
 // Grouped grids: group header rows over a view's groups, expansion, focus,
 // selection of groups' rows, group sorting, and streaming, without a DOM.
 import { describe, expect, it } from "vitest";
+import { count, max, mean, sum } from "../../src/data/aggregations.ts";
 import { category, time } from "../../src/data/column.ts";
-import { count, max, mean, sum } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { groupRows } from "../../src/data/groups.ts";
 import { RowSet } from "../../src/data/row-set.ts";

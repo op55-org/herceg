@@ -3,8 +3,8 @@
 // groups, and streaming into groups while scrolled.
 import { afterEach, describe, expect, it } from "vitest";
 import { userEvent } from "vitest/browser";
+import { count, max, mean, min } from "../../src/data/aggregations.ts";
 import { category } from "../../src/data/column.ts";
-import { count, max, mean, min } from "../../src/data/derive.ts";
 import { groupRows } from "../../src/data/groups.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { table } from "../../src/data/table.ts";

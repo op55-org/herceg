@@ -13,6 +13,7 @@ import type {
   InputEvent,
   PanelViewport,
   Pointer,
+  ProvenanceGroup,
   Target,
 } from "../dom/events.ts";
 import type { Axis, AxisInfo, Chart, ScaleInstance, SelectionOwner } from "../dom/handle.ts";
@@ -192,6 +193,8 @@ export type TargetPayload =
       row: number | null;
       panel: string;
       box: Box;
+      /** What it stands for, on clicks, secondary presses, and Enter (see `Provenance`). */
+      provenance?: ProvenancePayload;
     }
   | {
       kind: "axisLabel";
@@ -206,6 +209,17 @@ export type TargetPayload =
     }
   | { kind: "legendEntry"; key: string; label: string; panel: string | null }
   | { kind: "plot"; panel: string };
+
+/**
+ * An item's provenance as captured: groups on fields holding times say so
+ * (`time`), so readers can make dates of their epoch milliseconds;
+ * conditions are portable expressions, rows stay local.
+ */
+export interface ProvenancePayload {
+  groups: ProvenanceGroup[];
+  condition: Expression | null;
+  source: { table: string | null; condition: Expression | null } | null;
+}
 
 /** A `visibility` event, which is JSON as it is. */
 export type VisibilityPayload = ChartEvents["visibility"];
@@ -784,7 +798,8 @@ export function inputEventPayload(chart: Chart, event: InputEvent): InputEventPa
 
 function targetPayload(target: Target, panels: readonly PanelAxes[]): TargetPayload {
   switch (target.kind) {
-    case "item":
+    case "item": {
+      const { provenance } = target;
       return {
         kind: "item",
         mark: target.mark,
@@ -794,7 +809,17 @@ function targetPayload(target: Target, panels: readonly PanelAxes[]): TargetPayl
         row: target.row ?? null,
         panel: target.panel,
         box: { ...target.box },
+        ...(provenance && {
+          provenance: {
+            groups: provenance.groups.map((group) => ({ ...group })),
+            condition: provenance.condition,
+            source: provenance.source
+              ? { table: provenance.source.table ?? null, condition: provenance.source.condition }
+              : null,
+          },
+        }),
       };
+    }
     case "axisLabel":
       return {
         kind: "axisLabel",

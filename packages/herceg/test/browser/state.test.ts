@@ -1121,7 +1121,7 @@ describe("selections of layout items in facets and of changed data", () => {
     expect(red()).toBe(2);
   });
 
-  it("write the rows a slice stands for, and a series of value fields its rows", () => {
+  it("write a slice's condition, and a series of value fields its rows", () => {
     const sales = table({ region: ["a", "b", "a"], revenue: [3, 2, 1] });
     const store = selectionStore(sales);
     const chart = mount({
@@ -1132,8 +1132,19 @@ describe("selections of layout items in facets and of changed data", () => {
     });
     chart.render();
     chart.select({ kind: "items", items: [{ mark: "slices", item: ["a"] }] });
-    const held = store.get("focus");
-    expect(held?.kind === "rows" && [...held.rows.positions()]).toEqual([0, 2]);
+    // Its category, of a positive value: rows 0 and 2.
+    expect(store.get("focus")).toEqual({
+      kind: "predicate",
+      expression: [
+        "and",
+        ["==", ["field", "region"], "a"],
+        [
+          "and",
+          [">=", ["field", "revenue"], Number.MIN_VALUE],
+          ["<=", ["field", "revenue"], Number.MAX_VALUE],
+        ],
+      ],
+    });
     const source = data();
     const wide = selectionStore(source);
     const lines = mount(

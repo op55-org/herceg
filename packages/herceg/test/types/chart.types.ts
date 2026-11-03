@@ -1,4 +1,5 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
+import type { Expression } from "../../src/data/expression.ts";
 import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { axis } from "../../src/guides/options.ts";
@@ -99,3 +100,23 @@ axis({ scale: "x", format: { maximumFractionDigits: 0, fiscal } });
 axis({ scale: "x", ticks: { count: 4, fiscal } });
 // @ts-expect-error nor ticks by values
 axis({ scale: "x", ticks: { values: [0, 1], fiscal } });
+
+// Clicks say what their items stand for: groups, conditions here and at the
+// source, and rows read when asked; every part typed, none cast.
+chart.on("click", ({ target }) => {
+  if (target?.kind !== "item" || !target.provenance) return;
+  const { groups, condition, source } = target.provenance;
+  for (const group of groups) {
+    const bounds: [number, number] | undefined =
+      "value" in group ? undefined : [group.from, group.to];
+    void bounds;
+  }
+  const forwarded: Expression | null | undefined = source?.condition ?? condition;
+  const named: string | undefined = source?.table;
+  const positions: Uint32Array | undefined = target.rows?.().positions;
+  void [forwarded, named, positions];
+});
+chart.on("select", ({ conditions }) => {
+  const source: Expression | null | undefined = conditions[0]?.source?.condition;
+  void source;
+});

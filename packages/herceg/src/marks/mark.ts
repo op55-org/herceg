@@ -12,7 +12,7 @@ import type { clearDomain } from "../model/clearance.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import { keyPrefix } from "../model/identity.ts";
 import type { MarkSeries } from "../model/inspect.ts";
-import type { LocalGroup } from "../model/items.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
 import type { Nearest } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -516,7 +516,7 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * and for the rows the key names (model/items.ts); undefined for a key
    * of none of its items.
    */
-  groupsOf?(key: string): readonly LocalGroup[] | undefined;
+  groupsOf?(key: string): readonly ProvenanceGroup[] | undefined;
   /**
    * Resolves series for the current data. `key` prefixes series keys,
    * `palette` returns the color for a series key, `hidden` holds keys of

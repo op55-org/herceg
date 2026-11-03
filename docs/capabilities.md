@@ -604,8 +604,9 @@ Each recipe is all the marks it draws, proved together in Python.
 | early-input |  | ✓ |  |  |
 | rapid-gestures |  | ✓ |  |  |
 | viewport-event |  | ✓ (also reentrant) |  |  |
+| provenance | ✓ |  |  |  |
 
-Proved in [zoom-pan.test.ts](../packages/herceg/test/browser/interaction/zoom-pan.test.ts), [brushes.test.ts](../packages/herceg/test/browser/interaction/brushes.test.ts), [reading.test.ts](../packages/herceg/test/browser/interaction/reading.test.ts), [limits.test.ts](../packages/herceg/test/browser/interaction/limits.test.ts), [sync.test.ts](../packages/herceg/test/browser/interaction/sync.test.ts), [selections.test.ts](../packages/herceg/test/browser/interaction/selections.test.ts), [navigator.test.ts](../packages/herceg/test/browser/interaction/navigator.test.ts), [lifecycle.test.ts](../packages/herceg/test/browser/interaction/lifecycle.test.ts).
+Proved in [zoom-pan.test.ts](../packages/herceg/test/browser/interaction/zoom-pan.test.ts), [brushes.test.ts](../packages/herceg/test/browser/interaction/brushes.test.ts), [reading.test.ts](../packages/herceg/test/browser/interaction/reading.test.ts), [limits.test.ts](../packages/herceg/test/browser/interaction/limits.test.ts), [sync.test.ts](../packages/herceg/test/browser/interaction/sync.test.ts), [selections.test.ts](../packages/herceg/test/browser/interaction/selections.test.ts), [navigator.test.ts](../packages/herceg/test/browser/interaction/navigator.test.ts), [lifecycle.test.ts](../packages/herceg/test/browser/interaction/lifecycle.test.ts), [provenance.test.ts](../packages/herceg/test/browser/provenance.test.ts).
 
 ## GPU paths
 

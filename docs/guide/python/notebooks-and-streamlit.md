@@ -80,6 +80,17 @@ def show_row(event):
 
 live.on_click(show_row)
 live.on_click(show_row, remove=True)  # stop calling it
+
+
+def drill(event):
+    # What a clicked bar or bin stands for, and through hg.derive the rows behind it.
+    provenance = getattr(event.target, "provenance", None)
+    if provenance is not None and provenance.source is not None:
+        print(provenance.groups)  # (hg.ValueGroup(field="month", value=datetime(2025, 2, 1)),)
+        print(provenance.source.condition)  # its days, as an hg.Expr on the source table
+
+
+live.on_click(drill)
 live.on_edge(lambda edge: print(edge.side, edge.bound))  # near an end of `limits`
 live.on_error(lambda error: print(error))  # what a browser refused
 live.show_cursor(x=when)  # hide_cursor() hides it
@@ -96,6 +107,7 @@ live.on_pin(lambda pinned: print(pinned))  # clicks with hg.Tooltip(pin="click")
 | `hg.ViewportEvent` | One change of view: `scales` changed, every panel's `views` (by panel key, `""` for one panel), `cause` (`"pointer"`, `"wheel"`, `"keyboard"`, `"api"`, `"sync"`, `"data"`, `"options"`), and `panel`. |
 | `hg.ViewEdge` | `scale`, `side`, `domain`, `bound`, `panels`, `cause`. |
 | `hg.InputEvent` | What `on_hover`, `on_click`, and `on_context_menu` hear: `pointer` (`hg.Pointer`: `x`, `y`, `panel`, `in_plot`, its `values` by axis, datetimes on time axes, and `categories`; None for the keyboard), `target` (`hg.ItemTarget`, `hg.AxisLabelTarget`, `hg.LegendEntryTarget`, or `hg.PlotTarget`, by `kind`; None over nothing), `inspection`, `cause`, and `revision`. |
+| `hg.Provenance` | What a clicked item stands for (`event.target.provenance` on clicks, secondary presses, and Enter; None on hover): its `groups` on its mark's data (`hg.ValueGroup`: `field`, `value`; `hg.IntervalGroup`: `field`, `start`, `end`, `closed`), the `condition` its rows meet there (an `hg.Expr`; None where none says them exactly, as for a row without `item_key`), and `source` (`hg.ProvenanceSource`: `table`, `condition`), that condition through `hg.derive` on the table derived from, None for data not derived. See [Events](../interaction.md#events). |
 | `hg.Inspection` | What the inspection reads: `axis`, `value`, `label`, `panel`, and `points` (`hg.InspectedPoint`: `label`, `value`, `text`, `fields`, `row`, `mark`, `mark_id`, `key`). |
 | `hg.PinTarget` | Where the tooltip is pinned (`live.pinned`, what `on_pin` hears): an `item` by its key, or a `value` on an `axis`, in a `panel`. Assign one to `live.pinned`, or call `live.pin(...)`; None lets it go. |
 | `hg.ItemMove` | What `on_item_move` hears: a network node or a dragged rule moved, by `key` and `mark_id`, its `position` (`hg.ItemPosition`: a node's `x` and `y`, or a rule's value on its axis), `phase` (`"preview"` while a rule moves, `"commit"`, `"cancel"`), `cause`, and `revision`. |

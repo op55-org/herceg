@@ -1,9 +1,11 @@
 // Events a chart emits to the application.
 
+import type { Table } from "../data/table.ts";
 import type { SelectionCondition } from "../model/conditions.ts";
 import type { ItemChanges } from "../model/item-views.ts";
 import type { PanelVisibility } from "../model/legend.ts";
 import type { ChangeCause, Inspection, ViewReport } from "../model/model.ts";
+import type { Provenance } from "../model/provenance.ts";
 import type { RowSelectionChange } from "../model/row-selection.ts";
 import type { ChartError } from "../spec/errors.ts";
 import type {
@@ -20,6 +22,7 @@ import { report } from "./scheduler.ts";
 export type { SelectionCondition } from "../model/conditions.ts";
 export type { PanelVisibility } from "../model/legend.ts";
 export type { ChangeCause, PanelViewport, ScaleView } from "../model/model.ts";
+export type { Provenance, ProvenanceGroup, SourceCondition } from "../model/provenance.ts";
 
 /**
  * An opaque name of one chart's state as one of its reports saw it (each
@@ -96,6 +99,20 @@ export interface ItemTarget {
   readonly panel: string;
   /** Where it is drawn: its box; a line's observation or a layout item, its point. */
   readonly box: Box;
+  /**
+   * What it stands for in its data (see `Provenance`), as the input found
+   * it: on clicks, Enter, and secondary presses; never on hover.
+   */
+  readonly provenance?: Provenance | undefined;
+  /**
+   * The rows of its table it stands for, taken as the input found them and
+   * read when called: its row; every row sharing its `itemKey` value, or
+   * its bar's position in its series; an aggregate's or a layout item's
+   * rows; each within its panel and its mark's view. Rows dropped since
+   * are left out, and after a reset there are none. On clicks, Enter, and
+   * secondary presses of items of a table; never on hover.
+   */
+  readonly rows?: () => { readonly table: Table; readonly positions: Uint32Array };
 }
 
 /** A tick label of an axis. */

@@ -1,7 +1,7 @@
 // Compile-time tests of pivots: checked by `npm run typecheck`, never executed.
 import { expectTypeOf } from "vitest";
+import { count, max, mean, median, sum } from "../../src/data/aggregations.ts";
 import { time } from "../../src/data/column.ts";
-import { count, max, mean, median, sum } from "../../src/data/derive.ts";
 import { pivotRows } from "../../src/data/pivot.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore } from "../../src/data/selection.ts";

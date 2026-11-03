@@ -2,8 +2,9 @@
 //   npm run bench -w herceg
 // Reports the median and median absolute deviation over repeated runs.
 
+import { count, mean } from "../src/data/aggregations.ts";
 import { category, time } from "../src/data/column.ts";
-import { count, derive, mean } from "../src/data/derive.ts";
+import { derive } from "../src/data/derive.ts";
 import { col } from "../src/data/expr.ts";
 import { fromGeoJSON } from "../src/data/geojson.ts";
 import { fromMatrix } from "../src/data/matrix.ts";

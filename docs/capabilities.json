@@ -7327,7 +7327,8 @@
       "interaction.navigator.chart.marks-refused",
       "interaction.early-input.subplots",
       "interaction.rapid-gestures.subplots",
-      "interaction.viewport-event.subplots.reentrant"
+      "interaction.viewport-event.subplots.reentrant",
+      "interaction.provenance.chart"
     ]
   },
   "gpu": {
@@ -8706,6 +8707,7 @@
       "interaction.zoom-y.subplots.right-y.engine",
       "interaction.zoom-y.subplots.shared-y.engine"
     ],
+    "../packages/herceg/test/browser/provenance.test.ts": ["interaction.provenance.chart.engine"],
     "../packages/herceg/test/contracts/export.test.ts": [
       "area-range.export.pdf",
       "area.export.pdf",

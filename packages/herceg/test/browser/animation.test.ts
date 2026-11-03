@@ -2,6 +2,7 @@ import "./interactive.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
+import type { InputEvent, ItemTarget } from "../../src/dom/events.ts";
 import { SvgLayer } from "../../src/dom/svg-layer.ts";
 import { sectorsOf } from "../../src/dom/value-sectors.ts";
 import { ValueAnimation } from "../../src/dom/value-transition.ts";
@@ -1334,6 +1335,39 @@ describe("keyed transitions", () => {
     chart.root.dispatchEvent(new PointerEvent("pointerup", at));
     tick(16);
     expect(drills).toEqual([expect.any(String), b.key]);
+  });
+
+  it("give a leaf a drill takes away its row when clicked on its way out", async () => {
+    const chart = await burst();
+    await controlTime();
+    const clicks: InputEvent[] = [];
+    chart.on("click", (event) => clicks.push(event));
+    chart.setDrillRoot(["a"]);
+    tick(16);
+    tick(100);
+    const b1 = chart
+      .getItems({ mark: "tree" })!
+      .items.find(({ names }) => names.join() === "b,b1")!;
+    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle } = b1.sector!;
+    const [middle, along] = [(startAngle + endAngle) / 2, (innerRadius + outerRadius) / 2];
+    const rect = chart.root.getBoundingClientRect();
+    const at = {
+      bubbles: true,
+      button: 0,
+      pointerId: MOUSE,
+      clientX: rect.left + cx + along * Math.sin(middle),
+      clientY: rect.top + cy - along * Math.cos(middle),
+    };
+    chart.root.dispatchEvent(new PointerEvent("pointerdown", at));
+    chart.root.dispatchEvent(new PointerEvent("pointerup", at));
+    tick(16);
+    const target = clicks.at(-1)?.target as ItemTarget | undefined;
+    expect(target?.item).toBe(b1.key);
+    expect([...target!.rows!().positions]).toEqual([3]);
+    expect(target!.provenance?.groups).toEqual([
+      { field: "top", value: "b" },
+      { field: "leaf", value: "b1" },
+    ]);
   });
 
   it("drill gradually the first time, with no frame drawn since its code loaded", async () => {

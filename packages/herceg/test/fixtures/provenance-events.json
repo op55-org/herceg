@@ -1,0 +1,108 @@
+{
+  "about": "Clicks on items and the provenance their targets carry, as JSON (web/events.ts `inputEventPayload`). Each case proves its contract (test/contracts/interaction.json): the browser tests write each case's payload and compare it with `provenance`; Python decodes the same payloads (python/tests/test_events.py), so both read the same expressions.",
+  "cases": [
+    {
+      "contract": "interaction.provenance.chart.derived",
+      "name": "a month's bar of a derived table: its month, and its days on the day table",
+      "spec": {
+        "version": 1,
+        "data": {
+          "days": {
+            "columns": {
+              "day": {
+                "type": "time",
+                "values": [
+                  1736035200000, 1737331200000, 1738540800000, 1739491200000, 1740787200000,
+                  1743379200000
+                ]
+              },
+              "revenue": [1, 2, 3, 4, 5, 6]
+            }
+          },
+          "monthly": {
+            "source": "days",
+            "transform": [
+              {
+                "bin": "day",
+                "bins": [1735689600000, 1738368000000, 1740787200000, 1743465600000],
+                "as": "month"
+              },
+              {
+                "aggregate": [{ "op": "sum", "field": "revenue", "as": "revenue" }],
+                "by": ["month"]
+              }
+            ]
+          }
+        },
+        "marks": [{ "type": "bar", "data": "monthly", "x": "month", "y": "revenue" }]
+      },
+      "click": { "x": 1738540800000, "y": 1 },
+      "provenance": {
+        "groups": [{ "field": "month", "value": 1738368000000, "time": true }],
+        "condition": ["==", ["field", "month"], 1738368000000],
+        "source": {
+          "table": "days",
+          "condition": [
+            "and",
+            [">=", ["field", "day"], 1738368000000],
+            ["<", ["field", "day"], 1740787200000]
+          ]
+        }
+      }
+    },
+    {
+      "contract": "interaction.provenance.chart.derived-last-bin",
+      "name": "the last month's bar: its days up to the bins' last edge, which it holds",
+      "spec": "same",
+      "click": { "x": 1740873600000, "y": 1 },
+      "provenance": {
+        "groups": [{ "field": "month", "value": 1740787200000, "time": true }],
+        "condition": ["==", ["field", "month"], 1740787200000],
+        "source": {
+          "table": "days",
+          "condition": [
+            "and",
+            [">=", ["field", "day"], 1740787200000],
+            ["<=", ["field", "day"], 1743465600000]
+          ]
+        }
+      }
+    },
+    {
+      "contract": "interaction.provenance.chart.histogram",
+      "name": "a histogram's last bin: its interval, holding its right edge, on a table not derived",
+      "spec": {
+        "version": 1,
+        "data": { "raw": { "columns": { "v": [0, 1, 2, 3, 4, 10] } } },
+        "marks": [{ "type": "histogram", "x": "v", "bins": [0, 5, 10] }]
+      },
+      "click": { "x": 7.5, "y": 0.5 },
+      "provenance": {
+        "groups": [{ "field": "v", "from": 5, "to": 10, "closed": true }],
+        "condition": ["and", [">=", ["field", "v"], 5], ["<=", ["field", "v"], 10]],
+        "source": null
+      }
+    },
+    {
+      "contract": "interaction.provenance.chart.rolling",
+      "name": "a point of a rolling mean: named by its itemKey, of no condition on the table it was derived from",
+      "spec": {
+        "version": 1,
+        "data": {
+          "raw": { "columns": { "t": [0, 1, 2, 3], "v": [1, 3, 5, 7] } },
+          "smooth": {
+            "source": "raw",
+            "transform": [{ "rolling": [{ "op": "mean", "field": "v", "as": "mean" }], "size": 2 }]
+          }
+        },
+        "marks": [{ "type": "point", "data": "smooth", "x": "t", "y": "mean", "itemKey": "t" }]
+      },
+      "click": { "x": 2, "y": 4 },
+      "provenance": {
+        "groups": [{ "field": "t", "value": 2 }],
+        "condition": ["==", ["field", "t"], 2],
+        "source": { "table": "raw", "condition": null }
+      }
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import { formatNumber, numberFormatter } from "../format/format.ts";
 import { ELBOW, placePieLabels, RUN } from "../layout/pie-labels.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type {
   ArcGeometry,
@@ -32,6 +33,7 @@ import {
   type LayoutItem,
   type LayoutMark,
   type LayoutResult,
+  positive,
   RowsCache,
   SelectionCache,
   SoleRows,
@@ -88,6 +90,12 @@ export class PieMark implements LayoutMark {
   readonly #held = new SelectionCache<Held>();
   /** The one row each category's slice stands for, of all rows and of each facet panel's. */
   readonly #soles = new RowsCache<SoleRows>();
+
+  /** What the slice keyed `key` groups by: its category, and with a value, rows of a positive one. */
+  groupsOf(key: string): ProvenanceGroup[] {
+    const { category, value } = this.spec;
+    return [{ field: category, value: (JSON.parse(key) as string[])[1]! }, ...positive(value)];
+  }
 
   constructor(input: PieSpec, table: Table) {
     this.spec = frozen(input);

@@ -22,6 +22,7 @@ import { rasterDrawing } from "../draw/raster.ts";
 import { formatNumber } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
 import { CellIndex } from "../lod/cell-index.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -53,6 +54,38 @@ import {
 } from "./mark.ts";
 import { type MarkRows, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
+
+/**
+ * A bin `[from, to)` of `binnings` (each panel's edges) as what it groups
+ * by on `field`: holding `to` too where it is the last bin of its edges;
+ * with `cumulative`, from the first edge. Undefined where no binning has
+ * it, or where panels bin it otherwise (one's last bin, another's not).
+ */
+export function binGroup(
+  field: string,
+  [from, to]: readonly [number, number],
+  binnings: Iterable<Float64Array>,
+  cumulative?: boolean,
+): ProvenanceGroup | undefined {
+  let found: { field: string; from: number; to: number; closed?: true } | undefined;
+  for (const edges of binnings) {
+    const at = edges.indexOf(to);
+    if (at < 1 || edges[at - 1] !== from) continue;
+    const start = cumulative ? edges[0]! : from;
+    const closed = at === edges.length - 1;
+    if (found && (found.from !== start || (found.closed === true) !== closed)) return undefined;
+    found = closed ? { field, from: start, to, closed: true } : { field, from: start, to };
+  }
+  return found;
+}
+
+/** Rows of a usable weight, which alone histograms count. */
+export const weighed = (field: string): ProvenanceGroup => ({
+  field,
+  from: 0,
+  to: Number.MAX_VALUE,
+  closed: true,
+});
 
 /** A histogram of x and y both: cells counting pairs of values. */
 export interface Histogram2DOptions<S extends Schema> extends SelectionLooks {
@@ -199,6 +232,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   /** Explicit edges per axis, used as given. */
   readonly #explicit: { x: Float64Array | undefined; y: Float64Array | undefined };
   readonly #binned = new Map<TimeZone, Binned>();
+  /** The edges cells were last counted in along each axis, for what cells group by (see `groupsOf`). */
+  readonly #binnings = { x: new Set<Float64Array>(), y: new Set<Float64Array>() };
   readonly #panels = new WeakMap<Uint32Array, PanelCounts>();
   /** Each series' cells, by its values, which only it holds. */
   readonly #cells = new WeakMap<NumericArray, Cells>();
@@ -269,6 +304,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
     const zone = context.zone;
     const cached = this.#binned.get(zone);
     if (cached?.revision === revision && cached.series.key === id) return [cached.series];
+    this.#forget();
     const [xs, ys] = [this.#numbers("x"), this.#numbers("y")];
     const [rx, ry] = jointRanges(xs, ys, positions, NO_RANGE, NO_RANGE);
     const xEdges = this.#edges("x", rx, zone);
@@ -310,6 +346,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
       this.#rosters.set(roster[0]!, cached.series);
       return cached.series.map((s) => [s]);
     }
+    this.#forget();
     const [xs, ys] = [this.#numbers("x"), this.#numbers("y")];
     const xRanges: BinRange[] = [];
     const yRanges: BinRange[] = [];
@@ -363,6 +400,8 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   ): Series {
     const xs = this.#numbers("x");
     const ys = this.#numbers("y");
+    this.#binnings.x.add(xEdges);
+    this.#binnings.y.add(yEdges);
     const weights =
       this.spec.weight === undefined ? undefined : this.table.numbers(this.spec.weight as never);
     const nx = Math.max(0, xEdges.length - 1);
@@ -494,6 +533,26 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   /** The cells a series of this mark counted. */
   cellsOf(s: Series): Cells | undefined {
     return this.#cells.get(s.values);
+  }
+
+  #forget(): void {
+    this.#binnings.x.clear();
+    this.#binnings.y.clear();
+  }
+
+  /**
+   * What the cell keyed `key` groups by (marks/lookups.ts names it by its
+   * bins): its bin along x and along y (holding the right edge, the last),
+   * and, with weights, rows of a usable weight, as cells count them.
+   */
+  groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    const [, x, y, ...rest] = JSON.parse(key) as unknown[];
+    if (!Array.isArray(x) || !Array.isArray(y) || rest.length > 0) return undefined;
+    const { weight } = this.spec;
+    const across = binGroup(this.spec.x, x as [number, number], this.#binnings.x);
+    const down = binGroup(this.spec.y, y as [number, number], this.#binnings.y);
+    if (!across || !down) return undefined;
+    return [across, down, ...(weight === undefined ? [] : [weighed(weight)])];
   }
 
   /**

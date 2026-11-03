@@ -1,8 +1,9 @@
 // Row groups: aggregates over a view's positions, as derived tables compute
 // them, kept current as the view's table streams, with stable keys.
 import { describe, expect, it, vi } from "vitest";
+import { count, max, mean, min, sum } from "../../src/data/aggregations.ts";
 import { category, encodedCategory, time } from "../../src/data/column.ts";
-import { count, derive, max, mean, min, sum } from "../../src/data/derive.ts";
+import { derive } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { groupId, groupRows } from "../../src/data/groups.ts";
 import { RowSet } from "../../src/data/row-set.ts";

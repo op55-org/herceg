@@ -5,10 +5,12 @@
 // the keyboard visit. A layout mark has a chart to itself, or one of a
 // chart's facet panels or subplots.
 
+import type { Expression } from "../data/expression.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Table } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { ItemViews } from "../model/item-views.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry, LegendPart } from "../model/legend.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -275,6 +277,14 @@ export interface LayoutResult {
    */
   rowsOf?(key: string, table: Table): ArrayLike<number> | undefined;
   /**
+   * Exactly the rows of `table` the item keyed `key` stands for, as a
+   * condition on its fields, where what the item groups by (`groupsOf`)
+   * does not say it alone: a slice leaves out rows of no positive value, a
+   * Sankey node holds the links drawn into and out of it. Null where no
+   * condition says it; undefined where the groups do.
+   */
+  conditionOf?(key: string, table: Table): Expression | null | undefined;
+  /**
    * The one row of `table` the item keyed `key` stands for, for items that
    * sum rows (a slice of one row), whose tooltips show its fields; undefined
    * for none or several. Inspections read it on every pointer move, so it
@@ -316,6 +326,8 @@ export interface LayoutResult {
 export interface LayoutMark extends ChartMark {
   /** Tells layout marks from marks along axes. */
   readonly layout: true;
+  /** What the item keyed `key` groups by on the mark's table, as `Mark.groupsOf` says. */
+  groupsOf?(key: string): readonly ProvenanceGroup[] | undefined;
   /**
    * What charts keep of what their layout marks drew, and check charts of
    * layout marks with: every layout mark gives the same class, through which
@@ -425,6 +437,17 @@ export function insidePolygon(
     if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) odd = !odd;
   }
   return odd;
+}
+
+/**
+ * Rows of a positive, finite `field`, which alone slices and flows of a
+ * value count, as a group: from the least positive number up to the
+ * largest. None without a field.
+ */
+export function positive(field: string | undefined): ProvenanceGroup[] {
+  return field === undefined
+    ? []
+    : [{ field, from: Number.MIN_VALUE, to: Number.MAX_VALUE, closed: true }];
 }
 
 export function isLayoutMark(mark: object): mark is LayoutMark {

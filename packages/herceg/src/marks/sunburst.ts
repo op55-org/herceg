@@ -14,6 +14,7 @@ import { formatNumber, numberFormatter } from "../format/format.ts";
 import { layoutPartition } from "../layout/partition.ts";
 import { labelFor, oneLineText, textItem } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
 import type {
@@ -207,6 +208,11 @@ export class SunburstMark implements LayoutMark {
     this.measure = spec.value ?? "Count";
     // Items stand for their color field's values, as series of that field do.
     this.identity = { field: this.#data.colorField, read: secondOf };
+  }
+
+  /** What the node keyed `key` groups by: each level's field at its name (see `TreeData.groupsOf`). */
+  groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    return this.#data.groupsOf(key);
   }
 
   /** Takes the feature compiler's code for its labels (see marks/features/tree-text.ts). */

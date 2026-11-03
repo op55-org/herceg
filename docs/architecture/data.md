@@ -252,6 +252,24 @@ A data entry with `source` and `transform` derives rows from another table
   `WeakRef`, removed by a `FinalizationRegistry`. The same map records which
   fields pass through unchanged, which [identities](marks.md#identity-and-color)
   follow back to the source.
+- **Lineage.** Each derived table registers its source, steps, and a
+  `back` function in `data/lineage.ts`, a registry that imports no code, so
+  the picking chunk reads it without loading the transforms. `sourceOf`
+  walks a chain to its first table, rewriting a condition through each
+  step, from the last: a filter is joined to it; a calculated field is
+  replaced by its expression (truth values as 1 and 0, an `if`'s null
+  branch kept missing); a comparison of a bin start with a number becomes
+  the binned field between the values where it holds, found by halving
+  over doubles with the placement `bin` itself uses (`binsOf`, through the
+  edges the last run used), so missing values, values outside the bins,
+  bin numbers past what a double holds, and edges that run together fall
+  where `bin` puts them; a read of the bin's `end` gives null; aggregates keep `by` fields and give null for outputs;
+  sorts change nothing; rolling windows give null. A rewrite the rules do
+  not cover gives null, never an approximate condition. Tables a spec's
+  `origin` names were computed elsewhere, so a walk ends at them.
+- **Aggregations** (`data/aggregations.ts`) live apart from the derivation
+  code, so pivots and summaries that use them do not load lineage or
+  `derive`.
 - The spec loader loads tables in dependency order and rejects unknown
   sources and cycles.
 

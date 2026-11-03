@@ -114,16 +114,32 @@ names items alike.
   every row sharing a name (rows sharing an `itemKey` value are one item;
   a number names no category's row, nor a category's name a number's),
   a bar's rows by series and position (none for a wide mark's value field
-  it no longer draws), and an aggregate's through
-  `Mark.groupsOf` (declared; no mark gives it yet).
+  it no longer draws), and an aggregate's through `Mark.groupsOf`.
   Hints (`ItemHint`) find rows faster but are never part of a key.
 - **References.** Applications name items by the mark's `id` and the parts
   after it (`keyOfReference`), so keys stay opaque.
 
-The resolver has no reader yet; input targets, item selections, pinned
-tooltips, and every mark's transitions build on it ([roadmap](../roadmap.md)).
-Points' value transitions match points by `itemKey`
-([rendering](rendering.md#animated-values)).
+Input targets, item selections and their looks, row selections, pinned
+tooltips, and [keyed transitions](rendering.md#animated-values) read items
+through it.
+
+**What an item stands for.** `Mark.groupsOf(key)` gives what an aggregate
+or layout item groups by on its mark's table (`ProvenanceGroup`: a value
+of a field, or an interval of one, closed for the last bin): histograms'
+bins with their series and, weighted, the usable weights (none where
+panels' binnings close a bin differently); 2D histograms' cells;
+heatmaps' cells by `x` and `y`, of finite colors; boxes, violins, and
+boxen by category and series, of finite values; pies' and funnels'
+categories; treemaps' and
+sunbursts' path fields; Sankey links' sources and targets. What rows need
+to count is a group too: a finite value, a usable weight, a positive
+value. Rows group by their `itemKey` value, bars without one by position
+and series (`model/item-conditions.ts`). Groups with the view filter say
+an item's rows exactly; where no groups can, a layout may give the
+condition (`LayoutResult.conditionOf`: a Sankey node's drawn links).
+`itemCondition` joins either with the panel's facet values and the mark's
+view filter, or gives null; selections' conditions and clicks'
+provenance share it.
 
 ## Drawn marks
 

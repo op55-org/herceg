@@ -18,6 +18,7 @@ import { lineDrawing } from "../draw/line.ts";
 import { rectDrawing } from "../draw/rect.ts";
 import { formatNumber } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, niceTimeDomain, timeTicks } from "../scale/time.ts";
 import {
@@ -41,7 +42,7 @@ import { BandShares, STILL } from "./dodge.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
 import type { CssColor } from "./encoding.ts";
 import { histogramFormError } from "./histogram-input.ts";
-import { Histogram2DMark, type Histogram2DOptions } from "./histogram2d.ts";
+import { binGroup, Histogram2DMark, type Histogram2DOptions, weighed } from "./histogram2d.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -249,6 +250,8 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   readonly #selected = new WeakMap<Series, Picked>();
   /** The bin each rectangle of a geometry drawn is (see `partOf`). */
   readonly #drawnBins = new WeakMap<Geometry, Uint32Array>();
+  /** The edges series were last counted in, for what bins group by (see `groupsOf`). */
+  readonly #binnings = new Set<Float64Array>();
   /** How many rows each bin of a weighted series has, by the series' counts. */
   readonly #binnedRows = new WeakMap<NumericArray, NumericArray>();
   /**
@@ -307,6 +310,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     context: BandContext,
     split = false,
   ): Series[] {
+    this.#binnings.clear();
     // Facets count each panel's rows (summarizePanels), so need no rows by series.
     const sources = split ? this.#present().sources : this.#split.sources();
     const roster = sources.map((source) => {
@@ -330,6 +334,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     context: BandContext,
     yGroupOf: readonly number[] = xGroupOf,
   ): Series[][] {
+    this.#binnings.clear();
     const groupOf = this.#horizontal ? yGroupOf : xGroupOf;
     const { bins, counted } = this.#panelCounts(rows, groupOf, context.zone);
     const { codes } = this.#present();
@@ -355,6 +360,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   ): Series[] {
     const bins = centers.length;
     const { stack } = this.spec;
+    this.#binnings.add(edges);
     const all = counted.reduce((sum, s) => sum + (s?.finite ?? 0), 0);
     const measures = counted.map((found) => found && this.#measure(found, edges, all));
     // Stacked series sit on the visible ones before them; filled stacks
@@ -587,6 +593,25 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
       series: s,
       position: bin,
     });
+  }
+
+  /**
+   * What the bin keyed `key` groups by (see `partOf`): its interval on the
+   * binned field (from the first edge, for a cumulative bin; holding its
+   * right edge, the last), its series' value, and, with weights, rows of a
+   * usable weight, as `summarized` counts them.
+   */
+  groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    const parts = JSON.parse(key) as unknown[];
+    const bin = parts.at(-1) as readonly [number, number];
+    const { series, weight, cumulative } = this.spec;
+    if (!Array.isArray(bin) || parts.length !== (series === undefined ? 2 : 3)) return undefined;
+    const binned = binGroup(this.#field, bin, this.#binnings, cumulative);
+    if (!binned) return undefined;
+    const groups = [binned];
+    if (series !== undefined) groups.push({ field: series, value: parts[1] as string });
+    if (weight !== undefined) groups.push(weighed(weight));
+    return groups;
   }
 
   /**

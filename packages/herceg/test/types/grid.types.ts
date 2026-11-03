@@ -1,7 +1,7 @@
 // Compile-time tests: checked by `npm run typecheck`, never executed.
 import { expectTypeOf } from "vitest";
+import { count, max, mean, median, min, sum } from "../../src/data/aggregations.ts";
 import { time } from "../../src/data/column.ts";
-import { count, max, mean, median, min, sum } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { type GroupKey, groupRows, type RowGroups } from "../../src/data/groups.ts";
 import { rowView } from "../../src/data/row-view.ts";

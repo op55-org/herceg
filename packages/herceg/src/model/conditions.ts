@@ -1,16 +1,18 @@
 // What a chart's selection stands for in each table its marks read: a
 // condition on that table's fields, which a product forwards to its queries
-// and a row view filters by (the `conditions` of `select` events). Made at
-// once, as `select` reports, so it loads with every chart. Where no
-// condition says exactly which rows the selection holds (a lasso, a
-// stack's tops, a summary's statistics, rows named by their identity), the
-// table has none: a condition is never approximated.
+// and a row view filters by (the `conditions` of `select` events), with the
+// condition through derived tables. Made at once, as `select` reports, with
+// state support. Where no condition says exactly which rows the selection
+// holds (a lasso, a stack's tops, a summary's statistics, rows named by
+// their identity), the table has none: a condition is never approximated.
 
 import type { Expression } from "../data/expression.ts";
+import { type SourceCondition, sourceOf } from "../data/lineage.ts";
 import type { Table } from "../data/table.ts";
 import type { Frame, Mark } from "../marks/mark.ts";
 import { rowField } from "../marks/row-bindings.ts";
 import type { BrushSelection, ChartSelection } from "../spec/state.ts";
+import { any, itemCondition, viewed, within } from "./item-conditions.ts";
 import type { ChartModel } from "./model.ts";
 import type { SelectionOwner } from "./selected-rows.ts";
 
@@ -19,11 +21,15 @@ export interface SelectionCondition {
   readonly table: Table;
   /** On `table`'s fields: true for the rows the selection holds. */
   readonly condition: Expression;
+  /**
+   * Where `table` is derived (or made from another), the condition written
+   * on the table it comes from first of all; its condition is null where
+   * none says those rows exactly.
+   */
+  readonly source?: SourceCondition | undefined;
 }
 
 const field = (name: string) => ["field", name] as const;
-const any = (parts: readonly Expression[]): Expression =>
-  parts.length === 1 ? parts[0]! : ["or", ...parts];
 
 /**
  * The conditions of `selection` (owned by `owner`, for a brush) on each
@@ -39,11 +45,11 @@ export function conditionsOf(
 ): SelectionCondition[] {
   // Each table's conditions, by their text so a mark of several panels counts once; null where one cannot say.
   const found = new Map<Table, Map<string, Expression> | null>();
-  const add = (mark: Mark | undefined, condition: Expression | undefined) => {
+  const add = (mark: Mark | undefined, condition: Expression | null | undefined) => {
     const table = mark?.table;
     if (!table) return;
     const kept = found.get(table);
-    if (condition === undefined || kept === null) found.set(table, null);
+    if (condition == null || kept === null) found.set(table, null);
     else found.set(table, (kept ?? new Map()).set(JSON.stringify(condition), condition));
   };
   if (selection?.kind === "brush") {
@@ -66,16 +72,18 @@ export function conditionsOf(
       add(
         mark,
         mark &&
-          viewed(
-            mark,
-            selection.kind === "items" ? named(mark, key as string, parts) : of(mark, parts[1]),
-          ),
+          (selection.kind === "items"
+            ? itemCondition(model, mark, key as string, parts)
+            : viewed(mark, of(mark, parts[1]))),
       );
     }
   }
-  return [...found].flatMap(([table, kept]) =>
-    kept ? [{ table, condition: any([...kept.values()]) }] : [],
-  );
+  return [...found].flatMap(([table, kept]) => {
+    if (!kept) return [];
+    const condition = any([...kept.values()]);
+    const source = sourceOf(table, condition);
+    return [source ? { table, condition, source } : { table, condition }];
+  });
 }
 
 /** The rows of `mark` a brush's ranges hold: its fields' values in them along each brushed axis. */
@@ -107,76 +115,6 @@ function brushed(mark: Mark, frame: Frame, selection: BrushSelection): Expressio
     parts.push(any(each));
   }
   return parts.length === 1 ? parts[0] : ["and", ...parts];
-}
-
-/**
- * `condition` on the rows `mark` draws in panel `key`: those of its facet
- * values, where the facet splits it, and of its view (see `viewed`).
- */
-function within(
-  model: ChartModel,
-  key: string,
-  mark: Mark,
-  condition: Expression | undefined,
-): Expression | undefined {
-  const facet = model.config.facet;
-  if (condition === undefined || !facet?.splits(mark)) return viewed(mark, condition);
-  const fields = (facet.field !== undefined ? [facet.field] : [facet.row, facet.column]).filter(
-    (name) => name !== undefined,
-  );
-  // One field's panels are keyed by its value; a grid's by both, as a list.
-  const values = fields.length === 1 ? [key] : (JSON.parse(key) as unknown[]);
-  const facets = fields.map((name, i): Expression => ["==", field(name), values[i] as string]);
-  return viewed(mark, ["and", condition, ...facets]);
-}
-
-/**
- * `condition` on the rows `mark` shows: within its view's filter;
- * undefined where its view shows rows a set of them names, which no
- * condition says.
- */
-function viewed(mark: Mark, condition: Expression | undefined): Expression | undefined {
-  const view = mark.view;
-  if (condition === undefined || view?.restriction) return undefined;
-  const filter = view?.query.filter;
-  if (filter === undefined || filter === true) return condition;
-  const shown =
-    filter !== null && typeof filter === "object" && "expression" in filter
-      ? filter.expression
-      : filter;
-  return ["and", condition, shown];
-}
-
-/** The rows an item of `mark` keyed `key` (parsed as `parts`) stands for. */
-function named(mark: Mark, key: string, parts: readonly unknown[]): Expression | undefined {
-  const groups = mark.groupsOf?.(key);
-  if (groups)
-    return groups.length === 0
-      ? true
-      : [
-          "and",
-          ...groups.map(
-            (group): Expression =>
-              "value" in group
-                ? ["==", field(group.field), group.value]
-                : [
-                    "and",
-                    [">=", field(group.field), group.from],
-                    [group.closed ? "<=" : "<", field(group.field), group.to],
-                  ],
-          ),
-        ];
-  const wide = mark.wide ? 1 : 0;
-  const name = parts[1 + wide] as string | number;
-  const itemKey = (mark.spec as { itemKey?: string }).itemKey;
-  if (itemKey !== undefined)
-    return parts.length === 2 + wide ? ["==", field(itemKey), name] : undefined;
-  // A bar by its position's value, in its series.
-  const position = mark.itemPosition;
-  if (position === undefined || parts.length !== 3) return undefined;
-  const at: Expression = ["==", field(position), parts[2] as string | number];
-  const series = wide ? undefined : of(mark, parts[1]);
-  return series === undefined ? at : ["and", at, series];
 }
 
 /** The rows a series of `mark` named `source` holds: those of its value of the series field. */

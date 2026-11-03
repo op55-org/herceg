@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { count, mean } from "../../src/data/aggregations.ts";
 import { category } from "../../src/data/column.ts";
-import { count, mean } from "../../src/data/derive.ts";
 import { groupRows } from "../../src/data/groups.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { type Table, table } from "../../src/data/table.ts";

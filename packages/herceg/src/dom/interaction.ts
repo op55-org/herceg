@@ -3354,7 +3354,9 @@ export class Interaction {
     const inspection = this.#keyed(keyboard) ?? keyboard.last;
     const payload = this.#stamped({
       pointer: undefined,
-      target: this.#keyboardTarget(inspection, keyboard),
+      target: host.events.has("click")
+        ? this.#provenanced(this.#keyboardTarget(inspection, keyboard))
+        : this.#keyboardTarget(inspection, keyboard),
       inspection,
       cause: "keyboard",
       revision,
@@ -3386,10 +3388,30 @@ export class Interaction {
     const host = this.#host;
     return this.#stamped({
       pointer: this.#pointerAt(x, y),
-      target: this.#pressing(event, () => this.#targetAt(x, y, event.target)),
+      target: this.#provenanced(this.#pressing(event, () => this.#targetAt(x, y, event.target))),
       inspection: host.options().inspection === false ? undefined : host.model.inspect(x, y),
       cause: "pointer",
       revision,
+    });
+  }
+
+  /**
+   * `target` with what an item stands for and its rows, taken now, as a
+   * click, Enter, or a secondary press captures it (hover takes neither).
+   */
+  #provenanced(target: Target | undefined): Target | undefined {
+    const { model } = this.#host;
+    const mark = target?.kind === "item" && (model.config.marks[target.mark] as Mark | undefined);
+    if (!mark || !this.#picking) return target;
+    const { item, panel } = target as ItemTarget;
+    const { provenanceOf, rowsOfItem } = this.#picking.module;
+    // An aggregate's point, a layout's item (of no row), or a row.
+    const picked =
+      this.#points.get(target as ItemTarget) ??
+      ((target as ItemTarget).row === undefined ? "group" : undefined);
+    return Object.assign(target!, {
+      provenance: provenanceOf(model, mark, item, panel),
+      rows: rowsOfItem(model, this.#items(), mark, item, panel, picked),
     });
   }
 
