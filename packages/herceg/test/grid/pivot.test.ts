@@ -2,8 +2,8 @@
 // layout and focus kept by id as values come and go, sorting by generated
 // columns, and rows selecting their rows of the view.
 import { describe, expect, it } from "vitest";
+import { count, mean } from "../../src/data/aggregations.ts";
 import { category } from "../../src/data/column.ts";
-import { count, mean } from "../../src/data/derive.ts";
 import { pivotRows } from "../../src/data/pivot.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore } from "../../src/data/selection.ts";

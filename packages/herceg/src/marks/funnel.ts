@@ -12,6 +12,7 @@ import { shapesDrawing } from "../draw/shapes.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { contrastingText } from "../scale/color.ts";
 import type { Geometry, RectGeometry, ShapesGeometry, TextGeometry } from "../scene/scene.ts";
@@ -91,6 +92,11 @@ export class FunnelMark implements LayoutMark {
   readonly #held = new SelectionCache<Held>();
   /** The one row each stage stands for, of all rows and of each facet panel's. */
   readonly #soles = new RowsCache<SoleRows>();
+
+  /** What the stage keyed `key` groups by: its category. */
+  groupsOf(key: string): ProvenanceGroup[] {
+    return [{ field: this.spec.category, value: (JSON.parse(key) as string[])[1]! }];
+  }
 
   constructor(input: FunnelSpec, table: Table) {
     this.spec = frozen(input);

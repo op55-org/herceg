@@ -1,17 +1,7 @@
 // Public API of the herceg package.
 
-export type {
-  CategoryInput,
-  ColumnInput,
-  FieldKind,
-  NumericArray,
-  TimeInput,
-} from "./data/column.ts";
-export { category, encodedCategory, time } from "./data/column.ts";
 export {
   count,
-  Derivation,
-  derive,
   distinct,
   first,
   last,
@@ -24,7 +14,16 @@ export {
   stdev,
   sum,
   variance,
-} from "./data/derive.ts";
+} from "./data/aggregations.ts";
+export type {
+  CategoryInput,
+  ColumnInput,
+  FieldKind,
+  NumericArray,
+  TimeInput,
+} from "./data/column.ts";
+export { category, encodedCategory, time } from "./data/column.ts";
+export { Derivation, derive } from "./data/derive.ts";
 export { col, Expr, type Operand, when } from "./data/expr.ts";
 export {
   type Feature,
@@ -97,9 +96,12 @@ export type {
   PinEvent,
   PlotTarget,
   Pointer,
+  Provenance,
+  ProvenanceGroup,
   ScaleView,
   SelectEvent,
   SelectionCondition,
+  SourceCondition,
   StateChange,
   Target,
   ViewportEvent,

@@ -19,6 +19,7 @@ import type { Table } from "../data/table.ts";
 import { textDrawing } from "../draw/labels.ts";
 import { formatNumber } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { Rect, TextGeometry } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -599,6 +600,18 @@ export class TreeData {
       height,
       crumbs,
     };
+  }
+
+  /**
+   * What the node keyed `key` (its names from the top) groups by: each
+   * level's field at its name, for trees of a path; none a condition says
+   * for trees of node and parent fields, whose subtrees no field names.
+   */
+  groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    const { path } = this.encoding as { path?: readonly string[] };
+    const names = (JSON.parse(key) as string[]).slice(1);
+    if (!path || names.length === 0 || names.length > path.length) return undefined;
+    return names.map((name, i) => ({ field: path[i]!, value: name }));
   }
 
   /**

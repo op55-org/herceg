@@ -1,15 +1,11 @@
 // Portable expressions and derived tables: each transform, incremental
 // following of the source, and derived tables in specs.
 import { describe, expect, it } from "vitest";
-import { category, time } from "../../src/data/column.ts";
 import {
   count,
-  derive,
-  deriveTable,
   distinct,
   first,
   last,
-  lineageOf,
   max,
   mean,
   median,
@@ -19,9 +15,12 @@ import {
   stdev,
   sum,
   variance,
-} from "../../src/data/derive.ts";
+} from "../../src/data/aggregations.ts";
+import { category, time } from "../../src/data/column.ts";
+import { derive, deriveTable } from "../../src/data/derive.ts";
 import { col, when } from "../../src/data/expr.ts";
 import { compileExpression, type Expression } from "../../src/data/expression.ts";
+import { lineageOf, sourceOf } from "../../src/data/lineage.ts";
 import { orderedTable } from "../../src/data/ordered.ts";
 import { quantile } from "../../src/data/quantile.ts";
 import { type Schema, type Table, table } from "../../src/data/table.ts";
@@ -712,7 +711,7 @@ describe("lineage", () => {
     const lineage = (of: object) => lineageOf(of as Table);
     const near = lineage(totals)!;
     expect(near.steps).toEqual(daily.transforms);
-    expect(lineage(near.source)).toEqual({ source: sales, steps: north.transforms });
+    expect(lineage(near.source)).toMatchObject({ source: sales, steps: north.transforms });
     expect(lineage(sales)).toBeUndefined();
     // A table made elsewhere from another, by steps of its own, has none.
     expect(lineage(table({ day: [0] }, { origin: sales as unknown as Table }))).toBeUndefined();
@@ -727,7 +726,239 @@ describe("lineage", () => {
       },
       marks: [],
     } as unknown as ChartSpec);
-    expect(lineageOf(tables.get("big")!)).toEqual({ source: tables.get("raw"), steps: transform });
+    expect(lineageOf(tables.get("big")!)).toMatchObject({
+      source: tables.get("raw"),
+      steps: transform,
+    });
+  });
+});
+
+describe("source conditions", () => {
+  /** The rows of `t` where `condition` holds. */
+  const where = (of: object, condition: Expression | null | undefined) => {
+    if (condition === null || condition === undefined) return null;
+    const t = of as Table;
+    const holds = compileExpression(condition, t);
+    return Array.from({ length: t.length }, (_, i) => i).filter((i) => holds.at(i));
+  };
+  const days = () =>
+    table({
+      day: [0, 3, 7, 10, 14, 20, 29, 30, Number.NaN, 35, -2],
+      region: ["N", "S", "N", "S", "N", "N", "S", "N", "S", "N", "S"],
+      amount: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    });
+
+  // Steps that keep every row in its place: a condition holds for a derived
+  // row exactly where its rewrite holds for the source row behind it.
+  const aligned = (
+    steps: (
+      d: ReturnType<typeof derive<{ day: "number"; region: "category"; amount: "number" }>>,
+    ) => { table(): object },
+    conditions: Expression[],
+    source = days(),
+  ) => {
+    const derived = steps(derive(source)).table();
+    for (const condition of conditions) {
+      const rewritten = sourceOf(derived as unknown as Table, condition);
+      expect(rewritten?.condition, JSON.stringify(condition)).not.toBeNull();
+      expect(where(source, rewritten!.condition), JSON.stringify(condition)).toEqual(
+        where(derived, condition),
+      );
+    }
+  };
+
+  it("write calculated fields as their expressions, truth values as 1 and 0", () => {
+    aligned(
+      (d) => d.calculate("double", col("amount").mul(2)).calculate("big", col("amount").gt(9)),
+      [
+        ["==", ["field", "double"], 16],
+        ["==", ["field", "big"], 1],
+        ["and", ["==", ["field", "big"], 0], ["==", ["field", "region"], "N"]],
+      ],
+    );
+    // A truth value an `if` leaves missing stays missing.
+    const flag = ["field", "flag"] as const;
+    aligned(
+      (d) => d.calculate("flag", when(col("day").gt(7), true, null)),
+      [
+        ["==", flag, 0],
+        ["==", flag, 1],
+        ["missing", flag],
+        ["!=", flag, 1],
+      ],
+    );
+    // A calculation of nothing is missing everywhere, as its rewrite says.
+    const none = deriveTable(days() as unknown as Table, [{ calculate: null, as: "n" }]);
+    expect(sourceOf(none, ["missing", ["field", "n"]])?.condition).toEqual(["missing", null]);
+    // A field named "" is a field like any other.
+    aligned(
+      (d) => d.calculate("", 42),
+      [
+        ["==", ["field", "day"], 7],
+        ["==", ["field", ""], 42],
+      ],
+    );
+  });
+
+  it("write bins of a width as the edges their starts compare with", () => {
+    const week = ["field", "week"] as const;
+    aligned(
+      (d) => d.bin("day", { bins: { step: 7 }, as: "week" }),
+      [
+        ["==", week, 7],
+        ["==", week, 8],
+        ["!=", week, 7],
+        [">=", week, 3],
+        [">", week, 7],
+        ["<", week, 14],
+        ["<=", week, 13],
+        ["and", [">=", week, 5], ["<=", week, 10]],
+        ["==", week, null],
+        ["!=", week, null],
+        ["missing", week],
+        ["in", week, 0, 28],
+        ["not", ["==", week, 7]],
+        [">", 14, week],
+      ],
+    );
+    aligned(
+      (d) => d.bin("day", { bins: { step: 7, start: 3 } }),
+      [
+        ["==", ["field", "day"], 3],
+        ["<", ["field", "day"], 10],
+        [">=", ["field", "day"], -100],
+        ["==", ["field", "day"], null],
+      ],
+    );
+  });
+
+  it("write bins of edges or a count as their edges, the last holding its right edge", () => {
+    const month = ["field", "month"] as const;
+    const edged = [
+      ["==", month, 20],
+      ["==", month, 30],
+      ["and", [">=", month, 5], ["<=", month, 10]],
+      ["<", month, 25],
+      [">=", month, 20],
+      ["missing", month],
+      ["!=", month, 0],
+    ] as Expression[];
+    aligned((d) => d.bin("day", { bins: [0, 10, 20, 30], as: "month" }), edged);
+    const source = days();
+    const counted = derive(source).bin("day", { bins: 3, as: "month" }).table();
+    const starts = [...new Set(values(counted, "month").filter((v) => v !== null))] as number[];
+    aligned(
+      (d) => d.bin("day", { bins: 3, as: "month" }),
+      starts.flatMap((start): Expression[] => [
+        ["==", month, start],
+        [">", month, start],
+        ["<=", month, start],
+      ]),
+    );
+    // The bin's start, as a value group says it, is its interval on the day.
+    expect(sourceOf(counted as unknown as Table, ["==", month, starts[0]!])?.condition).toEqual([
+      "and",
+      [">=", ["field", "day"], starts[0]],
+      ["<", ["field", "day"], starts[1]],
+    ]);
+  });
+
+  it("refuse what reads a bin otherwise than compared with a number, or its end", () => {
+    const binned = derive(days())
+      .bin("day", { bins: { step: 7 }, as: "week", end: "until" })
+      .table() as unknown as Table;
+    for (const condition of [
+      ["==", ["+", ["field", "week"], 1], 8],
+      ["==", ["field", "until"], 14],
+      [">", ["field", "week"], ["field", "amount"]],
+    ] as Expression[])
+      expect(sourceOf(binned, condition)?.condition).toBeNull();
+  });
+
+  it("place values as bins do where bin numbers outgrow doubles or edges run together", () => {
+    const tiny = ["field", "tiny"] as const;
+    const conditions = [
+      ["==", tiny, 7],
+      ["==", tiny, 0],
+      [">=", tiny, 7],
+      ["<", tiny, 7],
+      ["missing", tiny],
+      ["!=", tiny, null],
+    ] as Expression[];
+    // Past 2 ** 53 bins from the start, values start bins of their own.
+    aligned((d) => d.bin("day", { bins: { step: 1e-300 }, as: "tiny" }), conditions);
+    // A bin number past the largest double is no bin.
+    const far = table({
+      day: [0, 7, 1e100, -1e100, Number.MAX_VALUE],
+      region: ["N", "S", "N", "S", "N"],
+      amount: [1, 2, 3, 4, 5],
+    });
+    aligned((d) => d.bin("day", { bins: { step: 1e-300 }, as: "tiny" }), conditions, far);
+    // Edges a start far past the step runs together, in the same time as others.
+    const huge = table({
+      day: [1e30, 1e30 + 2 ** 47, 1e30 + 2 ** 48, 7, Number.NaN],
+      region: ["N", "S", "N", "S", "N"],
+      amount: [1, 2, 3, 4, 5],
+    });
+    const started = (d: Parameters<Parameters<typeof aligned>[0]>[0]) =>
+      d.bin("day", { bins: { step: 1, start: 1e30 }, as: "tiny" });
+    aligned(started, [...conditions, [">=", tiny, 1e30], ["==", tiny, 1e30]], huge);
+  });
+
+  it("add filters, keep groups through aggregates and sorts, and give null for rolling windows", () => {
+    const source = days();
+    const totals = derive(source)
+      .filter(col("amount").gt(5))
+      .bin("day", { bins: [0, 10, 20, 30], as: "month" })
+      .aggregate({ by: ["month", "region"], ops: { total: sum("amount") } })
+      .sort("total")
+      .table() as unknown as Table;
+    const group = [
+      "and",
+      ["==", ["field", "month"], 10],
+      ["==", ["field", "region"], "N"],
+    ] as Expression;
+    const back = sourceOf(totals, group)!;
+    expect(back.condition).toEqual([
+      "and",
+      [
+        "and",
+        ["and", [">=", ["field", "day"], 10], ["<", ["field", "day"], 20]],
+        ["==", ["field", "region"], "N"],
+      ],
+      [">", ["field", "amount"], 5],
+    ]);
+    // The rows behind the group: the north's days 10 to 20, of amounts above 5.
+    expect(where(source, back.condition)).toEqual([4]);
+    // An aggregate's results name no rows of its source.
+    expect(sourceOf(totals, [">", ["field", "total"], 9])?.condition).toBeNull();
+    const rolled = derive(source)
+      .rolling({ size: 2, ops: { mean: mean("amount") } })
+      .table() as unknown as Table;
+    expect(sourceOf(rolled, ["==", ["field", "region"], "N"])?.condition).toBeNull();
+  });
+
+  it("name the table derived from first of all; a table made elsewhere is not derived", () => {
+    const sales = table(
+      { day: [0, 1, 2], region: ["N", "S", "N"], amount: [5, 6, 7] },
+      { name: "sales" },
+    );
+    expect(sourceOf(sales as unknown as Table, true)).toBeUndefined();
+    const north = derive(sales).filter(col("region").eq("N")).table() as unknown as Table;
+    const late = derive(north).filter(col("day").gt(0)).table() as unknown as Table;
+    expect(sourceOf(late, ["==", ["field", "amount"], 7])).toEqual({
+      table: "sales",
+      condition: [
+        "and",
+        ["and", ["==", ["field", "amount"], 7], [">", ["field", "day"], 0]],
+        ["==", ["field", "region"], "N"],
+      ],
+    });
+    // Its rows are its own: conditions end there, by its name.
+    const elsewhere = table({ day: [0, 1] }, { origin: sales as unknown as Table, name: "copy" });
+    expect(sourceOf(elsewhere as unknown as Table, true)).toBeUndefined();
+    const above = derive(elsewhere).sort("day").table() as unknown as Table;
+    expect(sourceOf(above, true)).toEqual({ table: "copy", condition: true });
   });
 });
 

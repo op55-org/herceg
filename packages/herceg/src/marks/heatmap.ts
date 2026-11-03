@@ -11,6 +11,7 @@ import {
 import { rasterDrawing } from "../draw/raster.ts";
 import { CellIndex } from "../lod/cell-index.ts";
 import type { Breaks } from "../lod/m4.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -1155,6 +1156,26 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    */
   pickItem(drawn: DrawnMark, query: PickQuery): PickedItem | undefined {
     return query.lookups.heatmap(this, drawn, query, PICKING);
+  }
+
+  /**
+   * What the cell keyed `key` groups by (marks/lookups.ts names it by its
+   * value along each axis: a category's name, a banded number, or the
+   * value its cell is at): those values of `x` and `y`, of rows with a
+   * value, as cells hold. Cells between `x1` and `x2`, and a calendar's
+   * days, group by none a condition says.
+   */
+  groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    const [, x, y, ...rest] = JSON.parse(key) as unknown[];
+    const { x: across, y: down } = this.spec as { x?: string; y?: string };
+    if (this.#layout || across === undefined || down === undefined || rest.length > 0)
+      return undefined;
+    return [
+      { field: across, value: x as string | number | null },
+      { field: down, value: y as string | number | null },
+      // Rows of a value, which alone cells draw.
+      { field: this.spec.color, from: -Number.MAX_VALUE, to: Number.MAX_VALUE, closed: true },
+    ];
   }
 
   /**

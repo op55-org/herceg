@@ -13,7 +13,8 @@ import type {
   RollingSpec,
   TransformSpec,
 } from "../spec/spec.ts";
-import { binEdges, binOf, checkBins, evenBinOf, evenStep, finiteRange } from "./bins.ts";
+import type { Aggregation } from "./aggregations.ts";
+import { binEdges, binOf, checkBins, evenBinOf, evenStep, finiteRange, NO_BINS } from "./bins.ts";
 import {
   type ColumnInput,
   encodedCategory,
@@ -24,6 +25,7 @@ import {
 import { type Expr, expressionOf, type KindOf } from "./expr.ts";
 import { compileExpression, type Expression, type Fields } from "./expression.ts";
 import { type GeometrySet, geometryOf } from "./geometry.ts";
+import { setLineage } from "./lineage.ts";
 import { rowComparator } from "./order.ts";
 import { setOrigin } from "./origin.ts";
 import { quantile } from "./quantile.ts";
@@ -158,10 +160,11 @@ function rowwise(step: TransformSpec): boolean {
   );
 }
 
-function apply(rows: Rows, step: TransformSpec): Rows {
+/** Rows after `step`; `counted` hears the edges a bin of a count used. */
+function apply(rows: Rows, step: TransformSpec, counted?: (edges: Float64Array) => void): Rows {
   if ("filter" in step) return filter(rows, step.filter);
   if ("calculate" in step) return calculate(rows, step);
-  if ("bin" in step) return bin(rows, step);
+  if ("bin" in step) return bin(rows, step, counted);
   if ("aggregate" in step) return aggregate(rows, step.aggregate, step.by ?? []);
   if ("rolling" in step) return rolling(rows, step.rolling, step.size, step.by ?? []);
   if ("sort" in step) return sort(rows, step.sort, step.order ?? "ascending");
@@ -220,7 +223,11 @@ const BINS = 10;
  * did; a count bins the values the table holds. Values in no bin (missing,
  * below an explicit start, or outside explicit edges) have none.
  */
-function bin(rows: Rows, step: { bin: string; bins?: BinSpec; as?: string; end?: string }): Rows {
+function bin(
+  rows: Rows,
+  step: { bin: string; bins?: BinSpec; as?: string; end?: string },
+  counted?: (edges: Float64Array) => void,
+): Rows {
   const kind = rows.kind(step.bin);
   if (kind === "category" || kind === "geometry")
     throw new TypeError(`field "${step.bin}" holds ${kind} values; expected number or time`);
@@ -235,47 +242,76 @@ function bin(rows: Rows, step: { bin: string; bins?: BinSpec; as?: string; end?:
   const n = rows.length;
   const starts = new Float64Array(n);
   const ends = step.end === undefined ? undefined : new Float64Array(n);
-  if (typeof bins === "object" && !Array.isArray(bins)) {
+  const edges = widthOf(bins) ? undefined : binEdges(bins, finiteRange(values, undefined), BINS);
+  if (edges) counted?.(edges);
+  const place = binsOf(bins, edges);
+  for (let i = 0; i < n; i++) {
+    const value = values[i]!;
+    const k = place.numberOf(value);
+    starts[i] = place.startOf(k, value);
+    if (ends) ends[i] = place.endOf(k, value);
+  }
+  const binned = rows.with(name, { kind, values: starts, owned: true });
+  return ends ? binned.with(step.end!, { kind, values: ends, owned: true }) : binned;
+}
+
+/** Where bins put values (see `binsOf`). */
+interface Bins {
+  /**
+   * The number of the bin holding `value`: NaN for none (missing, below an
+   * explicit start, outside edges, or past a bin number a double holds);
+   * Infinity for a value starting a bin of its own.
+   */
+  numberOf(value: number): number;
+  /** Bin `k`'s start, for `value` in it: NaN for none. */
+  startOf(k: number, value: number): number;
+  /** Bin `k`'s end, for `value` in it: NaN for none. */
+  endOf(k: number, value: number): number;
+}
+
+/** Bins of a width (`{ step, start }`), rather than of a count or edges. */
+const widthOf = (bins: BinSpec | undefined) => typeof bins === "object" && !Array.isArray(bins);
+
+/**
+ * Where `bins` put values. Bins of a width run from multiples of the step
+ * (or from `start`) without end; past 2 ** 53 bins from the start bin
+ * numbers are not exact, so each value there starts its own bin, and no
+ * bin starts above its values. Bins of `edges` hold their last edge. Either
+ * way, a greater value is in the same bin or a later one.
+ */
+function binsOf(bins: BinSpec | undefined, edges: Float64Array = NO_BINS): Bins {
+  if (widthOf(bins)) {
     const { step: width, start } = bins as { step: number; start?: number };
     // Without a start, edges are multiples of the step, the same for every
     // batch of appended rows.
     const edge = binEdgesOf(start ?? 0, width);
     const first = edge(0);
-    for (let i = 0; i < n; i++) {
-      const value = values[i]!;
-      let k = Math.floor((value - first) / width);
-      if (!Number.isFinite(k) || (start !== undefined && value < start)) {
-        starts[i] = Number.NaN;
-        if (ends) ends[i] = Number.NaN;
-        continue;
-      }
-      // Past 2 ** 53 bins from the start, bin numbers are not exact: each value
-      // starts its own bin, so no bin starts above its values.
-      if (!Number.isSafeInteger(k)) {
-        starts[i] = value;
-        if (ends) ends[i] = value + width;
-        continue;
-      }
-      // A value belongs to the bin whose edges hold it; division can put one
-      // just below an edge it is on (0.3 / 0.1 is 2.999…).
-      if (edge(k + 1) <= value) k++;
-      else if (edge(k) > value) k--;
-      starts[i] = edge(k);
-      if (ends) ends[i] = edge(k + 1);
-    }
-  } else {
-    const edges = binEdges(bins, finiteRange(values, undefined), BINS);
-    const even = Array.isArray(bins) ? 0 : evenStep(edges);
-    for (let i = 0; i < n; i++) {
-      const value = values[i]!;
+    const own = Number.POSITIVE_INFINITY;
+    return {
+      numberOf(value) {
+        let k = Math.floor((value - first) / width);
+        if (!Number.isFinite(k) || (start !== undefined && value < start)) return Number.NaN;
+        if (!Number.isSafeInteger(k)) return own;
+        // A value belongs to the bin whose edges hold it; division can put one
+        // just below an edge it is on (0.3 / 0.1 is 2.999…).
+        if (edge(k + 1) <= value) k++;
+        else if (edge(k) > value) k--;
+        return k;
+      },
+      startOf: (k, value) => (k === own ? value : Number.isNaN(k) ? k : edge(k)),
+      endOf: (k, value) => (k === own ? value + width : Number.isNaN(k) ? k : edge(k + 1)),
+    };
+  }
+  const even = Array.isArray(bins) ? 0 : evenStep(edges);
+  return {
+    numberOf(value) {
       const at =
         edges.length < 2 ? -1 : even > 0 ? evenBinOf(edges, even, value) : binOf(edges, value);
-      starts[i] = at < 0 ? Number.NaN : edges[at]!;
-      if (ends) ends[i] = at < 0 ? Number.NaN : edges[at + 1]!;
-    }
-  }
-  const binned = rows.with(name, { kind, values: starts, owned: true });
-  return ends ? binned.with(step.end!, { kind, values: ends, owned: true }) : binned;
+      return at < 0 ? Number.NaN : at;
+    },
+    startOf: (k) => (Number.isNaN(k) ? k : edges[k]!),
+    endOf: (k) => (Number.isNaN(k) ? k : edges[k + 1]!),
+  };
 }
 
 /**
@@ -651,12 +687,22 @@ function inputsOf(rows: Rows): Record<string, ColumnInput> {
   return inputs;
 }
 
-/** Runs transforms over a table's rows from position `from`. */
-function run(source: Table, transforms: readonly TransformSpec[], from = 0): Rows {
+/**
+ * Runs transforms over a table's rows from position `from`, keeping in
+ * `edges` the edges each bin of a count used (by step).
+ */
+function run(
+  source: Table,
+  transforms: readonly TransformSpec[],
+  from = 0,
+  edges: Float64Array[] = [],
+): Rows {
   let rows = rowsOf(source, from);
   transforms.forEach((step, i) => {
     try {
-      rows = apply(rows, step);
+      rows = apply(rows, step, (used) => {
+        edges[i] = used;
+      });
     } catch (error) {
       throw new Error(`transform[${i}] (${Object.keys(step)[0]}): ${(error as Error).message}`);
     }
@@ -684,37 +730,186 @@ function passesThrough(transforms: readonly TransformSpec[]): (field: string) =>
 }
 
 /**
- * A table of rows derived from `source` by `transforms`, kept current as the
- * source changes. The derived table keeps its source alive; the source holds
- * the derived table only weakly, so one no longer referenced stops following.
+ * `condition`, on the fields of the rows `steps` made from a table, written
+ * on that table's fields: true for exactly the rows behind the rows it
+ * holds (provenance, data/lineage.ts). Read from the last step back: a
+ * filter adds its condition; a calculated field is its expression; a bin
+ * compared with numbers is the binned field compared with the values where
+ * bins start (`edges[i]`, step i's edges, as last computed); an
+ * aggregate's grouping fields stay as they are; a sort changes nothing.
+ * Null where no condition says it: the rows a rolling window read, an
+ * aggregate's results, a bin read otherwise than compared with a number.
  */
-/** How a derived table was made: its source, and the transform steps it ran, in order. */
-export interface Lineage {
-  readonly source: Table;
-  readonly steps: readonly TransformSpec[];
+function back(
+  steps: readonly TransformSpec[],
+  edges: readonly Float64Array[],
+  condition: Expression,
+): Expression | null {
+  let at: Expression | null = condition;
+  for (let i = steps.length - 1; i >= 0 && at !== null; i--) {
+    const step = steps[i]!;
+    if ("filter" in step) at = ["and", at, step.filter];
+    else if ("calculate" in step) at = replaced(at, step.as, () => kept(step.calculate)) ?? null;
+    else if ("bin" in step) at = unbinned(at, step, edges[i]);
+    else if ("aggregate" in step) {
+      const results = step.aggregate.map(({ as }) => as);
+      at =
+        replaced(at, undefined, (e) =>
+          results.includes(e[1] as string) ? undefined : (e as Expression),
+        ) ?? null;
+    } else if ("rolling" in step) at = null;
+  }
+  return at;
 }
 
-/** Derived tables' lineage, kept as long as they are (the steps are the caller's own). */
-const lineages = new WeakMap<Table, Lineage>();
+/**
+ * `e` with each read of field `name` (of every field, for undefined)
+ * replaced by `by` of it; undefined where `by` gives undefined for one.
+ */
+function replaced(
+  e: Expression,
+  name: string | undefined,
+  by: (field: readonly [string, ...Expression[]]) => Expression | undefined,
+): Expression | undefined {
+  if (!Array.isArray(e)) return e;
+  const [op, ...args] = e as readonly [string, ...Expression[]];
+  if (op === "field")
+    return name === undefined || args[0] === name ? by(e as never) : (e as Expression);
+  const out: Expression[] = [];
+  for (const arg of args) {
+    const each = replaced(arg, name, by);
+    if (each === undefined) return undefined;
+    out.push(each);
+  }
+  return [op, ...out] as never;
+}
+
+const TRUTHS = ["==", "!=", "<", "<=", ">", ">=", "and", "or", "not", "in", "missing"];
 
 /**
- * How `table` was derived (`deriveTable`, `derive(...).table()`, a spec's
- * `{ source, transform }`), or undefined for a table that was not: what
- * provenance rewrites conditions through.
+ * `e` as a calculation keeps it: truth values as 1 and 0, a missing one
+ * (an `if`'s null branch) as missing, anything else as it is.
  */
-export function lineageOf(table: Table): Lineage | undefined {
-  return lineages.get(table);
+function kept(e: Expression): Expression {
+  if (typeof e === "boolean") return e ? 1 : 0;
+  if (!Array.isArray(e)) return e;
+  const [op, test, yes, no] = e as readonly Expression[];
+  if (op === "if") return ["if", test!, kept(yes!), kept(no!)] as Expression;
+  return TRUTHS.includes(op as string) ? ["if", e, 1, 0] : e;
+}
+
+const MAX = Number.MAX_VALUE;
+const FLIP: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": "<=" };
+
+/**
+ * Of the values from `yes`, where `holds`, toward `no`, where it does not,
+ * the last where it does, found by halving: `holds` turns once between.
+ */
+function turn(yes: number, no: number, holds: (value: number) => boolean): number {
+  for (;;) {
+    const mid = yes / 2 + no / 2;
+    if (mid === yes || mid === no) return yes;
+    if (holds(mid)) yes = mid;
+    else no = mid;
+  }
+}
+
+/**
+ * `condition` on rows binned by `step`, written on the rows before it:
+ * each comparison of the bins' starts with a number (or null, for rows in
+ * no bin) as the binned field between the values where that holds, which
+ * `binsOf` finds by placing values as `bin` does (a greater value is never
+ * in an earlier bin), so missing values and values outside the bins fall
+ * where they are; null where it reads a bin otherwise, or its end.
+ * `counted` are the edges bins of edges last used.
+ */
+function unbinned(
+  condition: Expression,
+  step: { bin: string; bins?: BinSpec; as?: string; end?: string },
+  counted: Float64Array | undefined,
+): Expression | null {
+  const name = step.as ?? step.bin;
+  const field = ["field", step.bin] as const;
+  const { bins } = step;
+  const edges = counted ?? Float64Array.from(Array.isArray(bins) ? (bins as number[]) : []);
+  const place = binsOf(bins, edges);
+  const startAt = (value: number) => place.startOf(place.numberOf(value), value);
+  const placed = (value: number) => !Number.isNaN(place.numberOf(value));
+  // A value in a bin, and the least and greatest values in one.
+  const inside = widthOf(bins)
+    ? ((bins as { start?: number }).start ?? 0)
+    : edges.length > 1
+      ? edges[0]
+      : undefined;
+  const low = inside === undefined || placed(-MAX) ? -MAX : turn(inside, -MAX, placed);
+  const high = inside === undefined || placed(MAX) ? MAX : turn(inside, MAX, placed);
+  /** The least value in a bin whose start passes `test`; undefined for none. */
+  const from = (test: (start: number) => boolean): number | undefined =>
+    inside === undefined || !test(startAt(high))
+      ? undefined
+      : test(startAt(low))
+        ? low
+        : turn(high, low, (value) => test(startAt(value)));
+  /** Values from `a` up to `b`, or to the greatest in a bin for none. */
+  const between = (a: number | undefined, b?: number): Expression =>
+    a === undefined || a === b
+      ? false
+      : ["and", [">=", field, a], b === undefined ? ["<=", field, high] : ["<", field, b]];
+  const binned = between(inside === undefined ? undefined : low);
+  // False once the condition reads the bins otherwise.
+  let exact = true;
+  /** The rows whose bin's start compares with `c` as `op` says; undefined where none says it. */
+  const compared = (op: string, c: Expression): Expression | undefined => {
+    if (c === null) return op === "==" ? ["not", binned] : op === "!=" ? binned : undefined;
+    if (typeof c !== "number" || !Number.isFinite(c) || !(op in FLIP || op === "==" || op === "!="))
+      return undefined;
+    // Values from which bins start at c or above, and above it.
+    const atOrAbove = from((start) => start >= c);
+    const above = from((start) => start > c);
+    if (op === "==" || op === "!=") {
+      const bin = between(atOrAbove, above);
+      return op === "==" ? bin : ["not", bin];
+    }
+    if (op === ">=") return between(atOrAbove);
+    if (op === ">") return between(above);
+    return between(inside === undefined ? undefined : low, op === "<" ? atOrAbove : above);
+  };
+  const named = (x: Expression | undefined) =>
+    Array.isArray(x) && x[0] === "field" && x[1] === name;
+  const read = (e: Expression): Expression => {
+    if (!Array.isArray(e)) return e;
+    const [op, a, b, ...rest] = e as readonly [string, ...Expression[]];
+    let found: Expression | undefined;
+    if (op === "missing" && named(a)) found = ["not", binned];
+    else if (op === "in" && named(a)) {
+      const each = [b!, ...rest].map((c) => compared("==", c));
+      if (!each.includes(undefined)) found = ["or", ...(each as Expression[])];
+    } else if (rest.length === 0 && named(a)) found = compared(op, b!);
+    else if (rest.length === 0 && named(b)) found = compared(FLIP[op] ?? op, a!);
+    if (found !== undefined) return found;
+    if (op === "field" && (a === name || a === step.end)) exact = false;
+    return [op, ...(e as Expression[]).slice(1).map(read)] as never;
+  };
+  const out = read(condition);
+  return exact ? out : null;
 }
 
 /** Stops a collected derived table's subscription to its source. */
 const followers = new FinalizationRegistry<() => void>((stop) => stop());
 
+/**
+ * A table of rows derived from `source` by `transforms`, kept current as the
+ * source changes. The derived table keeps its source alive; the source holds
+ * the derived table only weakly, so one no longer referenced stops following.
+ */
 export function deriveTable(
   source: Table,
   transforms: readonly TransformSpec[],
   options: { name?: string } = {},
 ): Table {
-  const first = run(source, transforms);
+  // The edges bins of a count used, as the rows were last computed.
+  let edges: Float64Array[] = [];
+  const first = run(source, transforms, 0, edges);
   const derived = table(
     inputsOf(first),
     options.name === undefined ? {} : { name: options.name },
@@ -728,7 +923,11 @@ export function deriveTable(
   // hold together; the source's subscription holds the derived table weakly
   // and ends when it is collected.
   setOrigin(derived, source, passesThrough(transforms));
-  lineages.set(derived, { source, steps: transforms });
+  setLineage(derived, {
+    source,
+    steps: transforms,
+    back: (condition) => back(transforms, edges, condition),
+  });
   const ref = new WeakRef(derived);
   // The source's version the derived rows hold. A change made in another
   // listener is heard before the one that listener was told of: one heard
@@ -776,7 +975,8 @@ export function deriveTable(
       });
       return;
     }
-    const rows = run(source, transforms);
+    edges = [];
+    const rows = run(source, transforms, 0, edges);
     ids = incremental ? Array.from(rows.ids ?? []) : [];
     idStart = 0;
     read = source.rowOffset + source.length;
@@ -802,31 +1002,6 @@ function batchOf(rows: Rows): Record<string, ArrayLike<unknown>> {
   }
   return batch;
 }
-
-/** An aggregate operation and the field it reads; `count()` reads none. */
-export interface Aggregation<F extends string = string> {
-  op: AggregateOp;
-  field?: F;
-}
-
-/** Counts rows; with a field, its finite values. */
-export function count(): { readonly op: "count" };
-export function count<F extends string>(field: F): { readonly op: "count"; readonly field: F };
-export function count(field?: string) {
-  return field === undefined ? { op: "count" } : { op: "count", field };
-}
-export const sum = <F extends string>(field: F) => ({ op: "sum", field }) as const;
-export const mean = <F extends string>(field: F) => ({ op: "mean", field }) as const;
-export const median = <F extends string>(field: F) => ({ op: "median", field }) as const;
-export const min = <F extends string>(field: F) => ({ op: "min", field }) as const;
-export const max = <F extends string>(field: F) => ({ op: "max", field }) as const;
-export const q1 = <F extends string>(field: F) => ({ op: "q1", field }) as const;
-export const q3 = <F extends string>(field: F) => ({ op: "q3", field }) as const;
-export const stdev = <F extends string>(field: F) => ({ op: "stdev", field }) as const;
-export const variance = <F extends string>(field: F) => ({ op: "variance", field }) as const;
-export const distinct = <F extends string>(field: F) => ({ op: "distinct", field }) as const;
-export const first = <F extends string>(field: F) => ({ op: "first", field }) as const;
-export const last = <F extends string>(field: F) => ({ op: "last", field }) as const;
 
 /** The kind of a calculated field: text makes categories; numbers and truth values numbers. */
 type CalculatedKind<K> = K extends "string" ? "category" : K extends "value" ? FieldKind : "number";

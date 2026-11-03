@@ -3,8 +3,8 @@
 // absent combinations told from missing ones, dense and sparse indexes,
 // limits refused before anything grows, and streaming.
 import { describe, expect, it, vi } from "vitest";
+import { count, max, mean, min, sum } from "../../src/data/aggregations.ts";
 import { category, encodedCategory, time } from "../../src/data/column.ts";
-import { count, max, mean, min, sum } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { GroupLevel } from "../../src/data/group-levels.ts";
 import { RowGroups } from "../../src/data/groups.ts";

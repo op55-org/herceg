@@ -119,6 +119,21 @@ never geometry made again from current data.
   the row picked when read. Each input event keeps the panels drawn as it
   was captured, so writing it as JSON later (`web/events.ts`) reads the
   axes it acted on.
+- **Provenance.** A click's, context menu's, or Enter's item target gets
+  `provenance` and `rows()` when the input is captured, before listeners
+  run (`model/provenance.ts`, in the picker's chunk; hover never builds
+  them): groups through `Mark.groupsOf` and the facet's values, the
+  condition through `itemCondition` ([marks](marks.md#items)), and the
+  source condition through `sourceOf` ([lineage](data.md#derived-tables)).
+  `rows()` takes the item's positions then (a layout item's through
+  `ItemViews.rowsAt`, a sector a drill leaves too; an aggregate's or a
+  cell's from the point picked, through `model/point-rows.ts`, which
+  clicks' row selections use too; others by key) and keeps their
+  identities with the table's generation; reading it finds them again (a table kept in
+  order in one pass, others by `positionOf`), so rows appended since are
+  not among them and rows dropped are left out. Selections' `conditions`
+  use the same item conditions and lineage, in a chunk the state module
+  and the picker share.
 
 ## The interaction controller
 

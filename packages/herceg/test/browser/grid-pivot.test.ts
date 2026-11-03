@@ -4,8 +4,8 @@
 // a pivot that stopped at a limit.
 import { afterEach, describe, expect, it } from "vitest";
 import { userEvent } from "vitest/browser";
+import { count, mean } from "../../src/data/aggregations.ts";
 import { category } from "../../src/data/column.ts";
-import { count, mean } from "../../src/data/derive.ts";
 import type { NamedAggregate } from "../../src/data/groups.ts";
 import { pivotColumnId, pivotRows } from "../../src/data/pivot.ts";
 import { rowView } from "../../src/data/row-view.ts";

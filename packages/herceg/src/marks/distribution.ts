@@ -13,6 +13,7 @@ import {
   table,
 } from "../data/table.ts";
 import { clearDomain } from "../model/clearance.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
 import type { BoxenSpec, BoxPlotSpec, Clip, Frozen, ViolinSpec } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
@@ -227,6 +228,27 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
     this.tooltip = this.horizontal ? "y" : "x";
     // Shapes stand for their series field's values, or for the value field.
     this.identity = { field: spec.series, values: [this.value] };
+  }
+
+  /**
+   * What the shape keyed `key` groups by (marks/lookups.ts names it by its
+   * category, after its series' value): its category, its series', and
+   * rows whose values (`counted`) the statistics count, finite ones.
+   */
+  groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    const parts = JSON.parse(key) as (string | null)[];
+    const { series } = this.spec;
+    if (parts.length !== (series === undefined ? 2 : 3)) return undefined;
+    const groups: ProvenanceGroup[] = [{ field: this.category, value: parts.at(-1)! }];
+    if (series !== undefined) groups.push({ field: series, value: parts[1]! });
+    for (const field of this.counted())
+      groups.push({ field, from: -Number.MAX_VALUE, to: Number.MAX_VALUE, closed: true });
+    return groups;
+  }
+
+  /** The fields a row needs finite values of to count (see `acceptsRow`). */
+  protected counted(): readonly string[] {
+    return [this.value];
   }
 
   /** What to keep of a group's ascending, finite values besides `stats`. */

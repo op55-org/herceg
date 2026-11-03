@@ -39,8 +39,9 @@ import type { ItemViews } from "./item-views.ts";
 import type { KeyPart } from "./items.ts";
 import type { Nearest } from "./nearest.ts";
 
-// Events name what was picked by its item key, which loads with picking.
 export { itemResolver } from "./items.ts";
+// Events name what was picked by its item key, which loads with picking.
+export { provenanceOf, rowsOfItem } from "./provenance.ts";
 
 import type { ChartModel } from "./model.ts";
 

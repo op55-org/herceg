@@ -1,3 +1,4 @@
+import type { Expression } from "../data/expression.ts";
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { textDrawing } from "../draw/labels.ts";
@@ -15,6 +16,7 @@ import {
 } from "../layout/sankey.ts";
 import { labelFor, oneLineText } from "../layout/text.ts";
 import { ItemViews } from "../model/item-views.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import { isLightColor } from "../scale/color.ts";
 import type {
@@ -35,6 +37,7 @@ import {
   type LayoutItem,
   type LayoutMark,
   type LayoutResult,
+  positive,
   RowsCache,
   SelectionCache,
   SoleRows,
@@ -302,6 +305,19 @@ export class SankeyMark implements LayoutMark {
     return layout;
   }
 
+  /**
+   * What the link keyed `key` groups by: its source and target, and with a
+   * value, rows of a positive one. A node, none of its fields alone (see
+   * its layout's `conditionOf`).
+   */
+  groupsOf(key: string): ProvenanceGroup[] | undefined {
+    const [, from, to, ...rest] = JSON.parse(key) as string[];
+    const { source, target, value } = this.spec;
+    return to === undefined || rest.length > 0
+      ? undefined
+      : [{ field: source, value: from! }, { field: target, value: to }, ...positive(value)];
+  }
+
   /** Nodes are labeled where they are drawn, so there is no legend. */
   legend(): LegendEntry[] {
     return [];
@@ -544,6 +560,31 @@ export class SankeyMark implements LayoutMark {
             rows.push(row);
         });
         return rows;
+      },
+      // A node's rows: of the links drawn into and out of it, of a positive value.
+      conditionOf: (key, table) => {
+        const found = table === this.table ? find(key) : undefined;
+        if (found?.link !== undefined || !found) return undefined;
+        const { node } = found;
+        const pairs: Expression[] = [];
+        for (let at = 0; at < status.length; at++)
+          if (status[at] === DRAWN && (source[at] === node || target[at] === node))
+            pairs.push([
+              "and",
+              ["==", ["field", this.spec.source], names[source[at]!]!],
+              ["==", ["field", this.spec.target], names[target[at]!]!],
+            ]);
+        const held: Expression =
+          pairs.length === 0 ? false : pairs.length === 1 ? pairs[0]! : ["or", ...pairs];
+        const value = this.spec.value;
+        return value === undefined
+          ? held
+          : [
+              "and",
+              held,
+              [">=", ["field", value], Number.MIN_VALUE],
+              ["<=", ["field", value], Number.MAX_VALUE],
+            ];
       },
       soleRow: (key, table) => {
         const found = table === this.table ? find(key) : undefined;

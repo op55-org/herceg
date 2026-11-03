@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Literal, TypeVar
 
 from ._data import _time_ms, listlike
+from ._derive import Expr
 from ._errors import (
     ChartError,
     Hint,
@@ -246,6 +247,81 @@ class Pointer:
 
 
 @dataclass(frozen=True)
+class ValueGroup:
+    """A value an item groups by: rows whose ``field`` holds ``value`` (a
+    datetime on time fields; None for rows missing one)."""
+
+    field: str
+    value: str | float | _dt.datetime | None
+
+
+@dataclass(frozen=True)
+class IntervalGroup:
+    """An interval an item groups by, such as a bin: rows whose ``field`` is
+    from ``start`` up to ``end``, and at ``end`` too where ``closed`` (as the
+    last bin of a binning holds its right edge); datetimes on time fields."""
+
+    field: str
+    start: float | _dt.datetime
+    end: float | _dt.datetime
+    closed: bool = False
+
+
+#: One thing an item groups by: a value of a field, or an interval of one.
+ProvenanceGroup = ValueGroup | IntervalGroup
+
+
+def _same(a: Expr | None, b: Expr | None) -> bool:
+    """Whether two conditions are the same expression (or both none)."""
+    return a.to_json() == b.to_json() if a is not None and b is not None else a is b
+
+
+@dataclass(frozen=True, eq=False)
+class ProvenanceSource:
+    """An item's condition written on the table its mark's data was derived
+    from first of all (``hg.derive``): that table's name (None for a table
+    without one) and the ``condition`` its rows there meet, None where no
+    condition says exactly which rows those are (a rolling window's)."""
+
+    table: str | None
+    condition: Expr | None
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, ProvenanceSource)
+            and self.table == other.table
+            and _same(self.condition, other.condition)
+        )
+
+
+@dataclass(frozen=True, eq=False)
+class Provenance:
+    """What a clicked item stands for in its data (``event.target.provenance``
+    on clicks, secondary presses, and Enter, never on hover): the ``groups`` it
+    groups by on its mark's data (its position's category or bin, its
+    series' value, a node's path, its ``item_key`` value, its facet panel's
+    values, and what rows need to count: finite values, usable weights), the
+    ``condition`` its rows there meet (with a view's filter;
+    None where no condition says them exactly, as for a row without
+    ``item_key``), and that condition through derived tables (``source``,
+    None where the mark's data is not derived). Conditions are the same
+    expressions the browser writes; forward ``condition.to_json()`` or use
+    them as ``hg.view`` filters."""
+
+    groups: tuple[ProvenanceGroup, ...]
+    condition: Expr | None
+    source: ProvenanceSource | None
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, Provenance)
+            and self.groups == other.groups
+            and _same(self.condition, other.condition)
+            and self.source == other.source
+        )
+
+
+@dataclass(frozen=True)
 class ItemTarget:
     """A mark's item under the pointer or keyboard cursor: a bar, a point, a
     line's observation, a cell, a slice. ``mark`` is the mark's index among
@@ -263,6 +339,8 @@ class ItemTarget:
     panel: str
     #: Where it is drawn: its box, or a line's observation's point.
     box: Box
+    #: What it stands for, on clicks and secondary presses (see ``Provenance``); None on hover.
+    provenance: Provenance | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +488,7 @@ def _target(payload: Any) -> Target | None:
             row=row,
             panel=text("panel"),
             box=_box(payload.get("box")),
+            provenance=_provenance(payload.get("provenance")),
         )
     if kind == "axisLabel":
         scale, value = payload.get("scale"), payload.get("value")
@@ -430,6 +509,48 @@ def _target(payload: Any) -> Target | None:
         return PlotTarget(panel=text("panel"))
     raise ValueError(
         f'target kind: expected "item", "axisLabel", "legendEntry", or "plot", not {kind!r}'
+    )
+
+
+def _provenance(payload: Any) -> Provenance | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected a provenance, not {payload!r}")
+    groups, source = payload.get("groups"), payload.get("source")
+    if not (
+        isinstance(groups, list)
+        and "condition" in payload
+        and (source is None or (isinstance(source, dict) and "condition" in source))
+    ):
+        raise ValueError(f"expected a provenance's groups, condition, and source, not {payload!r}")
+
+    def group(each: Any) -> ProvenanceGroup:
+        if not (isinstance(each, dict) and isinstance(each.get("field"), str)):
+            raise ValueError(f"provenance group: expected a field, not {each!r}")
+        time = each.get("time") is True
+        if "value" in each:
+            value = each["value"]
+            if not (value is None or isinstance(value, str) or _finite(value)):
+                raise ValueError(f"provenance group value: expected a value, not {value!r}")
+            return ValueGroup(each["field"], _value(value, time))
+        start, end = each.get("from"), each.get("to")
+        if not (_finite(start) and _finite(end)) or start is None or end is None:
+            raise ValueError(f"provenance group: expected a value, or from and to, not {each!r}")
+        return IntervalGroup(
+            each["field"], _time(start, time), _time(end, time), each.get("closed") is True
+        )
+
+    def condition(json: Any) -> Expr | None:
+        return None if json is None else Expr(json)
+
+    table = source.get("table") if source else None
+    if table is not None and not isinstance(table, str):
+        raise ValueError(f"provenance source table: expected a name, not {table!r}")
+    return Provenance(
+        groups=tuple(group(each) for each in groups),
+        condition=condition(payload["condition"]),
+        source=ProvenanceSource(table, condition(source["condition"])) if source else None,
     )
 
 

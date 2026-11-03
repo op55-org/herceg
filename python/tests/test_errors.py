@@ -365,6 +365,8 @@ READ |= {"LegendEntryTarget", "PlotTarget"}
 READ |= {"ItemSelection", "SeriesSelection", "ItemReference", "SeriesReference"}
 # Pins, which events report and widgets take, and moves of items.
 READ |= {"PinTarget", "ItemMove", "ItemPosition"}
+# What a clicked item stands for, which click events report.
+READ |= {"Provenance", "ProvenanceSource", "ValueGroup", "IntervalGroup"}
 
 
 # Fields that replace what an object is given above, which are refused together.

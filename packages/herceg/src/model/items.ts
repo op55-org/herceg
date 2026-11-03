@@ -21,13 +21,20 @@ export interface ItemHint {
 }
 
 /**
- * One thing an aggregate item groups by on its mark's table: a value of a
- * field, or an interval of one, `from` included and `to` excluded (`to`
- * too where `closed`, as the last bin of a binning holds its right edge).
+ * One thing an item groups by on its mark's table: a value of a field, or
+ * an interval of one, `from` included and `to` excluded (`to` too where
+ * `closed`, as the last bin of a binning holds its right edge); epoch ms
+ * on time fields, which a click's provenance marks `time`.
  */
-export type LocalGroup =
-  | { readonly field: string; readonly value: string | number | null }
-  | { readonly field: string; readonly from: number; readonly to: number; readonly closed?: true };
+export type ProvenanceGroup =
+  | { readonly field: string; readonly value: string | number | null; readonly time?: true }
+  | {
+      readonly field: string;
+      readonly from: number;
+      readonly to: number;
+      readonly closed?: true;
+      readonly time?: true;
+    };
 
 /** A table row as a mark draws it: with its series where it has one (annotations' rows have none). */
 export interface ItemRow {
@@ -224,7 +231,7 @@ function positionsOf(table: Table, field: string, value: string | number): Uint3
 }
 
 /** The positions of rows in every one of `groups` (values compared as `positionsOf` does). */
-function rowsIn(table: Table, groups: readonly LocalGroup[]): Uint32Array {
+function rowsIn(table: Table, groups: readonly ProvenanceGroup[]): Uint32Array {
   const tests = groups.map((group): ((row: number) => boolean) => {
     if (!table.has(group.field)) return () => false;
     if ("value" in group) {

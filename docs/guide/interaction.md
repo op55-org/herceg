@@ -496,7 +496,7 @@ chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer
 | Event | Reports |
 | --- | --- |
 | `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`); with state support, `state`. A map's or network's view is its plane's ranges. |
-| `select` | The `selection` ([Selections](#selections)), its `phase` (`"preview"`, `"commit"`, `"cancel"`), a brush's `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table; with [state support](#chart-state), `basis`, `state`, and `conditions`. |
+| `select` | The `selection` ([Selections](#selections)), its `phase` (`"preview"`, `"commit"`, `"cancel"`), a brush's `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table; with [state support](#chart-state), `basis`, `state`, and `conditions` (each table's condition, and its `source` through [derived tables](data.md#derived-tables)). |
 | `hover` | What the pointer or keyboard cursor is on, or what inspection reads there, changed: an input event (below). A cursor another chart shares (cause `"sync"`) or `showCursor` shows (`"api"`) reports once drawn. |
 | `click` | A press released without moving on a plot, an item, an axis label, or a legend entry, or Enter on the keyboard cursor (cause `"keyboard"`): an input event; with `rowSelection`, `rows`. |
 | `contextMenu` | A secondary press (a right click, a long press): an input event with its `pointer`. While a listener listens, the browser's own menu stays off the plots and items (not off axes or legends). |
@@ -553,6 +553,74 @@ chart.on("select", ({ revision }) => {
 - `inspection`: what [`inspection`](#inspection) reads there; undefined
   where it reads nothing, and for the pointer with `inspection: false`.
 - `revision`: the frame the input acted on, what the user saw.
+
+**What a clicked item stands for.** On `click`, `contextMenu`, and Enter
+(never on `hover`), an item target also carries `provenance` and `rows()`,
+taken as the input found them:
+
+```ts
+const days = table({ day: dayStarts, region, revenue }, { name: "days" });
+const monthly = derive(days)
+  .bin("day", { bins: monthStarts, as: "month" })
+  .aggregate({ by: ["month", "region"], ops: { revenue: sum("revenue") } })
+  .table();
+const chart = createChart(element, { marks: [bar(monthly, { x: "month", y: "revenue", series: "region" })] });
+chart.on("click", ({ target }) => {
+  if (target?.kind !== "item" || !target.provenance) return;
+  const { groups, condition, source } = target.provenance;
+  // groups: [{ field: "month", value: <Feb 1> }, { field: "region", value: "North" }]
+  // source: { table: "days", condition: ["and", ["and", [">=", ["field", "day"], <Feb 1>],
+  //   ["<", ["field", "day"], <Mar 1>]], ["==", ["field", "region"], "North"]] }
+  if (source?.condition) drillToDays(source.condition); // a product's query
+  else if (condition) detail.setQuery({ filter: condition }); // a row view of the same table
+  const { table, positions } = target.rows!();
+});
+```
+
+- `groups`: what the item groups by on its mark's table, `{ field, value }`
+  or an interval `{ field, from, to, closed? }` (`from` included, `to`
+  excluded, and included too where `closed`: the last bin of a binning),
+  with `time: true` where the field holds times (epoch ms):
+
+  | Item | Groups |
+  | --- | --- |
+  | A bar without `itemKey` | its position's value, then its series field's value |
+  | A row of a mark with `itemKey` | its `itemKey` value |
+  | Any other row | none (its condition is null) |
+  | A histogram's bin | its interval (a cumulative bin's from the first edge), its series' value, and with `weight`, the usable weights (0 up to the largest number); none where facet panels bin it differently |
+  | A 2D histogram's cell | its bin along `x` and along `y`, and with `weight`, the usable weights |
+  | A heatmap's cell | its `x` and `y` values, and finite `color` values (the largest negative number up to the largest); cells between `x1` and `x2` and calendars' days have none |
+  | A box, violin, or boxen shape | its category, its series' value, and finite values of the field the statistics count (a precomputed box's five statistics; none where other boxes share its category) |
+  | A pie's slice | its category, and with `value`, positive values (the least positive number up to the largest) |
+  | A funnel's stage | its category |
+  | A treemap's or sunburst's node | each level's field at its name, from the top (trees of `node` and `parent` fields have none) |
+  | A Sankey link | its `source` and `target` names, and with `value`, positive values; a node has none |
+
+  In a facet's panel the facet's values follow, where the facet splits the
+  mark. With the view's filter, groups say the item's rows exactly; where
+  none do, `groups` is empty (a row without `itemKey`, a bin facet panels
+  bin differently, a Sankey node).
+- `condition`: exactly the item's rows of its mark's table, as a portable
+  expression: its groups and its mark's view's filter, and for a Sankey
+  node, the links drawn into and out of it. Null where no condition says
+  which rows: a row without `itemKey`, a view restricted to a row set, a
+  calendar's day. A condition is never approximated.
+- `source`: where the mark's table is [derived](data.md#derived-tables), the
+  condition written on the table it was derived from first of all, by
+  that table's `name`, through each step; null there where no condition
+  says the rows (a rolling window's). Undefined for a table not derived.
+- `rows()`: the item's rows of its table now, `{ table, positions }`: its
+  row; every row sharing its `itemKey` value, or its bar's position in its
+  series; an aggregate's, a cell's, or a layout item's rows as a click
+  selects them (a network node's of its nodes table); each within its
+  panel and view, with or without a condition. They are kept by identity: rows appended since are not among
+  them, rows dropped since are left out, and after a reset there are none.
+
+Provenance is worked out once per click, by code that loaded with
+picking; hover never computes it. The `select` event's `conditions` say
+items, series, and brushes the same way, each with its `source` where its
+table is derived. `herceg/web` pages and Python receive the same
+expressions (`event.target.provenance`); `rows()` stays in the browser.
 
 Items are picked as the frame on screen drew them, in paint order
 (`zIndex`, then as listed), the topmost within reach: inside bars, bins,

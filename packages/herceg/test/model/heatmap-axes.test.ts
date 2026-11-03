@@ -2,8 +2,9 @@
 // their edges from the data, the image they paint, and zoom, tooltips, the
 // keyboard, panels, and specs over them.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { count } from "../../src/data/aggregations.ts";
 import { time } from "../../src/data/column.ts";
-import { count, derive } from "../../src/data/derive.ts";
+import { derive } from "../../src/data/derive.ts";
 import { table } from "../../src/data/table.ts";
 import { estimateText } from "../../src/layout/text.ts";
 import { type HeatmapOptions, heatmap } from "../../src/marks/heatmap.ts";

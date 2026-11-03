@@ -280,6 +280,26 @@ recompute the table. Treat derived tables as read-only. A derived table
 keeps its source alive; the source holds it weakly, so one no longer
 referenced stops following once collected.
 
+**Back to the source rows.** A derived table remembers its source and
+steps, so a condition on its fields can be written on the source's: a
+clicked item's [provenance](interaction.md#events) and a selection's
+`conditions` carry it as `source`, to forward to a query of the rows
+behind a bar or a bin. Each step rewrites the condition exactly or gives
+null:
+
+| Step | The condition on the source |
+| --- | --- |
+| Filter | the condition and the filter |
+| Calculate | the calculated field replaced by its expression |
+| Bin | a comparison of the bin start with a number as one of the field with bin edges (`>=` a start, `<` the next, `<=` the last edge for edges and counts of bins), with missing values and values out of the bins where they belong; null where the condition reads the bin's `end` |
+| Aggregate | unchanged on `by` fields; null on an aggregate's outputs |
+| Sort | unchanged |
+| Rolling window | null |
+
+A table computed from another outside `derive` (a spec table naming its
+`origin`, a model's fit) is not derived: conditions on it stay on its own
+fields.
+
 TypeScript charts bundle the transforms only when they call `derive`;
 `herceg/spec` includes them (about 4.9 KiB gzip) because specs may carry
 them.

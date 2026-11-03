@@ -1,5 +1,5 @@
 {
-  "about": "Interaction in every placement: each cell `interaction.<capability>.<placement>[.<variant>]` works, proved by the engine's contract test `<id>.engine`; each case of the viewport event fixture (packages/herceg/test/fixtures/viewport-events.json) is proved by the engine as `<id>.engine` and by Python as `<id>.python`; each page event by the web tests, as its ID. `suites` names the suite each kind of proof passes in.",
+  "about": "Interaction in every placement: each cell `interaction.<capability>.<placement>[.<variant>]` works, proved by the engine's contract test `<id>.engine`; each case of the viewport and provenance event fixtures (packages/herceg/test/fixtures/viewport-events.json, provenance-events.json) is proved by the engine as `<id>.engine` and by Python as `<id>.python`; each page event by the web tests, as its ID. `suites` names the suite each kind of proof passes in.",
   "suites": {
     "cells": "herceg-browser",
     "fixture": "herceg-browser",
@@ -18,7 +18,11 @@
     "interaction.set-viewport.subplots.right-y",
     "interaction.set-viewport.facets",
     "interaction.set-viewport.insets",
-    "interaction.set-viewport.chart.category"
+    "interaction.set-viewport.chart.category",
+    "interaction.provenance.chart.derived",
+    "interaction.provenance.chart.derived-last-bin",
+    "interaction.provenance.chart.histogram",
+    "interaction.provenance.chart.rolling"
   ],
   "cells": [
     "interaction.zoom-x.chart",
@@ -105,7 +109,8 @@
     "interaction.navigator.chart.marks-refused",
     "interaction.early-input.subplots",
     "interaction.rapid-gestures.subplots",
-    "interaction.viewport-event.subplots.reentrant"
+    "interaction.viewport-event.subplots.reentrant",
+    "interaction.provenance.chart"
   ],
   "web": [
     "web.events.viewport",

@@ -5,6 +5,7 @@ import { areaDrawing } from "../draw/area.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { rectDrawing } from "../draw/rect.ts";
 import { segmentDrawing } from "../draw/segments.ts";
+import type { ProvenanceGroup } from "../model/items.ts";
 import type {
   AreaGeometry,
   Geometry,
@@ -148,6 +149,38 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
       (stat) =>
         stat === "count" || Number.isFinite(this.table.numbers(this.spec[stat]! as never)[row]!),
     );
+  }
+
+  /**
+   * A raw box groups as distributions do; a precomputed one is its row,
+   * which its category, series, and statistics name only where no other
+   * box of the rows read shares them.
+   */
+  override groupsOf(key: string): readonly ProvenanceGroup[] | undefined {
+    const groups = super.groupsOf(key);
+    if (!groups || this.spec.median === undefined) return groups;
+    const table = this.table;
+    const [category, series] = [groups[0]!, this.spec.series === undefined ? undefined : groups[1]];
+    const codeOf = (group: ProvenanceGroup) => {
+      const { codes, dictionary } = table.categories(group.field as never);
+      return [codes, dictionary.indexOf((group as { value: string }).value)] as const;
+    };
+    const [categories, c] = codeOf(category);
+    const [seriesCodes, s] = series ? codeOf(series) : [undefined, -1];
+    const read = this.rows().positions;
+    let boxes = 0;
+    for (let k = 0, n = read ? read.length : table.length; k < n && boxes < 2; k++) {
+      const row = read ? read[k]! : k;
+      if (categories[row] === c && (!seriesCodes || seriesCodes[row] === s) && this.acceptsRow(row))
+        boxes++;
+    }
+    return boxes === 1 ? groups : undefined;
+  }
+
+  protected override counted(): readonly string[] {
+    const { spec } = this;
+    if (spec.median === undefined) return super.counted();
+    return STATS.flatMap((stat) => (stat === "count" ? [] : [spec[stat]! as string]));
   }
 
   /** A precomputed box is the row of its statistics; a raw one, its group's rows. */
