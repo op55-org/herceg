@@ -160,7 +160,9 @@ describe.each(engines)("web pages in %s", (engine) => {
     expect(first[ENTRY]).toBe(1);
     for (const chunk of manifest.preload) expect(first[`/_herceg/${chunk}`]).toBe(1);
     // Files of the engine never change under their names: another page
-    // takes them from the cache, without asking.
+    // takes them from the cache, without asking. The first page's lazy
+    // chunks finish loading first, so leaving it aborts none mid-fetch.
+    await page.waitForLoadState("networkidle");
     await page.goto(`${origin}/test/page?n=10&kinds=bar`);
     await events(page, "herceg:ready", 10);
     const second = await hits();
