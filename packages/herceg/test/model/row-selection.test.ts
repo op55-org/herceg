@@ -30,6 +30,7 @@ import { ChartError } from "../../src/spec/errors.ts";
 import type { BrushSpec, PanelInteractionSpec } from "../../src/spec/spec.ts";
 import type { BrushSelection as Selection } from "../../src/spec/state.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>): Table => typed(columns) as unknown as Table;
@@ -399,7 +400,7 @@ describe("the rows gestures select", () => {
   // Clicks pick what custom marks draw once their items are recorded (contract 3C).
   it.skip("of custom marks clicked, as of points", () => {
     const model = customs();
-    const [px, py] = [model.xScale()!.map(3), model.yScale()!.map(12)];
+    const [px, py] = [xScale(model)!.map(3), yScale(model)!.map(12)];
     expect(
       Array.from(clickedRows(withPicker(model), new Set([trips]), px, py)?.rows ?? []),
     ).toEqual([2]);
@@ -422,8 +423,8 @@ describe("the rows gestures select", () => {
     });
     const model = drawn({ marks: [candles] });
     const tables = new Set([prices]);
-    const x = model.xScale()!.map(2);
-    const y = model.yScale()!;
+    const x = xScale(model)!.map(2);
+    const y = yScale(model)!;
     // Its wick above the body, and the body's edge away from its middle.
     for (const [px, py] of [
       [x, y.map(38)],

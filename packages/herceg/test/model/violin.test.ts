@@ -19,6 +19,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { legendOf } from "../helpers/guides.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 
 const latency = table({
   region: ["n", "n", "n", "n", "n", "s", "s", "s", "s", "s", "s", "s", "s"],
@@ -71,7 +72,7 @@ describe("violin", () => {
     expect(medians[0]!.fill).toBe("#ffffff");
     // The y domain reaches two bandwidths past the extreme values.
     const tail = 100 + 2 * silverman([8, 9, 10, 11, 100]);
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(tail);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(tail);
   });
 
   it("makes every violin as wide at its densest", () => {
@@ -101,7 +102,7 @@ describe("violin", () => {
 
   it("lays violins along y when the categories are on y", () => {
     const { scene, model } = build({ marks: [violin(latency, { x: "ms", y: "region" })] });
-    expect(model.yScale()!.type).toBe("band");
+    expect(yScale(model)!.type).toBe("band");
     expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     const { upper, lower } = geometry<AreaGeometry>(scene, "area")[0]! as AreaGeometry & {
       lower: Polyline;
@@ -126,7 +127,7 @@ describe("violin", () => {
 
     const wide = build({ marks: [violin(flat, { x: "g", y: "v", bandwidth: 5 })] });
     expect(geometry<AreaGeometry>(wide.scene, "area")[0]!.upper.starts).toHaveLength(2);
-    const [lo, hi] = wide.model.yScale()!.domain;
+    const [lo, hi] = yScale(wide.model)!.domain;
     expect(lo).toBeLessThanOrEqual(1 - 10);
     expect(hi).toBeGreaterThanOrEqual(4 + 10);
   });
@@ -141,7 +142,7 @@ describe("violin", () => {
       marks: [violin(signed, { x: "v", y: "g" })],
       x: { type: "log", nice: false },
     });
-    for (const scale of [vertical.model.yScale()!, horizontal.model.xScale()!]) {
+    for (const scale of [yScale(vertical.model)!, xScale(horizontal.model)!]) {
       // The median, 0.001, is in view.
       expect(Math.min(...scale.domain)).toBeLessThanOrEqual(0.001);
       expect(Math.min(...scale.domain)).toBeGreaterThan(0);
@@ -156,7 +157,7 @@ describe("violin", () => {
         marks: [violin(straddling, { x, y, bandwidth: 10 } as never)],
         [axis]: { type: "log", nice: false },
       });
-      const scale = axis === "y" ? model.yScale()! : model.xScale()!;
+      const scale = axis === "y" ? yScale(model)! : xScale(model)!;
       expect(Math.min(...scale.domain)).toBeLessThan(2);
     }
   });
@@ -192,7 +193,7 @@ describe("violin", () => {
       y: { type: "log" },
     });
     // The density reaches below zero, which the log axis cannot place.
-    expect(model.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(model)!.domain[0]).toBeGreaterThan(0);
     const { upper } = geometry<AreaGeometry>(scene, "area")[0]!;
     expect(upper.count).toBeGreaterThan(10);
     expect(Array.from(upper.coords.subarray(0, upper.count * 2)).every(Number.isFinite)).toBe(true);
@@ -201,7 +202,7 @@ describe("violin", () => {
   it("splits by facets, and refuses data without a category axis", () => {
     const faceted = table({ g: ["a", "b"], p: ["P", "Q"], v: [1, 2] });
     const split = build({ marks: [violin(faceted, { x: "g", y: "v" })], facet: facet("p") });
-    expect(split.model.panels().map((p) => split.model.panelSeries(p.key)[0]!.length)).toEqual([
+    expect(split.model.panels().map((p) => panelSeries(split.model, p.key)[0]!.length)).toEqual([
       1, 1,
     ]);
     const numbers = table({ a: [1, 2], b: [3, 4] });

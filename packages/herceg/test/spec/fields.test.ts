@@ -168,7 +168,7 @@ describe("field displays in specs", () => {
     expect(checkSpec(rule)).toEqual(["fields[0].match.pattern"]);
   });
 
-  it("travel through JSON unchanged, and charts draw specs with them as without", () => {
+  it("travel through JSON unchanged, and charts draw specs through them", () => {
     const spec: ChartSpec = {
       data,
       width: 320,
@@ -182,8 +182,9 @@ describe("field displays in specs", () => {
     const copy = JSON.parse(JSON.stringify(spec)) as ChartSpec;
     expect(copy).toEqual(spec);
     expect(() => validateSpec(copy)).not.toThrow();
-    const { fields: _, ...without } = spec;
     const drawn = (one: ChartSpec) => specToSVG(one).replace(/herceg-svg-\d+/g, "id");
-    expect(drawn(copy)).toBe(drawn(without));
+    expect(drawn(copy)).toBe(drawn(spec));
+    expect(drawn(copy)).toContain("Latency: 4 points, from 450 B to 120 kB, last 120 kB.");
+    expect(drawn(copy)).toContain(">120 kB</text>");
   });
 });

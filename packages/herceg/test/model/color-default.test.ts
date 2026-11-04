@@ -20,12 +20,10 @@ import { contractTest } from "../helpers/contracts.ts";
 
 function build(config: ChartConfig, compilers = true) {
   const [guides, features] = compilers ? staticCompilers() : [];
-  const model = new ChartModel(
-    { locale: "en-US", timeZone: "UTC", ...config },
-    undefined,
+  const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, [
     guides,
     features,
-  );
+  ]);
   model.setSize(600, 300, 1);
   return model;
 }
@@ -200,7 +198,7 @@ describe("names of tables of value fields", () => {
         },
         false,
       );
-      expect(one.lacks()).toEqual([false, false]);
+      expect(one.lacks()).toEqual([false, false, false]);
       one.scene(estimateText);
       expect(entries(one).map(({ key }) => key)).toEqual([
         identityKey({ table: { mark: 0 } }, "v"),
@@ -218,8 +216,8 @@ describe("names of tables of value fields", () => {
       const v = entries(model)[1]!;
       expect(v.key).toBe(identityKey({ table: { mark: 1 } }, "v"));
       model.update({ marks: [line(data, { x: "t", y: "v" }), line(rows(), { x: "t", y: "v" })] });
-      expect(model.lacks()).toEqual([false, true]);
-      model.use(undefined, staticCompilers()[1]);
+      expect(model.lacks()).toEqual([false, true, false]);
+      model.use([undefined, staticCompilers()[1]]);
       model.scene(estimateText);
       expect(entries(model).map(({ key }) => key)).toEqual([
         v.key,

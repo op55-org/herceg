@@ -283,7 +283,7 @@ export class BoxenMark extends DistributionMark<BoxenSpec, Letters> {
 
   /** A group's median, quartiles, letter values, and counts, formatted as its value axis formats values. */
   pointText(series: Series, row: number, format: AxisFormat): string {
-    const f = this.horizontal ? format.x : format.y;
+    const f = this.valueFormat(series, format);
     const { stats, groups } = this.summaryOf(series);
     const stat = (name: Stat) => stats[name][row]!;
     const { k, outliers } = groups[row]!;

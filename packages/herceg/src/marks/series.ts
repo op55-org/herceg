@@ -1,11 +1,13 @@
 import { bisect } from "../data/bisect.ts";
 import type { NumericArray } from "../data/column.ts";
 import { scanExtent, type Table } from "../data/table.ts";
+import type { ChartFields } from "../fields/chart.ts";
 import type { Breaks, Mapping } from "../lod/m4.ts";
 import type { RangeExtremes, RangeIndex } from "../lod/minmax-index.ts";
 import type { TraceBuffers, TraceColumns, TraceSource } from "../lod/point-view.ts";
 import type { PointSink } from "../lod/polyline.ts";
 import type { SeriesFeatures } from "../model/features.ts";
+import type { AxisFormat } from "./mark.ts";
 
 /**
  * One drawable series: x and y columns, optionally restricted to a subset of
@@ -88,6 +90,24 @@ export interface Series {
   whole?: Series | undefined;
   /** What the feature compiler resolved for the series: its paint, tracing, and markers. */
   features?: SeriesFeatures | undefined;
+  /**
+   * How its values are written where a field's display writes them (set by
+   * the feature compiler): a writer over how the surface writes them
+   * otherwise (`fallback`, its axis' writer in the panel inspected; numbers
+   * as charts write them without one).
+   */
+  write?: ((fallback?: (value: number) => string) => (value: number) => string) | undefined;
+  /** How the low ends of its range (`y0`, or `x0` along y) are written, as `write` writes its values. */
+  write0?: Series["write"];
+  /** Its value field's description, which the text alternative reads after its first series of it. */
+  about?: string | undefined;
+  /**
+   * The chart's field displays, where it gives any, which what its mark
+   * writes of it beyond its values reads (keys, ramps, cells' values): each
+   * chart's own, whatever charts share the mark (set as series are named,
+   * or made).
+   */
+  fields?: ChartFields | undefined;
   /** For a series some of whose rows legends hide by value (marks/hidden.ts), the series with them. */
   unhidden?: Series | undefined;
   /**
@@ -192,6 +212,17 @@ export function placeAt(s: Series, axis: "x" | "y", row: number): number {
  */
 export function valueAt(s: Series, row: number): number {
   return s.values === s.y ? placeAt(s, "y", row) : s.values[row]!;
+}
+
+/**
+ * A range's tooltip text at row `row` (an error bar's, a band's): its low
+ * end and its value, along x for marks inspected along y (`along`), each
+ * as its field's display writes it over the axis' `format`.
+ */
+export function rangeText(s: Series, row: number, along: boolean, format: AxisFormat): string {
+  const axis = along ? format.x : format.y;
+  const low = (s.write0?.(axis) ?? axis)((along ? s.x0 : s.y0)![row]!);
+  return `${low} – ${(s.write?.(axis) ?? axis)(valueAt(s, row))}`;
 }
 
 /**

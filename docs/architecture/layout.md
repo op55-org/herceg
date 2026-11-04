@@ -10,6 +10,7 @@ navigator fit in. For using them, see the [layout](../guide/layout.md) and
 - [Chart layout](#chart-layout)
 - [Guides as scene items](#guides-as-scene-items)
 - [The guide compiler](#the-guide-compiler)
+- [Field displays](#field-displays)
 - [Legends and visibility](#legends-and-visibility)
 - [Panel layouts](#panel-layouts)
 - [Small multiples](#small-multiples)
@@ -120,7 +121,8 @@ configuration. What only some charts need is the **guide compiler**
 (`guides/`), which loads with them: `needsGuides` (`model/guides.ts`, in
 every bundle) says whether a configuration asks for it (ticks other than a
 count, formats other than Intl options, `scales`, `guides`, legend settings
-beyond `place` and `style`, or `zIndex`).
+beyond `place` and `style`, `zIndex`, field displays, or axis titles of
+parts).
 
 - A live chart imports it before drawing such a configuration: the first
   frame waits, exports refuse with "await chart.loading", updates keep the
@@ -152,6 +154,45 @@ beyond `place` and `style`, or `zIndex`).
   labels align by style are drawn as listed axes.
 - **Colorbars** (`guides/colorbars.ts`) draw a mark's ramp or a contour's
   bands, with ticks planned as an axis' along the bar.
+- **Field displays** (`fields`, [Field displays](../guide/fields.md)) reach
+  axes through the contexts it returns: `guides/fields.ts` finds the fields
+  marks place on each position scale, and where their displays agree, the
+  axis context takes their format below the axis' own (number axes' ticks
+  and values, time axes' values), band axes write categories through their
+  mappings (`CompiledGuides.categories`, which the model's band list
+  reads), and axis titles of parts become text. Agreement is per scale
+  name over the chart, not per panel.
+
+## Field displays
+
+The code that writes displays is a chunk of its own (`fields/compile.ts`,
+the chart's `DisplayCode` in `model/features.ts`): `fields/` (rules,
+checks, displays compiled for the chart), what axes read
+(`guides/fields.ts`), series' names and value writers
+(`marks/features/names.ts`), and labels' content
+(`marks/features/label-displays.ts`). `needsFeatures` says a configuration
+needs it where it gives `fields` or a mark names series by parts; a live
+chart loads it with the guide and feature compilers before its first
+frame, and holds it in `LOADED` (`model/guides.ts`), which the compilers
+read through their kit (`GUIDE_KIT.loaded`), so neither imports it and
+charts without displays load none of it. Static output loads it with the
+compilers (`render/compilers.ts`).
+
+- **Compiled once** per displays object, locale, and zone
+  (`chartFieldsOf`): both compilers and charts sharing displays read one
+  `ChartFields`, whose `of(table, field)` caches each field's display.
+- **Names** are set where the feature compiler attaches each series'
+  features: a series is named by its mark's `label` parts, else its value
+  field's label or its series value's text, and given its value writer
+  (`Series.write`), which inspection, the text alternative, and point
+  labels read. Legend entries several series share through a color field
+  are named by the color value's text. Identities and keys stay raw, and
+  parts join identities by their raw form.
+- **Eager readers** take what the compilers handed them: inspection and
+  the text alternative a series' writer, tooltip fields the compiled
+  displays (`CompiledFeatures.fields`), gauges, heatmaps, and points their
+  fields' displays through `useFormats`, and band axes the categories'
+  text.
 
 ## Legends and visibility
 
@@ -513,7 +554,7 @@ Renderers draw one kind of guide for every chart rather than a second,
 smaller path for unstyled ones.
 
 What only some charts need loads with them: the guide compiler, the
-feature compiler, `herceg/fonts`, color ramps' SVG with the marks whose
+feature compiler, the display code, `herceg/fonts`, color ramps' SVG with the marks whose
 legends have them, and the panel layout with subplots.
 
 ## Time axis breaks

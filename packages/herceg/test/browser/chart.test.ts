@@ -25,6 +25,7 @@ import { treemap } from "../../src/marks/treemap.ts";
 import { panels } from "../../src/model/panels.ts";
 import type { ArcGeometry, ShapesGeometry, TextShape } from "../../src/scene/scene.ts";
 import { resolveTheme } from "../../src/theme.ts";
+import { xScale, yRightScale, yScale } from "../helpers/scales.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { brief } from "../helpers/views.ts";
 import { bandBox, labelsOf, MOUSE, modelOf } from "./helpers.ts";
@@ -469,8 +470,8 @@ describe("events and brushing", () => {
     );
   }
   function drag(chart: Chart, from: number, to: number, shiftKey = false) {
-    const x = modelOf(chart).xScale()!;
-    const y = modelOf(chart).yScale()!;
+    const x = xScale(modelOf(chart))!;
+    const y = yScale(modelOf(chart))!;
     const py = (y.range[0] + y.range[1]) / 2;
     press(chart.root, "pointerdown", x.map(from), py, shiftKey);
     press(chart.root, "pointermove", x.map((from + to) / 2), py, shiftKey);
@@ -503,7 +504,7 @@ describe("events and brushing", () => {
     expect(band(chart)!.getAttribute("visibility")).toBe("visible");
     // A brush selects; it does not zoom.
     expect(chart.getViewport().x).toBeNull();
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     press(chart.root, "pointerdown", x.map(80_000), 150);
     press(chart.root, "pointerup", x.map(80_000), 150);
     await frame();
@@ -585,7 +586,7 @@ describe("events and brushing", () => {
     chart.on("hover", ({ inspection }) => hovers.push(inspection?.value));
     const clicks: (number | undefined)[] = [];
     chart.on("click", ({ inspection }) => clicks.push(inspection?.value));
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     press(chart.root, "pointermove", x.map(1), 150);
     await frame();
     press(chart.root, "pointermove", x.map(1) + 1, 150);
@@ -614,7 +615,7 @@ describe("events and brushing", () => {
     });
     const hovers: (number | undefined)[] = [];
     chart.on("hover", ({ inspection }) => hovers.push(inspection?.points[0]?.row));
-    const [x, y] = [modelOf(chart).xScale()!, modelOf(chart).yScale()!];
+    const [x, y] = [xScale(modelOf(chart))!, yScale(modelOf(chart))!];
     press(chart.root, "pointermove", x.map(1), y.map(5));
     await frame();
     press(chart.root, "pointerdown", x.map(1), y.map(5));
@@ -646,7 +647,7 @@ describe("events and brushing", () => {
     // scrolling and pinches to the page, as the chart does not zoom.
     await chart.loading;
     expect(chart.root.style.touchAction).toBe("pan-y pinch-zoom");
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     press(chart.root, "pointerdown", x.map(1), 150);
     press(chart.root, "pointermove", x.map(2), 150);
     press(chart.root, "pointermove", x.range[1] + 200, 150);
@@ -668,7 +669,7 @@ describe("events and brushing", () => {
     });
     // The brush loads on demand.
     await chart.loading;
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     // From inside the first category to inside the third.
     press(chart.root, "pointerdown", x.map(0) + 5, 150);
     press(chart.root, "pointermove", x.map(1), 150);
@@ -805,7 +806,7 @@ describe("events and brushing", () => {
       marks: [line(table({ t: [0, 1, 2, 3], v: [1, 2, 3, 4] }), { x: "t", y: "v" })],
     });
     chart.select([1, 2]);
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     press(chart.root, "pointerdown", x.map(0.5), 150);
     press(chart.root, "pointermove", x.map(0.5) + 40, 150);
     await frame();
@@ -1972,8 +1973,8 @@ describe("zooming and brushing in two dimensions", () => {
     chart.setViewport({ y: null, yRight: [1000, 2000] });
     expect(chart.getViewport()).toEqual({ x: null, y: null, yRight: [1000, 2000] });
     chart.render();
-    expect(modelOf(chart).yScale()!.domain).toEqual([0, 30]);
-    expect(modelOf(chart).yRightScale()!.domain).toEqual([1000, 2000]);
+    expect(yScale(modelOf(chart))!.domain).toEqual([0, 30]);
+    expect(yRightScale(modelOf(chart))!.domain).toEqual([1000, 2000]);
     chart.setViewport({ y: [10, 20] });
     expect(chart.getViewport()).toEqual({ x: null, y: [10, 20], yRight: [1000, 2000] });
     expect(viewports).toHaveLength(3);

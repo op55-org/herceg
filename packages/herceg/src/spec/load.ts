@@ -24,6 +24,8 @@ import {
   selectWhere,
 } from "../data/selection.ts";
 import { type Table, table } from "../data/table.ts";
+import { holds, misfit } from "../fields/check.ts";
+import type { FieldDisplays } from "../fields/rules.ts";
 import { readsTable } from "../marks/annotation.ts";
 import { AreaMark } from "../marks/area.ts";
 import { BarMark } from "../marks/bar.ts";
@@ -67,7 +69,8 @@ import { type RowSelection, rowSelection } from "../model/row-selection.ts";
 import { timeBreaks } from "../scale/breaks.ts";
 import { scheme } from "../scale/schemes.ts";
 import { type ChartStateSupport, chartState } from "../state/chart-state.ts";
-import { within } from "./errors.ts";
+import { ChartError, within } from "./errors.ts";
+import type { DisplayedKind, FieldDisplaysSpec, FieldRuleSpec } from "./fields.ts";
 import type {
   AnnotationPosition,
   BinaryType,
@@ -79,6 +82,7 @@ import type {
   Histogram2DSpec,
   LabelSpec,
   MarkSpec,
+  MarkTooltipSpec,
   RowSelectionSpec,
   SelectionSpec,
 } from "./spec.ts";
@@ -177,6 +181,7 @@ export function loadSpec(
   const views = new Map<string, RowView>();
   const tables = loadTables(spec.data ?? {}, buffers, byName(options.tables), views);
   const marks = spec.marks.map((mark, index) => loadMark(mark, index, tables, views));
+  marks.forEach(tooltipKinds);
   const {
     data: _data,
     marks: _marks,
@@ -187,6 +192,7 @@ export function loadSpec(
     x,
     navigator: strip,
     rowSelection: bindings,
+    fields: displays,
     ...chart
   } = spec;
   const stores = new Map<string, SelectionStore>();
@@ -202,6 +208,7 @@ export function loadSpec(
   return {
     config: {
       ...chart,
+      ...(displays && { fields: fieldTables(displays, tables, views) }),
       marks,
       state: chartState,
       ...(xAxis && { x: xAxis }),
@@ -215,6 +222,57 @@ export function loadSpec(
     stores,
     unknown,
   };
+}
+
+/**
+ * Refuses a format of a mark's tooltip field (`tooltip.fields`) that its
+ * field's kind does not take: a number form on a time field, a time
+ * pattern on a number field, or any on a category field, as the chart's
+ * tooltips would when they first read it (dom/tooltip-content.ts).
+ */
+function tooltipKinds(mark: Mark | LayoutMark, index: number): void {
+  const { table } = mark as { table?: Table };
+  const { type, id, tooltip } = mark.spec as {
+    type: string;
+    id?: string;
+    tooltip?: MarkTooltipSpec;
+  };
+  tooltip?.fields?.forEach((entry, i) => {
+    if (typeof entry === "string" || entry.format === undefined || !table) return;
+    const kind = table.kind(entry.field);
+    const wrong = kind !== "geometry" && misfit(kind, "format", entry.format);
+    if (!wrong) return;
+    const at = `tooltip.fields[${i}].format`;
+    throw within(
+      `marks[${index}]`,
+      new ChartError({
+        code: "invalid-option",
+        path: at,
+        message: `${type} ${at}: ${wrong.problem(holds(entry.field, kind as DisplayedKind))}`,
+      }),
+      id ?? index,
+    );
+  });
+}
+
+/**
+ * Field displays with the tables their rules name by the spec's names
+ * (`match.table`) as the tables loaded, a view's its table's, so that they
+ * match those tables whatever their own names; names the data lacks match
+ * tables of that name, or nothing.
+ */
+function fieldTables(
+  displays: FieldDisplaysSpec,
+  tables: ReadonlyMap<string, Table>,
+  views: ReadonlyMap<string, RowView>,
+): FieldDisplays {
+  if (!Array.isArray(displays)) return displays as FieldDisplays;
+  return (displays as readonly FieldRuleSpec[]).map((rule) => {
+    const { match } = rule;
+    const name = typeof match === "object" ? match.table : undefined;
+    const table = name === undefined ? undefined : (tables.get(name) ?? views.get(name)?.source);
+    return table ? { ...rule, match: { ...(match as object), table } } : rule;
+  });
 }
 
 function byName<T>(values: ByName<T> | undefined): ReadonlyMap<string, T> | undefined {

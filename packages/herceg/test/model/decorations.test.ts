@@ -430,7 +430,7 @@ describe("decorations of a layout mark's chart", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     expect(legendOf(model.scene(estimateText)).map(({ label }) => label)).toEqual([

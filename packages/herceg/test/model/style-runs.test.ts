@@ -33,12 +33,13 @@ import type {
 } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function model(config: ChartConfig) {
   const made = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   made.setSize(600, 300, 1);
   return made;
@@ -134,8 +135,8 @@ describe("style runs", () => {
       const chart = model({ marks: [line(forecast, { x: "t", y: "v", encode: dotted })] });
       const scene = chart.scene(estimateText);
       const at = (t: number): Point => [
-        chart.xScale()!.map(t),
-        chart.yScale()!.map(forecast.numbers("v")[t]!),
+        xScale(chart)!.map(t),
+        yScale(chart)!.map(forecast.numbers("v")[t]!),
       ];
       const [solid, dots] = linesOf(scene);
       // The piece into t = 4, the first estimate, is dotted: the solid run ends at t = 3.
@@ -161,7 +162,7 @@ describe("style runs", () => {
         const [solid, dots] = linesOf(chart.scene(estimateText));
         const end = ownPoints(solid!).at(-1)!;
         expect(close(ownPoints(dots!)[0]!, end)).toBe(true);
-        return { end, x: (t: number) => chart.xScale()!.map(t), y: chart.yScale()!.map(4) };
+        return { end, x: (t: number) => xScale(chart)!.map(t), y: yScale(chart)!.map(4) };
       };
       // After: the flat run from t = 3 holds 3's value (solid); the jump at 4 is 4's.
       const after = boundary("step-after");
@@ -187,7 +188,7 @@ describe("style runs", () => {
           marks: [line(table({ t, v, paint }), { x: "t", y: "v", encode: painted })],
         });
         const pieces = linesOf(chart.scene(estimateText));
-        const at = (i: number): Point => [chart.xScale()!.map(t[i]!), chart.yScale()!.map(v[i]!)];
+        const at = (i: number): Point => [xScale(chart)!.map(t[i]!), yScale(chart)!.map(v[i]!)];
         return { pieces, at };
       };
       // The vertical edge at t = 1 arrives at the blue observation: blue, whole.
@@ -233,7 +234,7 @@ describe("style runs", () => {
         ],
       });
       const [red, blue] = linesOf(chart.scene(estimateText));
-      const [cx, cy] = [chart.xScale()!.map(1), chart.yScale()!.map(0)];
+      const [cx, cy] = [xScale(chart)!.map(1), yScale(chart)!.map(0)];
       // Every point of the stroke about the corner is painted by one run, none by both.
       // Off the grid of whole pixels, so no point lies on a cut.
       for (let dx = -9.13; dx <= 9; dx += 0.47)
@@ -241,8 +242,8 @@ describe("style runs", () => {
           const p: Point = [cx + dx, cy + dy];
           const by = [paints(red!, p), paints(blue!, p)].filter(Boolean).length;
           const full = Math.min(
-            distance(p, [chart.xScale()!.map(0), cy], [cx, cy]),
-            distance(p, [cx, cy], [chart.xScale()!.map(2), chart.yScale()!.map(1)]),
+            distance(p, [xScale(chart)!.map(0), cy], [cx, cy]),
+            distance(p, [cx, cy], [xScale(chart)!.map(2), yScale(chart)!.map(1)]),
           );
           // Points on the cut itself may fall to either side.
           if (Math.abs(full - 6) > 0.1) expect(by, `${dx}, ${dy}`).toBe(full < 6 ? 1 : 0);
@@ -302,7 +303,7 @@ describe("style runs", () => {
       // Reduced to about four points a pixel column, and the boundaries kept.
       expect(pieces.reduce((sum, g) => sum + g.path.count, 0)).toBeLessThan(n / 10);
       const red = pieces.filter((g) => g.stroke === "#d62728");
-      const x = (t: number) => chart.xScale()!.map(t);
+      const x = (t: number) => xScale(chart)!.map(t);
       // One observation alone: the edge into it, from the one before, then
       // past it (dense, the runs are not cut: the one after paints over).
       expect(red[0]!.draw.holes).toBeUndefined();
@@ -468,7 +469,7 @@ describe("style runs", () => {
       const pieces = linesOf(chart.scene(estimateText));
       expect(pieces.map((g) => g.stroke)).toEqual(["#ff0000", "#00ff00"]);
       const band = (name: string) =>
-        chart.xScale()!.map(rows.categories("c").dictionary.indexOf(name));
+        xScale(chart)!.map(rows.categories("c").dictionary.indexOf(name));
       expect(ownPoints(pieces[0]!).map(([px]) => px)).toEqual([band("a"), band("b")]);
     }
   });
@@ -530,7 +531,7 @@ describe("style runs", () => {
       marks: [line(forecast, { x: "v", y: "t", orient: "y", encode: dotted })],
     });
     const [solid, dots] = linesOf(chart.scene(estimateText));
-    const at: Point = [chart.xScale()!.map(4), chart.yScale()!.map(3)];
+    const at: Point = [xScale(chart)!.map(4), yScale(chart)!.map(3)];
     expect(close(ownPoints(solid!).at(-1)!, at)).toBe(true);
     expect(close(ownPoints(dots!)[0]!, at)).toBe(true);
   });
@@ -684,7 +685,7 @@ describe("style runs", () => {
       });
       const [fill, forecastFill, outline, forecastOutline] = areasOf(chart.scene(estimateText));
       // Fills meet at t = 3, sharing the edge across the band there.
-      const x3 = chart.xScale()!.map(3);
+      const x3 = xScale(chart)!.map(3);
       expect(pointsOf(fill!).at(-1)![0]).toBeCloseTo(x3);
       expect(pointsOf(forecastFill!)[0]![0]).toBeCloseTo(x3);
       expect([fill!.strokeWidth, forecastFill!.strokeWidth]).toEqual([0, 0]);
@@ -715,7 +716,7 @@ describe("style runs", () => {
       });
       const fills = areasOf(band.scene(estimateText)).filter((g) => g.fillOpacity > 0);
       expect(fills.map((g) => g.fill)).toEqual(["#ff0000", "#0000ff"]);
-      const x2 = band.xScale()!.map(2);
+      const x2 = xScale(band)!.map(2);
       expect(pointsOf(fills[0]!).at(-1)![0]).toBeCloseTo(x2);
       expect(pointsOf(fills[1]!)[0]![0]).toBeCloseTo(x2);
     },
@@ -738,7 +739,7 @@ describe("style runs", () => {
     const fills = areasOf(chart.scene(estimateText)).filter((g) => g.fillOpacity > 0);
     expect(fills.map((g) => g.fill)).toEqual(["#ff0000", "#0000ff"]);
     // Each closes at the baseline (x = 0) between its own ends.
-    const [x0, y] = [chart.xScale()!.map(0), (t: number) => chart.yScale()!.map(t)];
+    const [x0, y] = [xScale(chart)!.map(0), (t: number) => yScale(chart)!.map(t)];
     const ends = [
       [1, 3],
       [3, 9],
@@ -769,7 +770,7 @@ describe("style runs", () => {
     expect(rest).toEqual([]);
     expect(blue!.stroke).toBe("#0000ff");
     expect(blue!.draw.holes).toBeUndefined();
-    const start: Point = [chart.xScale()!.map(2) - 5, chart.yScale()!.map(5)];
+    const start: Point = [xScale(chart)!.map(2) - 5, yScale(chart)!.map(5)];
     expect(paints(blue!, start)).toBe(true);
   });
 
@@ -788,7 +789,7 @@ describe("style runs", () => {
     const [red, blue] = linesOf(chart.scene(estimateText));
     // The way back is blue from its turn on, uncut, drawn over the red way
     // up, which ends past the turn as its join does.
-    const [x, top] = [chart.xScale()!.map(5), chart.yScale()!.map(8)];
+    const [x, top] = [xScale(chart)!.map(5), yScale(chart)!.map(8)];
     expect([red!.draw.holes, blue!.draw.holes]).toEqual([undefined, undefined]);
     expect(close(pointsOf(blue!)[0]!, [x, top])).toBe(true);
     expect(paints(blue!, [x, top + 10])).toBe(true);
@@ -811,8 +812,8 @@ describe("style runs", () => {
         ],
       });
       const at = (tt: number, vv: number): Point => [
-        chart.xScale()!.map(tt),
-        chart.yScale()!.map(vv),
+        xScale(chart)!.map(tt),
+        yScale(chart)!.map(vv),
       ];
       return { pieces: linesOf(chart.scene(estimateText)), at };
     };

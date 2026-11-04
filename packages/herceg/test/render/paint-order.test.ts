@@ -23,6 +23,7 @@ import { renderToSVG, type StaticOptions } from "../../src/render/static.ts";
 import type { PointGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 const values = table({ x: [0, 1, 2], y: [1, 3, 2] });
 const chart = (
@@ -145,7 +146,7 @@ describe("paint order", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(400, 200, 1);
     const planOf = (key: string) =>
@@ -182,8 +183,8 @@ describe("paint order", () => {
       });
       model.setSize(300, 200, 1);
       model.scene(estimateText);
-      const x = model.xScale()!.map(1);
-      const y = model.yScale()!.map(2);
+      const x = xScale(model)!.map(1);
+      const y = yScale(model)!.map(2);
       return model.inspect(x, y, "nearest")!.points[0]!.label;
     };
     expect(found()).toBe("b");
@@ -206,7 +207,7 @@ describe("paint order", () => {
       model.setSize(300, 200, 1);
       model.scene(estimateText);
       const tables = new Set([first, second] as unknown as Table[]);
-      return clickedRows(withPicker(model), tables, model.xScale()!.map(1), model.yScale()!.map(2))
+      return clickedRows(withPicker(model), tables, xScale(model)!.map(1), yScale(model)!.map(2))
         ?.table;
     };
     expect(clicked()).toBe(second);
@@ -222,8 +223,8 @@ describe("paint order", () => {
     });
     model.setSize(300, 200, 1);
     model.scene(estimateText);
-    const x = model.xScale()!.map(1);
-    const y = model.yScale()!.map(2);
+    const x = xScale(model)!.map(1);
+    const y = yScale(model)!.map(2);
     expect(model.inspect(x, y, "nearest")!.points[0]!.label).toBe("last");
     // Opaque points of several colors paint color by color: the one in the
     // color painted later is on top, whichever row it is.
@@ -240,7 +241,7 @@ describe("paint order", () => {
     const top = tones[0]! > tones[1]! ? 0 : 1;
     // Here the first row's color paints later: ties do not just go to the later row.
     expect(top).toBe(0);
-    const [px, py] = [colored.xScale()!.map(1), colored.yScale()!.map(2)];
+    const [px, py] = [xScale(colored)!.map(1), yScale(colored)!.map(2)];
     expect(colored.inspect(px, py, "nearest")!.points[0]!.row).toBe(top);
     // A click selects the row on top too.
     const clicked = clickedRows(withPicker(colored), new Set([toned as unknown as Table]), px, py);
@@ -261,7 +262,7 @@ describe("paint order", () => {
       model.setSize(400, 300, 1);
       const scene = model.scene(estimateText);
       const drawn = scene.panels[0]!.marks.find((m) => m.kind === "point") as PointGeometry;
-      const [x, y] = [model.xScale()!.map(1), model.yScale()!.map(1)];
+      const [x, y] = [xScale(model)!.map(1), yScale(model)!.map(1)];
       // Where the point is drawn is not quite where the line's observation is.
       expect(drawn.coords[2]).not.toBe(x);
       return model.inspect(x + 0.4, y, "nearest")!.points[0]!.label;
@@ -288,7 +289,7 @@ describe("paint order", () => {
     });
     model.setSize(400, 300, 1);
     model.scene(estimateText);
-    const found = model.inspect(model.xScale()!.map(0), model.yScale()!.map(1), "nearest");
+    const found = model.inspect(xScale(model)!.map(0), yScale(model)!.map(1), "nearest");
     expect(found!.points[0]!.row).toBeLessThan(3);
   });
 
@@ -308,8 +309,8 @@ describe("paint order", () => {
       return built;
     };
     const plain = model([1, 1, 1]);
-    const [px, py] = [plain.xScale()!.map(1) + 1e-6, plain.yScale()!.map(1)];
-    const away = [0.00001, 0.0009, 0.0018].map((d) => plain.yScale()!.invert(py - d));
+    const [px, py] = [xScale(plain)!.map(1) + 1e-6, yScale(plain)!.map(1)];
+    const away = [0.00001, 0.0009, 0.0018].map((d) => yScale(plain)!.invert(py - d));
     const found = model(away).inspect(px, py, "nearest");
     expect(found!.points[0]!.row).toBe(1);
   });
@@ -326,7 +327,7 @@ describe("paint order", () => {
     });
     model.setSize(400, 301, 1);
     model.scene(estimateText);
-    const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(1.5)];
+    const [px, py] = [xScale(model)!.map(1), yScale(model)!.map(1.5)];
     expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(1);
     const clicked = clickedRows(withPicker(model), new Set([two as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([1]);
@@ -352,14 +353,14 @@ describe("paint order", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(300, 200, 1);
     const scene = model.scene(estimateText);
     // Row 1's look paints after the other rows'.
     const rects = scene.panels[0]!.marks.filter((g) => g.kind === "rect");
     expect(rects.map((g) => (g as RectGeometry).count)).toEqual([2, 1]);
-    const [px, py] = [model.xScale()!.map(2), model.yScale()!.map(2)];
+    const [px, py] = [xScale(model)!.map(2), yScale(model)!.map(2)];
     const clicked = clickedRows(withPicker(model), new Set([three as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([1]);
   });
@@ -381,7 +382,7 @@ describe("paint order", () => {
       selection.highlight(model);
       store.set("focus", selectRows(new RowSet(both).add(0)));
       model.scene(estimateText);
-      const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(2)];
+      const [px, py] = [xScale(model)!.map(1), yScale(model)!.map(2)];
       expect(model.inspect(px, py, "nearest")!.points[0]!.row, series).toBe(0);
       const clicked = clickedRows(withPicker(model), new Set([both as unknown as Table]), px, py);
       expect(Array.from(clicked!.rows), series).toEqual([0]);
@@ -400,7 +401,7 @@ describe("paint order", () => {
     pairSelection.highlight(bars);
     pairStore.set("focus", selectRows(new RowSet(pair).add(0)));
     bars.scene(estimateText);
-    const [bx, by] = [bars.xScale()!.map(1.5), bars.yScale()!.map(2)];
+    const [bx, by] = [xScale(bars)!.map(1.5), yScale(bars)!.map(2)];
     const onTop = clickedRows(withPicker(bars), new Set([pair as unknown as Table]), bx, by);
     expect(Array.from(onTop!.rows)).toEqual([0]);
     // A line's highlighted observation is found over a coincident one.
@@ -416,7 +417,7 @@ describe("paint order", () => {
     walkSelection.highlight(walked);
     walkStore.set("focus", selectRows(new RowSet(walk).add(0)));
     walked.scene(estimateText);
-    const [wx, wy] = [walked.xScale()!.map(1), walked.yScale()!.map(5)];
+    const [wx, wy] = [xScale(walked)!.map(1), yScale(walked)!.map(5)];
     expect(walked.inspect(wx, wy, "nearest")!.points[0]!.row).toBe(0);
     // Rows left out are dimmed, translucent: they paint in row order, not color by color.
     const toned = table({ x: [1, 1, 5], y: [2, 2, 5], c: [100, 0, 50] });
@@ -431,7 +432,7 @@ describe("paint order", () => {
     selection.highlight(model);
     store.set("focus", selectRows(new RowSet(toned).add(2)));
     model.scene(estimateText);
-    const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(2)];
+    const [px, py] = [xScale(model)!.map(1), yScale(model)!.map(2)];
     expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(1);
     const clicked = clickedRows(withPicker(model), new Set([toned as unknown as Table]), px, py);
     expect(Array.from(clicked!.rows)).toEqual([1]);

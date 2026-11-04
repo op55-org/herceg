@@ -9,6 +9,7 @@ import {
   type TimeField,
 } from "../data/table.ts";
 import { rasterDrawing } from "../draw/raster.ts";
+import type { ChartFields, ShownField } from "../fields/chart.ts";
 import { CellIndex } from "../lod/cell-index.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
@@ -516,9 +517,12 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       if (this.#layout) return this.#calendarBands(axis, keys, context);
       return bandIndices(this.rows(), this.#field(axis), keys, context);
     };
+    // Its chart's displays, which name it and the ramp and write the cells' values.
+    const fields = context.features?.fields;
+    const shown = fields?.of(table, spec.color);
     const whole: Series = {
       key: seriesKey(key, "cells"),
-      label: spec.label ?? spec.color,
+      label: spec.label ?? shown?.label ?? spec.color,
       color: ramp[ramp.length - 1]!,
       x: position("x"),
       y: position("y"),
@@ -528,6 +532,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       rows: rows.positions,
       length: rowCount(rows),
       sorted: false,
+      fields,
+      about: shown?.description,
     };
     for (const axis of ["x", "y"] as const)
       if (this.#banded[axis]) this.bandKeys.set(whole[axis], bands[axis]?.keys ?? []);
@@ -707,7 +713,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
           : 0;
     const label = (axis: "x" | "y", s: Series, row: number) => {
       const at = s[axis][row]!;
-      return this.#banded[axis] ? (bands[axis]?.labels[at] ?? "") : format[axis](at);
+      return this.#banded[axis] ? (bands[axis]?.texts[at] ?? "") : format[axis](at);
     };
     const [columns, rows] = [count("x"), count("y")];
     const resolved = parts.map((s) =>
@@ -733,8 +739,9 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
       });
     });
     if (!low || !high) return `${name}: no values`;
+    const write = this.#write(format.value, parts[0]?.fields);
     const at = ([s, row, value]: [Series, number, number]) =>
-      `${format.value(value)} at ${label("x", s, row)}, ${label("y", s, row)}`;
+      `${write(value)} at ${label("x", s, row)}, ${label("y", s, row)}`;
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
     return (
       `${name}: ${plural(cells, "cell")} in ${plural(columnCount, "column")} and ` +
@@ -756,19 +763,45 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   ): LegendPart[] {
     const scale = series[0] && this.#colorScale(theme, paint, series[0]);
     if (!scale) return [];
-    const title = this.spec.label ?? this.spec.color;
+    const field = this.#toneOf(series[0]!);
+    const title = this.spec.label ?? field?.label ?? this.spec.color;
     const { domain, midpoint } = scale;
-    return [rampLegend({ stops: scale.legendStops(), domain, title, midpoint })];
+    // Cells' sums are written as the field's values are.
+    return [rampLegend({ stops: scale.legendStops(), domain, title, midpoint, field })];
   }
 
   /**
-   * The scale coloring the cells of `s`: over `colorDomain` or the values'
-   * extent, or with `reduce: "sum"`, the extent of its cells' sums (with
-   * facets, of every panel's).
+   * The display of the `color` field among the chart's that `s` carries
+   * (`Series.fields`): the bounds its ramp spans, unless its cells' sums,
+   * which are no values of the field, color them; its label; and how its
+   * cells' values (and sums) are written in tooltips and the summary.
+   */
+  #toneOf(s: Series | undefined): ShownField | undefined {
+    return s?.fields?.of(this.table, this.spec.color);
+  }
+
+  /** How cells' values (or sums) are written: as the `color` field's display among `fields` writes them, else by `fallback`. */
+  #write(
+    fallback: (value: number) => string,
+    fields: ChartFields | undefined,
+  ): (value: number) => string {
+    return fields?.of(this.table, this.spec.color)?.writer(undefined, fallback) ?? fallback;
+  }
+
+  /**
+   * The scale coloring the cells of `s`: over `colorDomain`, else the
+   * `color` field's display's bounds, or the values' extent for an end
+   * without one, or with `reduce: "sum"`, the extent of its cells' sums
+   * (with facets, of every panel's).
    */
   #colorScale(theme: Theme, paint: PaintReader, s: Series): SequentialScale | undefined {
     const { spec } = this;
-    const domain = spec.colorDomain ?? this.#valueExtent(s);
+    const extent = this.#valueExtent(s);
+    const tone = spec.reduce === "sum" ? undefined : this.#toneOf(s);
+    const lo = tone?.min ?? extent?.[0];
+    const hi = tone?.max ?? extent?.[1];
+    const domain =
+      spec.colorDomain ?? (lo === undefined || hi === undefined ? undefined : [lo, hi]);
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
     const ramp = rampOf(spec.colors, fallback, paint, "heatmap colors");
@@ -1123,11 +1156,23 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     return Number.isFinite(px) && Number.isFinite(py) ? [px, py] : undefined;
   }
 
+  /**
+   * How values of `field` along `axis` are written: as the axis writes
+   * them, through the field's display off band axes (whose places are
+   * bands').
+   */
+  #along(series: Series, axis: "x" | "y", field: string, format: AxisFormat) {
+    const shown = this.#banded[axis] ? undefined : series.fields?.of(this.table, field);
+    return shown?.over(format[axis]) ?? format[axis];
+  }
+
   /** A cell's row: its y (between edges, both), as tooltips name the cell. */
   pointLabel(series: Series, row: number, format: AxisFormat): string {
-    const y = format.y(placeAt(series, "y", row));
+    const y = this.#along(series, "y", this.#field("y"), format)(placeAt(series, "y", row));
     const high = this.spec.y2;
-    return high === undefined ? y : `${y} – ${format.y(this.table.numbers(high as never)[row]!)}`;
+    return high === undefined
+      ? y
+      : `${y} – ${this.#along(series, "y", high, format)(this.table.numbers(high as never)[row]!)}`;
   }
 
   /**
@@ -1135,12 +1180,13 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    * selection is drawn, how many of its rows it holds.
    */
   pointText(series: Series, row: number, format: AxisFormat): string {
-    const value = format.value(series.values[row]!);
+    const value = this.#write(format.value, series.fields)(series.values[row]!);
     const high = this.spec.x2;
+    const ends = (field: string, at: number) => this.#along(series, "x", field, format)(at);
     const text =
       high === undefined
         ? value
-        : `${format.x(series.x[row]!)} – ${format.x(this.table.numbers(high as never)[row]!)}: ${value}`;
+        : `${ends(this.#field("x"), series.x[row]!)} – ${ends(high, this.table.numbers(high as never)[row]!)}: ${value}`;
     // A cell is read at the row its value is at.
     const held = this.#selected.get(series);
     const k = held ? this.#cellAtRow(held.runs, row) : -1;

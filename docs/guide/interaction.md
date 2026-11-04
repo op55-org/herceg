@@ -304,7 +304,8 @@ chart.point(x="time", y="value", data=annotations, pick=False, inspect=False)
 
 The tooltip shows what is at the pointer or keyboard cursor: the position
 (the x value, or y, or an item's name), then a row per series or item,
-written as the axis' `format` writes it.
+written as the axis' `format` writes it, or as the series' value field's
+[display](fields.md#charts) does.
 
 | Option | Does |
 | --- | --- |
@@ -335,9 +336,12 @@ hg.line(daily, x="time", y="p99",
 hg.Chart(daily).line(x="time", y="p99", tooltip=hg.Tooltip(fields=["requests"]))
 ```
 
-- **Fields** are checked against the mark's table. Numbers are written as
-  the chart's other numbers, times as the x axis writes them, missing values
-  as "–". Marks whose points are rows take fields (lines, areas, bars,
+- **Fields** are checked against the mark's table. Each is labeled and
+  written as its [field display](fields.md#tooltips-labels-and-gauges)
+  says, under the entry's own `label` and `format`; without one, numbers
+  are written as the chart's other numbers, times as the x axis writes
+  them, missing values as "–". A format of the wrong kind for its field
+  (a number format for a time field) is refused. Marks whose points are rows take fields (lines, areas, bars,
   points, rugs, error bars, candlesticks, heatmaps, map regions and points,
   3D points, lines, and surfaces, radars, gauges, custom marks with
   series); pies, funnels, trees, and Sankey links show them for items of

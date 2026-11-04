@@ -10,6 +10,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { AreaGeometry, TextGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
@@ -44,7 +45,7 @@ describe("normalized and stream stacks", () => {
       close(a!.base, [0, 0, 0]);
       close(b!.top, [1, 1, 0]);
       close(b!.base, [0.25, 0.5, 0]);
-      expect((horizontal ? model.xScale() : model.yScale())!.domain).toEqual([0, 1]);
+      expect((horizontal ? xScale(model) : yScale(model))!.domain).toEqual([0, 1]);
       expect(positionOf(model, model.series()[0]!.key, 0)!.points[0]).toMatchObject({
         value: 2,
         text: "0.25 share (2 raw)",

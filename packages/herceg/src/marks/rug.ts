@@ -7,7 +7,7 @@ import type { Clip, Frozen, RugSpec } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
-import type { CssColor, ItemKeyed } from "./encoding.ts";
+import type { CssColor, ItemKeyed, SeriesName } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -48,7 +48,7 @@ interface RugStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   stroke?: string;
   /** Width in CSS pixels. Default 1. */
   strokeWidth?: number;
-  label?: string;
+  label?: SeriesName<S>;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
   axis?: "left" | "right";
@@ -357,7 +357,8 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
   }
 
   pointText(s: Series, row: number, format: AxisFormat): string {
-    return format[this.tooltip](s.values[row]!);
+    const axis = format[this.tooltip];
+    return (s.write?.(axis) ?? axis)(s.values[row]!);
   }
 
   summarize(parts: readonly Series[], name: string, context: SummaryContext): string {
@@ -378,7 +379,8 @@ export class RugMark implements Mark<Frozen<RugSpec>> {
       }
     }
     if (count === 0) return `${name}: no data`;
-    const format = context.format[this.tooltip];
+    const axis = context.format[this.tooltip];
+    const format = parts[0]?.write?.(axis) ?? axis;
     return `${name}: ${count} ${count === 1 ? "value" : "values"}, from ${format(low)} to ${format(high)}`;
   }
 }

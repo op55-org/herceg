@@ -18,7 +18,7 @@ import { setViewport } from "../helpers/views.ts";
 /** Compare full bar geometry and the strip at the same scales and column width. */
 function drawing(input: ChartMark, axes: Partial<Frame> = {}) {
   const mark = input as BarMark;
-  const model = new ChartModel({ marks: [mark] }, undefined, ...staticCompilers());
+  const model = new ChartModel({ marks: [mark] }, undefined, staticCompilers());
   model.setSize(600, 300, 1);
   const drawing = vi.spyOn(mark, "geometry");
   model.scene(estimateText);

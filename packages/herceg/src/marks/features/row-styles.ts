@@ -5,6 +5,7 @@
 // geometry per look its rows take.
 
 import type { Table } from "../../data/table.ts";
+import type { ChartFields } from "../../fields/chart.ts";
 import type { RowLooks, RowPaint } from "../../model/features.ts";
 import type { EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
@@ -60,6 +61,8 @@ export class RowStyles {
   readonly #path: string;
   /** Whether rows have looks of their own; otherwise looks are by series, through the palette. */
   readonly byRow: boolean;
+  /** The chart's field displays, which name keys and write their values. */
+  readonly #fields: ChartFields | undefined;
   #theme: Theme | undefined;
   #paint: PaintReader = (value) => value;
   /** Each series' looks, by its key, for the rows' looks they were found from. */
@@ -95,7 +98,9 @@ export class RowStyles {
     scales: ScaleOf,
     path: string,
     isColor: (value: string) => boolean,
+    fields?: ChartFields,
   ) {
+    this.#fields = fields;
     this.#table = table;
     this.#drawn = drawn;
     this.#spec = spec;
@@ -210,7 +215,8 @@ export class RowStyles {
 
   /**
    * A key of the colors a field other than the series field gives rows: the
-   * values the rows drawn hold, in the scale's order, for the table's version.
+   * values the rows drawn hold, in the scale's order, for the table's version,
+   * written as the field's display writes them.
    */
   key(): GlyphKey | undefined {
     const fill = this.#fill;
@@ -234,7 +240,7 @@ export class RowStyles {
     values.sort((a, b) => place(a) - place(b));
     const palette = theme?.palette ?? [];
     const muted = theme?.muted ?? "#999999";
-    const key: GlyphKey | undefined = values.length
+    const raw: GlyphKey | undefined = values.length
       ? {
           title: fill.field,
           channel: "color",
@@ -247,6 +253,8 @@ export class RowStyles {
           })),
         }
       : undefined;
+    // Named and written as the field's display writes them.
+    const key = raw && (this.#fields?.key(table, fill.field, raw) ?? raw);
     this.#key = { version: table.version, subset: drawn, key };
     return key;
   }

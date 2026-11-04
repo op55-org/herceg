@@ -15,6 +15,7 @@ import type { AreaGeometry, LineGeometry, RuleGeometry, Scene } from "../../src/
 import { loadSpec } from "../../src/spec/load.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { stopsOf } from "../helpers/keyboard.ts";
+import { xScale, yRightScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 /** The y of a polyline at pixel x, by linear interpolation, if it spans x. */
@@ -65,7 +66,7 @@ function curveAt(
   model.setSize(width, 300, 1);
   if (viewport) setViewport(model, viewport);
   const path = lines(model.scene(estimateText))[0]!.path;
-  return model.yScale()!.invert(yAt(path, model.xScale()!.map(at))!);
+  return yScale(model)!.invert(yAt(path, xScale(model)!.map(at))!);
 }
 
 function sceneOf(
@@ -170,7 +171,7 @@ describe("mark specs", () => {
     fields[0] = "z";
     const { model } = sceneOf(config);
     expect(model.series().map((s) => s.label)).toEqual(["y"]);
-    expect(model.yScale()!.domain[1]).toBeLessThan(5);
+    expect(yScale(model)!.domain[1]).toBeLessThan(5);
   });
 
   it("keep keys named like object internals as keys", () => {
@@ -205,9 +206,9 @@ describe("domains", () => {
     model.scene(estimateText);
     expect(model.getViewport().x).toEqual([1, 4]);
     expect(model.getViewport()).toEqual({ x: [1, 4], y: [200, 800], yRight: [20, 80] });
-    expect(model.xScale()!.domain).toEqual([4, 1]);
-    expect(model.yScale()!.domain).toEqual([800, 200]);
-    expect(model.yRightScale()!.domain).toEqual([20, 80]);
+    expect(xScale(model)!.domain).toEqual([4, 1]);
+    expect(yScale(model)!.domain).toEqual([800, 200]);
+    expect(yRightScale(model)!.domain).toEqual([20, 80]);
   });
 
   it("excludes hidden series from the domain and the scene", () => {
@@ -414,10 +415,10 @@ describe("areas", () => {
       line(runs, { x: "n", y: ["size", "done"] }),
     ];
     for (const mark of marks) {
-      expect(sceneOf({ marks: [mark] }).model.yScale()!.type).toBe("time");
+      expect(yScale(sceneOf({ marks: [mark] }).model)!.type).toBe("time");
     }
     const linear = sceneOf({ marks: [line(runs, { x: "n", y: "done" })], y: { type: "linear" } });
-    expect(linear.model.yScale()!.type).toBe("linear");
+    expect(yScale(linear.model)!.type).toBe("linear");
   });
 
   it("draws bands between two fields", () => {
@@ -470,7 +471,7 @@ describe("inspect", () => {
         marks: [line(table({ x, v }), { x: "x", y: "v" })],
         ...config,
       });
-      const hit = model.inspect(model.xScale()!.map(value), scene.panels[0]!.plot.y + 5);
+      const hit = model.inspect(xScale(model)!.map(value), scene.panels[0]!.plot.y + 5);
       return hit && [hit.value, hit.points.map((p) => p.value)];
     };
     const gap = Number.NaN;
@@ -517,8 +518,8 @@ describe("level of detail", () => {
       marks: [line(data, { x: "x", y: "y", curve: "monotone" })],
     });
     const { path } = lines(scene)[0]!;
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     // Curved segments, as cubic curves between the data's points.
     expect(path.curved).toBe(true);
     expect(path.count).toBe(6);
@@ -629,7 +630,7 @@ describe("level of detail", () => {
       marks: [area(band, { x: "x", y1: "lo", y2: "hi", curve: "monotone" })],
     });
     const { upper } = scene.panels[0]!.marks[0] as AreaGeometry;
-    const top = model.yScale()!.map(3);
+    const top = yScale(model)!.map(3);
     for (let i = 0; i < upper.count; i++)
       expect(upper.coords[i * 2 + 1]!).toBeGreaterThanOrEqual(top - 1e-3);
     const logs = table({ x: [0, 1, 2, 3], a: [1, 10, 1, 10], b: [10, 10, 10, 10] });
@@ -715,7 +716,7 @@ describe("level of detail", () => {
       });
       m.setSize(width, 300, 1);
       const { upper } = m.scene(estimateText).panels[0]!.marks[0] as AreaGeometry;
-      return m.yScale()!.invert(yAt(upper, m.xScale()!.map(1.25))!);
+      return yScale(m)!.invert(yAt(upper, xScale(m)!.map(1.25))!);
     };
     expect(bandAt(444)).toBeCloseTo(bandAt(445), 0);
     expect(bandAt(444)).toBeCloseTo(100 * (1 - (3 * 0.25 ** 2 - 2 * 0.25 ** 3)), 0);

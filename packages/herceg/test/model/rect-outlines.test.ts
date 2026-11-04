@@ -12,13 +12,14 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import type { RectGeometry, Scene } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { xScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 400) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, 200, 1);
   return { model, scene: model.scene(estimateText) };
@@ -44,7 +45,7 @@ describe("bars of a width in pixels", () => {
     const { model, scene } = build({
       marks: [bar(zones, { x: "zone", y: "gain", width: { px: 8 } })],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     for (const [i, [left, , width]] of boxes(rects(scene)[0]!).entries()) {
       expect(width).toBe(8);
       expect(left! + 4).toBeCloseTo(x.map(i), 3);

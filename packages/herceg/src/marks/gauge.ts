@@ -5,6 +5,7 @@ import type { NumberField, Schema, Table } from "../data/table.ts";
 import { ArcPath, arcDrawing, traceSector } from "../draw/arc.ts";
 import { textDrawing } from "../draw/labels.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
+import type { ChartFields, ShownField } from "../fields/chart.ts";
 import { type Formatter, formatNumber, lazyFormat, numberFormatter } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import type { FormatUser, FormatWrite } from "../model/features.ts";
@@ -21,7 +22,7 @@ import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 export interface GaugeOptions<S extends Schema> {
   /** Number field whose last finite value the gauge shows. */
   value: NumberField<S>;
-  /** The ends of the dial; 0 and 100 by default. */
+  /** The ends of the dial: the field's display's `min` and `max` by default, else 0 and 100. */
   min?: number;
   max?: number;
   /**
@@ -29,9 +30,12 @@ export interface GaugeOptions<S extends Schema> {
    * band's end (the first from `min`) up to its `to`, at most `max`.
    */
   bands?: readonly GaugeBand[];
-  /** Text under the value; the field's name by default. */
+  /** Text under the value; the field's label by default (its display's, else its name). */
   label?: string;
-  /** How the value and the dial's ends are written, in any of numbers' forms (`NumberFormatSpec`). */
+  /**
+   * How the value and the dial's ends are written, in any of numbers'
+   * forms (`NumberFormatSpec`); the field's display's format by default.
+   */
   format?: NumberFormatSpec;
   /** Fields of the row the gauge shows, which its tooltip shows besides the value. */
   tooltip?: MarkTooltip<S>;
@@ -68,8 +72,6 @@ export class GaugeMark implements LayoutMark, FormatUser {
   readonly spec: Frozen<GaugeSpec>;
   readonly table: Table;
   readonly measure: string;
-  readonly #min: number;
-  readonly #max: number;
   /** A format other than Intl options, which the feature compiler writes, handing its writer over. */
   readonly featured: boolean;
   #formats: FormatWrite | undefined;
@@ -81,12 +83,44 @@ export class GaugeMark implements LayoutMark, FormatUser {
     requireField(table, spec.value, ["number"], "gauge value");
     checkTooltip(table, spec.tooltip, "gauge");
     this.featured = lazyFormat(spec.format);
-    const min = spec.min ?? 0;
-    const max = spec.max ?? 100;
-    if (!(Number.isFinite(min) && Number.isFinite(max) && min < max))
+    this.table = table;
+    this.measure = spec.value;
+    // Ends the gauge gives are checked now; ends a field's display may give, once it is known.
+    for (const [name, end] of [
+      ["min", spec.min],
+      ["max", spec.max],
+    ] as const)
+      if (end !== undefined && !Number.isFinite(end))
+        throw new RangeError(`gauge ${name}: expected a finite number; received ${end}`);
+    if (spec.min !== undefined && spec.max !== undefined) this.#endsOf(undefined);
+  }
+
+  /**
+   * The dial's ends: its own `min` and `max`, else its field's display's
+   * (`display`, the chart's), else 0 and 100; refused where they are out of
+   * order or its bands leave them, an end the display gives named as the
+   * chart's `index`-th mark's.
+   */
+  #endsOf(display: ShownField | undefined, index = 0): readonly [number, number] {
+    const { spec } = this;
+    const min = spec.min ?? display?.min ?? 0;
+    const max = spec.max ?? display?.max ?? 100;
+    if (!(min < max)) {
+      // An end the field gives is named where it is given.
+      const from = (end: "min" | "max") =>
+        spec[end] === undefined && display?.[end] !== undefined ? display.from[end] : undefined;
+      const field = from("min") ?? from("max");
+      if (field === undefined)
+        throw new RangeError(
+          `gauge min, max: expected finite numbers, min below max; received ${min}, ${max}`,
+        );
+      const own = from("min") ? "max" : "min";
       throw new RangeError(
-        `gauge min, max: expected finite numbers, min below max; received ${min}, ${max}`,
+        own === "max"
+          ? `chart marks[${index}].max: ${max} is not above min ${min} (${field}.min); give max above min`
+          : `chart marks[${index}].min: ${min} is not below max ${max} (${field}.max); give min below max`,
       );
+    }
     let previous = min;
     for (const { to } of spec.bands ?? []) {
       if (!(to > min && to <= max))
@@ -99,10 +133,7 @@ export class GaugeMark implements LayoutMark, FormatUser {
         );
       previous = to;
     }
-    this.table = table;
-    this.measure = spec.value;
-    this.#min = min;
-    this.#max = max;
+    return [min, max];
   }
 
   legend(): LegendEntry[] {
@@ -122,8 +153,8 @@ export class GaugeMark implements LayoutMark, FormatUser {
     return -1;
   }
 
-  #bands({ theme, paint }: Pick<LayoutFrame, "theme" | "paint">): Band[] {
-    let from = this.#min;
+  #bands({ theme, paint }: Pick<LayoutFrame, "theme" | "paint">, min: number): Band[] {
+    let from = min;
     return (this.spec.bands ?? []).map(({ to, color }, i) => {
       const band = {
         from,
@@ -138,26 +169,39 @@ export class GaugeMark implements LayoutMark, FormatUser {
     });
   }
 
-  /** Takes the feature compiler's writer of its format. */
-  useFormats(write: FormatWrite): void {
+  /**
+   * Takes the feature compiler's writer of its format, and checks its ends
+   * against its field's display among the chart's (`fields`), which it
+   * reads again as it is drawn: charts with other displays may draw it.
+   */
+  useFormats(write: FormatWrite, fields: ChartFields | undefined, index: number): void {
     this.#formats = write;
+    this.#endsOf(fields?.of(this.table, this.spec.value), index);
   }
 
   draw(frame: LayoutFrame): LayoutResult {
     const { bounds, theme, measure, locale } = frame;
-    const min = this.#min;
-    const max = this.#max;
+    // Its field's display, the chart's own.
+    const display = frame.features?.fields?.of(this.table, this.spec.value);
+    const [min, max] = this.#endsOf(display);
     const row = this.#row(frame.rows);
     const value = row < 0 ? Number.NaN : this.table.numbers(this.spec.value)[row]!;
     const given = this.spec.format;
-    const format: Formatter = this.featured
+    // The ends are written in the format, the gauge's or else its field's; the
+    // value through the field's display too (its mappings and missing text).
+    const ends: Formatter = this.featured
       ? this.#formats!(given!, locale, "gauge format")
       : given
         ? numberFormatter(given as Intl.NumberFormatOptions, locale)
-        : (v) => formatNumber(v, locale);
+        : display?.format
+          ? this.#formats!(display.format, locale, `chart ${display.from.format}.format`)
+          : (v) => formatNumber(v, locale);
+    const shown = display?.writer(ends, ends);
+    const format: Formatter = shown ? (v) => shown(v) : ends;
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
-    const bands = this.#bands(frame);
+    const bands = this.#bands(frame, min);
+    const label = this.spec.label ?? display?.label ?? this.spec.value;
 
     // The dial reaches its outer radius above its center, and half that below
     // it at its ends (30 degrees below level), with the end labels under them.
@@ -179,7 +223,7 @@ export class GaugeMark implements LayoutMark, FormatUser {
     const bandOf = (v: number) => bands.find(({ to }) => Math.min(max, Math.max(min, v)) <= to);
     const colorOf = (v: number) => bandOf(v)?.color ?? theme.palette[0] ?? theme.text;
     const endOf = (v: number) => (Number.isNaN(v) ? START : angle(v));
-    const extremes = [format(min), format(max)];
+    const extremes = [ends(min), ends(max)];
     const widths = extremes.map((extreme) => measure(extreme, font));
     // The dial, the value, and the labels, as drawn at value `v`.
     const dial = (v: number): Geometry[] => {
@@ -219,7 +263,7 @@ export class GaugeMark implements LayoutMark, FormatUser {
 
       // The value as large as the dial allows, within the track's inside, and
       // the label under it.
-      const text = Number.isNaN(v) ? "–" : format(v);
+      const text = Number.isNaN(v) ? (shown?.(v) ?? "–") : format(v);
       const perPixel = measure(text, `600 100px ${theme.font}`) / 100;
       const size = Math.round(
         Math.min(
@@ -229,14 +273,10 @@ export class GaugeMark implements LayoutMark, FormatUser {
         ),
       );
       const valueY = cy - lineHeight * 0.3;
-      const label = fitText(
-        oneLineText(this.spec.label ?? this.spec.value),
-        1.7 * r0,
-        measure,
-        font,
-      );
+      const fitted = fitText(oneLineText(label), 1.7 * r0, measure, font);
       const labels: { text: string; x: number; y: number }[] = [];
-      if (label !== "…") labels.push({ text: label, x: cx, y: valueY + size / 2 + lineHeight / 2 });
+      if (fitted !== "…")
+        labels.push({ text: fitted, x: cx, y: valueY + size / 2 + lineHeight / 2 });
       geometry.push({
         kind: "shapes",
         draw: shapesDrawing,
@@ -292,12 +332,12 @@ export class GaugeMark implements LayoutMark, FormatUser {
     const middle = (r0 + r) / 2;
     const item: LayoutItem = {
       key,
-      label: this.spec.label ?? this.spec.value,
+      label,
       color,
       value,
       text: Number.isNaN(value)
-        ? `no value, from ${format(min)} to ${format(max)}`
-        : `${format(value)} of ${format(min)} to ${format(max)}${outside(value, min, max)}`,
+        ? `no value, from ${ends(min)} to ${ends(max)}`
+        : `${format(value)} of ${ends(min)} to ${ends(max)}${outside(value, min, max)}`,
       px: cx + middle * Math.cos(end),
       py: cy + middle * Math.sin(end),
       outline: outline.d,
@@ -311,9 +351,9 @@ export class GaugeMark implements LayoutMark, FormatUser {
       indexOf: (k) => (k === key ? 0 : -1),
       summary: () => {
         const name = `Gauge of ${item.label}`;
-        const range = `from ${format(min)} to ${format(max)}`;
+        const range = `from ${ends(min)} to ${ends(max)}`;
         if (Number.isNaN(value)) return `${name}: no value, ${range}.`;
-        const within = band ? `, in the band up to ${format(band.to)}` : "";
+        const within = band ? `, in the band up to ${ends(band.to)}` : "";
         return `${name}: ${format(value)}, ${range}${outside(value, min, max)}${within}.`;
       },
     };

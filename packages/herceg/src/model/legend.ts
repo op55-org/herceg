@@ -2,6 +2,7 @@
 // shape keys), flow left to right in rows across the top of the chart,
 // wrapping at its right edge; parts that break start a row of their own.
 
+import type { ShownField } from "../fields/chart.ts";
 import { type Align, alignedAt } from "../layout/place.ts";
 import {
   centeredLines,
@@ -217,6 +218,8 @@ export type ColorbarScale =
       /** The bands' edges, ascending: one more than the colors. */
       readonly levels: readonly number[];
       readonly colors: readonly string[];
+      /** The display of the field the steps are of, which writes their edges. */
+      readonly field?: ShownField | undefined;
     };
 
 /** What parts add to the layout: their guides, and what to do once the rows are placed. */

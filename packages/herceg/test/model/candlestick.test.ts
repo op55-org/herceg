@@ -10,6 +10,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { Panel, RectGeometry, SegmentGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -43,8 +44,8 @@ describe("candlesticks", () => {
     expect(rising.stroke).toBe(LIGHT.rise);
     // Day 1 falls: one wick and one body.
     expect([falling.count, bodies.count]).toEqual([1, 1]);
-    const y = model.yScale()!;
-    const x = model.xScale()!;
+    const y = yScale(model)!;
+    const x = xScale(model)!;
     // Day 1's wick runs from its high to its low through its center.
     const wick = Array.from(falling.coords.subarray(0, 4));
     expect(wick[0]).toBeCloseTo(x.map(1), 3);
@@ -57,17 +58,17 @@ describe("candlesticks", () => {
 
   it("count every candle's low and high toward y, and leave half a slot at the x ends", () => {
     const { model } = build({ marks: [candlestick(prices, ohlc)] });
-    const [y0, y1] = model.yScale()!.domain;
+    const [y0, y1] = yScale(model)!.domain;
     expect(y0).toBeLessThanOrEqual(8);
     expect(y1).toBeGreaterThanOrEqual(13);
-    const [x0, x1] = model.xScale()!.domain;
+    const [x0, x1] = xScale(model)!.domain;
     expect(x0).toBeLessThanOrEqual(-0.5);
     expect(x1).toBeGreaterThanOrEqual(2.5);
   });
 
   it("report open, high, low, and close in tooltips", () => {
     const { scene, model } = build({ marks: [candlestick(prices, ohlc)] });
-    const hit = model.inspect(model.xScale()!.map(1), scene.panels[0]!.plot.y + 10)!;
+    const hit = model.inspect(xScale(model)!.map(1), scene.panels[0]!.plot.y + 10)!;
     expect(hit.points[0]!.text).toBe("open 12, high 12.5, low 8, close 9");
   });
 
@@ -91,7 +92,7 @@ describe("candlesticks", () => {
     for (const segments of [rising, falling]) {
       for (let i = 0; i < segments.count * 4; i += 2) top = Math.min(top, segments.coords[i + 1]!);
     }
-    expect(top).toBeCloseTo(model.yScale()!.map(Math.max(...dense.numbers("h"))), 1);
+    expect(top).toBeCloseTo(yScale(model)!.map(Math.max(...dense.numbers("h"))), 1);
   });
 
   it("stand in bands on a category x, with colors from options", () => {
@@ -100,10 +101,10 @@ describe("candlesticks", () => {
       marks: [candlestick(named, { ...ohlc, x: "d", rise: "#000000", fall: "#ffffff" })],
     });
     const { rising, bodies } = parts(scene.panels[0]!);
-    expect(model.xScale()!.type).toBe("band");
+    expect(xScale(model)!.type).toBe("band");
     expect(rising.stroke).toBe("#000000");
     expect(bodies.fill).toBe("#ffffff");
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(bodies.rects[2]).toBeCloseTo(Math.abs(x.bandwidth!), 3);
   });
 
@@ -150,7 +151,7 @@ describe("candlesticks", () => {
     expect(rising.count / 6 + falling.count).toBe(2);
     // x = 0: rows 0, 2, ..., 1998. Open of row 0 (50), close of row 1998
     // (50 - 1998 % 5 = 47): it falls, with the high of row 10 and the low of row 20.
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     expect(bodies.count).toBe(2);
     expect(bodies.rects[1]).toBeCloseTo(y.map(50), 3);
     expect(bodies.rects[1]! + bodies.rects[3]!).toBeCloseTo(y.map(47), 3);
@@ -173,12 +174,12 @@ describe("candlesticks", () => {
     const { rising } = parts(scene.panels[0]!);
     // Every column still draws, including the ones holding rows 5 and 500.
     expect(rising.count / 6).toBeGreaterThan(scene.panels[0]!.plot.width - 2);
-    expect(model.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(model)!.domain[0]).toBeGreaterThan(0);
     // Tooltips skip the row without an open, to the nearest candle drawn.
     const small = table({ t: [0, 1], o: [Number.NaN, 2], h: [3, 3], l: [0, 1], c: [1, 2] });
     const shown = build({ marks: [candlestick(small, ohlc)] });
     for (const mode of ["nearest-x", "nearest"] as const) {
-      const px = shown.model.xScale()!.map(0);
+      const px = xScale(shown.model)!.map(0);
       const hit = shown.model.inspect(px, shown.scene.panels[0]!.plot.y + 5, mode)!;
       expect(hit.points.map((p) => p.text)).toEqual(["open 2, high 3, low 1, close 2"]);
     }
@@ -187,7 +188,7 @@ describe("candlesticks", () => {
   it("widen high and low to cover open and close, in drawing and extents", () => {
     const odd = table({ t: [0], o: [100], h: [13], l: [9], c: [12] });
     const { model } = build({ marks: [candlestick(odd, ohlc)] });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(100);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(100);
   });
 
   it("fit y to the candles centered in view when zoomed", () => {
@@ -201,7 +202,7 @@ describe("candlesticks", () => {
     const { model } = build({ marks: [candlestick(spiky, ohlc)] });
     setViewport(model, [0.9, 1.1]);
     model.scene(estimateText);
-    expect(model.yScale()!.domain[1]).toBeLessThan(100);
+    expect(yScale(model)!.domain[1]).toBeLessThan(100);
   });
 
   it("keep merged candles inside the plot, in buffers bounded by its width", () => {
@@ -236,7 +237,7 @@ describe("candlesticks", () => {
     live.append({ t: [2], o: [10], h: [20], l: [5], c: [15] });
     const next = parts(model.scene(estimateText).panels[0]!);
     expect(next.rising.count).toBe(12);
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(20);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(20);
   });
 
   it("describe candles, their range, and the latest one", () => {
@@ -258,7 +259,7 @@ describe("candlesticks", () => {
     const { rising, falling } = parts(scene.panels[0]!);
     // Only the last row makes a candle (falling, from 100 to 12).
     expect([rising.count, falling.count]).toEqual([0, 1]);
-    const hit = model.inspect(model.xScale()!.map(2), scene.panels[0]!.plot.y + 5)!;
+    const hit = model.inspect(xScale(model)!.map(2), scene.panels[0]!.plot.y + 5)!;
     expect(hit.points[0]!.text).toBe("open 100, high 100, low 9, close 12");
   });
 
@@ -271,8 +272,8 @@ describe("candlesticks", () => {
       c: [11, 11, 11],
     });
     const reversed = build({ marks: [candlestick(three, ohlc)], x: { domain: [2, 0] } }).model;
-    expect(reversed.yScale()!.domain[0]).toBeLessThanOrEqual(9);
-    expect(reversed.yScale()!.domain[1]).toBeGreaterThanOrEqual(13);
+    expect(yScale(reversed)!.domain[0]).toBeLessThanOrEqual(9);
+    expect(yScale(reversed)!.domain[1]).toBeGreaterThanOrEqual(13);
     // 1,000 unsorted rows zoomed to one candle: drawn at full slot width.
     const n = 1000;
     const shuffled = table({

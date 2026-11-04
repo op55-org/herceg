@@ -5,6 +5,7 @@
 import { describe, expect } from "vitest";
 import type { ChartModel } from "../../src/model/model.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { panelSeries } from "../helpers/scales.ts";
 import {
   build,
   cellsOf,
@@ -225,7 +226,7 @@ describe("placement.facet-in-cell", () => {
  */
 function shownIn(model: ChartModel, panel: string) {
   const scales = model.panels().find(({ key }) => key === panel);
-  const series = model.panelSeries(panel).map(({ key, x, y, y0, rows, length }) => {
+  const series = panelSeries(model, panel).map(({ key, x, y, y0, rows, length }) => {
     const read = (values: ArrayLike<number> | undefined, axis: "x" | "y") =>
       values &&
       Array.from({ length }, (_, i) => {

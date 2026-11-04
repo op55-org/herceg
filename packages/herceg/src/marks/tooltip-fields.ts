@@ -7,6 +7,7 @@ import type { PositionField, Schema, Table } from "../data/table.ts";
 import type { Formatter } from "../format/format.ts";
 import type { FormatKit } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { CompiledFeatures } from "../model/features.ts";
 import type { NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
 import type { Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import { requireField } from "./mark.ts";
@@ -53,23 +54,29 @@ export interface InspectedField {
   text: string;
 }
 
-/** The fields a mark's tooltip shows of `row`; undefined for a mark without any. */
+/** The fields `mark`'s tooltip shows of `row`; undefined for a mark without any. */
 export type FieldReader = (
-  table: Table | undefined,
-  tooltip: Frozen<MarkTooltipSpec> | undefined,
+  mark:
+    | {
+        readonly table?: Table | undefined;
+        readonly spec: { readonly tooltip?: Frozen<MarkTooltipSpec> | undefined };
+      }
+    | undefined,
   row: number,
 ) => InspectedField[] | undefined;
 
 /**
  * Makes field readers in a chart's locale and zone, which write with the
- * chart's code (`kit`, see `GuideKit`): numbers as the chart's other
- * numbers, and times as `times` does (the x axis' formatter, on time axes),
- * unless a field has a format (see dom/tooltip-content.ts).
+ * chart's code (`kit`, see `GuideKit`): through the chart's field displays
+ * (`features.fields`), else numbers as the chart's other numbers, and
+ * times as `times` does (the x axis' formatter, on time axes), unless a
+ * field has a format (see dom/tooltip-content.ts).
  */
 export type FieldReaders = (
   locale: string | undefined,
   zone: TimeZone,
   kit: FormatKit & { formatNumber(value: number, locale?: string): string },
+  features?: Pick<CompiledFeatures, "fields">,
   times?: Formatter,
 ) => FieldReader;
 

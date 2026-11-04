@@ -58,7 +58,7 @@ describe("spec contracts", () => {
         try {
           const { config } = loadSpec(full);
           reached = "draw";
-          const model = new ChartModel(config, undefined, ...staticCompilers());
+          const model = new ChartModel(config, undefined, staticCompilers());
           model.setSize(400, 200, 1);
           const scene = model.scene(estimateText);
           shown = [
@@ -110,11 +110,7 @@ describe("mark functions", () => {
     // Every mark function keeps zIndex, which orders the panel's painting.
     const cells = heatmap(rows, { x: "t", y: "region", color: "v", zIndex: 2 });
     expect(cells.spec.zIndex).toBe(2);
-    const model = new ChartModel(
-      { marks: [cells, rule({ x: 1 })] },
-      undefined,
-      ...staticCompilers(),
-    );
+    const model = new ChartModel({ marks: [cells, rule({ x: 1 })] }, undefined, staticCompilers());
     model.setSize(300, 200, 1);
     const [panel] = model.scene(estimateText).panels;
     const order = panel!.paint!.map((i) =>
@@ -203,7 +199,7 @@ describe("mark functions", () => {
       thrown(() => bar(rows, { x: "region", y: "v", labels: { content: [] as never } })),
     ).toMatchObject({ code: "invalid-option", path: "labels.content" });
     const marks = [line(rows, { x: "t", y: "v", labels: { at: "last", content: [] as never } })];
-    expect(thrown(() => new ChartModel({ marks }, undefined, ...staticCompilers()))).toMatchObject({
+    expect(thrown(() => new ChartModel({ marks }, undefined, staticCompilers()))).toMatchObject({
       code: "invalid-option",
       path: "marks[0].labels.content",
     });
@@ -228,7 +224,7 @@ describe("mark functions", () => {
     ];
     for (const [x, path] of compiled) {
       const marks = [line(rows, { x: x as never, y: "v" })];
-      const draw = () => new ChartModel({ marks }, undefined, ...staticCompilers());
+      const draw = () => new ChartModel({ marks }, undefined, staticCompilers());
       expect(thrown(draw)).toMatchObject({ code: "invalid-option", path });
     }
   });
@@ -237,7 +233,7 @@ describe("mark functions", () => {
     // The chart's settings alike, where the guide compiler refuses them.
     const lines = line(rows, { x: "t", y: "v" });
     const draw = (options: object) => () => {
-      const model = new ChartModel({ marks: [lines], ...options }, undefined, ...staticCompilers());
+      const model = new ChartModel({ marks: [lines], ...options }, undefined, staticCompilers());
       model.setSize(400, 200, 1);
       model.scene(estimateText);
     };
@@ -271,15 +267,15 @@ describe("mark functions", () => {
       marks: [lines],
       scales: { depth: { type: "linear", padding: 0.5 } },
     });
-    expect(live.lacks()).toEqual([true, true]);
-    expect(thrown(() => live.use(...staticCompilers()))).toMatchObject({
+    expect(live.lacks()).toEqual([true, true, false]);
+    expect(thrown(() => live.use(staticCompilers()))).toMatchObject({
       code: "invalid-option",
       path: "scales.depth.padding",
     });
     // A 3D box's axes, which refuse padding for good, check it first too.
     const cloud = point3d(table({ a: [0, 1], b: [1, 2], c: [2, 3] }), { x: "a", y: "b", z: "c" });
     const box = (options: object) => () => {
-      const model = new ChartModel({ marks: [cloud], ...options }, undefined, ...staticCompilers());
+      const model = new ChartModel({ marks: [cloud], ...options }, undefined, staticCompilers());
       model.setSize(400, 200, 1);
       model.scene(estimateText);
     };

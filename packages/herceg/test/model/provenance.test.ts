@@ -35,6 +35,7 @@ import { Picker } from "../../src/model/pick.ts";
 import { provenanceOf, rowsOfItem } from "../../src/model/provenance.ts";
 import type { RectGeometry } from "../../src/scene/scene.ts";
 import { pickKit } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -141,7 +142,7 @@ describe("rows marks", () => {
     const data = table({ id: ["a", "b", "a"], x: [0, 5, 10], y: [0, 5, 10] });
     const keyed = build({ marks: [point(data, { x: "x", y: "y", itemKey: "id" })] });
     const at = (model: ChartModel, x: number, y: number) =>
-      clicked(model, model.xScale()!.map(x), model.yScale()!.map(y));
+      clicked(model, xScale(model)!.map(x), yScale(model)!.map(y));
     const named = at(keyed, 10, 10);
     expect(named).toMatchObject({ groups: [{ field: "id", value: "a" }] });
     // A shared name is one item: both its rows.

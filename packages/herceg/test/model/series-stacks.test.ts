@@ -14,6 +14,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import type { AreaGeometry, RectGeometry, Scene } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function sceneOf(config: ChartConfig): { model: ChartModel; scene: Scene } {
   const model = new ChartModel({ locale: "en-US", ...config });
@@ -54,7 +55,7 @@ describe("areas stacked by a series field", () => {
   it("draw every layer on every minute any of them has, sharing their edges", () => {
     const { scene, model } = sceneOf({ marks: [stacked(requests())] });
     const [ok, error, missing] = areas(scene);
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     // The 500s are drawn flat at minute 1, where they have no row.
     expect(points(error!.lower!).map(([, py]) => y.invert(py))).toEqual([1, 2, 3, 0].map(near));
     expect(points(error!.upper).map(([, py]) => y.invert(py))).toEqual([11, 2, 23, 30].map(near));
@@ -66,8 +67,8 @@ describe("areas stacked by a series field", () => {
 
   it("report each series' own rows, where they are drawn, in tooltips and the keyboard", () => {
     const { model } = sceneOf({ marks: [stacked(requests())] });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const at = (minute: number) => model.inspect(x.map(minute), y.map(5))!;
     // Minute 1: the 404s and 200s have rows there; the 500s do not.
     expect(at(1).points.map((p) => [p.label, p.value, p.row])).toEqual([
@@ -102,7 +103,7 @@ describe("areas stacked by a series field", () => {
       ["b", 5, 20],
     ]);
     // Every point is reported where its layer is drawn at that occurrence.
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     expect(positionOf(model, b!.key, 2)!.points.map((p) => p.py)).toEqual([y.map(4), y.map(24)]);
     expect(read(a!.key, 1)).toEqual([
       ["a", 1, 2],
@@ -127,7 +128,7 @@ describe("areas stacked by a series field", () => {
       ["b", 5, 20],
     ]);
     expect(shuffledRead(0)).toEqual([["a", 0, 2]]);
-    const shuffledY = other.yScale()!;
+    const shuffledY = yScale(other)!;
     expect(positionOf(other, first!.key, 2)!.points.map((p) => p.py)).toEqual([
       shuffledY.map(4),
       shuffledY.map(24),
@@ -168,7 +169,7 @@ describe("areas stacked by a series field", () => {
     const data = table({ x: [0, 1, 2, 0, 2], y: [1, 100, 1, 50, 50], s: category([..."aaabb"]) });
     const mark = area(data, { x: "x", y: "y", series: "s", stack: { gaps: "interpolate" } });
     const { model } = sceneOf({ marks: [mark] });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(150);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(150);
   });
 
   it("stand stacks on the low end of a reversed log axis", () => {
@@ -178,7 +179,7 @@ describe("areas stacked by a series field", () => {
       stacked(requests()),
     ]) {
       const { scene, model } = sceneOf({ marks: [mark], y: { type: "log", domain: [100, 1] } });
-      const low = model.yScale()!.map(1);
+      const low = yScale(model)!.map(1);
       const [first, second] = areas(scene);
       expect(first!.baseline).toBeCloseTo(low);
       // The second layer stands on the first's zero there, at the same end.
@@ -379,7 +380,7 @@ describe("stacks of series over streaming tables", () => {
       two.hidden.add(two.series()[0]!.key);
       /** Where the first chart's tooltip places each series at minute `m`. */
       const read = (model: ChartModel, m: number) =>
-        model.inspect(model.xScale()!.map(m), model.yScale()!.map(1))?.points.map((p) => p.py);
+        model.inspect(xScale(model)!.map(m), yScale(model)!.map(1))?.points.map((p) => p.py);
       for (let m = 20; m < 30; m++) {
         data.append(rows(m, 1));
         const a = drawn(one);
@@ -402,7 +403,7 @@ describe("bars stacked by a series field, hovered", () => {
       inspection: { mode: "nearest" },
       marks: [bar(requests(), { x: "minute", y: "count", series: "status", stack: true })],
     });
-    const [x, y] = [model.xScale()!, model.yScale()!];
+    const [x, y] = [xScale(model)!, yScale(model)!];
     const read = (minute: number, count: number) =>
       model.inspect(x.map(minute), y.map(count))?.points.map((p) => [p.label, p.row]);
     // At minute 0, 500's segment runs from 1 to 11: inside it, nearer 200's top.

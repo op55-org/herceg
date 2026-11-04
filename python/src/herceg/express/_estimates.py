@@ -29,6 +29,7 @@ from ._common import (
     check_n_boot,
     checked_ends,
     checking,
+    column_name,
     complete,
     describe_interval,
     dropped_sentence,
@@ -145,7 +146,7 @@ def barplot(
     chart = make_chart(
         est.table, options, sentence=est.sentence("Bars"), palette=palette, x_label=x, y_label=y
     )
-    label = None if series else est.value
+    label = None if series else column_name(chart, est.value)
     xy = (est.value, est.category) if est.horizontal else (est.category, est.value)
     chart.bar(*xy, series=series, label=label, **marks.primary())
     est.error_bars(chart, dodge=series is not None, stroke=neutral(options.get("theme")))
@@ -225,7 +226,7 @@ def pointplot(
         y_label=y,
     )
     spread = dodge and series is not None
-    label = None if series else est.value
+    label = None if series else column_name(chart, est.value)
     xy = (est.value, est.category) if est.horizontal else (est.category, est.value)
     # The points come first: their series, in order, give the legend group its
     # colors and slots, which the lines' marks (one per style) then share.
@@ -439,7 +440,7 @@ def lineplot(
         + dropped_sentence(dropped, roles, series_order is not None)
     )
     chart = make_chart(table, options, sentence=sentence, palette=palette, x_label=x, y_label=y)
-    label = None if series else y
+    label = None if series else column_name(chart, y)
     if interval is not None and error_style == "band":
         # A band per series, of the line's table: each stands for what its
         # line does, sharing its color, legend entry, and visibility.
@@ -509,7 +510,9 @@ def _lines_of_rows(
     order = f"in {x} order" if sort else "in the data's order"
     sentence = f"Lines join the rows' {y} {order}{by(series)}{lines}." + left_out
     chart = make_chart(drawn, options, sentence=sentence, palette=palette, x_label=x, y_label=y)
-    chart.line(x, y, series=series, label=None if series else y, **marks.primary())
+    chart.line(
+        x, y, series=series, label=None if series else column_name(chart, y), **marks.primary()
+    )
     stats = Statistics("lineplot", sentence, {"rows": readable(table)}, None, dropped)
     return record(chart, stats)
 
@@ -808,7 +811,7 @@ class _CategoryEstimates:
             "series": self.series,
             "dodge": dodge,
             "stroke": stroke,
-            "label": None if self.series else self.value,
+            "label": None if self.series else column_name(chart, self.value),
         }
         if self.horizontal:
             chart.errorbar(y=self.category, x1=self.low, x2=self.high, **style)

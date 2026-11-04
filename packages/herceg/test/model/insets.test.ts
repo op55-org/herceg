@@ -277,7 +277,7 @@ describe("insets", () => {
           panels: panels(panel("main", insets)),
         },
         NO_PAGE,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(width, 600, 1);
       return model.scene(estimateText);
@@ -349,7 +349,7 @@ describe("insets", () => {
           ),
         },
         NO_PAGE,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(800, 600, 1);
       return model;
@@ -395,7 +395,7 @@ describe("insets", () => {
         ),
       },
       NO_PAGE,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     defaults.setSize(800, 600, 1);
     const plain = drawnIn(defaults.scene(estimateText), "plain");

@@ -49,7 +49,7 @@ from ._style import (
 )
 
 if TYPE_CHECKING:
-    from ._encoding import Dash, Pixels, SymbolName
+    from ._encoding import Dash, LabelPart, Pixels, SymbolName
 
 
 class LayoutScope(TypedDict):
@@ -1221,7 +1221,8 @@ class AxisGuide:
     scale: str
     id: str | None = None
     place: Place | Mapping[str, Any] | None = None
-    title: str | None = None
+    #: Text, or text and columns' labels: ``[hg.LabelPart(label="latency"), " (p99)"]``.
+    title: str | Sequence[str | LabelPart] | None = None
     ticks: int | Ticks | Mapping[str, Any] | None = None
     format: Format | Mapping[str, Any] | None = None
     tick: Tick | Literal[False] | Mapping[str, Any] | None = None
@@ -1291,7 +1292,7 @@ class AxisGuide:
             "id": self.id,
             "scale": "yRight" if self.scale == "y_right" else self.scale,
             "place": {"side": self.place.side} if isinstance(self.place, Place) else None,
-            "title": self.title,
+            "title": _axis_title(self.title),
             "ticks": ticks_spec(self.ticks, "axis ticks"),
             "format": format_spec(self.format, "axis format"),
             "tick": _marks(self.tick, Tick, "axis tick"),
@@ -1610,3 +1611,11 @@ def guides_spec(value: Any, start: int = 0) -> Any:
             )
         out.append(located(at, guide._spec))
     return out
+
+
+def _axis_title(title: Any) -> Any:
+    """An axis guide's title as the spec takes it (see ``axis_title_spec``)."""
+    # Parts are label parts, which the encodings module holds; it imports this one.
+    from ._encoding import axis_title_spec
+
+    return axis_title_spec(title, "axis title")

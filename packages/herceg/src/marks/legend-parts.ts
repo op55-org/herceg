@@ -47,7 +47,10 @@ function rampMarkup(item: RampItem, id: string): string {
 
 /** The legend of a continuous color scale: its title, low value, ramp, and high value in a row. */
 export function rampLegend(ramp: ColorRamp): LegendPart {
-  const { title, domain, midpoint, stops } = ramp;
+  const { title, domain, midpoint, stops, field } = ramp;
+  // Values as the field's display writes them, else as the chart's numbers.
+  const writer = (locale: string | undefined) =>
+    field?.writer() ?? ((value: number) => formatNumber(value, locale));
   const key = `ramp|${title}|${domain.join()}|${midpoint}|${stops.join()}`;
   const [lo, hi] = domain;
   // Where the midpoint falls between the ends, for diverging ramps.
@@ -63,8 +66,9 @@ export function rampLegend(ramp: ColorRamp): LegendPart {
     colorbar: { kind: "ramp", ramp, offsets },
     items(text: LegendText, out: LegendOut): LegendFlowItem[] {
       const { measure, lineHeight, locale } = text;
-      const low = formatNumber(lo, locale);
-      const high = formatNumber(hi, locale);
+      const write = writer(locale);
+      const low = write(lo);
+      const high = write(hi);
       const titleWidth = textWidth(title, text.title, measure) + 10;
       const lowWidth = textWidth(low, text.value, measure) + 6;
       const at = out.guides.length;
@@ -111,7 +115,7 @@ export function rampLegend(ramp: ColorRamp): LegendPart {
       ];
     },
     describe(locale: string | undefined): string {
-      const f = (value: number) => formatNumber(value, locale);
+      const f = writer(locale);
       const middle = midpoint === undefined ? "" : `, diverging at ${f(midpoint)}`;
       return `Color shows ${title} from ${f(domain[0])} to ${f(domain[1])}${middle}.`;
     },

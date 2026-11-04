@@ -20,6 +20,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -54,12 +55,12 @@ describe("lines over category axes", () => {
         line(months, { x: "month", y: "target", series: "region" }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(x.type).toBe("band");
     expect(x.categories).toEqual(["Jan", "Feb", "Mar"]);
     const [bars] = of<RectGeometry>(scene, "rect");
     const [north] = of<LineGeometry>(scene, "line");
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     // Rows Mar, Jan, Feb are drawn Jan, Feb, Mar, at the bars' centers.
     near(
       vertices(north!.path),
@@ -91,7 +92,7 @@ describe("lines over category axes", () => {
     const [drawn] = of<LineGeometry>(scene, "line");
     expect(drawn!.path.starts).toEqual([0, 2]);
     expect(drawn!.path.count).toBe(3);
-    expect(model.xScale()!.categories).toEqual(["Jan", "Feb", "Mar", "Apr"]);
+    expect(xScale(model)!.categories).toEqual(["Jan", "Feb", "Mar", "Apr"]);
     expect(describeChart(model)).toContain("v: 4 points, from 1 to 4");
   });
 
@@ -150,10 +151,10 @@ describe("lines over category axes", () => {
     const { model, scene } = build({
       marks: [area(months, { x: "month", y: "sales", series: "region", stack: true })],
     });
-    expect(model.xScale()!.categories).toEqual(["Mar", "Jan", "Feb"]);
+    expect(xScale(model)!.categories).toEqual(["Mar", "Jan", "Feb"]);
     const [north, south] = of<AreaGeometry>(scene, "area");
-    const y = model.yScale()!;
-    const x = model.xScale()!;
+    const y = yScale(model)!;
+    const x = xScale(model)!;
     // The south layer's top runs Mar, Jan, Feb at its stacked heights.
     near(
       vertices(south!.upper),
@@ -178,7 +179,7 @@ describe("lines over category axes", () => {
     const top = stacked.model.series().find((s) => s.label === "b")!;
     expect([0, 1].map((k) => positionOf(stacked.model, top.key, k)!.label)).toEqual(["Jan", "Feb"]);
     const [, upper] = of<AreaGeometry>(stacked.scene, "area");
-    const sy = stacked.model.yScale()!;
+    const sy = yScale(stacked.model)!;
     expect(vertices(upper!.upper).map(([, py]) => Math.round(py!))).toEqual(
       [11, 22].map((v) => Math.round(sy.map(v))),
     );
@@ -215,7 +216,7 @@ describe("lines over category axes", () => {
       b: new Float64Array(n).fill(1),
     });
     const { model } = build({ marks: [area(data, { x: "c", y: ["a", "b"], stack: true })] });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(1001);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(1001);
   });
 
   it("trace long stacks in facet panels of their own categories through every row", () => {
@@ -235,7 +236,7 @@ describe("lines over category axes", () => {
       facet: facet("half"),
       x: { scope: "panel" },
     });
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     const highest = (p: number) => {
       const [bottom] = of<AreaGeometry>(scene, "area", p);
       return Math.min(...vertices(bottom!.upper).map(([, py]) => py!));
@@ -256,8 +257,8 @@ describe("lines and areas along y", () => {
     const { model, scene } = build({
       marks: [line(casts, { x: ["temperature", "salinity"], y: "depth", orient: "y" })],
     });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     expect(x.domain[0]).toBeLessThanOrEqual(7);
     const [temperature] = of<LineGeometry>(scene, "line");
     near(
@@ -293,9 +294,9 @@ describe("lines and areas along y", () => {
   it("lay along a category y without orient, as bars do", () => {
     const data = table({ day: ["thu", "fri", "sat"], tip: [2, 3, 4] });
     const { model, scene } = build({ marks: [line(data, { x: "tip", y: "day" })] });
-    expect(model.yScale()!.type).toBe("band");
+    expect(yScale(model)!.type).toBe("band");
     const [drawn] = of<LineGeometry>(scene, "line");
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     expect(vertices(drawn!.path).map(([, py]) => Math.round(py!))).toEqual(
       [0, 1, 2].map((band) => Math.round(y.map(band))),
     );
@@ -311,8 +312,8 @@ describe("lines and areas along y", () => {
         area(casts, { y: "depth", x1: "temperature", x2: "salinity" }),
       ],
     });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     expect(x.domain[0]).toBe(0);
     const [filled, band] = of<AreaGeometry>(scene, "area");
     near(
@@ -341,8 +342,8 @@ describe("lines and areas along y", () => {
     const { model, scene } = build({
       marks: [area(data, { x: "v", y: "depth", series: "g", stack: true, orient: "y" })],
     });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const [, upper] = of<AreaGeometry>(scene, "area");
     near(vertices(upper!.upper), [
       [x.map(4), y.map(0)],
@@ -365,7 +366,7 @@ describe("lines and areas along y", () => {
     zoomed.setSize(600, 300, 1);
     setViewport(zoomed, [4, 6]);
     zoomed.scene(estimateText);
-    expect(zoomed.yScale()!.domain).toEqual([0, 100]);
+    expect(yScale(zoomed)!.domain).toEqual([0, 100]);
     // Interpolated gaps of a stack along y reach past any row's own top.
     const sparse = table({ depth: [1, 0, 2], v: [100, 100, 100], g: ["a", "b", "b"] });
     const { model, scene } = build({
@@ -379,7 +380,7 @@ describe("lines and areas along y", () => {
         }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(Math.max(...x.domain)).toBeGreaterThanOrEqual(200);
     const [, upper] = of<AreaGeometry>(scene, "area");
     const reach = Math.max(...vertices(upper!.upper).map(([px]) => px!));
@@ -439,7 +440,7 @@ describe("lines and areas along y", () => {
       facet: facet("half"),
     });
     const panel = model.panels()[0]!;
-    const b = model.panelSeries(panel.key).find((s) => s.label === "b")!;
+    const b = panelSeries(model, panel.key).find((s) => s.label === "b")!;
     expect(b.sorted).toBe(false);
     // The pointer on b's top at depth 2 finds it there.
     const found = model.inspect(panel.x.map(3), panel.y.map(2), "nearest")!;

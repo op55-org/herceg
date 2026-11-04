@@ -19,6 +19,7 @@ import type {
 import { loadSpec } from "../../src/spec/load.ts";
 import { surface } from "../../src/theme.ts";
 import { legendOf } from "../helpers/guides.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -73,8 +74,8 @@ describe("point outlines", () => {
       model.setSize(600, 300, 1);
       const scene = model.scene(estimateText);
       const { plot } = scene.panels[0]!;
-      const outside = plot.x - model.xScale()!.map(1);
-      const py = model.yScale()!.map(3);
+      const outside = plot.x - xScale(model)!.map(1);
+      const py = yScale(model)!.map(3);
       return { scene, outside, hit: model.inspect(plot.x + 1, py, "nearest") };
     };
     const ringed = at(20);

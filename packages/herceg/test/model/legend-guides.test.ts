@@ -39,7 +39,7 @@ const [, features] = staticCompilers();
 
 function build(config: ChartConfig, width = 640, height = 360) {
   // Symbol fields' shapes are the feature compiler's.
-  const model = new ChartModel({ locale: "en-US", ...config }, undefined, guides, features);
+  const model = new ChartModel({ locale: "en-US", ...config }, undefined, [guides, features]);
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }

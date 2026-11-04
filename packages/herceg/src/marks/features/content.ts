@@ -1,16 +1,18 @@
 // Labels' text made of parts (`LabelContent`): literal text, a field's
-// value at the label's row, the name of the series it labels, and the value
-// drawn at its place, each written with its own format. Bars' value labels,
+// value at the label's row, the name of the series it labels, the value
+// drawn at its place, and a field's label, each written with its own format
+// or as the chart's field displays write it. Bars' value labels,
 // annotations' labels, and labels following series share it.
 
 import type { Table } from "../../data/table.ts";
+import type { ChartFields } from "../../fields/chart.ts";
 import type { Formatter } from "../../format/format.ts";
 import { formatWriter } from "../../format/patterns.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { LabelContent, LabelPart, PartStyle } from "../../spec/encoding.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
 import type { TextPaint } from "../../style/style.ts";
-import type { Frame } from "../mark.ts";
+import type { Frame, Mark } from "../mark.ts";
 import { type PartText, partText } from "./part-text.ts";
 
 /**
@@ -25,6 +27,7 @@ export type ContentWriter = ((
   series: string,
   value: number,
   time?: boolean,
+  field?: string,
 ) => string) & {
   readonly styled?: (
     row: number,
@@ -33,6 +36,7 @@ export type ContentWriter = ((
     time: boolean | undefined,
     paint: TextPaint,
     frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
+    field?: string,
   ) => PartText;
 };
 
@@ -44,12 +48,17 @@ const TIME = { dateStyle: "medium", timeStyle: "short" } as const;
 
 /**
  * Writes `content` at its labels' places: fields of `table` (none for
- * labels of no rows), checked now, numbers as the chart writes them and
- * times in `zone`, or each with its part's format; the value with `value`
- * (how the mark writes values) unless its part has a format, and as a
- * time where the writer is told it is one. `path` names
- * each part (`marks[1].labels.content[0]`) in errors; `has` says what parts
- * the mark's labels can say: `series` and `value` where it has them.
+ * labels of no rows), checked now, through the chart's field displays
+ * (`fields`: missing values, mappings, formats), numbers as the chart
+ * writes them and times in `zone`, or each with its part's format (over
+ * its display's); the value through the display of the labeled series'
+ * value field of mark `valued` (`field`, as the writer is told, else the
+ * mark's; see `ChartFields.valueDisplay`; the part's format over the
+ * display's), else in its part's format, else as numbers, or as times
+ * where the writer is told it is one; a field's label as its display
+ * gives it. `path` names each part
+ * (`marks[1].labels.content[0]`) in errors; `has` says what parts the
+ * mark's labels can say: `series` and `value` where it has them.
  */
 export function writeContent(
   kit: FeatureKit,
@@ -59,7 +68,8 @@ export function writeContent(
   zone: string,
   path: (part: number) => string,
   has: { series: boolean; value: boolean },
-  value?: Formatter,
+  fields?: ChartFields,
+  valued?: Mark,
 ): ContentWriter {
   const format = (spec: FormatSpec | undefined, at: string, time: boolean): Formatter => {
     // Intl options write a date for times, in the chart's zone, else a number; other forms as they say.
@@ -70,9 +80,9 @@ export function writeContent(
   const writers = content.map((part: LabelPart, i): ContentWriter => {
     const at = path(i);
     if (typeof part === "string") return () => part;
-    const kinds = ["field", "series", "value"].filter((key) => key in (part ?? {}));
+    const kinds = ["field", "series", "value", "label"].filter((key) => key in (part ?? {}));
     if (typeof part !== "object" || part === null || kinds.length !== 1)
-      refuse(kit, at, "expected text, { field }, { series: true }, or { value: true }");
+      refuse(kit, at, "expected text, { field }, { series: true }, { value: true }, or { label }");
     if (part.style) {
       for (const key of BLOCK)
         if (key in part.style)
@@ -99,41 +109,59 @@ export function writeContent(
           at,
           "writes the value at the label's place, and these labels have none; give text or a field",
         );
-      const write = part.format
-        ? format(part.format, at, false)
-        : (value ?? format(undefined, at, false));
-      // Times are written as a field of times is; a pattern says which it writes.
-      const pattern = part.format as { number?: string; time?: string } | undefined;
-      const patterned = pattern?.number !== undefined || pattern?.time !== undefined;
-      let times: Formatter | undefined;
-      return (_row, _series, v, time) => {
+      // Each value field's display of its kind writes its series' values,
+      // mappings whatever the format; times are written as a field of
+      // times is. Missing values are left blank.
+      const writes = new Map<string, Formatter>();
+      return (_row, _series, v, time, field) => {
         if (!Number.isFinite(v)) return "";
-        if (!time || patterned) return write(v);
-        times ??= format(part.format, at, true);
-        return times(v);
+        const key = `${!!time}${field === undefined ? "" : `:${field}`}`;
+        let write = writes.get(key);
+        if (!write) {
+          const own = part.format && format(part.format, at, !!time);
+          const fallback = format(undefined, at, !!time);
+          const shown = valued && fields?.valueDisplay(valued, field);
+          write =
+            (shown?.kind === (time ? "time" : "number")
+              ? shown.writer(own, fallback, "")
+              : undefined) ??
+            (own || fallback);
+          writes.set(key, write);
+        }
+        return write(v);
       };
     }
-    const field = part.field;
+    const field = (part.field ?? part.label)!;
+    const key = part.label === undefined ? "field" : "label";
     if (!table?.has(field))
       throw new kit.ChartError({
         code: table ? "unknown-field" : "invalid-option",
-        path: `${at}.field`,
+        path: `${at}.${key}`,
         message: table
-          ? `${at}.field: no field "${field}"; the table has ${table
+          ? `${at}.${key}: no field "${field}"; the table has ${table
               .fields()
               .map((name) => `"${name}"`)
               .join(", ")}`
-          : `${at}.field: these labels have no table whose rows a field reads; give text, or the series or value`,
+          : `${at}.${key}: these labels have no table whose rows a field reads; give text, or the series or value`,
       });
-    const kind = table.kind(field as never);
-    const write = format(part.format, at, kind === "time");
-    return (row) => {
-      const read = table.value(field as never, row);
-      return read === null ? "" : typeof read === "number" ? write(read) : String(read);
-    };
+    const shown = fields?.of(table, field);
+    // A field's label, the same at every row: its name without one.
+    if (part.label !== undefined) {
+      const label = shown?.label ?? field;
+      return () => label;
+    }
+    const time = table.kind(field as never) === "time";
+    const own = part.format && format(part.format, at, time);
+    const fallback = format(undefined, at, time);
+    // The part's format over the display's; mappings and missing text stay the field's.
+    const write =
+      shown?.writer(own, fallback, "") ??
+      ((read: number | string | null) =>
+        read === null ? "" : typeof read === "number" ? (own || fallback)(read) : String(read));
+    return (row) => write(table.value(field as never, row));
   });
-  const write: ContentWriter = (row, series, v, time) =>
-    writers.map((part) => part(row, series, v, time)).join("");
+  const write: ContentWriter = (row, series, v, time, field) =>
+    writers.map((part) => part(row, series, v, time, field)).join("");
   if (styles.length === 0) return write;
   // Parts' styles as the last frame read them: a frame is a panel's in one scene.
   let readIn: object | undefined;
@@ -146,6 +174,7 @@ export function writeContent(
       time: boolean | undefined,
       paint: TextPaint,
       frame: Pick<Frame, "measure"> & Partial<Pick<Frame, "read">>,
+      field?: string,
     ) => {
       if (frame.read && readIn !== frame) {
         readIn = frame;
@@ -154,7 +183,7 @@ export function writeContent(
       return partText(
         kit,
         writers.map((part, i) => ({
-          text: part(row, series, v, time),
+          text: part(row, series, v, time, field),
           style: frame.read ? read[i] : styles[i],
         })),
         paint,

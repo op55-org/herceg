@@ -17,6 +17,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { xScale, yRightScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -43,8 +44,8 @@ describe("right y axis", () => {
       ],
       yRight: { title: "req/s" },
     });
-    const left = model.yScale()!;
-    const right = model.yRightScale()!;
+    const left = yScale(model)!;
+    const right = yRightScale(model)!;
     expect(left.domain[1]).toBeLessThan(100);
     expect(right.domain[1]).toBeGreaterThanOrEqual(4800);
     const rightAxis = axis(scene, "right")!;
@@ -68,9 +69,9 @@ describe("right y axis", () => {
       ],
       yRight: { format: { notation: "compact" } },
     });
-    const inspection = model.inspect(model.xScale()!.map(1), scene.panels[0]!.plot.y + 10)!;
+    const inspection = model.inspect(xScale(model)!.map(1), scene.panels[0]!.plot.y + 10)!;
     expect(inspection.points.map((p) => p.text)).toEqual(["18", "4.8K"]);
-    expect(inspection.points[1]!.py).toBeCloseTo(model.yRightScale()!.map(4800), 3);
+    expect(inspection.points[1]!.py).toBeCloseTo(yRightScale(model)!.map(4800), 3);
   });
 
   it("leave the left axis out and draw grid lines for the right one when every mark is there", () => {
@@ -83,7 +84,7 @@ describe("right y axis", () => {
       axis(scene, "right")!.ticks[0]!.position,
       3,
     );
-    expect(model.yRightScale()!.domain[1]).toBeGreaterThanOrEqual(4800);
+    expect(yRightScale(model)!.domain[1]).toBeGreaterThanOrEqual(4800);
   });
 
   it("place annotations on the right axis and count them toward it", () => {
@@ -94,10 +95,10 @@ describe("right y axis", () => {
         rule({ y: 9000, label: "capacity", axis: "right", contributeDomain: true }),
       ],
     });
-    expect(model.yRightScale()!.domain[1]).toBeGreaterThanOrEqual(9000);
-    expect(model.yScale()!.domain[1]).toBeLessThan(100);
+    expect(yRightScale(model)!.domain[1]).toBeGreaterThanOrEqual(9000);
+    expect(yScale(model)!.domain[1]).toBeLessThan(100);
     const capacity = scene.panels[0]!.marks.find((m): m is RuleGeometry => m.kind === "rule")!;
-    expect(capacity.y1).toBeCloseTo(model.yRightScale()!.map(9000), 3);
+    expect(capacity.y1).toBeCloseTo(yRightScale(model)!.map(9000), 3);
   });
 
   it("fit the right axis to its visible series", () => {
@@ -109,7 +110,7 @@ describe("right y axis", () => {
     });
     model.hidden.add(model.series()[1]!.key);
     model.scene(estimateText);
-    expect(model.yRightScale()!.domain[1]).toBeLessThan(100);
+    expect(yRightScale(model)!.domain[1]).toBeLessThan(100);
   });
 
   it("stay in place while their series are hidden", () => {
@@ -193,9 +194,9 @@ describe("right y axis", () => {
       yRight: { domain: [0, 1000] },
       inspection: { mode: "nearest-y" },
     });
-    const left = model.yScale()!;
+    const left = yScale(model)!;
     // b is 5 on the right axis, far below the pointer; only left values count.
-    const hit = model.inspect(model.xScale()!.map(1), left.map(5)) as AxisInspection;
+    const hit = model.inspect(xScale(model)!.map(1), left.map(5)) as AxisInspection;
     expect(hit.points.map((p) => p.text)).toEqual(["4"]);
     expect(hit.position).toBeCloseTo(left.map(4), 3);
     // With every series on the right, the right axis is the one followed.
@@ -203,8 +204,8 @@ describe("right y axis", () => {
       marks: [line(pair, { x: "t", y: "b", axis: "right" })],
       inspection: { mode: "nearest-y" },
     }).model;
-    const right = only.yRightScale()!;
-    const along = only.inspect(only.xScale()!.map(1), right.map(500)) as AxisInspection;
+    const right = yRightScale(only)!;
+    const along = only.inspect(xScale(only)!.map(1), right.map(500)) as AxisInspection;
     expect(along.points.map((p) => p.text)).toEqual(["500"]);
     expect(along.position).toBeCloseTo(right.map(500), 3);
   });
@@ -275,7 +276,7 @@ describe("right y axis", () => {
         }),
       ],
     });
-    const right = model.yRightScale()!;
+    const right = yRightScale(model)!;
     expect(right.domain[1]).toBeGreaterThanOrEqual(4800);
     expect(mapped).toBeCloseTo(right.map(4800), 3);
     expect(overlay).toBeCloseTo(right.map(1200), 3);
@@ -329,8 +330,8 @@ describe("right y axis", () => {
       ],
       yRight: { format: { notation: "compact" } },
     });
-    const x = model.xScale()!;
-    const right = model.yRightScale()!;
+    const x = xScale(model)!;
+    const right = yRightScale(model)!;
     const requests = model.series()[1]!;
     const keyed = positionOf(model, requests.key, 1)!;
     const point = keyed.points.find((p) => p.key === requests.key)!;

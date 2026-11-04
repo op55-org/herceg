@@ -11,6 +11,7 @@ import { isSortedSubset, rowsByCode, type Series, yExtent } from "../../src/mark
 import { SplitRows } from "../../src/marks/split.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function series(x: number[], y: number[], options: Partial<Series> = {}): Series {
   const values = Float64Array.from(y);
@@ -187,8 +188,8 @@ describe("row groups", () => {
     t.append({ x: Float64Array.of(5), kind: ["a"] });
     b.scene(estimateText);
     const at = (model: ChartModel) => {
-      const x = model.xScale()!.map(3);
-      const y = model.yScale()!.map(3);
+      const x = xScale(model)!.map(3);
+      const y = yScale(model)!.map(3);
       const point = model.inspect(x, y, "nearest")?.points[0];
       return point && [point.label, point.value];
     };

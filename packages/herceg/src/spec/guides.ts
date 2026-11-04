@@ -5,6 +5,7 @@
 // "The guide compiler").
 
 import type {
+  AxisTitleSpec,
   ChannelScaleSpec,
   IdentityScaleSpec,
   OrdinalScaleSpec,
@@ -348,7 +349,7 @@ export interface AxisGuideSpec {
   scale: "x" | "y" | "yRight" | (string & {});
   /** Below the plots (x) or left of them (y) by default; x above, y on the right. */
   place?: { side: Side };
-  title?: string;
+  title?: AxisTitleSpec;
   ticks?: TicksSpec;
   format?: FormatSpec;
   tick?: TickMarkSpec | false;

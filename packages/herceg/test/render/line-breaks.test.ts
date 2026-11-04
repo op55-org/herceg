@@ -40,7 +40,7 @@ const lines = (svg: string) =>
 
 /** The plot of a chart's first panel. */
 const plotOf = (config: Omit<ChartConfig, "width" | "height">) => {
-  const model = new ChartModel(config as ChartConfig, NO_PAGE, ...staticCompilers());
+  const model = new ChartModel(config as ChartConfig, NO_PAGE, staticCompilers());
   model.setSize(400, 300, 1);
   return model.scene(estimateText, false, NO_PAGE).panels[0]!.plot;
 };

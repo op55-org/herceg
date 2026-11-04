@@ -1,6 +1,7 @@
 import { type FieldKind, type NumericArray, UNTYPED } from "../data/column.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
+import type { ShownField } from "../fields/chart.ts";
 import type { Formatter } from "../format/format.ts";
 import { formatNumber, timeTickLabels } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
@@ -18,6 +19,7 @@ import type { Nearest } from "../model/nearest.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { TIME_UNIT_MS, type TimeUnit } from "../scale/time.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
+import type { NameSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
@@ -262,9 +264,10 @@ export interface SummaryContext {
   log: boolean;
   /**
    * The chart's bands, which band indices in series name: summaries read
-   * series' parts across panels, whose own categories place them apart.
+   * series' parts across panels, whose own categories place them apart,
+   * and the texts the axes write them in.
    */
-  bands: Bands;
+  bands: ChartBands;
 }
 
 /** How the chart formats single x and y values, as in tooltips. */
@@ -303,6 +306,8 @@ export interface ColorRamp {
   title: string;
   /** The value at the ramp's middle, for diverging ramps. */
   midpoint?: number | undefined;
+  /** The display of the field it colors by, which writes its values, where the chart's `fields` give one. */
+  field?: ShownField | undefined;
 }
 
 /**
@@ -493,9 +498,11 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   ): readonly [number, number] | undefined;
   /**
    * The series' points summarize rows of the table (histogram bins, box
-   * plot groups) rather than being its rows, so inspections name no row.
+   * plot groups) rather than being its rows, so inspections name no row:
+   * counting them ("counts"), or as values of its value field ("values":
+   * box plots' medians and quartiles, contours' levels).
    */
-  readonly summarizes?: boolean;
+  readonly summarizes?: "counts" | "values" | undefined;
   /**
    * For marks naming items without `itemKey` by their position (bars): the
    * field of their positions, whose value with their series names each
@@ -1046,6 +1053,11 @@ export class SeriesSplitter {
   readonly #xField: string | undefined;
   readonly yFields: readonly string[];
   readonly #seriesField: string | undefined;
+  /**
+   * A single series' name: text, or parts, which are its label until the
+   * feature compiler names it (charts naming series by parts load it,
+   * marks/features/names.ts).
+   */
   readonly #label: string | undefined;
   #cache: { rows: MarkRows; sources: SeriesSource[] } | undefined;
   /**
@@ -1060,13 +1072,13 @@ export class SeriesSplitter {
     xField: string | undefined,
     yFields: readonly string[],
     seriesField: string | undefined,
-    label: string | undefined,
+    label: NameSpec | undefined,
   ) {
     this.#rows = rows;
     this.#xField = xField;
     this.yFields = yFields;
     this.#seriesField = seriesField;
-    this.#label = label;
+    this.#label = label as string | undefined;
     requireSeriesFields(yFields, seriesField);
   }
 
@@ -1173,6 +1185,21 @@ export function buildSeries(
 export interface BandList {
   keys: readonly string[];
   labels: readonly string[];
+}
+
+/**
+ * A chart's bands on a band axis, with their labels as the axis writes
+ * them (`texts`: through the chart's field displays, else the labels);
+ * scales, events, and panels read the labels.
+ */
+export interface AxisBands extends BandList {
+  readonly texts: readonly string[];
+}
+
+/** The chart's bands on its band axes. */
+export interface ChartBands {
+  x?: AxisBands | undefined;
+  y?: AxisBands | undefined;
 }
 
 /** Ordered distinct values of a field as bands, with each row's band. */

@@ -11,6 +11,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import type { LabelsGeometry, TextGeometry } from "../../src/scene/scene.ts";
 import type { TextStyle } from "../../src/spec/spec.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 const rows = table({ t: [0, 10], v: [0, 10] });
 
@@ -32,7 +33,7 @@ describe("verticalAlign", () => {
         text({ x: 5, y: 5, label: { text: "peak", ...(style && { style }) } }),
       ]);
       const drawn = marks.find((m) => m.kind === "text") as TextGeometry;
-      return drawn.coords[1]! - model.yScale()!.map(5);
+      return drawn.coords[1]! - yScale(model)!.map(5);
     };
     // Plain text's line is 15 pixels tall (12px, line height 1.25): its middle by default.
     expect(at()).toBeCloseTo(0, 6);
@@ -57,7 +58,7 @@ describe("verticalAlign", () => {
       ]);
       const drawn = marks.find((m) => m.kind === "labels") as LabelsGeometry;
       const box = drawn.items[0]!.box!;
-      return [box.y - model.yScale()!.map(5), box.y + box.height - model.yScale()!.map(5)];
+      return [box.y - yScale(model)!.map(5), box.y + box.height - yScale(model)!.map(5)];
     };
     expect(boxed("top")[0]).toBeCloseTo(0, 6);
     expect(boxed("bottom")[1]).toBeCloseTo(0, 6);
@@ -69,7 +70,7 @@ describe("verticalAlign", () => {
         rule({ y: 5, label: { text: "SLO", ...(style && { style }) } }),
       ]);
       const drawn = marks.find((m) => m.kind === "labels") as LabelsGeometry | undefined;
-      const y = model.yScale()!.map(5);
+      const y = yScale(model)!.map(5);
       return drawn ? drawn.items[0]!.y - y : undefined;
     };
     // Above the rule by default, below it for "top", on it for "middle".
@@ -103,7 +104,7 @@ describe("verticalAlign", () => {
       const item = drawn.items[0]!;
       // The box holds both lines and their padding.
       expect(item.box!.height).toBeCloseTo(2 * item.paint.lineHeight + 21, 6);
-      return { box: item.box!, x: model.xScale()!.map(5), y: model.yScale()!.map(5) };
+      return { box: item.box!, x: xScale(model)!.map(5), y: yScale(model)!.map(5) };
     };
     const below = box("top");
     expect(below.box.y - below.y).toBeCloseTo(4, 6);
@@ -130,7 +131,7 @@ describe("verticalAlign", () => {
         }),
       ]);
       const drawn = marks.find((m) => m.kind === "labels") as LabelsGeometry;
-      return { box: drawn.items[0]!.box!, top: model.yScale()!.map(8) };
+      return { box: drawn.items[0]!.box!, top: yScale(model)!.map(8) };
     };
     const below = box("top");
     expect(below.box.y - below.top).toBeCloseTo(4, 6);

@@ -34,6 +34,7 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import type { AreaGeometry, PointGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import { positionOf } from "../helpers/keyboard.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { panelSeries } from "../helpers/scales.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>, options?: TableOptions): Table =>
@@ -128,7 +129,7 @@ describe("brushes as conditions", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     model.scene(estimateText);
@@ -583,7 +584,7 @@ describe("lassos and clicks as rows", () => {
       x: { type: "log", domain: [0.1, 2] },
     });
     const [lp] = logged.panels();
-    const [series] = logged.panelSeries(lp!.key);
+    const [series] = panelSeries(logged, lp!.key);
     expect(positionOf(logged, series!.key, 0)!.points[0]!.value).toBe(10);
   });
 
@@ -820,7 +821,7 @@ describe("lassos and clicks as rows", () => {
   it("select the rows under the keyboard cursor", () => {
     const values = table({ v: [0, 0.5, 1.5], g: ["a", "a", "a"] });
     const model = drawn({ marks: [histogram(values, { x: "v", bins: { step: 1 } })] });
-    const [s] = model.panelSeries("");
+    const [s] = panelSeries(model, "");
     const found = cursorRows(model, new Set([values]), { panel: "", key: s!.key, position: 0 });
     expect(Array.from(found!.rows)).toEqual([0, 1]);
     expect(cursorRows(model, new Set(), { panel: "", key: s!.key, position: 0 })).toBeUndefined();
@@ -830,7 +831,7 @@ describe("lassos and clicks as rows", () => {
     // A point a log axis cannot place is not drawn, so the cursor selects nothing there.
     const signed = table({ x: [-1, 1, 2], y: [1, 2, 3] });
     const logged = drawn({ marks: [point(signed, { x: "x", y: "y" })], x: { type: "log" } });
-    const [p] = logged.panelSeries("");
+    const [p] = panelSeries(logged, "");
     const at = (position: number) =>
       cursorRows(logged, new Set([signed]), { panel: "", key: p!.key, position });
     expect(at(0)).toBeUndefined();
@@ -842,7 +843,7 @@ describe("lassos and clicks as rows", () => {
       y: { type: "log" },
     });
     const [bp] = bars.panels();
-    const [e] = bars.panelSeries("");
+    const [e] = panelSeries(bars, "");
     expect(
       clickedRows(withPicker(bars), new Set([ranges]), bp!.x.map(0), bp!.y.map(1)),
     ).toBeUndefined();
@@ -873,14 +874,14 @@ describe("lassos and clicks as rows", () => {
     expect(Array.from(across!.rows)).toEqual([1]);
     const brushed = brushedRows(along, parts, { x: [0.1, 0.2], y: [0.5, 1.5], lasso: null }, null);
     expect(rowsOf(brushed, parts)).toEqual([1]);
-    const [as] = along.panelSeries("");
+    const [as] = panelSeries(along, "");
     expect(
       Array.from(
         cursorRows(along, new Set([parts]), { panel: "", key: as!.key, position: 1 })!.rows,
       ),
     ).toEqual([1]);
     const based = stacks(["b", "a"]);
-    const [, upper] = based.panelSeries("");
+    const [, upper] = panelSeries(based, "");
     const onTop = (position: number) =>
       cursorRows(based, new Set([parts]), { panel: "", key: upper!.key, position });
     expect(onTop(0)).toBeUndefined();

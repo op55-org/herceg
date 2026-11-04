@@ -19,6 +19,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { gridAt } from "../helpers/grid.ts";
 import { headersOf } from "../helpers/guides.ts";
+import { panelSeries } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
@@ -64,7 +65,7 @@ describe("right axes in facets", () => {
     // The title is at the chart's edge, outside the labels, centered on the grid.
     expect(labels.title!.x).toBeGreaterThan(right!.plot.x + right!.plot.width + 20);
     // Each panel draws its own rows' right line with the right scale.
-    const ys = model.panelSeries("S").find((series) => series.label === "requests")!;
+    const ys = panelSeries(model, "S").find((series) => series.label === "requests")!;
     expect(ys.length).toBe(3);
   });
 

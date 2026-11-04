@@ -29,6 +29,7 @@ import type {
   RuleGeometry,
 } from "../../src/scene/scene.ts";
 import { pickKit } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -50,7 +51,7 @@ const rowOfPart = (part: Exclude<DrawnPart, { kind: "trace" }>) =>
 
 /** The pixel (x, y) of data (x, y) in the chart's one panel. */
 function pixel(model: ChartModel, x: number, y: number): [number, number] {
-  return [model.xScale()!.map(x), model.yScale()!.map(y)];
+  return [xScale(model)!.map(x), yScale(model)!.map(y)];
 }
 
 /** The center of bar `i` of the chart's first mark, and its top. */
@@ -99,7 +100,7 @@ describe("reach", () => {
     const [small, big] = [mark.reach!(0, series), mark.reach!(1, series)];
     // Apart by more than both reach, by less than twice the bubble's.
     const apart = (small + big - 1 + 2 * big - 2) / 2;
-    const unit = probe.xScale()!.map(1) - probe.xScale()!.map(0);
+    const unit = xScale(probe)!.map(1) - xScale(probe)!.map(0);
     const model = sized([40, 40 + apart / unit]);
     const [bx, by] = pixel(model, 40 + apart / unit, 5);
     // A pixel inside the bubble's edge, toward the small point.
@@ -430,7 +431,7 @@ describe("paths", () => {
       // A real row, not the bucket's corner: one of the column the vertex draws.
       const row = picked!.row as number;
       expect(Number.isInteger(row) && row >= 0 && row < n).toBe(true);
-      expect(Math.abs(model.xScale()!.map(xs[row]!) - vx)).toBeLessThan(0.5);
+      expect(Math.abs(xScale(model)!.map(xs[row]!) - vx)).toBeLessThan(0.5);
     }
   });
 

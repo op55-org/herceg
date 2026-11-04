@@ -18,11 +18,9 @@ const data = table({ x: [0, 100], v: [0, 10] });
 const marks = [line(data, { x: "x", y: "v" })];
 
 function sceneOf(config: Omit<ChartConfig, "marks"> & Partial<Pick<ChartConfig, "marks">>) {
-  const model = new ChartModel(
-    { locale: "en-US", timeZone: "UTC", marks, ...config },
-    undefined,
+  const model = new ChartModel({ locale: "en-US", timeZone: "UTC", marks, ...config }, undefined, [
     guides,
-  );
+  ]);
   model.setSize(400, 300, 1);
   return model.scene(estimateText);
 }

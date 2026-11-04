@@ -18,6 +18,7 @@ import type {
   ItemKeyed,
   MarkStyle,
   SeriesLabels,
+  SeriesName,
 } from "./encoding.ts";
 import {
   type Bands,
@@ -111,7 +112,7 @@ interface LineStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   /** How the line joins its points (see `Curve`); "linear" by default. */
   curve?: Curve;
   /** Name of a single line in legends and tooltips. Defaults to the value field. */
-  label?: string;
+  label?: SeriesName<S>;
   /** A label following each line: at its first or last point, or where it enters or leaves the view. */
   labels?: SeriesLabels<S>;
   /** Where the lines are drawn among the panel's marks: higher above lower; 0 by default. */

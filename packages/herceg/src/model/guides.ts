@@ -5,6 +5,7 @@
 // configuration, and static output (SVG, PDF, specs) brings it with it, so
 // charts that use none of it carry none of it.
 
+import { origins } from "../data/origin.ts";
 import { markupOf, n } from "../draw/markup.ts";
 import { textItemMarkup } from "../draw/text.ts";
 import {
@@ -30,7 +31,6 @@ import {
 import { mapValue } from "../lod/m4.ts";
 import type { Mark } from "../marks/mark.ts";
 import type { Series } from "../marks/series.ts";
-import { xExtent } from "../marks/series.ts";
 import { domainExtent, unionExtent } from "../marks/trace.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import { chooseInterval, timeTicks } from "../scale/time.ts";
@@ -54,6 +54,7 @@ import {
   writtenTicks,
 } from "./axis.ts";
 import type { clearDomain } from "./clearance.ts";
+import type { DisplayCode, FeatureCompiler } from "./features.ts";
 import type { MarkSeries } from "./inspect.ts";
 import {
   entryOf,
@@ -69,12 +70,30 @@ import type { ScaleName } from "./scales.ts";
 import type { ChartStyles } from "./styles.ts";
 
 /**
+ * The code charts load before they draw what needs it, once a chart on the
+ * page has loaded it (dom/chart.ts): the guide compiler, the feature
+ * compiler, and the display code (`DisplayCode`, which static output
+ * brings with its compilers).
+ */
+export const LOADED: [GuideCompiler?, FeatureCompiler?, DisplayCode?] = [];
+
+/** Compilers as `LOADED` holds them, which models take (the display code they read from `LOADED`). */
+export type Compilers = readonly [
+  guides?: GuideCompiler | undefined,
+  features?: FeatureCompiler | undefined,
+  displays?: DisplayCode | undefined,
+];
+
+/**
  * What the guide compiler and the feature compiler use of the chart's own
  * code, handed to them rather than imported: a module both the chart and a
  * compiler's chunk imported would move out of the chart's first chunk into
  * a chunk of its own (as esbuild splits code), which compresses worse.
+ * `loaded` is what charts load (`LOADED`), whose display code the
+ * compilers use.
  */
 export const GUIDE_KIT = {
+  loaded: LOADED,
   textItemMarkup,
   surface,
   textPaint,
@@ -109,7 +128,7 @@ export const GUIDE_KIT = {
   markupOf,
   mapValue,
   ChartError,
-  xExtent,
+  origins,
   domainExtent,
   unionExtent,
   usableDomain,
@@ -144,6 +163,17 @@ export interface CompiledGuides {
   paint(panels: readonly Panel[]): void;
   /** The axes `guides` lists, where they change the default ones. */
   readonly axes?: CompiledAxes | undefined;
+  /**
+   * The texts of the bands of the band axis along `axis`, from their keys
+   * and labels: as the display of the fields marks place in bands there
+   * writes them, where they agree on it; undefined where bands keep their
+   * labels.
+   */
+  readonly categories: (
+    axis: "x" | "y",
+    keys: readonly string[],
+    labels: readonly string[],
+  ) => readonly string[] | undefined;
   /** The chart's position scales of its own, where `scales` names any (guides/positions.ts). */
   readonly scales?: CompiledScales | undefined;
   /**
@@ -370,8 +400,9 @@ function alignsTickLabels(config: ChartConfig): boolean {
 export function needsGuides(config: ChartConfig): boolean {
   const { x, y, yRight, legend, panels, scales } = config;
   return (
-    // Position scales, the short forms' and the chart's own, are planned there.
-    !!config.guides ||
+    // Field displays write axes' text; position scales, the short forms'
+    // and the chart's own, are planned there.
+    !!(config.fields || config.guides) ||
     alignsTickLabels(config) ||
     // Marks painted out of their order, and on scales of the chart's own.
     (config.marks as readonly Mark[]).some(
@@ -396,9 +427,9 @@ export function needsGuides(config: ChartConfig): boolean {
     ].some(
       (axis) =>
         axis &&
-        (typeof axis.ticks === "object" ||
-          // Grid settings and padding, which the guide compiler checks.
-          typeof axis.grid === "object" ||
+        // Tick and grid settings, titles of parts (which name fields by
+        // their labels), and padding, which the guide compiler reads.
+        ([axis.ticks, axis.title, axis.grid].some((v) => typeof v === "object") ||
           axis.padding !== undefined ||
           [axis.ticks, axis.format, axis.tooltipFormat].some(
             (setting) =>

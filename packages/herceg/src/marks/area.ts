@@ -29,6 +29,7 @@ import type {
   FieldCoordinate,
   ItemKeyed,
   MarkStyle,
+  SeriesName,
 } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
@@ -74,6 +75,7 @@ import {
   isSortedSubset,
   type LayerEdges,
   lowerPosition,
+  rangeText,
   rowOf,
   type Series,
   xExtent,
@@ -150,7 +152,7 @@ interface AreaCommon<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   where?: Condition;
   /** How the area's edges join their points (see `Curve`); "linear" by default. */
   curve?: Curve;
-  label?: string;
+  label?: SeriesName<S>;
   /** A label following each area's value edge (a band's `edge`). */
   labels?: AreaLabels<S>;
   /** `false` leaves the mark out of the chart's legends. */
@@ -498,6 +500,9 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
     this.tooltip = orient;
     if (this.#stacking.mode === "fill")
       this.pointText = (s, row, format) => stackPointText(s, row, orient, format);
+    // A band's tooltips show both its ends.
+    if (!this.#split)
+      this.pointText = (s, row, format) => rangeText(s, row, orient === "y", format);
     this.zero = edges ? undefined : orient === "x" ? "y" : "x";
   }
 
@@ -546,7 +551,8 @@ export class AreaMark implements Mark<Frozen<AreaSpec>> {
       const sources = this.#bandSplit?.sources() ?? [
         {
           id: name,
-          label: spec.label ?? name,
+          // A name of parts is the series' label until the feature compiler names it.
+          label: (spec.label as string | undefined) ?? name,
           y: high,
           rows: shown,
           sorted:

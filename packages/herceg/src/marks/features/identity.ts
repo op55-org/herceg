@@ -32,6 +32,11 @@ export interface MarkScope {
   readonly field?: string | undefined;
 }
 
+/** A series' source, from its key (see `seriesKey`): a y field, or a series field's value, raw. */
+export function sourceOf(key: string): string {
+  return String((JSON.parse(key) as unknown[])[1]);
+}
+
 /** The prefix of identity keys of a scale's values; with `panel`, of its values in that panel. */
 export function scalePrefix(scale: string, panel?: string): string {
   return `${JSON.stringify(panel === undefined ? { scale } : { scale, panel }).slice(0, -1)},"value":`;

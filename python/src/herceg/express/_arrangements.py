@@ -22,6 +22,7 @@ from ._common import (
     by,
     category_column,
     check_n_boot,
+    column_name,
     complete,
     dropped_sentence,
     express,
@@ -351,7 +352,7 @@ def jointplot(
             kind, table, x, y, xv, yv, x_edges, y_edges, filled, settings, dropped
         )
     chart = make_chart(table, settings, sentence=sentence, palette=palette)
-    label = None if series else y
+    label = None if series else column_name(chart, y)
     chart.point(x, y, series=series, panel="joint", label=label)
     tables: dict[str, Mapping[str, np.ndarray]] = {
         "x edges": {"edges": x_edges},

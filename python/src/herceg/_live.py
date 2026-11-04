@@ -57,6 +57,8 @@ class LiveChart:
         settings = {**chart._settings, **self.overrides}
         chart._check_spec()
         self._settings = settings
+        # Data that field displays match is named as the chart's tables are.
+        self._name_of = chart._name_of
         # Panels' legends (``panel.legend``) go after the guides the options list.
         given = len(settings.get("guides") or [])
         self._panel_guides = (
@@ -432,7 +434,7 @@ class LiveChart:
 
     def _spec_options(self, settings: dict[str, Any]) -> dict[str, Any]:
         """The spec options of `settings`, with the panels' legends after their guides."""
-        options = spec_options(settings)
+        options = spec_options(settings, self._name_of)
         if not self._panel_guides:
             return options
         return {**options, "guides": [*(options.get("guides") or []), *self._panel_guides]}
@@ -479,6 +481,8 @@ class LiveChart:
         self._tables = {**self._tables, **{name: other._tables[name] for name in tables}}
         self._settings, self._options = other._settings, other._options
         self._sources, self._default = other._sources, other._default
+        # Field displays' Match(table=) names the data drawn now.
+        self._name_of = other._name_of
         if not tables and not changed:
             return None
         return {"type": "tables", "tables": tables, "options": changed}, buffers

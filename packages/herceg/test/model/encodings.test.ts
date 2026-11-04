@@ -19,6 +19,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { LIGHT } from "../../src/theme.ts";
 import { keysOf, legendOf, rampsOf } from "../helpers/guides.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 /** A shape as legends draw it: at most 4.5 pixels in radius, reaching at most 6. */
@@ -29,7 +30,7 @@ function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
@@ -99,7 +100,7 @@ describe("point size by field", () => {
   it("does not pick or report points it does not draw", () => {
     const { model } = build({ marks: [point(cities, { x: "x", y: "y", size: "pop" })] });
     // Row 3 (x 4) has no size; the nearest drawn point is x 3 or x 5.
-    const inspection = model.inspect(model.xScale()!.map(4), model.yScale()!.map(2))!;
+    const inspection = model.inspect(xScale(model)!.map(4), yScale(model)!.map(2))!;
     expect(inspection.value).not.toBe(4);
     expect(describeChart(model)).toContain("y: 4 points, from 1 to 5, last 1.");
   });
@@ -167,7 +168,7 @@ describe("point size by field", () => {
     const left = Array.from({ length: g.count }, (_, i) => g.coords[i * 2]!).filter(
       (px) => px < plot.x,
     );
-    const step = model.xScale()!.map(0.05) - model.xScale()!.map(0);
+    const step = xScale(model)!.map(0.05) - xScale(model)!.map(0);
     expect(left.length).toBe(Math.floor(80 / step));
     expect(left.length).toBeGreaterThan(1);
   });
@@ -179,17 +180,17 @@ describe("point size by field", () => {
       y: { domain: [0, 10] },
       marks: [point(t, { x: "x", y: "y", size: "s", radiusRange: [0, 30] })],
     });
-    const y = model.yScale()!.map(5);
+    const y = yScale(model)!.map(5);
     // Sized to nothing: neither drawn nor picked.
     const g = scene.panels[0]!.marks[0] as PointGeometry;
     expect(g.count).toBe(2);
-    expect(model.inspect(model.xScale()!.map(2), y)?.value).not.toBe(2);
+    expect(model.inspect(xScale(model)!.map(2), y)?.value).not.toBe(2);
     // Zoomed so the small bubble's center is 10 px left of the plot: its
     // radius (3 px) cannot reach in, though the largest (30 px) could.
     const width = scene.panels[0]!.plot.width;
     setViewport(model, [100 / (width + 10), 10]);
     const plot = model.scene(estimateText).panels[0]!.plot;
-    expect(model.xScale()!.map(0)).toBeCloseTo(plot.x - 10, 0);
+    expect(xScale(model)!.map(0)).toBeCloseTo(plot.x - 10, 0);
     expect(model.inspect(plot.x + 1, y)?.value).not.toBe(0);
   });
 
@@ -256,8 +257,7 @@ describe("point size by field", () => {
     const { model } = build({
       marks: [point(cities, { x: "x", y: "y", color: "growth", colors: ["#000000", "#ffffff"] })],
     });
-    const at = (i: number) =>
-      model.inspect(model.xScale()!.map(i + 1), model.yScale()!.map(5 - i))!;
+    const at = (i: number) => model.inspect(xScale(model)!.map(i + 1), yScale(model)!.map(5 - i))!;
     expect(at(0).points[0]!.color).toBe("#000000");
     expect(at(4).points[0]!.color).toBe("#ffffff");
   });
@@ -277,7 +277,7 @@ describe("point size by field", () => {
     const { model } = build({
       marks: [point(cities, { x: "x", y: "y", size: "pop", color: "growth" })],
     });
-    const inspection = model.inspect(model.xScale()!.map(2), model.yScale()!.map(4))!;
+    const inspection = model.inspect(xScale(model)!.map(2), yScale(model)!.map(4))!;
     expect(inspection.points[0]!.text).toBe("4, pop 100, growth -1");
   });
 });
@@ -422,7 +422,7 @@ describe("point color by category", () => {
     });
     const [g] = scene.panels[0]!.marks as PointGeometry[];
     expect(g!.count).toBe(2);
-    const at = (i: number) => model.inspect(model.xScale()!.map(i), model.yScale()!.map(i));
+    const at = (i: number) => model.inspect(xScale(model)!.map(i), yScale(model)!.map(i));
     expect(at(1)!.points[0]).toMatchObject({ text: "1, kind a", color: LIGHT.palette[0] });
     expect(at(3)!.points[0]).toMatchObject({ text: "3, kind b", color: LIGHT.palette[1] });
     expect(at(2)?.points.some((p) => p.text.startsWith("2,"))).not.toBe(true);
@@ -557,7 +557,7 @@ describe("point color by category", () => {
     expect(g!.colors!.index).toBeInstanceOf(Float32Array);
     const fills = keysOf(scene)[0]!.entries.map((e) => e.fill);
     expect(fills[258]).toBe(palette[258]);
-    const at = model.inspect(model.xScale()!.map(258), model.yScale()!.map(258))!;
+    const at = model.inspect(xScale(model)!.map(258), yScale(model)!.map(258))!;
     expect(at.points[0]!.color).toBe(palette[258]);
   });
 
@@ -735,7 +735,7 @@ describe("point symbols", () => {
     const model = new ChartModel(
       { locale: "en-US", marks: [point(stream, { x: "x", y: "y", symbol: "kind" })] },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 300, 1);
     const shapes = new Map<string, string>();

@@ -19,6 +19,7 @@ import type {
 import { gridAt } from "../helpers/grid.ts";
 import { legendOf, rampsOf } from "../helpers/guides.ts";
 import { axisOf, positionOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -39,7 +40,7 @@ describe("bar", () => {
     const { scene, model } = build({ marks: [bar(sales, { x: "region", y: ["q1", "q2"] })] });
     const [q1, q2] = rects(scene);
     expect(q1!.count).toBe(3);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(x.type).toBe("band");
     expect(
       scene.panels[0]!.axes.find((a) => a.side === "bottom")!.ticks.map((t) => t.label),
@@ -53,7 +54,7 @@ describe("bar", () => {
       expect(x2! + w2!).toBeLessThanOrEqual(x.start!(i) + x.bandwidth! + 0.01);
     }
     // Negative values extend below the zero line.
-    const zero = model.yScale()!.map(0);
+    const zero = yScale(model)!.map(0);
     const [, ySouth, , hSouth] = rect(q2!, 1);
     expect(ySouth).toBeCloseTo(zero, 1);
     expect(hSouth!).toBeGreaterThan(0);
@@ -79,7 +80,7 @@ describe("bar", () => {
     const counts = table({ t: time([start, start + 60_000, start + 120_000]), n: [1, 2, 3] });
     const { scene, model } = build({ marks: [bar(counts, { x: "t", y: "n" })] });
     const [bars] = rects(scene);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const spacing = x.map(start + 60_000) - x.map(start);
     // 80% of the spacing, capped so sparse data does not draw giant bars.
     expect(rect(bars!, 0)[2]).toBeCloseTo(Math.min(64, spacing * 0.8), 1);
@@ -93,12 +94,12 @@ describe("bar", () => {
     const { model } = build({ marks: [bar(sales, { x: "region", y: ["q1", "q2"] })] });
     model.hidden.add(model.series()[1]!.key);
     const [only] = rects(model.scene(estimateText));
-    expect(rect(only!, 0)[2]).toBeCloseTo(Math.abs(model.xScale()!.bandwidth!), 1);
+    expect(rect(only!, 0)[2]).toBeCloseTo(Math.abs(xScale(model)!.bandwidth!), 1);
   });
 
   it("reports every series in a category for tooltips", () => {
     const { scene, model } = build({ marks: [bar(sales, { x: "region", y: ["q1", "q2"] })] });
-    const inspection = model.inspect(model.xScale()!.map(2), scene.panels[0]!.plot.y + 10)!;
+    const inspection = model.inspect(xScale(model)!.map(2), scene.panels[0]!.plot.y + 10)!;
     expect(inspection.label).toBe("E");
     expect(inspection.points.map((p) => p.value)).toEqual([30, 15]);
   });
@@ -144,13 +145,13 @@ describe("bar", () => {
   it("leaves rows without a category out of the y domain", () => {
     const partial = table({ x: ["a", null], v: [1, 1_000_000] });
     const { model } = build({ marks: [bar(partial, { x: "x", y: "v" })] });
-    expect(model.yScale()!.domain[1]).toBeLessThan(10);
+    expect(yScale(model)!.domain[1]).toBeLessThan(10);
   });
 
   it("keeps log x domains finite at extreme magnitudes", () => {
     const wide = table({ x: [1e-200, 1e200], v: [1, 2] });
     const { model } = build({ x: { type: "log" }, marks: [bar(wide, { x: "x", y: "v" })] });
-    const [lo, hi] = model.xScale()!.domain;
+    const [lo, hi] = xScale(model)!.domain;
     expect(lo).toBeGreaterThan(0);
     expect(Number.isFinite(hi)).toBe(true);
   });
@@ -171,7 +172,7 @@ describe("bar", () => {
       x: { type: "log" },
       marks: [bar(counts, { x: "x", y: "v" })],
     });
-    const [lo, hi] = model.xScale()!.domain;
+    const [lo, hi] = xScale(model)!.domain;
     expect(lo).toBeGreaterThan(0);
     expect(lo).toBeLessThan(1);
     expect(hi).toBeGreaterThan(10);
@@ -192,7 +193,7 @@ describe("bar", () => {
   it("sizes numeric bars by the gap between neighbors of any series", () => {
     const interleaved = table({ x: [0, 1, 100, 101], v: [1, 1, 1, 1], g: ["a", "b", "a", "b"] });
     const { scene, model } = build({ marks: [bar(interleaved, { x: "x", y: "v", series: "g" })] });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const [a, b] = rects(scene);
     // Positions 0 and 1 are neighbors: their slot is 80% of that gap, split in two.
     const gap = x.map(1) - x.map(0);
@@ -214,7 +215,7 @@ describe("bar labels", () => {
       "middle",
       { color: "#ffffff", width: 3, opacity: 1 },
     ]);
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     expect(label!.coords[1]).toBeLessThan(y.map(5));
     expect(label!.coords[3]).toBeGreaterThan(y.map(-10));
   });
@@ -375,7 +376,7 @@ describe("bar labels", () => {
           point(values, { x: "x", y: "v", radius: 3 }),
         ],
       });
-      return model.yScale()!.map(0);
+      return yScale(model)!.map(0);
     };
     expect(zeroAt(true)).toBeCloseTo(zeroAt(false), 6);
   });
@@ -383,11 +384,11 @@ describe("bar labels", () => {
   it("reserve no room for hidden bars", () => {
     const values = table({ x: [1, 2], v: [100, 50] });
     const marks = [bar(values, { x: "x", y: "v", labels: true }), line(values, { x: "x", y: "v" })];
-    const plain = build({ marks: [line(values, { x: "x", y: "v" })] }).model.yScale()!.domain;
+    const plain = yScale(build({ marks: [line(values, { x: "x", y: "v" })] }).model)!.domain;
     const { model } = build({ marks });
     model.hidden.add(model.series()[0]!.key);
     model.scene(estimateText);
-    expect(model.yScale()!.domain[1]).toBe(plain[1]);
+    expect(yScale(model)!.domain[1]).toBe(plain[1]);
   });
 
   it("space grouped labels by their own bars, and keep them inside the plot", () => {
@@ -414,7 +415,7 @@ describe("bar labels", () => {
       x: { domain: [50, 150] },
     });
     const [label] = texts(scene);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(label!.coords[0]).toBeCloseTo((x.map(50) + x.map(100)) / 2, 3);
   });
 
@@ -446,8 +447,8 @@ describe("horizontal bar", () => {
 
   it("puts categories on y, top to bottom, and lengths on x from zero", () => {
     const { scene, model } = build({ marks: [bar(sales, { x: "q1", y: "region" })] });
-    const x = model.xScale()!;
-    expect(model.yScale()!.type).toBe("band");
+    const x = xScale(model)!;
+    expect(yScale(model)!.type).toBe("band");
     expect(left(scene).ticks.map((t) => t.label)).toEqual(["N", "S", "E"]);
     const [n, s] = left(scene).ticks;
     expect(n!.position).toBeLessThan(s!.position);
@@ -478,7 +479,7 @@ describe("horizontal bar", () => {
     const { scene, model } = build({
       marks: [bar(sales, { x: ["q1", "q2"], y: "region", stack: true })],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const [q1, q2] = rects(scene);
     // N: q2 starts where q1 ends.
     expect(rect(q2!, 0)[0]).toBeCloseTo(rect(q1!, 0)[0]! + rect(q1!, 0)[2]!, 3);
@@ -515,7 +516,7 @@ describe("horizontal bar", () => {
     const inspection = model.inspect(scene.panels[0]!.plot.x + 5, n)!;
     expect(inspection.points.map((p) => p.text)).toEqual(["10", "5"]);
     // The marker sits at the end of each segment.
-    expect(inspection.points[1]!.px).toBeCloseTo(model.xScale()!.map(15), 3);
+    expect(inspection.points[1]!.px).toBeCloseTo(xScale(model)!.map(15), 3);
   });
 
   it("grows bars from the left edge of a log x axis", () => {
@@ -542,7 +543,7 @@ describe("horizontal bar", () => {
   it("leaves rows without a category out of the x domain", () => {
     const partial = table({ name: ["a", null], v: [1, 1_000_000] });
     const { model } = build({ marks: [bar(partial, { x: "v", y: "name" })] });
-    expect(model.xScale()!.domain).toEqual([0, 1]);
+    expect(xScale(model)!.domain).toEqual([0, 1]);
   });
 
   it("fits the x domain to visible series", () => {
@@ -550,7 +551,7 @@ describe("horizontal bar", () => {
     const { model } = build({ marks: [bar(uneven, { x: ["small", "large"], y: "name" })] });
     model.hidden.add(model.series()[1]!.key);
     model.scene(estimateText);
-    expect(model.xScale()!.domain[1]).toBe(2);
+    expect(xScale(model)!.domain[1]).toBe(2);
   });
 
   it("reports only bars drawn in view", () => {
@@ -558,7 +559,7 @@ describe("horizontal bar", () => {
     const { model } = build({ marks: [bar(lengths, { x: "v", y: "name" })] });
     setViewport(model, [5, 8]);
     const scene = model.scene(estimateText);
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     // Bar a ends at 1, left of the view; bar b crosses the whole view.
     const a = model.inspect(scene.panels[0]!.plot.x + 5, y.map(0));
     expect(a?.label).toBe("b");
@@ -574,7 +575,7 @@ describe("horizontal bar", () => {
       marks: [bar(signed, { x: "v", y: "name" })],
       x: { type: "log" },
     });
-    const inspection = model.inspect(scene.panels[0]!.plot.x + 5, model.yScale()!.map(0));
+    const inspection = model.inspect(scene.panels[0]!.plot.x + 5, yScale(model)!.map(0));
     expect(inspection?.label).toBe("b");
     expect(inspection?.points.every((p) => Number.isFinite(p.px))).toBe(true);
   });
@@ -582,17 +583,17 @@ describe("horizontal bar", () => {
   it("finds the bar of a category whose first row is missing", () => {
     const repeated = table({ name: ["a", "a"], v: [Number.NaN, 10] });
     const { scene, model } = build({ marks: [bar(repeated, { x: "v", y: "name" })] });
-    const inspection = model.inspect(scene.panels[0]!.plot.x + 5, model.yScale()!.map(0))!;
+    const inspection = model.inspect(scene.panels[0]!.plot.x + 5, yScale(model)!.map(0))!;
     expect(inspection.points.map((p) => p.text)).toEqual(["10"]);
     const vertical = build({ marks: [bar(repeated, { x: "name", y: "v" })] });
     const plot = vertical.scene.panels[0]!.plot;
-    const column = vertical.model.inspect(vertical.model.xScale()!.map(0), plot.y + 5)!;
+    const column = vertical.model.inspect(xScale(vertical.model)!.map(0), plot.y + 5)!;
     expect(column.points.map((p) => p.text)).toEqual(["10"]);
     // A row a log axis cannot place is skipped the same way.
     const signed = table({ name: ["a", "a"], v: [-1, 10] });
     const log = build({ marks: [bar(signed, { x: "name", y: "v" })], y: { type: "log" } });
     const logColumn = log.model.inspect(
-      log.model.xScale()!.map(0),
+      xScale(log.model)!.map(0),
       log.scene.panels[0]!.plot.y + 5,
     )!;
     expect(logColumn.points.map((p) => p.text)).toEqual(["10"]);
@@ -614,7 +615,7 @@ describe("horizontal bar", () => {
       marks: [bar(sales, { x: "q1", y: "region" })],
       inspection: { mode: "nearest" },
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const inspection = model.inspect(x.map(20) - 2, left(scene).ticks[1]!.position)!;
     expect([inspection.axis, inspection.label]).toEqual(["y", "S"]);
     expect(inspection.points.map((p) => p.text)).toEqual(["20"]);
@@ -633,8 +634,8 @@ describe("point", () => {
     const geometry = scene.panels[0]!.marks as PointGeometry[];
     expect(geometry.map((g) => g.count)).toEqual([2, 2]);
     expect(model.inspectorOf("")?.mode).toBe("nearest");
-    const target = model.xScale()!.map(2);
-    const inspection = model.inspect(target + 2, model.yScale()!.map(0) - 1)!;
+    const target = xScale(model)!.map(2);
+    const inspection = model.inspect(target + 2, yScale(model)!.map(0) - 1)!;
     expect(inspection.value).toBe(2);
     expect(inspection.points[0]!.label).toBe("a");
   });
@@ -703,7 +704,7 @@ describe("point", () => {
     const mark = point(pts, { x: "x", y: "y" });
     build({ marks: [mark] }, 600, 300);
     const { model } = build({ marks: [mark] }, 300, 150);
-    const inspection = model.inspect(model.xScale()!.map(10), model.yScale()!.map(10))!;
+    const inspection = model.inspect(xScale(model)!.map(10), yScale(model)!.map(10))!;
     expect(inspection.value).toBe(10);
   });
 
@@ -713,7 +714,7 @@ describe("point", () => {
     setViewport(model, [0, 10]);
     const scene = model.scene(estimateText);
     expect((scene.panels[0]!.marks[0] as PointGeometry).count).toBe(1);
-    const inspection = model.inspect(scene.panels[0]!.plot.x, model.yScale()!.map(5))!;
+    const inspection = model.inspect(scene.panels[0]!.plot.x, yScale(model)!.map(5))!;
     expect(inspection.value).toBe(1);
   });
 
@@ -742,7 +743,7 @@ describe("point", () => {
     });
     expect(model.inspectorOf("")?.mode).toBe("nearest-x");
     // Far below the point, but at its x.
-    const inspection = model.inspect(model.xScale()!.map(1), model.yScale()!.map(3))!;
+    const inspection = model.inspect(xScale(model)!.map(1), yScale(model)!.map(3))!;
     expect(inspection.value).toBe(1);
     expect(inspection.points[0]!.value).toBe(4);
   });
@@ -796,10 +797,10 @@ describe("heatmap", () => {
 
   it("finds the cell under the pointer", () => {
     const { model } = build({ marks: [heatmap(cells, { x: "col", y: "row", color: "v" })] });
-    const inspection = model.inspect(model.xScale()!.map(1), model.yScale()!.map(0))!;
+    const inspection = model.inspect(xScale(model)!.map(1), yScale(model)!.map(0))!;
     expect(inspection.label).toBe("b");
     expect(inspection.points[0]).toMatchObject({ label: "low", value: 1, text: "1" });
-    expect(model.inspect(model.xScale()!.map(1), model.yScale()!.map(1))).toBeUndefined();
+    expect(model.inspect(xScale(model)!.map(1), yScale(model)!.map(1))).toBeUndefined();
   });
 
   it("describes its cells, lowest and highest, for assistive technology", () => {
@@ -820,7 +821,7 @@ describe("heatmap", () => {
     const earlier = table({ col: ["a"], row: ["r"], v: [3] });
     const mark = heatmap(later, { x: "col", y: "row", color: "v" });
     const { model } = build({ marks: [mark] });
-    expect(model.inspect(model.xScale()!.map(0), model.yScale()!.map(0))!.label).toBe("b");
+    expect(model.inspect(xScale(model)!.map(0), yScale(model)!.map(0))!.label).toBe("b");
     model.update({
       locale: "en-US",
       timeZone: "UTC",
@@ -828,7 +829,7 @@ describe("heatmap", () => {
     });
     model.scene(estimateText);
     const at = (column: number) =>
-      model.inspect(model.xScale()!.map(column), model.yScale()!.map(0))!;
+      model.inspect(xScale(model)!.map(column), yScale(model)!.map(0))!;
     expect(at(0).points.map((p) => p.value)).toEqual([3]);
     expect(at(1)).toMatchObject({ label: "b", points: [{ value: 1 }] });
   });
@@ -840,7 +841,7 @@ describe("heatmap", () => {
       marks: [heatmap(column, { x: "c", y: "r", color: "v" })],
     });
     expect(model.inspectorOf("")?.mode).toBe("nearest");
-    const [px, py] = [model.xScale()!.map(0), model.yScale()!.map(1)];
+    const [px, py] = [xScale(model)!.map(0), yScale(model)!.map(1)];
     for (const mode of [undefined, "nearest-x", "nearest"] as const) {
       expect(model.inspect(px, py, mode)!.points).toMatchObject([{ label: "r2", value: 10 }]);
     }
@@ -856,7 +857,7 @@ describe("heatmap", () => {
       ],
     });
     const at = (column: number) =>
-      model.inspect(model.xScale()!.map(column), model.yScale()!.map(0))!.points[0]!.value;
+      model.inspect(xScale(model)!.map(column), yScale(model)!.map(0))!.points[0]!.value;
     // The upper layer covers "a"; its missing "b" cell shows the layer below.
     expect(at(0)).toBe(2);
     expect(at(1)).toBe(1);
@@ -866,7 +867,7 @@ describe("heatmap", () => {
     const repeated = table({ c: ["a", "a"], r: ["r", "r"], v: [5, Number.NaN] });
     const { scene, model } = build({ marks: [heatmap(repeated, { x: "c", y: "r", color: "v" })] });
     expect((scene.panels[0]!.marks[0] as RasterGeometry).pixels[3]).toBe(255);
-    expect(model.inspect(model.xScale()!.map(0), model.yScale()!.map(0))!.points[0]!.value).toBe(5);
+    expect(model.inspect(xScale(model)!.map(0), yScale(model)!.map(0))!.points[0]!.value).toBe(5);
   });
 
   it("rejects colors the raster cannot read", () => {

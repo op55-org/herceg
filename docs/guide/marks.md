@@ -59,7 +59,7 @@ Most marks take these; where only some do, the row says which, and
 | `stack` | Series piled up at each position: bars, areas, and histograms. |
 | `id` | A name other marks and events refer to. |
 | `itemKey` | A category, number, or time field naming each row's item, on marks whose items are rows (lines, areas, bars, points, rugs, error bars, candlesticks, rules, regions, and text over tables, map layers, 3D points and lines, custom marks) ([Item keys](#item-keys)). Python: `item_key`. |
-| `label` | The series' name in the legend and tooltips for a single series. |
+| `label` | The series' name in the legend and tooltips: text for a single series, or parts naming each series: text, `{ series: true }`, `{ field }` (the series field, or a line's or area's color field), and `{ label }` (a field's label) ([Names](fields.md#names)). Without it, series are named through the chart's [field displays](fields.md). |
 | `legend: false` | Left out of the chart's legends while still drawn. |
 | `axis: "right"` | Draw on the second y axis ([Axes](axes-and-legends.md#a-second-y-axis)): marks with a y value axis; horizontal marks and lines along y stay on the left. |
 | `panel`, `facet` | Which subplot it draws in; `facet: "repeat"` draws all rows in every facet panel ([Layout](layout.md)). |

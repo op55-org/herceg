@@ -523,7 +523,13 @@ function pythonInventory(root) {
   const output = execFileSync(
     "uv",
     ["run", "--extra", "dev", "python", "../scripts/contracts/inventory.py"],
-    { cwd: join(root, "python"), encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+    // Its listing is over a megabyte, execFileSync's default buffer.
+    {
+      cwd: join(root, "python"),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+      maxBuffer: 64 * 1024 * 1024,
+    },
   );
   return JSON.parse(output);
 }

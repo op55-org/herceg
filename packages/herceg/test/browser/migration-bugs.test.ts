@@ -9,6 +9,7 @@ import { custom } from "../../src/marks/custom.ts";
 import { line } from "../../src/marks/line.ts";
 import { text } from "../../src/marks/text.ts";
 import type { TextGeometry } from "../../src/scene/scene.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -60,8 +61,8 @@ it.each(["svg", "canvas"] as const)(
       });
       await chart.loading;
       const model = modelOf(chart);
-      const x = model.xScale()!.map(mark.spec.orient === "y" ? 3 : 2);
-      const y = model.yScale()!.map(mark.spec.orient === "y" ? 2 : 3);
+      const x = xScale(model)!.map(mark.spec.orient === "y" ? 3 : 2);
+      const y = yScale(model)!.map(mark.spec.orient === "y" ? 2 : 3);
       const image = new Image();
       const url = URL.createObjectURL(new Blob([chart.toSVG()], { type: "image/svg+xml" }));
       try {
@@ -143,9 +144,9 @@ it.each(["svg", "canvas"] as const)(
       marks: [bar(data, { x: "zone", y: "value", series: "zone", labels: true })],
     });
     const model = modelOf(chart);
-    const band = model.xScale()!;
+    const band = xScale(model)!;
     expect(chart.toSVG()).toContain(">70</text>");
-    const at = model.inspect(band.map(3), model.yScale()!.map(20), "nearest-x")!;
+    const at = model.inspect(band.map(3), yScale(model)!.map(20), "nearest-x")!;
     expect(at.points[0]!.label).toBe("D");
     expect(at.points[0]!.px).toBeCloseTo(band.map(3), 3);
     chart.destroy();
@@ -192,8 +193,8 @@ it("breaks labels into lines in Canvas text, the legend, and the tooltip", async
     chart.root.dispatchEvent(
       new PointerEvent("pointermove", {
         bubbles: true,
-        clientX: rect.left + model.xScale()!.map(0),
-        clientY: rect.top + model.yScale()!.map(1),
+        clientX: rect.left + xScale(model)!.map(0),
+        clientY: rect.top + yScale(model)!.map(1),
       }),
     );
     chart.render();

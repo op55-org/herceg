@@ -2,6 +2,7 @@ import type { RowView } from "../data/row-view.ts";
 import type { CategoryField, NumericField, PositionField, Schema, Table } from "../data/table.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { SYMBOLS, type SymbolName, symbolPath, symbolReach } from "../draw/symbols.ts";
+import type { ChartFields, ShownField } from "../fields/chart.ts";
 import { formatNumber } from "../format/format.ts";
 import { GridIndex } from "../lod/grid-index.ts";
 import type { Breaks } from "../lod/m4.ts";
@@ -33,7 +34,14 @@ import type { Clip, Frozen, PointSpec } from "../spec/spec.ts";
 import type { SelectionLooks } from "../spec/state.ts";
 import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
-import type { Channel, Encodings, FieldCoordinate, ItemKeyed, MappedField } from "./encoding.ts";
+import type {
+  Channel,
+  Encodings,
+  FieldCoordinate,
+  ItemKeyed,
+  MappedField,
+  SeriesName,
+} from "./encoding.ts";
 import { withoutHidden } from "./hidden.ts";
 import { legendParts } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
@@ -238,7 +246,7 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   pick?: boolean;
   /** `false`: tooltips, hover, and the keyboard leave the marks out. */
   inspect?: boolean;
-  label?: string;
+  label?: SeriesName<S>;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
@@ -750,7 +758,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
         return MIN_OPACITY + (1 - MIN_OPACITY) * fraction(value, lo, hi);
       };
     }
-    const color = this.#colorScale(frame.theme, frame.paint);
+    const color = this.#colorScale(frame.theme, frame.paint, frame.features?.fields);
     if (color) {
       out.color = color;
       out.palette = this.#palette(color);
@@ -776,11 +784,27 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     };
   }
 
-  /** The continuous color scale of a number or time `color` field, with the current data. */
-  #colorScale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
+  /** The display of `field` among a chart's (`fields`), where they give it one. */
+  #shown(field: string | undefined, fields: ChartFields | undefined): ShownField | undefined {
+    return field === undefined ? undefined : fields?.of(this.table, field);
+  }
+
+  /**
+   * The continuous color scale of a number or time `color` field, with the
+   * current data: over `colorDomain`, else the field's display's bounds,
+   * else the data's extent for an end without one.
+   */
+  #colorScale(
+    theme: Theme,
+    paint: PaintReader,
+    fields: ChartFields | undefined,
+  ): SequentialScale | undefined {
     const { spec } = this;
     if (this.#toneField === undefined) return undefined;
-    const domain = spec.colorDomain ?? extentAt(this.rows(), this.#toneField);
+    const extent = extentAt(this.rows(), this.#toneField);
+    const tone = this.#shown(this.#toneField, fields);
+    const domain =
+      spec.colorDomain ?? (extent && ([tone?.min ?? extent[0], tone?.max ?? extent[1]] as const));
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
     const ramp = rampOf(spec.colors, fallback, paint, "point colors");
@@ -803,14 +827,18 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     format: (value: number) => string,
     paint: PaintReader,
   ): LegendPart[] {
-    const scale = series.length > 0 ? this.#colorScale(theme, paint) : undefined;
+    // The chart's displays, which its series carry.
+    const fields = series[0]?.fields;
+    const scale = series.length > 0 ? this.#colorScale(theme, paint, fields) : undefined;
+    const tone = this.#shown(this.#toneField, fields);
     const ramps: ColorRamp[] = scale
       ? [
           {
             stops: scale.legendStops(),
             domain: scale.domain,
             midpoint: scale.midpoint,
-            title: this.#toneField!,
+            title: tone?.label ?? this.#toneField!,
+            field: tone,
           },
         ]
       : [];
@@ -839,7 +867,7 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   /** A series' shape: its own when the symbol field also splits series, else a circle. */
   #legendSymbol(s: Series, looks: PointLooks | undefined): SymbolName {
     if (!looks?.shape) return this.#symbol;
-    return SYMBOLS[looks.seriesShape?.(s.label) ?? 0] ?? "circle";
+    return SYMBOLS[looks.seriesShape?.(s) ?? 0] ?? "circle";
   }
 
   /**
@@ -863,12 +891,14 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
           ticks.at(-1) ?? extent[1],
         );
       const values = [...new Set([0.25, 0.5, 1].map((f) => nearest(lo + (hi - lo) * f)))];
+      const size = this.#shown(this.#sizeField, series[0]!.fields);
+      const write = size?.writer(undefined, format) ?? format;
       out.push({
-        title: this.#sizeField!,
+        title: size?.label ?? this.#sizeField!,
         channel: "size",
         entries: values.map((value) => {
           const r = radius(value);
-          return { label: format(value), glyph: symbolPath("circle", 0, 0, r), r };
+          return { label: write(value), glyph: symbolPath("circle", 0, 0, r), r };
         }),
       });
     }
@@ -912,10 +942,14 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
    * color, opacity, and shape.
    */
   pointText(s: Series, row: number, format: AxisFormat): string {
-    let text = format.y(valueAt(s, row));
+    let text = (s.write?.(format.y) ?? format.y)(valueAt(s, row));
     for (const field of [this.#sizeField, this.#toneField, this.#opacityField]) {
       if (field === undefined) continue;
-      text += `, ${field} ${format.value(this.table.numbers(field as never)[row]!)}`;
+      // Named and written as the field's display does.
+      text += `, ${
+        s.fields?.labeled(this.table, field, row, format.value) ??
+        `${field} ${format.value(this.table.numbers(field as never)[row]!)}`
+      }`;
     }
     return text + (s.features?.points?.text(row, format.value) ?? "");
   }
@@ -926,8 +960,9 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     if (looks?.color) return looks.colors[looks.color(row)] ?? s.color;
     if (this.#toneField === undefined) return s.color;
     return (
-      this.#colorScale(theme, paint)?.color(this.table.numbers(this.#toneField as never)[row]!) ??
-      s.color
+      this.#colorScale(theme, paint, s.fields)?.color(
+        this.table.numbers(this.#toneField as never)[row]!,
+      ) ?? s.color
     );
   }
 
@@ -1026,14 +1061,16 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     }
     if (points === 0) return `${name}: no data`;
     const count = `${points} point${points === 1 ? "" : "s"}`;
-    // Numbers read as the chart's sentence reads them; along category x, as tooltips do.
-    const value = bandX ? format.value : (v: number) => formatNumber(v, locale);
+    // Numbers read as the chart's sentence reads them, along category x as
+    // tooltips do; values of a field with a display as it writes them.
+    const value =
+      parts[0]?.write?.() ?? (bandX ? format.value : (v: number) => formatNumber(v, locale));
     if (!bandY)
       return `${name}: ${count}, from ${value(low)} to ${value(high)}, last ${value(last)}`;
     const among = `${count} in ${categories} ${categories === 1 ? "category" : "categories"}`;
-    return bandX
-      ? `${name}: ${among}`
-      : `${name}: ${among}, x from ${format.x(low)} to ${format.x(high)}`;
+    const x =
+      parts[0]?.fields?.of(this.table, this.#fields.x)?.writer(undefined, format.x) ?? format.x;
+    return bandX ? `${name}: ${among}` : `${name}: ${among}, x from ${x(low)} to ${x(high)}`;
   }
 
   /**

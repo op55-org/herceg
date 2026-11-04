@@ -81,6 +81,7 @@ import { loadPayload } from "../../src/web/load.ts";
 import { encodePayload } from "../../src/web/payload.ts";
 import { legendOf, rampsOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
@@ -561,7 +562,7 @@ describe("capabilities: facets", () => {
     if (!c.repeats && !["histogram", "boxplot", "boxen", "violin"].includes(c.name)) {
       // Source series really split: at most three of the six rows per panel.
       for (const panel of scene.panels) {
-        expect(model.panelSeries(panel.key).every((s) => s.length <= 3)).toBe(true);
+        expect(panelSeries(model, panel.key).every((s) => s.length <= 3)).toBe(true);
       }
     }
   });
@@ -633,7 +634,7 @@ describe("capabilities: facets", () => {
     });
     for (const panel of scene.panels) {
       expectGeometry(panel, "point");
-      expect(model.panelSeries(panel.key).at(-1)!.length).toBe(6);
+      expect(panelSeries(model, panel.key).at(-1)!.length).toBe(6);
     }
   });
 
@@ -803,7 +804,7 @@ describe("capabilities: panel legends", () => {
     const model = new ChartModel(
       { locale: "en-US", timeZone: "UTC", ...config },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     return model.scene(estimateText);
@@ -949,13 +950,13 @@ describe("capabilities: right axis", () => {
 describe("capabilities: zoom and pan", () => {
   it.each(cartesian)("$name moves a continuous axis with its viewport", (c) => {
     const { model, scene } = build({ marks: [c.make()], interaction: { zoom: "xy" } });
-    const alongY = model.xScale()!.type === "band";
+    const alongY = xScale(model)!.type === "band";
     const orient = alongY ? "left" : "bottom";
     const before = scene.panels[0]!.axes.find((a) => a.side === orient)!.ticks;
     if (alongY) setViewport(model, { y: [2, 6], yRight: null });
     else setViewport(model, [0.5, 1.5]);
     const next = model.scene(estimateText);
-    const scale = alongY ? model.yScale()! : model.xScale()!;
+    const scale = alongY ? yScale(model)! : xScale(model)!;
     expect(scale.domain).toEqual(alongY ? [2, 6] : [0.5, 1.5]);
     expect(next.panels[0]!.axes.find((a) => a.side === orient)!.ticks).not.toEqual(before);
   });
@@ -965,12 +966,12 @@ describe("capabilities: zoom and pan", () => {
       marks: [c.make()],
       interaction: { pan: "xy", limits: { x: { extent: [0, 2] }, y: { extent: [0, 10] } } },
     });
-    const alongY = model.xScale()!.type === "band";
+    const alongY = xScale(model)!.type === "band";
     // Past an end, the view moves inside with its span.
     if (alongY) setViewport(model, { y: [-4, 2], yRight: null });
     else setViewport(model, [-1, 0.5]);
     model.scene(estimateText);
-    expect(alongY ? model.yScale()!.domain : model.xScale()!.domain).toEqual(
+    expect(alongY ? yScale(model)!.domain : xScale(model)!.domain).toEqual(
       alongY ? [0, 6] : [0, 1.5],
     );
   });
@@ -992,7 +993,7 @@ describe("capabilities: zoom and pan", () => {
       marks: [c.make(samples, { x: "category", y: "y" })],
       interaction: { zoom: "x" },
     });
-    expect(model.xScale()!.type).toBe("band");
+    expect(xScale(model)!.type).toBe("band");
     expect(() => setViewport(model, [0.5, 1.5])).toThrow(
       "setViewport x: the x axis shows categories, which do not zoom; drop x",
     );
@@ -1008,17 +1009,17 @@ describe("capabilities: zoom and pan", () => {
         interaction: { zoom: "xy" },
       });
       const type = Array.isArray(x) ? "linear" : "time";
-      expect([zoomed.model.xScale()!.type, zoomed.model.yScale()!.type]).toEqual([type, "linear"]);
+      expect([xScale(zoomed.model)!.type, yScale(zoomed.model)!.type]).toEqual([type, "linear"]);
       setViewport(zoomed.model, [0.5, 1.5]);
       setViewport(zoomed.model, { y: [0.5, 1.5], yRight: null });
       zoomed.model.scene(estimateText);
-      expect(zoomed.model.xScale()!.domain).toEqual([0.5, 1.5]);
-      expect(zoomed.model.yScale()!.domain).toEqual([0.5, 1.5]);
+      expect(xScale(zoomed.model)!.domain).toEqual([0.5, 1.5]);
+      expect(yScale(zoomed.model)!.domain).toEqual([0.5, 1.5]);
       const { model, scene } = build({
         marks: [heatmap(cells, { x: "x", y: "y", color: "value", xBanded: true, yBanded: true })],
         interaction: { zoom: "xy" },
       });
-      expect([model.xScale()!.type, model.yScale()!.type]).toEqual(["band", "band"]);
+      expect([xScale(model)!.type, yScale(model)!.type]).toEqual(["band", "band"]);
       expect(() => setViewport(model, [0.5, 1.5])).toThrow("shows categories");
       expect(() => setViewport(model, { y: [0.5, 1.5] })).toThrow("shows categories");
       expect(model.scene(estimateText).panels[0]!.axes).toEqual(scene.panels[0]!.axes);
@@ -1554,7 +1555,7 @@ describe("capabilities: legend toggle", () => {
     const model = new ChartModel(
       { locale: "en-US", timeZone: "UTC", marks: [c.make()], guides: [colorbar()] },
       undefined,
-      guides,
+      [guides],
     );
     model.setSize(600, 400, 1);
     const scene = model.scene(estimateText);
@@ -1578,7 +1579,7 @@ describe("capabilities: legend toggle", () => {
           ],
         },
         undefined,
-        guides,
+        [guides],
       );
       model.setSize(800, 600, 1);
       const scene = model.scene(estimateText);
@@ -1703,7 +1704,7 @@ describe("capabilities: tooltip and keyboard reading", () => {
     const { model } = build({ marks: [c.make()] });
     expect(stopsOf(model, "")).toEqual([]);
     expect(positionOf(model, "missing", 0)).toBeUndefined();
-    expect(model.inspect(model.xScale()!.map(1), model.yScale()!.map(2))).toBeUndefined();
+    expect(model.inspect(xScale(model)!.map(1), yScale(model)!.map(2))).toBeUndefined();
     expect(describeChart(model)).toContain(`Contract ${typeOf(c)}`);
   });
 
@@ -1762,7 +1763,7 @@ describe("capabilities: tooltip and keyboard reading", () => {
       ],
     });
     expect(stopsOf(model, "")).toEqual([]);
-    expect(model.inspect(model.xScale()!.map(1), model.yScale()!.map(2))).toBeUndefined();
+    expect(model.inspect(xScale(model)!.map(1), yScale(model)!.map(2))).toBeUndefined();
     expect(describeChart(model)).toBe("Contract custom shapes");
   });
 });
@@ -2283,7 +2284,7 @@ describe("capabilities: color identity in every family", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(800, 400, 1);
     model.scene(estimateText);
@@ -2303,7 +2304,7 @@ describe("capabilities: color identity in every family", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(800, 400, 1);
     model.scene(estimateText);
@@ -2345,7 +2346,7 @@ describe("capabilities: color identity in every family", () => {
       new ChartModel(
         { marks: [histogram(data, { x: "v", color: "stie" as never })] },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
     expect(model).toThrow('histogram (mark 0) color: "stie" is neither a field nor a color');
   });
@@ -2367,7 +2368,7 @@ describe("capabilities: color identity in every family", () => {
           ],
         },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(800, 400, 1);
       model.scene(estimateText);
@@ -2390,7 +2391,7 @@ describe("category-colored bars", () => {
         labels: true,
       });
       const { model, scene } = build({ marks: [mark] });
-      const band = (horizontal ? model.yScale() : model.xScale())!;
+      const band = (horizontal ? yScale(model) : xScale(model))!;
       const panel = scene.panels[0]!;
       const rects = panel.marks.filter((g): g is RectGeometry => g.kind === "rect");
       const labels = panel.marks.filter((g): g is TextGeometry => g.kind === "text");
@@ -2437,7 +2438,7 @@ it("capabilities: marks on the chart's scales paint at their zIndex", () => {
     const model = new ChartModel(
       { locale: "en-US", marks: [mark, line(rows, { x: "x", y: "y" })] },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     const scene = model.scene(estimateText);
@@ -2483,7 +2484,7 @@ describe("capabilities: encodings", () => {
     const model = new ChartModel(
       { locale: "en-US", timeZone: "UTC", ...config },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     return model.scene(estimateText);

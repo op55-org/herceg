@@ -15,6 +15,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import { rampsOf } from "../helpers/guides.ts";
 import { cellOf, positionOf } from "../helpers/keyboard.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -50,8 +51,8 @@ describe("2D histograms", () => {
     // Empty cells are not drawn: one raster of the drawn ones.
     const raster = scene.panels[0]!.marks.filter((m): m is RasterGeometry => m.kind === "raster");
     expect(raster).toHaveLength(1);
-    expect(model.xScale()!.domain).toEqual([0, 10]);
-    expect(model.yScale()!.domain).toEqual([0, 10]);
+    expect(xScale(model)!.domain).toEqual([0, 10]);
+    expect(yScale(model)!.domain).toEqual([0, 10]);
     // A ramp from 0 to the fullest cell.
     expect(rampsOf(scene)).toHaveLength(1);
     expect(rampsOf(scene)[0]!.low.text).toBe("0");
@@ -93,7 +94,7 @@ describe("2D histograms", () => {
     const { model } = build({
       marks: [histogram(pairs, { x: "x", y: "y", bins: [0, 5, 10] })],
     });
-    const [px, py] = [model.xScale()!.map(2), model.yScale()!.map(1)];
+    const [px, py] = [xScale(model)!.map(2), yScale(model)!.map(1)];
     const inspection = model.inspect(px, py)!;
     expect(inspection.points[0]).toMatchObject({
       label: "x 0 – 5, y 0 – 5",
@@ -119,7 +120,7 @@ describe("2D histograms", () => {
     expect(brushed({ x: null, y: [0, 1], lasso: null })).toEqual([0, 1, 2]);
     expect(brushed({ x: [0, 3], y: [0, 1], lasso: null })).toEqual([0, 1]);
     // An empty cell reports nothing.
-    expect(model.inspect(model.xScale()!.map(8), model.yScale()!.map(2))).toBeUndefined();
+    expect(model.inspect(xScale(model)!.map(8), yScale(model)!.map(2))).toBeUndefined();
     // The keyboard reads cells row by row from the top left.
     const key = model.series()[0]!.key;
     const top = cellOf(model, model.panels()[0]!.key, key, -1, 0, 0);
@@ -148,7 +149,7 @@ describe("2D histograms", () => {
     expect(panels).toHaveLength(2);
     // Bins along x from both panels' rows: they share the x scale.
     const counted = panels.map(({ key }) =>
-      shared.model.panelSeries(key).map((s) => Array.from(s.values.subarray(0, s.length))),
+      panelSeries(shared.model, key).map((s) => Array.from(s.values.subarray(0, s.length))),
     );
     expect(counted.flat(2).reduce((a, b) => a + b, 0)).toBe(7);
     // One ramp for both panels, to the fullest cell of either.

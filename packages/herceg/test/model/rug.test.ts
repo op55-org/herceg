@@ -16,6 +16,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
@@ -44,7 +45,7 @@ describe("rug", () => {
       const check = (drawn: Scene) => {
         const { plot } = drawn.panels[0]!;
         const [x1, y1, x2, y2] = endpoints(ticks(drawn)[0]!);
-        const value = alongX ? model.xScale()!.map(1) : model.yScale()!.map(1);
+        const value = alongX ? xScale(model)!.map(1) : yScale(model)!.map(1);
         const edge =
           side === "bottom"
             ? plot.y + plot.height
@@ -77,8 +78,8 @@ describe("rug", () => {
   it.each(["x", "y"] as const)("widens only %s, with a usable other domain", (axis) => {
     const t = table({ v: [100, 200] });
     const { model } = build({ marks: [axis === "x" ? rug(t, { x: "v" }) : rug(t, { y: "v" })] });
-    const own = axis === "x" ? model.xScale()! : model.yScale()!;
-    const other = axis === "x" ? model.yScale()! : model.xScale()!;
+    const own = axis === "x" ? xScale(model)! : yScale(model)!;
+    const other = axis === "x" ? yScale(model)! : xScale(model)!;
     expect(own.domain[0]).toBeLessThanOrEqual(100);
     expect(own.domain[1]).toBeGreaterThanOrEqual(200);
     expect(other.domain[1]).toBeLessThan(10);
@@ -94,9 +95,9 @@ describe("rug", () => {
         legend: false,
         ...(y === "y" ? { y: { type: "log" } } : {}),
       };
-      const before = build(config).model.yScale()!;
+      const before = yScale(build(config).model)!;
       const { model } = build({ ...config, marks: [...marks, rug(t, { x: "x" })] });
-      expect(model.yScale()!.domain).toEqual(before.domain);
+      expect(yScale(model)!.domain).toEqual(before.domain);
       expect(positionOf(model, model.series().at(-1)!.key, 0)!.points.at(-1)!.text).toBe("1");
     }
     const withY = build({ marks: [rug(t, { y: "y" })], x: { type: "log", domain: [1000, 2000] } });
@@ -137,8 +138,8 @@ describe("rug", () => {
       const plot = scene.panels[0]!.plot;
       const pointer =
         axis === "x"
-          ? [model.xScale()!.map(2.1), plot.y + 20]
-          : [plot.x + 20, model.yScale()!.map(2.1)];
+          ? [xScale(model)!.map(2.1), plot.y + 20]
+          : [plot.x + 20, yScale(model)!.map(2.1)];
       expect(model.inspect(pointer[0]!, pointer[1]!)!.value).toBe(2);
       const tickHit = model.inspect(hits[0]!.px, hits[0]!.py, "nearest")!;
       expect(tickHit.axis).toBe(axis);
@@ -163,7 +164,7 @@ describe("rug", () => {
       const dated = build({
         marks: [axis === "x" ? rug(t, { x: "date" }) : rug(t, { y: "date" })],
       });
-      expect((axis === "x" ? dated.model.xScale() : dated.model.yScale())!.type).toBe("time");
+      expect((axis === "x" ? xScale(dated.model) : yScale(dated.model))!.type).toBe("time");
       const hit = positionOf(dated.model, dated.model.series()[0]!.key, 0)!;
       expect(hit.points[0]!.text).toBe(hit.label);
       expect(describeChart(dated.model)).toContain(hit.label);
@@ -215,7 +216,7 @@ describe("rug", () => {
     for (const panel of subplots.scene.panels) {
       const hit = positionOf(
         subplots.model,
-        subplots.model.panelSeries(panel.key)[0]!.key,
+        panelSeries(subplots.model, panel.key)[0]!.key,
         0,
         panel.key,
       )!;
@@ -262,7 +263,7 @@ describe("rug", () => {
     // Exercise the picker on source rows too, independently of readable-row compaction.
     const hit = mark.pick(
       model.series(),
-      model.xScale()!.map(end + 1),
+      xScale(model)!.map(end + 1),
       plot.y + plot.height - 4,
       frame,
     )!;

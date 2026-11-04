@@ -29,4 +29,9 @@ Formats write numbers (Intl options, d3-like patterns with text around
 them, durations, SI and binary prefixes) and times (Intl options, strftime
 patterns, fiscal years) on every option that takes one. [Field
 displays](docs/guide/fields.md) name fields and write their values once,
-for every surface: `herceg/fields` and specs read them; charts do not yet.
+for every surface: charts' `fields` (TypeScript, the adapters, specs, and
+`hg.Chart(fields=...)`) write axes, legends, series' names, tooltips,
+labels, gauges, color ramps, and the text alternative through them, and
+`herceg/fields` reads them for application code. Series marks' `label`
+and axes' `title` take parts (`{ series: true }`, `{ field }`,
+`{ label }`, text).

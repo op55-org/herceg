@@ -14,9 +14,10 @@ import {
 } from "../lod/point-view.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
 import {
+  type AxisBands,
   type BandContext,
   type BandList,
-  type Bands,
+  type ChartBands,
   type ChartMark,
   type Mark,
   type RowParts,
@@ -144,7 +145,7 @@ export interface PanelSplit {
    * With categories resolved per panel along an axis, each panel's bands on
    * it: its group's (see PanelBands).
    */
-  bands?: { x?: readonly BandList[]; y?: readonly BandList[] };
+  bands?: { x?: readonly AxisBands[]; y?: readonly AxisBands[] };
 }
 
 /** A layout mark a panel holds: the mark, its index among the chart's marks, and its rows there. */
@@ -376,7 +377,7 @@ export interface PanelSplitter {
   split(
     base: readonly MarkSeries[],
     chart: PanelChart,
-    bands: Bands,
+    bands: ChartBands,
     context: BandContext,
   ): PanelSplit;
 }
@@ -1108,10 +1109,10 @@ let numbered = 0;
 /** A group's bands: the chart bands its panels hold, and where each is among them. */
 interface GroupBands {
   /** The chart's bands they were taken from. */
-  chart: BandList;
+  chart: AxisBands;
   /** The chart bands the group's panels hold, ascending. */
   held: Int32Array;
-  list: BandList;
+  list: AxisBands;
   /** Undefined when they are the chart's first bands, each at its own place. */
   places: BandPlaces | undefined;
 }
@@ -1152,7 +1153,7 @@ export class PanelBands {
   place(
     split: PanelSplit,
     groupsOf: (scope: ScaleScope, axis: "x" | "y") => number[],
-    bands: Bands,
+    bands: ChartBands,
     scopes: Scopes,
     context: BandContext,
   ): void {
@@ -1213,7 +1214,7 @@ export class PanelBands {
   #placeAxis(
     split: PanelSplit,
     groupOf: number[],
-    chart: BandList,
+    chart: AxisBands,
     axis: "x" | "y",
     context: BandContext,
   ): { groupOf: number[]; groups: GroupBands[] } {
@@ -1255,16 +1256,18 @@ export class PanelBands {
   }
 
   /** A group's bands for `held`, keeping its `last` ones, or their list, while they are the same. */
-  #group(last: GroupBands | undefined, chart: BandList, held: Int32Array): GroupBands {
+  #group(last: GroupBands | undefined, chart: AxisBands, held: Int32Array): GroupBands {
     if (last?.chart === chart && same(last.held, held)) return last;
     const keys = Array.from(held, (band) => chart.keys[band]!);
     const labels = Array.from(held, (band) => chart.labels[band]!);
+    const texts = Array.from(held, (band) => chart.texts[band]!);
     // Bands at their own places need none (as when every panel holds all of them).
     const places = held.every((band, place) => band === place) ? undefined : new Places(held);
     const sameKeys = last !== undefined && same(last.list.keys, keys);
-    if (sameKeys && same(last.list.labels, labels)) return { chart, held, list: last.list, places };
+    if (sameKeys && same(last.list.labels, labels) && same(last.list.texts, texts))
+      return { chart, held, list: last.list, places };
     // Frozen: axes share the labels with the chart's panels, which show them to applications.
-    const list = { keys, labels: Object.freeze(labels) };
+    const list = { keys, labels: Object.freeze(labels), texts };
     // Labels alone changing (another locale) leaves the bands the same.
     numbers.set(list, sameKeys ? numbers.get(last.list)! : ++numbered);
     return { chart, held, list, places };

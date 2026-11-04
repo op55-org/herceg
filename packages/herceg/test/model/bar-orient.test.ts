@@ -7,6 +7,7 @@ import { bar } from "../../src/marks/bar.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import type { RectGeometry } from "../../src/scene/scene.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 // B6's bar race: each brand's bar at its rank, a continuous y, ranks a frame apart.
 const ranked = table({
@@ -29,8 +30,8 @@ describe("bars along y", () => {
       marks: [bar(ranked, { itemKey: "brand", orient: "y", x: "value", y: "rank" })],
       y: { domain: [2.5, -0.5] },
     });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     expect(rects.count).toBe(3);
     // Row by row: each bar's top and bottom around its rank, its length to its value.
     for (let i = 0; i < 3; i++) {
@@ -46,11 +47,11 @@ describe("bars along y", () => {
 
   it("pad the y domain by half a slot, and keep a category y's bands without orient", () => {
     const { model } = bars({ marks: [bar(ranked, { orient: "y", x: "value", y: "rank" })] });
-    const [lo, hi] = model.yScale()!.domain;
+    const [lo, hi] = yScale(model)!.domain;
     expect(Math.min(lo, hi)).toBeLessThanOrEqual(-0.5);
     expect(Math.max(lo, hi)).toBeGreaterThanOrEqual(2.5);
     const banded = bars({ marks: [bar(ranked, { x: "value", y: "brand" })] });
-    expect(banded.model.yScale()!.type).toBe("band");
+    expect(yScale(banded.model)!.type).toBe("band");
   });
 
   it("refuse lengths that are categories and orients that are none", () => {
@@ -71,8 +72,8 @@ describe("bars along y", () => {
   it("are inspected by their lengths along x, in no order, and by their positions along y", () => {
     const lengths = table({ rank: [0, 1, 2], value: [30, 10, 20] });
     const { model } = bars({ marks: [bar(lengths, { orient: "y", x: "value", y: "rank" })] });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const at = (mode: "nearest-x" | "nearest-y", px: number, py: number) => {
       const found = model.inspect(px, py, mode);
       return found && "points" in found ? found.points.map((p) => p.row) : undefined;

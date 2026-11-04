@@ -28,7 +28,7 @@ function build(config: ChartConfig, width = 400, height = 240) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, height, 1);
   return model.scene(estimateText);
@@ -318,7 +318,7 @@ describe("30 series labels with leaders while streaming", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(700, 640, 1);
     for (let tick = 0; tick <= 30; tick++) {

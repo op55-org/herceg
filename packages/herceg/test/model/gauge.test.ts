@@ -15,6 +15,7 @@ import type {
   TextShape,
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import type { GaugeBand } from "../../src/spec/spec.ts";
 import { legendOf } from "../helpers/guides.ts";
 
 function build(config: ChartConfig, width = 400, height = 300) {
@@ -196,12 +197,20 @@ describe("gauge", () => {
     expect(() => gauge(cpu, { value: "cpu", min: 5, max: 5 })).toThrow(
       "gauge min, max: expected finite numbers, min below max; received 5, 5",
     );
-    expect(() => gauge(cpu, { value: "cpu", max: Number.NaN })).toThrow("received 0, NaN");
-    expect(() => gauge(cpu, { value: "cpu", bands: [{ to: 120 }] })).toThrow(
+    expect(() => gauge(cpu, { value: "cpu", max: Number.NaN })).toThrow(
+      "gauge max: expected a finite number; received NaN",
+    );
+    expect(() => gauge(cpu, { value: "cpu", min: 0, max: 100, bands: [{ to: 120 }] })).toThrow(
       "gauge bands: expected ends above min 0 and at most max 100; received 120",
     );
-    expect(() => gauge(cpu, { value: "cpu", bands: [{ to: 0 }] })).toThrow("received 0");
-    expect(() => gauge(cpu, { value: "cpu", bands: [{ to: 50 }, { to: 40 }] })).toThrow(
+    // Ends the gauge leaves to its field's display are checked as it is drawn.
+    const drawn = (bands: GaugeBand[]) => () =>
+      build({ marks: [gauge(cpu, { value: "cpu", bands })] });
+    expect(drawn([{ to: 120 }])).toThrow(
+      "gauge bands: expected ends above min 0 and at most max 100; received 120",
+    );
+    expect(drawn([{ to: 0 }])).toThrow("received 0");
+    expect(drawn([{ to: 50 }, { to: 40 }])).toThrow(
       "gauge bands: expected ascending ends; received 40 after 50",
     );
     expect(() => gauge(cpu, { value: "host" as never })).toThrow();
@@ -238,7 +247,9 @@ describe("gauge", () => {
     );
     expect(load({ bands: [{ color: "red" }] })).toThrow("marks[0].bands[0].to: required");
     expect(load({ format: { style: "nonsense" } })).toThrow("marks[0].format");
-    expect(load({ min: 100 })).toThrow("marks[0]: gauge min, max: expected finite numbers");
+    expect(load({ min: 100, max: 100 })).toThrow(
+      "marks[0]: gauge min, max: expected finite numbers",
+    );
     expect(load({ value: undefined })).toThrow("marks[0].value: required");
   });
 });

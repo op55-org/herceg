@@ -8,6 +8,7 @@
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
+import type { ChartFields } from "../../fields/chart.ts";
 import { formatWriter, formed } from "../../format/patterns.ts";
 import { LabelBoxes } from "../../layout/label-boxes.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
@@ -56,7 +57,7 @@ import {
 import { writeContent } from "./content.ts";
 import { bandRuns, indexedBand, Topology } from "./continuity.ts";
 import { encodedChannels } from "./encoded.ts";
-import { type MarkScope, scalePrefix, scopeOfMark, tableNames } from "./identity.ts";
+import { type MarkScope, scalePrefix, scopeOfMark, sourceOf, tableNames } from "./identity.ts";
 import {
   checkAt,
   checkContent,
@@ -103,14 +104,22 @@ export function featureCompiler(kit: FeatureKit): FeatureCompiler {
   const trees = treeText(kit);
   return {
     compile: (config, marks, previous, identities) => {
+      const zone = config.timeZone ?? "local";
+      const display = kit.loaded[2];
+      const fields =
+        config.fields && display?.chartFieldsOf(config.fields, kit, config.locale, zone);
       // Tree marks draw labels of parts and styles with the compiler's code,
-      // and layout marks write formats it writes (gauges) with its writer.
-      const formats = formatOf(kit, config.timeZone ?? "local");
-      for (const mark of config.marks) {
-        (mark as Partial<TreeTextUser>).useTreeText?.(trees);
-        (mark as Partial<FormatUser>).useFormats?.(formats);
-      }
-      return compile(kit, config, marks, previous, identities);
+      // and layout marks write formats it writes (gauges) with its writer,
+      // and check their fields as the chart's displays give them; a chart
+      // giving displays draws once their code is here (`ChartModel.lacks`),
+      // so its marks are not checked without them.
+      const formats = formatOf(kit, zone);
+      if (!config.fields || display)
+        config.marks.forEach((mark, index) => {
+          (mark as Partial<TreeTextUser>).useTreeText?.(trees);
+          (mark as Partial<FormatUser>).useFormats?.(formats, fields, index);
+        });
+      return compile(kit, config, marks, previous, identities, fields);
     },
     names: (tables, places, last) => tableNames(kit, tables, places, last),
   };
@@ -143,6 +152,7 @@ function compile(
   marks: readonly Mark[],
   previous: CompiledFeatures | undefined,
   identities: Identities,
+  fields: ChartFields | undefined,
 ): CompiledFeatures {
   // Scales keep their values' places across updates that keep their settings.
   const kept = (previous as Compiled | undefined)?.scales;
@@ -288,13 +298,28 @@ function compile(
   /**
    * The scales whose values series and layout items stand for, by the
    * prefix of their identity keys (a panel's own, for scales of each
-   * subplot), with the marks reading them: legends list their declared
-   * domains for those marks.
+   * subplot), with the marks reading them and the field each reads them
+   * from (`reads`, which name entries; see `ChartFields.entry`): legends
+   * list their declared domains for those marks.
    */
-  const listed = new Map<string, { scale: CategoryScale; marks: Set<ChartMark> }>();
-  const list = (prefix: string, scale: CategoryScale, mark: ChartMark) => {
-    const readers = listed.get(prefix) ?? { scale, marks: new Set<ChartMark>() };
+  const listed = new Map<
+    string,
+    {
+      scale: CategoryScale;
+      marks: Set<ChartMark>;
+      reads: [Table | undefined, string | undefined][];
+    }
+  >();
+  const list = (
+    prefix: string,
+    scale: CategoryScale,
+    mark: ChartMark,
+    table: Table | undefined,
+    field: string | undefined,
+  ) => {
+    const readers = listed.get(prefix) ?? { scale, marks: new Set<ChartMark>(), reads: [] };
     readers.marks.add(mark);
+    readers.reads.push([table, field]);
     listed.set(prefix, readers);
   };
   /** The keys of a declared domain's values, in its order; none without one. */
@@ -317,6 +342,8 @@ function compile(
     }),
   );
   const drawings = new Map<Mark, Drawings>();
+  // How marks write the legend entries they share through color fields (see `naming`).
+  const entryDisplays = new Map<string, [Table, string][]>();
   marks.forEach((mark, at) => {
     // Named by its place among the chart's marks, layout marks included.
     const index = identities.positions[at]!;
@@ -324,7 +351,21 @@ function compile(
     const path = `${spec.type}${spec.id === undefined ? ` (mark ${index})` : ` "${spec.id}"`}`;
     const where: Where = { path, index, mark: spec.id ?? index };
     try {
-      compileMark(mark, identities.scopes[at], spec, path, where);
+      const scope = compileMark(mark, identities.scopes[at], spec, path, where);
+      // Series take their names and value writers from the chart's displays and their parts.
+      const named =
+        mark.identity &&
+        kit.loaded[2]?.naming(
+          kit,
+          mark,
+          identities.scopes[at],
+          scope,
+          fields,
+          where,
+          entryDisplays,
+        );
+      if (named)
+        byMark.set(mark, named(byMark.get(mark) ?? { use() {}, palette: (p) => p, attach() {} }));
     } catch (error) {
       throw placed(kit, error, where);
     }
@@ -335,11 +376,11 @@ function compile(
     spec: { type: string; id?: string; color?: unknown },
     path: string,
     where: Where,
-  ): void {
+  ): MarkScope | undefined {
     const from = spec.type === "text" ? (mark.spec as TextSpec).from : undefined;
     if (from && !("item" in from)) {
-      byMark.set(mark, followingText(kit, mark, where, marks, drawings, config, zone));
-      return;
+      byMark.set(mark, followingText(kit, mark, where, marks, drawings, config, zone, fields));
+      return undefined;
     }
     if (mark.bound) checkPositions(mark, where);
     // On marks whose `color` is a field or a color, a name both says neither
@@ -395,7 +436,7 @@ function compile(
       // The scale reads the values that color the mark, not series it colors otherwise.
       if (scope!.field !== undefined) scale.read(mark.table!, scope!.field);
       const prefix = scalePrefix(scale.name, ofPanels.has(scale.name) ? (panel ?? "") : undefined);
-      if (scope!.color === prefix) list(prefix, scale, mark);
+      if (scope!.color === prefix) list(prefix, scale, mark, mark.table, scope!.field);
     }
     // Series of lines and areas labels follow record what they draw.
     const labels = (mark.spec as { labels?: AreaLabelsSpec }).labels;
@@ -404,21 +445,27 @@ function compile(
       (labels !== undefined || (spec.id !== undefined && followed.has(spec.id)))
         ? new Drawings(mark)
         : undefined;
-    // Series of marks that need nothing else take the declared scale's colors.
-    if (!mark.featured && !asks(mark) && !drawn) {
+    // Series of marks that need nothing else take the declared scale's colors;
+    // with the chart's displays, bars' and annotations' labels write through them.
+    const shown = fields && kit.loaded[2]?.displayedContent(mark);
+    if (!mark.featured && !asks(mark) && !drawn && !shown) {
       if (scale) byMark.set(mark, scaledFeatures(scale, scope!));
-      return;
+      return scope;
     }
     const log = positionsLog(config, mark);
     const at = { scope, path, read, scale, where, labeled: drawn !== undefined };
     if (spec.type === "line") byMark.set(mark, lineFeatures(kit, mark, at, zone, log));
     else if (spec.type === "area") byMark.set(mark, areaFeatures(kit, mark, at, zone, log));
-    else if (spec.type === "bar") byMark.set(mark, barFeatures(kit, mark, at, zone, config.locale));
-    else if (spec.type === "point") byMark.set(mark, pointFeatures(kit, mark, at));
+    else if (spec.type === "bar")
+      byMark.set(mark, barFeatures(kit, mark, at, zone, config.locale, fields, shown));
+    else if (spec.type === "point") byMark.set(mark, pointFeatures(kit, mark, at, fields));
     else if (spec.type === "custom") byMark.set(mark, customFeatures(kit, mark, at));
     else if (spec.type === "region" && (mark.spec as { encode?: object }).encode) {
       const looks = rowLooks(mark.spec as RowStyleSpec, mark.table, read, path, kit.isColor);
-      byMark.set(mark, { ...labelFeatures(kit, mark, zone, path, where, config.locale), ...looks });
+      byMark.set(mark, {
+        ...labelFeatures(kit, mark, zone, path, where, config.locale, fields, shown),
+        ...looks,
+      });
       const { label } = mark.spec as { label?: string | { field?: string } };
       const field = typeof label === "object" ? label.field : undefined;
       if (field !== undefined && mark.table)
@@ -432,12 +479,12 @@ function compile(
           ),
         });
     } else if (spec.type === "rule" || spec.type === "region" || spec.type === "text")
-      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config.locale));
+      byMark.set(mark, labelFeatures(kit, mark, zone, path, where, config.locale, fields, shown));
     else
       throw new Error(
         `${path}: encode, style, markers, continuity, and where are not options of ${spec.type} marks`,
       );
-    if (!drawn) return;
+    if (!drawn) return scope;
     const features = byMark.get(mark)!;
     recording(features, drawn);
     drawings.set(mark, drawn);
@@ -468,6 +515,8 @@ function compile(
               zone,
               (i) => `marks[${where.index}].labels.content[${i}]`,
               { series: true, value: true },
+              fields,
+              mark,
             ),
             style: labels.style,
             place: labels.place,
@@ -477,6 +526,7 @@ function compile(
           JSON.stringify([where.mark, "labels"]),
         ),
       );
+    return scope;
   }
   // Layout marks' items follow a declared color scale too, reading their fields' values into it.
   let theme: Theme | undefined;
@@ -496,12 +546,19 @@ function compile(
       if (!marks.includes(mark) && identity?.field !== undefined && mark.table) {
         const scale = colorOf(mark)!;
         scale.read(identity.table ?? mark.table, identity.field);
-        list(prefixIn("color", mark.spec.panel), scale, mark);
+        list(
+          prefixIn("color", mark.spec.panel),
+          scale,
+          mark,
+          identity.table ?? mark.table,
+          identity.field,
+        );
       }
     }
   const compiled: Compiled = {
     scales,
     scopes: prefixes,
+    fields,
     items: (mark) => {
       const scale = colorOf(mark);
       return (
@@ -516,7 +573,7 @@ function compile(
     labels: (drawings) => panelLabels(kit, drawings, (mark) => byMark.get(mark)),
     listDomains: (entries, plain) => {
       let out = [...entries];
-      for (const [prefix, { scale, marks }] of listed) {
+      for (const [prefix, { scale, marks, reads }] of listed) {
         const domain = scale.spec?.domain;
         // Marks left out of legends list it where guides name them, and only there.
         if (!domain || !theme || (plain && [...marks].every(({ spec }) => spec.legend === false)))
@@ -531,9 +588,9 @@ function compile(
         const listing = domain.map((value, i): LegendEntry => {
           const color = paint!(scale.output(value, theme!.palette, theme!.muted), path);
           const glyph = look?.glyph;
-          return (
-            drawn.get(keys[i]!) ?? { key: keys[i]!, label: value, color, ...(glyph && { glyph }) }
-          );
+          // Named as the marks reading the scale write the value, where they all write it alike.
+          const label = fields?.entry(reads, value) ?? value;
+          return drawn.get(keys[i]!) ?? { key: keys[i]!, label, color, ...(glyph && { glyph }) };
         });
         const outside = out.filter(({ key }) => key.startsWith(prefix) && !keys.includes(key));
         out = out.filter(({ key }) => !key.startsWith(prefix));
@@ -576,6 +633,7 @@ function followingText(
   drawings: ReadonlyMap<Mark, Drawings>,
   config: ChartConfig,
   zone: string,
+  fields: ChartFields | undefined,
 ): MarkFeatures & { use(): void } {
   const spec = mark.spec as TextSpec;
   const from = spec.from as MarkAnchorSpec;
@@ -639,6 +697,8 @@ function followingText(
           zone,
           (i) => (label.content ? `${own}.content[${i}]` : own),
           { series: true, value: true },
+          fields,
+          source,
         ),
         style: label.style,
         halo: spec.halo,
@@ -774,11 +834,6 @@ function asks(mark: Mark): boolean {
   return ["encode", "style", "markers", "continuity", "where"].some(
     (key) => spec[key] !== undefined,
   );
-}
-
-/** A series' source, from its key (see `seriesKey`): a y field, or a series field's value. */
-function sourceOf(key: string): string {
-  return String((JSON.parse(key) as unknown[])[1]);
 }
 
 /**
@@ -1185,6 +1240,8 @@ function barFeatures(
   { scope, path, read, scale, where }: At,
   zone: string,
   locale: string | undefined,
+  fields: ChartFields | undefined,
+  shown: LabelContent | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const spec = mark.spec as BarSpec;
   const styles = new RowStyles(
@@ -1194,23 +1251,28 @@ function barFeatures(
     read,
     path,
     kit.isColor,
+    fields,
   );
   const format = formatOf(kit, zone);
   // A pattern refused is refused now, not when the first label is drawn.
   const labels = typeof spec.labels === "object" ? spec.labels : undefined;
   if (formed(labels?.format)) format(labels!.format!, undefined, `${path} labels.format`);
   if (labels) checkBarLayout(labels as Record<string, unknown>, `${path} labels`);
-  // Labels of parts: a field at the bar's row, its series, its value.
+  // Labels of parts: a field at the bar's row, its series, its value; with
+  // the chart's displays, a value or field label is written through them.
+  const given = labels?.content ?? shown;
   const content =
-    labels?.content &&
+    given &&
     writeContent(
       kit,
-      labels.content,
+      given,
       mark.table,
       locale,
       zone,
-      (i) => `marks[${where.index}].labels.content[${i}]`,
+      (i) => `marks[${where.index}].labels${labels?.content ? `.content[${i}]` : ""}`,
       { series: true, value: true },
+      fields,
+      mark,
     );
   let theme: Theme | undefined;
   let paintOf: PaintReader;
@@ -1284,6 +1346,8 @@ function labelFeatures(
   path: string,
   where: Where,
   locale: string | undefined,
+  fields: ChartFields | undefined,
+  shown: LabelContent | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const format = formatOf(kit, zone);
   const label = (mark.spec as { label?: unknown }).label;
@@ -1294,16 +1358,19 @@ function labelFeatures(
   // A format refused is refused now, not when the first label is drawn; Intl options are the chart's.
   if (formed(own?.format)) format(own!.format!, undefined, `${path} label.format`);
   if (own) checkContent(own.content, `${path} label.content`);
+  // With the chart's displays, a label of a field is written through its display.
+  const parts = own?.content ?? shown;
   const content =
-    own?.content &&
+    parts &&
     writeContent(
       kit,
-      own.content,
+      parts,
       mark.table,
       locale,
       zone,
-      (i) => `marks[${where.index}].label.content[${i}]`,
+      (i) => `marks[${where.index}].label${own?.content ? `.content[${i}]` : ""}`,
       { series: false, value: mark.spec.type === "rule" },
+      fields,
     );
   return { use() {}, palette: (base) => base, attach() {}, format, content };
 }
@@ -1761,6 +1828,7 @@ function pointFeatures(
   kit: FeatureKit,
   mark: Mark,
   { scope, path, read, scale }: At,
+  fields: ChartFields | undefined,
 ): MarkFeatures & { use(theme: Theme, paint: PaintReader): void } {
   const channels = (mark as Mark & { channels: PointChannels }).channels;
   const styles = new PointStyles(
@@ -1771,6 +1839,7 @@ function pointFeatures(
     read,
     path,
     mark.identity?.field,
+    fields,
   );
   let theme: Theme | undefined;
   return {

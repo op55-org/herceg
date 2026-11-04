@@ -23,8 +23,7 @@ import type { DrillRoot } from "../marks/tree-data.ts";
 import { planAxis } from "../model/axis.ts";
 import { axisGuide } from "../model/axis-guide.ts";
 import { chartDescription, describeChart } from "../model/describe.ts";
-import type { FeatureCompiler } from "../model/features.ts";
-import { GUIDE_KIT, type GuideCompiler } from "../model/guides.ts";
+import { LOADED as compilers, GUIDE_KIT } from "../model/guides.ts";
 import type { PlaneViewChange } from "../model/item-views.ts";
 import {
   type ChartConfig,
@@ -181,11 +180,11 @@ const DEFAULT_HEIGHT = 320;
 let nextId = 0;
 
 /**
- * The guide compiler and the feature compiler (model/guides.ts,
- * model/features.ts), once a chart on the page has loaded them, and their
- * imports: code a configuration may need before it draws.
+ * The imports of the code a configuration may need before it draws: the
+ * guide compiler, the feature compiler, and the display code, held in
+ * `compilers` (`LOADED`, model/guides.ts) once a chart on the page has
+ * loaded them.
  */
-const compilers: [GuideCompiler?, FeatureCompiler?] = [];
 const imports: (Promise<unknown> | undefined)[] = [];
 const COMPILERS = [
   () => import("../guides/compile.ts").then((module) => module.guideCompiler(GUIDE_KIT)),
@@ -194,6 +193,7 @@ const COMPILERS = [
       // The browser tells colors from fields' names (see FeatureKit).
       module.featureCompiler({ ...GUIDE_KIT, isColor: (value) => CSS.supports("color", value) }),
     ),
+  () => import("../fields/compile.ts"),
 ];
 
 /**
@@ -539,7 +539,7 @@ export class MountedChart implements Chart, ExportsScene {
     this.ready.catch(() => {});
     let refused: unknown;
     const model = (config: ChartOptions) =>
-      readPage(container, (page) => new ChartModel(config, page, ...compilers));
+      readPage(container, (page) => new ChartModel(config, page, compilers));
     try {
       this.#model = model(options);
     } catch (error) {
@@ -1947,23 +1947,26 @@ export class MountedChart implements Chart, ExportsScene {
       }
       throw error;
     };
-    for (const [i, lack] of lacks.entries())
-      if (lack)
-        imports[i] ??= COMPILERS[i]!().then(
-          (compiler) => {
-            compilers[i] = compiler as never;
-          },
-          (error: unknown) => {
-            // A later update imports again, though browsers that keep a failed
-            // module's result (Chrome does) reject it until the page reloads.
-            imports[i] = undefined;
-            throw error;
-          },
-        );
-    compiling = Promise.all(lacks.map((lack, i) => lack && imports[i])).then(() => {
+    compiling = Promise.all(
+      lacks.map((lack, i) => {
+        if (lack)
+          imports[i] ??= COMPILERS[i]!().then(
+            (compiler) => {
+              compilers[i] = compiler as never;
+            },
+            (error: unknown) => {
+              // A later update imports again, though browsers that keep a failed
+              // module's result (Chrome does) reject it until the page reloads.
+              imports[i] = undefined;
+              throw error;
+            },
+          );
+        return lack && imports[i];
+      }),
+    ).then(() => {
       if (this.#compiling !== compiling) return;
       try {
-        readPage(this.#container, (page) => this.#model.use(compilers[0], compilers[1], page));
+        readPage(this.#container, (page) => this.#model.use(compilers, page));
       } catch (error) {
         // A compiler refuses the configuration: nothing is drawn until an update.
         fail("compile")(error);

@@ -42,6 +42,10 @@ bar(sales, { x: "region", y: ["q1", "q2"] }); // grouped bars
 point(cars, { x: "weight", y: "mpg", color: "origin", size: "power" });
 heatmap(load, { x: "hour", y: "host", color: "cpu" });
 
+// Fields named and their values written once, for axes, legends, and tooltips.
+createChart(c, { fields: { p99: { label: "99th percentile", format: { duration: "millisecond" } } },
+  marks: [line(metrics, { x: "time", y: "p99" })] });
+
 // Brushing one chart highlights the same rows in another.
 const focus = selectionStore(cars);
 createChart(a, { marks: [point(cars, { x: "weight", y: "mpg" })], interaction: { brush: "xy" },
@@ -65,7 +69,7 @@ const pdf = renderToPDF(chart); // a mounted chart as it is shown
 | `herceg` | Tables, marks, `createChart`, `renderToSVG`, server snapshots and hydration |
 | `herceg/layout` | Subplot layouts: columns, rows, grids, panels, insets |
 | `herceg/state` | `chartState`: state options, conditional writes, selections of items and series |
-| `herceg/fields` | Field displays: `displayOf`, `compileFields`, `fieldsOf` |
+| `herceg/fields` | Field displays for application code: `displayOf`, `compileFields`, `fieldsOf` (charts take `fields` without it) |
 | `herceg/spec` | Charts from portable JSON specs: `loadSpec`, `validateSpec`, `chartFromSpec`, `specToSVG`, `specToPDF` |
 | `herceg/pdf` | `renderToPDF` |
 | `herceg/image` | `renderToImage`: PNG, JPEG, and WebP for documents |

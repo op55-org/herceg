@@ -23,7 +23,7 @@ function build(config: ChartConfig, width = 640, height = 320) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.fields = fieldReader;
   model.setSize(width, height, 1);

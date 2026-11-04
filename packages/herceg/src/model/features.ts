@@ -6,12 +6,18 @@
 // a configuration, and static output brings it with it.
 
 import type { Table } from "../data/table.ts";
+import type { ChartFieldKit, ChartFields } from "../fields/chart.ts";
+import type { FieldDisplays } from "../fields/rules.ts";
+import type { TimeZone } from "../format/zone.ts";
+import type { GuideFields } from "../guides/fields.ts";
 import type { AttachedLabel } from "../layout/attached.ts";
 import type { PanelDrawing } from "../layout/placer.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { PointSink, Polyline } from "../lod/polyline.ts";
 import type { ContentWriter } from "../marks/features/content.ts";
+import type { displayedContent } from "../marks/features/label-displays.ts";
+import type { naming } from "../marks/features/names.ts";
 import type { TracedEdge } from "../marks/features/provenance.ts";
 import type { ChartMark, Frame, GlyphKey, Mark, Palette } from "../marks/mark.ts";
 import type { RowBindings } from "../marks/row-bindings.ts";
@@ -38,6 +44,30 @@ import type { ChartConfig } from "./model.ts";
  * hold the reader where both the chart and the compiler imported it).
  */
 export type FeatureKit = GuideKit & { isColor(value: string): boolean };
+
+/**
+ * What a chart loads for field displays (`fields`) and series named by
+ * parts (fields/compile.ts, `needsFeatures`), in a chunk of its own that
+ * charts without them never load, and hands to the compilers in their kit
+ * (`GUIDE_KIT.loaded`): displays compiled for a chart, what axes read of
+ * them, series' names and value writers, and the content labels take from
+ * them.
+ */
+export interface DisplayCode {
+  /**
+   * `fields` checked and compiled for a chart in `locale` and `zone` (see
+   * fields/chart.ts), once for the displays given there.
+   */
+  chartFieldsOf(
+    fields: FieldDisplays,
+    kit: ChartFieldKit,
+    locale: string | undefined,
+    zone: TimeZone,
+  ): ChartFields;
+  guideFields(config: ChartConfig, fields: ChartFields): GuideFields;
+  naming: typeof naming;
+  displayedContent: typeof displayedContent;
+}
 
 /**
  * A series' swatch: one a spec could give, a box whose fill has an opacity
@@ -142,6 +172,11 @@ export interface CompiledFeatures {
   items?(
     mark: Mark,
   ): { readonly prefix: string; color(value: string): string | undefined } | undefined;
+  /**
+   * The chart's field displays (`fields`), which tooltip fields read;
+   * undefined for a chart without them.
+   */
+  readonly fields?: ChartFields | undefined;
 }
 
 /**
@@ -155,9 +190,14 @@ export type FormatWrite = (
   path: string,
 ) => (value: number) => string;
 
-/** Layout marks writing values in formats only the compiler writes, which hands them its writer. */
+/**
+ * Layout marks writing values in formats only the compiler writes, which
+ * hands them its writer, and the chart's field displays (`fields`), where
+ * it has them; `index` is the mark's place among the chart's marks, which
+ * messages name.
+ */
 export interface FormatUser {
-  useFormats(write: FormatWrite): void;
+  useFormats(write: FormatWrite, fields: ChartFields | undefined, index: number): void;
 }
 
 /** One mark's compiled features. */
@@ -404,8 +444,8 @@ export interface PointLooks {
   readonly opacity?: ((row: number) => number) | undefined;
   /** A row's shape, an index into SYMBOLS; -1 where it has none. */
   readonly shape?: ((row: number) => number) | undefined;
-  /** The shape of the series of a name, where the series field gives shapes. */
-  readonly seriesShape?: ((name: string) => number) | undefined;
+  /** A series' shape, where its series field gives shapes: its raw value's, whatever its name. */
+  readonly seriesShape?: ((series: Series) => number) | undefined;
   /** How far points reach past their centers at most, outlines included. */
   readonly reach: number;
   /** Keys of the values field channels map through ordinal scales: colors, shapes, and sizes. */
@@ -450,17 +490,26 @@ export function asksFeatures(
 }
 
 /**
- * Whether a configuration uses what only the feature compiler draws:
- * categorical scales, or marks whose options need it (`Mark.featured`)
- * or that place rows by coordinates (`Mark.bound`).
- * Without it, such a configuration draws without its marks' features, so
- * charts load it first and static output brings it.
+ * What of the feature code a configuration uses: the feature compiler and
+ * the display code (2) where it gives field displays or names series by
+ * parts; the compiler alone (1) for categorical scales, or marks whose
+ * options need it (`Mark.featured`) or that place rows by coordinates
+ * (`Mark.bound`); neither (0). Without them, such a configuration draws
+ * without its marks' features, so charts load them first and static
+ * output brings them.
  */
-export function needsFeatures(config: ChartConfig): boolean {
-  return (
+export function needsFeatures(config: ChartConfig): 0 | 1 | 2 {
+  // Field displays name series and write their values, and parts name
+  // series: with the display code.
+  if (
+    config.fields ||
+    config.marks.some((mark) => Array.isArray((mark.spec as { label?: unknown }).label))
+  )
+    return 2;
+  return +(
     // Scales of other names, and a position's with a range, which it refuses.
     Object.entries(config.scales ?? {}).some(
       ([name, scale]) => !/^(x|y|yRight)$/.test(name) || (!!scale && "range" in scale),
     ) || config.marks.some((mark) => (mark as Mark).featured || (mark as Mark).bound)
-  );
+  ) as 0 | 1;
 }

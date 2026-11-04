@@ -36,7 +36,6 @@ import { ChartError } from "../spec/errors.ts";
 import type { CameraSpec } from "../spec/spec.ts";
 import type { Camera } from "../three/camera.ts";
 import { checkDecorations, type Decoration, decorate, painted } from "./decorations.ts";
-import type { CompiledFeatures } from "./features.ts";
 import type { ItemInspection, MarkSeries } from "./inspect.ts";
 import type { LegendPart } from "./legend.ts";
 import type {
@@ -148,7 +147,7 @@ export interface ItemPanel {
 export type ItemFrame = Omit<
   LayoutFrame,
   "bounds" | "id" | "rows" | "root" | "moved" | "viewport" | "nodePositions" | "clock"
-> & { features?: CompiledFeatures | undefined };
+>;
 
 /** The title and legends around a chart, and the room they leave for its mark. */
 export interface Header {
@@ -1688,8 +1687,7 @@ export class ItemViews {
         ? (view.result.soleRow?.(key, owner.table) ??
           this.#leaving(key, view.key)?.soleRow?.(key, owner.table))
         : undefined);
-    const fields =
-      one === undefined ? undefined : this.fields?.(owner?.table, owner?.spec.tooltip, one);
+    const fields = one === undefined ? undefined : this.fields?.(owner, one);
     return {
       axis: "item",
       key,

@@ -12,7 +12,7 @@ import { aligned } from "../layout/place.ts";
 import { lineCount, type MeasureText } from "../layout/text.ts";
 import type { CustomSpec } from "../marks/custom.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
-import type { BandContext, Bands, Mark } from "../marks/mark.ts";
+import type { BandContext, ChartBands, Mark } from "../marks/mark.ts";
 import type { MarkRows } from "../marks/rows.ts";
 import type { Series } from "../marks/series.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
@@ -497,7 +497,7 @@ export class Splitter {
   split(
     base: readonly MarkSeries[],
     chart: PanelChart,
-    bands: Bands,
+    bands: ChartBands,
     context: BandContext,
   ): PanelSplit {
     const splits = (mark: Mark) => this.#facet.splits(mark);

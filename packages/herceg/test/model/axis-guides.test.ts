@@ -30,7 +30,9 @@ const week = table({
 });
 
 function build(config: ChartConfig, width = 800, height = 320) {
-  const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, guides);
+  const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, [
+    guides,
+  ]);
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }

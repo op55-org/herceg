@@ -190,7 +190,8 @@ export function stackPointText(
   along: "x" | "y",
   format: AxisFormat,
 ): string {
-  const raw = format.value(s.values[row]!);
+  // Values as their field's display writes them; shares as the axis does.
+  const raw = (s.write?.(format.value) ?? format.value)(s.values[row]!);
   return `${format[along === "x" ? "y" : "x"](stackShare(s, row))} share (${raw} raw)`;
 }
 

@@ -24,6 +24,7 @@ from ._common import (
     by,
     check_choice,
     check_grid_size,
+    column_name,
     complete,
     dropped_sentence,
     express,
@@ -366,7 +367,7 @@ def histplot(
         element=None if element == "bars" else element,
         # Densities over one series' bars show through them, as in Seaborn.
         fill_opacity=0.5 if kde and not grouped and element == "bars" else None,
-        label=None if series else name,
+        label=None if series else column_name(chart, name),
         z_index=marks.z_index,
     )
     if kde_table is not None:
@@ -377,7 +378,7 @@ def histplot(
             data=kde_table,
             orient="x" if is_x else "y",
             series=series,
-            label=None if series else name,
+            label=None if series else column_name(chart, name),
         )
     return record(chart, Statistics("histplot", sentence, tables, None, dropped))
 
@@ -551,7 +552,7 @@ def kdeplot(
         x_label=name if is_x else measured,
         y_label=measured if is_x else name,
     )
-    label = None if series else name
+    label = None if series else column_name(chart, name)
     # Densities of y run along y, read by y in tooltips and the keyboard.
     xy = (name, density) if is_x else (density, name)
     orient: Literal["x", "y"] = "x" if is_x else "y"
@@ -690,7 +691,7 @@ def ecdfplot(
     xy = (name, share) if is_x else (share, name)
     orient: Literal["x", "y"] = "x" if is_x else "y"
     if not any(single):
-        label = None if series else name
+        label = None if series else column_name(chart, name)
         chart.line(
             *xy,
             orient=orient,
@@ -773,7 +774,7 @@ def rugplot(
         y=None if is_x else name,
         series=series,
         length=length,
-        label=None if series else name,
+        label=None if series else column_name(chart, name),
         **marks.primary(),
     )
     return record(

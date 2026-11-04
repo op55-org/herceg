@@ -18,6 +18,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { headersOf, legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
@@ -51,11 +52,11 @@ describe("facets", () => {
     expect(scene.panels.map((p) => p.key)).toEqual(["N", "S", "E"]);
     expect(headersOf(scene).map((h) => h.text)).toEqual(["N", "S", "E"]);
     // One y domain for all panels, covering every region.
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(300);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(300);
     // Each panel draws its region's rows: N is 1, 2, 3.
     const [n, s] = scene.panels;
     const y = (value: number, panel: Panel) => {
-      const scale = model.yScale()!;
+      const scale = yScale(model)!;
       return scale.map(value) - model.panels()[0]!.plot.y + panel.plot.y;
     };
     expect(points(lines(n!)[0]!).map(([, py]) => py)).toEqual(
@@ -123,7 +124,7 @@ describe("facets", () => {
     });
     expect(scene.panels.map((p) => p.key)).toEqual(["a"]);
     expect(points(lines(scene.panels[0]!)[0]!)).toHaveLength(2);
-    expect(model.yScale()!.domain[1]).toBeLessThan(100);
+    expect(yScale(model)!.domain[1]).toBeLessThan(100);
   });
 
   it("refuse marks they cannot split, and explain how to repeat them", () => {
@@ -166,7 +167,7 @@ describe("facets", () => {
     expect(hit.points.map((p) => p.text)).toEqual(["20"]);
     // Between panels, nothing.
     expect(model.inspect(s.plot.x - 4, s.plot.y + 10)).toBeUndefined();
-    const keyed = positionOf(model, model.panelSeries("E")[0]!.key, 2, "E")!;
+    const keyed = positionOf(model, panelSeries(model, "E")[0]!.key, 2, "E")!;
     expect(keyed.panel).toBe("E");
     expect(keyed.points[0]!.text).toBe("300");
   });
@@ -186,7 +187,7 @@ describe("facets", () => {
     expect(a!.path).not.toBe(b!.path);
     expect(points(a!)[0]![0]).not.toBeCloseTo(points(b!)[0]![0]!, 3);
     expect(model.series()[0]!.sorted).toBe(false);
-    expect(model.panelSeries("a")[0]!.sorted).toBe(true);
+    expect(panelSeries(model, "a")[0]!.sorted).toBe(true);
   });
 
   it("keep grouped bars in their slots in panels missing a group", () => {
@@ -273,11 +274,11 @@ describe("facets", () => {
     const two = table({ a: [0, 1, 2], b: [2, 0, 1], v: [1, 2, 3], g: ["p", "p", "p"] });
     const panels = facet("g");
     const { model } = build({ marks: [line(two, { x: "a", y: "v" })], facet: panels });
-    expect(model.panelSeries("p")[0]!.sorted).toBe(true);
+    expect(panelSeries(model, "p")[0]!.sorted).toBe(true);
     model.update({ locale: "en-US", marks: [line(two, { x: "b", y: "v" })], facet: panels });
     model.scene(estimateText);
-    expect(model.panelSeries("p")[0]!.sorted).toBe(false);
-    expect(model.xScale()!.domain).toEqual([0, 2]);
+    expect(panelSeries(model, "p")[0]!.sorted).toBe(false);
+    expect(xScale(model)!.domain).toEqual([0, 2]);
   });
 
   it("keep each panel's x scale on its plot, the same from one scene to the next", () => {

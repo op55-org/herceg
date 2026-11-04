@@ -635,19 +635,21 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
   /**
    * Tooltip text for a row: the `pointText` option's, or the series'
    * value; a range's values, each axis' written as it writes them: "12 –
-   * 40" along one axis, "(1, 2) – (3, 4)" along both.
+   * 40" along one axis, "(1, 2) – (3, 4)" along both. Values of fields with
+   * displays are written as their displays write them.
    */
   pointText(series: Series, row: number, format: AxisFormat): string {
     if (this.#pointText) return this.#pointText(row, format, customSeries(series, this.#placed));
-    if (this.#layout !== "ranges") return format.y(valueAt(series, row));
+    if (this.#layout !== "ranges")
+      return (series.write?.(format.y) ?? format.y)(valueAt(series, row));
     const table = this.table!;
     const written = (fields: readonly string[], axis: "x" | "y") =>
       fields.map((field, i) =>
-        format[axis](
-          this.#banded[axis] && i === 0
-            ? placeAt(series, axis, row)
-            : table.numbers(field as never)[row]!,
-        ),
+        this.#banded[axis] && i === 0
+          ? format[axis](placeAt(series, axis, row))
+          : (series.fields?.of(table, field)?.over(format[axis]) ?? format[axis])(
+              table.numbers(field as never)[row]!,
+            ),
       );
     const [xs, ys] = [written(this.#x, "x"), written(this.#y, "y")];
     if (xs.length > 1 && ys.length > 1)

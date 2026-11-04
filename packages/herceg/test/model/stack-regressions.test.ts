@@ -10,6 +10,7 @@ import { offsetLayers } from "../../src/marks/stack-offset.ts";
 import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig) {
@@ -78,8 +79,8 @@ for (const horizontal of [false, true]) {
           ],
         });
         expect(boundaries(model, horizontal)).toEqual(boundaries(fresh, horizontal));
-        expect((horizontal ? model.xScale() : model.yScale())!.domain).toEqual(
-          (horizontal ? fresh.xScale() : fresh.yScale())!.domain,
+        expect((horizontal ? xScale(model) : yScale(model))!.domain).toEqual(
+          (horizontal ? xScale(fresh) : yScale(fresh))!.domain,
         );
       }
     });
@@ -158,7 +159,7 @@ for (const stack of ["fill", "center", "wiggle"] as const) {
     });
     const mark = area(data, { x: "t", y: ["a", "b"], stack });
     const model = build({ marks: [mark], facet: facet("p") });
-    const parts = () => model.panels().map((panel) => model.panelSeries(panel.key));
+    const parts = () => model.panels().map((panel) => panelSeries(model, panel.key));
     const top = parts()[0]![0]!.y;
     const base = parts()[0]![0]!.y0;
     const totals = parts()[0]![0]!.stackTotals;
@@ -182,12 +183,12 @@ for (const stack of ["fill", "center", "wiggle"] as const) {
     fresh.scene(estimateText);
     for (let p = 0; p < parts().length; p++) {
       expect(Array.from(parts()[p]![1]!.y)).toEqual(
-        Array.from(fresh.panelSeries(fresh.panels()[p]!.key)[1]!.y),
+        Array.from(panelSeries(fresh, fresh.panels()[p]!.key)[1]!.y),
       );
     }
     const saved = Array.from(top);
     const another = build({ marks: [mark], facet: facet("p") });
-    expect(another.panelSeries(another.panels()[0]!.key)[0]!.y).not.toBe(top);
+    expect(panelSeries(another, another.panels()[0]!.key)[0]!.y).not.toBe(top);
     expect(Array.from(top)).toEqual(saved);
   });
   for (const long of [false, true]) {
@@ -253,7 +254,7 @@ for (const horizontal of [false, true]) {
           : area(source, { x: "t", y: ["a", "b"], stack: { offset: stack, order: "inside-out" } });
       const model = build({ marks: [make(data)], facet: facet("p") });
       for (const panel of model.panels()) {
-        const parts = model.panelSeries(panel.key);
+        const parts = panelSeries(model, panel.key);
         const rows = Array.from(parts[0]!.rows!);
         const fresh = build({
           marks: [

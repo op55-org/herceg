@@ -118,6 +118,31 @@ describe("<Chart>", () => {
     expect(host.textContent).toContain("4!");
   });
 
+  it("takes field displays, comparing the tables their rules match by identity", async () => {
+    // Two unnamed tables write the same JSON: only the one the line draws matches.
+    const drawn = table({ t: [0, 1], v: [1, 2] });
+    const other = table({ t: [0, 1], v: [1, 2] });
+    let chart: HercegChart | null = null;
+    const draw = (matched: typeof drawn) =>
+      root.render(
+        <Chart
+          ref={(value) => {
+            chart = value;
+          }}
+          renderer="svg"
+          fields={[{ match: { table: matched, field: "v" }, label: "Volume" }]}
+        >
+          <Line data={drawn} x="t" y="v" />
+        </Chart>,
+      );
+    act(() => draw(drawn));
+    await act(() => chart!.loading);
+    expect(chart!.toSVG()).toContain("Volume: 2 points");
+    act(() => draw(other));
+    await act(frame);
+    expect(chart!.toSVG()).not.toContain("Volume");
+  });
+
   for (const stack of ["fill", "center", "wiggle"] as const) {
     it(`passes ${stack} and inside-out area options through React`, () => {
       let chart: HercegChart | null = null;

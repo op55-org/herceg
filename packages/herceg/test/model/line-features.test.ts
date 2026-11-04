@@ -28,7 +28,7 @@ function model(config: ChartConfig) {
   const made = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   made.setSize(600, 300, 1);
   return made;
@@ -732,7 +732,7 @@ describe("markers", () => {
 describe("what needs the feature compiler", () => {
   it("is a mark's channels, looks, markers, or continuity, and scales of categories", () => {
     const plain = line(sites, { x: "t", y: "v", series: "site", stroke: "#000000" });
-    expect(needsFeatures({ marks: [plain] })).toBe(false);
+    expect(needsFeatures({ marks: [plain] })).toBe(0);
     for (const options of [
       { color: "site", series: false },
       { encode: { strokeWidth: { value: 2 } } },
@@ -746,30 +746,34 @@ describe("what needs the feature compiler", () => {
       expect(
         needsFeatures({ marks: [line(sites, { x: "t", y: "v", ...options } as never)] }),
         JSON.stringify(options),
-      ).toBe(true);
-    expect(needsFeatures({ marks: [plain], scales: { site: { type: "ordinal" } } })).toBe(true);
+      ).toBe(1);
+    expect(needsFeatures({ marks: [plain], scales: { site: { type: "ordinal" } } })).toBe(1);
     // A color field the series are split by is the chart's to color.
     const colored = line(sites, { x: "t", y: "v", color: "site" });
-    expect(needsFeatures({ marks: [colored] })).toBe(false);
+    expect(needsFeatures({ marks: [colored] })).toBe(0);
     expect(
       needsFeatures({ marks: [line(sites, { x: "t", y: "v", series: "site", color: "site" })] }),
-    ).toBe(false);
+    ).toBe(0);
+    // Field displays and series names by parts need the display code too.
+    expect(needsFeatures({ marks: [plain], fields: { v: { label: "Value" } } })).toBe(2);
+    const parts = line(sites, { x: "t", y: "v", series: "site", label: [{ field: "site" }] });
+    expect(needsFeatures({ marks: [parts] })).toBe(2);
   });
 
   it("is not a color in CSS syntax that names no field, which marks draw themselves", () => {
     const named = table({ t: [0, 1], v: [1, 2], "#c00": ["a", "b"] });
     for (const color of ["#c00000", "rgb(0, 0, 0)", "hsl(0 0% 0%)", "var(--accent)"]) {
       const mark = line(sites, { x: "t", y: "v", series: "site", color } as never);
-      expect(needsFeatures({ marks: [mark] }), color).toBe(false);
+      expect(needsFeatures({ marks: [mark] }), color).toBe(0);
     }
     const scene = new ChartModel({ marks: [line(sites, { x: "t", y: "v", color: "#c00000" })] });
     scene.setSize(400, 200, 1);
     expect(strokes(scene.scene(estimateText))).toEqual(["#c00000"]);
     // Names go through the compiler, which knows them; a field named like a
     // color is the field, which splits the series.
-    expect(needsFeatures({ marks: [line(sites, { x: "t", y: "v", color: "red" })] })).toBe(true);
+    expect(needsFeatures({ marks: [line(sites, { x: "t", y: "v", color: "red" })] })).toBe(1);
     const field = line(named, { x: "t", y: "v", color: "#c00" } as never);
-    expect(needsFeatures({ marks: [field] })).toBe(false);
+    expect(needsFeatures({ marks: [field] })).toBe(0);
     const split = new ChartModel({ marks: [field] });
     split.setSize(400, 200, 1);
     expect(strokes(split.scene(estimateText))).toHaveLength(2);
@@ -782,7 +786,7 @@ describe("what needs the feature compiler", () => {
       marks: [{ type: "line", x: "t", y: "v", series: "site", color: "site" }],
     };
     const loaded = loadSpec(spec);
-    const scene = new ChartModel(loaded.config, undefined, ...staticCompilers());
+    const scene = new ChartModel(loaded.config, undefined, staticCompilers());
     scene.setSize(400, 200, 1);
     expect(strokes(scene.scene(estimateText))).toEqual(["#00ab41"]);
   });

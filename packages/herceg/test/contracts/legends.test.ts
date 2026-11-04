@@ -5,6 +5,7 @@ import { estimateText } from "../../src/layout/text.ts";
 import { guidesOf } from "../../src/scene/scene.ts";
 import { ChartError } from "../../src/spec/errors.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { panelSeries } from "../helpers/scales.ts";
 import {
   build,
   cellsOf,
@@ -44,7 +45,7 @@ function showing(row: string, keys: string[], shown: string, color: string) {
   const named: string[][] = [...customDrew].map(wordsOf);
   const drawn = new Set(marks.map(({ key }) => key.split("|")[0]));
   for (const panel of model.panels())
-    for (const series of model.panelSeries(panel.key))
+    for (const series of panelSeries(model, panel.key))
       if (drawn.has(series.key)) named.push(wordsOf(series.label));
   const table = tables?.[fixtureOf(row).table] as { columns?: object } | undefined;
   const columns = Object.values(table?.columns ?? {});

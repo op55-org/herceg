@@ -26,7 +26,7 @@ function render(config: Omit<ChartConfig, "locale">, budget?: number) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     NO_PAGE,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(400, 300, 1);
   const plain = renderSvg(model.scene(estimateText), { idPrefix: "t" });
@@ -215,7 +215,7 @@ describe("titles in static SVG", () => {
           marks: [make(rows, { x: "x", y: "y" })],
         },
         NO_PAGE,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(400, 300, 1);
       model.highlight = (mark, series, frame, key) =>
@@ -258,7 +258,7 @@ describe("titles in static SVG", () => {
         rowSelection: selection,
       },
       NO_PAGE,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(400, 300, 1);
     selection.highlight(model);
@@ -290,7 +290,7 @@ describe("titles in static SVG", () => {
         rowSelection: selection,
       },
       NO_PAGE,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(400, 300, 1);
     selection.highlight(model);
@@ -319,7 +319,7 @@ describe("titles in static SVG", () => {
         rowSelection: fourSelection,
       },
       NO_PAGE,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     both.setSize(400, 300, 1);
     fourSelection.highlight(both);

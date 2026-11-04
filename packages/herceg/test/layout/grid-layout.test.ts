@@ -365,7 +365,7 @@ describe("charts of grid layouts", () => {
         guides: [axis({ scale: "x", repeat: "all" })],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     expect(
@@ -423,7 +423,7 @@ describe("charts of grid layouts", () => {
             ],
           },
           undefined,
-          ...staticCompilers(),
+          staticCompilers(),
         );
         model.setSize(600, 400, 1);
         const scene = model.scene(estimateText);
@@ -452,7 +452,7 @@ describe("charts of grid layouts", () => {
       const model = new ChartModel(
         { locale: "en-US", timeZone: "UTC", ...config },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(600, 400, 1);
       return model.scene(estimateText).panels.map((p) => p.axes.map((a) => a.side).sort());
@@ -492,7 +492,7 @@ describe("charts of grid layouts", () => {
           guides: [axis({ scale: "y", place: { side: "right" }, repeat: "all" })],
         },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(600, 400, 1);
       const [first, second] = model.scene(estimateText).panels;

@@ -585,7 +585,7 @@ export class ViolinMark extends DistributionMark<ViolinSpec, Shape> {
 
   /** A violin's statistics, formatted as its value axis formats values. */
   pointText(series: Series, row: number, format: AxisFormat): string {
-    const f = this.horizontal ? format.x : format.y;
+    const f = this.valueFormat(series, format);
     const { stats, groups } = this.summaryOf(series);
     const stat = (name: Stat) => stats[name][row]!;
     const { min, max } = groups[row]!;

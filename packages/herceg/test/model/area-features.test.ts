@@ -11,12 +11,13 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import type { AreaGeometry, LineGeometry, Scene } from "../../src/scene/scene.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(600, 300, 1);
   return { model, scene: model.scene(estimateText) };
@@ -41,7 +42,7 @@ describe("conditional bands", () => {
       ],
     });
     const [band] = areas(scene);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const upper = ends(band!.upper).map(([a, b]) => [x.invert(a!), x.invert(b!)]);
     const lower = ends(band!.lower!).map(([a, b]) => [x.invert(a!), x.invert(b!)]);
     // Both edges share their runs and their crossings.
@@ -51,7 +52,7 @@ describe("conditional bands", () => {
     ]);
     expect(lower).toEqual(upper);
     // At a crossing, the band closes on the line: both edges at the limit.
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     const crossing = band!.upper.runEnd(0) - 1;
     expect(y.invert(band!.upper.coords[crossing * 2 + 1]!)).toBeCloseTo(1, 6);
   });
@@ -68,7 +69,7 @@ describe("conditional bands", () => {
         }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const [band] = areas(scene);
     expect(ends(band!.upper).map(([a, b]) => [x.invert(a!), x.invert(b!)])).toEqual([
       [expect.closeTo(0, 6), expect.closeTo(2, 6)],
@@ -91,7 +92,7 @@ describe("conditional bands", () => {
         }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const [band] = areas(scene);
     expect(ends(band!.upper).map(([a, b]) => [x.invert(a!), x.invert(b!)])).toEqual([
       [expect.closeTo(1, 6), expect.closeTo(2, 6)],

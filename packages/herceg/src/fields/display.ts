@@ -51,12 +51,13 @@ export interface DisplayedField<K extends DisplayedKind = DisplayedKind> {
 }
 
 /** A display's settings once resolved, without the `false` that resets them. */
-type ResolvedDisplay = {
+export type ResolvedDisplay = {
   [K in keyof FieldDisplay]?: Exclude<FieldDisplay[K], false>;
 };
 
 /** Times written without a format: the date and the time of day. */
-const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
+/** How times are written without a format: dates with times of day. */
+export const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
 
 /**
  * `field`'s display from `resolved`, writing with `kit` where `settings`
@@ -64,19 +65,19 @@ const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
  */
 export function displayed<K extends DisplayedKind>(
   field: FieldOf & { kind: K },
-  { settings: display, from }: Resolved,
+  { settings, from }: Resolved,
   kit: DisplayKit,
   { locale, timeZone = "local", format: own, missing: fallback = "–" }: DisplaySettings,
   surface: string,
 ): DisplayedField<K> {
   const { name, kind } = field;
-  const { mappings } = display as ResolvedDisplay;
+  const display = settings as ResolvedDisplay;
   if (own !== undefined) {
     checkFormat(own, `${surface} settings.format`, kit);
     const wrong = misfit(kind, "format", own);
     if (wrong) throw new Error(`${surface} settings.format: ${wrong.problem(holds(name, kind))}`);
   }
-  const format = own ?? (display as ResolvedDisplay).format;
+  const format = own ?? display.format;
   const at = own ? `${surface} settings.format` : `${surface} ${from.format}.format`;
   const write: Formatter | undefined = format
     ? formatWriter(kit, format, kind === "time", timeZone, locale, at)
@@ -85,9 +86,8 @@ export function displayed<K extends DisplayedKind>(
       : kind === "time"
         ? kit.timeFormatter(DATE_TIME, timeZone, locale)
         : undefined;
-  const mapped = mappings ? mapper(mappings) : undefined;
-  // Resolved settings hold no `false`: resetting removed them.
-  const { label = name, description, min, max, missing = fallback } = display as ResolvedDisplay;
+  const mapped = display.mappings && mapper(display.mappings);
+  const { label = name, description, min, max, missing = fallback } = display;
   return {
     field: name,
     kind,
@@ -95,21 +95,30 @@ export function displayed<K extends DisplayedKind>(
     description,
     min,
     max,
-    text: (value) => {
-      // Times beyond what dates hold (an infinity among them) have no date to write.
-      if (
-        value === null ||
-        (typeof value === "number" &&
-          (kind === "time" ? !(Math.abs(value) <= 8.64e15) : Number.isNaN(value)))
-      )
-        return missing;
-      return mapped?.(value) ?? (typeof value === "string" ? value : write!(value));
-    },
+    // A value not missing is a number or text.
+    text: (value) =>
+      missingValue(kind, value)
+        ? missing
+        : (mapped?.(value!) ?? (typeof value === "string" ? value : write!(value!))),
   };
 }
 
+/**
+ * Whether `value` of a field of `kind` is missing: null (a missing
+ * category), NaN, or for times one beyond what dates hold (an infinity among them).
+ */
+export function missingValue(kind: DisplayedKind, value: number | string | null): boolean {
+  return (
+    value === null ||
+    (typeof value === "number" &&
+      (kind === "time" ? !(Math.abs(value) <= 8.64e15) : Number.isNaN(value)))
+  );
+}
+
 /** The text of the first of `mappings` that matches a value, or undefined where none does. */
-function mapper(mappings: readonly ValueMapping[]): (value: number | string) => string | undefined {
+export function mapper(
+  mappings: readonly ValueMapping[],
+): (value: number | string) => string | undefined {
   const tests = mappings.map((mapping): ((value: number | string) => string | undefined) => {
     const { text } = mapping;
     if (mapping.regex !== undefined) {

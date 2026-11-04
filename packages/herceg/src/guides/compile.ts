@@ -9,7 +9,9 @@ import type { AxisContext } from "../model/axis.ts";
 import type { CompiledGuides, GuideCompiler, GuideKit } from "../model/guides.ts";
 import type { ChartConfig } from "../model/model.ts";
 import type { ScaleName } from "../model/scales.ts";
+import type { AxisTitleSpec } from "../spec/encoding.ts";
 import { compiledAxes, listedAxes } from "./axes.ts";
+import type { GuideFields } from "./fields.ts";
 import { compiledLegends, plannedLegends } from "./legends.ts";
 import type { Format } from "./options.ts";
 import { axisPadding } from "./padding.ts";
@@ -150,7 +152,13 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
   };
   for (const scale of SCALES) note(config[scale], scale);
   config.panels?.declared.forEach((panel, i) => {
-    for (const scale of SCALES) note(panel[scale], `panels[${i}].${scale}`);
+    for (const scale of SCALES) {
+      note(panel[scale], `panels[${i}].${scale}`);
+      if (typeof panel[scale]?.title === "object")
+        throw new Error(
+          `chart panels[${i}].${scale}.title: a subplot's own axis title is text; give text, or the title of parts on the chart's ${scale}`,
+        );
+    }
   });
   // The model merged `scales` into the short forms; their settings are named where they are set.
   const { scales } = config;
@@ -167,7 +175,12 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
       );
   for (const [name, scale] of Object.entries(scales ?? {})) note(scale, scalePath(name));
   checkSettings(kit, config);
-  let read = config;
+  const displays = kit.loaded[2];
+  const shown =
+    config.fields &&
+    displays?.chartFieldsOf(config.fields, kit, config.locale, config.timeZone ?? "local");
+  const fields = shown && displays!.guideFields(config, shown);
+  let read = titled(config, fields);
   // Listed axes: each scale's on its default side read as its short form.
   config.guides?.forEach((guide, i) => {
     note(guide, `guides[${i}]`);
@@ -183,7 +196,8 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
     return labels ? (labels.duplicates ?? (axis.home ? undefined : "hide")) : undefined;
   };
   const legends = plannedLegends(kit, read);
-  const context = (context: AxisContext, scale: string): AxisContext => {
+  const context = (asked: AxisContext, scale: string): AxisContext => {
+    const context = fields ? fields.axis(asked, scale, paths) : asked;
     const spec = context.spec;
     if (!spec) return context;
     const { ticks, format, tooltipFormat } = spec;
@@ -192,6 +206,8 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
     const plannedTicks = ticks !== undefined && count === undefined;
     const plannedFormat = planned(format);
     const plannedValue = planned(tooltipFormat) || (tooltipFormat === undefined && plannedFormat);
+    // With field displays, the axis' own tooltipFormat is marked as its own.
+    const owned = fields !== undefined && asked.spec?.tooltipFormat !== undefined;
     // A duplicates policy of its own has the compiler write the axis' labels too.
     const policy = context.type !== "band" && repeats(scale) !== undefined;
     // Padding given replaces the room marks ask for.
@@ -213,7 +229,7 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
       [tooltipFormat, "tooltipFormat"],
     ] as const)
       if (shown && !planned(shown)) intlOptions(shown as object, at(shown, name));
-    if (!plannedTicks && !plannedFormat && !plannedValue && !policy && ticks === count)
+    if (!plannedTicks && !plannedFormat && !plannedValue && !owned && !policy && ticks === count)
       return padding ? { ...context, padding } : context;
     // Category axes label every category that fits, and write them as they are.
     if (context.type === "band" && (plannedTicks || plannedFormat))
@@ -235,10 +251,15 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
           )
         : undefined;
     const shown = tooltipFormat ?? format;
-    const formatValue = plannedValue
-      ? writer(kit, shown, context, scale, at(shown, tooltipFormat ? "tooltipFormat" : "format"))
-          ?.value
-      : undefined;
+    const written =
+      plannedValue || owned
+        ? writer(kit, shown, context, scale, at(shown, tooltipFormat ? "tooltipFormat" : "format"))
+            ?.value
+        : undefined;
+    const formatValue =
+      owned && written
+        ? Object.assign((value: number) => written(value), { own: true as const })
+        : written;
     const { ticks: _, ...rest } = spec;
     return {
       ...context,
@@ -256,7 +277,29 @@ function compile(kit: GuideKit, config: ChartConfig): CompiledGuides {
     scales: ownScales(kit, read, context, scalePath),
     config: read,
     context,
+    categories: (axis, keys, labels) => fields?.categories(axis, keys, labels),
   };
+}
+
+/**
+ * `config` with its axes' titles of parts as text: the short forms' and the
+ * guides' axes', their `{ label }` parts the fields' labels
+ * (`GuideFields.title`), or without displays their names.
+ */
+function titled(config: ChartConfig, fields: GuideFields | undefined): ChartConfig {
+  const text = <A extends { title?: AxisTitleSpec | undefined }>(axis: A): A =>
+    typeof axis.title === "object"
+      ? {
+          ...axis,
+          title: fields
+            ? fields.title(axis.title)
+            : axis.title.map((part) => (typeof part === "string" ? part : part.label)).join(""),
+        }
+      : axis;
+  const read = { ...config };
+  for (const scale of SCALES) if (config[scale]) read[scale] = text(config[scale]) as never;
+  read.guides &&= read.guides.map((guide) => (guide.type === "axis" ? text(guide) : guide));
+  return read;
 }
 
 /**

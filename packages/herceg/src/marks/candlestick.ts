@@ -201,7 +201,10 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
       ? bandIndices(this.rows(), spec.x, bands.x?.keys ?? [], context)
       : table.numbers(spec.x as never);
     const color = painted(context.paint, spec.rise, "candlestick rise") ?? context.theme.rise;
-    return buildSeries(table, this.#split.sources(), positions, key, palette, color);
+    const series = buildSeries(table, this.#split.sources(), positions, key, palette, color);
+    // Its chart's displays, which write its prices.
+    for (const s of series) s.fields = context.features?.fields;
+    return series;
   }
 
   xExtent(series: readonly Series[], log: boolean, breaks?: Breaks) {
@@ -572,11 +575,22 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     return candleOf(this.prices(), row, y.type === "log", this.candle);
   }
 
+  /**
+   * How each price is written (open, high, low, close): as the y axis
+   * writes it, through its field's display.
+   */
+  #writers(s: Series | undefined, y: (value: number) => string) {
+    const { open, high, low, close } = this.spec;
+    return [open, high, low, close].map((field) => s?.fields?.of(this.table, field)?.over(y) ?? y);
+  }
+
   /** The candle's four prices, high and low widened as drawn. */
-  pointText(_series: Series, row: number, format: AxisFormat): string {
+  pointText(series: Series, row: number, format: AxisFormat): string {
     const candle = this.candle;
     if (!candleOf(this.prices(), row, false, candle)) return "";
-    const [open, high, low, close] = Array.from(candle, format.y);
+    const [open, high, low, close] = this.#writers(series, format.y).map((write, i) =>
+      write(candle[i]!),
+    );
     return `open ${open}, high ${high}, low ${low}, close ${close}`;
   }
 
@@ -613,10 +627,10 @@ export class CandlestickMark implements Mark<Frozen<CandlestickSpec>> {
     const noun = (n: number) =>
       bars ? (n === 1 ? "OHLC bar" : "OHLC bars") : n === 1 ? "candle" : "candles";
     if (count === 0 || latest < 0) return `${name}: no ${noun(0)}`;
-    const f = format.y;
     candleOf(prices, latest, log, candle);
     const [o, h, l, c] = candle;
-    return `${name}: ${count} ${noun(count)}, prices from ${f(low)} to ${f(high)}; the last opened at ${f(o!)}, ranged from ${f(l!)} to ${f(h!)}, and closed at ${f(c!)}`;
+    const [open, highs, lows, close] = this.#writers(parts[0], format.y);
+    return `${name}: ${count} ${noun(count)}, prices from ${lows!(low)} to ${highs!(high)}; the last opened at ${open!(o!)}, ranged from ${lows!(l!)} to ${highs!(h!)}, and closed at ${close!(c!)}`;
   }
 
   prices(): Prices {

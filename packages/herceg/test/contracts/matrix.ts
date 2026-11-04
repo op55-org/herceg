@@ -242,7 +242,7 @@ export function build(
   spec: Spec,
   measure: MeasureText = estimateText,
 ): { model: ChartModel; scene: Scene } {
-  const model = new ChartModel(configOf(spec), undefined, ...staticCompilers());
+  const model = new ChartModel(configOf(spec), undefined, staticCompilers());
   model.setSize(600, 400, 1);
   return { model, scene: model.scene(measure) };
 }

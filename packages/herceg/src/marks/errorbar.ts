@@ -12,9 +12,10 @@ import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
-import type { CssColor, FieldCoordinate, ItemKeyed } from "./encoding.ts";
+import type { CssColor, FieldCoordinate, ItemKeyed, SeriesName } from "./encoding.ts";
 import { definedFields } from "./line.ts";
 import {
+  type AxisFormat,
   type BandContext,
   type BandList,
   type Bands,
@@ -39,7 +40,15 @@ import {
 } from "./mark.ts";
 import { bindRows, offAxis, type RowBindings } from "./row-bindings.ts";
 import { isRowView, type MarkRows, rowsOf } from "./rows.ts";
-import { lowerPosition, rowOf, type Series, TableCache, visibleRange, xExtent } from "./series.ts";
+import {
+  lowerPosition,
+  rangeText,
+  rowOf,
+  type Series,
+  TableCache,
+  visibleRange,
+  xExtent,
+} from "./series.ts";
 import { boxOf, clipBox, distanceToCut, paintedLater } from "./shapes.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
 import { unionExtent } from "./trace.ts";
@@ -80,7 +89,7 @@ interface ErrorBarStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   pick?: boolean;
   /** `false`: tooltips, hover, and the keyboard leave the marks out. */
   inspect?: boolean;
-  label?: string;
+  label?: SeriesName<S>;
   /** `false` leaves the mark out of the chart's legends. */
   legend?: false;
   /** Fields of the row tooltips show besides the mark's values, such as counts that are not plotted. */
@@ -326,6 +335,11 @@ export class ErrorBarMark implements Mark<Frozen<ErrorBarSpec>> {
       }
     }
     return series;
+  }
+
+  /** Both ends of a bar, each as its field's display writes it. */
+  pointText(s: Series, row: number, format: AxisFormat): string {
+    return rangeText(s, row, this.horizontal, format);
   }
 
   xExtent(series: readonly Series[], log: boolean) {

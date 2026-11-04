@@ -70,7 +70,7 @@ Herceg takes Herceg's names:
 | `whiskers`, `outliers`, `depth`, `inner`, ... | The box plot, boxen, and violin marks' options. |
 | `jitter` | stripplot's spread as a fraction of the band (`True` is 0.5; `hg.Jitter` brings a seed). |
 | `z_index`, `encode`, `labels` | Passed to the mark drawing the plot's result (barplot's bars, lineplot's lines, ...). |
-| Chart options | `title`, `width`, `height`, `theme`, `x_axis`, `scales`, `legend`, `inspection`, `tooltip`, ... as the one-call helpers take them. |
+| Chart options | `title`, `width`, `height`, `theme`, `x_axis`, `scales`, `legend`, `inspection`, `tooltip`, `fields`, ... as the one-call helpers take them. |
 
 Statistical options keep Seaborn's names: `estimator`, `errorbar`,
 `n_boot`, `bw_method`, `bw_adjust`, `ci`, `multiple`, `linestyles`,
@@ -83,6 +83,10 @@ hx.lineplot(fmri, x="timepoint", y="signal", series="subject", scales=groups,
 hx.barplot(tips, x="day", y="tip", labels=True, z_index=1)
 ```
 
+- `fields` ([Field displays](../fields.md)) names columns and writes their
+  values: with it, express titles its axes and names a single series by
+  the column's label (`hg.LabelPart(label=column)`), so a line and its
+  error band still share one legend entry when the label changes.
 - `encode` reads the data's columns and the plot's x, y, and series as
   drawn, never a value it computes. Where the plot summarizes groups, a
   column it reads must have one value per group; otherwise it is refused

@@ -34,14 +34,11 @@ import { contractTest } from "../helpers/contracts.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { readKeys } from "../helpers/keyboard.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = withPicker(
-    new ChartModel(
-      { locale: "en-US", timeZone: "UTC", ...config },
-      undefined,
-      ...staticCompilers(),
-    ),
+    new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, staticCompilers()),
   );
   // As a chart does once it has loaded what reads tooltips' fields.
   model.fields = fieldReader;
@@ -287,15 +284,15 @@ describe("custom marks' items", () => {
         }),
       ],
     });
-    expect(model.yScale()!.type).toBe("band");
+    expect(yScale(model)!.type).toBe("band");
     expect(seen.sort()).toEqual([
       [0, 0],
       [1, 1],
       [2, 2],
     ]);
     // Both ends count toward x: the third row's end is the domain's low end.
-    expect(model.xScale()!.domain[0]).toBeLessThanOrEqual(-12);
-    const [x, y] = [model.xScale()!.map(0), model.yScale()!.map(2)];
+    expect(xScale(model)!.domain[0]).toBeLessThanOrEqual(-12);
+    const [x, y] = [xScale(model)!.map(0), yScale(model)!.map(2)];
     expect(model.inspect(x, y)!.points.map((p) => [p.label, p.text])).toEqual([
       ["energy", "25 – -12"],
     ]);
@@ -347,7 +344,7 @@ describe("custom marks' items", () => {
           }),
         ],
       });
-      expect(model.xScale()!.type).toBe("band");
+      expect(xScale(model)!.type).toBe("band");
       // Each row at its category's band: "a" first, "b" second.
       expect(seen.sort()).toEqual([
         [0, 0],

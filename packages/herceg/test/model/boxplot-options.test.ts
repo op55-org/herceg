@@ -21,6 +21,7 @@ import type {
 import { checkSpec, validateSpec } from "../../src/spec/validate.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import legacyBoxes from "./fixtures/boxplot-legacy.json";
 
 const fields = { low: "lo", q1: "p25", median: "p50", q3: "p75", high: "hi" } as const;
@@ -139,8 +140,8 @@ describe("box plot options", () => {
         ],
       });
       const lines = marks.find((m) => m.kind === "segments") as SegmentGeometry;
-      expect(lines.coords[6 * 4 + 1]).toBeCloseTo(model.yScale()!.map(expected[0]!), 4);
-      expect(lines.coords[8 * 4 + 1]).toBeCloseTo(model.yScale()!.map(expected[1]!), 4);
+      expect(lines.coords[6 * 4 + 1]).toBeCloseTo(yScale(model)!.map(expected[0]!), 4);
+      expect(lines.coords[8 * 4 + 1]).toBeCloseTo(yScale(model)!.map(expected[1]!), 4);
       expect((marks.find((m) => m.kind === "point") as PointGeometry).count).toBe(expected[2]);
     },
   );
@@ -188,8 +189,8 @@ describe("box plot options", () => {
     });
     const lines = marks.find((mark) => mark.kind === "segments") as SegmentGeometry;
     expect(lines.count).toBe(9);
-    expect(lines.coords[5 * 4 + 3]).toBeCloseTo(model.yScale()!.map(1e308), 4);
-    expect(lines.coords[6 * 4 + 1]).toBeCloseTo(model.yScale()!.map(1e308), 4);
+    expect(lines.coords[5 * 4 + 3]).toBeCloseTo(yScale(model)!.map(1e308), 4);
+    expect(lines.coords[6 * 4 + 1]).toBeCloseTo(yScale(model)!.map(1e308), 4);
     expect((marks.find((mark) => mark.kind === "point") as PointGeometry).count).toBe(0);
     expect([...lines.coords.subarray(0, lines.count * 4)].every(Number.isFinite)).toBe(true);
   });
@@ -210,8 +211,8 @@ describe("box plot options", () => {
     });
     const area = marks.find((m) => m.kind === "area") as AreaGeometry;
     expect(area.upper.count).toBe(5);
-    expect(area.upper.coords[2]).toBeCloseTo(model.xScale()!.map(-3.14e307), 3);
-    expect(area.upper.coords[6]).toBeCloseTo(model.xScale()!.map(3.14e307), 3);
+    expect(area.upper.coords[2]).toBeCloseTo(xScale(model)!.map(-3.14e307), 3);
+    expect(area.upper.coords[6]).toBeCloseTo(xScale(model)!.map(3.14e307), 3);
   });
 
   it("retains a finite notch endpoint even when the half-width overflows", () => {
@@ -221,10 +222,10 @@ describe("box plot options", () => {
       marks: [mark],
       y: { type: "log", domain: [1e307, 1.79e308] },
     });
-    const s = model.panelSeries("")[0]!;
+    const s = panelSeries(model, "")[0]!;
     expect(mark.yExtent!([s], 0, 1, true)![1]).toBeCloseTo(1.7695e308, -294);
     const lines = marks.find((m) => m.kind === "segments") as SegmentGeometry;
-    const endpoint = model.yScale()!.map(1.7695e308);
+    const endpoint = yScale(model)!.map(1.7695e308);
     expect(
       [...lines.coords.subarray(0, lines.count * 4)].some(
         (value, i) => i % 2 === 1 && Math.abs(value - endpoint) < 0.001,
@@ -256,7 +257,7 @@ describe("box plot options", () => {
           ),
         ],
       });
-      expect((horizontal ? model.xScale() : model.yScale())!.type).toBe("time");
+      expect((horizontal ? xScale(model) : yScale(model))!.type).toBe("time");
       expect(positionOf(model, stopsOf(model, "")[0]!.key, 0)!.points[0]!.text).toMatch(
         /median Jan 3/,
       );
@@ -314,7 +315,7 @@ describe("box plot options", () => {
       hi: [4, 14, 24],
     });
     const one = build({ marks: [boxplot(data, { x: "group", ...fields })] });
-    expect(one.model.panelSeries("")[0]!.length).toBe(3);
+    expect(panelSeries(one.model, "")[0]!.length).toBe(3);
     expect(describeChart(one.model)).toContain("3 boxes");
     const repeated = build({
       marks: [
@@ -324,7 +325,7 @@ describe("box plot options", () => {
       facet: facet("panel"),
     });
     expect(
-      repeated.model.panels().map((p) => repeated.model.panelSeries(p.key)[0]!.length),
+      repeated.model.panels().map((p) => panelSeries(repeated.model, p.key)[0]!.length),
     ).toEqual([3, 3]);
   });
 
@@ -373,12 +374,12 @@ describe("box plot options", () => {
       marks: [boxplot(table({ g: ["a", "a"], v: [0, 100] }), { x: "g", y: "v", notch: true })],
     });
     const half = (1.57 * 50) / Math.sqrt(2);
-    const scale = model.yScale()!;
+    const scale = yScale(model)!;
     expect(scale.domain[0]).toBeLessThanOrEqual(50 - half);
     expect(scale.domain[1]).toBeGreaterThanOrEqual(50 + half);
     const area = marks.find((m) => m.kind === "area") as AreaGeometry;
     expect(area.upper.coords[3]).toBeCloseTo(scale.map(50 - half), 4);
-    const hit = model.inspect(model.xScale()!.map(0), scale.map(50 + half), "nearest")!;
+    const hit = model.inspect(xScale(model)!.map(0), scale.map(50 + half), "nearest")!;
     expect(hit.points[0]!.value).toBe(50);
   });
 
@@ -394,10 +395,10 @@ describe("box plot options", () => {
     });
     const mark = boxplot(data, { x: "g", ...fields, count: "n" });
     const { model } = build({ marks: [mark] });
-    expect(model.panelSeries("")[0]!.length).toBe(1);
+    expect(panelSeries(model, "")[0]!.length).toBe(1);
     data.append({ g: ["c"], lo: [10], p25: [11], p50: [12], p75: [13], hi: [14], n: [20] });
     model.scene(estimateText);
-    expect(model.panelSeries("")[0]!.length).toBe(2);
+    expect(panelSeries(model, "")[0]!.length).toBe(2);
     for (const n of [0, -1, 0.5, 2 ** 53, Infinity, Number.NaN]) {
       const bad = table({ group: ["a"], lo: [0], p25: [1], p50: [2], p75: [3], hi: [4], n: [n] });
       expect(() =>

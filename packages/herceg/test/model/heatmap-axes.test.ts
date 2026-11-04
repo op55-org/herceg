@@ -24,6 +24,7 @@ import { validateSpec } from "../../src/spec/validate.ts";
 import { rampsOf } from "../helpers/guides.ts";
 import { cellOf } from "../helpers/keyboard.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const GRAY = ["#000000", "#ffffff"];
@@ -154,7 +155,7 @@ describe("heatmap cells along number and time axes", () => {
     setViewport(model, [0.25, 0.35]);
     model.scene(estimateText);
     const plot = model.panels()[0]!.plot;
-    expect(model.inspect(plot.x, model.yScale()!.map(0))!.points[0]!.value).toBe(2);
+    expect(model.inspect(plot.x, yScale(model)!.map(0))!.points[0]!.value).toBe(2);
   });
 
   it("refuse steps too small to tell a cell's edges apart", () => {
@@ -227,11 +228,11 @@ describe("heatmap cells along number and time axes", () => {
       timeZone: "America/New_York",
       marks: [heatmap(data, { x: "day", y: "row", color: "v" })],
     });
-    expect(model.xScale()!.type).toBe("time");
+    expect(xScale(model)!.type).toBe("time");
     const raster = scene.panels[0]!.marks[0] as RasterGeometry;
     expect(raster.columns).toBe(Math.floor(scene.panels[0]!.plot.width));
     for (const [i, t] of midnights.entries())
-      expect(model.inspect(model.xScale()!.map(t), model.yScale()!.map(0))!.points[0]!.value).toBe(
+      expect(model.inspect(xScale(model)!.map(t), yScale(model)!.map(0))!.points[0]!.value).toBe(
         i + 1,
       );
   });
@@ -285,7 +286,7 @@ describe("heatmap cells along number and time axes", () => {
     ] as const) {
       const config = strip(x, v, { reduce });
       const { model } = across(config, 450);
-      const point = model.inspect(model.xScale()!.map(1), model.yScale()!.map(0))!.points[0]!;
+      const point = model.inspect(xScale(model)!.map(1), yScale(model)!.map(0))!.points[0]!;
       expect(point.value).toBe(value);
       // Its last row with a value is the cell's.
       expect(point.row).toBe(2);
@@ -366,10 +367,10 @@ describe("heatmap cells along number and time axes", () => {
     expect([raster.columns, raster.rows]).toEqual([4, 1]);
     expect(pixel(raster, 2)).toEqual([0, 0, 0, 0]);
     expect(pixel(raster, 3)).toEqual(gray(30));
-    const at = (x: number) => model.inspect(model.xScale()!.map(x), model.yScale()!.map(0));
+    const at = (x: number) => model.inspect(xScale(model)!.map(x), yScale(model)!.map(0));
     expect(at(2)).toBeUndefined();
     expect(at(2.6)!.points[0]!.value).toBe(30);
-    expect(model.xScale()!.domain).toEqual([-0.5, 3.5]);
+    expect(xScale(model)!.domain).toEqual([-0.5, 3.5]);
   });
 
   it("draw at fractional pixel ratios without losing a pixel", () => {
@@ -424,14 +425,14 @@ describe("heatmap cells along number and time axes", () => {
     const values = new Set<string>();
     for (let c = 0; c < raster.columns; c++) values.add(pixel(raster, c).join());
     expect(values).toEqual(new Set([gray(10).join(), gray(40).join()]));
-    const at = (t: number) => model.inspect(model.xScale()!.map(t), model.yScale()!.map(0));
+    const at = (t: number) => model.inspect(xScale(model)!.map(t), yScale(model)!.map(0));
     expect(at(days[0]!)!.points[0]!.value).toBe(10);
     expect(at(days[3]!)!.points[0]!.value).toBe(40);
     expect(at(days[0]! + 13 * HOUR)!.points[0]!.value).toBe(40);
-    expect(model.xScale()!.domain).toEqual([friday - 12 * HOUR, days[3]! + 12 * HOUR]);
+    expect(xScale(model)!.domain).toEqual([friday - 12 * HOUR, days[3]! + 12 * HOUR]);
     expect(raster.columns).toBe(2);
     // Saturday's cell is not drawn, nor is it a stop for the keyboard.
-    const series = model.panelSeries("")[0]!;
+    const series = panelSeries(model, "")[0]!;
     const first = cellOf(model, "", series.key, -1, 0, 0)!;
     const next = cellOf(model, "", series.key, first, 1, 0)!;
     expect(series.values[rowOf(series, next)]).toBe(40);
@@ -454,14 +455,14 @@ describe("heatmaps zoomed and panned", () => {
 
   it("end automatic domains at the cells' edges", () => {
     const { model } = build({ marks: [heatmap(grid(10), { x: "x", y: "y", color: "v" })] });
-    expect(model.xScale()!.domain).toEqual([-0.5, 9.5]);
-    expect(model.yScale()!.domain).toEqual([-0.5, 9.5]);
+    expect(xScale(model)!.domain).toEqual([-0.5, 9.5]);
+    expect(yScale(model)!.domain).toEqual([-0.5, 9.5]);
     // Asked for, round ends still come.
     const nice = build({
       y: { nice: true },
       marks: [heatmap(grid(10), { x: "x", y: "y", color: "v" })],
     });
-    expect(nice.model.yScale()!.domain).not.toEqual([-0.5, 9.5]);
+    expect(yScale(nice.model)!.domain).not.toEqual([-0.5, 9.5]);
   });
 
   it("repaint when the view moves, and only then", () => {
@@ -497,8 +498,8 @@ describe("heatmaps zoomed and panned", () => {
     expect(raster.columns).toBe(3);
     expect(raster.x).toBeCloseTo(plot.x - plot.width / 4, 6);
     expect(raster.width).toBeCloseTo(plot.width * 1.5, 6);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     expect(model.inspect(plot.x + 1, y.map(0))!.points[0]!.value).toBe(0);
     expect(model.inspect(x.map(1.6), y.map(3))!.points[0]!.value).toBe(23);
   });
@@ -527,10 +528,10 @@ describe("heatmaps zoomed and panned", () => {
       interaction: { zoom: "x" },
       marks: [heatmap(data, { x: "x", y: "y", color: "v" })],
     });
-    expect(model.yScale()!.domain).toEqual([-0.5, 9.5]);
+    expect(yScale(model)!.domain).toEqual([-0.5, 9.5]);
     setViewport(model, [8.6, 10]);
     model.scene(estimateText);
-    expect(model.yScale()!.domain).toEqual([3.5, 5.5]);
+    expect(yScale(model)!.domain).toEqual([3.5, 5.5]);
   });
 
   it("pans with the viewport, cells keeping their edges", () => {
@@ -546,8 +547,8 @@ describe("heatmaps zoomed and panned", () => {
     ] as const) {
       setViewport(model, view);
       model.scene(estimateText);
-      const x = model.xScale()!;
-      const y = model.yScale()!;
+      const x = xScale(model)!;
+      const y = yScale(model)!;
       const value = (at: number) => model.inspect(x.map(at), y.map(0))?.points[0]?.value;
       expect([value(edge - 0.01), value(edge + 0.01)]).toEqual([
         (edge - 0.5) * 10,
@@ -567,10 +568,10 @@ describe("heatmap tooltips, keyboard, and summaries on number axes", () => {
 
   it("name cells by their values", () => {
     const { model } = build({ marks: [heatmap(hours, { x: "hour", y: "day", color: "load" })] });
-    const inspection = model.inspect(model.xScale()!.map(3), model.yScale()!.map(1))!;
+    const inspection = model.inspect(xScale(model)!.map(3), yScale(model)!.map(1))!;
     expect(inspection.label).toBe("3");
     expect(inspection.points[0]).toMatchObject({ label: "1", value: 6, row: 5 });
-    expect(model.inspect(model.xScale()!.map(1), model.yScale()!.map(1))).toBeUndefined();
+    expect(model.inspect(xScale(model)!.map(1), yScale(model)!.map(1))).toBeUndefined();
     expect(describeChart(model)).toContain(
       "load: 5 cells in 3 columns and 2 rows, lowest 1 at 0, 0, highest 6 at 3, 1.",
     );
@@ -582,7 +583,7 @@ describe("heatmap tooltips, keyboard, and summaries on number axes", () => {
         ...(reversed && { x: { domain: [4, -1] } }),
         marks: [heatmap(hours, { x: "hour", y: "day", color: "load" })],
       });
-      const series = model.panelSeries("")[0]!;
+      const series = panelSeries(model, "")[0]!;
       const value = (position: number | undefined) =>
         position === undefined ? undefined : series.values[rowOf(series, position)];
       const step = (position: number, columns: number, rows: number) =>
@@ -615,7 +616,7 @@ describe("heatmap keyboard steps on sparse grids", () => {
         ...(reversed && { x: { domain: [200, -50] } }),
         marks: [heatmap(data, { x: "x", y: "y", color: "v", xStep: 1, yStep: 1 })],
       });
-      const series = model.panelSeries("")[0]!;
+      const series = panelSeries(model, "")[0]!;
       // The last row of each cell is the one drawn there.
       const last = new Map<string, number>();
       for (let row = 0; row < x.length; row++) last.set(`${x[row]},${y[row]}`, row);
@@ -759,7 +760,7 @@ describe("heatmap specs", () => {
   const axisTypes = (s: ChartSpec) => {
     const { config } = loadSpec(s);
     const { model } = build(config);
-    return [model.xScale()!.type, model.yScale()!.type];
+    return [xScale(model)!.type, yScale(model)!.type];
   };
 
   it("place number and time fields on number and time axes, or in bands", () => {
@@ -807,15 +808,15 @@ describe("heatmap cells between edges", () => {
     const { model, scene } = build({
       marks: [heatmap(binned, { x1: "x0", x2: "x1", y1: "y0", y2: "y1", color: "n" })],
     });
-    expect(model.xScale()!.domain).toEqual([0, 10]);
-    expect(model.yScale()!.domain).toEqual([0, 10]);
+    expect(xScale(model)!.domain).toEqual([0, 10]);
+    expect(yScale(model)!.domain).toEqual([0, 10]);
     const raster = scene.panels[0]!.marks.find((m) => m.kind === "raster") as RasterGeometry;
     // Unequal cells are painted at the plot's resolution.
     expect(raster.columns).toBe(Math.floor(scene.panels[0]!.plot.width));
-    const point = model.inspect(model.xScale()!.map(5), model.yScale()!.map(9))!.points[0]!;
+    const point = model.inspect(xScale(model)!.map(5), yScale(model)!.map(9))!.points[0]!;
     expect(point).toMatchObject({ label: "5 – 10", text: "2 – 10: 3", value: 3 });
     // Between the cells: nothing.
-    expect(model.inspect(model.xScale()!.map(1), model.yScale()!.map(8))).toBeUndefined();
+    expect(model.inspect(xScale(model)!.map(1), yScale(model)!.map(8))).toBeUndefined();
   });
 
   it("leave rows without a usable pair of edges out of cells, clicks, and sums", () => {
@@ -825,7 +826,7 @@ describe("heatmap cells between edges", () => {
       marks: [heatmap(edges, { x1: "a", x2: "b", y: "y", color: "v", reduce: "sum" })],
       legend: true,
     });
-    const [px, py] = [model.xScale()!.map(0.5), model.yScale()!.map(0)];
+    const [px, py] = [xScale(model)!.map(0.5), yScale(model)!.map(0)];
     expect(model.inspect(px, py)!.points[0]!.value).toBe(1);
     expect(
       Array.from(clickedRows(withPicker(model), new Set([edges as never]), px, py)!.rows),
@@ -893,6 +894,6 @@ describe("heatmap cells between edges", () => {
     };
     expect(() => validateSpec(spec)).not.toThrow();
     const { model } = build(loadSpec(spec).config);
-    expect(model.xScale()!.domain).toEqual([0, 10]);
+    expect(xScale(model)!.domain).toEqual([0, 10]);
   });
 });

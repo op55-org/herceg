@@ -38,7 +38,7 @@ describe("chart errors", () => {
       const spec = { data: { data: { columns: errors.data } }, marks: [mark] } as ChartSpec;
       let thrown: unknown;
       try {
-        const model = new ChartModel(loadSpec(spec).config, undefined, ...staticCompilers());
+        const model = new ChartModel(loadSpec(spec).config, undefined, staticCompilers());
         model.setSize(400, 200, 1);
         model.scene(estimateText);
       } catch (error) {
@@ -56,7 +56,7 @@ describe("color identity", () => {
       const model = new ChartModel(
         loadSpec(spec as unknown as ChartSpec & { marks: MarkSpec[] }).config,
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(800, 400, 1);
       model.scene(estimateText);

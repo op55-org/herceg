@@ -19,12 +19,13 @@ import type {
   TextGeometry,
 } from "../../src/scene/scene.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
@@ -179,7 +180,7 @@ describe("rule labels", () => {
     expect((mark as unknown as { table: unknown }).table).toBe(windows);
     const { scene, model } = build({ marks: [line(data, { x: "x", y: "y" }), mark] });
     const drawn = marksOf(scene, "rule") as RuleGeometry[];
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(drawn.map((r) => [x.invert(r.x1), x.invert(r.x2)])).toEqual([
       [expect.closeTo(0, 6), expect.closeTo(1, 6)],
       [expect.closeTo(2, 6), expect.closeTo(3, 6)],
@@ -193,7 +194,7 @@ describe("rule labels", () => {
         rule({ y: 2, span: [{ data: 0 }, { data: 8 }], contributeDomain: true }),
       ],
     });
-    expect(model.xScale()!.domain[1]).toBeGreaterThanOrEqual(8);
+    expect(xScale(model)!.domain[1]).toBeGreaterThanOrEqual(8);
   });
 
   it("refuse a scale other than its axis'", () => {
@@ -214,7 +215,7 @@ describe("text places", () => {
     const [label] = marksOf(scene, "text") as TextGeometry[];
     const plot = scene.panels[0]!.plot;
     expect(label!.coords[0]).toBeCloseTo(plot.x + 0.03 * plot.width, 3);
-    expect(label!.coords[1]).toBeCloseTo(model.yScale()!.map(1.7), 3);
+    expect(label!.coords[1]).toBeCloseTo(yScale(model)!.map(1.7), 3);
   });
 
   it("take pixels from the top and offsets, and categories by their values", () => {
@@ -226,7 +227,7 @@ describe("text places", () => {
       ],
     });
     const [label] = marksOf(scene, "text") as TextGeometry[];
-    expect(label!.coords[0]).toBeCloseTo(model.xScale()!.map(1), 3);
+    expect(label!.coords[0]).toBeCloseTo(xScale(model)!.map(1), 3);
     expect(label!.coords[1]).toBeCloseTo(scene.panels[0]!.plot.y + 15, 3);
   });
 
@@ -329,7 +330,7 @@ describe("region domains", () => {
         }),
       ],
     });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(20);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(20);
   });
 });
 
@@ -348,8 +349,8 @@ describe("region labels", () => {
     };
     const { scene, model } = build({ marks: [line(data, { x: "x", y: "y" })] });
     void scene;
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const bottom = at({ side: "bottom", attachment: "end" });
     expect(bottom.anchor).toBe("end");
     expect(bottom.x).toBeCloseTo(x.map(2) - 4, 3);

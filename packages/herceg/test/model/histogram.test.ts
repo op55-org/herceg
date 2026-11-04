@@ -12,6 +12,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import type { Panel, RectGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -35,8 +36,8 @@ describe("histograms", () => {
     // Edges 0, 5, 10: [0, 5) holds 0, 1, 4; [5, 10] holds 5, 9.99, 10, 10.
     expect(only!.centers).toEqual([2.5, 7.5]);
     expect(only!.values).toEqual([3, 4]);
-    expect(model.yScale()!.domain[0]).toBe(0);
-    expect(model.xScale()!.domain).toEqual([0, 10]);
+    expect(yScale(model)!.domain[0]).toBe(0);
+    expect(xScale(model)!.domain).toEqual([0, 10]);
   });
 
   it("take a bin width and start, and default to a count from the data size", () => {
@@ -64,7 +65,7 @@ describe("histograms", () => {
     const { scene, model } = build({ marks: [histogram(at, { x: "t", bins: 30 })] });
     const [days] = bars(model);
     expect(days!.centers[1]! - days!.centers[0]!).toBe(day);
-    const hit = model.inspect(model.xScale()!.map(days!.centers[0]!), scene.panels[0]!.plot.y + 5)!;
+    const hit = model.inspect(xScale(model)!.map(days!.centers[0]!), scene.panels[0]!.plot.y + 5)!;
     expect(hit.points[0]!.text).toMatch(/Jan 1.* – .*Jan 2.*: 1$/);
   });
 
@@ -118,7 +119,7 @@ describe("histograms", () => {
         ],
         facet: facet("g"),
       });
-      return model.panels().map((p) => [...model.panelSeries(p.key)[0]!.values]);
+      return model.panels().map((p) => [...panelSeries(model, p.key)[0]!.values]);
     };
     expect(counted(false)).toEqual([
       [1, 1],
@@ -217,7 +218,7 @@ describe("histograms", () => {
     const utc = chart("UTC");
     const text = () =>
       utc.model.inspect(
-        utc.model.xScale()!.map(utc.model.series()[0]!.x[0]!),
+        xScale(utc.model)!.map(utc.model.series()[0]!.x[0]!),
         utc.scene.panels[0]!.plot.y + 5,
       )!.points[0]!.text;
     const before = text();
