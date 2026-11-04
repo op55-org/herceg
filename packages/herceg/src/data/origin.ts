@@ -26,3 +26,17 @@ export function rootOf(table: Table, fields: readonly string[]): Table {
   }
   return table;
 }
+
+/**
+ * The tables `field` of `table` comes from unchanged, nearest first:
+ * `table`, then each source while the field passes through the step that
+ * made the table before it (field displays matching a table follow it so).
+ */
+export function lineOf(table: Table, field: string): Table[] {
+  const line = [table];
+  for (let origin = origins.get(table); origin?.passes(field); origin = origins.get(table)) {
+    table = origin.source;
+    line.push(table);
+  }
+  return line;
+}

@@ -12,6 +12,7 @@
       "herceg/image": ["../packages/herceg/src/image.ts"],
       "herceg/fonts": ["../packages/herceg/src/fonts.ts"],
       "herceg/state": ["../packages/herceg/src/state.ts"],
+      "herceg/fields": ["../packages/herceg/src/fields.ts"],
       "herceg/spec": ["../packages/herceg/src/from-spec.ts"],
       "herceg/grid": ["../packages/herceg/src/grid.ts"],
       "herceg/layout": ["../packages/herceg/src/layout.ts"],

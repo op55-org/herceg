@@ -48,6 +48,11 @@
       "import": "./dist/state.js",
       "default": "./dist/state.js"
     },
+    "./fields": {
+      "types": "./dist/fields.d.ts",
+      "import": "./dist/fields.js",
+      "default": "./dist/fields.js"
+    },
     "./grid": {
       "types": "./dist/grid.d.ts",
       "import": "./dist/grid.js",

@@ -141,7 +141,9 @@ def test_ticks_and_formats_refuse_what_they_cannot_say_in_python_names():
         hg.Ticks(every="day", anchor=3)
     with pytest.raises(ValueError, match='Ticks every: "fortnight" is not a time interval'):
         hg.Ticks(every="fortnight")._spec()
-    with pytest.raises(ValueError, match="Format: give number or time, one of them"):
+    with pytest.raises(
+        ValueError, match="Format: give number, time, duration, si, or binary, one of them"
+    ):
         hg.Format()
     with pytest.raises(ValueError, match='Format number: ",.2q" is not a number pattern'):
         hg.Format(number=",.2q")

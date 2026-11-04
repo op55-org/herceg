@@ -1,7 +1,7 @@
 import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { ruleDrawing, ruleLine } from "../draw/rule.ts";
-import type { Formatter } from "../format/format.ts";
+import { type Formatter, lazyFormat } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
 import {
   type LabelledMark,
@@ -215,9 +215,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         !label.format &&
         layout.overlap === "show" &&
         layout.group === undefined);
-    const format = label?.format as { number?: unknown; time?: unknown } | undefined;
-    this.featured =
-      format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
+    this.featured = lazyFormat(label?.format) || label?.content !== undefined;
     const vertical = spec.x !== undefined;
     const place = label?.place;
     if (place?.outside && place.attachment === "center")

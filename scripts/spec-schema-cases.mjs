@@ -358,6 +358,10 @@ function settings(given, tools, expanded, depth = 1, inside = []) {
       const base = Object.fromEntries(
         (member.required ?? []).map((name) => [name, tools.sample(member.properties[name])]),
       );
+      // Objects needing options but requiring none by name (a rule's match) set their first ones.
+      for (const [name, property] of Object.entries(member.properties))
+        if (Object.keys(base).length < (member.minProperties ?? 0) && property !== false)
+          base[name] ??= tools.sample(property);
       add("", "", base);
       for (const [name, property] of Object.entries(member.properties))
         if (property !== false)

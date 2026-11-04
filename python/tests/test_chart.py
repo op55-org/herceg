@@ -1266,7 +1266,7 @@ def test_format_options_match_typescript():
     root = Path(__file__).resolve().parents[2] / "packages" / "herceg" / "src"
     if not root.exists():
         pytest.skip("needs a source checkout")
-    source = (root / "spec" / "validate.ts").read_text()
+    source = (root / "format" / "intl-options.ts").read_text()
     for name, options in (("NUMBER_OPTIONS", _NUMBER_FORMAT), ("TIME_OPTIONS", _TIME_FORMAT)):
         body = source[source.index(f"const {name} = [") :]
         listed = re.findall(r'^  "(\w+)",$', body[: body.index("];")], re.MULTILINE)

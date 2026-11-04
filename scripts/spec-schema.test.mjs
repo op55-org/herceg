@@ -41,14 +41,14 @@ test("a change of the spec's types changes the schema, with no edit of its own",
     spec,
     source.replace(
       declaration,
-      `${declaration}  /** How fields read, by name. @minItems 1 */\n  fields?: readonly string[];\n`,
+      `${declaration}  /** Words the chart is found by. @minItems 1 */\n  tags?: readonly string[];\n`,
     ),
   );
   const text = schemaText(pkg);
   assert.notEqual(text, readFileSync(SCHEMA_PATH, "utf8"));
-  assert.deepEqual(JSON.parse(text).$defs.ChartSpec.properties.fields, {
-    title: "Fields",
-    description: "How fields read, by name.",
+  assert.deepEqual(JSON.parse(text).$defs.ChartSpec.properties.tags, {
+    title: "Tags",
+    description: "Words the chart is found by.",
     type: "array",
     items: { type: "string" },
     minItems: 1,

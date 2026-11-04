@@ -26,6 +26,7 @@ const publicAPIs = {
   "herceg/pivot": ["pivotRows"],
   "herceg/layout": ["columns", "rows", "grid", "cell", "panel", "inset", "mosaic", "panels"],
   "herceg/state": ["chartState"],
+  "herceg/fields": ["displayOf", "fieldsOf"],
   "herceg/web": ["loadPayload", "mount", "unmount", "getChart", "observe", "decodePayload"],
   "herceg/spec.schema.json": ["$schema", "$defs", "description"],
   "herceg/capabilities.json": ["about", "groups", "capabilities", "marks"],

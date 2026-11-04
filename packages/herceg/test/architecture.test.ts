@@ -35,13 +35,20 @@ describe("architecture", () => {
   it("the guide compiler imports only types from the chart's modules", () => {
     const shared = [
       "format/patterns.ts",
+      "format/units.ts",
       "marks/features/markers.ts",
       "draw/symbol-shapes.ts",
       "layout/block.ts",
     ];
     const own = (path: string) =>
       path.startsWith(join(SRC, "guides")) || shared.some((file) => path === join(SRC, file));
-    for (const file of [...files(join(SRC, "guides")), join(SRC, "format/patterns.ts")]) {
+    for (const file of [
+      ...files(join(SRC, "guides")),
+      join(SRC, "format/patterns.ts"),
+      join(SRC, "format/units.ts"),
+      // The tooltip content chunk writes fields' formats with them.
+      join(SRC, "dom/tooltip-content.ts"),
+    ]) {
       const source = readFileSync(file, "utf8");
       for (const [, path] of source.matchAll(/^import (?!type )[^;]*?from "([^"]+)"/gm))
         expect(own(resolve(dirname(file), path!)), `${file} imports ${path}`).toBe(true);

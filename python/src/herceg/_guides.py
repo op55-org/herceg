@@ -282,33 +282,116 @@ def _check_time_pattern(pattern: str, role: str) -> None:
             )
 
 
+#: Units lengths of time are in, for ``hg.Format(duration=...)``.
+DurationUnit = Literal[
+    "nanosecond", "microsecond", "millisecond", "second", "minute", "hour", "day"
+]
+_DURATION_UNITS = ("nanosecond", "microsecond", "millisecond", "second", "minute", "hour", "day")
+#: The keys that tell a format's forms apart; a dict without one is Intl options.
+FORMS = frozenset(("number", "time", "duration", "si", "binary"))
+
+#: Intl.NumberFormat options, as herceg's spec reader knows them.
+_NUMBER_FORMAT = frozenset(
+    ("localeMatcher", "numberingSystem", "style", "currency", "currencyDisplay")
+    + ("currencySign", "unit", "unitDisplay", "notation", "compactDisplay", "signDisplay")
+    + ("useGrouping", "minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits")
+    + ("minimumSignificantDigits", "maximumSignificantDigits", "roundingMode")
+    + ("roundingPriority", "roundingIncrement", "trailingZeroDisplay")
+)
+#: Intl.DateTimeFormat options, likewise.
+_TIME_FORMAT = frozenset(
+    ("localeMatcher", "numberingSystem", "calendar", "timeZone", "hour12", "hourCycle")
+    + ("formatMatcher", "dateStyle", "timeStyle", "weekday", "era", "year", "month", "day")
+    + ("dayPeriod", "hour", "minute", "second", "fractionalSecondDigits", "timeZoneName")
+)
+
+
+def _check_format(format: dict[str, Any] | None, role: str, known: frozenset[str]) -> None:
+    """Refuses Intl options that do not exist, which Intl would silently ignore."""
+    if format is not None and not isinstance(format, Mapping):
+        raise ChartError(f"{role}: expected a dict of Intl options; received {shown(format)}")
+    unknown = [key for key in format or () if key not in known]
+    if unknown:
+        raise ChartError(f"{role}: {shown(unknown[0])} is not an Intl format option")
+
+
 @refuses
 @dataclass
 class Format:
-    """How values are written by pattern: ``number``, a d3-format pattern
-    (``",.2f"``, ``".1%"``, ``"~s"``), or ``time``, a strftime pattern
-    (``"%b %d %H:%M"``, ``"%-d %b"``) in the chart's time zone, whose
-    ``%q`` is the quarter; with ``fiscal`` (an ``hg.Fiscal``), ``%Y``,
-    ``%y``, and ``%q`` write the fiscal year and its quarter. Intl options
-    are a dict of their own names, ``{"maximumFractionDigits": 1}``."""
+    """How values are written, in one of these forms:
+
+    - ``number``, a d3-format pattern (``",.2f"``, ``".1%"``, ``"~s"``),
+      with ``prefix`` and ``suffix`` text around it:
+      ``hg.Format(number=".3~s", suffix=" req/s")`` writes 1234 as "1.23k req/s";
+    - ``time``, a strftime pattern (``"%b %d %H:%M"``, ``"%-d %b"``) in the
+      chart's time zone, whose ``%q`` is the quarter; with ``fiscal`` (an
+      ``hg.Fiscal``), ``%Y``, ``%y``, and ``%q`` write the fiscal year and
+      its quarter;
+    - ``duration``, the unit of values that are lengths of time, written in
+      their largest units: ``hg.Format(duration="millisecond")`` writes
+      66000 as "1m 6s", at most ``max_units`` units (2 by default), the last
+      with ``decimals`` (0 by default);
+    - ``si`` or ``binary``, a unit written after an SI prefix (thousands, n
+      to E) or a binary one (1,024s, Ki to Ei): ``hg.Format(si="B")``
+      writes 1500000 as "1.5 MB", ``hg.Format(binary="B")`` 1572864 as
+      "1.5 MiB"; ``decimals`` given are kept, else up to 1.
+
+    Intl options are a dict of their own names, ``{"maximumFractionDigits": 1}``."""
 
     number: str | None = None
     time: str | None = None
+    duration: DurationUnit | None = None
+    si: str | None = None
+    binary: str | None = None
+    max_units: int | None = None
+    decimals: int | None = None
+    prefix: str | None = None
+    suffix: str | None = None
     fiscal: Fiscal | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if (self.number is None) == (self.time is None):
-            raise ChartError("Format: give number or time, one of them")
-        for name in ("number", "time"):
+        given = [
+            name
+            for name in ("number", "time", "duration", "si", "binary")
+            if getattr(self, name) is not None
+        ]
+        if len(given) != 1:
+            raise ChartError("Format: give number, time, duration, si, or binary, one of them")
+        form = given[0]
+        for name in ("number", "time", "si", "binary", "prefix", "suffix"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, str):
-                raise ChartError(
-                    f"Format {name}: expected a pattern string; received {shown(value)}"
-                )
+                raise ChartError(f"Format {name}: expected text; received {shown(value)}")
         if self.number is not None:
             _check_number_pattern(self.number, "Format number")
         if self.time is not None:
             _check_time_pattern(self.time, "Format time")
+        if self.duration is not None and self.duration not in _DURATION_UNITS:
+            raise ChartError(
+                f"Format duration: expected one of {listed(_DURATION_UNITS)}; "
+                f"received {shown(self.duration)}"
+            )
+        for name, forms, fix in (
+            ("max_units", ("duration",), "describes durations; give duration, or drop max_units"),
+            (
+                "decimals",
+                ("duration", "si", "binary"),
+                'goes with duration, si, or binary; a number pattern gives its precision (".2f")',
+            ),
+            ("prefix", ("number",), "text around numbers goes with a number pattern; give number"),
+            ("suffix", ("number",), "text around numbers goes with a number pattern; give number"),
+        ):
+            if getattr(self, name) is not None and form not in forms:
+                raise ChartError(f"Format {name}: {fix}")
+        for name, low, high, what in (
+            ("max_units", 1, 7, "a whole number of units from 1 to 7"),
+            ("decimals", 0, 20, "a whole number from 0 to 20"),
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high
+            ):
+                raise ChartError(f"Format {name}: expected {what}; received {shown(value)}")
         self.fiscal = _built(self.fiscal, Fiscal, "Format fiscal")
         if self.fiscal is not None and self.time is None:
             raise ChartError(
@@ -316,12 +399,19 @@ class Format:
             )
 
     def _spec(self) -> dict[str, Any]:
-        if self.number is not None:
-            return {"number": self.number}
-        spec: dict[str, Any] = {"time": self.time or ""}
-        if self.fiscal is not None:
-            spec["fiscal"] = _spec(self.fiscal)
-        return spec
+        spec = {
+            "number": self.number,
+            "time": self.time,
+            "duration": self.duration,
+            "si": self.si,
+            "binary": self.binary,
+            "maxUnits": self.max_units,
+            "decimals": self.decimals,
+            "prefix": self.prefix,
+            "suffix": self.suffix,
+            "fiscal": None if self.fiscal is None else _spec(self.fiscal),
+        }
+        return {key: value for key, value in spec.items() if value is not None}
 
 
 def _flags(options: Any, owner: str, names: Sequence[str]) -> None:
@@ -333,7 +423,8 @@ def _flags(options: Any, owner: str, names: Sequence[str]) -> None:
 
 
 def format_spec(value: Any, role: str) -> Any:
-    """A format as the spec takes it: Intl options (a dict of Intl names), or an ``hg.Format``."""
+    """A format as the spec takes it: Intl options (a dict of Intl names), or
+    an ``hg.Format`` (or a dict of its keyword arguments)."""
     if value is None:
         return None
     if callable(value):
@@ -342,7 +433,7 @@ def format_spec(value: Any, role: str) -> Any:
         )
     if isinstance(value, Format):
         return placed(role, value._spec)
-    if isinstance(value, Mapping) and set(value) & {"number", "time"}:
+    if isinstance(value, Mapping) and set(value) & FORMS:
         return placed(role, lambda: _built(value, Format, role)._spec())
     if isinstance(value, Mapping):
         # Intl's options, each a word, a number, or a flag.

@@ -137,6 +137,7 @@ from ._events import (
     ViewportEvent,
     VisibilityState,
 )
+from ._fields import FieldDisplay, Mapping, Match
 from ._guides import (
     AxisGuide,
     ChannelScale,
@@ -255,6 +256,7 @@ __all__ = [
     "EditBrushAction",
     "Encodings",
     "Expr",
+    "FieldDisplay",
     "Fiscal",
     "Format",
     "Fraction",
@@ -298,10 +300,12 @@ __all__ = [
     "line_3d",
     "LineStyle",
     "Look",
+    "Mapping",
     "MarkAnchor",
     "MarkerStyle",
     "MarkRef",
     "MarkStyle",
+    "Match",
     "Matrix",
     "matrix",
     "Measure",

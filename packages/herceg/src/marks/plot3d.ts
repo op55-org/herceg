@@ -21,7 +21,7 @@
 
 import type { Table } from "../data/table.ts";
 import { facesDrawing } from "../draw/faces.ts";
-import { type Formatter, formatNumber, timeValueFormatter } from "../format/format.ts";
+import { type Formatter, formatNumber, lazyFormat, timeValueFormatter } from "../format/format.ts";
 import type { AxisOptions } from "../guides/options.ts";
 import type { Mapping } from "../lod/m4.ts";
 import {
@@ -798,7 +798,7 @@ function planAxis3D(
   if (
     (ticks !== undefined && typeof ticks !== "number") ||
     typeof format === "function" ||
-    (format && ("number" in format || "time" in format))
+    lazyFormat(format as object | undefined)
   )
     throw new Error(
       `chart ${name}: a 3D chart's axes take a number of ticks and Intl formats; give ticks a number and format Intl options`,

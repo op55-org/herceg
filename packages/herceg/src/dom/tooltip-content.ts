@@ -1,44 +1,41 @@
 // What charts load for tooltips that show more than their marks' values:
 // the fields of rows marks' tooltips show (`tooltip.fields`), read and
 // written for inspections, and content of the application's own
-// (`renderTooltip`) in the tooltip's box. It imports only types, so that
-// loading it later shares no code with the chart's own.
+// (`renderTooltip`) in the tooltip's box. It imports only types of the
+// chart's modules, and writes with the chart's code handed in (the kit), so
+// that loading it later shares no code with the chart's own.
 
 import type { Formatter } from "../format/format.ts";
+import { formatWriter } from "../format/patterns.ts";
 import type { FieldReaders, InspectedField } from "../marks/tooltip-fields.ts";
 import type { Inspection } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
 import type { RenderTooltip, Tooltip } from "./tooltip.ts";
 
+const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
+
 /**
  * Reads tooltip fields in a chart's locale and zone, written with their
- * formats, else numbers as `numbers` writes them, and times as `times`
- * does (the x axis' formatter, on time axes) or as dates and times.
+ * formats (any form, `FormatSpec`), else numbers as the chart's other
+ * numbers, and times as `times` does (the x axis' formatter, on time axes)
+ * or as dates and times.
  */
-export const fieldReader: FieldReaders = (locale, zone, numbers, times) => {
-  const timeZone = zone === "local" ? undefined : zone;
+export const fieldReader: FieldReaders = (locale, zone, kit, times) => {
+  const numbers = (value: number) => kit.formatNumber(value, locale);
   const formats = new Map<string, Formatter>();
-  const write = (kind: string, format: object | undefined): Formatter => {
-    if (!format && kind === "number") return numbers;
-    if (!format && times) return times;
+  const write = (kind: string, format: object | undefined, at: string): Formatter => {
+    if (!format)
+      return kind === "number" ? numbers : (times ?? kit.timeFormatter(DATE_TIME, zone, locale));
     const key = `${kind} ${JSON.stringify(format)}`;
     let formatter = formats.get(key);
     if (!formatter) {
-      const intl =
-        kind === "time"
-          ? new Intl.DateTimeFormat(locale, {
-              timeZone,
-              ...(format ?? { dateStyle: "medium", timeStyle: "short" }),
-            })
-          : // As the chart writes numbers: values that round to zero without a minus sign.
-            new Intl.NumberFormat(locale, { signDisplay: "negative", ...format });
-      formatter = (value) => intl.format(value);
+      formatter = formatWriter(kit, format, kind === "time", zone, locale, at);
       formats.set(key, formatter);
     }
     return formatter;
   };
   return (table, tooltip, row) =>
-    tooltip?.fields?.map((entry) => {
+    tooltip?.fields?.map((entry, i) => {
       const { field, label = field, format } = typeof entry === "string" ? { field: entry } : entry;
       const value = table!.value(field, row);
       const kind = table!.kind(field) as InspectedField["kind"];
@@ -48,7 +45,7 @@ export const fieldReader: FieldReaders = (locale, zone, numbers, times) => {
           ? "–"
           : typeof value === "string"
             ? value
-            : write(kind, format)(value);
+            : write(kind, format, `tooltip.fields[${i}].format`)(value);
       return { field, label, kind, value, text };
     });
 };

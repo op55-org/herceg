@@ -9,7 +9,7 @@
 // move to a chunk of its own (see model/guides.ts, `GUIDE_KIT`).
 
 import type { Table } from "../../data/table.ts";
-import { intlOptions, numberPattern } from "../../format/patterns.ts";
+import { formatWriter } from "../../format/patterns.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { TextItem } from "../../scene/scene.ts";
 import type { FormatSpec, PartStyle } from "../../spec/spec.ts";
@@ -129,16 +129,10 @@ function writer(
 ): ContentWriter {
   // Numbers written as a part's format says, for the frame's locale; patterns checked now.
   const number = (format: FormatSpec | undefined, where: string) => {
-    const spec = format as { number?: string } | undefined;
     const make = (locale: string | undefined) =>
-      spec?.number !== undefined
-        ? numberPattern(kit, spec as { number: string }, locale, `${where}.format`)
-        : spec
-          ? kit.numberFormatter(
-              intlOptions(spec as Intl.NumberFormatOptions, `${where}.format`),
-              locale,
-            )
-          : (v: number) => kit.formatNumber(v, locale);
+      format
+        ? formatWriter(kit, format, false, "UTC", locale, `${where}.format`)
+        : (v: number) => kit.formatNumber(v, locale);
     let made = { locale: undefined as string | undefined, write: make(undefined) };
     return (value: number, locale: string | undefined) => {
       if (made.locale !== locale) made = { locale, write: make(locale) };

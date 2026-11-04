@@ -80,26 +80,99 @@ export interface FiscalSpec {
   name?: "end" | "start";
 }
 
+/** A unit lengths of time are in. Weeks and longer have no fixed length. */
+export type DurationUnit =
+  | "nanosecond"
+  | "microsecond"
+  | "millisecond"
+  | "second"
+  | "minute"
+  | "hour"
+  | "day";
+
 /**
- * How values are written: Intl.NumberFormat options (number axes) or
- * Intl.DateTimeFormat options (time axes); `{ number }`, a d3-format pattern
- * such as ",.2f" or ".1%"; or `{ time }`, a strftime pattern such as
- * "%b %d %H:%M", in the scale's time zone, with years and quarters of a
- * `fiscal` year if given.
+ * Numbers as lengths of time, in their largest units: 66000 milliseconds
+ * is "1m 6s", 450 is "450ms". Unit symbols are d, h, m, s, ms, µs, and ns;
+ * digits are the locale's.
  */
-export type FormatSpec =
+export interface DurationFormat {
+  /** The unit the values are in. */
+  duration: DurationUnit;
+  /** At most this many units, the largest first ("1m 6s" is two). @integer @minimum 1 @maximum 7 @default 2 */
+  maxUnits?: number;
+  /** Decimals of the last unit, kept when zero. @integer @minimum 0 @maximum 20 @default 0 */
+  decimals?: number;
+  fiscal?: never;
+}
+
+/**
+ * Numbers with SI prefixes, by thousands from n to E, before the unit `si`:
+ * 1500000 with `{ si: "B" }` is "1.5 MB", 0.45 with `{ si: "W" }` "450 mW".
+ * The prefix is chosen after rounding; values are in the unit already.
+ */
+export interface SiFormat {
+  /** The unit's symbol, written after the prefix. @examples ["B", "b/s", "W", "Hz"] */
+  si: string;
+  /** Decimals, kept when zero; by default up to 1, zeros dropped. @integer @minimum 0 @maximum 20 */
+  decimals?: number;
+  fiscal?: never;
+}
+
+/**
+ * Numbers with binary prefixes, by 1,024s from Ki to Ei, before the unit
+ * `binary`: 1572864 with `{ binary: "B" }` is "1.5 MiB"; values under 1,024
+ * take none. The prefix is chosen after rounding.
+ */
+export interface BinaryFormat {
+  /** The unit's symbol, written after the prefix. @examples ["B", "b"] */
+  binary: string;
+  /** Decimals, kept when zero; by default up to 1, zeros dropped. @integer @minimum 0 @maximum 20 */
+  decimals?: number;
+  fiscal?: never;
+}
+
+/** A d3-format pattern, with text before and after it: 1234 with `{ number: ".3~s", suffix: " req/s" }` is "1.23k req/s". */
+export interface NumberPatternFormat {
+  /** @examples [",.2f", ".1%", "~s"] */
+  number: string;
+  /** Text before the number. */
+  prefix?: string;
+  /** Text after the number. @examples [" req/s", "%"] */
+  suffix?: string;
+  fiscal?: never;
+}
+
+/** A strftime pattern, in the scale's time zone, with years and quarters of a `fiscal` year if given. */
+export interface TimePatternFormat {
+  /** @examples ["%b %d %H:%M", "%Y-%m-%d"] */
+  time: string;
+  fiscal?: FiscalSpec;
+}
+
+/**
+ * How numbers are written: Intl.NumberFormat options; `{ number }`, a
+ * d3-format pattern; `{ duration }`, lengths of time; or `{ si }` and
+ * `{ binary }`, a unit after a prefix.
+ */
+export type NumberFormatSpec =
   | (Intl.NumberFormatOptions & { fiscal?: never })
-  | (Intl.DateTimeFormatOptions & { fiscal?: never })
-  | {
-      /** @examples [",.2f", ".1%", "~s"] */
-      number: string;
-      fiscal?: never;
-    }
-  | {
-      /** @examples ["%b %d %H:%M", "%Y-%m-%d"] */
-      time: string;
-      fiscal?: FiscalSpec;
-    };
+  | NumberPatternFormat
+  | DurationFormat
+  | SiFormat
+  | BinaryFormat;
+
+/** How times are written: Intl.DateTimeFormat options, or `{ time }`, a strftime pattern. */
+export type TimeFormatSpec = (Intl.DateTimeFormatOptions & { fiscal?: never }) | TimePatternFormat;
+
+/**
+ * How values are written: numbers as `NumberFormatSpec` says (Intl
+ * options, a d3-format pattern such as ",.2f" or ".1%", a duration, or a
+ * unit with SI or binary prefixes), times as `TimeFormatSpec` says (Intl
+ * date options, or a strftime pattern such as "%b %d %H:%M"). The forms
+ * are told apart by their keys (`number`, `time`, `duration`, `si`,
+ * `binary`); a format gives one of them, or Intl options.
+ */
+export type FormatSpec = NumberFormatSpec | TimeFormatSpec;
 
 /**
  * Tick marks: out from the plot (the default), in over it, or across the

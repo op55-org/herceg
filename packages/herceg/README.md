@@ -65,6 +65,7 @@ const pdf = renderToPDF(chart); // a mounted chart as it is shown
 | `herceg` | Tables, marks, `createChart`, `renderToSVG`, server snapshots and hydration |
 | `herceg/layout` | Subplot layouts: columns, rows, grids, panels, insets |
 | `herceg/state` | `chartState`: state options, conditional writes, selections of items and series |
+| `herceg/fields` | Field displays: `displayOf`, `compileFields`, `fieldsOf` |
 | `herceg/spec` | Charts from portable JSON specs: `loadSpec`, `validateSpec`, `chartFromSpec`, `specToSVG`, `specToPDF` |
 | `herceg/pdf` | `renderToPDF` |
 | `herceg/image` | `renderToImage`: PNG, JPEG, and WebP for documents |

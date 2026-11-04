@@ -17,6 +17,7 @@ Python. Start with [Getting started](guide/getting-started.md).
 | [Financial charts](guide/financial-charts.md) | Candlesticks, trading-session axes, price and volume panels |
 | [Layout](guide/layout.md) | Small multiples, subplots, insets, shared scales |
 | [Axes and legends](guide/axes-and-legends.md) | Scales, ticks, formats, time breaks, legends, colorbars |
+| [Field displays](guide/fields.md) | Fields' labels, descriptions, formats, bounds, missing text, and value mappings, given once |
 | [Styling](guide/styling.md) | Colors, themes, role styles, CSS variables, halos, paint order |
 | [Interaction](guide/interaction.md) | Pan, zoom, brush, bindings, sync, tooltips, events, selected rows, the range navigator, animation |
 | [Accessibility](guide/accessibility.md) | Keyboard, screen readers, color and motion, static output |

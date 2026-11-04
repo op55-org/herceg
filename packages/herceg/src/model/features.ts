@@ -144,6 +144,22 @@ export interface CompiledFeatures {
   ): { readonly prefix: string; color(value: string): string | undefined } | undefined;
 }
 
+/**
+ * How the compiler writes numbers in `format` (format/patterns.ts): a
+ * pattern (times for a time pattern), a duration, or a unit with prefixes;
+ * `path` names the format in errors.
+ */
+export type FormatWrite = (
+  format: FormatSpec,
+  locale: string | undefined,
+  path: string,
+) => (value: number) => string;
+
+/** Layout marks writing values in formats only the compiler writes, which hands them its writer. */
+export interface FormatUser {
+  useFormats(write: FormatWrite): void;
+}
+
 /** One mark's compiled features. */
 export interface MarkFeatures {
   /** Pixels a line's markers reach past their observations along each axis, as `Mark.inset`. */
@@ -154,8 +170,8 @@ export interface MarkFeatures {
   palette(palette: Palette): Palette;
   /** What a series of the mark draws with, set on it as it is resolved. */
   attach(series: Series): void;
-  /** How the mark writes values in `format`, a pattern (`{ number }`, `{ time }`) included. */
-  format?(format: FormatSpec, locale: string | undefined, path: string): (value: number) => string;
+  /** How the mark writes values in `format`, the forms the compiler writes (`FormatWrite`) included. */
+  format?: FormatWrite | undefined;
   /**
    * Labels following series the mark draws (`labels` on lines and areas,
    * text `from` a mark) in `frame`'s panel, once the mark is drawn there,

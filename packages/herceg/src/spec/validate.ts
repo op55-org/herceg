@@ -8,7 +8,9 @@
 // property meant where one is close, so misspellings do not go unnoticed.
 
 import { checkBins } from "../data/bins.ts";
-import { numberPattern, type TimePattern, timePattern } from "../format/patterns.ts";
+import { checkKinds, KINDS, keyPath, rangeProblem, regexProblem } from "../fields/check.ts";
+import { NUMBER_OPTIONS, TIME_OPTIONS } from "../format/intl-options.ts";
+import { formatWriter, formOf } from "../format/patterns.ts";
 import { calendarInterval } from "../guides/ticks.ts";
 import { areaFormError } from "../marks/area.ts";
 import { boxPlotFormError } from "../marks/boxplot-input.ts";
@@ -47,6 +49,13 @@ import type {
   StyleMapSpec,
 } from "./encoding.ts";
 import { ChartError, type ChartErrorCode } from "./errors.ts";
+import type {
+  DisplayedKind,
+  FieldDisplay,
+  FieldLink,
+  FieldRuleSpec,
+  ValueMapping,
+} from "./fields.ts";
 import type { ItemAnchor, ItemCoordinate, ItemRef } from "./place.ts";
 import {
   type AnimationSpec,
@@ -790,52 +799,6 @@ function format(type: unknown): Check {
   };
 }
 
-const NUMBER_OPTIONS = [
-  "localeMatcher",
-  "numberingSystem",
-  "style",
-  "currency",
-  "currencyDisplay",
-  "currencySign",
-  "unit",
-  "unitDisplay",
-  "notation",
-  "compactDisplay",
-  "signDisplay",
-  "useGrouping",
-  "minimumIntegerDigits",
-  "minimumFractionDigits",
-  "maximumFractionDigits",
-  "minimumSignificantDigits",
-  "maximumSignificantDigits",
-  "roundingMode",
-  "roundingPriority",
-  "roundingIncrement",
-  "trailingZeroDisplay",
-];
-const TIME_OPTIONS = [
-  "localeMatcher",
-  "numberingSystem",
-  "calendar",
-  "timeZone",
-  "hour12",
-  "hourCycle",
-  "formatMatcher",
-  "dateStyle",
-  "timeStyle",
-  "weekday",
-  "era",
-  "year",
-  "month",
-  "day",
-  "dayPeriod",
-  "hour",
-  "minute",
-  "second",
-  "fractionalSecondDigits",
-  "timeZoneName",
-];
-
 /** The checks of an axis' options. */
 function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
   return {
@@ -952,30 +915,186 @@ const fiscal: Check = (v, path) => {
   });
 };
 
+/** The writer of a format checks the values of its settings (format/patterns.ts, format/units.ts). */
+const written: Check = () => {};
+
+/** Each format form's settings. */
+const FORMATS: Record<string, Record<string, Check>> = {
+  number: { number: written, prefix: written, suffix: written },
+  time: { time: written, fiscal },
+  duration: { duration: written, maxUnits: written, decimals: written },
+  si: { si: written, decimals: written },
+  binary: { binary: written, decimals: written },
+};
+
 /**
- * How an axis of `type` writes values: Intl options, or a pattern, `{ number }`
- * (d3-format) or `{ time }` (strftime), alone.
+ * How an axis of `type` writes values: Intl options, or one form alone, a
+ * pattern (`{ number }`, d3-format, or `{ time }`, strftime), a duration,
+ * or a unit with SI or binary prefixes; number forms on number axes, time
+ * forms on time axes (either where `type` is undefined).
  */
 function axisFormat(type: unknown): Check {
   const intl = format(type);
   return (v, path) => {
     noFunction(v, path, 'give Intl options, { number: ",.2f" }, or { time: "%H:%M" }');
-    if (!isRecord(v) || !("number" in v || "time" in v)) return intl(v, path);
-    const key = "number" in v ? "number" : "time";
-    checkProperties(v, path, [key], key === "time" ? { time: string, fiscal } : { number: string });
-    if (key === "number" && type === "time")
-      fail(`${path}.number`, '{ time: "..." } or Intl date options on a time axis', v.number);
-    if (key === "time" && (type === "linear" || type === "log"))
-      fail(`${path}.time`, '{ number: "..." } or Intl number options on a number axis', v.time);
+    if (!isRecord(v)) return intl(v, path);
+    let form: string;
     try {
-      if (key === "number")
-        numberPattern(GUIDE_KIT, { number: v.number as string }, undefined, path);
-      else timePattern(GUIDE_KIT, v as unknown as TimePattern, "UTC", undefined, path);
+      form = formOf(v, path);
     } catch (error) {
-      throw delegated(`${path}.${key}`, error);
+      throw delegated(path, error);
+    }
+    if (form === "intl") return intl(v, path);
+    properties(v, path, FORMATS[form]!);
+    if (form === "time" && (type === "linear" || type === "log"))
+      fail(`${path}.time`, '{ number: "..." } or Intl number options on a number axis', v.time);
+    if (form !== "time" && type === "time")
+      fail(`${path}.${form}`, '{ time: "..." } or Intl date options on a time axis', v[form]);
+    // The writer reads the form's own settings; others are noted as unknown.
+    const own = Object.fromEntries(Object.keys(FORMATS[form]!).map((key) => [key, v[key]]));
+    try {
+      formatWriter(GUIDE_KIT, own, form === "time", "UTC", undefined, path);
+    } catch (error) {
+      throw delegated(path, error);
     }
   };
 }
+
+/** A setting a field display may reset with `false`, else checked by `check`. */
+function orFalse(check: Check): Check {
+  return (v, path) => {
+    if (v !== false) check(v, path);
+  };
+}
+
+/** A part of a link: text, `{ field }`, or `{ value: true }`. */
+const linkPart: Check = (v, path) => {
+  if (typeof v === "string") return;
+  object(v, path);
+  const part = v as Record<string, unknown>;
+  if ((part.field === undefined) === (part.value === undefined))
+    throw refusal(path, "a part is text, { field }, or { value: true }; give one");
+  properties(part, path, {
+    field,
+    value: (x, at) => {
+      if (x !== true) fail(at, "true", x);
+    },
+  });
+};
+const linkParts: Check = (v, path) => {
+  if (!Array.isArray(v)) fail(path, "a list of parts", v);
+  for (const [i, part] of v.entries()) linkPart(part, `${path}[${i}]`);
+};
+
+/** Mappings of values to text: each by value, by a range, or by a regular expression. */
+const valueMappings: Check = (v, path) => {
+  if (!Array.isArray(v)) fail(path, "a list of mappings", v);
+  for (const [i, item] of v.entries()) {
+    const at = `${path}[${i}]`;
+    object(item, at);
+    const mapping = item as Record<string, unknown>;
+    if (["value", "between", "regex"].filter((key) => mapping[key] !== undefined).length !== 1)
+      throw refusal(at, "a mapping matches by value, between, or regex; give one");
+    checkProperties(mapping, at, ["text"], {
+      value: (x, p) => {
+        if (typeof x !== "string" && !Number.isFinite(x)) fail(p, "text or a finite number", x);
+      },
+      between: (x, p) => {
+        const problem = rangeProblem(x);
+        if (problem) throw refusal(p, problem);
+      },
+      regex: (x, p) => {
+        string(x, p);
+        const problem = regexProblem(x as string);
+        if (problem) throw refusal(p, problem);
+      },
+      text: string,
+    } satisfies ChecksOf<ValueMapping>);
+  }
+};
+
+/** A field display's settings; links are checked, and drawn by nothing yet. */
+const DISPLAY: ChecksOf<FieldDisplay> = {
+  label: orFalse(string),
+  description: orFalse(string),
+  missing: orFalse(string),
+  format: orFalse(axisFormat(undefined)),
+  min: orFalse(finite),
+  max: orFalse(finite),
+  mappings: orFalse(valueMappings),
+  link: orFalse((v, path) => {
+    object(v, path);
+    checkProperties(v as Record<string, unknown>, path, ["url"], {
+      url: (url, at) => {
+        if (typeof url !== "string") linkParts(url, at);
+      },
+      text: linkParts,
+    } satisfies ChecksOf<FieldLink>);
+  }),
+};
+
+/** Refuses a display giving bounds out of order. */
+function bounded({ min, max }: FieldDisplay, path: string): void {
+  if (typeof min === "number" && typeof max === "number" && !(min < max))
+    throw refusal(`${path}.min`, `${min} is not below max ${max}; give min below max`);
+}
+
+/** Which fields a rule applies to: a name, or names, a regular expression, kinds, and a table's name. */
+const fieldMatch: Check = (v, path) => {
+  if (typeof v === "string") return;
+  object(v, path);
+  if (Object.keys(v as object).length === 0)
+    throw refusal(path, "{} matches every field; drop match for that");
+  properties(v as Record<string, unknown>, path, {
+    field: fields,
+    regex: (x, at) => {
+      string(x, at);
+      const problem = regexProblem(x as string);
+      if (problem) throw refusal(at, problem);
+    },
+    kind: (x, at) => {
+      const kind = oneOf(...KINDS);
+      if (!Array.isArray(x)) return kind(x, at);
+      if (x.length === 0) fail(at, "at least one kind", x);
+      for (const [i, one] of x.entries()) kind(one, `${at}[${i}]`);
+    },
+    table: string,
+  });
+};
+
+/**
+ * Field displays: by field name, or rules in order. A rule matching kinds
+ * and naming no field refuses settings none of its kinds takes; what
+ * needs the data (a named field's kind) is checked where charts read it.
+ */
+const fieldDisplays: Check = (v, path) => {
+  if (!Array.isArray(v)) {
+    object(v, path);
+    for (const [name, display] of Object.entries(v as object)) {
+      const at = `${path}${keyPath(name)}`;
+      object(display, at);
+      properties(display as Record<string, unknown>, at, DISPLAY);
+      bounded(display as FieldDisplay, at);
+    }
+    return;
+  }
+  for (const [i, item] of v.entries()) {
+    const at = `${path}[${i}]`;
+    object(item, at);
+    const rule = item as Record<string, unknown>;
+    properties(rule, at, { match: fieldMatch, ...DISPLAY } satisfies ChecksOf<FieldRuleSpec>);
+    bounded(rule as FieldDisplay, at);
+    const match = rule.match as
+      | { field?: unknown; kind?: DisplayedKind | DisplayedKind[] }
+      | undefined;
+    if (typeof match === "object" && match.kind !== undefined && match.field === undefined)
+      try {
+        checkKinds(rule, typeof match.kind === "string" ? [match.kind] : match.kind, at);
+      } catch (error) {
+        throw delegated(at, error);
+      }
+  }
+};
 
 /** Tick marks: their direction and length. */
 const tickMark: Check = (v, path) => {
@@ -1936,7 +2055,7 @@ const tooltip: Check = (v, path) => {
         checkProperties(entry, `${at}[${i}]`, ["field"], {
           field,
           label: string,
-          format: format(undefined),
+          format: axisFormat(undefined),
         });
       });
     },
@@ -2883,7 +3002,7 @@ const MARKS: MarkChecks = {
         }
       },
       label: string,
-      format: format("linear"),
+      format: axisFormat("linear"),
       tooltip,
     },
   },
@@ -3923,6 +4042,7 @@ function checkChart(spec: unknown): asserts spec is ChartSpec {
       viewport: scoped(view),
       visibility,
       drillRoot: scoped(drillRoot),
+      fields: fieldDisplays,
     } satisfies ChecksOf<Omit<ChartSpec, "marks" | "version">>,
     ["marks", "version"],
   );

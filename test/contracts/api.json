@@ -123,7 +123,8 @@
       "without": {
         "version": "The spec format's version, which specs carry and charts made in TypeScript do not need.",
         "data": "A spec's named tables; TypeScript's marks take their tables themselves.",
-        "layout": "TypeScript's panels (herceg/layout's panels()) carry the layout with the panels."
+        "layout": "TypeScript's panels (herceg/layout's panels()) carry the layout with the panels.",
+        "fields": "Charts do not read field displays yet; specs check them (docs/guide/fields.md)."
       },
       "only": {
         "fonts": "Fonts the browser loads for Canvas text and exports, by URL: not part of a portable spec.",
@@ -175,7 +176,8 @@
     "chart python": {
       "without": {
         "version": "Written by to_spec(); a chart made in Python does not need it.",
-        "marks": "Python adds marks with the chart's methods (chart.line(...))."
+        "marks": "Python adds marks with the chart's methods (chart.line(...)).",
+        "fields": "Charts do not read field displays yet; specs check them (docs/guide/fields.md)."
       },
       "spread": {
         "interaction": {
@@ -917,6 +919,19 @@
       "only": {
         "axis_labels": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip axis_labels: is the chart's; give it to the chart's tooltip`).",
         "pin": "Python's one hg.Tooltip serves the chart and its marks; a mark refuses the chart's settings (`line tooltip pin: is the chart's; give it to the chart's tooltip`)."
+      }
+    },
+    "settings MarkTooltipSpec MarkTooltip": {
+      "untyped": {
+        "fields": "TypeScript types each field's format by the field's kind, through a type over the table's fields: numbers' forms, times', and none for categories."
+      }
+    },
+    "settings NumberFormatSpec hg.Format": {
+      "only": {
+        "time": "Python's one hg.Format serves every format; a gauge refuses time formats (`gauge format: a gauge writes numbers; give a number format, such as hg.Format(number=\",.0f\")`)."
+      },
+      "untyped": {
+        "fiscal": "As time: fiscal years go with time formats, which a gauge refuses."
       }
     },
     "settings ContinuitySpec hg.Continuity": {

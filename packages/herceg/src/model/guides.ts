@@ -363,7 +363,8 @@ function alignsTickLabels(config: ChartConfig): boolean {
 
 /**
  * Whether a configuration uses what only the guide compiler plans: ticks
- * other than a number, formats other than Intl options, `scales`, `guides`,
+ * other than a number, formats other than Intl options (patterns,
+ * durations, units with prefixes), `scales`, `guides`,
  * and legend settings beyond its place and style.
  */
 export function needsGuides(config: ChartConfig): boolean {
@@ -402,8 +403,8 @@ export function needsGuides(config: ChartConfig): boolean {
           [axis.ticks, axis.format, axis.tooltipFormat].some(
             (setting) =>
               typeof setting === "function" ||
-              // Patterns, and Intl options with a fiscal year, which it refuses.
-              ["number", "time", "fiscal"].some(
+              // Patterns, durations, units with prefixes, and Intl options with a fiscal year, which it refuses.
+              ["number", "time", "duration", "si", "binary", "fiscal"].some(
                 (key) => (setting as Record<string, unknown> | undefined)?.[key] !== undefined,
               ),
           )),

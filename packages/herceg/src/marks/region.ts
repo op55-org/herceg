@@ -1,7 +1,7 @@
 import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
 import { rectDrawing, sideMask } from "../draw/rect.ts";
-import type { Formatter } from "../format/format.ts";
+import { type Formatter, lazyFormat } from "../format/format.ts";
 import { anchorBlock } from "../layout/block.ts";
 import {
   type LabelledMark,
@@ -222,12 +222,8 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "region");
     this.#plain = label !== undefined && !label.style && !label.place && !label.format;
-    const format = label?.format as { number?: unknown; time?: unknown } | undefined;
     this.featured =
-      format?.number !== undefined ||
-      format?.time !== undefined ||
-      label?.content !== undefined ||
-      spec.encode !== undefined;
+      lazyFormat(label?.format) || label?.content !== undefined || spec.encode !== undefined;
   }
 
   get table(): Table | undefined {

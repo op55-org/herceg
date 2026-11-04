@@ -114,6 +114,10 @@ channels read by name, and position scales of a mark's own (see
 | `{ number: ",.2f" }` | A d3-format pattern `[sign][,][.precision][~][type]`: sign `-`, `+`, `(`, or space; `,` groups thousands; `~` trims zeros; type `d`, `f`, `e`, `g`, `s` (SI, `"1.5k"`), `%`, or none. Digits and separators are the locale's. |
 | `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %q %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`, `%q` the quarter (1 to 4); `%-d` drops padding. |
 | `{ time: "FY%y Q%q", fiscal: { start: 7, name? } }` | Years and quarters of a fiscal year starting on the first of month `start`, named by the year it ends in (`name: "end"`, the default) or starts in (`"start"`). Months and days stay the calendar's. |
+| `{ number: ",.0f", prefix: "$", suffix: " req/s" }` | A number pattern with text around the number, inside its sign: "-$1,234", "($1,234)". |
+| `{ duration: "millisecond", maxUnits?, decimals? }` | Lengths of time in the given unit (`"nanosecond"`, `"microsecond"`, `"millisecond"`, `"second"`, `"minute"`, `"hour"`, `"day"`), in their largest units: 66,000 ms is "1m 6s". At most `maxUnits` units (1 to 7, 2 by default), the last with `decimals` (0 to 20, 0 by default). |
+| `{ si: "B", decimals? }` | Numbers in the given unit with SI prefixes, n to E by 1,000: 1,500,000 is "1.5 MB". |
+| `{ binary: "B", decimals? }` | Numbers in the given unit with binary prefixes, Ki to Ei by 1,024: 1,572,864 is "1.5 MiB". |
 | `(value, context) => string` | JavaScript only. `""` leaves a tick unlabeled. |
 
 - A tick is its value, never its text: "Apr" of 2024 and "Apr" of 2025 are
@@ -122,8 +126,44 @@ channels read by name, and position scales of a mark's own (see
   apart, so a date-only format uses day ticks. A label still repeating the
   one before is left blank and its tick kept, on automatic and chosen ticks
   alike (`labels: { duplicates: "show" }` writes it).
-- Specs and Python carry Intl options and patterns; functions stay in
-  JavaScript, and `validateSpec` refuses them with their path.
+- Specs and Python carry every form but functions, which stay in
+  JavaScript; `validateSpec` refuses them with their path.
+- Durations round the last unit, and rounding carries into larger units
+  (59,999.6 ms is "1m"); units that round to zero after the first are left
+  out ("1h", not "1h 0m"), and zero is "0" in the given unit ("0ms").
+- Prefixes are chosen after rounding (999,960 B is "1 MB", not "1,000 kB").
+  SI writes none from 1 to under 1,000, binary none under 1,024, and values
+  past the largest prefix keep it. Given `decimals` are exact, zeros kept;
+  without them, up to one decimal, zeros dropped.
+- Units are text: values must already be in the unit the format names.
+  Unit symbols are fixed (d, h, m, s, ms, µs, ns, and the prefixes);
+  digits, separators, and the minus sign are the locale's. NaN and
+  infinities are written as Intl writes them, without a unit.
+- On axes, durations and prefixed numbers without `decimals` take the
+  decimals that tell neighboring ticks apart ("1.0 MB", "1.5 MB"), and
+  durations go down to the unit of the step between ticks, past
+  `maxUnits` ("1m 20s").
+- Every option that takes a format takes every form: axes' `format` and
+  `tooltipFormat`, tick layers, colorbars, label parts, bar, rule, region,
+  text, and annotation labels, tooltip fields (their field's kind's
+  forms), and gauges (number forms). Time axes refuse number forms, and
+  number axes `{ time }` patterns. Grid columns and 3D charts' axes take
+  Intl options.
+
+  ```ts
+  createChart(host, {
+    y: { format: { duration: "millisecond" }, tooltipFormat: { duration: "millisecond", maxUnits: 3 } },
+    marks: [line(requests, { x: "time", y: "latency", tooltip: { fields: [{ field: "bytes", format: { binary: "B" } }] } })],
+  });
+  ```
+
+  ```python
+  hg.Chart(requests, y=hg.AxisOptions(format=hg.Format(duration="millisecond"))).line(
+      x="time", y="latency",
+      tooltip=hg.Tooltip(fields=[hg.TooltipField("bytes", format=hg.Format(binary="B"))]))
+  hg.Format(si="b/s", decimals=2)            # "12.35 Mb/s"
+  hg.Format(number=".3~s", suffix=" req/s")  # "1.23k req/s"
+  ```
 - Only steps of months or years and `{ time }` patterns take `fiscal`; counts,
   values, number patterns, and Intl options are refused with it.
 - A fiscal row under monthly ticks gives one object to both, so ticks and
