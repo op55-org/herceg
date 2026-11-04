@@ -1390,12 +1390,19 @@ describe("keyed transitions", () => {
     try {
       await chart.loading;
       await frame();
+      // The clock is the test's from here: a slow machine's real frames
+      // (over 10 ms) would make the drill show at once.
+      vi.useFakeTimers({
+        toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
+      });
+      chart.render();
+      tick(16);
       const a = () =>
         chart.getItems({ mark: "tree" })!.items.find(({ names }) => names.join() === "a")!;
       const before = a().sector!.innerRadius;
       chart.setDrillRoot(["a"]);
-      await frame();
-      await frame();
+      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(16);
       // On its way to the middle, not there at once.
       expect(a().sector!.innerRadius).toBeGreaterThan(0);
       expect(a().sector!.innerRadius).toBeLessThan(before);
