@@ -40,7 +40,9 @@ export function pointRows(
     }
     return Uint32Array.from(found);
   }
-  const member = mark.summarized!(series, position);
+  // A summary that names no rows of its own (a contour's band, of a grid it interpolates) stands for none.
+  if (!mark.summarized) return new Uint32Array(0);
+  const member = mark.summarized(series, position);
   // Of its panel's facet values, where the facet splits the mark.
   const facets = facetsOf(model, panel.key, mark).map(({ field, ...group }) => {
     const { codes, dictionary } = table.categories(field as never);

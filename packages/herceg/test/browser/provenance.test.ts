@@ -14,6 +14,7 @@ import type { Chart } from "../../src/dom/chart.ts";
 import type { ItemTarget } from "../../src/dom/events.ts";
 import { chartFromSpec } from "../../src/from-spec.ts";
 import { bar } from "../../src/marks/bar.ts";
+import { contour } from "../../src/marks/contour.ts";
 import { point } from "../../src/marks/point.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { inputEventPayload } from "../../src/web/events.ts";
@@ -141,6 +142,24 @@ describe("input", () => {
     const entered = clicks.at(-1)!;
     expect(entered.cause).toBe("keyboard");
     expect((entered.target as ItemTarget).provenance?.condition).toEqual(expect.any(Array));
+  });
+
+  it("gives a contour's band no condition and no rows, since it interpolates a grid", async () => {
+    const x: number[] = [];
+    const y: number[] = [];
+    const v: number[] = [];
+    for (let j = 0; j < 20; j++)
+      for (let i = 0; i < 20; i++) {
+        x.push(i);
+        y.push(j);
+        v.push(Math.sin(i / 3) + Math.cos(j / 3));
+      }
+    const chart = await mount({
+      marks: [contour(table({ x, y, v }), { x: "x", y: "y", color: "v", variant: "bands" })],
+    });
+    const target = await clickAt(chart, 5, 5);
+    expect(target.provenance?.condition).toBeNull();
+    expect([...target.rows!().positions]).toEqual([]);
   });
 
   it("keep rows by identity: appended rows join none, dropped ones leave, and none survive a reset", async () => {
