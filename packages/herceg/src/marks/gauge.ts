@@ -5,11 +5,13 @@ import type { NumberField, Schema, Table } from "../data/table.ts";
 import { ArcPath, arcDrawing, traceSector } from "../draw/arc.ts";
 import { textDrawing } from "../draw/labels.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
-import { type Formatter, formatNumber, numberFormatter } from "../format/format.ts";
+import { type Formatter, formatNumber, lazyFormat, numberFormatter } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
+import type { FormatUser, FormatWrite } from "../model/features.ts";
 import { ItemViews } from "../model/item-views.ts";
 import type { LegendEntry } from "../model/legend.ts";
 import type { ArcGeometry, Geometry, ShapesGeometry, TextGeometry } from "../scene/scene.ts";
+import type { NumberFormatSpec } from "../spec/guides.ts";
 import type { Frozen, GaugeBand, GaugeSpec, MarkTooltipSpec } from "../spec/spec.ts";
 import { refuseColor } from "./colored.ts";
 import type { LayoutFrame, LayoutItem, LayoutMark, LayoutResult } from "./layout-mark.ts";
@@ -29,8 +31,8 @@ export interface GaugeOptions<S extends Schema> {
   bands?: readonly GaugeBand[];
   /** Text under the value; the field's name by default. */
   label?: string;
-  /** Intl.NumberFormat options for the value and the dial's ends. */
-  format?: Intl.NumberFormatOptions;
+  /** How the value and the dial's ends are written, in any of numbers' forms (`NumberFormatSpec`). */
+  format?: NumberFormatSpec;
   /** Fields of the row the gauge shows, which its tooltip shows besides the value. */
   tooltip?: MarkTooltip<S>;
   id?: string;
@@ -59,7 +61,7 @@ interface Band {
   color: string;
 }
 
-export class GaugeMark implements LayoutMark {
+export class GaugeMark implements LayoutMark, FormatUser {
   declare readonly [MARK]: true;
   readonly layout = true;
   readonly views = ItemViews;
@@ -68,6 +70,9 @@ export class GaugeMark implements LayoutMark {
   readonly measure: string;
   readonly #min: number;
   readonly #max: number;
+  /** A format other than Intl options, which the feature compiler writes, handing its writer over. */
+  readonly featured: boolean;
+  #formats: FormatWrite | undefined;
 
   constructor(input: GaugeSpec, table: Table) {
     this.spec = frozen(input);
@@ -75,6 +80,7 @@ export class GaugeMark implements LayoutMark {
     const spec = this.spec;
     requireField(table, spec.value, ["number"], "gauge value");
     checkTooltip(table, spec.tooltip, "gauge");
+    this.featured = lazyFormat(spec.format);
     const min = spec.min ?? 0;
     const max = spec.max ?? 100;
     if (!(Number.isFinite(min) && Number.isFinite(max) && min < max))
@@ -132,15 +138,23 @@ export class GaugeMark implements LayoutMark {
     });
   }
 
+  /** Takes the feature compiler's writer of its format. */
+  useFormats(write: FormatWrite): void {
+    this.#formats = write;
+  }
+
   draw(frame: LayoutFrame): LayoutResult {
     const { bounds, theme, measure, locale } = frame;
     const min = this.#min;
     const max = this.#max;
     const row = this.#row(frame.rows);
     const value = row < 0 ? Number.NaN : this.table.numbers(this.spec.value)[row]!;
-    const format: Formatter = this.spec.format
-      ? numberFormatter(this.spec.format, locale)
-      : (v) => formatNumber(v, locale);
+    const given = this.spec.format;
+    const format: Formatter = this.featured
+      ? this.#formats!(given!, locale, "gauge format")
+      : given
+        ? numberFormatter(given as Intl.NumberFormatOptions, locale)
+        : (v) => formatNumber(v, locale);
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
     const bands = this.#bands(frame);

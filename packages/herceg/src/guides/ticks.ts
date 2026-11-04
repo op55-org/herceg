@@ -4,7 +4,8 @@
 // never on pointer movement.
 
 import type { Formatter } from "../format/format.ts";
-import { fiscalOf, intlOptions, numberPattern, timePattern } from "../format/patterns.ts";
+import { fiscalOf, formatWriter, formOf } from "../format/patterns.ts";
+import { type UnitFormat, unitWriter } from "../format/units.ts";
 import type { AxisBreaks, AxisContext, AxisType } from "../model/axis.ts";
 import type { GuideKit } from "../model/guides.ts";
 import type { PositionScale } from "../scale/scale.ts";
@@ -125,24 +126,20 @@ export function writer(
       value: (value) => text(format(value, { ...base, kind: "value" }), value),
     };
   }
-  let write: Formatter;
-  if ("number" in format) {
-    if (type === "time")
-      throw new Error(
-        `${path}.number: a time axis writes times; give { time: "%b %d" } or Intl date options`,
-      );
-    write = numberPattern(kit, format, locale, path);
-  } else if ("time" in format) {
-    if (type !== "time")
-      throw new Error(
-        `${path}.time: a ${type} axis writes numbers; give { number: ",.2f" } or Intl number options`,
-      );
-    write = timePattern(kit, format, zone, locale, path);
-  } else
-    write =
-      type === "time"
-        ? kit.timeFormatter(intlOptions(format, path), zone, locale)
-        : kit.numberFormatter(intlOptions(format, path), locale);
+  const form = formOf(format, path);
+  if (type === "time" && form !== "time" && form !== "intl")
+    throw new Error(
+      `${path}.${form}: a time axis writes times; give { time: "%b %d" } or Intl date options`,
+    );
+  if (type !== "time" && form === "time")
+    throw new Error(
+      `${path}.time: a ${type} axis writes numbers; give { number: ",.2f" } or Intl number options`,
+    );
+  if (form === "duration" || form === "si" || form === "binary") {
+    const units = unitWriter(kit, format as UnitFormat, locale, path);
+    return { callback: false, ticks: units.ticks, value: units.value };
+  }
+  const write = formatWriter(kit, format, type === "time", zone, locale, path);
   return { callback: false, ticks: (values) => values.map(write), value: write };
 }
 

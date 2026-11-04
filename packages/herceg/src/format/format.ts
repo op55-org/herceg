@@ -40,6 +40,17 @@ export function timeFormatter(options: TimeFormat, zone: TimeZone, locale?: stri
 }
 
 /**
+ * Whether the chart's lazily loaded code writes `format` (format/patterns.ts):
+ * a pattern, a duration, or a unit with prefixes, where Intl options are
+ * written here.
+ */
+export function lazyFormat(format: object | undefined): boolean {
+  return ["number", "time", "duration", "si", "binary"].some(
+    (key) => (format as Record<string, unknown> | undefined)?.[key] !== undefined,
+  );
+}
+
+/**
  * Labels for numeric ticks: enough decimals to tell neighbors apart, and
  * compact notation ("2.5M") for large magnitudes.
  */

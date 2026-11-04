@@ -10,7 +10,7 @@ import type { FieldKind, NumericArray } from "../data/column.ts";
 import type { Schema, Table } from "../data/table.ts";
 import { leaderDrawingOf } from "../draw/leaders.ts";
 import { markupOf, n } from "../draw/markup.ts";
-import { type Formatter, formatNumber, numberFormatter } from "../format/format.ts";
+import { type Formatter, formatNumber, lazyFormat, numberFormatter } from "../format/format.ts";
 import { coordinateAt } from "../layout/position.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Drawing, Rect, SegmentGeometry } from "../scene/scene.ts";
@@ -583,10 +583,9 @@ export class AnnotationData {
     locale: string | undefined,
     pattern?: (format: object, locale: string | undefined, path: string) => Formatter,
   ): Formatter | undefined {
-    const format = this.label?.format as { number?: string; time?: string } | undefined;
+    const format = this.label?.format;
     if (!format) return undefined;
-    if (format.number !== undefined || format.time !== undefined)
-      return pattern?.(format, locale, `${this.#role} label.format`);
+    if (lazyFormat(format)) return pattern?.(format, locale, `${this.#role} label.format`);
     return numberFormatter(format as Intl.NumberFormatOptions, locale);
   }
 

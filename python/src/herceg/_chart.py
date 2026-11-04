@@ -108,7 +108,11 @@ from ._events import (
     viewport_option,
     visibility_option,
 )
+from ._fields import writes
 from ._guides import (
+    _NUMBER_FORMAT,
+    _TIME_FORMAT,
+    FORMS,
     ChannelScale,
     Format,
     GridLines,
@@ -120,6 +124,7 @@ from ._guides import (
     Scale,
     Scope,
     Ticks,
+    _check_format,
     format_spec,
     grid_spec,
     guide_problem,
@@ -489,32 +494,8 @@ def _break(rule: Break | dict[str, Any]) -> dict[str, Any]:
     )
 
 
-#: Intl.NumberFormat options, as herceg's spec reader knows them.
-_NUMBER_FORMAT = frozenset(
-    ("localeMatcher", "numberingSystem", "style", "currency", "currencyDisplay")
-    + ("currencySign", "unit", "unitDisplay", "notation", "compactDisplay", "signDisplay")
-    + ("useGrouping", "minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits")
-    + ("minimumSignificantDigits", "maximumSignificantDigits", "roundingMode")
-    + ("roundingPriority", "roundingIncrement", "trailingZeroDisplay")
-)
-#: Intl.DateTimeFormat options, likewise.
-_TIME_FORMAT = frozenset(
-    ("localeMatcher", "numberingSystem", "calendar", "timeZone", "hour12", "hourCycle")
-    + ("formatMatcher", "dateStyle", "timeStyle", "weekday", "era", "year", "month", "day")
-    + ("dayPeriod", "hour", "minute", "second", "fractionalSecondDigits", "timeZoneName")
-)
-
 #: What only times are written with: a pattern, a fiscal year, or Intl.DateTimeFormat's own options.
 _TIME_ONLY = (_TIME_FORMAT - _NUMBER_FORMAT) | {"time", "fiscal"}
-
-
-def _check_format(format: dict[str, Any] | None, role: str, known: frozenset[str]) -> None:
-    """Refuses Intl options that do not exist, which Intl would silently ignore."""
-    if format is not None and not isinstance(format, Mapping):
-        raise ChartError(f"{role}: expected a dict of Intl options; received {shown(format)}")
-    unknown = [key for key in format or () if key not in known]
-    if unknown:
-        raise ChartError(f"{role}: {shown(unknown[0])} is not an Intl format option")
 
 
 @refuses
@@ -576,9 +557,11 @@ class AxisOptions:
         _seams_spec(self.seams)  # checked as made, before its hints are
         for name in ("format", "tooltip_format"):
             value = getattr(self, name)
-            # Intl options as a dict of their names; patterns are hg.Format.
-            if isinstance(value, dict) and not set(value) & {"number", "time"}:
+            # Intl options as a dict of their names; other forms are hg.Format.
+            if isinstance(value, dict) and not set(value) & FORMS:
                 _check_format(value, f"AxisOptions {name}", _NUMBER_FORMAT | _TIME_FORMAT)
+            elif isinstance(value, dict):
+                format_spec(value, f"AxisOptions {name}")
         scope_spec(self.scope, "AxisOptions scope")
         padding_spec(self.padding, "AxisOptions padding")
         grid_spec(self.grid, "AxisOptions grid")
@@ -718,25 +701,35 @@ class Projection:
 class TooltipField:
     """A column a mark's tooltips show of the row they are at, besides its
     values: ``field`` names it, ``label`` names it in the tooltip (the
-    column's name by default), and ``format`` writes it, as Intl format
-    options (``{"maximumFractionDigits": 0}``, ``{"weekday": "short"}``), as
-    ``AxisOptions.format`` takes them. Without a format, numbers are written as the
-    chart's other numbers, times as the x axis writes them when it is a time
-    axis (else as dates and times), and categories as they are."""
+    column's name by default), and ``format`` writes it, as
+    ``AxisOptions.format`` takes formats: an ``hg.Format``
+    (``hg.Format(binary="B")``) or Intl format options
+    (``{"maximumFractionDigits": 0}``, ``{"weekday": "short"}``), number
+    forms for numbers and time forms for times. Without a format, numbers
+    are written as the chart's other numbers, times as the x axis writes
+    them when it is a time axis (else as dates and times), and categories
+    as they are."""
 
     field: str
     label: str | None = None
-    format: dict[str, Any] | None = None
+    format: Format | dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.field, str):
             raise ChartError(
                 f"TooltipField field: expected a column name; received {shown(self.field)}"
             )
-        _check_format(self.format, "TooltipField format", _NUMBER_FORMAT | _TIME_FORMAT)
+        if isinstance(self.format, dict) and not set(self.format) & FORMS:
+            _check_format(self.format, "TooltipField format", _NUMBER_FORMAT | _TIME_FORMAT)
+        elif self.format is not None:
+            format_spec(self.format, "TooltipField format")
 
     def _spec(self) -> dict[str, Any]:
-        spec = {"field": self.field, "label": self.label, "format": self.format}
+        spec = {
+            "field": self.field,
+            "label": self.label,
+            "format": format_spec(self.format, "TooltipField format"),
+        }
         return {key: value for key, value in spec.items() if value is not None}
 
 
@@ -2185,7 +2178,7 @@ class Chart:
                 "bar labels", lambda: _built(labels, BarLabels, "bar labels")
             )
             pattern = value_labels.format
-            if isinstance(pattern, Mapping) and not {"number", "time"} & set(pattern):
+            if isinstance(pattern, Mapping) and not FORMS & set(pattern):
                 self._option(
                     "bar labels format",
                     lambda: _check_format(dict(pattern), "bar labels format", _NUMBER_FORMAT),
@@ -3106,7 +3099,7 @@ class Chart:
         max: float | None = None,
         bands: Sequence[float | tuple[float, str]] | None = None,
         label: str | None = None,
-        format: dict[str, Any] | None = None,
+        format: Format | dict[str, Any] | None = None,
         tooltip: Tooltip | None = None,
         panel: str | None = None,
         id: str | None = None,
@@ -3118,14 +3111,22 @@ class Chart:
         ``bands`` color ranges of the dial by their upper ends, ascending,
         above ``min`` and at most ``max``: numbers, or ``(to, color)`` pairs.
         Each starts where the previous one ends, the first at ``min``; colors
-        default to the theme's palette. ``format`` takes Intl.NumberFormat
-        options for the value and the dial's ends; ``tooltip=hg.Tooltip(fields=[...])``
+        default to the theme's palette. ``format`` writes the value and the
+        dial's ends: an ``hg.Format`` of numbers (``hg.Format(duration="millisecond")``)
+        or Intl.NumberFormat options; ``tooltip=hg.Tooltip(fields=[...])``
         shows more of the row the needle shows. A gauge has its chart to
         itself; with facets, each panel, the last value of the panel's rows;
         with panels, the one ``panel`` names.
         """
         self._layout_place("gauge")
-        _check_format(format, "gauge format", _NUMBER_FORMAT)
+        written = format_spec(format, "gauge format")
+        if isinstance(format, dict) and not set(format) & FORMS:
+            _check_format(format, "gauge format", _NUMBER_FORMAT)
+        if written is not None and "time" in written:
+            raise ChartError(
+                "gauge format: a gauge writes numbers; give a number format, "
+                'such as hg.Format(number=",.0f")'
+            )
         table = self._mark_table(data)
         self._require(table, value, ("number",), "gauge value")
         low = 0.0 if min is None else min
@@ -3146,7 +3147,7 @@ class Chart:
                 "max": None if max is None else float(max),
                 "bands": _gauge_bands(bands, low, high),
                 "label": label,
-                "format": format,
+                "format": written,
                 "tooltip": self._mark_tooltip(table, tooltip, "gauge"),
                 "panel": panel,
                 "id": id,
@@ -6351,6 +6352,19 @@ class Chart:
             self._require(
                 table, field, ("number", "time", "category"), f"{mark} tooltip fields[{i}]"
             )
+            # A format writes its field's kind: numbers' forms, times', none for categories.
+            kind = self._kind(table, field)
+            if isinstance(entry, dict) and "format" in entry and kind is not None:
+                if kind == "category" or not writes(entry["format"], kind):
+                    fix = {
+                        "category": "formats are for numbers and times; drop format",
+                        "time": "give hg.Format(time=...) or Intl date options",
+                        "number": "give a number format",
+                    }[kind]
+                    raise ChartError(
+                        f"{mark} tooltip fields[{i}] format: {shown(field)} holds "
+                        f"{'categories' if kind == 'category' else kind + 's'}; {fix}"
+                    )
         return spec or None
 
     def _kind(self, table: int, field: str) -> str | None:
@@ -9953,7 +9967,7 @@ def gauge(
     max: float | None = None,
     bands: Sequence[float | tuple[float, str]] | None = None,
     label: str | None = None,
-    format: dict[str, Any] | None = None,
+    format: Format | dict[str, Any] | None = None,
     panel: str | None = None,
     id: str | None = None,
     **options: Unpack[HelperOptions],

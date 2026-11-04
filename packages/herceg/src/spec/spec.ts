@@ -25,11 +25,13 @@ import type {
   StackSpec,
   SymbolName,
 } from "./encoding.ts";
+import type { FieldDisplaysSpec } from "./fields.ts";
 import type {
   FormatSpec,
   GridLinesSpec,
   GuideSpec,
   LegendOptionsSpec,
+  NumberFormatSpec,
   ScalePadding,
   ScalesSpec,
   TicksSpec,
@@ -57,6 +59,7 @@ import type {
 
 export type { Expression, Operator } from "../data/expression.ts";
 export type * from "./encoding.ts";
+export type * from "./fields.ts";
 export type * from "./guides.ts";
 export type * from "./layout.ts";
 export type * from "./place.ts";
@@ -103,6 +106,12 @@ export interface ChartSpec extends StateSpec {
   height?: number;
   /** Tables referenced by marks, by name. */
   data?: Record<string, DataSpec>;
+  /**
+   * How fields are named and their values written, by field name or as
+   * rules applied in order (see `FieldDisplaysSpec`). Specs check them;
+   * charts do not read them yet (docs/guide/fields.md).
+   */
+  fields?: FieldDisplaysSpec;
   marks: readonly MarkSpec[];
   /**
    * The x scale and its axis: the short form of the scale named "x" and the
@@ -1348,17 +1357,18 @@ type SeriesBase = MarkBase & Legended;
 
 /**
  * A field of a row that tooltips show besides the mark's values: its name,
- * or its name with a label (the name by default) and Intl format options,
- * as axes take them. Without a format, numbers are written as the chart's
- * other numbers, times by the x axis' format when x is a time axis (else
- * as dates and times), and categories as they are.
+ * or its name with a label (the name by default) and a format, as axes
+ * take them (number forms for number fields, time forms for times).
+ * Without a format, numbers are written as the chart's other numbers,
+ * times by the x axis' format when x is a time axis (else as dates and
+ * times), and categories as they are.
  */
 export type TooltipField =
   | Field
   | {
       field: Field;
       label?: string;
-      format?: Intl.NumberFormatOptions | Intl.DateTimeFormatOptions;
+      format?: FormatSpec;
     };
 
 /** What a mark's tooltips show of the rows they are at. */
@@ -2336,8 +2346,8 @@ export interface GaugeSpec extends RowTooltip {
   bands?: readonly GaugeBand[];
   /** Text under the value; the field's name by default. */
   label?: string;
-  /** Intl.NumberFormat options for the value and the dial's ends. */
-  format?: Intl.NumberFormatOptions;
+  /** How the value and the dial's ends are written, in any of numbers' forms. */
+  format?: NumberFormatSpec;
   /** With the chart's `panels`, the id of the panel the gauge has to itself. */
   panel?: string;
 }

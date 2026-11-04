@@ -130,6 +130,7 @@ arrows, second x scale (`twiny`), formatter callbacks (write an
 | Maps; 3D; candlesticks | [Maps](../maps.md), [3D](../three-dimensional.md), [Financial](../financial-charts.md) |
 | Facets, subplots, insets | [Layout](../layout.md) |
 | Axes, legends, colorbars | [Axes and legends](../axes-and-legends.md) |
+| Columns' labels, formats, and mappings | [Field displays](../fields.md) |
 | Colors, themes, styles | [Styling](../styling.md) |
 | Zoom, brush, sync, tooltips | [Interaction](../interaction.md) |
 | HTML, SVG, PNG, PDF, web pages | [Output](output.md), [Export](../export.md) |

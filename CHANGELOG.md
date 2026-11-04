@@ -11,7 +11,7 @@ The first release.
 
 - **`herceg`**: the engine, with tables, marks, layouts, interaction,
   rendering, and export; optional parts as subpaths (`herceg/spec`,
-  `herceg/state`, `herceg/pdf`, `herceg/image`, `herceg/fonts`, `herceg/grid`,
+  `herceg/state`, `herceg/fields`, `herceg/pdf`, `herceg/image`, `herceg/fonts`, `herceg/grid`,
   `herceg/web`, ...). See [Getting started](docs/guide/getting-started.md).
 - **`@herceg/react`, `@herceg/vue`, `@herceg/svelte`**: components over the
   same engine. See [React, Vue, and Svelte](docs/guide/frameworks.md).
@@ -24,3 +24,9 @@ and the [capability matrix](docs/capabilities.md), which the package also
 publishes as `herceg/capabilities.json` beside the spec's JSON Schema,
 `herceg/spec.schema.json` (`hg.spec_schema()` in Python), for chart
 editors; what is planned, in the [roadmap](docs/roadmap.md).
+
+Formats write numbers (Intl options, d3-like patterns with text around
+them, durations, SI and binary prefixes) and times (Intl options, strftime
+patterns, fiscal years) on every option that takes one. [Field
+displays](docs/guide/fields.md) name fields and write their values once,
+for every surface: `herceg/fields` and specs read them; charts do not yet.

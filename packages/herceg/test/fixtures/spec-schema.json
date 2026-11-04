@@ -482,7 +482,7 @@
     },
     {
       "id": "ascending",
-      "text": "Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's min and max, a fit box's south and north, a time break's from and to), as do bin edges, thresholds, and a gauge's bands within its range.",
+      "text": "Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.",
       "matches": [
         "expected two finite (numbers|radii), ascending",
         "expected two different numbers",
@@ -492,7 +492,8 @@
         "expected ends above",
         "expected a north above the south",
         "expected a time after from",
-        "an end above the previous band's"
+        "an end above the previous band's",
+        "give from, then to"
       ],
       "witnesses": [
         {

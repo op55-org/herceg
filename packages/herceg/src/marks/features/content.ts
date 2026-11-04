@@ -5,12 +5,7 @@
 
 import type { Table } from "../../data/table.ts";
 import type { Formatter } from "../../format/format.ts";
-import {
-  intlOptions,
-  numberPattern,
-  type TimePattern,
-  timePattern,
-} from "../../format/patterns.ts";
+import { formatWriter } from "../../format/patterns.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { LabelContent, LabelPart, PartStyle } from "../../spec/encoding.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
@@ -67,23 +62,8 @@ export function writeContent(
   value?: Formatter,
 ): ContentWriter {
   const format = (spec: FormatSpec | undefined, at: string, time: boolean): Formatter => {
-    const pattern = spec as { number?: string; time?: string } | undefined;
-    if (pattern?.time !== undefined)
-      return timePattern(kit, pattern as TimePattern, zone, locale, `${at}.format`);
-    if (pattern?.number !== undefined)
-      return numberPattern(kit, pattern as { number: string }, locale, `${at}.format`);
-    // Intl options: a date's for times, in the chart's zone, else a number's.
-    if (spec)
-      return time
-        ? kit.timeFormatter(
-            intlOptions(spec as Intl.DateTimeFormatOptions, `${at}.format`),
-            zone,
-            locale,
-          )
-        : kit.numberFormatter(
-            intlOptions(spec as Intl.NumberFormatOptions, `${at}.format`),
-            locale,
-          );
+    // Intl options write a date for times, in the chart's zone, else a number; other forms as they say.
+    if (spec) return formatWriter(kit, spec, time, zone, locale, `${at}.format`);
     return time ? kit.timeFormatter(TIME, zone, locale) : (v) => kit.formatNumber(v, locale);
   };
   const styles: (PartStyle | undefined)[] = [];

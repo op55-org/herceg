@@ -103,6 +103,7 @@ import { type CompiledFeatures, type FeatureCompiler, needsFeatures } from "./fe
 import {
   type AxesState,
   type CompiledGuides,
+  GUIDE_KIT,
   type GuideCompiler,
   type MarkRoom,
   needsGuides,
@@ -137,6 +138,8 @@ export type ChartConfig = Omit<
   ChartSpec,
   | "marks"
   | "data"
+  // Specs check field displays; charts do not read them yet.
+  | "fields"
   | "width"
   | "height"
   | "version"
@@ -2612,7 +2615,7 @@ export class ChartModel {
       // A layout mark draws its rows in the panel, which has no axes.
       if (item) {
         this.#items ??= new item.mark.views(this);
-        this.#items.fields = this.fields?.(locale, zone, numberFormatter(locale));
+        this.#items.fields = this.fields?.(locale, zone, GUIDE_KIT);
         // Its room is its plot: drawn on the plot's paint, its halos on the plot's fill.
         const paint = styles.plot(i);
         const frame = {
@@ -2803,7 +2806,7 @@ export class ChartModel {
         fields: this.fields?.(
           locale,
           zone,
-          formatNumbers,
+          GUIDE_KIT,
           xContexts[h]!.type === "time" ? formatXOf(h, i) : undefined,
         ),
       });
@@ -3284,7 +3287,7 @@ export class ChartModel {
     this.#floats.clear();
     this.#doubles.clear();
     this.#bytes.clear();
-    items.fields = this.fields?.(locale, this.#config.timeZone ?? "local", numberFormatter(locale));
+    items.fields = this.fields?.(locale, this.#config.timeZone ?? "local", GUIDE_KIT);
     const paint = this.#styles.plot(0);
     const under = plotSurface(paint?.fill);
     const { guides, box, inside } = header;

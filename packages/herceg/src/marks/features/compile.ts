@@ -8,7 +8,7 @@
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import { symbolReach } from "../../draw/symbol-shapes.ts";
-import { numberPattern, type TimePattern, timePattern } from "../../format/patterns.ts";
+import { formatWriter, formed } from "../../format/patterns.ts";
 import { LabelBoxes } from "../../layout/label-boxes.ts";
 import type { PointSink, Polyline } from "../../lod/polyline.ts";
 import { clearDomain } from "../../model/clearance.ts";
@@ -16,6 +16,8 @@ import type {
   CompiledFeatures,
   FeatureCompiler,
   FeatureKit,
+  FormatUser,
+  FormatWrite,
   Identities,
   MarkFeatures,
   PointChannels,
@@ -101,8 +103,13 @@ export function featureCompiler(kit: FeatureKit): FeatureCompiler {
   const trees = treeText(kit);
   return {
     compile: (config, marks, previous, identities) => {
-      // Tree marks draw labels of parts and styles with the compiler's code.
-      for (const mark of config.marks) (mark as Partial<TreeTextUser>).useTreeText?.(trees);
+      // Tree marks draw labels of parts and styles with the compiler's code,
+      // and layout marks write formats it writes (gauges) with its writer.
+      const formats = formatOf(kit, config.timeZone ?? "local");
+      for (const mark of config.marks) {
+        (mark as Partial<TreeTextUser>).useTreeText?.(trees);
+        (mark as Partial<FormatUser>).useFormats?.(formats);
+      }
       return compile(kit, config, marks, previous, identities);
     },
     names: (tables, places, last) => tableNames(kit, tables, places, last),
@@ -1162,17 +1169,13 @@ function positionField(position: unknown): string {
   return coordinate.field ?? (coordinate.fraction ?? coordinate.px)!.field;
 }
 
-/** How marks write values in a pattern format (`{ number }`, `{ time }`). */
-function formatOf(
-  kit: FeatureKit,
-  zone: string,
-): (format: FormatSpec, locale: string | undefined, path: string) => (value: number) => string {
-  return (format, locale, path) => {
-    const pattern = format as { number?: string; time?: string };
-    return pattern.time !== undefined
-      ? timePattern(kit, pattern as TimePattern, zone, locale, path)
-      : numberPattern(kit, pattern as { number: string }, locale, path);
-  };
+/**
+ * How marks write values in a format the compiler writes (a pattern, a
+ * duration, a unit with prefixes): times for a time pattern, numbers
+ * otherwise.
+ */
+function formatOf(kit: FeatureKit, zone: string): FormatWrite {
+  return (format, locale, path) => formatWriter(kit, format, false, zone, locale, path);
 }
 
 /** Bars' looks by series and by row, and their labels' pattern formats. */
@@ -1195,9 +1198,7 @@ function barFeatures(
   const format = formatOf(kit, zone);
   // A pattern refused is refused now, not when the first label is drawn.
   const labels = typeof spec.labels === "object" ? spec.labels : undefined;
-  const pattern = labels?.format as { number?: string; time?: string } | undefined;
-  if (pattern?.number !== undefined || pattern?.time !== undefined)
-    format(labels!.format!, undefined, `${path} labels.format`);
+  if (formed(labels?.format)) format(labels!.format!, undefined, `${path} labels.format`);
   if (labels) checkBarLayout(labels as Record<string, unknown>, `${path} labels`);
   // Labels of parts: a field at the bar's row, its series, its value.
   const content =
@@ -1290,11 +1291,8 @@ function labelFeatures(
     typeof label === "object"
       ? (label as { format?: FormatSpec; content?: LabelContent })
       : undefined;
-  const pattern = own?.format;
-  // A pattern refused is refused now, not when the first label is drawn; Intl options are the chart's.
-  const { number, time } = (pattern ?? {}) as { number?: string; time?: string };
-  if (number !== undefined || time !== undefined)
-    format(pattern!, undefined, `${path} label.format`);
+  // A format refused is refused now, not when the first label is drawn; Intl options are the chart's.
+  if (formed(own?.format)) format(own!.format!, undefined, `${path} label.format`);
   if (own) checkContent(own.content, `${path} label.content`);
   const content =
     own?.content &&

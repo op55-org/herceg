@@ -367,6 +367,9 @@ READ |= {"ItemSelection", "SeriesSelection", "ItemReference", "SeriesReference"}
 READ |= {"PinTarget", "ItemMove", "ItemPosition"}
 # What a clicked item stands for, which click events report.
 READ |= {"Provenance", "ProvenanceSource", "ValueGroup", "IntervalGroup"}
+# Field displays, which charts do not take yet (docs/guide/fields.md); tests/test_fields.py
+# checks what they refuse.
+UNPLACED = {"FieldDisplay", "Match", "Mapping"}
 
 
 # Fields that replace what an object is given above, which are refused together.
@@ -381,6 +384,9 @@ INSTEAD = {
     ("Break", "hours"): {"weekdays"},
     ("Break", "dates"): {"weekdays"},
     ("Format", "time"): {"number"},
+    ("Format", "duration"): {"number"},
+    ("Format", "si"): {"number"},
+    ("Format", "binary"): {"number"},
     ("LegendTarget", "scale"): {"mark", "field"},
     ("Ticks", "values"): {"count"},
 }
@@ -395,7 +401,7 @@ def test_every_object_of_options_has_a_place_above():
         and dataclasses.is_dataclass(kind)
         and any(field.init for field in dataclasses.fields(kind))
     }
-    assert taken - READ - set(SLOTS) == set()
+    assert taken - READ - UNPLACED - set(SLOTS) == set()
 
 
 def test_objects_of_options_above_are_taken_where_they_are_placed():

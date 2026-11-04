@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Herceg chart spec",
-  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's min and max, a fit box's south and north, a time break's from and to), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
+  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
   "$ref": "#/$defs/ChartSpec",
   "$defs": {
     "AggregateOp": {
@@ -787,6 +787,28 @@
         "buffer": { "title": "Buffer", "type": "integer", "minimum": 0 }
       },
       "required": ["type", "dtype", "buffer"],
+      "additionalProperties": false
+    },
+    "BinaryFormat": {
+      "description": "Numbers with binary prefixes, by 1,024s from Ki to Ei, before the unit `binary`: 1572864 with `{ binary: \"B\" }` is \"1.5 MiB\"; values under 1,024 take none. The prefix is chosen after rounding.",
+      "type": "object",
+      "properties": {
+        "binary": {
+          "title": "Binary",
+          "description": "The unit's symbol, written after the prefix.",
+          "type": "string",
+          "examples": ["B", "b"]
+        },
+        "decimals": {
+          "title": "Decimals",
+          "description": "Decimals, kept when zero; by default up to 1, zeros dropped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "fiscal": false
+      },
+      "required": ["binary"],
       "additionalProperties": false
     },
     "BinaryType": {
@@ -1894,6 +1916,11 @@
           "properties": {},
           "additionalProperties": { "$ref": "#/$defs/DataSpec" }
         },
+        "fields": {
+          "title": "Fields",
+          "description": "How fields are named and their values written, by field name or as rules applied in order (see `FieldDisplaysSpec`). Specs check them; charts do not read them yet (docs/guide/fields.md).",
+          "$ref": "#/$defs/FieldDisplaysSpec"
+        },
         "marks": { "title": "Marks", "type": "array", "items": { "$ref": "#/$defs/MarkSpec" } },
         "x": {
           "title": "X",
@@ -2594,6 +2621,11 @@
       "required": ["source", "transform"],
       "additionalProperties": false
     },
+    "DisplayedKind": {
+      "description": "A kind of field displays write: numbers, times, or categories.",
+      "type": "string",
+      "enum": ["number", "time", "category"]
+    },
     "DoubleClickGesture": {
       "description": "A double click on the plot.",
       "type": "object",
@@ -2655,6 +2687,41 @@
           "additionalProperties": false
         }
       ]
+    },
+    "DurationFormat": {
+      "description": "Numbers as lengths of time, in their largest units: 66000 milliseconds is \"1m 6s\", 450 is \"450ms\". Unit symbols are d, h, m, s, ms, µs, and ns; digits are the locale's.",
+      "type": "object",
+      "properties": {
+        "duration": {
+          "title": "Duration",
+          "description": "The unit the values are in.",
+          "$ref": "#/$defs/DurationUnit"
+        },
+        "maxUnits": {
+          "title": "Max units",
+          "description": "At most this many units, the largest first (\"1m 6s\" is two).",
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 7
+        },
+        "decimals": {
+          "title": "Decimals",
+          "description": "Decimals of the last unit, kept when zero.",
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 20
+        },
+        "fiscal": false
+      },
+      "required": ["duration"],
+      "additionalProperties": false
+    },
+    "DurationUnit": {
+      "description": "A unit lengths of time are in. Weeks and longer have no fixed length.",
+      "type": "string",
+      "enum": ["nanosecond", "microsecond", "millisecond", "second", "minute", "hour", "day"]
     },
     "EditBrushAction": {
       "description": "The brush moves with a drag that starts inside it, and resizes with one that starts on its edges or corners; the wheel over it resizes it about the pointer. Elsewhere, later bindings are tried.",
@@ -2836,6 +2903,153 @@
       "description": "Panels by the values of category fields, in order of first appearance, sharing their x and y scales: one field's values wrapped into rows of panels, or a grid with a row per value of `row` and a column per value of `column` (either may be left out). Every mark over a table splits its rows by the fields unless it has `facet: \"repeat\"`; marks without a table repeat.",
       "anyOf": [{ "$ref": "#/$defs/WrappedFacetSpec" }, { "$ref": "#/$defs/GridFacetSpec" }]
     },
+    "FieldDisplay": {
+      "description": "How a field of any kind is named and its values written. Each kind takes what it writes: numbers a number format, bounds, and mappings by value or range; times a time format and mappings by value or range; categories mappings by value or regular expression.",
+      "type": "object",
+      "properties": {
+        "format": {
+          "title": "Format",
+          "description": "How values are written: number forms for numbers, time forms for times.",
+          "anyOf": [{ "$ref": "#/$defs/FormatSpec" }, { "const": false }]
+        },
+        "min": {
+          "title": "Min",
+          "description": "The field's lower bound (numbers): never an axis' domain.",
+          "anyOf": [{ "type": "number" }, { "const": false }]
+        },
+        "max": {
+          "title": "Max",
+          "description": "The field's upper bound (numbers).",
+          "anyOf": [{ "type": "number" }, { "const": false }]
+        },
+        "mappings": {
+          "title": "Mappings",
+          "anyOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/ValueMapping" } },
+            { "const": false }
+          ]
+        },
+        "label": {
+          "title": "Label",
+          "description": "The field's name where surfaces name it; its name by default.",
+          "anyOf": [{ "type": "string" }, { "const": false }]
+        },
+        "description": {
+          "title": "Description",
+          "description": "What the field is, for accessible descriptions.",
+          "anyOf": [{ "type": "string" }, { "const": false }]
+        },
+        "missing": {
+          "title": "Missing",
+          "description": "The text of missing values; \"–\" by default.",
+          "anyOf": [{ "type": "string" }, { "const": false }]
+        },
+        "link": { "title": "Link", "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }] }
+      },
+      "additionalProperties": false
+    },
+    "FieldDisplaysSpec": {
+      "description": "Field displays: by field name, or rules applied in order, a later rule's settings over an earlier one's, setting by setting (`false` resets one). A surface's own option (an axis' `format`) wins over both, for it alone.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": { "$ref": "#/$defs/FieldDisplay" }
+        },
+        { "type": "array", "items": { "$ref": "#/$defs/FieldRuleSpec" } }
+      ]
+    },
+    "FieldLink": {
+      "description": "A link from each value: a URL, constant or made of parts (whose values are written raw and URL-encoded), and its text, made of parts. No surface draws links yet; they are checked, and planned for tooltips, grid cells, and `displayOf`.",
+      "type": "object",
+      "properties": {
+        "url": {
+          "title": "Url",
+          "anyOf": [
+            { "type": "string", "examples": ["https://status.example.com"] },
+            { "type": "array", "items": { "$ref": "#/$defs/LinkPart" } }
+          ]
+        },
+        "text": { "title": "Text", "type": "array", "items": { "$ref": "#/$defs/LinkPart" } }
+      },
+      "required": ["url"],
+      "additionalProperties": false
+    },
+    "FieldMatchSpec": {
+      "description": "Which fields a rule applies to: one by name, or every field that all the given keys hold for: named (`field`), whose name matches `regex` (a JavaScript regular expression, unanchored), of a kind, or of a table the spec's `data` names, and the same fields of tables derived from it that pass them through unchanged.",
+      "anyOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": {
+            "field": {
+              "title": "Field",
+              "anyOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+              ]
+            },
+            "regex": { "title": "Regex", "type": "string", "examples": ["^bytes_"] },
+            "kind": {
+              "title": "Kind",
+              "anyOf": [
+                { "$ref": "#/$defs/DisplayedKind" },
+                { "type": "array", "items": { "$ref": "#/$defs/DisplayedKind" }, "minItems": 1 }
+              ]
+            },
+            "table": { "title": "Table", "type": "string" }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        }
+      ]
+    },
+    "FieldRuleSpec": {
+      "description": "A display and the fields it applies to; every field without `match`.",
+      "type": "object",
+      "properties": {
+        "match": { "title": "Match", "$ref": "#/$defs/FieldMatchSpec" },
+        "label": {
+          "title": "Label",
+          "description": "The field's name where surfaces name it; its name by default.",
+          "anyOf": [{ "type": "string" }, { "const": false }]
+        },
+        "description": {
+          "title": "Description",
+          "description": "What the field is, for accessible descriptions.",
+          "anyOf": [{ "type": "string" }, { "const": false }]
+        },
+        "missing": {
+          "title": "Missing",
+          "description": "The text of missing values; \"–\" by default.",
+          "anyOf": [{ "type": "string" }, { "const": false }]
+        },
+        "link": { "title": "Link", "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }] },
+        "format": {
+          "title": "Format",
+          "description": "How values are written: number forms for numbers, time forms for times.",
+          "anyOf": [{ "$ref": "#/$defs/FormatSpec" }, { "const": false }]
+        },
+        "min": {
+          "title": "Min",
+          "description": "The field's lower bound (numbers): never an axis' domain.",
+          "anyOf": [{ "type": "number" }, { "const": false }]
+        },
+        "max": {
+          "title": "Max",
+          "description": "The field's upper bound (numbers).",
+          "anyOf": [{ "type": "number" }, { "const": false }]
+        },
+        "mappings": {
+          "title": "Mappings",
+          "anyOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/ValueMapping" } },
+            { "const": false }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "FiscalSpec": {
       "description": "A fiscal year: it starts on the first of month `start` (1 to 12) and is named by the year it ends in (\"end\", the default) or starts in. Time patterns write it with %Y, %y, and %q (its quarter); month and year ticks step from its start.",
       "type": "object",
@@ -2847,297 +3061,8 @@
       "additionalProperties": false
     },
     "FormatSpec": {
-      "description": "How values are written: Intl.NumberFormat options (number axes) or Intl.DateTimeFormat options (time axes); `{ number }`, a d3-format pattern such as \",.2f\" or \".1%\"; or `{ time }`, a strftime pattern such as \"%b %d %H:%M\", in the scale's time zone, with years and quarters of a `fiscal` year if given.",
-      "type": "object",
-      "properties": {
-        "localeMatcher": {
-          "title": "Locale matcher",
-          "anyOf": [
-            { "type": "string", "enum": ["lookup", "best fit"] },
-            { "type": "string", "enum": ["best fit", "lookup"] }
-          ]
-        },
-        "style": {
-          "title": "Style",
-          "type": "string",
-          "enum": ["currency", "decimal", "percent", "unit"]
-        },
-        "currency": { "title": "Currency", "type": "string" },
-        "currencyDisplay": {
-          "title": "Currency display",
-          "type": "string",
-          "enum": ["code", "name", "narrowSymbol", "symbol"]
-        },
-        "useGrouping": {
-          "title": "Use grouping",
-          "anyOf": [
-            { "type": "string", "enum": ["always", "auto", "false", "min2", "true"] },
-            { "type": "boolean" }
-          ]
-        },
-        "minimumIntegerDigits": { "title": "Minimum integer digits", "type": "number" },
-        "minimumFractionDigits": { "title": "Minimum fraction digits", "type": "number" },
-        "maximumFractionDigits": { "title": "Maximum fraction digits", "type": "number" },
-        "minimumSignificantDigits": { "title": "Minimum significant digits", "type": "number" },
-        "maximumSignificantDigits": { "title": "Maximum significant digits", "type": "number" },
-        "numberingSystem": { "title": "Numbering system", "type": "string" },
-        "compactDisplay": {
-          "title": "Compact display",
-          "type": "string",
-          "enum": ["short", "long"]
-        },
-        "notation": {
-          "title": "Notation",
-          "type": "string",
-          "enum": ["standard", "scientific", "engineering", "compact"]
-        },
-        "signDisplay": {
-          "title": "Sign display",
-          "type": "string",
-          "enum": ["always", "auto", "exceptZero", "negative", "never"]
-        },
-        "unit": { "title": "Unit", "type": "string" },
-        "unitDisplay": {
-          "title": "Unit display",
-          "type": "string",
-          "enum": ["short", "long", "narrow"]
-        },
-        "currencySign": {
-          "title": "Currency sign",
-          "type": "string",
-          "enum": ["standard", "accounting"]
-        },
-        "roundingPriority": {
-          "title": "Rounding priority",
-          "type": "string",
-          "enum": ["auto", "morePrecision", "lessPrecision"]
-        },
-        "roundingIncrement": {
-          "title": "Rounding increment",
-          "type": "number",
-          "enum": [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000]
-        },
-        "roundingMode": {
-          "title": "Rounding mode",
-          "type": "string",
-          "enum": [
-            "ceil",
-            "floor",
-            "expand",
-            "trunc",
-            "halfCeil",
-            "halfFloor",
-            "halfExpand",
-            "halfTrunc",
-            "halfEven"
-          ]
-        },
-        "trailingZeroDisplay": {
-          "title": "Trailing zero display",
-          "type": "string",
-          "enum": ["auto", "stripIfInteger"]
-        },
-        "fiscal": { "title": "Fiscal", "$ref": "#/$defs/FiscalSpec" },
-        "weekday": { "title": "Weekday", "type": "string", "enum": ["long", "short", "narrow"] },
-        "era": { "title": "Era", "type": "string", "enum": ["long", "short", "narrow"] },
-        "year": { "title": "Year", "type": "string", "enum": ["numeric", "2-digit"] },
-        "month": {
-          "title": "Month",
-          "type": "string",
-          "enum": ["numeric", "2-digit", "long", "short", "narrow"]
-        },
-        "day": { "title": "Day", "type": "string", "enum": ["numeric", "2-digit"] },
-        "hour": { "title": "Hour", "type": "string", "enum": ["numeric", "2-digit"] },
-        "minute": { "title": "Minute", "type": "string", "enum": ["numeric", "2-digit"] },
-        "second": { "title": "Second", "type": "string", "enum": ["numeric", "2-digit"] },
-        "timeZoneName": {
-          "title": "Time zone name",
-          "type": "string",
-          "enum": ["short", "long", "shortOffset", "longOffset", "shortGeneric", "longGeneric"]
-        },
-        "formatMatcher": {
-          "title": "Format matcher",
-          "type": "string",
-          "enum": ["best fit", "basic"]
-        },
-        "hour12": { "title": "Hour12", "type": "boolean" },
-        "timeZone": { "title": "Time zone", "type": "string" },
-        "calendar": { "title": "Calendar", "type": "string" },
-        "dayPeriod": {
-          "title": "Day period",
-          "type": "string",
-          "enum": ["narrow", "short", "long"]
-        },
-        "dateStyle": {
-          "title": "Date style",
-          "type": "string",
-          "enum": ["full", "long", "medium", "short"]
-        },
-        "timeStyle": {
-          "title": "Time style",
-          "type": "string",
-          "enum": ["full", "long", "medium", "short"]
-        },
-        "hourCycle": {
-          "title": "Hour cycle",
-          "type": "string",
-          "enum": ["h11", "h12", "h23", "h24"]
-        },
-        "fractionalSecondDigits": {
-          "title": "Fractional second digits",
-          "type": "number",
-          "enum": [1, 2, 3]
-        },
-        "number": { "title": "Number", "type": "string", "examples": [",.2f", ".1%", "~s"] },
-        "time": { "title": "Time", "type": "string", "examples": ["%b %d %H:%M", "%Y-%m-%d"] }
-      },
-      "anyOf": [
-        {
-          "properties": {
-            "localeMatcher": { "type": "string", "enum": ["lookup", "best fit"] },
-            "fiscal": false,
-            "weekday": false,
-            "era": false,
-            "year": false,
-            "month": false,
-            "day": false,
-            "hour": false,
-            "minute": false,
-            "second": false,
-            "timeZoneName": false,
-            "formatMatcher": false,
-            "hour12": false,
-            "timeZone": false,
-            "calendar": false,
-            "dayPeriod": false,
-            "dateStyle": false,
-            "timeStyle": false,
-            "hourCycle": false,
-            "fractionalSecondDigits": false,
-            "number": false,
-            "time": false
-          }
-        },
-        {
-          "properties": {
-            "localeMatcher": { "type": "string", "enum": ["best fit", "lookup"] },
-            "style": false,
-            "currency": false,
-            "currencyDisplay": false,
-            "useGrouping": false,
-            "minimumIntegerDigits": false,
-            "minimumFractionDigits": false,
-            "maximumFractionDigits": false,
-            "minimumSignificantDigits": false,
-            "maximumSignificantDigits": false,
-            "compactDisplay": false,
-            "notation": false,
-            "signDisplay": false,
-            "unit": false,
-            "unitDisplay": false,
-            "currencySign": false,
-            "roundingPriority": false,
-            "roundingIncrement": false,
-            "roundingMode": false,
-            "trailingZeroDisplay": false,
-            "fiscal": false,
-            "number": false,
-            "time": false
-          }
-        },
-        {
-          "required": ["number"],
-          "properties": {
-            "localeMatcher": false,
-            "style": false,
-            "currency": false,
-            "currencyDisplay": false,
-            "useGrouping": false,
-            "minimumIntegerDigits": false,
-            "minimumFractionDigits": false,
-            "maximumFractionDigits": false,
-            "minimumSignificantDigits": false,
-            "maximumSignificantDigits": false,
-            "numberingSystem": false,
-            "compactDisplay": false,
-            "notation": false,
-            "signDisplay": false,
-            "unit": false,
-            "unitDisplay": false,
-            "currencySign": false,
-            "roundingPriority": false,
-            "roundingIncrement": false,
-            "roundingMode": false,
-            "trailingZeroDisplay": false,
-            "fiscal": false,
-            "weekday": false,
-            "era": false,
-            "year": false,
-            "month": false,
-            "day": false,
-            "hour": false,
-            "minute": false,
-            "second": false,
-            "timeZoneName": false,
-            "formatMatcher": false,
-            "hour12": false,
-            "timeZone": false,
-            "calendar": false,
-            "dayPeriod": false,
-            "dateStyle": false,
-            "timeStyle": false,
-            "hourCycle": false,
-            "fractionalSecondDigits": false,
-            "time": false
-          }
-        },
-        {
-          "required": ["time"],
-          "properties": {
-            "localeMatcher": false,
-            "style": false,
-            "currency": false,
-            "currencyDisplay": false,
-            "useGrouping": false,
-            "minimumIntegerDigits": false,
-            "minimumFractionDigits": false,
-            "maximumFractionDigits": false,
-            "minimumSignificantDigits": false,
-            "maximumSignificantDigits": false,
-            "numberingSystem": false,
-            "compactDisplay": false,
-            "notation": false,
-            "signDisplay": false,
-            "unit": false,
-            "unitDisplay": false,
-            "currencySign": false,
-            "roundingPriority": false,
-            "roundingIncrement": false,
-            "roundingMode": false,
-            "trailingZeroDisplay": false,
-            "weekday": false,
-            "era": false,
-            "year": false,
-            "month": false,
-            "day": false,
-            "hour": false,
-            "minute": false,
-            "second": false,
-            "timeZoneName": false,
-            "formatMatcher": false,
-            "hour12": false,
-            "timeZone": false,
-            "calendar": false,
-            "dayPeriod": false,
-            "dateStyle": false,
-            "timeStyle": false,
-            "hourCycle": false,
-            "fractionalSecondDigits": false,
-            "number": false
-          }
-        }
-      ],
-      "additionalProperties": false
+      "description": "How values are written: numbers as `NumberFormatSpec` says (Intl options, a d3-format pattern such as \",.2f\" or \".1%\", a duration, or a unit with SI or binary prefixes), times as `TimeFormatSpec` says (Intl date options, or a strftime pattern such as \"%b %d %H:%M\"). The forms are told apart by their keys (`number`, `time`, `duration`, `si`, `binary`); a format gives one of them, or Intl options.",
+      "anyOf": [{ "$ref": "#/$defs/NumberFormatSpec" }, { "$ref": "#/$defs/TimeFormatSpec" }]
     },
     "Frame": {
       "description": "The boxes `fraction` and `px` coordinates are measured in: a panel's plot, or the whole chart.",
@@ -3251,96 +3176,8 @@
         },
         "format": {
           "title": "Format",
-          "description": "Intl.NumberFormat options for the value and the dial's ends.",
-          "type": "object",
-          "properties": {
-            "localeMatcher": {
-              "title": "Locale matcher",
-              "type": "string",
-              "enum": ["lookup", "best fit"]
-            },
-            "style": {
-              "title": "Style",
-              "type": "string",
-              "enum": ["currency", "decimal", "percent", "unit"]
-            },
-            "currency": { "title": "Currency", "type": "string" },
-            "currencyDisplay": {
-              "title": "Currency display",
-              "type": "string",
-              "enum": ["code", "name", "narrowSymbol", "symbol"]
-            },
-            "useGrouping": {
-              "title": "Use grouping",
-              "anyOf": [
-                { "type": "string", "enum": ["always", "auto", "false", "min2", "true"] },
-                { "type": "boolean" }
-              ]
-            },
-            "minimumIntegerDigits": { "title": "Minimum integer digits", "type": "number" },
-            "minimumFractionDigits": { "title": "Minimum fraction digits", "type": "number" },
-            "maximumFractionDigits": { "title": "Maximum fraction digits", "type": "number" },
-            "minimumSignificantDigits": { "title": "Minimum significant digits", "type": "number" },
-            "maximumSignificantDigits": { "title": "Maximum significant digits", "type": "number" },
-            "numberingSystem": { "title": "Numbering system", "type": "string" },
-            "compactDisplay": {
-              "title": "Compact display",
-              "type": "string",
-              "enum": ["short", "long"]
-            },
-            "notation": {
-              "title": "Notation",
-              "type": "string",
-              "enum": ["standard", "scientific", "engineering", "compact"]
-            },
-            "signDisplay": {
-              "title": "Sign display",
-              "type": "string",
-              "enum": ["always", "auto", "exceptZero", "negative", "never"]
-            },
-            "unit": { "title": "Unit", "type": "string" },
-            "unitDisplay": {
-              "title": "Unit display",
-              "type": "string",
-              "enum": ["short", "long", "narrow"]
-            },
-            "currencySign": {
-              "title": "Currency sign",
-              "type": "string",
-              "enum": ["standard", "accounting"]
-            },
-            "roundingPriority": {
-              "title": "Rounding priority",
-              "type": "string",
-              "enum": ["auto", "morePrecision", "lessPrecision"]
-            },
-            "roundingIncrement": {
-              "title": "Rounding increment",
-              "type": "number",
-              "enum": [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000]
-            },
-            "roundingMode": {
-              "title": "Rounding mode",
-              "type": "string",
-              "enum": [
-                "ceil",
-                "floor",
-                "expand",
-                "trunc",
-                "halfCeil",
-                "halfFloor",
-                "halfExpand",
-                "halfTrunc",
-                "halfEven"
-              ]
-            },
-            "trailingZeroDisplay": {
-              "title": "Trailing zero display",
-              "type": "string",
-              "enum": ["auto", "stripIfInteger"]
-            }
-          },
-          "additionalProperties": false
+          "description": "How the value and the dial's ends are written, in any of numbers' forms.",
+          "$ref": "#/$defs/NumberFormatSpec"
         },
         "panel": {
           "title": "Panel",
@@ -5338,6 +5175,24 @@
       "required": ["type", "x", "y"],
       "additionalProperties": false
     },
+    "LinkPart": {
+      "description": "A part of a link: literal text, a field of the row, or the field's own value.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "value": { "title": "Value", "const": true }
+          },
+          "anyOf": [
+            { "required": ["field"], "properties": { "value": false } },
+            { "required": ["value"], "properties": { "field": false } }
+          ],
+          "additionalProperties": false
+        },
+        { "type": "string" }
+      ]
+    },
     "LonLat": {
       "description": "A longitude and a latitude in degrees: longitudes within a turn and a half of the meridian (shapes may cross the antimeridian), latitudes from pole to pole.",
       "type": "array",
@@ -5514,6 +5369,124 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    },
+    "NumberFormatSpec": {
+      "description": "How numbers are written: Intl.NumberFormat options; `{ number }`, a d3-format pattern; `{ duration }`, lengths of time; or `{ si }` and `{ binary }`, a unit after a prefix.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "localeMatcher": {
+              "title": "Locale matcher",
+              "type": "string",
+              "enum": ["lookup", "best fit"]
+            },
+            "style": {
+              "title": "Style",
+              "type": "string",
+              "enum": ["currency", "decimal", "percent", "unit"]
+            },
+            "currency": { "title": "Currency", "type": "string" },
+            "currencyDisplay": {
+              "title": "Currency display",
+              "type": "string",
+              "enum": ["code", "name", "narrowSymbol", "symbol"]
+            },
+            "useGrouping": {
+              "title": "Use grouping",
+              "anyOf": [
+                { "type": "string", "enum": ["always", "auto", "false", "min2", "true"] },
+                { "type": "boolean" }
+              ]
+            },
+            "minimumIntegerDigits": { "title": "Minimum integer digits", "type": "number" },
+            "minimumFractionDigits": { "title": "Minimum fraction digits", "type": "number" },
+            "maximumFractionDigits": { "title": "Maximum fraction digits", "type": "number" },
+            "minimumSignificantDigits": { "title": "Minimum significant digits", "type": "number" },
+            "maximumSignificantDigits": { "title": "Maximum significant digits", "type": "number" },
+            "numberingSystem": { "title": "Numbering system", "type": "string" },
+            "compactDisplay": {
+              "title": "Compact display",
+              "type": "string",
+              "enum": ["short", "long"]
+            },
+            "notation": {
+              "title": "Notation",
+              "type": "string",
+              "enum": ["standard", "scientific", "engineering", "compact"]
+            },
+            "signDisplay": {
+              "title": "Sign display",
+              "type": "string",
+              "enum": ["always", "auto", "exceptZero", "negative", "never"]
+            },
+            "unit": { "title": "Unit", "type": "string" },
+            "unitDisplay": {
+              "title": "Unit display",
+              "type": "string",
+              "enum": ["short", "long", "narrow"]
+            },
+            "currencySign": {
+              "title": "Currency sign",
+              "type": "string",
+              "enum": ["standard", "accounting"]
+            },
+            "roundingPriority": {
+              "title": "Rounding priority",
+              "type": "string",
+              "enum": ["auto", "morePrecision", "lessPrecision"]
+            },
+            "roundingIncrement": {
+              "title": "Rounding increment",
+              "type": "number",
+              "enum": [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000]
+            },
+            "roundingMode": {
+              "title": "Rounding mode",
+              "type": "string",
+              "enum": [
+                "ceil",
+                "floor",
+                "expand",
+                "trunc",
+                "halfCeil",
+                "halfFloor",
+                "halfExpand",
+                "halfTrunc",
+                "halfEven"
+              ]
+            },
+            "trailingZeroDisplay": {
+              "title": "Trailing zero display",
+              "type": "string",
+              "enum": ["auto", "stripIfInteger"]
+            },
+            "fiscal": false
+          },
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/NumberPatternFormat" },
+        { "$ref": "#/$defs/DurationFormat" },
+        { "$ref": "#/$defs/SiFormat" },
+        { "$ref": "#/$defs/BinaryFormat" }
+      ]
+    },
+    "NumberPatternFormat": {
+      "description": "A d3-format pattern, with text before and after it: 1234 with `{ number: \".3~s\", suffix: \" req/s\" }` is \"1.23k req/s\".",
+      "type": "object",
+      "properties": {
+        "number": { "title": "Number", "type": "string", "examples": [",.2f", ".1%", "~s"] },
+        "prefix": { "title": "Prefix", "description": "Text before the number.", "type": "string" },
+        "suffix": {
+          "title": "Suffix",
+          "description": "Text after the number.",
+          "type": "string",
+          "examples": [" req/s", "%"]
+        },
+        "fiscal": false
+      },
+      "required": ["number"],
       "additionalProperties": false
     },
     "Operator": {
@@ -7267,6 +7240,28 @@
       },
       "additionalProperties": false
     },
+    "SiFormat": {
+      "description": "Numbers with SI prefixes, by thousands from n to E, before the unit `si`: 1500000 with `{ si: \"B\" }` is \"1.5 MB\", 0.45 with `{ si: \"W\" }` \"450 mW\". The prefix is chosen after rounding; values are in the unit already.",
+      "type": "object",
+      "properties": {
+        "si": {
+          "title": "Si",
+          "description": "The unit's symbol, written after the prefix.",
+          "type": "string",
+          "examples": ["B", "b/s", "W", "Hz"]
+        },
+        "decimals": {
+          "title": "Decimals",
+          "description": "Decimals, kept when zero; by default up to 1, zeros dropped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "fiscal": false
+      },
+      "required": ["si"],
+      "additionalProperties": false
+    },
     "Side": {
       "description": "A side of the chart or of a panel's plot.",
       "type": "string",
@@ -8279,6 +8274,79 @@
       "required": ["type", "values"],
       "additionalProperties": false
     },
+    "TimeFormatSpec": {
+      "description": "How times are written: Intl.DateTimeFormat options, or `{ time }`, a strftime pattern.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "localeMatcher": {
+              "title": "Locale matcher",
+              "type": "string",
+              "enum": ["best fit", "lookup"]
+            },
+            "weekday": {
+              "title": "Weekday",
+              "type": "string",
+              "enum": ["long", "short", "narrow"]
+            },
+            "era": { "title": "Era", "type": "string", "enum": ["long", "short", "narrow"] },
+            "year": { "title": "Year", "type": "string", "enum": ["numeric", "2-digit"] },
+            "month": {
+              "title": "Month",
+              "type": "string",
+              "enum": ["numeric", "2-digit", "long", "short", "narrow"]
+            },
+            "day": { "title": "Day", "type": "string", "enum": ["numeric", "2-digit"] },
+            "hour": { "title": "Hour", "type": "string", "enum": ["numeric", "2-digit"] },
+            "minute": { "title": "Minute", "type": "string", "enum": ["numeric", "2-digit"] },
+            "second": { "title": "Second", "type": "string", "enum": ["numeric", "2-digit"] },
+            "timeZoneName": {
+              "title": "Time zone name",
+              "type": "string",
+              "enum": ["short", "long", "shortOffset", "longOffset", "shortGeneric", "longGeneric"]
+            },
+            "formatMatcher": {
+              "title": "Format matcher",
+              "type": "string",
+              "enum": ["best fit", "basic"]
+            },
+            "hour12": { "title": "Hour12", "type": "boolean" },
+            "timeZone": { "title": "Time zone", "type": "string" },
+            "calendar": { "title": "Calendar", "type": "string" },
+            "dayPeriod": {
+              "title": "Day period",
+              "type": "string",
+              "enum": ["narrow", "short", "long"]
+            },
+            "numberingSystem": { "title": "Numbering system", "type": "string" },
+            "dateStyle": {
+              "title": "Date style",
+              "type": "string",
+              "enum": ["full", "long", "medium", "short"]
+            },
+            "timeStyle": {
+              "title": "Time style",
+              "type": "string",
+              "enum": ["full", "long", "medium", "short"]
+            },
+            "hourCycle": {
+              "title": "Hour cycle",
+              "type": "string",
+              "enum": ["h11", "h12", "h23", "h24"]
+            },
+            "fractionalSecondDigits": {
+              "title": "Fractional second digits",
+              "type": "number",
+              "enum": [1, 2, 3]
+            },
+            "fiscal": false
+          },
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/TimePatternFormat" }
+      ]
+    },
     "TimeInterval": {
       "description": "The time between ticks on a time axis: calendar steps in the scale's time zone, written as a unit (\"day\"), a count and a unit (\"6 hours\"), or `{ unit, step }`; or elapsed time, `{ milliseconds }`, which keeps the same length across daylight saving changes.",
       "anyOf": [
@@ -8297,6 +8365,16 @@
         },
         { "type": "string", "examples": ["month", "6 hours", "15 minutes"] }
       ]
+    },
+    "TimePatternFormat": {
+      "description": "A strftime pattern, in the scale's time zone, with years and quarters of a `fiscal` year if given.",
+      "type": "object",
+      "properties": {
+        "time": { "title": "Time", "type": "string", "examples": ["%b %d %H:%M", "%Y-%m-%d"] },
+        "fiscal": { "title": "Fiscal", "$ref": "#/$defs/FiscalSpec" }
+      },
+      "required": ["time"],
+      "additionalProperties": false
     },
     "TimeUnit": {
       "description": "A calendar unit of time, as time axes step through it in their time zone.",
@@ -8328,7 +8406,7 @@
       "additionalProperties": false
     },
     "TooltipField": {
-      "description": "A field of a row that tooltips show besides the mark's values: its name, or its name with a label (the name by default) and Intl format options, as axes take them. Without a format, numbers are written as the chart's other numbers, times by the x axis' format when x is a time axis (else as dates and times), and categories as they are.",
+      "description": "A field of a row that tooltips show besides the mark's values: its name, or its name with a label (the name by default) and a format, as axes take them (number forms for number fields, time forms for times). Without a format, numbers are written as the chart's other numbers, times by the x axis' format when x is a time axis (else as dates and times), and categories as they are.",
       "anyOf": [
         { "type": "string" },
         {
@@ -8336,216 +8414,7 @@
           "properties": {
             "field": { "title": "Field", "type": "string" },
             "label": { "title": "Label", "type": "string" },
-            "format": {
-              "title": "Format",
-              "type": "object",
-              "properties": {
-                "localeMatcher": {
-                  "title": "Locale matcher",
-                  "anyOf": [
-                    { "type": "string", "enum": ["lookup", "best fit"] },
-                    { "type": "string", "enum": ["best fit", "lookup"] }
-                  ]
-                },
-                "style": {
-                  "title": "Style",
-                  "type": "string",
-                  "enum": ["currency", "decimal", "percent", "unit"]
-                },
-                "currency": { "title": "Currency", "type": "string" },
-                "currencyDisplay": {
-                  "title": "Currency display",
-                  "type": "string",
-                  "enum": ["code", "name", "narrowSymbol", "symbol"]
-                },
-                "useGrouping": {
-                  "title": "Use grouping",
-                  "anyOf": [
-                    { "type": "string", "enum": ["always", "auto", "false", "min2", "true"] },
-                    { "type": "boolean" }
-                  ]
-                },
-                "minimumIntegerDigits": { "title": "Minimum integer digits", "type": "number" },
-                "minimumFractionDigits": { "title": "Minimum fraction digits", "type": "number" },
-                "maximumFractionDigits": { "title": "Maximum fraction digits", "type": "number" },
-                "minimumSignificantDigits": {
-                  "title": "Minimum significant digits",
-                  "type": "number"
-                },
-                "maximumSignificantDigits": {
-                  "title": "Maximum significant digits",
-                  "type": "number"
-                },
-                "numberingSystem": { "title": "Numbering system", "type": "string" },
-                "compactDisplay": {
-                  "title": "Compact display",
-                  "type": "string",
-                  "enum": ["short", "long"]
-                },
-                "notation": {
-                  "title": "Notation",
-                  "type": "string",
-                  "enum": ["standard", "scientific", "engineering", "compact"]
-                },
-                "signDisplay": {
-                  "title": "Sign display",
-                  "type": "string",
-                  "enum": ["always", "auto", "exceptZero", "negative", "never"]
-                },
-                "unit": { "title": "Unit", "type": "string" },
-                "unitDisplay": {
-                  "title": "Unit display",
-                  "type": "string",
-                  "enum": ["short", "long", "narrow"]
-                },
-                "currencySign": {
-                  "title": "Currency sign",
-                  "type": "string",
-                  "enum": ["standard", "accounting"]
-                },
-                "roundingPriority": {
-                  "title": "Rounding priority",
-                  "type": "string",
-                  "enum": ["auto", "morePrecision", "lessPrecision"]
-                },
-                "roundingIncrement": {
-                  "title": "Rounding increment",
-                  "type": "number",
-                  "enum": [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000]
-                },
-                "roundingMode": {
-                  "title": "Rounding mode",
-                  "type": "string",
-                  "enum": [
-                    "ceil",
-                    "floor",
-                    "expand",
-                    "trunc",
-                    "halfCeil",
-                    "halfFloor",
-                    "halfExpand",
-                    "halfTrunc",
-                    "halfEven"
-                  ]
-                },
-                "trailingZeroDisplay": {
-                  "title": "Trailing zero display",
-                  "type": "string",
-                  "enum": ["auto", "stripIfInteger"]
-                },
-                "weekday": {
-                  "title": "Weekday",
-                  "type": "string",
-                  "enum": ["long", "short", "narrow"]
-                },
-                "era": { "title": "Era", "type": "string", "enum": ["long", "short", "narrow"] },
-                "year": { "title": "Year", "type": "string", "enum": ["numeric", "2-digit"] },
-                "month": {
-                  "title": "Month",
-                  "type": "string",
-                  "enum": ["numeric", "2-digit", "long", "short", "narrow"]
-                },
-                "day": { "title": "Day", "type": "string", "enum": ["numeric", "2-digit"] },
-                "hour": { "title": "Hour", "type": "string", "enum": ["numeric", "2-digit"] },
-                "minute": { "title": "Minute", "type": "string", "enum": ["numeric", "2-digit"] },
-                "second": { "title": "Second", "type": "string", "enum": ["numeric", "2-digit"] },
-                "timeZoneName": {
-                  "title": "Time zone name",
-                  "type": "string",
-                  "enum": [
-                    "short",
-                    "long",
-                    "shortOffset",
-                    "longOffset",
-                    "shortGeneric",
-                    "longGeneric"
-                  ]
-                },
-                "formatMatcher": {
-                  "title": "Format matcher",
-                  "type": "string",
-                  "enum": ["best fit", "basic"]
-                },
-                "hour12": { "title": "Hour12", "type": "boolean" },
-                "timeZone": { "title": "Time zone", "type": "string" },
-                "calendar": { "title": "Calendar", "type": "string" },
-                "dayPeriod": {
-                  "title": "Day period",
-                  "type": "string",
-                  "enum": ["narrow", "short", "long"]
-                },
-                "dateStyle": {
-                  "title": "Date style",
-                  "type": "string",
-                  "enum": ["full", "long", "medium", "short"]
-                },
-                "timeStyle": {
-                  "title": "Time style",
-                  "type": "string",
-                  "enum": ["full", "long", "medium", "short"]
-                },
-                "hourCycle": {
-                  "title": "Hour cycle",
-                  "type": "string",
-                  "enum": ["h11", "h12", "h23", "h24"]
-                },
-                "fractionalSecondDigits": {
-                  "title": "Fractional second digits",
-                  "type": "number",
-                  "enum": [1, 2, 3]
-                }
-              },
-              "anyOf": [
-                {
-                  "properties": {
-                    "localeMatcher": { "type": "string", "enum": ["lookup", "best fit"] },
-                    "weekday": false,
-                    "era": false,
-                    "year": false,
-                    "month": false,
-                    "day": false,
-                    "hour": false,
-                    "minute": false,
-                    "second": false,
-                    "timeZoneName": false,
-                    "formatMatcher": false,
-                    "hour12": false,
-                    "timeZone": false,
-                    "calendar": false,
-                    "dayPeriod": false,
-                    "dateStyle": false,
-                    "timeStyle": false,
-                    "hourCycle": false,
-                    "fractionalSecondDigits": false
-                  }
-                },
-                {
-                  "properties": {
-                    "localeMatcher": { "type": "string", "enum": ["best fit", "lookup"] },
-                    "style": false,
-                    "currency": false,
-                    "currencyDisplay": false,
-                    "useGrouping": false,
-                    "minimumIntegerDigits": false,
-                    "minimumFractionDigits": false,
-                    "maximumFractionDigits": false,
-                    "minimumSignificantDigits": false,
-                    "maximumSignificantDigits": false,
-                    "compactDisplay": false,
-                    "notation": false,
-                    "signDisplay": false,
-                    "unit": false,
-                    "unitDisplay": false,
-                    "currencySign": false,
-                    "roundingPriority": false,
-                    "roundingIncrement": false,
-                    "roundingMode": false,
-                    "trailingZeroDisplay": false
-                  }
-                }
-              ],
-              "additionalProperties": false
-            }
+            "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" }
           },
           "required": ["field"],
           "additionalProperties": false
@@ -8833,6 +8702,32 @@
       "anyOf": [
         { "required": ["type", "path"], "properties": { "node": false, "parent": false } },
         { "required": ["type", "node", "parent"], "properties": { "path": false } }
+      ],
+      "additionalProperties": false
+    },
+    "ValueMapping": {
+      "description": "Values shown as `text`, matched by one value (a category, a number, or a time in epoch milliseconds), by a range of numbers or times (`between`, both ends included, null for an open end), or, for categories, by a regular expression (`regex`; `$1`, `$2` in `text` write its groups). The first mapping that matches a value applies.",
+      "type": "object",
+      "properties": {
+        "value": { "title": "Value", "anyOf": [{ "type": "number" }, { "type": "string" }] },
+        "text": { "title": "Text", "type": "string" },
+        "between": {
+          "title": "Between",
+          "type": "array",
+          "prefixItems": [
+            { "anyOf": [{ "type": "null" }, { "type": "number" }] },
+            { "anyOf": [{ "type": "null" }, { "type": "number" }] }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "regex": { "title": "Regex", "type": "string", "examples": ["^5(\\d\\d)$"] }
+      },
+      "anyOf": [
+        { "required": ["value", "text"], "properties": { "between": false, "regex": false } },
+        { "required": ["between", "text"], "properties": { "value": false, "regex": false } },
+        { "required": ["regex", "text"], "properties": { "value": false, "between": false } }
       ],
       "additionalProperties": false
     },

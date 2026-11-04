@@ -4,7 +4,7 @@
 // legends and colorbars. A live chart loads it before drawing such a
 // configuration; static output imports it.
 
-import { intlOptions } from "../format/patterns.ts";
+import { formed, intlOptions } from "../format/patterns.ts";
 import type { AxisContext } from "../model/axis.ts";
 import type { CompiledGuides, GuideCompiler, GuideKit } from "../model/guides.ts";
 import type { ChartConfig } from "../model/model.ts";
@@ -279,7 +279,7 @@ function scalePath(name: string): string {
   return /^[A-Za-z_$][\w$]*$/.test(name) ? `scales.${name}` : `scales[${JSON.stringify(name)}]`;
 }
 
-/** A format only the compiler writes: a pattern or a function. */
+/** A format only the compiler writes: a function, a pattern, a duration, or a unit with prefixes. */
 function planned(format: Format | undefined): boolean {
-  return typeof format === "function" || (!!format && ("number" in format || "time" in format));
+  return typeof format === "function" || formed(format);
 }

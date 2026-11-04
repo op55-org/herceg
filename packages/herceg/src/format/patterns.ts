@@ -3,12 +3,95 @@
 // strftime (`{ time: "%b %d %H:%M" }`). Digits, separators, and names are
 // the chart locale's, written with Intl; times are written in the scale's
 // time zone. The patterns used last are kept compiled. They write with the
-// chart's formatters and zone arithmetic, handed in (see `GuideKit`).
+// chart's formatters and zone arithmetic, handed in (see `GuideKit`), as
+// every form `formatWriter` tells apart does.
 
-import type { GuideKit } from "../model/guides.ts";
-import type { FiscalSpec } from "../spec/guides.ts";
-import type { Formatter } from "./format.ts";
+import type { FiscalSpec, NumberPatternFormat } from "../spec/guides.ts";
+import type { Formatter, NumberFormat, TimeFormat } from "./format.ts";
+import { minusSign, type UnitFormat, unitWriter } from "./units.ts";
 import type { TimeZone } from "./zone.ts";
+
+/**
+ * What format writers use of the chart's code, handed in (see `GuideKit`):
+ * its kept Intl formatters and its time zone arithmetic.
+ */
+export interface FormatKit {
+  numberFormatter(options: NumberFormat, locale?: string): Formatter;
+  timeFormatter(options: TimeFormat, zone: TimeZone, locale?: string): Formatter;
+  toWall(zone: TimeZone, t: number): number;
+}
+
+/** The keys that tell formats' forms apart; a format without one is Intl options. */
+const FORMS = ["number", "time", "duration", "si", "binary"] as const;
+export type FormName = (typeof FORMS)[number] | "intl";
+
+/** Whether `format` gives a form's key, being a pattern, a duration, or a unit, not Intl options. */
+export function formed(format: object | undefined): boolean {
+  return FORMS.some((key) => (format as Record<string, unknown> | undefined)?.[key] !== undefined);
+}
+
+/** Settings of some forms only, the forms that take each, and the correction for others. */
+const OWN: readonly [key: string, forms: readonly FormName[], fix: string][] = [
+  ["maxUnits", ["duration"], "describes durations; give duration, or drop maxUnits"],
+  [
+    "decimals",
+    ["duration", "si", "binary"],
+    'goes with duration, si, or binary; a number pattern gives its precision (".2f"), Intl options maximumFractionDigits',
+  ],
+  [
+    "prefix",
+    ["number"],
+    'text around numbers goes with a number pattern; give { number: ",.0f", prefix }',
+  ],
+  [
+    "suffix",
+    ["number"],
+    'text around numbers goes with a number pattern; give { number: ",.0f", suffix }',
+  ],
+];
+
+/**
+ * Which form `format` is: the one of `FORMS` whose key it gives, or Intl
+ * options. Throws, naming its path `at`, for a format of two forms and for
+ * another form's settings (`maxUnits` beside `si`).
+ */
+export function formOf(format: object, at: string): FormName {
+  const settings = format as Record<string, unknown>;
+  const given = FORMS.filter((key) => settings[key] !== undefined);
+  if (given.length > 1)
+    throw new Error(
+      `${at}: give one of number, time, duration, si, binary, or Intl options; received ${given.join(" and ")}`,
+    );
+  const form = given[0] ?? "intl";
+  for (const [key, forms, fix] of OWN)
+    if (settings[key] !== undefined && !forms.includes(form))
+      throw new Error(`${at}.${key}: ${fix}`);
+  return form;
+}
+
+/**
+ * Writes values as `format` says, in any of its forms: Intl options
+ * (dates' where `time`, numbers' otherwise), a number or time pattern, a
+ * duration, or a unit after a prefix. Throws, naming its path `at`, as
+ * `formOf` and each form's writer do.
+ */
+export function formatWriter(
+  kit: FormatKit,
+  format: object,
+  time: boolean,
+  zone: TimeZone,
+  locale: string | undefined,
+  at: string,
+): Formatter {
+  const form = formOf(format, at);
+  if (form === "number") return numberPattern(kit, format as NumberPatternFormat, locale, at);
+  if (form === "time") return timePattern(kit, format as TimePattern, zone, locale, at);
+  if (form === "intl")
+    return time
+      ? kit.timeFormatter(intlOptions(format, at), zone, locale)
+      : kit.numberFormatter(intlOptions(format, at), locale);
+  return unitWriter(kit, format as UnitFormat, locale, at).value;
+}
 
 /** How many compiled patterns are kept: the ones used last, as a page's charts use a few. */
 const KEPT = 64;
@@ -53,20 +136,28 @@ const PREFIXES = [
  * thousands, ".precision", "~" to trim trailing zeros, and a type: d
  * (whole numbers), f (fixed decimals), e (exponent), g (significant
  * digits), s (significant digits with an SI prefix), % (percent), or none
- * (as "~g" with 12 digits). Throws, naming the format's path `at`, for
- * other patterns, and for a fiscal year, which numbers have none.
+ * (as "~g" with 12 digits); with the format's `prefix` before and `suffix`
+ * after finite numbers, inside their sign ("-$5", "($5)"). Throws, naming
+ * the format's path `at`, for other patterns, and for a fiscal year, which
+ * numbers have none.
  */
 export function numberPattern(
-  kit: GuideKit,
-  format: { number: string; fiscal?: unknown },
+  kit: FormatKit,
+  format: { number: string; prefix?: string; suffix?: string; fiscal?: unknown },
   locale: string | undefined,
   at: string,
 ): Formatter {
   if (format.fiscal !== undefined)
     throw new Error(`${at}.fiscal: numbers have no fiscal year; give time, or drop fiscal`);
-  const pattern = format.number;
+  const { number: pattern, prefix = "", suffix = "" } = format;
+  for (const [key, text] of [
+    ["prefix", prefix],
+    ["suffix", suffix],
+  ])
+    if (typeof text !== "string")
+      throw new Error(`${at}.${key}: expected text; received ${JSON.stringify(text)}`);
   const where = `${at}.number`;
-  return cached(`n|${locale}|${pattern}`, () => {
+  return cached(JSON.stringify(["n", locale, pattern, prefix, suffix]), () => {
     const match = NUMBER.exec(pattern);
     if (!match)
       throw new Error(
@@ -123,18 +214,14 @@ export function numberPattern(
     const minus = minusSign(locale);
     return (value) => {
       if (!Number.isFinite(value)) return digits(value, {});
-      const [text, shown] = body(Math.abs(value));
+      // The text around the number goes inside its sign, as d3-format's "$" does: "-$5".
+      const [written, shown] = body(Math.abs(value));
+      const text = prefix + written + suffix;
       // Values that round to zero are written without a minus sign.
       if (value < 0 && shown !== 0) return sign === "(" ? `(${text})` : minus + text;
       return (sign === "+" ? "+" : sign === " " ? " " : "") + text;
     };
   });
-}
-
-/** The locale's minus sign, as Intl writes negative numbers. */
-function minusSign(locale: string | undefined): string {
-  const parts = new Intl.NumberFormat(locale).formatToParts(-1);
-  return parts.find((part) => part.type === "minusSign")?.value ?? "-";
 }
 
 const DIRECTIVE = /%(-?)(.?)/g;
@@ -180,7 +267,7 @@ export function fiscalOf(fiscal: FiscalSpec, where: string): [shift: number, end
  * (the format's path) and the directive's place, for anything else.
  */
 export function timePattern(
-  kit: GuideKit,
+  kit: FormatKit,
   { time: pattern, fiscal }: TimePattern,
   zone: TimeZone,
   locale: string | undefined,

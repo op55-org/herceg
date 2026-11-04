@@ -18,6 +18,7 @@ One name per concept, used the same way in code and docs.
 | **Table** | Columnar data: named columns of equal length (`Table`). |
 | **Field** | The name of a column in a table. Encodings refer to fields. |
 | **Column** | The typed storage behind a field: numbers, times (epoch ms), dictionary-encoded categories, or geometries (codes into a shared set of shapes). |
+| **Field display** | How a field is named and its values written (`FieldDisplay`): label, description, format, bounds, missing text, and value mappings, given by field name or as rules matching fields (`fields`, `herceg/fields`). Read by every surface that writes the field; not its column (storage) or a grid column. |
 | **Matrix table** | A table of values at every x crossed with every y (`fromMatrix`): its coordinates are kept as given, one value per column of the matrix and one per row, and a column of each row's x or y is made only for a reader that asks for one. |
 | **Bins** | How histograms and the `bin` transform cut a number or time axis into intervals (`BinSpec`): about a count of round bins, a step from a start, or the edges themselves. |
 | **Threshold** | A value a contour is drawn at: a line runs where the field crosses it, and bands fill from one threshold up to the next. |
@@ -101,7 +102,7 @@ glyph for monospace fonts) padded by 10%, or with supplied fonts.
 ## Spec and API
 
 `ChartSpec` (`src/spec/spec.ts`) is plain JSON: field names, constants,
-Intl format options, and expression trees; no functions or typed arrays.
+formats, field displays, and expression trees; no functions or typed arrays.
 
 - **Marks carry their implementation.** `line(table, options)` returns a
   `ChartMark` whose `spec` is a frozen copy of what built it, since the

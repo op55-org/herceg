@@ -4,7 +4,7 @@ import type { CategoryField, NumericField, PositionField, Schema, Table } from "
 import { labelHalo } from "../draw/label-halo.ts";
 import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { ALL_SIDES, BOTTOM, LEFT, RIGHT, rectDrawing, sideMask, TOP } from "../draw/rect.ts";
-import { type Formatter, numberFormatter } from "../format/format.ts";
+import { type Formatter, lazyFormat, numberFormatter } from "../format/format.ts";
 import { centeredLines, estimateText, lineCount, textItem } from "../layout/text.ts";
 import type { Breaks } from "../lod/m4.ts";
 import { clearDomain } from "../model/clearance.ts";
@@ -380,11 +380,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
         "bar labels.place.outside: stacked bars' labels go inside their segments; drop outside",
       );
 
-    const format = labels.format as { number?: unknown; time?: unknown } | undefined;
-    this.#labelOptions = {
-      ...labels,
-      pattern: format?.number !== undefined || format?.time !== undefined,
-    };
+    this.#labelOptions = { ...labels, pattern: lazyFormat(labels.format) };
     if (typeof spec.series === "string") requireField(table, spec.series, CATEGORY, "bar series");
     const series = seriesOf(spec, table, "fill");
     // Patterns, labels of parts, and labels kept apart (checked there) are the feature compiler's.

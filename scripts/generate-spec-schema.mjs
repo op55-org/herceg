@@ -8,8 +8,9 @@
 // The types say the structure, and their doc comments the descriptions;
 // tags in the doc comments say what the types cannot: `@default <json>`,
 // `@examples <json list>`, `@minimum`, `@maximum`, `@exclusiveMinimum`, `@exclusiveMaximum`,
-// `@integer`, `@minItems`, `@maxItems`, `@uniqueItems`, and `@items <json>`
-// (keywords of a list's items, or a tuple's by position). Number tags on an option of a generic
+// `@integer`, `@minItems`, `@maxItems`, `@uniqueItems`, `@items <json>`
+// (keywords of a list's items, or a tuple's by position), and `@minProperties`
+// (of an object, or a union's objects). Number tags on an option of a generic
 // type's instance (`ChannelSpec<number>`) bound the numbers it holds, in a
 // copy named with the bounds. Each object form is written whole and
 // closed, as the validator refuses properties a form does not have. A type
@@ -377,6 +378,7 @@ class Generator {
       else if (name === "integer") bounds.type = "integer";
       else if (LIST_TAGS.includes(name)) arrays(schema, where, { [name]: value ?? true });
       else if (name === "items") items(schema, where, value);
+      else if (name === "minProperties") objects(schema, where, { minProperties: value });
       else throw new Error(`generate-spec-schema: ${where}: unknown tag @${name}`);
     }
     if (Object.keys(bounds).length > 0) this.constrain(schema, where, bounds);
@@ -588,6 +590,14 @@ function arrays(schema, where, keywords) {
     schema.type === "array" ? [schema] : (schema.anyOf ?? []).filter((s) => s.type === "array");
   if (found.length === 0) throw new Error(`generate-spec-schema: ${where}: a list tag on no list`);
   for (const array of found) Object.assign(array, keywords);
+}
+
+function objects(schema, where, keywords) {
+  const found =
+    schema.type === "object" ? [schema] : (schema.anyOf ?? []).filter((s) => s.type === "object");
+  if (found.length === 0)
+    throw new Error(`generate-spec-schema: ${where}: an object tag on no object`);
+  for (const object of found) Object.assign(object, keywords);
 }
 
 /** The schema as the file holds it. */

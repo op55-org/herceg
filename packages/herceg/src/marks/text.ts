@@ -1,6 +1,6 @@
 import type { CategoryField, PositionField, Schema, Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
-import { type Formatter, formatNumber } from "../format/format.ts";
+import { type Formatter, formatNumber, lazyFormat } from "../format/format.ts";
 import {
   type LabelledMark,
   type LabelPlacement,
@@ -290,9 +290,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     );
     // Rows a constant annotation does not read have no items to name.
     checkOptionalItemKey(this.#data.table, this.spec.itemKey, "text");
-    const format = label?.format as { number?: unknown; time?: unknown } | undefined;
-    this.featured =
-      format?.number !== undefined || format?.time !== undefined || label?.content !== undefined;
+    this.featured = lazyFormat(label?.format) || label?.content !== undefined;
   }
 
   get table(): Table | undefined {

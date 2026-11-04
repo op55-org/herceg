@@ -72,6 +72,11 @@ The long-term target covers the major chart families. Not yet available:
 
 ## Axes, legends, and layout
 
+- **Field displays everywhere.** Charts reading `fields` ([Field
+  displays](guide/fields.md)): axis titles and formats, tooltips, legends,
+  series names, label parts, gauges, and the text alternative; then grids
+  and layout marks (through `compileFields`), colors and thresholds from a
+  field's values, and links.
 - Animation of categories that come and go.
 - More than one axis per side, log color scales, legend scrolling, and
   colorbar handles.
