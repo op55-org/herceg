@@ -49,11 +49,12 @@ _TEXT = Hint(frozenset({str}), (), True)
 
 
 def asset_path(name: str) -> Path:
-    """A JavaScript bundle shipped in the package (built by `npm run build:python`)."""
+    """A JavaScript bundle, or the spec's schema, shipped in the package (built
+    by `npm run build:python`)."""
     path = Path(str(files("herceg") / "static" / name))
     if not path.is_file():
         raise RuntimeError(
-            f"herceg's JavaScript bundle ({name}) is missing. In a source checkout, "
+            f"herceg's {name} is missing. In a source checkout, "
             "run `npm run build:python` from the repository root."
         )
     return path

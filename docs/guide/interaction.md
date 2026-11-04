@@ -398,7 +398,8 @@ widget.pin(value=datetime(2025, 4, 1), axis="x")
   inspection's mode lets it go.
 - **What pins.** An item the inspection reads: a series' point, a layout
   item, a custom mark's item. Annotations and marks with `inspect: false`
-  pin nothing; a click there, or off the data, lets a pin go. Along an
+  pin nothing, nor do a map's regions and points and 3D points and lines,
+  which the tooltip reads; a click there, or off the data, lets a pin go. Along an
   axis, an item the inspection at its value does not read (a heatmap's
   cell, a point placed in the plot's own units, a right-axis point under
   `"nearest-y"` beside left-axis series) pins nothing.

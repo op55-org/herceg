@@ -6,13 +6,20 @@
 
 import type { Dash } from "./spec.ts";
 
-/** Space around or inside a box, in CSS pixels: the same on every side, or each side's own. */
+/**
+ * Space around or inside a box, in CSS pixels: the same on every side, or each side's own.
+ * @minimum 0
+ */
 export type Insets =
   | number
   | {
+      /** @minimum 0 */
       readonly top?: number;
+      /** @minimum 0 */
       readonly right?: number;
+      /** @minimum 0 */
       readonly bottom?: number;
+      /** @minimum 0 */
       readonly left?: number;
     };
 
@@ -24,14 +31,24 @@ export type Insets =
  * likely is); `false` draws none; or a color of its own, 3 pixels wide by
  * default.
  */
-export type Halo = "auto" | false | { color: string; width?: number; opacity?: number };
+export type Halo =
+  | "auto"
+  | false
+  | {
+      color: string;
+      /** @minimum 0 */
+      width?: number;
+      /** @minimum 0 @maximum 1 */
+      opacity?: number;
+    };
 
 /** A box drawn behind text. */
 export interface TextBox {
   fill: string;
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
-  /** Corner radius in pixels. */
+  /** Corner radius in pixels. @minimum 0 */
   radius?: number;
 }
 
@@ -42,15 +59,18 @@ export interface TextBox {
 export interface TextStyle {
   /** A CSS font family list. */
   font?: string;
-  /** In CSS pixels. */
+  /** In CSS pixels. @exclusiveMinimum 0 */
   fontSize?: number;
-  /** 100 to 900; 400 is normal, 600 semibold, 700 bold. */
+  /** 100 to 900; 400 is normal, 600 semibold, 700 bold. @integer @minimum 1 @maximum 1000 */
   fontWeight?: number;
   fontStyle?: "normal" | "italic";
   color?: string;
-  /** From 0 to 1. */
+  /** From 0 to 1. @minimum 0 @maximum 1 */
   opacity?: number;
-  /** The distance between lines of text, as a multiple of `fontSize`; 1.25 by default. */
+  /**
+   * The distance between lines of text, as a multiple of `fontSize`; 1.25 by default.
+   * @exclusiveMinimum 0 @default 1.25
+   */
   lineHeight?: number;
   /**
    * Where text sits in the span it is placed in: the chart's width for its
@@ -81,16 +101,19 @@ export interface TextStyle {
 /** How a line looks: its color, width in pixels, dash pattern, and opacity. */
 export interface StrokeStyle {
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
   dash?: Dash;
-  /** From 0 to 1. */
+  /** From 0 to 1. @minimum 0 @maximum 1 */
   opacity?: number;
 }
 
 /** How a filled shape looks: a fill and an outline. */
 export interface PaintStyle extends StrokeStyle {
   fill?: string;
+  /** @minimum 0 @maximum 1 */
   fillOpacity?: number;
+  /** @minimum 0 @maximum 1 */
   strokeOpacity?: number;
 }
 
@@ -98,6 +121,7 @@ export interface PaintStyle extends StrokeStyle {
 export interface PlotStyle {
   fill?: string;
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
 }
 
@@ -130,9 +154,15 @@ export interface StyleRoles {
   /** The line the pointer's, the keyboard's, and other charts' cursors draw across a plot. */
   crosshair?: StrokeStyle;
   /** Lines, area outlines, and contour lines that do not set their own width. */
-  line?: { strokeWidth?: number };
+  line?: {
+    /** @exclusiveMinimum 0 */
+    strokeWidth?: number;
+  };
   /** Bars: the radius of the corners at the value end of unstacked bars; 0 for square bars. */
-  bar?: { radius?: number };
+  bar?: {
+    /** @minimum 0 */
+    radius?: number;
+  };
   /** The tooltip's box; its text is the theme's text color. */
   tooltip?: { fill?: string; stroke?: string };
 }
@@ -165,11 +195,11 @@ export interface ThemeTokens {
   grid?: string;
   /** Axis lines and ticks. */
   axis?: string;
-  /** Categorical colors in assignment order. */
+  /** Categorical colors in assignment order. @minItems 1 */
   palette?: readonly string[];
-  /** Ramp for continuous color (heatmaps), from low to high values. */
+  /** Ramp for continuous color (heatmaps), from low to high values. @minItems 2 */
   sequential?: readonly string[];
-  /** Ramp for colors on either side of a midpoint, low to high. */
+  /** Ramp for colors on either side of a midpoint, low to high. @minItems 2 */
   diverging?: readonly string[];
   /** Colors of candlesticks that close at or above, and below, their open. */
   rise?: string;

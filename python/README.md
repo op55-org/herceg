@@ -74,6 +74,8 @@ state = hst.chart(chart, key="latency", on_select="rerun")
   Flask, Django, and FastAPI pages.
 - **Errors** are `hg.ChartError`, raised as early as Python can check,
   naming the option and what was meant.
+- **Specs** are the portable chart format the TypeScript library loads;
+  `hg.spec_schema()` gives its JSON Schema, for editors and validation.
 
 ## Extras
 

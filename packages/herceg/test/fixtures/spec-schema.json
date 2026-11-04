@@ -1,0 +1,1323 @@
+{
+  "about": "The spec schema (packages/herceg/spec.schema.json) against herceg's own checks. invalid: specs both refuse, validateSpec at path. unsaid: what herceg checks that the schema cannot say, each with witnesses the schema takes and herceg refuses by it, and patterns of its messages, which the witnesses' refusals or the corpus's each meet; the schema's description and docs/guide/export.md list their text, and every refusal of a spec the schema takes must match one's messages (python/tests/test_spec_schema.py, over scripts/spec-schema-cases.mjs). stricter: what the schema refuses and herceg takes, each with patterns of the places (mark type and option path) where it may, and a witness and its place; the schema's description and the guide list their text too. unprobed: the places (patterns of mark type and option path) where some form of an option is set by no probe in a spec validateSpec takes, whose changes are therefore not made, each with why; every other form a probe sets is set in one.",
+  "invalid": [
+    {
+      "name": "a misspelled property",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "strokeWidht": 2
+          }
+        ]
+      },
+      "path": "marks[0].strokeWidht"
+    },
+    {
+      "name": "a chart option the format does not have",
+      "spec": {
+        "marks": [],
+        "colour": "red"
+      },
+      "path": "colour"
+    },
+    {
+      "name": "a width given as text",
+      "spec": {
+        "marks": [],
+        "width": "640"
+      },
+      "path": "width"
+    },
+    {
+      "name": "an opacity above 1",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "opacity": 1.5
+          }
+        ]
+      },
+      "path": "marks[0].opacity"
+    },
+    {
+      "name": "a negative stroke width",
+      "spec": {
+        "marks": [
+          {
+            "type": "bar",
+            "x": "t",
+            "y": "v",
+            "strokeWidth": -1
+          }
+        ]
+      },
+      "path": "marks[0].strokeWidth"
+    },
+    {
+      "name": "a pie's inner radius of the whole",
+      "spec": {
+        "marks": [
+          {
+            "type": "pie",
+            "category": "c",
+            "value": "v",
+            "innerRadius": 1
+          }
+        ]
+      },
+      "path": "marks[0].innerRadius"
+    },
+    {
+      "name": "a fractional rolling window",
+      "spec": {
+        "data": {
+          "raw": {
+            "columns": {
+              "t": [0, 1],
+              "v": [1, 2]
+            }
+          },
+          "smooth": {
+            "source": "raw",
+            "transform": [
+              {
+                "rolling": [
+                  {
+                    "op": "mean",
+                    "field": "v",
+                    "as": "m"
+                  }
+                ],
+                "size": 1.5
+              }
+            ]
+          }
+        },
+        "marks": []
+      },
+      "path": "data.smooth.transform[0].size"
+    },
+    {
+      "name": "a curve of no kind",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "curve": "bezier"
+          }
+        ]
+      },
+      "path": "marks[0].curve"
+    },
+    {
+      "name": "a mark of no type",
+      "spec": {
+        "marks": [
+          {
+            "type": "lines",
+            "x": "t",
+            "y": "v"
+          }
+        ]
+      },
+      "path": "marks[0].type"
+    },
+    {
+      "name": "a line without its values",
+      "spec": {
+        "marks": [
+          {
+            "type": "line",
+            "x": "t"
+          }
+        ]
+      },
+      "path": "marks[0].y"
+    },
+    {
+      "name": "a later spec version",
+      "spec": {
+        "version": 2,
+        "marks": []
+      },
+      "path": "version"
+    },
+    {
+      "name": "a tree of no path",
+      "spec": {
+        "marks": [
+          {
+            "type": "treemap",
+            "path": [],
+            "value": "v"
+          }
+        ]
+      },
+      "path": "marks[0].path"
+    },
+    {
+      "name": "bins of one edge",
+      "spec": {
+        "marks": [
+          {
+            "type": "histogram",
+            "x": "v",
+            "bins": [0]
+          }
+        ]
+      },
+      "path": "marks[0].bins"
+    },
+    {
+      "name": "a layout cell at a fractional row",
+      "spec": {
+        "panels": [
+          {
+            "id": "a"
+          }
+        ],
+        "layout": {
+          "type": "grid",
+          "cells": [
+            {
+              "row": 0.5,
+              "column": 0,
+              "content": {
+                "type": "panel",
+                "panel": "a"
+              }
+            }
+          ]
+        },
+        "marks": []
+      },
+      "path": "layout.cells[0].row"
+    }
+  ],
+  "unsaid": [
+    {
+      "id": "fields",
+      "text": "Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.",
+      "matches": [
+        "no field \"",
+        "holds (numbers|number values|category values|categories|geometry values)",
+        "is not a category field",
+        "is not a field of the path",
+        "needs one category position",
+        "in the bands of a category",
+        "\\.field( \\(row \\d+\\))?: expected",
+        "the table has no geometry field",
+        "which tree labels do not write"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "p99"
+            }
+          ]
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "g": ["a", "b"],
+                "v": [1, 2],
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000]
+                }
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "treemap",
+              "path": ["g"],
+              "value": "v",
+              "labels": {
+                "content": [
+                  {
+                    "field": "t"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "field-or-constant",
+      "text": "A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.",
+      "matches": [
+        "is neither a field nor a color",
+        "names both a (field|shape)",
+        "no shape or field"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v",
+              "color": "stie"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "series",
+      "text": "A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.",
+      "matches": ["several y fields, and series", "changes within", "draws its rows as one"],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2],
+                "w": [2, 1],
+                "region": ["eu", "us"]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": ["v", "w"],
+              "color": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "references",
+      "text": "Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.",
+      "matches": [
+        "no table",
+        "the spec has (no|several) tables",
+        "the name of another table in data",
+        "no mark has id",
+        "the chart has no (position )?scale",
+        "is not this . axis' scale",
+        "or a position scale of the chart's scales",
+        "places numbers and times, not",
+        "is a scale of categories",
+        "no panel \"",
+        "the id of one of the panels",
+        "expected a spec with panels",
+        "need it drawn in the panel",
+        "the chart has no subplots",
+        "the chart has one panel",
+        "no mark \"[^\"]*\" in the chart",
+        "is missing; \\d+ were delivered",
+        "no color scale a colorbar shows",
+        "a colorbar shows a color scale",
+        "is no color ramp",
+        "the chart has no right y axis"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "data": "other",
+              "x": "t",
+              "y": "v"
+            }
+          ]
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "viewport": {
+            "yRight": [0, 1]
+          }
+        }
+      ]
+    },
+    {
+      "id": "tables",
+      "text": "Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.",
+      "matches": [
+        "has \\d+ rows, expected",
+        "expected epoch milliseconds or an ISO 8601 time",
+        "is outside the dictionary",
+        "[Oo]ffsets must start at 0",
+        "[Oo]ffsets decrease at entry",
+        "[Oo]ffsets end at",
+        "is not a longitude and latitude in degrees",
+        "expected a position among",
+        "labels for \\d+ merge rows"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2],
+                "c": {
+                  "type": "category",
+                  "codes": [0, 2],
+                  "dictionary": ["a", "b"]
+                }
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v",
+              "color": "c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layout",
+      "text": "A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.",
+      "matches": [
+        "is past the grid's",
+        "is placed nowhere",
+        "overlaps cell",
+        "is placed twice",
+        "reaches past the grid's"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "panels": [
+            {
+              "id": "a"
+            },
+            {
+              "id": "b"
+            }
+          ],
+          "layout": {
+            "type": "grid",
+            "cells": [
+              {
+                "row": 0,
+                "column": 0,
+                "content": {
+                  "type": "panel",
+                  "panel": "a"
+                }
+              }
+            ]
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v",
+              "panel": "a"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ascending",
+      "text": "Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's min and max, a fit box's south and north, a time break's from and to), as do bin edges, thresholds, and a gauge's bands within its range.",
+      "matches": [
+        "expected two finite (numbers|radii), ascending",
+        "expected two different numbers",
+        "the edge before",
+        "the one before",
+        "min below max",
+        "expected ends above",
+        "expected a north above the south",
+        "expected a time after from",
+        "an end above the previous band's"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "point",
+              "x": "t",
+              "y": "v",
+              "color": "v",
+              "colorDomain": [2, 1]
+            }
+          ]
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000, 1767398400000]
+                },
+                "v": [1, 2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "breaks": [
+              {
+                "from": 1767225600000,
+                "to": 1767225600000
+              }
+            ]
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "v": [30]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "gauge",
+              "value": "v",
+              "bands": [
+                {
+                  "to": 60,
+                  "color": "#2ca02c"
+                },
+                {
+                  "to": 40,
+                  "color": "#d62728"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chart-kind",
+      "text": "Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.",
+      "matches": [
+        "expected a spec with",
+        "a 3D box",
+        "no tree to drill",
+        "a 3D chart's axes take",
+        "expected a panel with"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "projection": "mercator"
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "panels": [
+            {
+              "id": "a",
+              "interaction": {
+                "drag": true
+              }
+            }
+          ],
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v",
+              "panel": "a"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "forms",
+      "text": "Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.",
+      "matches": [
+        "needs a place",
+        "one of them",
+        "not both",
+        "do not stand side by side",
+        "draws lines; bands take",
+        "values, a band between each two; received 1$",
+        "names the rows of the mark's data",
+        "lists the rule by its label",
+        "move with their rows",
+        "nodes table",
+        "need a number color field",
+        "a row or column field",
+        "required for \"",
+        "labels that show are drawn at their place",
+        "points of a mark draw one outline",
+        "set as \\w+ and as encode\\.",
+        "names series through a scale, which",
+        "text at a place is drawn there",
+        "labels go where they follow their series",
+        "labels follow its values' edge",
+        "several fields are values along",
+        "these labels have none",
+        "these labels label none",
+        "an ellipsis shortens only y axes' labels",
+        "placed otherwise than",
+        "pile up in one slot",
+        "expected \"(top\" or \"bottom\" for an x|left\" or \"right\" for a y) axis",
+        "inside-out order needs shares or a stream",
+        "fiscal years start months and years",
+        "expected no anchor with a calendar interval"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2],
+                "w": [2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "area",
+              "x": "t",
+              "y1": "v",
+              "y2": "w",
+              "dodge": true
+            }
+          ]
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "c": ["a", "b"],
+                "v": [1, 2],
+                "s": ["x", "y"]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "bar",
+              "x": "c",
+              "y": "v",
+              "series": "s",
+              "stack": true,
+              "dodge": true
+            }
+          ]
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000, 1767398400000]
+                },
+                "v": [1, 2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "ticks": {
+              "every": "6 hours",
+              "fiscal": {
+                "start": 4
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "colors",
+      "text": "Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.",
+      "matches": [
+        "CSS color",
+        "colors: expected",
+        "Unknown color scheme",
+        "expected \"#rrggbb\" colors",
+        "expected a \"#rrggbb\" color;"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "point",
+              "x": "t",
+              "y": "v",
+              "color": "v",
+              "colors": "rainbowish"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "expressions",
+      "text": "Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").",
+      "matches": [
+        "expected a condition",
+        "needs a true or false condition",
+        "\"field\": expected one field name",
+        "\": expected (number|string|boolean) operands",
+        "\": expected \\d+ operands?; received \\d+",
+        "\": needs (operands|a value and at least one candidate)"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v",
+              "where": ["+", ["field", "v"], 1]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "named-scales",
+      "text": "A scale of scales named other than x, y, or yRight gives its type.",
+      "matches": ["a position scale's \"linear\""],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "scales": {
+            "depth": {
+              "domain": [0, 1]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "locale",
+      "text": "locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.",
+      "matches": [
+        "Incorrect locale information",
+        "Invalid time zone",
+        "value is out of range",
+        "Currency code is required",
+        "Invalid currency code",
+        "Invalid unit argument",
+        "Invalid numberingSystem"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "locale": "x"
+        }
+      ]
+    },
+    {
+      "id": "notations",
+      "text": "Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).",
+      "matches": [
+        "is not a number pattern herceg reads",
+        "is not a time interval",
+        "expected a date, \"YYYY-MM-DD\"",
+        "expected a time of day, \"HH:MM\"",
+        "every day leaves no time to show",
+        "leaves out (no time|every hour)"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "format": {
+              "number": "x"
+            }
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000, 1767398400000]
+                },
+                "v": [1, 2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "breaks": [
+              {
+                "dates": ["2025-02-30"]
+              }
+            ]
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000, 1767398400000]
+                },
+                "v": [1, 2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "breaks": [
+              {
+                "hours": ["24:00", "09:30"]
+              }
+            ]
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000, 1767398400000]
+                },
+                "v": [1, 2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "breaks": [
+              {
+                "weekdays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+              }
+            ]
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": {
+                  "type": "time",
+                  "values": [1767225600000, 1767312000000, 1767398400000]
+                },
+                "v": [1, 2, 3]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "breaks": [
+              {
+                "hours": ["09:00", "09:00"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "axis-kind",
+      "text": "Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.",
+      "matches": [
+        "need a time x axis",
+        "expected time-axis breaks",
+        "; the positions hold number values",
+        "ticks\\.values\\[\\d+\\]: expected a finite number",
+        "a time axis steps by time",
+        "expected a number on a linear axis",
+        "Intl number options on a number axis",
+        "which time formats do not",
+        "a linear axis writes numbers",
+        "steps through time; a linear axis steps by a number"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "breaks": [
+              {
+                "from": 0,
+                "to": 1
+              }
+            ]
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "format": {
+              "time": "%Y"
+            }
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "ticks": {
+              "every": {
+                "unit": "day"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "room",
+      "text": "Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.",
+      "matches": [
+        "leave no room in a plot",
+        "a static export draws no",
+        "do not fit a",
+        "needs at least \\d+ px of (height|width)",
+        "larger than an export lays out"
+      ],
+      "witnesses": [
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "x": {
+            "padding": {
+              "px": 400
+            }
+          }
+        },
+        {
+          "data": {
+            "data": {
+              "columns": {
+                "t": [0, 1],
+                "v": [1, 2]
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "x": "t",
+              "y": "v"
+            }
+          ],
+          "width": 20000
+        }
+      ]
+    }
+  ],
+  "stricter": [
+    {
+      "id": "histogram-2d-axis",
+      "text": "A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.",
+      "places": ["histogram: marks\\[\\]\\.axis"],
+      "place": "histogram: marks[].axis",
+      "witness": {
+        "data": {
+          "data": {
+            "columns": {
+              "a": [0, 1],
+              "b": [1, 2]
+            }
+          }
+        },
+        "marks": [
+          {
+            "type": "histogram",
+            "x": "a",
+            "y": "b",
+            "axis": "left"
+          }
+        ]
+      }
+    },
+    {
+      "id": "intl-options",
+      "text": "Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).",
+      "places": [
+        ".*(format|Format)\\.(roundingIncrement|formatMatcher|hour12|timeZone|calendar|fractionalSecondDigits|localeMatcher|roundingPriority|trailingZeroDisplay|numberingSystem)"
+      ],
+      "place": "chart: x.format.hour12",
+      "witness": {
+        "data": {
+          "data": {
+            "columns": {
+              "t": [0, 1],
+              "v": [1, 2]
+            }
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          }
+        ],
+        "x": {
+          "format": {
+            "hour12": "true"
+          }
+        }
+      }
+    },
+    {
+      "id": "dash",
+      "text": "Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).",
+      "places": [".*\\.dash\\[\\]"],
+      "place": "line: marks[].dash[]",
+      "witness": {
+        "data": {
+          "data": {
+            "columns": {
+              "t": [0, 1],
+              "v": [1, 2]
+            }
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v",
+            "dash": [-1]
+          }
+        ]
+      }
+    },
+    {
+      "id": "3d-z-index",
+      "text": "A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.",
+      "places": ["(point3d|line3d|surface): marks\\[\\]\\.zIndex"],
+      "place": "point3d: marks[].zIndex",
+      "witness": {
+        "data": {
+          "data": {
+            "columns": {
+              "t": [0, 1],
+              "v": [1, 2],
+              "w": [2, 3]
+            }
+          }
+        },
+        "marks": [
+          {
+            "type": "point3d",
+            "x": "t",
+            "y": "v",
+            "z": "w",
+            "zIndex": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "unread-expressions",
+      "text": "An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
+      "places": ["region: marks\\[\\]\\.encode\\.color\\.condition\\.when\\[\\]"],
+      "place": "region: marks[].encode.color.condition.when[]",
+      "witness": {
+        "data": {
+          "data": {
+            "columns": {
+              "t": [0, 1],
+              "v": [1, 2]
+            }
+          }
+        },
+        "marks": [
+          {
+            "type": "line",
+            "x": "t",
+            "y": "v"
+          },
+          {
+            "type": "region",
+            "x1": 0,
+            "x2": 1,
+            "fill": "#ff7f0e",
+            "encode": {
+              "color": {
+                "condition": {
+                  "when": ["nope", 1],
+                  "then": "red",
+                  "otherwise": "blue"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "unprobed": [
+    {
+      "id": "forms",
+      "reason": "Forms of an option that need another option the probe does not set: a contour of bands (no stroke or strokeWidth; two thresholds), a rule over a table (no drag), text at a place (no from, nor its label's place), labels that do not move (no leader), a facet by row or column (one of them), ticks of a calendar interval (no anchor), and a guide's time formats and intervals (a time axis, where its sample names a number axis).",
+      "places": [
+        "contour: marks\\[\\]\\.(stroke|strokeWidth|thresholds(\\[\\])?)",
+        "rule: marks\\[\\]\\.drag",
+        "(rule|text): marks\\[\\]\\.label\\.leader(\\..*)?",
+        "text: marks\\[\\]\\.(from|label\\.place)(\\..*)?",
+        "chart: facet(\\..*)?",
+        "chart: x\\.ticks\\.anchor",
+        "chart: guides\\[\\]\\.(format|ticks)"
+      ]
+    },
+    {
+      "id": "tables",
+      "reason": "A dendrogram's leaves, one more than the merges its table holds.",
+      "places": ["dendrogram: marks\\[\\]\\.leaves(\\[\\])?"]
+    },
+    {
+      "id": "named-scales",
+      "reason": "A named scale's options without the type it gives.",
+      "places": ["chart: scales\\.\\{\\}(\\.(nice|padding|tooltipFormat|zero|domain|scope))?"]
+    },
+    {
+      "id": "seams",
+      "reason": "An axis' seams without the breaks they go with.",
+      "places": ["chart: x\\.seams(\\..*)?"]
+    }
+  ]
+}

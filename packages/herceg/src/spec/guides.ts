@@ -11,7 +11,7 @@ import type {
   SymbolName,
 } from "./encoding.ts";
 import type { Place, Side } from "./place.ts";
-import type { ScaleScope } from "./spec.ts";
+import type { Dash, ScaleScope } from "./spec.ts";
 import type { AxisStyles, LegendStyles, TextStyle } from "./style.ts";
 
 /** A calendar unit of time, as time axes step through it in their time zone. */
@@ -30,8 +30,19 @@ export type TimeUnit =
  * zone, written as a unit ("day"), a count and a unit ("6 hours"), or
  * `{ unit, step }`; or elapsed time, `{ milliseconds }`, which keeps the
  * same length across daylight saving changes.
+ * @examples ["month", "6 hours", "15 minutes"]
  */
-export type TimeInterval = string | { unit: TimeUnit; step?: number } | { milliseconds: number };
+export type TimeInterval =
+  | string
+  | {
+      unit: TimeUnit;
+      /** @integer @minimum 1 */
+      step?: number;
+    }
+  | {
+      /** @exclusiveMinimum 0 */
+      milliseconds: number;
+    };
 
 /**
  * Which ticks an axis draws: about `count` round values (a number alone is
@@ -39,11 +50,21 @@ export type TimeInterval = string | { unit: TimeUnit; step?: number } | { millis
  * default; a time interval on time axes; on category axes, every n-th
  * category); or exactly `values` (numbers, epoch milliseconds on time axes,
  * or categories), those inside the axis' domain.
+ * @exclusiveMinimum 0
  */
 export type TicksSpec =
   | number
-  | { count: number; fiscal?: never }
-  | { every: number; anchor?: number; fiscal?: never }
+  | {
+      /** @exclusiveMinimum 0 */
+      count: number;
+      fiscal?: never;
+    }
+  | {
+      /** @exclusiveMinimum 0 */
+      every: number;
+      anchor?: number;
+      fiscal?: never;
+    }
   | { every: TimeInterval; anchor?: number; fiscal?: FiscalSpec }
   | { values: readonly (number | string)[]; fiscal?: never };
 
@@ -54,6 +75,7 @@ export type TicksSpec =
  * ticks step from its start.
  */
 export interface FiscalSpec {
+  /** @integer @minimum 1 @maximum 12 */
   start: number;
   name?: "end" | "start";
 }
@@ -68,8 +90,16 @@ export interface FiscalSpec {
 export type FormatSpec =
   | (Intl.NumberFormatOptions & { fiscal?: never })
   | (Intl.DateTimeFormatOptions & { fiscal?: never })
-  | { number: string; fiscal?: never }
-  | { time: string; fiscal?: FiscalSpec };
+  | {
+      /** @examples [",.2f", ".1%", "~s"] */
+      number: string;
+      fiscal?: never;
+    }
+  | {
+      /** @examples ["%b %d %H:%M", "%Y-%m-%d"] */
+      time: string;
+      fiscal?: FiscalSpec;
+    };
 
 /**
  * Tick marks: out from the plot (the default), in over it, or across the
@@ -78,6 +108,7 @@ export type FormatSpec =
  */
 export interface TickMarkSpec {
   direction?: "out" | "in" | "cross";
+  /** @minimum 0 */
   length?: number;
 }
 
@@ -93,16 +124,24 @@ export type TickOverlap = "show" | "hide" | "stagger" | "wrap";
 export interface TickLabelsSpec {
   /**
    * Degrees clockwise, from -90 (reading up) to 90 (reading down); or
-   * angles tried in order, the first at which the labels fit.
+   * angles tried in order, the first at which the labels fit. @minimum -90 @maximum 90
    */
-  rotation?: number | { candidates: readonly number[] };
+  rotation?:
+    | number
+    | {
+        /** @minimum -90 @maximum 90 @minItems 1 */
+        candidates: readonly number[];
+      };
   /** Overlapping labels: drawn all ("show"), the default for number and time axes, or as `TickOverlap` says. */
   overlap?: TickOverlap;
-  /** The row of labels, 0 by the axis line and 1 beyond it. */
+  /** The row of labels, 0 by the axis line and 1 beyond it. @integer @minimum 0 */
   row?: number;
-  /** Which labels stay where labels collide, the higher; 0 by default. */
+  /** Which labels stay where labels collide, the higher; 0 by default. @default 0 */
   priority?: number;
-  /** Labels that repeat the one before them: left blank, their ticks kept ("hide", the default), or drawn ("show"). */
+  /**
+   * Labels that repeat the one before them: left blank, their ticks kept ("hide", the default), or drawn ("show").
+   * @default "hide"
+   */
   duplicates?: "hide" | "show";
   /**
    * Draw the labels inside the plot, beside their ticks, rather than
@@ -115,7 +154,7 @@ export interface TickLabelsSpec {
   /**
    * Pixels from the labels to their tick's end on their side (half a
    * "cross" tick's length; the axis line where the tick does not reach
-   * their side), 0 or more.
+   * their side), 0 or more. @minimum 0
    */
   gap?: number;
 }
@@ -145,8 +184,15 @@ export interface TickLayerSpec {
  * p(b - a)]`, in the scale's transformed space: logs on a log scale), from
  * 0 up to but not including 0.5; `{ px }` keeps that many pixels at each
  * end. 0 turns automatic room off.
+ * @minimum 0 @exclusiveMaximum 0.5
  */
-export type ScalePadding = "auto" | number | { px: number };
+export type ScalePadding =
+  | "auto"
+  | number
+  | {
+      /** @minimum 0 */
+      px: number;
+    };
 
 /**
  * A position scale's settings: the short forms `x`, `y`, and `yRight` hold
@@ -239,20 +285,27 @@ export interface AxisGuideSpec {
   /** Grid lines at its major ticks across the plot; the scale's default axis draws them by default. */
   grid?: boolean | GridLinesSpec;
   layers?: readonly TickLayerSpec[];
-  /** Draw the axis; true by default. */
+  /** Draw the axis; true by default. @default true */
   show?: boolean;
   /**
    * Where panels sharing the scale label it: on the outer edge of panels
-   * lined up with each other ("outer", the default), or on every panel ("all").
+   * lined up with each other ("outer", the default), or on every panel ("all"). @default "outer"
    */
   repeat?: "outer" | "all";
   /**
    * Pixels a y axis' tick marks and labels take beside the plot: a fixed
    * room, so that the plots of charts and panels line up, or bounds on the
    * room its labels need. Labels wider than it are shortened with an
-   * ellipsis. Y axes only.
+   * ellipsis. Y axes only. @minimum 0
    */
-  room?: number | { min?: number; max?: number };
+  room?:
+    | number
+    | {
+        /** @minimum 0 */
+        min?: number;
+        /** @minimum 0 */
+        max?: number;
+      };
   style?: AxisStyles;
 }
 
@@ -274,20 +327,34 @@ export type SwatchSpec =
   | {
       type: "line";
       stroke: string;
+      /** @minimum 0 */
       strokeWidth?: number;
-      dash?: readonly number[] | string;
+      dash?: Dash;
+      /** @minimum 0 @maximum 1 */
       opacity?: number;
     }
-  | { type: "rect"; fill: string; stroke?: string; opacity?: number }
+  | {
+      type: "rect";
+      fill: string;
+      stroke?: string;
+      /** @minimum 0 @maximum 1 */
+      opacity?: number;
+    }
   | {
       type: "symbol";
       symbol?: SymbolName;
       fill: string;
       stroke?: string;
+      /** @exclusiveMinimum 0 */
       size?: number;
+      /** @minimum 0 @maximum 1 */
       opacity?: number;
     }
-  | { type: "composite"; parts: readonly SwatchSpec[] };
+  | {
+      type: "composite";
+      /** @minItems 1 */
+      parts: readonly SwatchSpec[];
+    };
 
 /**
  * What a legend entry of your own hides and shows: a mark whole, the rows
@@ -324,9 +391,9 @@ export interface LegendOptionsSpec {
    * column), or inside a plot at a corner, over what it draws.
    */
   place?: Place;
-  /** Entries in this many columns, filled row by row (or as `order` says). */
+  /** Entries in this many columns, filled row by row (or as `order` says). @integer @minimum 1 */
   columns?: number;
-  /** Entries in this many rows. */
+  /** Entries in this many rows. @integer @minimum 1 */
   rows?: number;
   /** Fill the grid row by row ("row", the default with `columns`) or down each column ("column", the default with `rows`). */
   order?: "row" | "column";
@@ -346,7 +413,7 @@ export interface LegendOptionsSpec {
    * and shows what it names; "select" selects it, as a series selection
    * (Shift adds it or takes it out; a click on the one selected clears
    * it); `false`, nothing of the chart's own (`click` events still report
-   * it). "select" needs state support (`herceg/state`).
+   * it). "select" needs state support (`herceg/state`). @default "hide"
    */
   action?: LegendAction;
 }
@@ -387,9 +454,12 @@ export interface ColorbarSpec {
   labels?: TickLabelsSpec | false;
   /** More layers of ticks along the bar, as axes take them. */
   layers?: readonly TickLayerSpec[];
-  /** Pixels along its values; the plots' height (or width) by default, up to 240. */
+  /**
+   * Pixels along its values; the plots' height (or width) by default, up to 240.
+   * @exclusiveMinimum 0
+   */
   length?: number;
-  /** Pixels across; 12 by default. */
+  /** Pixels across; 12 by default. @exclusiveMinimum 0 @default 12 */
   thickness?: number;
   show?: boolean;
   style?: Pick<AxisStyles, "tick" | "tickLabel"> & Pick<LegendStyles, "legendTitle">;

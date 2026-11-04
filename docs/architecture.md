@@ -126,6 +126,14 @@ Intl format options, and expression trees; no functions or typed arrays.
 - **One spelling of each value.** `dash` is a pixel array or one of
   `"-"`, `"--"`, `":"`, `"-."`, resolved with matplotlib's default patterns
   and the final stroke width, so SVG, Canvas, and PDF agree.
+- **JSON Schema.** `spec.schema.json` is generated from the spec's types
+  by `scripts/generate-spec-schema.mjs`, through TypeScript's checker:
+  doc comments give descriptions, tags (`@default`, `@minimum`,
+  `@integer`, ...) defaults and bounds, and unions of object forms become
+  `anyOf` of closed objects. Agreement tests hold it to the validator;
+  what a JSON Schema cannot say (field kinds, references, cross-option
+  rules) stays the validator's and is listed in the schema's description
+  ([Export](guide/export.md#schema-and-capabilities-for-editors)).
 - **Version.** Specs carry `version: 1` (`SPEC_VERSION`); the loader
   refuses later versions. The format changes in place until the first
   published release, from which its compatibility promise starts.

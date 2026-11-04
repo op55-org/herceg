@@ -22,6 +22,7 @@ chart.save("chart.pdf")
 hg.save(chart, "chart.webp", dpi=192)  # the same dispatch as chart.save
 chart.to_html(full_page=False)  # a <div> and script, the engine inlined
 chart.to_spec()  # (spec dict, list of binary buffers)
+hg.spec_schema()  # the spec's JSON Schema, a dict (see Export, editors)
 chart.to_snapshot(id_prefix="latency")  # markup a web page hydrates
 chart.widget()  # a live notebook chart
 ```

@@ -59,12 +59,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/herceg"]
-# The JavaScript bundles are build outputs (npm run build:python), so they
-# are not tracked by git but must ship in every distribution.
-artifacts = ["src/herceg/static/*.js", "src/herceg/static/web/*"]
+# The JavaScript bundles and the spec's schema are build outputs (npm run
+# build:python), so they are not tracked by git but must ship in every
+# distribution.
+artifacts = ["src/herceg/static/*.js", "src/herceg/static/*.json", "src/herceg/static/web/*"]
 
 [tool.hatch.build.targets.sdist]
-artifacts = ["src/herceg/static/*.js", "src/herceg/static/web/*"]
+artifacts = ["src/herceg/static/*.js", "src/herceg/static/*.json", "src/herceg/static/web/*"]
 # The tests and the web test pages need the repository's fixtures and browsers.
 exclude = ["/tests", "/web-test"]
 

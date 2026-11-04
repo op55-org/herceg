@@ -53,7 +53,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -78,7 +82,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["line.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "line-y": {
@@ -133,7 +151,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -158,7 +180,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["line-y.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "area": {
@@ -213,7 +249,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -238,7 +278,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["area.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "area-range": {
@@ -293,7 +347,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -318,7 +376,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["area-range.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "bar": {
@@ -373,7 +445,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -398,7 +474,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["bar.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "bar-stack": {
@@ -453,7 +543,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -478,7 +572,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["bar-stack.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "point": {
@@ -534,7 +642,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -548,7 +660,21 @@
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["point.placement.nested", "point.placement.facet"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "histogram": {
@@ -599,7 +725,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -672,7 +802,21 @@
               "point.reading.fields"
             ]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "histogram-2d": {
@@ -723,7 +867,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -763,12 +911,24 @@
               "point.reading.fields"
             ]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
         "legend.categorical": "A 2D histogram colors its cells by count, on a continuous scale: a colorbar shows it.",
         "legend.toggle": "A 2D histogram colors its cells by count, on a continuous scale: its colorbar hides nothing.",
-        "legend.panel-toggle": "A 2D histogram colors its cells by count, on a continuous scale: its colorbar hides nothing."
+        "legend.panel-toggle": "A 2D histogram colors its cells by count, on a continuous scale: its colorbar hides nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "boxplot": {
@@ -818,7 +978,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -902,7 +1066,21 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["boxplot.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "boxen": {
@@ -952,7 +1130,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1032,7 +1214,21 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["boxen.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "violin": {
@@ -1082,7 +1278,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1162,7 +1362,21 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["violin.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "rug": {
@@ -1217,7 +1431,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1275,7 +1493,21 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["rug.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "errorbar": {
@@ -1333,7 +1565,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1358,7 +1594,21 @@
             "text": "Color it by a category field, which the legend lists.",
             "proofs": ["errorbar.legend.categorical"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
+      },
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "candlestick": {
@@ -1412,7 +1662,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1426,11 +1680,23 @@
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["candlestick.placement.nested", "candlestick.placement.facet"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
         "legend.categorical": "Candlesticks color by rise and fall, not by a category.",
-        "legend.colorbar": "Candlesticks color by rise and fall (rise, fall), of no field."
+        "legend.colorbar": "Candlesticks color by rise and fall (rise, fall), of no field.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "heatmap": {
@@ -1483,7 +1749,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1497,12 +1767,24 @@
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["heatmap.placement.nested", "heatmap.placement.facet"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
         "legend.categorical": "A heatmap colors its cells by value, on a continuous scale: a colorbar shows it.",
         "legend.toggle": "A heatmap colors its cells by value, on a continuous scale: its colorbar hides nothing.",
-        "legend.panel-toggle": "A heatmap colors its cells by value, on a continuous scale: its colorbar hides nothing."
+        "legend.panel-toggle": "A heatmap colors its cells by value, on a continuous scale: its colorbar hides nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "heatmap-calendar": {
@@ -1555,7 +1837,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1569,12 +1855,24 @@
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["heatmap-calendar.placement.nested", "heatmap-calendar.placement.facet"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
         "legend.categorical": "A calendar heatmap colors its days by value, on a continuous scale: a colorbar shows it.",
         "legend.toggle": "A calendar heatmap colors its days by value, on a continuous scale: its colorbar hides nothing.",
-        "legend.panel-toggle": "A calendar heatmap colors its days by value, on a continuous scale: its colorbar hides nothing."
+        "legend.panel-toggle": "A calendar heatmap colors its days by value, on a continuous scale: its colorbar hides nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "contour": {
@@ -1624,7 +1922,16 @@
         "integration.vue",
         "integration.svelte"
       ],
-      "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
+      "unproved": [
+        "integration.widget",
+        "integration.streamlit",
+        "integration.web",
+        "events.click",
+        "events.pin",
+        "events.drill",
+        "selection.items",
+        "selection.series"
+      ],
       "refused": {
         "placement.facet-in-cell": {
           "error": {
@@ -1695,6 +2002,17 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["contour.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -1741,7 +2059,9 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1854,6 +2174,17 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["dendrogram.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -1865,7 +2196,10 @@
         "reading.nearest-x": "A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows.",
         "reading.nearest-y": "A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows.",
         "reading.keyboard": "A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows.",
-        "reading.fields": "A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows."
+        "reading.fields": "A dendrogram's merges are not rows of its table: it reads nothing under the pointer or with the arrow keys, and its description says what it shows.",
+        "events.pin": "A dendrogram's merges are not rows of its table: the tooltip reads nothing of them, so a click on one pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "A dendrogram's merges belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "rule": {
@@ -1909,7 +2243,10 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.item-move",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -1940,7 +2277,10 @@
         "reading.nearest": "An annotation is read through its label and the chart's description, not by the pointer or keys.",
         "reading.keyboard": "An annotation is read through its label and the chart's description, not by the pointer or keys.",
         "reading.fields": "A constant annotation reads no table, so it has no row whose fields could be read.",
-        "lifecycle.value-animation": "It draws given values, not a table's."
+        "lifecycle.value-animation": "It draws given values, not a table's.",
+        "events.pin": "An annotation is read through its label and the chart's description, not by the tooltip: a click on it pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "rule-table": {
@@ -1985,7 +2325,9 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -2076,6 +2418,17 @@
             "text": "Bind the table of a mark that draws its rows as data, such as points.",
             "proofs": ["point.selection.highlight"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "marks[0].drag",
+            "message": "marks[0].drag: rules over a table move with their rows; drag a rule of a value"
+          },
+          "alternative": {
+            "text": "Drag a rule of a value; rules over a table move as their rows change.",
+            "proofs": ["rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -2085,7 +2438,10 @@
         "reading.nearest": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
         "reading.nearest-x": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
         "reading.keyboard": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
-        "reading.fields": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark."
+        "reading.fields": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
+        "events.pin": "An annotation is read through its label and the chart's description, not by the tooltip: a click on it pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "region": {
@@ -2129,7 +2485,9 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -2142,6 +2500,17 @@
           "alternative": {
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["region.placement.nested", "region.placement.facet"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
           }
         }
       },
@@ -2160,7 +2529,10 @@
         "reading.nearest": "An annotation is read through its label and the chart's description, not by the pointer or keys.",
         "reading.keyboard": "An annotation is read through its label and the chart's description, not by the pointer or keys.",
         "reading.fields": "A constant annotation reads no table, so it has no row whose fields could be read.",
-        "lifecycle.value-animation": "It draws given values, not a table's."
+        "lifecycle.value-animation": "It draws given values, not a table's.",
+        "events.pin": "An annotation is read through its label and the chart's description, not by the tooltip: a click on it pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "region-table": {
@@ -2205,7 +2577,9 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -2296,6 +2670,17 @@
             "text": "Bind the table of a mark that draws its rows as data, such as points.",
             "proofs": ["point.selection.highlight"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -2305,7 +2690,10 @@
         "reading.nearest": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
         "reading.nearest-y": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
         "reading.keyboard": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
-        "reading.fields": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark."
+        "reading.fields": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
+        "events.pin": "An annotation is read through its label and the chart's description, not by the tooltip: a click on it pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "text": {
@@ -2349,7 +2737,9 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -2362,6 +2752,17 @@
           "alternative": {
             "text": "Put each group's marks in a panel of the layout (a table filtered to the group each), or facet a chart of its own.",
             "proofs": ["text.placement.nested", "text.placement.facet"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
           }
         }
       },
@@ -2380,7 +2781,10 @@
         "reading.nearest": "An annotation is read through its label and the chart's description, not by the pointer or keys.",
         "reading.keyboard": "An annotation is read through its label and the chart's description, not by the pointer or keys.",
         "reading.fields": "A constant annotation reads no table, so it has no row whose fields could be read.",
-        "lifecycle.value-animation": "It draws given values, not a table's."
+        "lifecycle.value-animation": "It draws given values, not a table's.",
+        "events.pin": "An annotation is read through its label and the chart's description, not by the tooltip: a click on it pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "text-table": {
@@ -2425,7 +2829,9 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -2516,6 +2922,17 @@
             "text": "Bind the table of a mark that draws its rows as data, such as points.",
             "proofs": ["point.selection.highlight"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -2525,7 +2942,10 @@
         "reading.nearest-x": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
         "reading.nearest-y": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
         "reading.keyboard": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
-        "reading.fields": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark."
+        "reading.fields": "Annotations of a table read none of their rows yet: they read nothing under the pointer or with the arrow keys, and their labels and description say what they mark.",
+        "events.pin": "An annotation is read through its label and the chart's description, not by the tooltip: a click on it pins nothing.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "An annotation's items belong to no series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "custom": {
@@ -2584,7 +3004,11 @@
         "lifecycle.selection-sync",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items",
+        "selection.series"
       ],
       "refused": {
         "placement.facet-in-cell": {
@@ -2608,13 +3032,25 @@
             "text": "Leave animation.values out: changed values show at once.",
             "proofs": ["custom.lifecycle.value-animation.off"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
         "legend.colorbar": "A custom mark's draw function paints it; the chart colors its series by category.",
         "integration.widget": "It is a TypeScript function: a spec sent from Python cannot hold it.",
         "integration.streamlit": "It is a TypeScript function: a spec sent from Python cannot hold it.",
-        "integration.web": "It is a TypeScript function: a spec sent from Python cannot hold it."
+        "integration.web": "It is a TypeScript function: a spec sent from Python cannot hold it.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill."
       }
     },
     "pie": {
@@ -2655,7 +3091,10 @@
         "lifecycle.value-animation",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -2823,10 +3262,33 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["pie.selection.click", "point.selection.receive"]
           }
+        },
+        "events.drill": {
+          "error": {
+            "code": "unsupported",
+            "path": "interaction.zoom",
+            "message": "pie zoom: no axes to zoom; drop interaction.zoom"
+          },
+          "alternative": {
+            "text": "Draw the parts as a treemap or sunburst, whose groups drill with interaction.zoom.",
+            "proofs": ["treemap.events.drill", "sunburst.events.drill"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
-        "lifecycle.view-animation": "It has no axes or view of its own to move."
+        "lifecycle.view-animation": "It has no axes or view of its own to move.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "treemap": {
@@ -2866,7 +3328,11 @@
         "reading.fields",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "events.drill",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -3045,10 +3511,22 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["treemap.selection.click", "point.selection.receive"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
-        "lifecycle.view-animation": "A drill lays the tree out anew and shows at once; the chart has no axes to move a view along."
+        "lifecycle.view-animation": "A drill lays the tree out anew and shows at once; the chart has no axes to move a view along.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "sunburst": {
@@ -3089,7 +3567,11 @@
         "lifecycle.value-animation",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "events.drill",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -3257,10 +3739,22 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["sunburst.selection.click", "point.selection.receive"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
-        "lifecycle.view-animation": "A drill shows at once with animation alone (with animation.values it moves as values do); the chart has no axes to move a view along."
+        "lifecycle.view-animation": "A drill shows at once with animation alone (with animation.values it moves as values do); the chart has no axes to move a view along.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "gauge": {
@@ -3295,7 +3789,10 @@
         "lifecycle.value-animation",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -3485,6 +3982,28 @@
             "text": "Draw the values along axes, as points, which sync.",
             "proofs": ["point.lifecycle.selection-sync"]
           }
+        },
+        "events.drill": {
+          "error": {
+            "code": "unsupported",
+            "path": "interaction.zoom",
+            "message": "gauge zoom: no axes to zoom; drop interaction.zoom"
+          },
+          "alternative": {
+            "text": "Draw the parts as a treemap or sunburst, whose groups drill with interaction.zoom.",
+            "proofs": ["treemap.events.drill", "sunburst.events.drill"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -3492,7 +4011,8 @@
         "legend.colorbar": "A gauge draws one value, in the colors of its bands.",
         "legend.toggle": "A gauge draws one value, listed in no legend.",
         "legend.panel-toggle": "A gauge draws one value, listed in no legend.",
-        "lifecycle.view-animation": "It has no axes or view of its own to move."
+        "lifecycle.view-animation": "It has no axes or view of its own to move.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "funnel": {
@@ -3529,7 +4049,10 @@
         "reading.fields",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -3697,6 +4220,28 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["funnel.selection.click", "point.selection.receive"]
           }
+        },
+        "events.drill": {
+          "error": {
+            "code": "unsupported",
+            "path": "interaction.zoom",
+            "message": "funnel zoom: no axes to zoom; drop interaction.zoom"
+          },
+          "alternative": {
+            "text": "Draw the parts as a treemap or sunburst, whose groups drill with interaction.zoom.",
+            "proofs": ["treemap.events.drill", "sunburst.events.drill"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -3704,7 +4249,8 @@
         "legend.colorbar": "A funnel draws its stages in one color (fill), labeled in place.",
         "legend.toggle": "A funnel draws its stages in one color, labeled in place, listed in no legend.",
         "legend.panel-toggle": "A funnel draws its stages in one color, labeled in place, listed in no legend.",
-        "lifecycle.view-animation": "It has no axes or view of its own to move."
+        "lifecycle.view-animation": "It has no axes or view of its own to move.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "radar": {
@@ -3741,7 +4287,10 @@
         "reading.fields",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -3953,10 +4502,33 @@
             "text": "Draw the values along axes, as points, which sync.",
             "proofs": ["point.lifecycle.selection-sync"]
           }
+        },
+        "events.drill": {
+          "error": {
+            "code": "unsupported",
+            "path": "interaction.zoom",
+            "message": "radar zoom: no axes to zoom; drop interaction.zoom"
+          },
+          "alternative": {
+            "text": "Draw the parts as a treemap or sunburst, whose groups drill with interaction.zoom.",
+            "proofs": ["treemap.events.drill", "sunburst.events.drill"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
-        "lifecycle.view-animation": "It has no axes or view of its own to move."
+        "lifecycle.view-animation": "It has no axes or view of its own to move.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "sankey": {
@@ -3993,7 +4565,10 @@
         "reading.fields",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -4161,6 +4736,28 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["sankey.selection.click", "point.selection.receive"]
           }
+        },
+        "events.drill": {
+          "error": {
+            "code": "unsupported",
+            "path": "interaction.zoom",
+            "message": "sankey zoom: no axes to zoom; drop interaction.zoom"
+          },
+          "alternative": {
+            "text": "Draw the parts as a treemap or sunburst, whose groups drill with interaction.zoom.",
+            "proofs": ["treemap.events.drill", "sunburst.events.drill"]
+          }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
@@ -4168,7 +4765,8 @@
         "legend.colorbar": "A Sankey diagram colors its nodes to tell them apart within it, by no field.",
         "legend.toggle": "A Sankey diagram labels its nodes in place, and lists none in a legend.",
         "legend.panel-toggle": "A Sankey diagram labels its nodes in place, and lists none in a legend.",
-        "lifecycle.view-animation": "It has no axes or view of its own to move."
+        "lifecycle.view-animation": "It has no axes or view of its own to move.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "graph": {
@@ -4210,7 +4808,11 @@
         "lifecycle.view-animation",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "events.item-move",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -4380,7 +4982,10 @@
           }
         }
       },
-      "na": {}
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
+      }
     },
     "geoshape": {
       "title": "geoshape",
@@ -4423,7 +5028,9 @@
         "lifecycle.view-animation",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -4569,9 +5176,24 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["geoshape.selection.click", "point.selection.receive"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
-      "na": {}
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "events.pin": "A map's regions pin nothing: the tooltip reads them under the pointer, but a click on one does not pin it.",
+        "selection.series": "A map's items name no series: with interaction.select \"series\", a click on one selects nothing."
+      }
     },
     "geopoint": {
       "title": "geopoint",
@@ -4614,7 +5236,9 @@
         "lifecycle.view-animation",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -4760,9 +5384,24 @@
             "text": "Link it to the synced charts through a selection store: what one selects, the others highlight.",
             "proofs": ["geopoint.selection.click", "point.selection.receive"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
-      "na": {}
+      "na": {
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "events.pin": "A map's points pin nothing: the tooltip reads them under the pointer, but a click on one does not pin it.",
+        "selection.series": "A map's items name no series: with interaction.select \"series\", a click on one selects nothing."
+      }
     },
     "point3d": {
       "title": "point3d",
@@ -4798,7 +5437,9 @@
         "lifecycle.hydration",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -5010,10 +5651,24 @@
             "text": "Draw the values along axes, as points, which sync.",
             "proofs": ["point.lifecycle.selection-sync"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
-        "lifecycle.view-animation": "Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on."
+        "lifecycle.view-animation": "Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "events.pin": "3D points pin nothing: the tooltip reads them under the pointer, but a click on one does not pin it.",
+        "selection.series": "3D items name no series, though the mark draws them by series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "line3d": {
@@ -5049,7 +5704,9 @@
         "lifecycle.hydration",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -5272,10 +5929,24 @@
             "text": "Draw the values along axes, as points, which sync.",
             "proofs": ["point.lifecycle.selection-sync"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
-        "lifecycle.view-animation": "Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on."
+        "lifecycle.view-animation": "Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "events.pin": "3D lines' points pin nothing: the tooltip reads them under the pointer, but a click on one does not pin it.",
+        "selection.series": "3D items name no series, though the mark draws them by series: with interaction.select \"series\", a click on one selects nothing."
       }
     },
     "surface": {
@@ -5309,7 +5980,10 @@
         "reading.fields",
         "integration.react",
         "integration.vue",
-        "integration.svelte"
+        "integration.svelte",
+        "events.click",
+        "events.pin",
+        "selection.items"
       ],
       "unproved": ["integration.widget", "integration.streamlit", "integration.web"],
       "refused": {
@@ -5521,13 +6195,26 @@
             "text": "Draw the values along axes, as points, which sync.",
             "proofs": ["point.lifecycle.selection-sync"]
           }
+        },
+        "events.item-move": {
+          "error": {
+            "code": "invalid-option",
+            "path": "interaction.drag",
+            "message": "interaction.drag: expected a spec with a graph mark, whose nodes dragging moves; received true"
+          },
+          "alternative": {
+            "text": "Move a network's nodes (interaction.drag), or a rule of a value (drag).",
+            "proofs": ["graph.events.item-move", "rule.events.item-move"]
+          }
         }
       },
       "na": {
         "legend.categorical": "A surface colors by height, on a continuous scale: a colorbar shows it.",
         "legend.toggle": "A surface colors by height, on a continuous scale: its colorbar hides nothing.",
         "legend.panel-toggle": "A surface colors by height, on a continuous scale: its colorbar hides nothing.",
-        "lifecycle.view-animation": "Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on."
+        "lifecycle.view-animation": "Its view is its camera, which gestures turn and magnify at once; it has no axes to set a view on.",
+        "events.drill": "The mark is no tree of groups: with interaction.zoom, a click on its item reports no drill.",
+        "selection.series": "Its items are laid out, not drawn in series: with interaction.select \"series\", a click on one selects nothing."
       }
     }
   },
@@ -5559,7 +6246,8 @@
       "derive": "a table computed from another",
       "matrix": "a table of a matrix",
       "ordered": "a table kept in order of a field",
-      "view": "rows of a table a filter and sort choose"
+      "view": "rows of a table a filter and sort choose",
+      "spec_schema": "the spec's JSON Schema, for editors"
     },
     "react": {
       "Chart": "the chart the marks are drawn in"

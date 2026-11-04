@@ -73,6 +73,7 @@ export interface ChannelScaleSpec {
   type: "linear" | "log" | "sqrt";
   /** The inputs mapped to `range`'s ends: two different numbers, positive for "log", not negative for "sqrt". */
   domain?: readonly [number, number];
+  /** @minItems 2 */
   range: readonly [number, number] | readonly string[];
   clamp?: boolean;
 }
@@ -89,9 +90,11 @@ export interface EncodingsSpec {
   stroke?: ChannelSpec<string>;
   dash?: ChannelSpec<Dash>;
   symbol?: ChannelSpec<SymbolName>;
+  /** Stroke widths in pixels. @minimum 0 */
   strokeWidth?: ChannelSpec<number>;
-  /** A point's area in square pixels. */
+  /** A point's area in square pixels. @minimum 0 */
   size?: ChannelSpec<number>;
+  /** Opacities from 0 to 1. @minimum 0 @maximum 1 */
   opacity?: ChannelSpec<number>;
 }
 
@@ -114,7 +117,7 @@ export interface OrdinalScaleSpec {
   /**
    * Which panels share the scale's mapping: every panel of the chart (the
    * default), or each panel its own ("panel"), whose values then take
-   * places in that panel's domain.
+   * places in that panel's domain. @default "chart"
    */
   scope?: "chart" | "panel";
   /** The values in order, and only those; legends list every one, drawn or not. */
@@ -127,12 +130,13 @@ export interface OrdinalScaleSpec {
 /** A point drawn at each observation of a line: its shape, radius, and paint (the line's color by default). */
 export interface MarkerStyle {
   symbol?: SymbolName;
-  /** In pixels; 3 by default. */
+  /** In pixels; 3 by default. @exclusiveMinimum 0 @default 3 */
   radius?: number;
   fill?: string;
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
-  /** From 0 to 1. */
+  /** From 0 to 1. @minimum 0 @maximum 1 */
   opacity?: number;
 }
 
@@ -175,7 +179,13 @@ export type CalendarBreak = "minute" | "hour" | "day" | "week" | "month" | "year
  */
 export interface ContinuitySpec {
   defined?: Expression;
-  maxGap?: number | { milliseconds: number };
+  /** @minimum 0 */
+  maxGap?:
+    | number
+    | {
+        /** @minimum 0 */
+        milliseconds: number;
+      };
   breakBy?: CalendarBreak | { field: Field };
 }
 
@@ -234,7 +244,10 @@ export type PartStyle = Pick<
   "fontSize" | "fontWeight" | "fontStyle" | "color" | "opacity"
 >;
 
-/** A label's text, its parts in order: `["Capacity: ", { value: true, format: { number: ".1f" } }]`. */
+/**
+ * A label's text, its parts in order: `["Capacity: ", { value: true, format: { number: ".1f" } }]`.
+ * @minItems 1
+ */
 export type LabelContent = readonly LabelPart[];
 
 /**
@@ -338,11 +351,12 @@ export type BarLabelsSpec = (
   | { content: LabelContent; field?: never; format?: never }
 ) & {
   style?: TextStyle;
+  /** @minimum 0 */
   minLength?: number;
   place?: BarLabelPlaceSpec;
   /**
    * Labels that would cover another of the mark's: drawn anyway ("show",
-   * the default), or left out ("hide"), the later in series and row order.
+   * the default), or left out ("hide"), the later in series and row order. @default "show"
    */
   overlap?: "show" | "hide";
 };

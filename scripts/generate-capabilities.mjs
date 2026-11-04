@@ -1,7 +1,8 @@
 // Writes docs/capabilities.md and docs/capabilities.json from the contract
 // declarations (test/contracts/) and a complete passing check of them
 // (scripts/check-contracts.mjs: every suite, every browser engine), so the
-// documented matrix says only what tests prove:
+// documented matrix says only what tests prove; and from the same records
+// the marks' matrix the package publishes, packages/herceg/capabilities.json:
 //
 //   node scripts/generate-capabilities.mjs           write them
 //   node scripts/generate-capabilities.mjs --check   fail if they are stale
@@ -13,10 +14,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { checkContracts } from "./check-contracts.mjs";
+import { formatJson } from "./contracts/json.mjs";
 import { root } from "./contracts/source.mjs";
 
 const MD = join(root, "docs/capabilities.md");
 const JSON_PATH = join(root, "docs/capabilities.json");
+const PACKAGE_PATH = join(root, "packages/herceg/capabilities.json");
 
 const STATES = { works: "✓", unproved: "○", refused: "✗", na: "·" };
 
@@ -112,29 +115,64 @@ export function capabilityRecords({ declarations, cells, proofs, executions }) {
 }
 
 /** The records as JSON, each value on one line where it fits in 100 columns. */
-export function capabilityJson(records) {
-  const inline = (value) => {
-    if (Array.isArray(value)) return `[${value.map(inline).join(", ")}]`;
-    if (value !== null && typeof value === "object") {
-      const entries = Object.entries(value).filter(([, v]) => v !== undefined);
-      if (entries.length === 0) return "{}";
-      return `{ ${entries.map(([k, v]) => `${JSON.stringify(k)}: ${inline(v)}`).join(", ")} }`;
-    }
-    return JSON.stringify(value);
+export const capabilityJson = formatJson;
+
+/**
+ * What herceg/capabilities.json publishes of the records: the marks' groups
+ * and capabilities, and each mark row's cells, their proofs left out; with
+ * each row's `emits` and `consumes`, the events and the options of its
+ * cells that work, by their capabilities' direction.
+ */
+export function packageCapabilities(records) {
+  const groups = records.groups
+    .filter((group) => group.for === undefined)
+    .map(({ id, title, capabilities }) => ({ id, title, capabilities }));
+  const ids = groups.flatMap((group) => group.capabilities);
+  const capabilities = Object.fromEntries(
+    ids.map((id) => {
+      const { title, works, na, direction, events, options } = records.capabilities[id];
+      return [
+        id,
+        { title, works, ...(na && { na }), ...(direction && { direction, events, options }) },
+      ];
+    }),
+  );
+  const collect = (working, directions, list) =>
+    [...new Set(working.filter((c) => directions.includes(c.direction)).flatMap(list))].sort();
+  const marks = Object.fromEntries(
+    Object.entries(records.marks).map(([row, { title, inventory, cells }]) => {
+      const working = ids.filter((id) => cells[id].state === "works").map((id) => capabilities[id]);
+      return [
+        row,
+        {
+          title,
+          inventory,
+          emits: collect(working, ["emits", "both"], (c) => c.events),
+          consumes: collect(working, ["consumes", "both"], (c) => c.options),
+          cells: Object.fromEntries(
+            ids.map((id) => {
+              const { state, error, alternative, reason } = cells[id];
+              return [
+                id,
+                {
+                  state,
+                  ...(error && { error, alternative: alternative.text }),
+                  ...(reason && { reason }),
+                },
+              ];
+            }),
+          ),
+        },
+      ];
+    }),
+  );
+  return {
+    about:
+      "What each mark supports, as herceg's tests prove it: every mark row's cell of each capability. A cell works (proved), is unproved (supported, not yet proved), refused (asking for it fails with error, a ChartError's code, path, and message; alternative says what works instead), or na (not applicable, for reason). A capability's direction says whether the chart reports it (emits: the chart events in events) or takes it in (consumes: through the spec options in options, paths into spec.schema.json, marks[] for any mark), or both; a row's emits and consumes collect those of its cells that work. Generated with the capability matrix of herceg's repository (docs/capabilities.md, which also names each cell's proofs); do not edit.",
+    groups,
+    capabilities,
+    marks,
   };
-  const format = (value, indent) => {
-    const line = inline(value);
-    if (value === null || typeof value !== "object" || indent.length + line.length <= 100)
-      return line;
-    const inner = `${indent}  `;
-    if (Array.isArray(value))
-      return `[\n${value.map((v) => inner + format(v, inner)).join(",\n")}\n${indent}]`;
-    const entries = Object.entries(value).filter(([, v]) => v !== undefined);
-    return `{\n${entries
-      .map(([k, v]) => `${inner}${JSON.stringify(k)}: ${format(v, inner)}`)
-      .join(",\n")}\n${indent}}`;
-  };
-  return `${format(records, "")}\n`;
 }
 
 const cellText = (text) => text.replaceAll("|", "\\|");
@@ -172,7 +210,8 @@ export function capabilityMarkdown(records) {
     "Generated by `npm run contracts:docs` from the declarations in",
     "[test/contracts/](../test/contracts/) and a complete passing run of every test",
     "suite (see [Contracts](contributing.md#contracts)); do not edit.",
-    "[capabilities.json](capabilities.json) has the same matrix with each cell's proofs.",
+    "[capabilities.json](capabilities.json) has the same matrix with each cell's proofs;",
+    "the package publishes the marks' matrix, without them, as `herceg/capabilities.json`.",
     "[test/contracts/api.json](../test/contracts/api.json) lists where option names differ",
     "between TypeScript, Python, and the adapters, and why.",
     "",
@@ -219,15 +258,20 @@ export function capabilityMarkdown(records) {
   let noted = 0;
   // The files listed with each capability, which its notes need not repeat.
   const provedIn = new Map();
+  const code = (names) => names.map((name) => `\`${name}\``).join(", ");
   const describe = (ids, rows) => {
     for (const id of ids) {
-      const { title, works } = records.capabilities[id];
+      const { title, works, direction, events, options } = records.capabilities[id];
+      // What it reports or takes in, as herceg/capabilities.json says it.
+      const flow = direction
+        ? ` (${[direction, ...(events.length ? [`events ${code(events)}`] : []), ...(options.length ? [`options ${code(options)}`] : [])].join("; ")})`
+        : "";
       const proved = Object.values(rows).flatMap(({ cells }) =>
         cells[id].state === "works" ? cells[id].proofs : [],
       );
       provedIn.set(id, new Set(proved.map((proof) => fileOf.get(proof)).filter(Boolean)));
       const files = fileLinks(proved, fileOf);
-      lines.push(`- **${title}**: ${works}${files ? ` Proved in ${files}.` : ""}`);
+      lines.push(`- **${title}**: ${works}${flow}${files ? ` Proved in ${files}.` : ""}`);
     }
     lines.push("");
   };
@@ -345,6 +389,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const written = {
     [JSON_PATH]: capabilityJson(records),
     [MD]: capabilityMarkdown(records),
+    [PACKAGE_PATH]: formatJson(packageCapabilities(records)),
   };
   if (values.check) {
     const stale = Object.entries(written)
@@ -357,9 +402,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       })
       .map(([path]) => relative(root, path));
     if (stale.length > 0) {
-      console.error(
-        `generate-capabilities: ${stale.join(" and ")} are stale; run npm run contracts:docs`,
-      );
+      console.error(`generate-capabilities: ${stale.join(", ")} stale; run npm run contracts:docs`);
       process.exit(1);
     }
     console.log("generate-capabilities: the docs are current");
@@ -368,7 +411,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(
       `generate-capabilities: wrote ${Object.keys(written)
         .map((p) => relative(root, p))
-        .join(" and ")}`,
+        .join(", ")}`,
     );
   }
 }

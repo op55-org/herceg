@@ -32,9 +32,40 @@ const SPEC_CONTRACTS = "packages/herceg/test/fixtures/contracts.json";
 /** The documented defaults both languages keep (see api.json). */
 const DEFAULTS = "test/contracts/fixtures/defaults.json";
 
+/** Where a capability's `direction` points: out of the chart, into it, or both ways. */
+const DIRECTIONS = ["emits", "consumes", "both"];
+
+/** The names of the events a chart reports (`ChartEvents` in src/dom/events.ts). */
+function chartEvents(root) {
+  const source = readFileSync(join(root, "packages/herceg/src/dom/events.ts"), "utf8");
+  const start = source.indexOf("export interface ChartEvents {");
+  const body = source.slice(start, source.indexOf("\n}\n", start));
+  return [...body.matchAll(/^ {2}(\w+)\??:/gm)].map(([, name]) => name);
+}
+
+/**
+ * Whether a path of spec options (`interaction.sync.cursor`, `marks[].drag`)
+ * names an option of the spec's schema: of any form of each option on the way.
+ */
+export function isSpecOption(schema, path) {
+  const forms = (node) => {
+    if (node.$ref) return forms(schema.$defs[decodeURIComponent(node.$ref.slice(8))]);
+    // A union's shared options are its own; each form's, its forms'.
+    if (node.anyOf) return [node, ...node.anyOf.flatMap(forms)];
+    if (node.type === "array" && typeof node.items === "object") return forms(node.items);
+    return [node];
+  };
+  let at = forms(schema.$defs.ChartSpec);
+  for (const name of path.replaceAll("[]", "").split("."))
+    at = at.flatMap((node) => (node.properties?.[name] ? forms(node.properties[name]) : []));
+  return at.length > 0;
+}
+
 /**
  * The parsed declaration files, by name, the spec contracts' fixture as
- * `spec`, and the API audit's defaults as `defaults`.
+ * `spec`, the API audit's defaults as `defaults`, and what capabilities'
+ * events and options name: the chart's events as `chartEvents`, and the
+ * spec's schema as `schema`.
  */
 export function readDeclarations(root) {
   const read = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
@@ -42,7 +73,33 @@ export function readDeclarations(root) {
     ...Object.fromEntries(FILES.map((name) => [name, read(`test/contracts/${name}.json`)])),
     spec: read(SPEC_CONTRACTS),
     defaults: read(DEFAULTS),
+    chartEvents: chartEvents(root),
+    schema: read("packages/herceg/spec.schema.json"),
   };
+}
+
+/**
+ * Errors of a capability's `direction`, `events`, and `options`: given
+ * together, a direction of DIRECTIONS, events the chart reports, and
+ * options of the spec, at least one of either.
+ */
+function directionErrors(id, { direction, events, options }, chartEvents, schema) {
+  if (direction === undefined && events === undefined && options === undefined) return [];
+  const where = `capabilities.json ${id}`;
+  if (!DIRECTIONS.includes(direction) || !Array.isArray(events) || !Array.isArray(options))
+    return [`${where}: give direction (${DIRECTIONS.join(", ")}), events, and options together`];
+  if (events.length + options.length === 0)
+    return [`${where}: name the events it reports or the options that ask for it`];
+  if (direction === "consumes" && events.length > 0)
+    return [`${where}: a capability that reports ${events.join(", ")} emits; give direction both`];
+  return [
+    ...events
+      .filter((name) => !chartEvents.includes(name))
+      .map((name) => `${where}: ${name} is no event a chart reports (ChartEvents)`),
+    ...options
+      .filter((path) => !isSpecOption(schema, path))
+      .map((path) => `${where}: ${path} is no option of the spec's schema`),
+  ];
 }
 
 /**
@@ -143,6 +200,8 @@ export function checkDeclarations({
   behaviors,
   spec,
   defaults,
+  chartEvents = [],
+  schema,
 }) {
   const errors = [];
   const defined = capabilities.capabilities;
@@ -163,6 +222,7 @@ export function checkDeclarations({
       errors.push(
         `capabilities.json ${id}: suite ${JSON.stringify(defined[id].suite)}; name one of ${Object.keys(SUITES).join(", ")}`,
       );
+    errors.push(...directionErrors(id, defined[id], chartEvents, schema));
   }
 
   const cells = [

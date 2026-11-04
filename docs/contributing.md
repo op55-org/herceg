@@ -129,7 +129,7 @@ supports:
 
 | File | Declares |
 | --- | --- |
-| `capabilities.json` | Capability groups, each capability's meaning, and the suite that proves it |
+| `capabilities.json` | Capability groups, each capability's meaning, and the suite that proves it; for what a chart reports or takes in, its direction, the events its proofs observe, and the spec options that ask for it (checked against `ChartEvents` and the spec's schema) |
 | `marks.json` | A row per mark and variant, its name on every surface, and a state per capability: works, unproved (declared, no proof yet), refused (with its `ChartError` and a proved alternative), or not applicable (with a reason) |
 | `express.json` | Express recipes and utilities |
 | `interaction.json`, `behaviors.json` | Interaction in panels, facets, and insets; other contracts |
@@ -171,9 +171,12 @@ in every engine.
   `packages/react/test/readme.types.tsx`, and
   `packages/svelte/test/Readme.svelte` compile the documentation's
   examples in `npm run typecheck`.
-- **Generated sections.** `docs/capabilities.md` and `.json` are written by
-  `npm run contracts:docs` from a complete passing check; CI fails when
-  they are stale (`-- --check`). Result tables in `docs/comparison.md`
+- **Generated sections.** `docs/capabilities.md` and `.json`, and the
+  package's `capabilities.json`, are written by `npm run contracts:docs`
+  from a complete passing check; CI fails when they are stale
+  (`-- --check`). `packages/herceg/spec.schema.json` is written by
+  `npm run spec:schema` from the spec's types; `npm run test:contracts`
+  fails when it is stale. Result tables in `docs/comparison.md`
   between `<!-- results:NAME -->` markers are written by
   `npm run bench:report` from `benchmarks/results/*.json`; edit the text
   around them, not the tables.

@@ -27,6 +27,8 @@ const publicAPIs = {
   "herceg/layout": ["columns", "rows", "grid", "cell", "panel", "inset", "mosaic", "panels"],
   "herceg/state": ["chartState"],
   "herceg/web": ["loadPayload", "mount", "unmount", "getChart", "observe", "decodePayload"],
+  "herceg/spec.schema.json": ["$schema", "$defs", "description"],
+  "herceg/capabilities.json": ["about", "groups", "capabilities", "marks"],
   "@herceg/react": ["Chart", "Line"],
   "@herceg/react/grid": ["Grid"],
   "@herceg/react/layout": ["Columns", "Rows", "Grid", "Cell", "Panel", "Inset"],
@@ -37,6 +39,8 @@ const publicAPIs = {
   "@herceg/svelte": ["Chart", "Line"],
 };
 const readJSON = (path) => JSON.parse(readFileSync(path, "utf8"));
+/** Subpaths of JSON data rather than modules: imported with a JSON attribute, and without declarations. */
+const isData = (path) => path.endsWith(".json");
 const unwanted =
   /(?:^|\/)(?:tests?|__tests__|bench(?:marks|es)?|tmp)(?:\/|\.|$)|\.(?:test|spec|bench|benchmark)\./i;
 
@@ -167,7 +171,8 @@ const publicAPIs = ${JSON.stringify(publicAPIs)};
 for (const path of ${JSON.stringify(imports)}) {
   // require.resolve selects default when neither import nor types is active.
   resolve.resolve(path);
-  const module = await import(path);
+  const data = path.endsWith(".json");
+  const module = data ? (await import(path, { with: { type: "json" } })).default : await import(path);
   assert(Object.keys(module).length > 0, path + ": empty module");
   for (const name of publicAPIs[path] ?? []) {
     assert(module[name] !== undefined, path + ": missing " + name);
@@ -214,6 +219,7 @@ for (const bytes of [
   writeFileSync(
     join(consumer, "entrypoints.ts"),
     entrypoints
+      .filter((path) => !isData(path))
       .map(
         (path, i) =>
           `import type * as entry${i} from ${JSON.stringify(path)};\nexport type Entry${i} = typeof entry${i};\n`,
@@ -223,6 +229,7 @@ for (const bytes of [
   writeFileSync(
     join(consumer, "api.ts"),
     Object.entries(publicAPIs)
+      .filter(([path]) => !isData(path))
       .map(
         ([path, names], i) =>
           `export { ${names.map((name) => `${name} as api${i}_${name}`).join(", ")} } from ${JSON.stringify(path)};\n`,

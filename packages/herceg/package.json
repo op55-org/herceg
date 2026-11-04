@@ -87,11 +87,15 @@
       "types": "./dist/web.d.ts",
       "import": "./dist/web.js",
       "default": "./dist/web.js"
-    }
+    },
+    "./spec.schema.json": "./spec.schema.json",
+    "./capabilities.json": "./capabilities.json"
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "spec.schema.json",
+    "capabilities.json"
   ],
   "scripts": {
     "prepublishOnly": "node ../../scripts/check-publish.mjs",

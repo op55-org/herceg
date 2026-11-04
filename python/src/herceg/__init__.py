@@ -188,6 +188,7 @@ from ._interaction import (
 from ._layout import Cell, Grid, GridCells, Weight
 from ._pdf import save, to_pdf
 from ._rows import RowSelection, SelectionBinding
+from ._schema import spec_schema
 from ._style import (
     BarStyle,
     Halo,
@@ -347,6 +348,7 @@ __all__ = [
     "SeriesReference",
     "SeriesSelection",
     "SeriesStyle",
+    "spec_schema",
     "Stack",
     "StrokeStyle",
     "Style",

@@ -61,7 +61,7 @@ from pathlib import Path
 license_text = Path(sys.argv[3]).read_bytes()
 import json
 with zipfile.ZipFile(sys.argv[1]) as wheel:
-    for name in ("herceg.js", "herceg-static.js", "herceg-widget.js", "herceg-streamlit.js"):
+    for name in ("herceg.js", "herceg-static.js", "herceg-widget.js", "herceg-streamlit.js", "spec.schema.json"):
         path = "herceg/static/" + name
         assert wheel.getinfo(path).file_size > 0, "Empty bundle: " + path
     # The web assets: every file the manifest lists, and nothing else beside it.
@@ -79,6 +79,7 @@ with zipfile.ZipFile(sys.argv[1]) as wheel:
 with tarfile.open(sys.argv[2], "r:gz") as sdist:
     prefix = Path(sys.argv[2]).name.removesuffix(".tar.gz") + "/"
     assert sdist.extractfile(prefix + "LICENSE").read() == license_text, "Sdist LICENSE differs from root LICENSE"
+    assert sdist.getmember(prefix + "src/herceg/static/spec.schema.json").size > 0, "Sdist without the spec schema"
     metadata = sdist.extractfile(prefix + "PKG-INFO").read()
     assert BytesParser().parsebytes(metadata).get_all("License-File") == ["LICENSE"]
     tests = [name for name in sdist.getnames() if name.startswith((prefix + "tests/", prefix + "web-test/"))]
@@ -119,6 +120,7 @@ assert found.entry in web.assets("/static/herceg"), "Missing web entry tag"
 assert web.payload(chart)[4:5] == b"{", "Payload without its header"
 assert "data-herceg" in web.fragment(chart), "Missing fragment host"
 print("Installed wheel has", len(found.files), "web assets")
+assert hg.spec_schema()["$schema"] == "https://json-schema.org/draft/2020-12/schema", "Missing spec schema"
 `,
       ],
       { cwd: consumer, env },
