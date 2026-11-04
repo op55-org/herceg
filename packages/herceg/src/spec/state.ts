@@ -144,7 +144,7 @@ export interface StateSpec {
 
 /** A look laid over a mark's paint where a selection marks it out. */
 export type Look = PaintStyle & {
-  /** A point's radius, in pixels. */
+  /** A point's radius, in pixels. @exclusiveMinimum 0 */
   radius?: number;
 };
 

@@ -72,6 +72,7 @@ const pdf = renderToPDF(chart); // a mounted chart as it is shown
 | `herceg/grid`, `herceg/grid/model`, `herceg/grid/pivot`, `herceg/grid/remote`, `herceg/grid/memory`, `herceg/grid/conformance` | Grids |
 | `herceg/pivot` | Row pivots |
 | `herceg/web` | Binary payloads and page fragments |
+| `herceg/spec.schema.json`, `herceg/capabilities.json` | JSON for chart editors: the spec's JSON Schema, and what each mark emits, consumes, and supports |
 
 Optional pieces are subpaths and the package has no side effects, so a
 line chart bundles none of PDF, grids, or specs, and code for interaction,

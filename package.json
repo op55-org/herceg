@@ -29,9 +29,10 @@
     "test:python-package": "node scripts/test-python-package.mjs",
     "test:python-web": "npm run build:python && node scripts/contracts/run.mjs python-web -- vitest run --config python/web-test/vitest.config.ts",
     "test:release": "node --test scripts/release.test.mjs",
-    "test:contracts": "node --test scripts/contracts.test.mjs",
+    "test:contracts": "node --test --experimental-strip-types scripts/contracts.test.mjs scripts/spec-schema.test.mjs",
     "contracts": "node scripts/check-contracts.mjs",
     "contracts:docs": "node scripts/generate-capabilities.mjs",
+    "spec:schema": "node scripts/generate-spec-schema.mjs",
     "version:set": "node scripts/set-version.mjs"
   },
   "engines": {

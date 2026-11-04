@@ -1,5 +1,5 @@
 {
-  "about": "What a capability of the matrix promises, and what its proofs must observe. Each row of marks.json declares every capability of the groups for marks once, and each recipe of express.json those express.json lists (groups `for` express are recipes' alone): works (its proof observes the result), refused (requesting it fails with a structured error naming an alternative that is tested to work), or not applicable (the concept has no target in that row; allowed only where na says what its proof observes). A row's proof of a capability is the contract test `<row>.<capability>`, run in the capability's suite; `shared` lists proofs every row's cell also needs. Read by scripts/check-contracts.mjs, scripts/generate-capabilities.mjs, and the proofs.",
+  "about": "What a capability of the matrix promises, and what its proofs must observe. Each row of marks.json declares every capability of the groups for marks once, and each recipe of express.json those express.json lists (groups `for` express are recipes' alone): works (its proof observes the result), refused (requesting it fails with a structured error naming an alternative that is tested to work), or not applicable (the concept has no target in that row; allowed only where na says what its proof observes). A row's proof of a capability is the contract test `<row>.<capability>`, run in the capability's suite; `shared` lists proofs every row's cell also needs. Where a capability is something a chart reports or takes in, `direction` says which (emits, consumes, or both), `events` names the chart events its proofs observe (which it reports, so a capability of events emits), and `options` the spec options that ask for it (paths into the spec's schema, `marks[]` for any mark); herceg/capabilities.json publishes them. Read by scripts/check-contracts.mjs, scripts/generate-capabilities.mjs, and the proofs.",
   "groups": [
     {
       "id": "placement",
@@ -26,9 +26,16 @@
         "selection.rows-xy",
         "selection.rows-lasso",
         "selection.click",
+        "selection.items",
+        "selection.series",
         "selection.receive",
         "selection.highlight"
       ]
+    },
+    {
+      "id": "events",
+      "title": "Events",
+      "capabilities": ["events.click", "events.pin", "events.drill", "events.item-move"]
     },
     {
       "id": "legends",
@@ -207,20 +214,29 @@
       "title": "SVG",
       "works": "Forced to SVG, the chart draws the mark as SVG elements in its colors (or an image of its cells), with no canvas.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "consumes",
+      "events": [],
+      "options": ["renderer"]
     },
     "rendering.canvas": {
       "title": "Canvas",
       "works": "Forced to Canvas, the canvas shows the mark's colors, and the SVG draws none of the mark.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "consumes",
+      "events": [],
+      "options": ["renderer"]
     },
     "rendering.auto": {
       "title": "Automatic",
       "works": "Left to choose, a chart of few vertices draws as forced SVG does; dense marks move to Canvas past 4,000 vertices and back under 2,000 (a shared proof).",
       "na": null,
       "suite": "herceg-browser",
-      "shared": ["rendering.auto.switch"]
+      "shared": ["rendering.auto.switch"],
+      "direction": "consumes",
+      "events": [],
+      "options": ["renderer"]
     },
     "export.svg": {
       "title": "SVG",
@@ -240,67 +256,154 @@
       "title": "Brush x",
       "works": "Dragging reports the x range dragged (and no y range) as the select event and chart.selection, without a store and so without rows.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush"]
     },
     "selection.brush-y": {
       "title": "Brush y",
       "works": "Dragging reports the y range dragged (and no x range) as the select event and chart.selection, without a store and so without rows.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush"]
     },
     "selection.brush-xy": {
       "title": "Brush xy",
       "works": "Dragging reports both ranges dragged as the select event and chart.selection, without a store and so without rows.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush"]
     },
     "selection.lasso": {
       "title": "Lasso",
       "works": "Drawing a lasso reports its outline as the select event and chart.selection, without a store and so without rows.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush"]
     },
     "selection.rows-x": {
       "title": "Rows by x",
       "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush", "rowSelection"]
     },
     "selection.rows-y": {
       "title": "Rows by y",
       "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush", "rowSelection"]
     },
     "selection.rows-xy": {
       "title": "Rows by xy",
       "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush", "rowSelection"]
     },
     "selection.rows-lasso": {
       "title": "Rows by lasso",
       "works": "On a chart bound to a selection store, the gesture writes exactly the rows the fixture lists to the store's channel, and its select event says so.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.brush", "rowSelection"]
     },
     "selection.click": {
       "title": "Click",
-      "works": "Clicking a point, bar, bin, group, cell, or item writes exactly the rows it stands for to the store.",
+      "works": "Clicking a point, bar, bin, group, cell, or item writes exactly the rows it stands for to the store, and its rowSelection event says so.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["rowSelection"],
+      "options": ["rowSelection"]
+    },
+    "selection.items": {
+      "title": "Items",
+      "works": "With interaction.select \"items\", a click on an item selects it alone: the select event and chart.selection name the key the click's target gives; a second click there clears it.",
+      "na": null,
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.select"]
+    },
+    "selection.series": {
+      "title": "Series",
+      "works": "With interaction.select \"series\", a click on an item selects its series alone: the select event and chart.selection name the series key the click's target gives; a second click there clears it.",
+      "na": "The mark's items belong to no series the click names (layout items, annotations, a dendrogram's merges, geographic and 3D items): with interaction.select \"series\", a click on one selects nothing.",
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["select"],
+      "options": ["interaction.select"]
     },
     "selection.receive": {
       "title": "Receive",
       "works": "A chart bound to receive only (events: []) gets the selection another view writes: its rowSelection event reports it, and where the chart highlights, its description counts the rows selected.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "both",
+      "events": ["rowSelection"],
+      "options": ["rowSelection"]
     },
     "selection.highlight": {
       "title": "Highlight",
       "works": "On Canvas, a selection draws a row it holds as it is and dims a row it does not hold, where the fixture says they are; a selection of no rows dims both, and clearing it draws the mark as before.",
       "na": "The mark reads no table: beside a line of the samples in a chart bound to their store, the gesture selects the line's rows alone, and a selection leaves the mark as drawn.",
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "consumes",
+      "events": [],
+      "options": ["rowSelection"]
+    },
+    "events.click": {
+      "title": "Click event",
+      "works": "A click on an item reports it as the click event's target: its mark's index and id, and its key, the same at the next click; where the mark reads a table, with the rows it stands for (those a click on it selects, else its own row).",
+      "na": null,
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["click"],
+      "options": []
+    },
+    "events.pin": {
+      "title": "Pin",
+      "works": "With tooltip.pin \"click\", a click on an item the tooltip reads pins the tooltip there: one pin event, at the item, or at its value along the inspection's axis; a second click there lets it go, reported too.",
+      "na": "The tooltip reads nothing of the item (an annotation, a dendrogram's merges), or does not pin what it reads (a map's regions and points, 3D points and lines): with tooltip.pin \"click\", a click on the item pins nothing.",
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["pin"],
+      "options": ["tooltip.pin"]
+    },
+    "events.drill": {
+      "title": "Drill",
+      "works": "With interaction.zoom, a click on a group drills into it: one drill event naming the group's key and path, which getDrillRoot then reads; Backspace goes back out to the whole tree, reported too.",
+      "na": "Only treemaps and sunbursts drill: with interaction.zoom, a click on the mark's item reports no drill, and the chart has no drill root.",
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["drill"],
+      "options": ["interaction.zoom"]
+    },
+    "events.item-move": {
+      "title": "Item move",
+      "works": "A network's node (interaction.drag) or a rule of a value (drag) moves by a drag: itemMove reports its key and where it is dropped (a node's place, which it keeps; a rule's value along its axis, after previews as it moves).",
+      "na": null,
+      "suite": "herceg-browser",
+      "direction": "emits",
+      "events": ["itemMove"],
+      "options": ["interaction.drag", "marks[].drag"]
     },
     "lifecycle.view-animation": {
       "title": "View animation",
@@ -313,26 +416,38 @@
       "works": "With animation.values, a value changed in place (Table.set) moves the mark gradually: mid-way it draws neither the old value nor the new, and it ends as a chart without animation draws it, inside a layout's panels as alone (a shared proof).",
       "na": "A constant annotation draws given values, not a table's: beside a line whose values move, it stays as drawn.",
       "suite": "herceg-browser",
-      "shared": ["lifecycle.value-animation.layout"]
+      "shared": ["lifecycle.value-animation.layout"],
+      "direction": "consumes",
+      "events": [],
+      "options": ["animation.values"]
     },
     "lifecycle.cursor-sync": {
       "title": "Cursor sync",
       "works": "Two charts in a cursor group: the pointer on one shows the cursor at that value in the other, though it shows another range (its crosshair at the value's pixel), once and without echo; a channel naming a panel carries that panel's cursor only (a shared proof).",
       "na": null,
       "suite": "herceg-browser",
-      "shared": ["lifecycle.cursor-sync.panel"]
+      "shared": ["lifecycle.cursor-sync.panel"],
+      "direction": "both",
+      "events": ["hover"],
+      "options": ["interaction.sync.cursor"]
     },
     "lifecycle.viewport-sync": {
       "title": "Viewport sync",
       "works": "Two charts in a viewport group: a view set on one (setViewport) is the other's at once, along x or, where x shows categories, along y; each reports it once.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "both",
+      "events": ["viewport"],
+      "options": ["interaction.sync.viewport"]
     },
     "lifecycle.selection-sync": {
       "title": "Selection sync",
       "works": "Two charts in a selection group: a range selected on one is the other's selection, in data values, reported once on each.",
       "na": null,
-      "suite": "herceg-browser"
+      "suite": "herceg-browser",
+      "direction": "both",
+      "events": ["select"],
+      "options": ["interaction.sync.selection"]
     },
     "lifecycle.hydration": {
       "title": "Hydration",

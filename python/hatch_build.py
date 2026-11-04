@@ -1,7 +1,7 @@
-"""Refuses to build a package without herceg's JavaScript bundles.
+"""Refuses to build a package without herceg's JavaScript bundles and spec schema.
 
-The bundles are build outputs (`npm run build:python`), not tracked by git;
-a package built without them would install but fail to render.
+They are build outputs (`npm run build:python`), not tracked by git; a
+package built without them would install but fail to render.
 """
 
 import json
@@ -9,7 +9,13 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-BUNDLES = ("herceg.js", "herceg-static.js", "herceg-widget.js", "herceg-streamlit.js")
+BUNDLES = (
+    "herceg.js",
+    "herceg-static.js",
+    "herceg-widget.js",
+    "herceg-streamlit.js",
+    "spec.schema.json",
+)
 
 
 class BundleCheck(BuildHookInterface):

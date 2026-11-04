@@ -1,8 +1,9 @@
 # Export
 
 Static SVG, PNG, JPEG, WebP, and PDF; fonts for identical layout
-everywhere; server rendering with hydration; and charts as portable specs
-and binary payloads.
+everywhere; server rendering with hydration; charts as portable specs
+and binary payloads; and the spec's JSON Schema and the marks'
+capabilities, for editors.
 
 - [Exporting a chart](#exporting-a-chart)
 - [SVG size and scaling](#svg-size-and-scaling)
@@ -11,6 +12,7 @@ and binary payloads.
 - [Fonts](#fonts)
 - [Server rendering](#server-rendering)
 - [Charts from specs](#charts-from-specs)
+- [Schema and capabilities for editors](#schema-and-capabilities-for-editors)
 - [Payloads and page fragments](#payloads-and-page-fragments)
 
 ## Exporting a chart
@@ -337,6 +339,90 @@ spec, buffers = chart.to_spec()
 - `carryNodePositions(old, new)` keeps a network's node positions when a
   changed spec replaces a chart
   ([Networks](hierarchy-and-flow.md#networks)).
+
+## Schema and capabilities for editors
+
+Products that build charts from forms, or offer the marks that can do
+something (be clicked, drill, take a selection), read two JSON files the
+package publishes beside its code. No bundle includes them.
+
+- `herceg/spec.schema.json` is a [JSON Schema](https://json-schema.org)
+  (draft 2020-12) of the spec: `ChartSpec` and every option it reaches,
+  generated from the spec's TypeScript types. Each option has a `title`
+  made from its name, the `description` its documentation gives, its type
+  and choices (`enum`, `const`; `examples` of an open string's usual
+  values, a pattern, an interval, or a time), its `default` where the
+  engine has one, and its bounds (`minimum`, `exclusiveMinimum`,
+  `maximum`, `minItems`, `maxItems`; `integer` types; a `pattern` for
+  dates and times of day). Objects take no other names, as `validateSpec` refuses them;
+  marks are an `anyOf` of their forms, each with its `type`. Python
+  returns the same schema from `hg.spec_schema()`, a dict, without a
+  JSON Schema package.
+- `herceg/capabilities.json` is the [capability matrix](../capabilities.md)
+  of the marks: each row's state of every capability (works, unproved,
+  refused with the error and what works instead, or not applicable with
+  the reason), and what each row `emits`, the chart events its proved
+  capabilities report (`click`, `select`, `rowSelection`, `pin`,
+  `drill`, `itemMove`, `hover`, `viewport`), and `consumes`, the spec
+  options through which it takes something in: another view's row
+  selection (`rowSelection`), a synced cursor, view, or selection
+  (`interaction.sync`), values that animate as they change
+  (`animation.values`), and a renderer (`renderer`). Each capability has
+  its `direction`, the `events` its tests observe, and the `options`
+  that ask for it.
+
+```ts
+import Ajv2020 from "ajv/dist/2020.js"; // or any draft 2020-12 validator
+import capabilities from "herceg/capabilities.json" with { type: "json" };
+import schema from "herceg/spec.schema.json" with { type: "json" };
+import { validateSpec } from "herceg/spec";
+
+const check = new Ajv2020({ allErrors: true, strict: false }).compile(schema);
+if (!check(draft)) showFieldErrors(check.errors); // as the user types
+validateSpec(draft); // then the engine's checks, which say more (below)
+
+const drills = Object.entries(capabilities.marks)
+  .filter(([, row]) => row.emits.includes("drill"))
+  .map(([name]) => name); // ["treemap", "sunburst"]
+```
+
+```python
+schema = hg.spec_schema()  # validate with jsonschema, or any draft 2020-12 validator
+```
+
+`validateSpec` and `loadSpec` also check what a JSON Schema cannot say,
+listed in the schema's own description too:
+
+- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.
+- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.
+- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.
+- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.
+- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.
+- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.
+- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's min and max, a fit box's south and north, a time break's from and to), as do bin edges, thresholds, and a gauge's bands within its range.
+- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.
+- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap "move"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient "y"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.
+- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are "#rgb" or "#rrggbb" colors.
+- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads (["field", name], numbers for "+").
+- A scale of scales named other than x, y, or yRight gives its type.
+- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.
+- Number patterns (",.2f") and time intervals ("6 hours") are written as herceg reads them; a break's dates ("YYYY-MM-DD") are days of the calendar, "24:00" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).
+- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.
+- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.
+
+The schema is stricter than `validateSpec` in five places, where it
+refuses what the engine takes:
+
+- A 2D histogram's axis: its type has none, and validateSpec takes "left", where it draws anyway.
+- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 "true") and a format leaves out what it does not read (a date's options in a number's).
+- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).
+- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.
+- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.
+
+Both files are generated in herceg's repository and tested: the schema
+against `validateSpec`, on every spec of the tests, the specs these
+guides give, Python's specs, and each option given every kind of value;
+the capabilities by the tests the matrix names.
 
 ## Payloads and page fragments
 

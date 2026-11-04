@@ -97,8 +97,9 @@ export interface ChartSpec extends StateSpec {
   title?: string | TitleSpec;
   /** Longer description for assistive technology. */
   description?: string;
-  /** CSS pixels. In the browser, omitted sizes follow the container. */
+  /** CSS pixels. In the browser, omitted sizes follow the container. @exclusiveMinimum 0 */
   width?: number;
+  /** @exclusiveMinimum 0 */
   height?: number;
   /** Tables referenced by marks, by name. */
   data?: Record<string, DataSpec>;
@@ -172,6 +173,7 @@ export interface ChartSpec extends StateSpec {
    * there, and the chart highlights the rows the channel holds, whoever
    * selected them (another chart, a grid). Stores are not part of the
    * spec: `loadSpec` takes them, or makes them. Needs marks along axes.
+   * @minItems 1
    */
   rowSelection?: RowSelectionSpec | readonly RowSelectionSpec[];
   /**
@@ -194,17 +196,17 @@ export interface ChartSpec extends StateSpec {
   animation?: boolean | AnimationSpec;
   /**
    * Renderer for marks: "auto" (the default) draws them in SVG, and in
-   * Canvas while the chart draws many points; "svg" or "canvas" always.
+   * Canvas while the chart draws many points; "svg" or "canvas" always. @default "auto"
    */
   renderer?: RendererName;
   theme?: ThemeName | ThemeSpec;
   /** BCP 47 locale for labels; defaults to the runtime locale. */
   locale?: string;
-  /** "local" (default), "UTC", or an IANA zone for time axes and labels. */
+  /** "local" (default), "UTC", or an IANA zone for time axes and labels. @default "local" */
   timeZone?: string;
   /**
    * How maps (`geoshape` and `geopoint` marks) are projected: a projection's
-   * name, or one with parameters. Equal Earth by default.
+   * name, or one with parameters. Equal Earth by default. @default "equal-earth"
    */
   projection?: ProjectionName | ProjectionSpec;
   /**
@@ -216,7 +218,7 @@ export interface ChartSpec extends StateSpec {
   camera?: CameraSpec;
   /**
    * The relative lengths of a 3D chart's x, y, and z sides: [1, 1, 1], a
-   * cube, by default. Only for 3D charts.
+   * cube, by default. Only for 3D charts. @exclusiveMinimum 0 @default [1, 1, 1]
    */
   boxAspect?: readonly [number, number, number];
 }
@@ -226,13 +228,25 @@ export interface ChartSpec extends StateSpec {
  * how the box is drawn. Angles are in degrees.
  */
 export interface CameraSpec {
-  /** About the vertical z axis, counterclockwise from +x seen from above; -60 by default. */
+  /**
+   * About the vertical z axis, counterclockwise from +x seen from above; -60 by default.
+   * @default -60
+   */
   azimuth?: number;
-  /** Above the x-y plane, from -90 (from below) to 90 (from above); 25 by default. */
+  /**
+   * Above the x-y plane, from -90 (from below) to 90 (from above); 25 by default.
+   * @minimum -90 @maximum 90 @default 25
+   */
   elevation?: number;
-  /** Magnification from 0.5 to 10; 1, the default, fits the box in the chart. */
+  /**
+   * Magnification from 0.5 to 10; 1, the default, fits the box in the chart.
+   * @minimum 0.5 @maximum 10 @default 1
+   */
   zoom?: number;
-  /** Perspective, nearer things larger, rather than orthographic projection (the default). */
+  /**
+   * Perspective, nearer things larger, rather than orthographic projection (the default).
+   * @default false
+   */
   perspective?: boolean;
 }
 
@@ -304,7 +318,7 @@ export type PanelInteractionSpec = Omit<InteractionSpec, "sync" | "select">;
 
 export interface WrappedFacetSpec extends FacetLayoutSpec {
   field: Field;
-  /** Panels per row; by default about as many columns as rows. */
+  /** Panels per row; by default about as many columns as rows. @integer @minimum 1 */
   columns?: number;
 }
 
@@ -315,14 +329,24 @@ export interface GridFacetSpec extends FacetLayoutSpec {
 
 /** How a facet's panels are spaced: whether they have headers naming them, and the gaps between them. */
 export interface FacetLayoutSpec {
-  /** `false` draws no headers and keeps no room for them; panels are named by their headers by default. */
+  /**
+   * `false` draws no headers and keeps no room for them; panels are named by their headers by default.
+   * @default true
+   */
   header?: boolean;
   /**
    * Pixels between neighboring panels beyond the room their axes' labels
    * and headers take: one for both, or each its own. Spaced to their
-   * labels by default.
+   * labels by default. @minimum 0
    */
-  gap?: number | { row?: number; column?: number };
+  gap?:
+    | number
+    | {
+        /** @minimum 0 */
+        row?: number;
+        /** @minimum 0 */
+        column?: number;
+      };
 }
 
 export type RendererName = "auto" | "svg" | "canvas";
@@ -350,17 +374,25 @@ export interface ProjectionSpec {
   centralMeridian?: number;
   /**
    * The two standard parallels of "conic-equal-area", in degrees: by
-   * default a sixth of the data's span of latitudes in from either end.
+   * default a sixth of the data's span of latitudes in from either end. @minimum -90 @maximum 90
    */
   parallels?: readonly [number, number];
   /**
    * What the map fits into its plot: the data's shapes and points ("data",
    * the default), the whole "world", or a box of longitudes and latitudes,
    * `[[west, south], [east, north]]`, whose west may lie east of its east
-   * to cross the antimeridian.
+   * to cross the antimeridian. @default "data"
    */
-  fit?: "data" | "world" | readonly [readonly [number, number], readonly [number, number]];
+  fit?: "data" | "world" | readonly [LonLat, LonLat];
 }
+
+/**
+ * A longitude and a latitude in degrees: longitudes within a turn and a
+ * half of the meridian (shapes may cross the antimeridian), latitudes from
+ * pole to pole.
+ * @items [{"minimum": -540, "maximum": 540}, {"minimum": -90, "maximum": 90}]
+ */
+type LonLat = readonly [number, number];
 /**
  * A built-in theme. Each paints a background of its own (light, the
  * default, white), except "auto": "light" or "dark" as the page behind the
@@ -394,7 +426,10 @@ export interface ColumnsSpec {
    * into place. Every row needs a value of it.
    */
   orderBy?: Field;
-  /** Keep at most this many rows: appends drop the first. A whole number of at least 1. */
+  /**
+   * Keep at most this many rows: appends drop the first. A whole number of at least 1.
+   * @integer @minimum 1
+   */
   maxRows?: number;
 }
 
@@ -439,8 +474,18 @@ export type TransformSpec =
   | { filter: Expression }
   | { calculate: Expression; as: Field }
   | { bin: Field; bins?: BinSpec; as?: Field; end?: Field }
-  | { aggregate: readonly AggregateSpec[]; by?: readonly Field[] }
-  | { rolling: readonly RollingSpec[]; size: number; by?: readonly Field[] }
+  | {
+      aggregate: readonly AggregateSpec[];
+      /** @minItems 1 */
+      by?: readonly Field[];
+    }
+  | {
+      rolling: readonly RollingSpec[];
+      /** @integer @minimum 1 */
+      size: number;
+      /** @minItems 1 */
+      by?: readonly Field[];
+    }
   | { sort: Field; order?: "ascending" | "descending" };
 
 /**
@@ -450,8 +495,16 @@ export type TransformSpec =
  * explicit start are in no bin), or the bins' edges (2 to 1,001, finite and
  * increasing, used exactly as given). A bin holds values from its left edge
  * up to its right one; the last holds its right edge too.
+ * @integer @minimum 1 @minItems 2 @maxItems 1001
  */
-export type BinSpec = number | { step: number; start?: number } | readonly number[];
+export type BinSpec =
+  | number
+  | {
+      /** @exclusiveMinimum 0 */
+      step: number;
+      start?: number;
+    }
+  | readonly number[];
 
 /** An aggregate: its operation, the number field it reads (none for count), and its name. */
 export interface AggregateSpec {
@@ -520,6 +573,7 @@ export type BinaryType =
 export interface BinaryColumnSpec {
   type: "number" | "time";
   dtype: BinaryType;
+  /** @integer @minimum 0 */
   buffer: number;
 }
 
@@ -529,6 +583,7 @@ export interface BinaryColumnSpec {
  */
 export interface CategoryColumnSpec {
   type: "category";
+  /** @integer @minimum 0 @items {"type": "integer", "minimum": -1} */
   codes: number | readonly number[];
   dictionary: readonly string[];
 }
@@ -546,10 +601,15 @@ export interface CategoryColumnSpec {
  */
 export interface GeometryColumnSpec {
   type: "geometry";
+  /** @integer @minimum 0 */
   coordinates: number | readonly number[];
+  /** @integer @minimum 0 @items {"type": "integer", "minimum": 0, "maximum": 2147483647} */
   ringOffsets: number | readonly number[];
+  /** @integer @minimum 0 @items {"type": "integer", "minimum": 0, "maximum": 2147483647} */
   polygonOffsets: number | readonly number[];
+  /** @integer @minimum 0 @items {"type": "integer", "minimum": 0, "maximum": 2147483647} */
   geometryOffsets: number | readonly number[];
+  /** @integer @minimum 0 @items {"type": "integer", "minimum": -1, "maximum": 2147483647} */
   codes?: number | readonly number[];
 }
 
@@ -566,7 +626,10 @@ export interface AxisSpec {
   nice?: boolean;
   /** Include zero in the domain. Default true for the value axis of areas and bars. */
   zero?: boolean;
-  /** Room between the data and the plot's edges: "auto" by default (see `ScalePadding`). */
+  /**
+   * Room between the data and the plot's edges: "auto" by default (see `ScalePadding`).
+   * @default "auto"
+   */
   padding?: ScalePadding;
   /** Axis title. */
   title?: string;
@@ -586,7 +649,7 @@ export interface AxisSpec {
    * they are: as `format` takes them; `format` by default.
    */
   tooltipFormat?: FormatSpec;
-  /** Draw the axis. Default true. */
+  /** Draw the axis. Default true. @default true */
   show?: boolean;
   /** How the axis' parts look: its line, ticks, tick labels, title, and grid lines. */
   style?: AxisStyles;
@@ -625,7 +688,7 @@ export interface ChartAxisSpec extends AxisSpec {
    * Where panels sharing the scale label it: "outer" (the default) only on
    * the outer edge of panels lined up on the same rows or columns, below
    * the lowest and beside the first (on the right, the last); "all" on
-   * every panel.
+   * every panel. @default "outer"
    */
   repeat?: "outer" | "all";
 }
@@ -644,7 +707,12 @@ export interface XAxisSpec extends ChartAxisSpec {
    * needs time-axis breaks. Seams are kept in chronological
    * order at least `minSpacing` CSS pixels apart (default 40), excluding plot edges.
    */
-  seams?: boolean | { minSpacing?: number };
+  seams?:
+    | boolean
+    | {
+        /** @exclusiveMinimum 0 */
+        minSpacing?: number;
+      };
 }
 
 /** A day of the week, by its first three letters in English. */
@@ -661,10 +729,36 @@ export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
  * span, so a span inside a repeated hour is left out twice.
  */
 export type TimeBreakSpec =
-  | { weekdays: readonly Weekday[] }
-  | { hours: readonly [string, string] }
-  | { dates: readonly string[] }
-  | { from: number; to: number };
+  | {
+      /** @minItems 1 */
+      weekdays: readonly Weekday[];
+    }
+  | {
+      /**
+       * @items [{"pattern": "^(([01]?[0-9]|2[0-3]):[0-5][0-9]|24:00)$", "examples": ["16:00"]},
+       * {"pattern": "^(([01]?[0-9]|2[0-3]):[0-5][0-9]|24:00)$", "examples": ["09:30"]}]
+       */
+      hours: readonly [string, string];
+    }
+  | {
+      /**
+       * @minItems 1
+       * @items {"pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$", "examples": ["2025-12-25"]}
+       */
+      dates: readonly string[];
+    }
+  | {
+      /**
+       * Epoch milliseconds. @integer @minimum -9007199254740991 @maximum 9007199254740991
+       * @examples [1767225600000]
+       */
+      from: number;
+      /**
+       * Epoch milliseconds. @integer @minimum -9007199254740991 @maximum 9007199254740991
+       * @examples [1767312000000]
+       */
+      to: number;
+    };
 
 /**
  * How inspection reads the data at the pointer or the keyboard's cursor.
@@ -679,8 +773,25 @@ export type TimeBreakSpec =
  */
 export type InspectionSpec =
   | { mode?: "nearest-x" | "nearest-y"; snap?: Snap; within?: never }
-  | { mode: "nearest-x" | "nearest-y"; snap?: Snap; within?: number | { milliseconds: number } }
-  | { mode: "nearest"; snap?: never; within?: { px: number } };
+  | {
+      mode: "nearest-x" | "nearest-y";
+      snap?: Snap;
+      /** @minimum 0 */
+      within?:
+        | number
+        | {
+            /** @minimum 0 */
+            milliseconds: number;
+          };
+    }
+  | {
+      mode: "nearest";
+      snap?: never;
+      within?: {
+        /** @minimum 0 */
+        px: number;
+      };
+    };
 
 /** How inspection finds data: along x, along y, or the nearest point on screen. */
 export type InspectionMode = "nearest-x" | "nearest-y" | "nearest";
@@ -704,7 +815,7 @@ export interface TooltipSpec {
   /**
    * Label the crosshair on the axes, as financial charts do: the inspected
    * value on the axis the crosshair follows, and the pointer's position on
-   * the other axes, across the plot at a dashed line. Off by default.
+   * the other axes, across the plot at a dashed line. Off by default. @default false
    */
   axisLabels?: boolean;
   /**
@@ -757,7 +868,7 @@ export interface InteractionSpec {
    * What a click or Enter selects (see `ChartSelection`): the item picked
    * ("items"), or its series ("series"); nothing by default (`false`).
    * Shift with a click adds or removes it; a click on the one selected, or
-   * off the data, clears.
+   * off the data, clears. @default false
    */
   select?: "items" | "series" | false;
   /**
@@ -776,7 +887,7 @@ export interface InteractionSpec {
   sync?: string | SyncSpec;
   /**
    * Dragging turns 3D charts; true by default. Their `zoom` is `true` or
-   * false: the wheel (with Ctrl or ⌘) magnifies them.
+   * false: the wheel (with Ctrl or ⌘) magnifies them. @default true
    */
   rotate?: boolean;
   /** Dragging a network's node moves it, and it stays where it is dropped. */
@@ -794,7 +905,7 @@ export interface BrushOptions {
   edit?: boolean;
   /**
    * What clears it: a click off it (the default), a double click
-   * (`clearBrush` bound to it), or neither (`false`); Escape always does.
+   * (`clearBrush` bound to it), or neither (`false`); Escape always does. @default "click"
    */
   clear?: "click" | "double-click" | false;
 }
@@ -811,7 +922,7 @@ export type Modifier = "shift" | "ctrl" | "alt" | "meta";
 export interface WheelGesture {
   type: "wheel";
   axis?: "x" | "y";
-  /** Keys held, exactly: none by default. */
+  /** Keys held, exactly: none by default. @default [] */
   modifiers?: readonly Modifier[];
   focused?: boolean;
 }
@@ -866,6 +977,7 @@ export interface PanAction {
 export interface ZoomAction {
   type: "zoom";
   axes?: ZoomSpec;
+  /** @exclusiveMinimum 0 */
   factor?: number;
 }
 
@@ -961,7 +1073,14 @@ export interface ScaleLimitsSpec {
    * again only once it has moved `hysteresis` (0.05) farther away, or the
    * end moved. `true` takes the defaults.
    */
-  edge?: boolean | { threshold?: number; hysteresis?: number };
+  edge?:
+    | boolean
+    | {
+        /** @minimum 0 */
+        threshold?: number;
+        /** @minimum 0 */
+        hysteresis?: number;
+      };
 }
 
 /**
@@ -1002,7 +1121,7 @@ export interface SyncChannelSpec {
 export interface CursorShowSpec {
   /** Which point of each series it reads (see `Snap`); by default, as the chart's `inspection` reads. */
   snap?: Snap;
-  /** The chart's tooltip shows at the cursor too; off by default. */
+  /** The chart's tooltip shows at the cursor too; off by default. @default false */
   tooltip?: boolean;
 }
 
@@ -1033,11 +1152,18 @@ export interface RowSelectionSpec {
    * The gestures that write to the channel: all three by default; none for
    * a chart that only highlights. They write only where `interaction.brush`
    * draws a brush or a lasso; a brush that writes rows never zooms.
+   * @default ["brush", "lasso", "click"]
    */
   events?: readonly SelectionGesture[];
-  /** "highlight" (the default) dims the rows the channel does not hold; "none" leaves them. */
+  /**
+   * "highlight" (the default) dims the rows the channel does not hold; "none" leaves them.
+   * @default "highlight"
+   */
   effect?: "highlight" | "none";
-  /** The channel hears a brush's previews while it moves, and its cancel; commits only by default. */
+  /**
+   * The channel hears a brush's previews while it moves, and its cancel; commits only by default.
+   * @default false
+   */
   live?: boolean;
   /**
    * What the channel holds once loaded, in a store `loadSpec` makes (a
@@ -1055,20 +1181,27 @@ export interface RowSelectionSpec {
  */
 export type SelectionSpec =
   | { kind: "predicate"; expression: Expression }
-  | { kind: "rows"; rows: number | readonly number[] };
+  | {
+      kind: "rows";
+      /**
+       * A uint32 buffer's index, or the rows' positions in the table.
+       * @integer @minimum 0 @items {"type": "integer", "minimum": 0}
+       */
+      rows: number | readonly number[];
+    };
 
 /** The range navigator's options. */
 export interface NavigatorSpec {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   /**
    * The strip's height in CSS pixels, from 16 up: 40 by default, at most a
    * third of the height the plots and the strip share, and less where the
    * plots would keep less than 30 pixels (or a row of several panels less
-   * than 20). A chart too short for a 16-pixel strip beside them has none.
+   * than 20). A chart too short for a 16-pixel strip beside them has none. @minimum 16 @default 40
    */
   height?: number;
   /**
@@ -1087,7 +1220,7 @@ export interface NavigatorSpec {
 }
 
 export interface AnimationSpec {
-  /** Milliseconds a change takes; 0 shows it at once. */
+  /** Milliseconds a change takes; 0 shows it at once. @minimum 0 */
   duration?: number;
   /**
    * Marks move from the values shown to new ones when a table's values
@@ -1115,7 +1248,7 @@ export type BrushSpec = "x" | "y" | "xy" | "lasso";
  * (static export) a variable needs a fallback, `var(--name, #2a78d6)`.
  */
 export interface ThemeSpec {
-  /** Base theme to extend; "light" by default. */
+  /** Base theme to extend; "light" by default. @default "light" */
   extends?: ThemeName;
   tokens?: ThemeTokens;
   style?: StyleRoles;
@@ -1174,7 +1307,7 @@ interface MarkBase extends SelectionLooks {
   id?: string;
   /**
    * The y axis the mark's values are on: "left" (the default) or "right",
-   * the chart's `yRight` axis. Category y values stay on the left.
+   * the chart's `yRight` axis. Category y values stay on the left. @default "left"
    */
   axis?: "left" | "right";
   /**
@@ -1187,7 +1320,7 @@ interface MarkBase extends SelectionLooks {
   /**
    * Where the mark is drawn among the others of its panel: higher above
    * lower, marks of equal `zIndex` in the order they are listed. 0 by
-   * default; grid lines are at -1. Any finite number.
+   * default; grid lines are at -1. Any finite number. @default 0
    */
   zIndex?: number;
   /** `false`: the pointer passes through the mark to what is under it (decorations). */
@@ -1265,7 +1398,7 @@ interface RowTooltip {
  */
 export type Curve = "linear" | "step" | "step-before" | "step-after" | "monotone";
 
-/** Pixel dash array, or a matplotlib style scaled by the resolved stroke width. */
+/** Pixel dash array, or a matplotlib style scaled by the resolved stroke width. @minimum 0 */
 export type Dash = readonly number[] | "-" | "--" | ":" | "-.";
 
 /**
@@ -1284,9 +1417,15 @@ export type Orient = "x" | "y";
  */
 export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
   type: "line";
-  /** Positions along x, or with `orient: "y"` the values: one field or several, or a coordinate. */
+  /**
+   * Positions along x, or with `orient: "y"` the values: one field or several, or a coordinate.
+   * @minItems 1
+   */
   x: RowPosition | readonly Field[];
-  /** Values along x (one field or several, or a coordinate), or with `orient: "y"` the positions. */
+  /**
+   * Values along x (one field or several, or a coordinate), or with `orient: "y"` the positions.
+   * @minItems 1
+   */
   y: RowPosition | readonly Field[];
   orient?: Orient;
   /**
@@ -1301,14 +1440,15 @@ export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
   dodge?: boolean;
   /** Constant color; otherwise colors come from the palette per series. */
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
   /** Pixel dash array, or a matplotlib style scaled by strokeWidth. */
   dash?: Dash;
-  /** From 0 to 1: the whole mark's, markers included. */
+  /** From 0 to 1: the whole mark's, markers included. @minimum 0 @maximum 1 */
   opacity?: number;
-  /** From 0 to 1: the line's stroke's. */
+  /** From 0 to 1: the line's stroke's. @minimum 0 @maximum 1 */
   strokeOpacity?: number;
-  /** How the line joins its points (see `Curve`); "linear" by default. */
+  /** How the line joins its points (see `Curve`); "linear" by default. @default "linear" */
   curve?: Curve;
   /** Legend and tooltip name for a single-field line without `series`. */
   label?: string;
@@ -1342,16 +1482,17 @@ interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
   /** On a category position axis, with `series` and no stack: the series side by side in each band. */
   dodge?: boolean;
   fill?: string;
+  /** @minimum 0 @maximum 1 */
   fillOpacity?: number;
   /** Outline the top edge. Default true for unstacked single areas, and with `stroke`. */
   line?: boolean;
   /** Outline color; each area's own color by default. */
   stroke?: string;
-  /** Outline width in pixels; the theme's line width by default. */
+  /** Outline width in pixels; the theme's line width by default. @minimum 0 */
   strokeWidth?: number;
-  /** From 0 to 1: the outline's. */
+  /** From 0 to 1: the outline's. @minimum 0 @maximum 1 */
   strokeOpacity?: number;
-  /** From 0 to 1: the whole mark's. */
+  /** From 0 to 1: the whole mark's. @minimum 0 @maximum 1 */
   opacity?: number;
   /**
    * The areas' fill: a category field (an area per value, unless `series`
@@ -1370,7 +1511,10 @@ interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
   continuity?: ContinuitySpec;
   /** Rows the areas leave out, as gaps (areas that do not stack). */
   where?: Expression;
-  /** How the area's edges join their points (see `Curve`); "linear" by default. */
+  /**
+   * How the area's edges join their points (see `Curve`); "linear" by default.
+   * @default "linear"
+   */
   curve?: Curve;
   label?: string;
   /** A label following each area's value edge (a band's `edge`). */
@@ -1405,9 +1549,9 @@ export type StackOrder = "input" | "inside-out";
 export type AreaSpec = AreaStyle &
   (
     | {
-        /** Positions along x, or with `orient: "y"` the values (one field or several, or a coordinate). */
+        /** Positions along x, or with `orient: "y"` the values (one field or several, or a coordinate). @minItems 1 */
         x: RowPosition | readonly Field[];
-        /** Values filled to zero (one field or several, or a coordinate), or with `orient: "y"` the positions. */
+        /** Values filled to zero (one field or several, or a coordinate), or with `orient: "y"` the positions. @minItems 1 */
         y: RowPosition | readonly Field[];
         /**
          * Category field that splits rows into one area per value. Without
@@ -1474,13 +1618,13 @@ interface AnnotationBase extends Omit<MarkBase, keyof SelectionLooks> {
   /**
    * Whether the annotation's values count toward the axes' domains, so the
    * view widens to keep them in it; false by default, so annotations show
-   * where the data is. Fractions and pixels never count.
+   * where the data is. Fractions and pixels never count. @default false
    */
   contributeDomain?: boolean;
   /**
    * `true` lists the annotation in the chart's legends by its label: one
    * entry for constant text, one per value of its label's field, which
-   * hide and show what they name. Annotations are left out by default.
+   * hide and show what they name. Annotations are left out by default. @default false
    */
   legend?: boolean;
 }
@@ -1496,9 +1640,10 @@ interface RuleStyle extends AnnotationBase, RowItems {
    */
   drag?: boolean;
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
   dash?: Dash;
-  /** From 0 to 1. */
+  /** From 0 to 1. @minimum 0 @maximum 1 */
   strokeOpacity?: number;
   /** Where along the other axis the rule runs, from one place to the other; the plot's whole extent by default. */
   span?: readonly [AnnotationCoordinate, AnnotationCoordinate];
@@ -1511,14 +1656,15 @@ export interface DendrogramSpec extends Omit<MarkBase, "axis" | keyof SelectionL
   first: Field;
   second: Field;
   height: Field;
-  /** Category labels indexed by leaf id; exactly one more than the merge rows. */
+  /** Category labels indexed by leaf id; exactly one more than the merge rows. @minItems 1 */
   leaves: readonly string[];
   /**
    * Plot edge at height zero; default bottom. Heights are values on the
-   * other axis, whose automatic domain descends for top and right.
+   * other axis, whose automatic domain descends for top and right. @default "bottom"
    */
   side?: "bottom" | "top" | "left" | "right";
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
   label?: string;
 }
@@ -1539,18 +1685,19 @@ export type RegionSpec = RegionStyle & RegionRange<AnnotationPosition>;
 interface RegionStyle extends AnnotationBase, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "region";
   /** Defaults to the theme's muted color. */
   fill?: string;
-  /** Default 0.15. */
+  /** Default 0.15. @minimum 0 @maximum 1 @default 0.15 */
   fillOpacity?: number;
   /** An outline: its color, and width in pixels (1 by default with a stroke). */
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
-  /** Which of the outline's sides are drawn: top, right, bottom, left (all by default). */
+  /** Which of the outline's sides are drawn: top, right, bottom, left (all by default). @uniqueItems */
   strokeSides?: readonly Side[];
   /**
    * Each row's paint, for regions of a table: `color` (the fill) or `fill`,
@@ -1561,6 +1708,7 @@ interface RegionStyle extends AnnotationBase, RowItems {
     color?: RowChannelSpec<string>;
     fill?: RowChannelSpec<string>;
     stroke?: RowChannelSpec<string>;
+    /** Opacities from 0 to 1. @minimum 0 @maximum 1 */
     opacity?: RowChannelSpec<number>;
   };
   /** Text drawn in every region (in its top left corner by default), constant or each row's `field`; it draws no leader. */
@@ -1588,7 +1736,7 @@ export type TextLabelSpec = LabelTextSpec &
 export interface TextSpec extends AnnotationBase, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "text";
@@ -1618,12 +1766,16 @@ export interface TextSpec extends AnnotationBase, RowItems {
 export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "bar";
-  /** Positions (or lengths, for horizontal bars): fields, or as positions a coordinate. */
+  /**
+   * Positions (or lengths, for horizontal bars): fields, or as positions a coordinate.
+   * @minItems 1
+   */
   x: RowPosition | readonly Field[];
+  /** @minItems 1 */
   y: RowPosition | readonly Field[];
   /**
    * The axis bars stand on: "x" (positions on x, lengths along y) or "y"
@@ -1645,24 +1797,30 @@ export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
    */
   dodge?: boolean;
   fill?: string;
+  /** @minimum 0 @maximum 1 */
   fillOpacity?: number;
   /** Edges: an outline of every bar. */
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
+  /** @minimum 0 @maximum 1 */
   strokeOpacity?: number;
   dash?: Dash;
   /**
    * Which sides of each bar the outline draws, as they stand on screen
    * (top, right, bottom, left; all by default), so `["top"]` caps bars
-   * whichever way their values go.
+   * whichever way their values go. @uniqueItems
    */
   strokeSides?: readonly Side[];
   /**
    * Each bar's thickness across its value direction, in pixels, whatever
    * its band's width; grouped bars stand centered in their slots.
    */
-  width?: { px: number };
-  /** From 0 to 1: the bars', fill and edges. */
+  width?: {
+    /** @minimum 0 */
+    px: number;
+  };
+  /** From 0 to 1: the bars', fill and edges. @minimum 0 @maximum 1 */
   opacity?: number;
   /**
    * The bars' fill: a category field (a bar series per value, unless
@@ -1697,10 +1855,10 @@ interface RugStyle extends SeriesBase, RowTooltip, RowItems {
    * mark's lines, as `fill` sets it.
    */
   color?: string;
-  /** Tick length in CSS pixels, finite and positive; default 8. */
+  /** Tick length in CSS pixels, finite and positive; default 8. @exclusiveMinimum 0 @default 8 */
   length?: number;
   stroke?: string;
-  /** Tick width in CSS pixels; default 1. */
+  /** Tick width in CSS pixels; default 1. @minimum 0 @default 1 */
   strokeWidth?: number;
   label?: string;
 }
@@ -1772,8 +1930,9 @@ interface ErrorBarStyle extends SeriesBase, RowTooltip, RowItems {
    */
   dodge?: boolean;
   stroke?: string;
+  /** @minimum 0 */
   strokeWidth?: number;
-  /** Width of the caps at each end in pixels; 0 for none. Default 8. */
+  /** Width of the caps at each end in pixels; 0 for none. Default 8. @minimum 0 @default 8 */
   cap?: number;
   label?: string;
 }
@@ -1793,7 +1952,7 @@ export interface CandlestickSpec extends SeriesBase, RowTooltip, RowItems {
   /**
    * "candlestick" (the default): bodies from open to close. "ohlc": bars,
    * a line from low to high with the open ticked to its left and the close
-   * to its right.
+   * to its right. @default "candlestick"
    */
   variant?: "candlestick" | "ohlc";
   /** Color of candles closing at or above their open; the theme's `rise` by default. */
@@ -1818,11 +1977,17 @@ export interface PieSpec extends RowTooltip {
   category: Field;
   /** Number field summed per category; without it, slices count rows. */
   value?: Field;
-  /** The hole's radius as a fraction of the pie's: 0 (the default) for a pie, about 0.6 for a donut. */
+  /**
+   * The hole's radius as a fraction of the pie's: 0 (the default) for a pie, about 0.6 for a donut.
+   * @minimum 0 @exclusiveMaximum 1 @default 0
+   */
   innerRadius?: number;
-  /** "value" (the default) orders slices largest first, clockwise from the top; "input" keeps the categories' order. */
+  /**
+   * "value" (the default) orders slices largest first, clockwise from the top; "input" keeps the categories' order.
+   * @default "value"
+   */
   sort?: "value" | "input";
-  /** Labels beside the slices, joined to them by lines; true by default. */
+  /** Labels beside the slices, joined to them by lines; true by default. @default true */
   labels?: boolean;
   /** With the chart's `panels`, the id of the panel the pie has to itself. */
   panel?: string;
@@ -1852,7 +2017,10 @@ export type BoxPlotRawInput = {
   q3?: never;
   high?: never;
   count?: never;
-  /** Tukey's 1.5 IQR (default), the full range, or a nonnegative IQR multiple. */
+  /**
+   * Tukey's 1.5 IQR (default), the full range, or a nonnegative IQR multiple. @minimum 0
+   * @default "tukey"
+   */
   whiskers?: "tukey" | "range" | number;
   /**
    * Notch half-width: 1.57 IQR / sqrt(count).
@@ -1861,7 +2029,7 @@ export type BoxPlotRawInput = {
   notch?: boolean;
   /**
    * Dots at the values beyond the whiskers; true by default. Hidden ones
-   * are still counted in tooltips, and leave the value axis' extent.
+   * are still counted in tooltips, and leave the value axis' extent. @default true
    */
   outliers?: boolean;
 };
@@ -1886,7 +2054,7 @@ export type BoxPlotStyle = {
   color?: string;
   /** Constant color for every shape; colors come from the palette otherwise. */
   fill?: string;
-  /** Opacity of the boxes' fill; 0.25 by default. */
+  /** Opacity of the boxes' fill; 0.25 by default. @minimum 0 @maximum 1 @default 0.25 */
   fillOpacity?: number;
   label?: string;
 };
@@ -1923,25 +2091,34 @@ export interface BoxenSpec extends SeriesBase {
    * about `outlierProportion` of them, "trustworthy" stops where a letter
    * value's confidence interval at `trustAlpha` would overlap the next one's,
    * "full" reaches every value; or a whole number of levels from 1, the
-   * box of the quartiles.
+   * box of the quartiles. @integer @minimum 1 @default "tukey"
    */
   depth?: "tukey" | "proportion" | "trustworthy" | "full" | number;
-  /** The share of values left beyond the boxes with `depth: "proportion"`; 0.007 by default. */
+  /**
+   * The share of values left beyond the boxes with `depth: "proportion"`; 0.007 by default.
+   * @exclusiveMinimum 0 @exclusiveMaximum 1 @default 0.007
+   */
   outlierProportion?: number;
-  /** The significance level `depth: "trustworthy"` stops at; 0.05 by default. */
+  /**
+   * The significance level `depth: "trustworthy"` stops at; 0.05 by default.
+   * @exclusiveMinimum 0 @exclusiveMaximum 1 @default 0.05
+   */
   trustAlpha?: number;
   /**
    * How a level's width shrinks from the quartile box's: by half each level
    * ("exponential", the default), by the same step each level ("linear"),
    * or so that each box's area is proportional to the share of values it
-   * holds ("area").
+   * holds ("area"). @default "exponential"
    */
   widthMethod?: "exponential" | "linear" | "area";
-  /** Dots at the values beyond the outermost boxes; true by default. */
+  /** Dots at the values beyond the outermost boxes; true by default. @default true */
   outliers?: boolean;
   /** Constant color for every shape; colors come from the palette otherwise. */
   fill?: string;
-  /** Opacity of the quartile box's fill, which outer levels lighten; 0.7 by default. */
+  /**
+   * Opacity of the quartile box's fill, which outer levels lighten; 0.7 by default.
+   * @minimum 0 @maximum 1 @default 0.7
+   */
   fillOpacity?: number;
   label?: string;
 }
@@ -1968,16 +2145,19 @@ export interface ViolinSpec extends SeriesBase {
   color?: string;
   /** Two series share the category center: first left (below horizontally), second right (above). */
   split?: boolean;
-  /** Inner box (default), dashed quartiles with a solid median, or no inner marks. */
+  /**
+   * Inner box (default), dashed quartiles with a solid median, or no inner marks.
+   * @default "box"
+   */
   inner?: "box" | "quartiles" | "none";
   /**
    * The kernel's standard deviation in data units, the same for every
-   * violin; by default each violin's by Silverman's rule of thumb.
+   * violin; by default each violin's by Silverman's rule of thumb. @exclusiveMinimum 0
    */
   bandwidth?: number;
   /** Constant color for every shape; colors come from the palette otherwise. */
   fill?: string;
-  /** Opacity of the violins' fill; 0.25 by default. */
+  /** Opacity of the violins' fill; 0.25 by default. @minimum 0 @maximum 1 @default 0.25 */
   fillOpacity?: number;
   label?: string;
 }
@@ -1987,7 +2167,12 @@ export interface ViolinSpec extends SeriesBase {
  * group in, or a field naming each row's node and one naming its parent's.
  */
 export type TreeShape =
-  | { path: readonly string[]; node?: never; parent?: never }
+  | {
+      /** @minItems 1 */
+      path: readonly string[];
+      node?: never;
+      parent?: never;
+    }
   | { node: string; parent: string; path?: never };
 
 /** A value each tree item has, which its paint may read: its share of its parent's value, its value, or its depth. */
@@ -1997,8 +2182,15 @@ export type ItemMeasure = "share" | "value" | "depth";
  * Tree items' fill opacity: a number from 0 to 1, or an item measure read
  * through `range` linearly: shares from 0 to 1, values from 0 to the
  * largest item's, depths from the top level to the deepest drawn.
+ * @minimum 0 @maximum 1
  */
-export type TreeOpacity = number | { measure: ItemMeasure; range: readonly [number, number] };
+export type TreeOpacity =
+  | number
+  | {
+      measure: ItemMeasure;
+      /** @minimum 0 @maximum 1 */
+      range: readonly [number, number];
+    };
 
 /**
  * A look laid over tree items' paint: of a `Look`, a fill, a fill opacity,
@@ -2022,7 +2214,10 @@ interface TreePaintStyle {
   branch?: TreeLook;
   fillOpacity?: TreeOpacity;
   sort?: "value" | "input";
-  /** Levels drawn below the tree's root (the drill root); every level by default. */
+  /**
+   * Levels drawn below the tree's root (the drill root); every level by default.
+   * @integer @minimum 1
+   */
   levels?: number;
   breadcrumbs?: boolean;
 }
@@ -2034,6 +2229,7 @@ interface TreePaintStyle {
  * item stands for; `{ value: true }`: the item's value), styled by `style`.
  */
 export interface TreeLabelsSpec {
+  /** @minItems 1 */
   content?: readonly Exclude<LabelPart, { series: true }>[];
   style?: TextStyle;
 }
@@ -2064,15 +2260,15 @@ interface TreemapStyle extends RowTooltip, TreePaintStyle {
   data?: string;
   id?: string;
   value?: string;
-  /** Names inside the rectangles that have room for them; true by default. */
+  /** Names inside the rectangles that have room for them; true by default. @default true */
   labels?: boolean | TreemapLabelsSpec;
   /**
    * How children fill their parent: in rows kept close to square
    * ("squarify", the default), or sliced along x, their children along y,
-   * and so on ("slice-dice", as a Marimekko's columns and cells).
+   * and so on ("slice-dice", as a Marimekko's columns and cells). @default "squarify"
    */
   tile?: "squarify" | "slice-dice";
-  /** Pixels between siblings; 2 by default. */
+  /** Pixels between siblings; 2 by default. @minimum 0 @default 2 */
   gap?: number;
   /** With the chart's `panels`, the id of the panel the treemap has to itself. */
   panel?: string;
@@ -2089,17 +2285,27 @@ interface SunburstStyle extends RowTooltip, TreePaintStyle {
   data?: string;
   id?: string;
   value?: string;
-  /** Names inside the sectors that have room for them; true by default. */
+  /** Names inside the sectors that have room for them; true by default. @default true */
   labels?: boolean | SunburstLabelsSpec;
-  /** The center kept empty of rings, as a fraction of the sunburst's radius; 0.18 by default. */
+  /**
+   * The center kept empty of rings, as a fraction of the sunburst's radius; 0.18 by default.
+   * @minimum 0 @exclusiveMaximum 1 @default 0.18
+   */
   innerRadius?: number;
   /**
    * A drilled sunburst's root painted in its center (true, the default);
-   * `false` leaves the center empty, and a click there still goes up.
+   * `false` leaves the center empty, and a click there still goes up. @default true
    */
   center?: boolean;
-  /** Pixels between neighboring sectors and between rings; 2 by default. */
-  gap?: number | { angular?: number; radial?: number };
+  /** Pixels between neighboring sectors and between rings; 2 by default. @minimum 0 */
+  gap?:
+    | number
+    | {
+        /** @minimum 0 */
+        angular?: number;
+        /** @minimum 0 */
+        radial?: number;
+      };
   /** With the chart's `panels`, the id of the panel the sunburst has to itself. */
   panel?: string;
 }
@@ -2122,8 +2328,9 @@ export interface GaugeSpec extends RowTooltip {
   id?: string;
   /** Number field whose last finite value the gauge shows. */
   value: Field;
-  /** The ends of the dial; 0 and 100 by default. */
+  /** The ends of the dial; 0 and 100 by default. @default 0 */
   min?: number;
+  /** @default 100 */
   max?: number;
   /** Colored ranges, by ascending ends above `min` and at most `max`. */
   bands?: readonly GaugeBand[];
@@ -2143,7 +2350,7 @@ export interface GaugeSpec extends RowTooltip {
 export interface FunnelSpec extends RowTooltip {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "funnel";
@@ -2153,9 +2360,12 @@ export interface FunnelSpec extends RowTooltip {
   category: Field;
   /** Number field summed per stage; without it, stages count rows. */
   value?: Field;
-  /** "input" (the default) keeps the categories' order; "value" puts the largest stage first. */
+  /**
+   * "input" (the default) keeps the categories' order; "value" puts the largest stage first.
+   * @default "input"
+   */
   sort?: "input" | "value";
-  /** Stage names beside the bars and values on them; true by default. */
+  /** Stage names beside the bars and values on them; true by default. @default true */
   labels?: boolean;
   /** With the chart's `panels`, the id of the panel the funnel has to itself. */
   panel?: string;
@@ -2171,7 +2381,7 @@ export interface FunnelSpec extends RowTooltip {
 export interface RadarSpec extends RowTooltip {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "radar";
@@ -2180,15 +2390,18 @@ export interface RadarSpec extends RowTooltip {
   /** Category field: a spoke per value, with `value` the number on it. */
   category?: Field;
   value?: Field;
-  /** Distinct number fields, a spoke each, in order; each series' last row is its polygon. */
+  /**
+   * Distinct number fields, a spoke each, in order; each series' last row is its polygon.
+   * @minItems 1
+   */
   fields?: readonly Field[];
   /** Category field: a polygon per value. Without it, every row belongs to one polygon. */
   series?: Field;
   /** Values at the center and at the rim; from 0 (or the smallest value) to a round number above the largest by default. */
   domain?: readonly [number, number];
-  /** Opacity of the polygons' fill; 0.15 by default. */
+  /** Opacity of the polygons' fill; 0.15 by default. @minimum 0 @maximum 1 @default 0.15 */
   fillOpacity?: number;
-  /** A dot at each value; true by default. */
+  /** A dot at each value; true by default. @default true */
   points?: boolean;
   /** Name of the polygon of a radar without `series`, and of its values in tooltips. */
   label?: string;
@@ -2206,7 +2419,7 @@ export interface RadarSpec extends RowTooltip {
 export interface SankeySpec extends RowTooltip {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "sankey";
@@ -2218,9 +2431,9 @@ export interface SankeySpec extends RowTooltip {
   target: Field;
   /** Number field summed per source and target; without it, links count rows. */
   value?: Field;
-  /** Names and values beside the nodes that have room for them; true by default. */
+  /** Names and values beside the nodes that have room for them; true by default. @default true */
   labels?: boolean;
-  /** Width of the node bars in pixels; 12 by default. */
+  /** Width of the node bars in pixels; 12 by default. @exclusiveMinimum 0 @default 12 */
   nodeWidth?: number;
   /**
    * Order of the nodes in each column: by default, the order that keeps
@@ -2263,7 +2476,7 @@ export type GraphLayout =
 export interface GraphSpec {
   /**
    * The outline that keeps the mark's text readable over what it is drawn
-   * on: "auto" (the default), false for none, or a color of its own.
+   * on: "auto" (the default), false for none, or a color of its own. @default "auto"
    */
   halo?: Halo;
   type: "graph";
@@ -2293,9 +2506,12 @@ export interface GraphSpec {
   color?: Field;
   /** Number field of `nodes` sizing nodes by area. */
   size?: Field;
-  /** Names beside the most connected (or largest) nodes that have room; true by default. */
+  /**
+   * Names beside the most connected (or largest) nodes that have room; true by default.
+   * @default true
+   */
   labels?: boolean;
-  /** How nodes are placed: "force" by default (see `GraphLayout`). */
+  /** How nodes are placed: "force" by default (see `GraphLayout`). @default "force" */
   layout?: GraphLayout;
   /** With the chart's `panels`, the id of the panel the network has to itself. */
   panel?: string;
@@ -2317,7 +2533,7 @@ export interface GeoShapeSpec extends RowTooltip, RowItems {
   labelField?: Field;
   /** A number field colored on a continuous scale, or a category field with a palette color per value. */
   color?: Field;
-  /** Colors for a number `color`, low to high, or a scheme name such as "viridis". */
+  /** Colors for a number `color`, low to high, or a scheme name such as "viridis". @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the color ramp; the field's extent by default. */
   colorDomain?: readonly [number, number];
@@ -2325,11 +2541,11 @@ export interface GeoShapeSpec extends RowTooltip, RowItems {
   colorMidpoint?: number;
   /** The fill without `color`, and of regions without a value. */
   fill?: string;
-  /** Default 1. */
+  /** Default 1. @minimum 0 @maximum 1 @default 1 */
   fillOpacity?: number;
   /** Border color; the chart's background by default. */
   stroke?: string;
-  /** Border width in pixels; default 0.75, 0 for none. */
+  /** Border width in pixels; default 0.75, 0 for none. @minimum 0 @default 0.75 */
   strokeWidth?: number;
   /** What the regions are, in the legend and tooltips without `color`. */
   label?: string;
@@ -2347,8 +2563,18 @@ export interface GeoShapeSpec extends RowTooltip, RowItems {
  * sized by area within `radiusRange` (bubbles); not both.
  */
 export type PointSizeSpec =
-  | { radius?: number; size?: never; radiusRange?: never }
-  | { radius?: never; size?: Field; radiusRange?: readonly [number, number] };
+  | {
+      /** @exclusiveMinimum 0 */
+      radius?: number;
+      size?: never;
+      radiusRange?: never;
+    }
+  | {
+      radius?: never;
+      size?: Field;
+      /** @minimum 0 */
+      radiusRange?: readonly [number, number];
+    };
 
 /**
  * Points of a map at `longitude` and `latitude` (number fields, degrees),
@@ -2369,15 +2595,19 @@ interface GeoPointStyleSpec extends RowTooltip, RowItems {
   series?: Field | false;
   /** A number field colored on a continuous scale. */
   color?: Field;
+  /** @minItems 2 */
   colors?: readonly string[] | string;
   colorDomain?: readonly [number, number];
   colorMidpoint?: number;
   fill?: string;
-  /** Default 0.8, so overlapping points and the regions under them show. */
+  /**
+   * Default 0.8, so overlapping points and the regions under them show. @minimum 0 @maximum 1
+   * @default 0.8
+   */
   fillOpacity?: number;
   /** Color of the ring around each point; the chart's background by default. */
   stroke?: string;
-  /** Width of the ring in pixels; default 1, 0 for none. */
+  /** Width of the ring in pixels; default 1, 0 for none. @minimum 0 @default 1 */
   strokeWidth?: number;
   /** Legend and tooltip name of points without `series`. */
   label?: string;
@@ -2423,7 +2653,7 @@ export type Histogram1DSpec = SeriesBase & {
   /**
    * What bars measure: "count" (default), "frequency" (the count per unit
    * of the binned axis), "probability" or "percent" of the series' counted
-   * values, or "density".
+   * values, or "density". @default "count"
    */
   normalize?: "count" | "frequency" | "probability" | "percent" | "density";
   /**
@@ -2435,10 +2665,11 @@ export type Histogram1DSpec = SeriesBase & {
   cumulative?: boolean;
   /**
    * How bins are drawn: "bars" (default), "step", an area whose top steps
-   * across each bin, or "poly", an area through the bins' centers.
+   * across each bin, or "poly", an area through the bins' centers. @default "bars"
    */
   element?: "bars" | "step" | "poly";
   fill?: string;
+  /** @minimum 0 @maximum 1 */
   fillOpacity?: number;
   label?: string;
 } & ({ x: Field; y?: never; axis?: "left" | "right" } | { y: Field; x?: never; axis?: "left" }) &
@@ -2464,10 +2695,10 @@ export interface Histogram2DSpec extends Omit<MarkBase, "axis">, Legended {
   /**
    * What cells measure: "count" (default), "frequency" (the count per unit
    * of bin area), "probability" or "percent" of the counted rows, or
-   * "density" (probability per unit of bin area).
+   * "density" (probability per unit of bin area). @default "count"
    */
   normalize?: "count" | "frequency" | "probability" | "percent" | "density";
-  /** Color ramp from low to high, or a scheme name; the theme's by default. */
+  /** Color ramp from low to high, or a scheme name; the theme's by default. @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the ramp; from 0 to the fullest cell's by default. */
   colorDomain?: readonly [number, number];
@@ -2488,6 +2719,7 @@ export type PointSpec = PointStyleSpec &
         /**
          * A channel through one of the chart's scales (`{ field, scale }`),
          * giving each point's area in square pixels.
+         * @minimum 0
          */
         size: ChannelSpec<number>;
         radius?: never;
@@ -2496,7 +2728,10 @@ export type PointSpec = PointStyleSpec &
       }
     | {
         /** `encode.size` gives each point's area, as a `size` channel does. */
-        encode: { size: ChannelSpec<number> };
+        encode: {
+          /** Areas in square pixels. @minimum 0 */
+          size: ChannelSpec<number>;
+        };
         size?: never;
         radius?: never;
         radiusRange?: never;
@@ -2515,12 +2750,12 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
   series?: Field | false;
   /** Outline color of every point; the chart's background with only `strokeWidth`. */
   stroke?: string;
-  /** Outline width in pixels: 1 with only `stroke`, none by default. */
+  /** Outline width in pixels: 1 with only `stroke`, none by default. @minimum 0 */
   strokeWidth?: number;
   fill?: string;
   /**
    * Opacity from 0 to 1, a number field mapped from 0.15 to 1, or a
-   * channel (`{ field, scale }`, a field through one of the chart's scales).
+   * channel (`{ field, scale }`, a field through one of the chart's scales). @minimum 0 @maximum 1
    */
   fillOpacity?: number | Field | ChannelSpec<number>;
   /**
@@ -2530,7 +2765,7 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
    * `{ field, scale: { type: "identity" } }` for colors the data holds.
    */
   color?: Field | ChannelSpec<string>;
-  /** Colors for `color`, low to high, or a scheme name such as "viridis". */
+  /** Colors for `color`, low to high, or a scheme name such as "viridis". @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the color ramp; the field's extent by default. */
   colorDomain?: readonly [number, number];
@@ -2548,7 +2783,7 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
     EncodingsSpec,
     "color" | "fill" | "stroke" | "strokeWidth" | "opacity" | "symbol" | "size"
   >;
-  /** "pixel" draws opaque points sharing a device pixel once. Default "none". */
+  /** "pixel" draws opaque points sharing a device pixel once. Default "none". @default "none" */
   sampling?: "none" | "pixel";
   /**
    * With `series` and a category `x` or `y`, the series side by side in each
@@ -2560,7 +2795,12 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
    * dodged share of it) over `width`, a fraction of it from 0 to 1, by a
    * hash of each row's identity and `seed` (0 by default).
    */
-  jitter?: { width: number; seed?: number };
+  jitter?: {
+    /** @minimum 0 @maximum 1 */
+    width: number;
+    /** @integer */
+    seed?: number;
+  };
   /**
    * With a category `x` or `y`, points packed across their band (or their
    * dodged share of it) without overlap, in order of their values, as a
@@ -2585,7 +2825,7 @@ interface HeatmapBase extends Omit<MarkBase, "axis">, Legended, RowTooltip {
   type: "heatmap";
   /** Number or time field: each cell's value, mapped to color. */
   color: Field;
-  /** Color ramp from low to high values, or a scheme name; defaults to the theme's. */
+  /** Color ramp from low to high values, or a scheme name; defaults to the theme's. @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the ramp; the values' extent by default. */
   colorDomain?: readonly [number, number];
@@ -2594,7 +2834,7 @@ interface HeatmapBase extends Omit<MarkBase, "axis">, Legended, RowTooltip {
   /**
    * How rows sharing a cell combine into its value: "last" (the default),
    * the last of them with a value, or their "mean", "sum", "min", or
-   * "max". Cells keep their values at every zoom.
+   * "max". Cells keep their values at every zoom. @default "last"
    */
   reduce?: CellReduce;
   /**
@@ -2629,12 +2869,16 @@ export interface ContourSpec extends Omit<MarkBase, "axis" | keyof SelectionLook
   /**
    * About how many round thresholds across the field's values (10 by
    * default; for bands, round edges covering them), or the thresholds,
-   * finite and increasing (for bands, at least two).
+   * finite and increasing (for bands, at least two). @integer @minimum 1 @maximum 1000
+   * @minItems 1 @maxItems 1000
    */
   thresholds?: number | readonly number[];
-  /** "lines" (the default) at each threshold, or "bands" filled between neighboring ones. */
+  /**
+   * "lines" (the default) at each threshold, or "bands" filled between neighboring ones.
+   * @default "lines"
+   */
   variant?: "lines" | "bands";
-  /** Color ramp from low to high values, or a scheme name; the theme's by default. */
+  /** Color ramp from low to high values, or a scheme name; the theme's by default. @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the ramp; the field's extent by default. */
   colorDomain?: readonly [number, number];
@@ -2642,9 +2886,9 @@ export interface ContourSpec extends Omit<MarkBase, "axis" | keyof SelectionLook
   colorMidpoint?: number;
   /** One color for every line, instead of its value's on the ramp. Lines only. */
   stroke?: string;
-  /** Line width in pixels; the theme's by default. Lines only. */
+  /** Line width in pixels; the theme's by default. Lines only. @minimum 0 */
   strokeWidth?: number;
-  /** Opacity of the bands' fill; 1 by default. Bands only. */
+  /** Opacity of the bands' fill; 1 by default. Bands only. @minimum 0 @maximum 1 @default 1 */
   fillOpacity?: number;
   /** What the field is, in the legend and tooltips; the `color` field's name by default. */
   label?: string;
@@ -2666,7 +2910,7 @@ type HeatmapXSpec =
       /**
        * Each cell's width along a number or time x (milliseconds for times),
        * centered on its value but never past halfway to a closer neighbor, so
-       * values further apart leave gaps. Not with `xBanded`.
+       * values further apart leave gaps. Not with `xBanded`. @exclusiveMinimum 0
        */
       xStep?: number;
       /**
@@ -2690,7 +2934,7 @@ type HeatmapXSpec =
 type HeatmapYSpec =
   | {
       y: Field;
-      /** Each cell's height along a number or time y, as `xStep`. */
+      /** Each cell's height along a number or time y, as `xStep`. @exclusiveMinimum 0 */
       yStep?: number;
       /** One row per distinct value of a number or time y, rising, as `xBanded`. */
       yBanded?: boolean;
@@ -2716,6 +2960,7 @@ type HeatmapYSpec =
 export interface HeatmapCalendarSpec extends HeatmapBase {
   date: Field;
   calendar?: "weeks" | "months";
+  /** @default "mon" */
   weekStart?: Weekday;
   x?: never;
   y?: never;
@@ -2746,16 +2991,16 @@ export interface Point3DSpec extends RowTooltip, RowItems {
   series?: Field | false;
   /** Category field naming each point, for tooltips and keyboard reading. */
   labelField?: Field;
-  /** Radius in pixels; default 3.5. */
+  /** Radius in pixels; default 3.5. @exclusiveMinimum 0 @default 3.5 */
   radius?: number;
   /** A number field colored on a continuous scale, with a color legend. */
   color?: Field;
-  /** Colors for `color`, low to high, or a scheme name such as "viridis". */
+  /** Colors for `color`, low to high, or a scheme name such as "viridis". @minItems 2 */
   colors?: readonly string[] | string;
   colorDomain?: readonly [number, number];
   colorMidpoint?: number;
   fill?: string;
-  /** Default 1. */
+  /** Default 1. @minimum 0 @maximum 1 @default 1 */
   fillOpacity?: number;
   /** Legend and tooltip name of points without `series`. */
   label?: string;
@@ -2780,7 +3025,7 @@ export interface Line3DSpec extends RowTooltip, RowItems {
   series?: Field;
   /** One color for every path; by default each series takes the chart's next. */
   stroke?: string;
-  /** Width in pixels, the same however near or far; default 2. */
+  /** Width in pixels, the same however near or far; default 2. @exclusiveMinimum 0 @default 2 */
   strokeWidth?: number;
   /** Legend and tooltip name of the path without `series`. */
   label?: string;
@@ -2804,18 +3049,18 @@ export interface SurfaceSpec extends RowTooltip {
   z: Field;
   /** A number field coloring the surface in place of `z`. */
   color?: Field;
-  /** Colors from low to high values, or a scheme name; the theme's ramp by default. */
+  /** Colors from low to high values, or a scheme name; the theme's ramp by default. @minItems 2 */
   colors?: readonly string[] | string;
   colorDomain?: readonly [number, number];
   colorMidpoint?: number;
-  /** Default 1. */
+  /** Default 1. @minimum 0 @maximum 1 @default 1 */
   fillOpacity?: number;
   /**
    * Shades cells by how they face a light above and behind the viewer; true
-   * by default. Without shading, colors read exactly as the legend shows.
+   * by default. Without shading, colors read exactly as the legend shows. @default true
    */
   shading?: boolean;
-  /** Draws the grid's lines over the surface; false by default. */
+  /** Draws the grid's lines over the surface; false by default. @default false */
   wireframe?: boolean;
   /** What the surface is, in tooltips. */
   label?: string;

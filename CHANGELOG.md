@@ -20,5 +20,7 @@ The first release.
   [Herceg for Python](docs/guide/python/README.md).
 
 What each mark supports is in [the support table](docs/guide/support.md)
-and the [capability matrix](docs/capabilities.md); what is planned, in the
-[roadmap](docs/roadmap.md).
+and the [capability matrix](docs/capabilities.md), which the package also
+publishes as `herceg/capabilities.json` beside the spec's JSON Schema,
+`herceg/spec.schema.json` (`hg.spec_schema()` in Python), for chart
+editors; what is planned, in the [roadmap](docs/roadmap.md).

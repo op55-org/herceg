@@ -1,8 +1,8 @@
 // The source a test run ran on, so that the contract check reads only
 // reports of the tree it checks: the commit, and a hash of how the tree
 // differs from it (tracked changes and deletions, and files git does not
-// ignore). The generated capability docs are left out: writing them from a
-// run must not make that run's reports stale.
+// ignore). The generated capability docs and the package's copy of the matrix
+// are left out: writing them from a run must not make that run's reports stale.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -14,7 +14,11 @@ import { fileURLToPath } from "node:url";
 export const root = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Files the fingerprint leaves out: what scripts/generate-capabilities.mjs writes. */
-export const GENERATED = ["docs/capabilities.md", "docs/capabilities.json"];
+export const GENERATED = [
+  "docs/capabilities.md",
+  "docs/capabilities.json",
+  "packages/herceg/capabilities.json",
+];
 
 const git = (...args) =>
   execFileSync("git", args, { cwd: root, maxBuffer: 1 << 30, encoding: "buffer" });

@@ -13,8 +13,20 @@ import type { StrokeStyle } from "./style.ts";
  * weight relative to the other flexible tracks (a number, or `{ weight }`
  * with a least size `min` in pixels), or a fixed size (`{ px }`). Fixed
  * tracks keep their size; flexible ones share what is left by weight.
+ * @exclusiveMinimum 0
  */
-export type TrackSpec = number | { weight: number; min?: number } | { px: number };
+export type TrackSpec =
+  | number
+  | {
+      /** @exclusiveMinimum 0 */
+      weight: number;
+      /** @minimum 0 */
+      min?: number;
+    }
+  | {
+      /** @exclusiveMinimum 0 */
+      px: number;
+    };
 
 /** A layout: a grid of cells, or one panel. */
 export type LayoutSpec = GridLayoutSpec | PanelLayoutSpec;
@@ -30,20 +42,34 @@ export interface GridLayoutSpec {
   type: "grid";
   /** Unique among the layout's grids; scale scopes name it (`{ layout, by }`). */
   id?: string;
-  /** The rows, top to bottom; one row of weight 1 by default. */
+  /** The rows, top to bottom; one row of weight 1 by default. @minItems 1 */
   rows?: readonly TrackSpec[];
-  /** The columns, left to right; one column of weight 1 by default. */
+  /** The columns, left to right; one column of weight 1 by default. @minItems 1 */
   columns?: readonly TrackSpec[];
   cells?: readonly LayoutCellSpec[];
-  /** Pixels between rows and between columns: one for both, or each its own. 12 by default. */
-  gap?: number | { row?: number; column?: number };
+  /**
+   * Pixels between rows and between columns: one for both, or each its own. 12 by default.
+   * @minimum 0
+   */
+  gap?:
+    | number
+    | {
+        /** @minimum 0 */
+        row?: number;
+        /** @minimum 0 */
+        column?: number;
+      };
 }
 
 /** A cell of a grid: where it starts (from 0), how many tracks it spans (1 by default), and what it holds. */
 export interface LayoutCellSpec {
+  /** @integer @minimum 0 */
   row: number;
+  /** @integer @minimum 0 */
   column: number;
+  /** @integer @minimum 1 */
   rowSpan?: number;
+  /** @integer @minimum 1 */
   columnSpan?: number;
   content: LayoutSpec;
 }
@@ -56,7 +82,15 @@ export interface PanelLayoutSpec {
 }
 
 /** A length of an inset: a fraction of its parent's plot, or pixels. */
-export type InsetSize = { fraction: number } | { px: number };
+export type InsetSize =
+  | {
+      /** @exclusiveMinimum 0 @maximum 1 */
+      fraction: number;
+    }
+  | {
+      /** @exclusiveMinimum 0 */
+      px: number;
+    };
 
 /** The corner or middle of an inset placed at a position. */
 export type InsetAnchor = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
@@ -68,7 +102,11 @@ export type InsetAnchor = "top-left" | "top-right" | "bottom-left" | "bottom-rig
  * parent's plot or of the chart, or pixels.
  */
 export type InsetPlace =
-  | { inside: Inside; inset?: number }
+  | {
+      inside: Inside;
+      /** @minimum 0 */
+      inset?: number;
+    }
   | { at: InsetPosition; anchor?: InsetAnchor };
 
 /** Where an inset's anchor goes: fractions of the parent's plot or the chart, or pixels, not data. */
@@ -104,7 +142,7 @@ export interface InsetSpec {
 
 /** How an inset's indicator looks: its box's line and whether lines join it to the inset. */
 export interface InsetIndicatorSpec {
-  /** Lines from the box to the inset's nearest corners; true by default. */
+  /** Lines from the box to the inset's nearest corners; true by default. @default true */
   connectors?: boolean;
   style?: StrokeStyle;
 }

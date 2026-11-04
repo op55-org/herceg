@@ -1,5 +1,5 @@
 // Bundles the JavaScript the Python package ships: `npm run build:python`.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -21,6 +21,11 @@ const common = {
   },
   logLevel: "warning",
 };
+// The spec's JSON Schema, which `hg.spec_schema()` reads.
+copyFileSync(
+  join(here, "..", "..", "packages", "herceg", "spec.schema.json"),
+  join(out, "spec.schema.json"),
+);
 // Browsers: a classic script defining `hercegPython.render`, so each chart's
 // HTML can inline it. The WebGL painter is inlined rather than split.
 await esbuild.build({

@@ -1,8 +1,12 @@
-// The pointer on the matrix's live charts: presses and drags at pixels,
-// and the pixels of values and items, for the proofs of gestures and reading.
+// The pointer on the matrix's live charts: presses, clicks, and drags at
+// pixels, and the pixels of values and items, for the proofs of gestures,
+// reading, and events.
 
 import type { Chart } from "../../../src/dom/chart.ts";
+import type { ItemTarget } from "../../../src/dom/events.ts";
+import { defaultsOf, fixtureOf } from "../../contracts/matrix.ts";
 import { MOUSE } from "../helpers.ts";
+import { plotsOf } from "./mount.ts";
 
 export type Pair = [number, number];
 
@@ -89,3 +93,65 @@ export const around = ([x, y]: Pair, r = 12): Pair[] => [
   [x - r, y + r],
   [x - r, y - r],
 ];
+
+/** A press released where it began. */
+export function click(chart: Chart, at: Pair): void {
+  press(chart, "pointerdown", at);
+  press(chart, "pointerup", at);
+}
+
+/** The pixels of a chart's plots, every 9, row by row from the top left. */
+export function scan(chart: Chart): Pair[] {
+  const { x, y, width, height } = plotsOf(chart);
+  const found: Pair[] = [];
+  for (let py = y + 4; py < y + height; py += 9)
+    for (let px = x + 4; px < x + width; px += 9) found.push([px, py]);
+  return found;
+}
+
+/**
+ * Where the row's fixture clicks its item (rows.json's `selection`, over
+ * its table's defaults) or reads it (`reading`), where it has such a place
+ * in `chart`.
+ */
+export function placeOf(chart: Chart, row: string): Pair | undefined {
+  const { table, selection, reading } = fixtureOf(row) as {
+    table: string;
+    selection?: { data?: string; click?: Pair | Item };
+    reading?: { at?: Pair | Item };
+  };
+  const defaults = defaultsOf(selection?.data ?? table) as { click?: Pair };
+  const at = selection?.click ?? defaults.click ?? reading?.at;
+  if (!at) return undefined;
+  try {
+    return Array.isArray(at) ? pixels(chart, at) : itemAt(chart, at).at;
+  } catch {
+    // No place on the axes (a mark without them), or no such item drawn.
+    return undefined;
+  }
+}
+
+/**
+ * Where a click picks the row's item, and the click's target there: the
+ * fixture's place (`placeOf`), else the first pixel of `scan` whose click
+ * picks one. Undefined where no click does.
+ */
+export function itemClicked(
+  chart: Chart,
+  row: string,
+): { at: Pair; target: ItemTarget } | undefined {
+  let target: ItemTarget | undefined;
+  const off = chart.on("click", (event) => {
+    if (event.target?.kind === "item") target = event.target;
+  });
+  const place = placeOf(chart, row);
+  try {
+    for (const at of place ? [place, ...scan(chart)] : scan(chart)) {
+      click(chart, at);
+      if (target) return { at, target };
+    }
+    return undefined;
+  } finally {
+    off();
+  }
+}

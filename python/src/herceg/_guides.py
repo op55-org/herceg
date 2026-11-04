@@ -49,7 +49,7 @@ from ._style import (
 )
 
 if TYPE_CHECKING:
-    from ._encoding import Pixels, SymbolName
+    from ._encoding import Dash, Pixels, SymbolName
 
 
 class LayoutScope(TypedDict):
@@ -943,7 +943,7 @@ class Swatch:
     stroke: str | None = None
     fill: str | None = None
     stroke_width: float | None = None
-    dash: str | Sequence[float] | None = None
+    dash: Dash | None = None
     symbol: SymbolName | None = None
     size: float | None = None
     opacity: float | None = None

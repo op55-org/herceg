@@ -3,19 +3,25 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { checkContracts } from "./check-contracts.mjs";
 import { auditsOf, checkApi } from "./contracts/api.mjs";
-import { checkDeclarations } from "./contracts/declarations.mjs";
+import { checkDeclarations, isSpecOption } from "./contracts/declarations.mjs";
 import { junitExecutions, readEvidence, vitestExecutions } from "./contracts/evidence.mjs";
 import { checkInventory, settingsOfType } from "./contracts/inventory.mjs";
 import { exportedComponents, uncheckedComponents } from "./contracts/props.mjs";
+import { root } from "./contracts/source.mjs";
 import { ENGINES, SUITES } from "./contracts/suites.mjs";
 import { checkEvidence } from "./contracts/verify.mjs";
-import { capabilityJson, capabilityMarkdown, capabilityRecords } from "./generate-capabilities.mjs";
+import {
+  capabilityJson,
+  capabilityMarkdown,
+  capabilityRecords,
+  packageCapabilities,
+} from "./generate-capabilities.mjs";
 
 const inventory = {
   spec: "line",
@@ -572,12 +578,13 @@ test("the docs list each cell's state, each proof's file once, and notes of refu
     "../placement.test.ts": ["line.placement.panel"],
     "../zoom.test.ts": ["interaction.zoom-x.chart.engine"],
   });
-  // The JSON is the records, one value per line where it fits.
+  // The JSON is the records, one value per line where it fits in 100 columns with its key.
   const json = capabilityJson(records);
   assert.deepEqual(JSON.parse(json), JSON.parse(JSON.stringify(records)));
+  assert.match(json, /\n {2}"totals": \{ "works": 0, "unproved": 0, "refused": 1, "na": 1 \},\n/);
   assert.match(
     json,
-    /\n {8}"legend\.colorbar": \{ "state": "na", "reason": "no ramp", "proofs": \["line\.legend\.colorbar"\] \}/,
+    /\n {8}"legend\.colorbar": \{\n {10}"state": "na",\n {10}"reason": "no ramp",\n {10}"proofs": \["line\.legend\.colorbar"\]\n {8}\}/,
   );
   const markdown = capabilityMarkdown(records);
   // Cells are marks and note numbers; notes link the files no capability lists.
@@ -727,6 +734,149 @@ test("the docs show an unproved cell as supported but not proved, and count ever
   assert.match(
     markdown,
     /- ·1 Not applicable: no ramp \(\[colorbar\.test\.ts\]\(\.\.\/colorbar\.test\.ts\)\)\n/,
+  );
+});
+
+/** A schema of a spec with a tooltip that pins, and marks of which one drags. */
+const SCHEMA = {
+  $defs: {
+    ChartSpec: {
+      type: "object",
+      properties: {
+        tooltip: { anyOf: [{ type: "boolean" }, { $ref: "#/$defs/TooltipSpec" }] },
+        marks: { type: "array", items: { $ref: "#/$defs/MarkSpec" } },
+      },
+    },
+    TooltipSpec: { type: "object", properties: { pin: { const: "click" } } },
+    MarkSpec: {
+      anyOf: [
+        { type: "object", properties: { type: { const: "line" } } },
+        {
+          type: "object",
+          properties: { type: { const: "rule" } },
+          anyOf: [{ properties: { drag: { type: "boolean" } } }],
+        },
+      ],
+    },
+  },
+};
+
+test("a direction names events a chart reports and options of the spec's schema", () => {
+  assert.equal(isSpecOption(SCHEMA, "tooltip.pin"), true);
+  // Through an array to its items, and a union's shared options to its forms'.
+  assert.equal(isSpecOption(SCHEMA, "marks[].drag"), true);
+  assert.equal(isSpecOption(SCHEMA, "marks[].pin"), false);
+  const declared = declarations({}, { chartEvents: ["click", "pin"], schema: SCHEMA });
+  const { capabilities } = declared.capabilities;
+  Object.assign(capabilities["placement.panel"], {
+    direction: "emits",
+    events: ["pin", "drill"],
+    options: ["tooltip.pin", "tooltip.pinned"],
+  });
+  Object.assign(capabilities["legend.colorbar"], { direction: "out", events: [] });
+  assert.deepEqual(checkDeclarations(declared).errors, [
+    "capabilities.json placement.panel: drill is no event a chart reports (ChartEvents)",
+    "capabilities.json placement.panel: tooltip.pinned is no option of the spec's schema",
+    "capabilities.json legend.colorbar: give direction (emits, consumes, both), events, and options together",
+  ]);
+  Object.assign(capabilities["legend.colorbar"], { direction: "both", events: [], options: [] });
+  assert.match(
+    checkDeclarations(declared).errors.at(-1),
+    /legend\.colorbar: name the events it reports or the options that ask for it/,
+  );
+  // What its proofs observe a chart report, it emits, though it takes it in.
+  Object.assign(capabilities["legend.colorbar"], { direction: "consumes", events: ["click"] });
+  assert.equal(
+    checkDeclarations(declared).errors.at(-1),
+    "capabilities.json legend.colorbar: a capability that reports click emits; give direction both",
+  );
+});
+
+test("the package publishes the marks' cells without proofs, with what each emits and consumes", () => {
+  const declared = declarations(
+    { works: ["placement.panel", "legend.colorbar"], na: {} },
+    { chartEvents: ["click", "pin"], schema: SCHEMA },
+  );
+  const { capabilities } = declared.capabilities;
+  Object.assign(capabilities["placement.panel"], {
+    direction: "emits",
+    events: ["click"],
+    options: [],
+  });
+  Object.assign(capabilities["legend.colorbar"], {
+    direction: "both",
+    events: ["pin"],
+    options: ["tooltip.pin"],
+  });
+  declared.capabilities.gpu = { about: "Where a GPU draws.", paths: {} };
+  const { cells, proofs } = checkDeclarations(declared);
+  const executions = [
+    passed("line.placement.panel", "herceg-unit", "node", "placement.test.ts"),
+    passed("line.legend.colorbar", "herceg-unit", "node", "colorbar.test.ts"),
+  ];
+  const records = capabilityRecords({ declarations: declared, cells, proofs, executions });
+  const published = packageCapabilities(records);
+  assert.match(
+    capabilityMarkdown(records),
+    /- \*\*Colorbar\*\*: a ramp \(both; events `pin`; options `tooltip\.pin`\) Proved in/,
+  );
+  assert.deepEqual(published.capabilities["placement.panel"], {
+    title: "Named panel",
+    works: "draws there",
+    direction: "emits",
+    events: ["click"],
+    options: [],
+  });
+  assert.deepEqual(published.marks.line, {
+    title: "line",
+    inventory,
+    emits: ["click", "pin"],
+    consumes: ["tooltip.pin"],
+    cells: { "placement.panel": { state: "works" }, "legend.colorbar": { state: "works" } },
+  });
+  // A refusal says what works instead, without its proofs; a cell not proved emits nothing.
+  const refusing = declarations(
+    {
+      works: [],
+      unproved: ["legend.colorbar"],
+      refused: {
+        "placement.panel": {
+          error: { code: "unsupported", message: "line panel: not here; draw it alone" },
+          alternative: { text: "Draw it alone.", proofs: ["line.alone"] },
+        },
+      },
+      na: {},
+    },
+    { chartEvents: ["pin"], schema: SCHEMA },
+  );
+  Object.assign(refusing.capabilities.capabilities["legend.colorbar"], {
+    direction: "emits",
+    events: ["pin"],
+    options: [],
+  });
+  refusing.capabilities.gpu = declared.capabilities.gpu;
+  const checked = checkDeclarations(refusing);
+  const line = packageCapabilities(
+    capabilityRecords({ declarations: refusing, ...checked, executions }),
+  ).marks.line;
+  assert.deepEqual(line.emits, []);
+  assert.deepEqual(line.cells, {
+    "placement.panel": {
+      state: "refused",
+      error: { code: "unsupported", message: "line panel: not here; draw it alone" },
+      alternative: "Draw it alone.",
+    },
+    "legend.colorbar": { state: "unproved" },
+  });
+});
+
+test("the package's capabilities are docs/capabilities.json's marks", () => {
+  const read = (path) => readFileSync(join(root, path), "utf8");
+  const records = JSON.parse(read("docs/capabilities.json"));
+  assert.equal(
+    read("packages/herceg/capabilities.json"),
+    capabilityJson(packageCapabilities(records)),
+    "run npm run contracts:docs",
   );
 });
 

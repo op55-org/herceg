@@ -544,7 +544,8 @@ def _public() -> set[str]:
 def _without_arguments(name: str) -> bool:
     """Whether a callable takes nothing a caller could get wrong."""
     owner, _, member = name.rpartition(".")
-    value = getattr(getattr(hg, owner, None) or getattr(web, owner, None), member, None)
+    holder = hg if owner == "hg" else getattr(hg, owner, None) or getattr(web, owner, None)
+    value = getattr(holder, member, None)
     if owner == "ChartWidget":
         value = getattr(ChartWidget, member, None)
     if value is None or not callable(value):

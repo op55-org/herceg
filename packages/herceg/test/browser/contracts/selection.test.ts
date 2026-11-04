@@ -1,5 +1,6 @@
 // Proofs of the matrix's selection (test/contracts/), one per row: real
-// gestures report the ranges or the outline they cover; on a chart bound to
+// gestures report the ranges or the outline they cover, and clicks the
+// item or series they select; on a chart bound to
 // a selection store they write exactly the rows rows.json lists, chosen by
 // the rules of src/model/selected-rows.ts; a selection another view writes
 // reaches the chart, which draws the rows it holds as they are and dims
@@ -12,6 +13,7 @@ import { RowSet } from "../../../src/data/row-set.ts";
 import { type SelectionStore, selectRows } from "../../../src/data/selection.ts";
 import type { Table } from "../../../src/data/table.ts";
 import type { Chart } from "../../../src/dom/chart.ts";
+import type { ItemTarget } from "../../../src/dom/events.ts";
 import type { RowSelectionChange } from "../../../src/model/row-selection.ts";
 import type { BrushSpec, SelectionGesture } from "../../../src/spec/spec.ts";
 import type { BrushSelection } from "../../../src/spec/state.ts";
@@ -29,10 +31,12 @@ import { brushOf } from "../../helpers/selections.ts";
 import { canvasPixels, expectChartRefused, mount, mountLoaded, sceneOf } from "./mount.ts";
 import {
   around,
+  click,
   drag,
   type Item,
   itemAt,
   itemCenter,
+  itemClicked,
   type Pair,
   pixel,
   pixels,
@@ -370,6 +374,47 @@ describe("selection.click", () => {
       ]);
     });
 });
+
+for (const mode of ["items", "series"] as const) {
+  const capability = `selection.${mode}`;
+  describe(capability, () => {
+    for (const cell of cellsOf(capability))
+      contractTest(`${cell.row}.${capability}`, async () => {
+        const mark = markOf(cell.row, { id: "m" });
+        // Where a click picks the item, found on a chart that does not select.
+        const found = itemClicked(await mount({ marks: [mark] }), cell.row);
+        expect(found, "a click picks the mark's item").toBeDefined();
+        const chart = await mount({ marks: [mark], interaction: { select: mode } });
+        const [selects, targets]: [unknown[], ItemTarget[]] = [[], []];
+        chart.on("select", ({ selection, phase, cause }) =>
+          selects.push({ selection, phase, cause }),
+        );
+        chart.on("click", ({ target }) => targets.push(target as ItemTarget));
+        click(chart, found!.at);
+        const [target] = targets;
+        expect(target?.kind).toBe("item");
+        if (cell.state === "na") {
+          expect(target!.series, "the item names no series").toBeUndefined();
+          expect(selects).toEqual([]);
+          expect(chart.selection).toBeNull();
+          return;
+        }
+        if (cell.state !== "works") throw new Error(`${capability} is never ${cell.state}`);
+        // It alone, by the key the click's target gives.
+        const selection =
+          mode === "items"
+            ? { kind: "items", items: [target!.item] }
+            : { kind: "series", series: [target!.series] };
+        if (mode === "series") expect(target!.series).toEqual(expect.any(String));
+        expect(selects).toEqual([{ selection, phase: "commit", cause: "pointer" }]);
+        expect(chart.selection).toEqual(selection);
+        // A click on the only one selected clears it.
+        click(chart, found!.at);
+        expect(selects.at(-1)).toEqual({ selection: null, phase: "commit", cause: "pointer" });
+        expect(chart.selection).toBeNull();
+      });
+  });
+}
 
 /** Selects `rows` of the store's table, as another view (a grid) would. */
 function selectFromElsewhere(store: SelectionStore, rows: readonly number[]): void {

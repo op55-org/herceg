@@ -26,7 +26,7 @@ export interface SidePlace {
   side: Side;
   /** Where along the side: its start (left or top), center, or end. */
   align?: "start" | "center" | "end";
-  /** Pixels between it and what it is beside, more than the usual gap. */
+  /** Pixels between it and what it is beside, more than the usual gap. @minimum 0 */
   offset?: number;
   scope?: "chart" | "panel";
   /** With `scope: "panel"`, the key of the panel (a subplot's id, a facet's value). */
@@ -41,6 +41,7 @@ export interface SidePlace {
  */
 export interface InsidePlace {
   inside: Inside;
+  /** @minimum 0 */
   inset?: number;
   scope?: "chart" | "panel";
   /** With `scope: "panel"`, the key of the panel (a subplot's id, a facet's value). */
@@ -111,6 +112,7 @@ export type ItemName = string | { field: string };
  */
 export interface ItemRef {
   mark: string;
+  /** @minItems 1 */
   item: readonly ItemName[];
 }
 

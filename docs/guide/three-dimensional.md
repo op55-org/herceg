@@ -163,6 +163,9 @@ of a mounted chart.
 
 - Tooltips, events, and the keyboard report a point's, a line point's, or
   a grid point's `x`, `y`, and `z` (and `color`).
+- Points' and lines' items name no series in events: a click on one
+  selects no series (`interaction.select: "series"`) and pins no tooltip
+  (`tooltip.pin`).
 - The pointer finds what shows on top: a point within 3 px, a line within
   3 px (the nearer segment end), or a surface cell (its nearest corner).
 - The arrow keys read points in row order, lines path by path, and a
