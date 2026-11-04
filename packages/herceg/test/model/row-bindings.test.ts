@@ -48,6 +48,7 @@ import type {
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { gridAt } from "../helpers/grid.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const rows = table({
@@ -62,7 +63,7 @@ function build(config: ChartConfig, width = 400, height = 200) {
   const model = new ChartModel(
     { locale: "en-US", legend: false, ...config },
     NO_PAGE,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
@@ -118,7 +119,7 @@ describe("marks of rows placed by coordinates", () => {
       [0.25, 0.25, 0.75, 0.75].map((share) => expect.closeTo(at(share), 3)),
     );
     // The lanes' shares count toward no domain: y fits the values alone.
-    const [lo, hi] = model.yScale()!.domain;
+    const [lo, hi] = yScale(model)!.domain;
     expect(lo).toBeGreaterThan(1);
     expect(hi).toBeGreaterThanOrEqual(40);
     // Zooming y moves the values, not the lanes (scenes reuse their buffers).
@@ -205,7 +206,7 @@ describe("marks of rows placed by coordinates", () => {
     // An offset moves rows on their own axis, which their values still fit.
     const plain = build({ marks: [line(rows, { x: "t", y: "v" })] });
     const moved = build({ marks: [line(rows, { x: { field: "t", offset: 6 }, y: "v" })] });
-    expect(moved.model.xScale()!.domain).toEqual(plain.model.xScale()!.domain);
+    expect(xScale(moved.model)!.domain).toEqual(xScale(plain.model)!.domain);
     const before = points(plain.scene);
     expect(points(moved.scene)).toEqual(before.map(([x, y]) => [x + 6, y]));
   });
@@ -259,7 +260,7 @@ describe("marks of rows placed by coordinates", () => {
     expect(coords[1]! + coords[3]!).toBeCloseTo(plot.y + plot.height, 3);
     expect(coords[3]).toBeCloseTo(plot.height * 0.25, 3);
     // No zero on y for bars measured off it.
-    expect(model.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(model)!.domain[0]).toBeGreaterThan(0);
   });
 
   contractTest("position.inspect", () => {
@@ -268,7 +269,7 @@ describe("marks of rows placed by coordinates", () => {
     const values = line(rows, { x: "t", y: "v" });
     const { model, scene } = build({ marks: [values, lanes, placed] });
     const plot = plotOf(scene);
-    const x = model.xScale()!.map(2);
+    const x = xScale(model)!.map(2);
     // Along x, points are read at the x snapped to: those of lanes there,
     // their values their shares; points placed off x are not on it.
     const along = model.inspect(x, plot.y + plot.height * 0.25, "nearest-x")!;
@@ -279,7 +280,7 @@ describe("marks of rows placed by coordinates", () => {
     ]);
     // Nearest, a point placed off x is found where it is drawn, headed by its share.
     const shareX = plot.x + plot.width * 0.25;
-    const near = model.inspect(shareX, model.yScale()!.map(20), "nearest")!;
+    const near = model.inspect(shareX, yScale(model)!.map(20), "nearest")!;
     expect(near).toMatchObject({ axis: "x", value: 0.25, label: "0.25" });
     expect((near as AxisInspection).position).toBeCloseTo(shareX, 3);
     expect(near.points[0]).toMatchObject({ mark: 2, value: 20, text: "20" });
@@ -385,7 +386,7 @@ describe("marks of rows placed by coordinates", () => {
     // Rounded to [0, 1000]: 100 is a tenth of the way up, 900 nine tenths.
     expect(drawn[0]![1]).toBeCloseTo(plot.y + plot.height * 0.9, 3);
     expect(drawn[3]![1]).toBeCloseTo(plot.y + plot.height * 0.1, 3);
-    expect(model.yScale()!.domain[1]).toBeLessThan(100);
+    expect(yScale(model)!.domain[1]).toBeLessThan(100);
     const near = model.inspect(drawn[3]![0], drawn[3]![1], "nearest")!;
     expect(near.points[0]).toMatchObject({ mark: 1, value: 900, text: "900" });
   });
@@ -646,7 +647,7 @@ describe("positions off their axis, as the review found them", () => {
       scales: { depth: { type: "linear" } },
       marks: [line(depth, { x: { field: "d", scale: "depth" }, y: "v" })],
     });
-    const [lo, hi] = own.model.yScale()!.domain;
+    const [lo, hi] = yScale(own.model)!.domain;
     expect(lo).toBeLessThanOrEqual(10);
     expect(hi).toBeGreaterThanOrEqual(20);
     const shares = table({ s: [0.2, 0.8], v: [10, 20] });
@@ -658,7 +659,7 @@ describe("positions off their axis, as the review found them", () => {
     });
     setViewport(framed.model, [100, 200]);
     framed.model.scene(estimateText);
-    expect(framed.model.yScale()!.domain[1]).toBeGreaterThanOrEqual(20);
+    expect(yScale(framed.model)!.domain[1]).toBeGreaterThanOrEqual(20);
   });
 
   contractTest("position.offset.inspect", () => {
@@ -688,9 +689,9 @@ describe("positions off their axis, as the review found them", () => {
     expect(found.position).toBeCloseTo(drawn.coords[0]!, 3);
     // ...and y fits the rows the domain holds, however wide the plot.
     const wide = build({ x: { domain: [0, 10] }, marks: marks([100, 1, 1]) });
-    expect(wide.model.yScale()!.domain[1]).toBeLessThan(100);
+    expect(yScale(wide.model)!.domain[1]).toBeLessThan(100);
     const narrow = build({ x: { domain: [0, 10] }, marks: marks([100, 1, 1]) }, 200);
-    expect(narrow.model.yScale()!.domain).toEqual(wide.model.yScale()!.domain);
+    expect(yScale(narrow.model)!.domain).toEqual(yScale(wide.model)!.domain);
   });
 
   contractTest("position.padding.y-domain", () => {
@@ -702,10 +703,10 @@ describe("positions off their axis, as the review found them", () => {
         x: { domain: [0, 10], padding },
         marks: [line(rows, { x: "x", y: "y" })],
       });
-      const first = model.yScale()!.domain;
+      const first = yScale(model)!.domain;
       expect(first[1]).toBeLessThan(1000);
       model.scene(estimateText);
-      expect(model.yScale()!.domain).toEqual(first);
+      expect(yScale(model)!.domain).toEqual(first);
     }
   });
 
@@ -844,7 +845,7 @@ describe("positions off their axis, as the review found them", () => {
     // A brush along x selects the rows drawn under it, moved by their offset.
     const moved = point(rows, { x: { field: "t", offset: 60 }, y: "v" });
     const { model } = build({ marks: [moved] });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const at = x.invert(x.map(0) + 60);
     const picked = brushedRows(
       model,
@@ -952,7 +953,7 @@ describe("positions off their axis, as the review found them", () => {
       scales: { depth: { type: "log" } },
       marks: [line(growth, { x: { field: "t", scale: "depth" }, y: "v", where: col("t").lt(10) })],
     });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(50);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(50);
   });
 
   contractTest("position.scale.own.view", () => {
@@ -1067,7 +1068,7 @@ describe("annotations placed by coordinates", () => {
       ),
     );
     const { rects } = scene.panels[0]!.marks.find((m) => m.kind === "rect") as RectGeometry;
-    expect(rects[0]).toBeCloseTo(model.xScale()!.map(2), 3);
+    expect(rects[0]).toBeCloseTo(xScale(model)!.map(2), 3);
     expect(rects[0]! + rects[2]!).toBeCloseTo(plot.x + plot.width, 3);
   });
 

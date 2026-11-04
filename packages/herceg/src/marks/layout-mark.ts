@@ -9,6 +9,7 @@ import type { Expression } from "../data/expression.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Table } from "../data/table.ts";
 import type { MeasureText } from "../layout/text.ts";
+import type { CompiledFeatures } from "../model/features.ts";
 import type { ItemViews } from "../model/item-views.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
 import type { LegendEntry, LegendPart } from "../model/legend.ts";
@@ -127,6 +128,8 @@ export interface LayoutFrame {
   surface?: string | undefined;
   locale: string | undefined;
   measure: MeasureText;
+  /** The chart's compiled features, when it draws any: its field displays (`fields`) among them. */
+  features?: CompiledFeatures | undefined;
   /** Keys of items hidden through the legend. */
   hidden: ReadonlySet<string>;
   /** The color of an item, kept for the chart's lifetime once given. */

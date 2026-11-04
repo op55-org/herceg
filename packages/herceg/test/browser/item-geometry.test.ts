@@ -16,6 +16,7 @@ import { rule } from "../../src/marks/rule.ts";
 import { sunburst } from "../../src/marks/sunburst.ts";
 import { text } from "../../src/marks/text.ts";
 import { treemap } from "../../src/marks/treemap.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { modelOf } from "./helpers.ts";
 import { heard, pointer } from "./interaction/helpers.ts";
 
@@ -316,8 +317,8 @@ describe("bars along y", () => {
     const canvas = await mount(options, "canvas");
     for (const chart of [svg, canvas]) {
       const model = modelOf(chart);
-      const y = model.yScale()!;
-      const x = model.xScale()!;
+      const y = yScale(model)!;
+      const x = xScale(model)!;
       // Each brand's bar runs along its rank, to its value.
       expect(
         chart.inspect(x.map(70_452) - 4, y.map(0), { mode: "nearest" })?.points[0],

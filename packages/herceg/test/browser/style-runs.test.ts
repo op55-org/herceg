@@ -245,7 +245,7 @@ describe("style runs", () => {
       const model = new ChartModel(
         { locale: "en-US", timeZone: "UTC", ...bare(marks), ...options },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(400, 300, 1);
       const source = rows as unknown as Table;

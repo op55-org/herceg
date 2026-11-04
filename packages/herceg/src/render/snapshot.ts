@@ -92,7 +92,7 @@ export function renderToSnapshot(options: StatefulConfig, env: SnapshotOptions):
     throw new TypeError(
       'renderToSnapshot timeZone: "local" is the server\'s zone, which browsers may not share; give an IANA zone or "UTC"',
     );
-  const model = new ChartModel({ ...options, locale, timeZone }, NO_PAGE, ...staticCompilers());
+  const model = new ChartModel({ ...options, locale, timeZone }, NO_PAGE, staticCompilers());
   model.setSize(width, height, 1);
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);

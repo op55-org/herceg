@@ -34,7 +34,7 @@ function model(config: ChartConfig, width = 800, height = 500) {
   const built = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     NO_PAGE,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   built.setSize(width, height, 1);
   return built;
@@ -362,7 +362,7 @@ describe("panel legends", () => {
         guides: [legend({ panel: "errors" }), axis({ scale: "x", place: { side: "top" } })],
       },
       NO_PAGE,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     chart.setSize(800, 500, 1);
     const scene = chart.scene(estimateText);

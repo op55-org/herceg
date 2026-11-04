@@ -615,9 +615,11 @@ export class Inspector {
       y: this.#formatOf(owner, "y"),
       value: this.#formatValue,
     };
-    const formatValue = along ? format.x : format.y;
+    const axis = along ? format.x : format.y;
+    // A series of a field's values writes them as the field's display does, over its axis.
+    const formatValue = s.write?.(axis) ?? axis;
     // Summarizing marks' series index rows of their summaries.
-    const fields = mark.summarizes ? undefined : this.#fields?.(mark.table, mark.spec.tooltip, row);
+    const fields = mark.summarizes ? undefined : this.#fields?.(mark, row);
     return {
       mark: index,
       markId: mark.spec.id,
@@ -627,11 +629,7 @@ export class Inspector {
       ...(fields && { fields }),
       color: mark.pointColor?.(s, row, this.#frame.theme, this.#frame.paint) ?? s.color,
       value,
-      text:
-        mark.pointText?.(s, row, format) ??
-        (s.range
-          ? `${formatValue((along ? s.x0 : s.y0)![row]!)} – ${formatValue(value)}`
-          : formatValue(value)),
+      text: mark.pointText?.(s, row, format) ?? formatValue(value),
       px,
       py,
     };

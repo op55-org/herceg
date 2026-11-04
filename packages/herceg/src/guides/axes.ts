@@ -181,8 +181,9 @@ export function listedAxes(
       // The axis moved off the default side takes the scale's titles with it.
       const moved = axes.find((axis) => axis.scale === scale)!;
       moved.layers[0]!.planned = true;
-      moved.title ??= short?.title;
-      const own = config.panels?.list.map((panel) => panel[scale]?.title);
+      // Titles of parts are text by now (guides/compile.ts, `titled`); subplots' are text.
+      moved.title ??= short?.title as string | undefined;
+      const own = config.panels?.list.map((panel) => panel[scale]?.title as string | undefined);
       if (own?.some((title) => title !== undefined)) moved.titles = own;
     }
     // Axes elsewhere leave out the subplots that hide the scale's axis.
@@ -261,7 +262,7 @@ function resolve(
     across,
     above: side === "top",
     show: guide.show ?? short?.show ?? true,
-    title: home ? undefined : guide.title,
+    title: home ? undefined : (guide.title as string | undefined),
     line: guide.line ?? across,
     layers,
     // Over the paints the model resolved for the scale's axis in each panel,

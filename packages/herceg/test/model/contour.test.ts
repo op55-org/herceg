@@ -18,6 +18,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { keysOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
@@ -65,7 +66,7 @@ describe("contours", () => {
     // An annulus: its outer ring and the next threshold's ring inside.
     expect(drawn[0]!.shapes[0]!.rings.length - 1).toBe(2);
     expect(drawn[0]!.fillOpacity).toBe(1);
-    expect(model.xScale()!.domain).toEqual([-1, 1]);
+    expect(xScale(model)!.domain).toEqual([-1, 1]);
     // The legend keys each band's color and range.
     expect(keysOf(scene)).toHaveLength(1);
     expect(keysOf(scene)[0]!.entries.map((e) => e.label.text)).toEqual(["2 – 5", "5 – 8"]);
@@ -147,7 +148,7 @@ describe("contours", () => {
         contour(field, { x: "x", y: "y", color: "z", thresholds: [2, 5, 8], variant: "bands" }),
       ],
     });
-    const [px, py] = [bands.model.xScale()!.map(0.2), bands.model.yScale()!.map(0.3)];
+    const [px, py] = [xScale(bands.model)!.map(0.2), yScale(bands.model)!.map(0.3)];
     const inspection = bands.model.inspect(px, py)!;
     expect(inspection.points[0]).toMatchObject({
       label: "z",
@@ -158,13 +159,13 @@ describe("contours", () => {
     });
     expect(inspection.label).toBe(bands.model.inspect(px, py)!.label);
     // Outside every band (above the last threshold, at the peak): nothing.
-    const peak = bands.model.inspect(bands.model.xScale()!.map(0), bands.model.yScale()!.map(0));
+    const peak = bands.model.inspect(xScale(bands.model)!.map(0), yScale(bands.model)!.map(0));
     expect(peak).toBeUndefined();
     const levels = build({
       marks: [contour(field, { x: "x", y: "y", color: "z", thresholds: [5] })],
     });
-    const x = levels.model.xScale()!;
-    const y = levels.model.yScale()!;
+    const x = xScale(levels.model)!;
+    const y = yScale(levels.model)!;
     // The line at 5 runs near radius 0.5.
     const near = levels.model.inspect(x.map(0.5) + 2, y.map(0))!;
     expect(near.points[0]!.text).toBe("5");
@@ -184,7 +185,7 @@ describe("contours", () => {
     const point = positionOf(model, stops[0]!.key, 0)!.points[0]!;
     expect(point.text).toBe("2 – 5");
     // Its marker sits in the band: between radius 0.2 and 0.8 of the cone.
-    const r = Math.hypot(model.xScale()!.invert(point.px), model.yScale()!.invert(point.py));
+    const r = Math.hypot(xScale(model)!.invert(point.px), yScale(model)!.invert(point.py));
     expect(r).toBeGreaterThan(0.2);
     expect(r).toBeLessThan(0.8);
   });
@@ -220,7 +221,7 @@ describe("contours", () => {
       ],
     });
     // The band holds the field less the cells around the missing peak: a ring with a hole.
-    const point = model.inspect(model.xScale()!.map(0), model.yScale()!.map(0));
+    const point = model.inspect(xScale(model)!.map(0), yScale(model)!.map(0));
     expect(point).toBeUndefined();
     const scattered = table({
       x: [0, 1, 2, 3, 4, 5],
@@ -397,7 +398,7 @@ describe("contours", () => {
       marks: [contour(data, { x: "x", y: "y", color: "z", thresholds: [2, 6], variant: "bands" })],
       facet: facet("half"),
     });
-    const counts = model.panels().map(({ key }) => model.panelSeries(key).map((s) => s.length));
+    const counts = model.panels().map(({ key }) => panelSeries(model, key).map((s) => s.length));
     // The half-height cone reaches 5: its band of 2 to 6 is a disc, the full one's an annulus.
     expect(counts).toEqual([[1], [1]]);
   });

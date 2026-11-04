@@ -33,7 +33,7 @@ function model(config: ChartConfig, width = 400, height = 200) {
   const made = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   made.setSize(width, height, 1);
   return made;

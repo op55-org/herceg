@@ -13,12 +13,13 @@ import { contrastingText } from "../../src/scale/color.ts";
 import type { LabelsGeometry, RectGeometry, Scene, TextGeometry } from "../../src/scene/scene.ts";
 import { DARK, LIGHT } from "../../src/theme.ts";
 import { keysOf, legendOf } from "../helpers/guides.ts";
+import { yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, 300, 1);
   return { model, scene: model.scene(estimateText) };
@@ -391,7 +392,7 @@ describe("bar value labels", () => {
     expect(shown(boxed(25, false).scene)).toEqual([]);
     // Outside: the y axis leaves room for a box above the tallest bar.
     const { model, scene } = boxed(3, true);
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     const plot = scene.panels[0]!.plot;
     expect(y.map(80) - plot.y).toBeGreaterThanOrEqual(3 * 12 + 4);
   });
@@ -409,7 +410,7 @@ describe("bar value labels", () => {
         ],
       });
       const [labels] = texts(scene);
-      return { labels: labels!, y: model.yScale()! };
+      return { labels: labels!, y: yScale(model)! };
     };
     const end = placed("end");
     expect(end.labels.fill).toBe("#ffffff");

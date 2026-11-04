@@ -54,7 +54,7 @@ const isRange = (value: unknown) =>
 /** The panels the case's chart draws over `data`, in reading order. */
 function drawn({ spec }: Case, data: object = fixture.data): readonly DrawnPanel[] {
   const full = { data: { data: { columns: data } }, ...spec } as unknown as ChartSpec;
-  const model = new ChartModel(loadSpec(full).config, undefined, ...staticCompilers());
+  const model = new ChartModel(loadSpec(full).config, undefined, staticCompilers());
   model.setSize(640, 400, 1);
   model.scene(estimateText);
   return model.panels();

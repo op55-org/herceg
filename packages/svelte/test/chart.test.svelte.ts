@@ -26,6 +26,7 @@ import Annotations from "./Annotations.svelte";
 import Bound from "./Bound.svelte";
 import Channels from "./Channels.svelte";
 import Dendrograms from "./Dendrograms.svelte";
+import Displays from "./Displays.svelte";
 import Encodings from "./Encodings.svelte";
 import Faulty from "./Faulty.svelte";
 import Fields from "./Fields.svelte";
@@ -699,6 +700,22 @@ describe("<Chart>", () => {
 
   it("rejects mark components outside a chart", () => {
     expect(() => render(Stray, {})).toThrow(/inside a <Chart>/);
+  });
+});
+
+describe("<Chart> options that hold tables", () => {
+  it("compare the tables field displays' rules match by identity", async () => {
+    // Two unnamed tables write the same JSON: only the one the line draws matches.
+    const drawn = table({ t: [0, 1], v: [1, 2] });
+    const other = table({ t: [0, 1], v: [1, 2] });
+    const props = $state({ data: drawn, matched: drawn, chart: null as HercegChart | null });
+    render(Displays, props);
+    await props.chart!.loading;
+    expect(props.chart!.toSVG()).toContain("Volume: 2 points");
+    props.matched = other;
+    flushSync();
+    await frame();
+    expect(props.chart!.toSVG()).not.toContain("Volume");
   });
 });
 

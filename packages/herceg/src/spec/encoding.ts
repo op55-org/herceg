@@ -225,15 +225,78 @@ export interface LabelPlaceSpec {
 
 /**
  * One part of a label's text: literal text, a field's value of the row
- * the label is at (written with `format`), the name of the series it
- * labels (`{ series: true }`), or its value there (`{ value: true }`, the
- * value the geometry has at the label's place, written with `format`).
+ * the label is at (written with `format`, else as the field's display
+ * writes it), the name of the series it labels (`{ series: true }`), its
+ * value there (`{ value: true }`, the value the geometry has at the
+ * label's place, written with `format`, else as its field's display writes
+ * it), or a field's label (`{ label }`, its name without one).
  */
 export type LabelPart =
   | string
-  | { field: Field; format?: FormatSpec; style?: PartStyle; series?: never; value?: never }
-  | { series: true; style?: PartStyle; field?: never; value?: never; format?: never }
-  | { value: true; format?: FormatSpec; style?: PartStyle; field?: never; series?: never };
+  | {
+      field: Field;
+      format?: FormatSpec;
+      style?: PartStyle;
+      series?: never;
+      value?: never;
+      label?: never;
+    }
+  | {
+      series: true;
+      style?: PartStyle;
+      field?: never;
+      value?: never;
+      format?: never;
+      label?: never;
+    }
+  | {
+      value: true;
+      format?: FormatSpec;
+      style?: PartStyle;
+      field?: never;
+      series?: never;
+      label?: never;
+    }
+  | {
+      label: Field;
+      style?: PartStyle;
+      field?: never;
+      series?: never;
+      value?: never;
+      format?: never;
+    };
+
+/**
+ * A part of a series' name: literal text, the series' own name (`{ series:
+ * true }`: its value field's label, or its series value as its field's
+ * display writes it), the value of a field constant within the series
+ * (`{ field }`: the mark's series field, or a line's or area's color
+ * field), written through its display, or a field's label (`{ label }`,
+ * its name without one).
+ */
+export type NamePart =
+  | string
+  | { series: true; field?: never; label?: never }
+  | { field: Field; series?: never; label?: never }
+  | { label: Field; series?: never; field?: never };
+
+/**
+ * A series mark's name: text naming its one series, or parts naming each
+ * series (`[{ series: true }, " p99"]`).
+ */
+export type NameSpec = string | NameParts;
+
+/** @minItems 1 */
+export type NameParts = readonly NamePart[];
+
+/** A part of an axis' title: literal text, or a field's label (`{ label: "p99" }`). */
+export type TitlePart = string | { label: Field };
+
+/** An axis' title: text, or literal text and fields' labels in order. */
+export type AxisTitleSpec = string | TitleParts;
+
+/** @minItems 1 */
+export type TitleParts = readonly TitlePart[];
 
 /**
  * How a part of a label looks over the label's style: its size, weight,

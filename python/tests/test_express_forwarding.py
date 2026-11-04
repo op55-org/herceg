@@ -230,7 +230,8 @@ def test_label_options_are_refused_where_the_chart_methods_refuse_them():
             (
                 "labels.content[1]",
                 "barplot labels.content[1]: expected text, or "
-                "hg.LabelPart(field=...), (series=True), or (value=True); received {'row': 1}",
+                "hg.LabelPart(field=...), (series=True), (value=True), or (label=...); "
+                "received {'row': 1}",
             ),
         ),
         (

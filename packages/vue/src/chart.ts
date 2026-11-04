@@ -15,6 +15,7 @@ import {
   type Panels,
   type RenderTooltip,
   showFailure,
+  Table,
   tablesOf,
   type ViewportState,
   type VisibilityState,
@@ -56,6 +57,7 @@ type Option<K extends keyof Options> = PropType<NonNullable<Options[K]>>;
 const optionProps = {
   title: [String, Object] as Option<"title">,
   description: String,
+  fields: [Object, Array] as Option<"fields">,
   width: Number,
   height: Number,
   x: Object as Option<"x">,
@@ -209,25 +211,28 @@ export function collect(children: unknown, parts: Parts, placing?: Placing): Par
 }
 
 /**
- * Ids of the functions options hold (tick generators, formatters), so that
- * a new function compares as a change and the same one as none.
+ * Ids of what options hold by identity: functions (tick generators,
+ * formatters), and tables and row views (in field displays' rules), so
+ * that a new one compares as a change and the same one as none.
  */
-const functionIds = new WeakMap<object, number>();
-let functions = 0;
+const identities = new WeakMap<object, number>();
+let identified = 0;
 
 /**
  * JSON with object keys sorted, so equal settings written in any order
- * compare equal, and functions by identity.
+ * compare equal, and functions, tables, and row views by identity (two
+ * unnamed tables write the same JSON).
  */
 function canonical(value: unknown): string {
   return JSON.stringify(value, (_, v: unknown) => {
-    if (typeof v === "function") {
-      let id = functionIds.get(v);
+    const table = v instanceof Table || (typeof v === "object" && v !== null && "markRows" in v);
+    if (typeof v === "function" || table) {
+      let id = identities.get(v as object);
       if (id === undefined) {
-        id = ++functions;
-        functionIds.set(v, id);
+        id = ++identified;
+        identities.set(v as object, id);
       }
-      return `function ${id}`;
+      return `${typeof v === "function" ? "function" : "table"} ${id}`;
     }
     return v && typeof v === "object" && !Array.isArray(v)
       ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))

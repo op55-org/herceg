@@ -4,14 +4,17 @@ once (``fields``) and read by every surface that writes the column.
 ``hg.FieldDisplay`` is a column's display, or with ``match`` a rule
 applying to every column it matches; ``hg.Match`` matches columns by name,
 regular expression, kind, and table; ``hg.Mapping`` shows values as given
-text. Charts do not take ``fields`` yet; the spec checks them."""
+text. Charts take them as ``fields=``: axes, legends, series' names,
+tooltips, labels, gauges, and the text alternative write columns through
+them."""
 
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 import math
+from collections.abc import Callable, Sequence
 from collections.abc import Mapping as MappingABC
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -102,13 +105,14 @@ class Match:
     for: named (``field``, a name or several), whose name matches ``regex``
     (a JavaScript regular expression, unanchored: ``"^bytes_"``), of a
     ``kind`` (``"number"``, ``"time"``, ``"category"``, or several), or of
-    the spec's table ``table`` names, and the same columns of tables derived
-    from it that pass them through unchanged."""
+    ``table`` (data the chart or its marks draw, or a table's name in the
+    spec), and the same columns of tables derived from it that pass them
+    through unchanged."""
 
     field: str | Sequence[str] | None = None
     regex: str | None = None
     kind: Kind | Sequence[Kind] | None = None
-    table: str | None = None
+    table: Any = None
 
     def __post_init__(self) -> None:
         if all(getattr(self, name) is None for name in ("field", "regex", "kind", "table")):
@@ -122,10 +126,13 @@ class Match:
             raise ChartError(
                 f"Match field: expected a column name or names; received {shown(self.field)}"
             )
-        for name in ("regex", "table"):
-            value = getattr(self, name)
-            if value is not None and not isinstance(value, str):
-                raise ChartError(f"Match {name}: expected text; received {shown(value)}")
+        if self.regex is not None and not isinstance(self.regex, str):
+            raise ChartError(f"Match regex: expected text; received {shown(self.regex)}")
+        if isinstance(self.table, (bytes, int, float, bool)):
+            raise ChartError(
+                f"Match table: expected data the chart draws, or a table's name; "
+                f"received {shown(self.table)}"
+            )
         kinds = [self.kind] if isinstance(self.kind, str) else self.kind
         if kinds is not None and (
             not isinstance(kinds, Sequence) or not kinds or any(k not in _KINDS for k in kinds)
@@ -141,18 +148,29 @@ class Match:
             return None
         return [self.kind] if isinstance(self.kind, str) else list(self.kind)
 
-    def _spec(self) -> dict[str, Any]:
+    def _spec(self, table_name: TableName | None = None) -> dict[str, Any]:
+        table = self.table
+        if table is not None and not isinstance(table, str):
+            if table_name is None:
+                raise ChartError(
+                    "Match table: data is named as a chart's table; give the displays to "
+                    "hg.Chart(fields=...), or a table's name"
+                )
+            table = table_name(table)
         spec = {
             "field": self.field if isinstance(self.field, (str, type(None))) else list(self.field),
             "regex": self.regex,
             "kind": self.kind if isinstance(self.kind, (str, type(None))) else list(self.kind),
-            "table": self.table,
+            "table": table,
         }
         return {key: value for key, value in spec.items() if value is not None}
 
 
 #: A setting a rule gives, or False, which resets it to the default.
 Reset = Literal[False]
+
+#: The spec's name of a table a chart draws, by its data; refuses data it does not draw.
+TableName = Callable[[Any], str]
 
 
 def writes(written: dict[str, Any], kind: str) -> bool:
@@ -189,8 +207,10 @@ class FieldDisplay:
             hg.FieldDisplay(match="latency", format=hg.Format(duration="millisecond")),
         ]
 
-    A dict of displays by column name is a rule per column. Charts do not
-    take ``fields`` yet; the spec checks them."""
+    A dict of displays by column name is a rule per column. Charts take
+    them as ``fields=``::
+
+        hg.Chart(df, fields={"latency": hg.FieldDisplay(label="Latency")})"""
 
     match: str | Match | dict[str, Any] | None = None
     label: str | Reset | None = None
@@ -290,12 +310,14 @@ class FieldDisplay:
                     return f"[{i}] value", f"expected {expected}; received {shown(mapping.value)}"
         return None
 
-    def _spec(self) -> dict[str, Any]:
+    def _spec(self, table_name: TableName | None = None) -> dict[str, Any]:
         format, mappings = self.format, self.mappings
         if isinstance(mappings, Sequence):  # each made an hg.Mapping as given
             mappings = [placed(f"mappings[{i}]", m._spec) for i, m in enumerate(mappings)]  # type: ignore[union-attr]
         spec = {
-            "match": self.match._spec() if isinstance(self.match, Match) else self.match,
+            "match": placed("match", lambda: self.match._spec(table_name))  # type: ignore[union-attr]
+            if isinstance(self.match, Match)
+            else self.match,
             "label": self.label,
             "description": self.description,
             "format": format if format is False else format_spec(format, "FieldDisplay format"),
@@ -313,9 +335,10 @@ FieldDisplays = (
 )
 
 
-def fields_spec(fields: Any, role: str) -> Any:
+def fields_spec(fields: Any, role: str, table_name: TableName | None = None) -> Any:
     """``fields`` as the spec takes it: displays by column name, or rules,
-    each an ``hg.FieldDisplay`` or a dict of its keyword arguments."""
+    each an ``hg.FieldDisplay`` or a dict of its keyword arguments; data
+    matched as tables are named by ``table_name``."""
     if fields is None:
         return None
     if isinstance(fields, MappingABC):
@@ -336,10 +359,23 @@ def fields_spec(fields: Any, role: str) -> Any:
             f"{role}: expected displays by column name, or a list of hg.FieldDisplay; "
             f"received {shown(fields)}"
         )
+
+    def rule_spec(rule: Any, at: str) -> dict[str, Any]:
+        return _built(rule, FieldDisplay, at)._spec(table_name)
+
     return [
-        placed(f"{role}[{i}]", _built(rule, FieldDisplay, f"{role}[{i}]")._spec)
+        placed(f"{role}[{i}]", functools.partial(rule_spec, rule, f"{role}[{i}]"))
         for i, rule in enumerate(fields)
     ]
 
 
-__all__ = ["FORMS", "FieldDisplay", "FieldDisplays", "Kind", "Mapping", "Match", "fields_spec"]
+__all__ = [
+    "FORMS",
+    "FieldDisplay",
+    "FieldDisplays",
+    "Kind",
+    "Mapping",
+    "Match",
+    "TableName",
+    "fields_spec",
+]

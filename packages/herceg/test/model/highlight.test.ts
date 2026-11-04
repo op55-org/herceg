@@ -37,6 +37,7 @@ import type {
 import { contractTest } from "../helpers/contracts.ts";
 import { channelHighlighter } from "../helpers/highlight.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 /** Tables as charts read them, whatever their fields. */
 const table = (columns: Record<string, ColumnInput>, options?: { maxRows?: number }): Table =>
@@ -68,7 +69,7 @@ describe("highlighting marks' features", () => {
     const model = new ChartModel(
       { marks, locale: "en-US", timeZone: "UTC" },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 400, 1);
     model.highlight = (mark, series, frame, key) =>
@@ -212,7 +213,7 @@ describe("highlighting", () => {
     const ofB = keys.map((key) => key.includes('"b"'));
     expect(litA).toBeGreaterThan(-1);
     expect(litA).toBeLessThan(ofB.lastIndexOf(true));
-    const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(5)];
+    const [px, py] = [xScale(model)!.map(1), yScale(model)!.map(5)];
     expect(model.inspect(px, py, "nearest")!.points[0]!.row).toBe(3);
     // A lone selected row's dot too: over its own line, under later series.
     const plain = highlighted(two, [line(two, { x: "x", y: "y", series: "s" })]);
@@ -258,7 +259,7 @@ describe("highlighting", () => {
       [false, true],
       [true, false],
     ]);
-    const [px, py] = [both.model.xScale()!.map(5), both.model.yScale()!.map(0)];
+    const [px, py] = [xScale(both.model)!.map(5), yScale(both.model)!.map(0)];
     expect(both.model.inspect(px, py, "nearest")!.points[0]!.row).toBe(6);
   });
 
@@ -901,7 +902,7 @@ describe("candlesticks and rugs with a selection", () => {
     bound.highlight(model);
     model.setSize(600, 400, 1);
     model.scene(estimateText);
-    const [px, py] = [model.xScale()!.map(1), model.yScale()!.map(15)];
+    const [px, py] = [xScale(model)!.map(1), yScale(model)!.map(15)];
     const picked = () => [
       model.inspect(px, py)?.points.map(({ row }) => row),
       clickedRows(withPicker(model), new Set([twice]), px, py)?.rows,

@@ -143,7 +143,7 @@ export function drawStatic(
   measure: MeasureText = estimateText,
   rasterRatio = STATIC_RASTER_RATIO,
 ): { scene: Scene; model: ChartModel; measure: MeasureText } {
-  const model = new ChartModel({ ...options, fonts }, NO_PAGE, ...staticCompilers());
+  const model = new ChartModel({ ...options, fonts }, NO_PAGE, staticCompilers());
   model.setSize(width, height, 1, rasterRatio);
   // What the bound stores hold now is drawn as a mounted chart draws it.
   options.rowSelection?.highlight(model);

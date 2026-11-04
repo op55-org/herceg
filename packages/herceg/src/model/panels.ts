@@ -11,7 +11,7 @@ import { type LayoutOptions, normalizeLayout } from "../layout/options.ts";
 import { aligned } from "../layout/place.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { LayoutMark } from "../marks/layout-mark.ts";
-import type { BandContext, Bands, Mark } from "../marks/mark.ts";
+import type { BandContext, ChartBands, Mark } from "../marks/mark.ts";
 import type { HeaderGuide, Rect } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { InteractionSpec, LayoutSpec, ScaleScope } from "../spec/spec.ts";
@@ -531,7 +531,7 @@ export class Panels implements PanelLayout {
   #split(
     base: readonly MarkSeries[],
     chart: PanelChart,
-    bands: Bands,
+    bands: ChartBands,
     context: BandContext,
     placed: PanelBands,
   ): PanelSplit {

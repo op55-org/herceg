@@ -10,12 +10,14 @@
 
 import type { Table } from "../../data/table.ts";
 import { CYCLE, SYMBOLS, symbolReach } from "../../draw/symbol-shapes.ts";
+import type { ChartFields } from "../../fields/chart.ts";
 import type { FeatureKit, PointChannel, PointChannels, PointLooks } from "../../model/features.ts";
 import type { ChannelName } from "../../spec/channels.ts";
 import type { SymbolName } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
 import type { MarkRows } from "../rows.ts";
+import type { Series } from "../series.ts";
 import {
   type Channel,
   type Check,
@@ -25,6 +27,7 @@ import {
   scaledOutputs,
   scaledRevision,
 } from "./channels.ts";
+import { sourceOf } from "./identity.ts";
 import { markerPath } from "./markers.ts";
 import { subset } from "./runs.ts";
 
@@ -56,6 +59,8 @@ export class PointStyles {
   readonly #size: Compiled<number> | undefined;
   readonly #opacity: Compiled<number> | undefined;
   readonly #symbol: Compiled<SymbolName> | undefined;
+  /** The chart's field displays, which name keys and write their values. */
+  readonly #fields: ChartFields | undefined;
   /** The rows the mark draws (marks/rows.ts), which checks, keys, and reach read. */
   readonly #rows: () => MarkRows;
   #theme: Theme | undefined;
@@ -72,8 +77,10 @@ export class PointStyles {
     scales: ScaleOf,
     path: string,
     series: string | undefined,
+    fields?: ChartFields,
   ) {
     this.#kit = kit;
+    this.#fields = fields;
     this.#table = table;
     this.#rows = rows;
     this.#own = own;
@@ -200,7 +207,7 @@ export class PointStyles {
       shape,
       seriesShape:
         symbol?.kind === "field" && symbol.field === this.#series
-          ? (name: string) => shapeOf(symbol.scale.output(name, SHAPES, "circle"))
+          ? (s: Series) => shapeOf(symbol.scale.output(sourceOf(s.key), SHAPES, "circle"))
           : undefined,
       keys: this.#keys(rows),
       text: (row: number, format: (value: number) => string) => this.#text(row, format),
@@ -287,7 +294,8 @@ export class PointStyles {
   /**
    * Keys of the values field channels map through ordinal scales (none for
    * the series field, which the series' entries show): a declared domain's
-   * values, held or not, else the values rows hold, in the scale's order.
+   * values, held or not, else the values rows hold, in the scale's order,
+   * written as the field's display writes them.
    */
   #keys(rows: MarkRows): GlyphKey[] {
     const keys: GlyphKey[] = [];
@@ -309,12 +317,14 @@ export class PointStyles {
       // A declared domain whole, then values held outside it.
       const domain = c.scale.spec?.domain;
       if (domain) values = [...domain, ...values.filter((value) => !domain.includes(value))];
-      keys.push({
+      const raw: GlyphKey = {
         title: c.field,
         channel,
         scale: c.scale.name,
         entries: values.map((value) => entry(value)),
-      });
+      };
+      // Named and written as the field's display writes them.
+      keys.push(this.#fields?.key(this.#table, c.field, raw) ?? raw);
     };
     const circle = markerPath(kit, "circle", 0, 0, KEY_RADIUS);
     key(this.#color, "color", (label) => {
@@ -350,7 +360,10 @@ export class PointStyles {
       if (!c || (c.kind !== "field" && c.kind !== "identity" && c.kind !== "scaled")) continue;
       if (c.field === this.#series || named.has(c.field)) continue;
       named.add(c.field);
-      if (table.kind(c.field) === "category") {
+      // Named and written as the field's display does.
+      const labeled = this.#fields?.labeled(table, c.field, row, format);
+      if (labeled) text += `, ${labeled}`;
+      else if (table.kind(c.field) === "category") {
         const { codes, dictionary } = table.categories(c.field as never);
         text += `, ${c.field} ${dictionary[codes[row]!] ?? ""}`;
       } else text += `, ${c.field} ${format(table.numbers(c.field as never)[row]!)}`;

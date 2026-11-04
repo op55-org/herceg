@@ -15,6 +15,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { cellOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const HOUR = 3_600_000;
@@ -37,7 +38,7 @@ function valueAt(model: ChartModel, px: number, py: number) {
   return model.inspect(px, py)?.points[0]?.value;
 }
 
-const categories = (model: ChartModel) => model.yScale()!.categories;
+const categories = (model: ChartModel) => yScale(model)!.categories;
 
 describe("calendar heatmaps by week", () => {
   // Thursday, January 1, 2026, to Wednesday the 14th.
@@ -47,15 +48,15 @@ describe("calendar heatmaps by week", () => {
     const { model, scene } = build({
       marks: [heatmap(days(january, 14, [6]), { date: "day", color: "n" })],
     });
-    expect(model.xScale()!.type).toBe("time");
+    expect(xScale(model)!.type).toBe("time");
     // Whole weeks from Monday, December 29, to Sunday, January 18.
-    expect(model.xScale()!.domain).toEqual([Date.UTC(2025, 11, 29), Date.UTC(2026, 0, 19)]);
+    expect(xScale(model)!.domain).toEqual([Date.UTC(2025, 11, 29), Date.UTC(2026, 0, 19)]);
     expect(categories(model)).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
     const raster = scene.panels[0]!.marks[0] as RasterGeometry;
     // UTC weeks are a lattice: a pixel per week and weekday.
     expect([raster.columns, raster.rows]).toEqual([3, 7]);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const at = (offset: number, weekday: number) =>
       valueAt(model, x.map(january + offset * DAY + 12 * HOUR), y.map(weekday));
     // January 1 is a Thursday, January 12 a Monday; the 7th has no row.
@@ -74,7 +75,7 @@ describe("calendar heatmaps by week", () => {
       marks: [heatmap(days(january, 14), { date: "day", color: "n", weekStart: "sun" })],
     });
     expect(categories(model)).toEqual(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
-    expect(model.xScale()!.domain).toEqual([Date.UTC(2025, 11, 28), Date.UTC(2026, 0, 18)]);
+    expect(xScale(model)!.domain).toEqual([Date.UTC(2025, 11, 28), Date.UTC(2026, 0, 18)]);
   });
 
   it("follow the zone's midnights across a clock change", () => {
@@ -103,8 +104,8 @@ describe("calendar heatmaps by week", () => {
       timeZone: "America/New_York",
       marks: [heatmap(data, { date: "day", color: "n" })],
     });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     for (const [i, t] of midnights.entries())
       expect(valueAt(model, x.map(t + 12 * HOUR), y.map(i % 7))).toBe(i);
   });
@@ -139,8 +140,8 @@ describe("calendar heatmaps by week", () => {
     const utc = build({ marks: [mark] }).model;
     const before = describeChart(utc);
     build({ timeZone: "America/New_York", marks: [mark] });
-    const x = utc.xScale()!;
-    expect(valueAt(utc, x.map(Date.UTC(2026, 0, 5, 12)), utc.yScale()!.map(0))).toBe(1);
+    const x = xScale(utc)!;
+    expect(valueAt(utc, x.map(Date.UTC(2026, 0, 5, 12)), yScale(utc)!.map(0))).toBe(1);
     expect(describeChart(utc)).toBe(before);
     expect(before).toContain("2 cells in 1 column");
   });
@@ -153,8 +154,8 @@ describe("calendar heatmaps by week", () => {
     });
     const { model } = build({ marks: [heatmap(data, { date: "day", color: "n" })] });
     // February 29, 2024 was a Thursday.
-    const x = model.xScale()!;
-    expect(valueAt(model, x.map(leap + 12 * HOUR), model.yScale()!.map(3))).toBe(2);
+    const x = xScale(model)!;
+    expect(valueAt(model, x.map(leap + 12 * HOUR), yScale(model)!.map(3))).toBe(2);
   });
 
   it("zoom along the weeks, and step week by week and day by day", () => {
@@ -164,8 +165,8 @@ describe("calendar heatmaps by week", () => {
     });
     setViewport(model, [Date.UTC(2026, 0, 5), Date.UTC(2026, 0, 12)]);
     model.scene(estimateText);
-    expect(model.xScale()!.domain).toEqual([Date.UTC(2026, 0, 5), Date.UTC(2026, 0, 12)]);
-    const series = model.panelSeries("")[0]!;
+    expect(xScale(model)!.domain).toEqual([Date.UTC(2026, 0, 5), Date.UTC(2026, 0, 12)]);
+    const series = panelSeries(model, "")[0]!;
     const value = (position: number | undefined) => series.values[rowOf(series, position!)];
     const step = (position: number, columns: number, rows: number) =>
       cellOf(model, "", series.key, position, columns, rows);
@@ -196,7 +197,7 @@ describe("calendar heatmaps by month", () => {
     const { model, scene } = build({
       marks: [heatmap(data, { date: "day", color: "n", calendar: "months" })],
     });
-    expect(model.xScale()!.categories).toEqual(Array.from({ length: 31 }, (_, d) => String(d + 1)));
+    expect(xScale(model)!.categories).toEqual(Array.from({ length: 31 }, (_, d) => String(d + 1)));
     // Every month from the first day's to the last's, in order down the plot.
     expect(categories(model)).toEqual([
       "Jan 2024",
@@ -208,8 +209,8 @@ describe("calendar heatmaps by month", () => {
     ]);
     const raster = scene.panels[0]!.marks[0] as RasterGeometry;
     expect([raster.columns, raster.rows]).toEqual([31, 6]);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const at = (day: number, month: number) => valueAt(model, x.map(day - 1), y.map(month));
     expect(at(30, 0)).toBe(0);
     // The leap day, the missing 10th, and dates February does not have.
@@ -265,7 +266,7 @@ describe("calendar heatmaps by month", () => {
       marks: [heatmap(data, { date: "day", color: "n", calendar: "months" })],
     });
     expect(categories(model)).toEqual(["Feb 2026"]);
-    expect(valueAt(model, model.xScale()!.map(27), model.yScale()!.map(0))).toBe(5);
+    expect(valueAt(model, xScale(model)!.map(27), yScale(model)!.map(0))).toBe(5);
   });
 });
 
@@ -279,7 +280,7 @@ describe("calendar heatmap specs", () => {
   it("load from specs", () => {
     const { config } = loadSpec(spec({ date: "day", calendar: "months", weekStart: undefined }));
     const { model } = build(config);
-    expect(model.yScale()!.categories).toEqual(["Jan 2026"]);
+    expect(yScale(model)!.categories).toEqual(["Jan 2026"]);
   });
 
   it("take a date or x and y, not both", () => {

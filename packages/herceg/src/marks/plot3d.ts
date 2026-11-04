@@ -747,7 +747,8 @@ function planAxis3D(
     );
   const kind = data[0]?.kind ?? "number";
   const fields = [...new Set(data.map((d) => d.field))];
-  const title = spec?.title ?? fields.join(", ");
+  // Titles of parts are text by now: the guide compiler writes them.
+  const title = (spec?.title as string | undefined) ?? fields.join(", ");
   const shown = spec?.show ?? true;
   // A 3D box's grid is drawn by depth with its walls ({ zIndex } is refused).
   const grid = spec?.grid !== false;

@@ -17,6 +17,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { rampsOf } from "../helpers/guides.ts";
 import { cellOf, positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -164,7 +165,7 @@ describe("heatmaps split by facets", () => {
     const [stop] = stopsOf(model, "S");
     const key = stop!.key;
     const rowAt = (panel: string, position: number | undefined) =>
-      position === undefined ? undefined : rowOf(model.panelSeries(panel)[0]!, position);
+      position === undefined ? undefined : rowOf(panelSeries(model, panel)[0]!, position);
     // S draws (b, p) and (c, p) on its top row, (a, q) below them.
     const first = cellOf(model, "S", key, -1, 0, 0);
     expect(rowAt("S", first)).toBe(6);
@@ -311,7 +312,7 @@ describe("heatmaps split by facets", () => {
     // One index serves both panels: the rows and their bands are the same,
     // N holding the chart's bands at their own places and S a and c (bands
     // 1 and 2) at 0 and 1.
-    const [n, s] = ["N", "S"].map((key) => model.panelSeries(key)[1]!);
+    const [n, s] = ["N", "S"].map((key) => panelSeries(model, key)[1]!);
     expect(n!.x).toBe(s!.x);
     expect(n!.places).toBeUndefined();
     expect([0, 1, 2].map((band) => s!.places!.x!.at(band))).toEqual([-1, 0, 1]);

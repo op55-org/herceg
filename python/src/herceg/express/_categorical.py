@@ -24,6 +24,7 @@ from ._common import (
     category_column,
     check_axes_differ,
     check_choice,
+    column_name,
     complete,
     dropped_sentence,
     express,
@@ -111,7 +112,7 @@ def stripplot(
         dodge=dodge and series is not None,
         jitter=spread,
         radius=radius,
-        label=None if series else layout.value,
+        label=None if series else column_name(chart, layout.value),
         **marks.primary(),
     )
     used_seed = spread.seed if spread is not None else None
@@ -186,7 +187,7 @@ def swarmplot(
         dodge=spread,
         swarm=True,
         radius=float(radius),
-        label=None if series else layout.value,
+        label=None if series else column_name(chart, layout.value),
         **marks.primary(),
     )
     _warn_unplaced(layout, options, series, spread, float(radius), float(warn_thresh))
@@ -392,7 +393,7 @@ def boxplot(
         whiskers=None if whiskers == "tukey" else whiskers,
         notch=notch or None,
         outliers=None if outliers else False,
-        label=None if series else layout.value,
+        label=None if series else column_name(chart, layout.value),
         z_index=marks.z_index,
     )
     return record(
@@ -481,7 +482,7 @@ def boxenplot(
         trust_alpha=None if trust_alpha == 0.05 else trust_alpha,
         width_method=None if width_method == "exponential" else width_method,
         outliers=None if outliers else False,
-        label=None if series else layout.value,
+        label=None if series else column_name(chart, layout.value),
         z_index=marks.z_index,
     )
     return record(chart, Statistics("boxenplot", sentence, letters, None, layout.dropped))
@@ -624,7 +625,7 @@ def violinplot(
         bandwidth=bandwidth,
         split=split or None,
         inner=None if inner == "box" else inner,
-        label=None if series else layout.value,
+        label=None if series else column_name(chart, layout.value),
         z_index=marks.z_index,
     )
     boxes, _ = _box_statistics(layout, 1.5)

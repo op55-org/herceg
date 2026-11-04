@@ -20,6 +20,7 @@ from ._data import duration_ms, listlike
 from ._derive import Expr
 from ._errors import (
     ChartError,
+    Role,
     is_number,
     key_path,
     listed,
@@ -868,8 +869,10 @@ class LabelPlace:
 class LabelPart:
     """A part of a label's text, between literal strings: a column's value
     of the row the label is at (``field``, written with ``format``), the
-    name of the series it labels (``series=True``), or the value it labels
-    there (``value=True``, written with ``format``)::
+    name of the series it labels (``series=True``), the value it labels
+    there (``value=True``, written with ``format``), or a column's label
+    (``label``: its display's, ``hg.FieldDisplay(label=...)``, else its
+    name)::
 
         content=["Peak ", hg.LabelPart(value=True, format=hg.Format(number=".1f"))]
 
@@ -888,25 +891,32 @@ class LabelPart:
     field: str | None = None
     series: bool | None = None
     value: bool | None = None
+    label: str | None = None
     format: Format | Mapping[str, Any] | None = None
     style: TextStyle | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        given = [name for name in ("field", "series", "value") if getattr(self, name) is not None]
+        given = [name for name in _PART_KINDS if getattr(self, name) is not None]
         if len(given) != 1:
-            raise ChartError("LabelPart: give field, series=True, or value=True, one of them")
+            raise ChartError(
+                "LabelPart: give field, series=True, value=True, or label, one of them"
+            )
         for name in ("series", "value"):
             # True itself: 1 equals True, but is no flag.
             if getattr(self, name) is not None and getattr(self, name) is not True:
                 raise ChartError(
                     f"LabelPart {name}: expected True; received {shown(getattr(self, name))}"
                 )
-        if self.field is not None and (not isinstance(self.field, str) or not self.field):
-            raise ChartError(
-                f"LabelPart field: expected a column name; received {shown(self.field)}"
-            )
+        for name in ("field", "label"):
+            column = getattr(self, name)
+            if column is not None and (not isinstance(column, str) or not column):
+                raise ChartError(
+                    f"LabelPart {name}: expected a column name; received {shown(column)}"
+                )
         if self.series and self.format is not None:
             raise ChartError("LabelPart format: a series' name is written as it is; drop format")
+        if self.label is not None and self.format is not None:
+            raise ChartError("LabelPart format: a column's label is written as it is; drop format")
         if self.style is not None:
             style = _built(self.style, TextStyle, "LabelPart style")
             for name in _PART_BLOCK:
@@ -920,6 +930,8 @@ class LabelPart:
         spec: dict[str, Any] = (
             {"field": self.field}
             if self.field is not None
+            else {"label": self.label}
+            if self.label is not None
             else {"series": True}
             if self.series
             else {"value": True}
@@ -930,6 +942,9 @@ class LabelPart:
             spec["style"] = _spec(self.style)
         return spec
 
+
+#: The kinds of parts, one of which each part is.
+_PART_KINDS = ("field", "series", "value", "label")
 
 #: What a label's block has once, which its parts' styles leave to it.
 _PART_BLOCK = ("font", "line_height", "align", "vertical_align", "halo", "background", "padding")
@@ -949,6 +964,65 @@ def content_spec(value: Any, role: str) -> Any:
         part if isinstance(part, str) else built_spec(part, LabelPart, f"{role}[{i}]")
         for i, part in enumerate(value)
     ]
+
+
+def name_spec(value: Any, mark: str) -> Any:
+    """A series' ``label`` as the spec takes it: text, or parts naming each
+    series: text, ``hg.LabelPart(series=True)``, ``(field=...)`` of the
+    series or color column, and ``(label=...)``, in the legend's and
+    tooltip's look. ``mark`` is the method's name, which refusals say."""
+    if value is None or isinstance(value, str):
+        return value
+    role = Role(f"{mark} label", "label")
+    if isinstance(value, Mapping) or not isinstance(value, Sequence) or not value:
+        raise role.error(
+            'expected text, or a list of parts, such as [hg.LabelPart(series=True), " p99"]; '
+            f"received {shown(value)}"
+        )
+    parts: list[Any] = []
+    for i, part in enumerate(value):
+        if isinstance(part, str):
+            parts.append(part)
+            continue
+        at = role.index(i)
+        built: LabelPart = located(at, functools.partial(_built, part, LabelPart, at.label))
+        if built.value:
+            raise at.error(
+                "a series' name has no value; use hg.LabelPart(series=True), (field=...), "
+                "or (label=...)"
+            )
+        for name in ("style", "format"):
+            if getattr(built, name) is not None:
+                raise at.field(name).error(
+                    f"a name is written in the legend's and tooltip's look; drop {name}"
+                )
+        parts.append(built._spec())
+    return parts
+
+
+def axis_title_spec(value: Any, role: str) -> Any:
+    """An axis' ``title`` as the spec takes it: text, or text and columns'
+    labels (``[hg.LabelPart(label="latency"), " (p99)"]``)."""
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, Mapping) or not isinstance(value, Sequence) or not value:
+        raise ChartError(
+            f"{role}: expected text, or a list of text and hg.LabelPart(label=...), such as "
+            f'[hg.LabelPart(label="latency"), " (p99)"]; received {shown(value)}'
+        )
+    parts: list[Any] = []
+    for i, part in enumerate(value):
+        if isinstance(part, str):
+            parts.append(part)
+            continue
+        built = _built(part, LabelPart, f"{role}[{i}]")
+        if built.label is None or built.style is not None:
+            raise ChartError(
+                f"{role}[{i}]: an axis' title names columns by their labels; give text, "
+                "or hg.LabelPart(label=...)"
+            )
+        parts.append({"label": built.label})
+    return parts
 
 
 #: Which point of a series a label follows.
@@ -991,19 +1065,19 @@ def _content_problem(content: Any) -> tuple[str, str] | None:
         if isinstance(part, (str, LabelPart)):
             continue
         given = (
-            [name for name in ("field", "series", "value") if part.get(name) is not None]
+            [name for name in _PART_KINDS if part.get(name) is not None]
             if isinstance(part, Mapping)
             else []
         )
         if len(given) != 1:
             return f"[{i}]", (
-                "expected text, or hg.LabelPart(field=...), (series=True), or (value=True); "
-                f"received {shown(part)}"
+                "expected text, or hg.LabelPart(field=...), (series=True), (value=True), "
+                f"or (label=...); received {shown(part)}"
             )
         name = given[0]
-        if name == "field" and not (isinstance(part[name], str) and part[name]):
-            return f"[{i}].field", f"expected a column's name; received {shown(part[name])}"
-        if name != "field" and part[name] is not True:
+        if name in ("field", "label") and not (isinstance(part[name], str) and part[name]):
+            return f"[{i}].{name}", f"expected a column's name; received {shown(part[name])}"
+        if name in ("series", "value") and part[name] is not True:
             return f"[{i}].{name}", f"expected True; received {shown(part[name])}"
     return None
 
@@ -1291,12 +1365,18 @@ def pixels_option(value: Any, role: str) -> Any:
 
 
 def _tree_content(content: Any, role: str) -> None:
-    """Refuses parts of a tree's labels that name a series, which tree items are none of."""
+    """Refuses parts of a tree's labels that name a series, which tree items
+    are none of, or a column's label, which they do not write."""
     for i, part in enumerate(content_spec(content, f"{role} content") or ()):
         if isinstance(part, dict) and part.get("series"):
             raise ChartError(
                 f"{role} content[{i}]: names a series, and tree items are none; "
                 "give text, a column, or the value"
+            )
+        if isinstance(part, dict) and part.get("label") is not None:
+            raise ChartError(
+                f"{role} content[{i}]: tree labels write their items' values, not columns' "
+                "labels; give text, a column, or the value"
             )
 
 

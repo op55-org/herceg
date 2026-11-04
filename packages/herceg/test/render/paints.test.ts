@@ -467,7 +467,7 @@ describe("CSS variables in color options", () => {
         marks: [heatmap(field, { x: "x", y: "y", color: "z", colors: [paint(1), paint(2)] })],
       },
       NO_PAGE,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(300, 200, 1);
     model.scene(estimateText, false, NO_PAGE);

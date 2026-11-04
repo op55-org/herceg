@@ -829,7 +829,7 @@
     },
     {
       "id": "locale",
-      "text": "locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.",
+      "text": "locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.",
       "matches": [
         "Incorrect locale information",
         "Invalid time zone",
@@ -837,7 +837,8 @@
         "Currency code is required",
         "Invalid currency code",
         "Invalid unit argument",
-        "Invalid numberingSystem"
+        "Invalid numberingSystem",
+        "Invalid calendar"
       ],
       "witnesses": [
         {

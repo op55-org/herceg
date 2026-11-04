@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Herceg chart spec",
-  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
+  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
   "$ref": "#/$defs/ChartSpec",
   "$defs": {
     "AggregateOp": {
@@ -172,7 +172,7 @@
           "$ref": "#/$defs/Curve",
           "default": "linear"
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "labels": {
           "title": "Labels",
           "description": "A label following each area's value edge (a band's `edge`).",
@@ -370,7 +370,7 @@
           "required": ["side"],
           "additionalProperties": false
         },
-        "title": { "title": "Title", "type": "string" },
+        "title": { "title": "Title", "$ref": "#/$defs/AxisTitleSpec" },
         "ticks": { "title": "Ticks", "$ref": "#/$defs/TicksSpec" },
         "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
         "tick": {
@@ -429,75 +429,6 @@
       "required": ["type", "scale"],
       "additionalProperties": false
     },
-    "AxisSpec": {
-      "description": "Scale and axis options for one position channel.",
-      "type": "object",
-      "properties": {
-        "type": {
-          "title": "Type",
-          "description": "Inferred from the data when omitted: time fields get \"time\".",
-          "type": "string",
-          "enum": ["linear", "log", "time"]
-        },
-        "domain": {
-          "title": "Domain",
-          "description": "Fixed domain. Time domains are epoch milliseconds.",
-          "type": "array",
-          "prefixItems": [{ "type": "number" }, { "type": "number" }],
-          "items": false,
-          "minItems": 2
-        },
-        "nice": {
-          "title": "Nice",
-          "description": "Extend the domain to round tick values. Default true for y, and for x when it measures horizontal bars.",
-          "type": "boolean"
-        },
-        "zero": {
-          "title": "Zero",
-          "description": "Include zero in the domain. Default true for the value axis of areas and bars.",
-          "type": "boolean"
-        },
-        "padding": {
-          "title": "Padding",
-          "description": "Room between the data and the plot's edges: \"auto\" by default (see `ScalePadding`).",
-          "$ref": "#/$defs/ScalePadding",
-          "default": "auto"
-        },
-        "title": { "title": "Title", "description": "Axis title.", "type": "string" },
-        "grid": {
-          "title": "Grid",
-          "description": "Grid lines across the plot, and where they are drawn among the marks (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.",
-          "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/GridLinesSpec" }]
-        },
-        "ticks": {
-          "title": "Ticks",
-          "description": "Which ticks it draws: about how many (a number), one `every` so often, or exactly `values`.",
-          "$ref": "#/$defs/TicksSpec"
-        },
-        "format": {
-          "title": "Format",
-          "description": "How tick labels are written: Intl options, or a pattern (`{ number: \",.2f\" }`, `{ time: \"%H:%M\" }`).",
-          "$ref": "#/$defs/FormatSpec"
-        },
-        "tooltipFormat": {
-          "title": "Tooltip format",
-          "description": "How tooltips, the keyboard's announcements, and crosshair labels write one value of the axis, such as `{ weekday: \"short\", month: \"short\", day: \"numeric\" }` or `{ time: \"%a %H:%M\" }`, leaving tick labels as they are: as `format` takes them; `format` by default.",
-          "$ref": "#/$defs/FormatSpec"
-        },
-        "show": {
-          "title": "Show",
-          "description": "Draw the axis. Default true.",
-          "type": "boolean",
-          "default": true
-        },
-        "style": {
-          "title": "Style",
-          "description": "How the axis' parts look: its line, ticks, tick labels, title, and grid lines.",
-          "$ref": "#/$defs/AxisStyles"
-        }
-      },
-      "additionalProperties": false
-    },
     "AxisStyles": {
       "description": "The roles an axis draws: its line, ticks, tick labels, title, and grid lines.",
       "type": "object",
@@ -525,6 +456,10 @@
         }
       },
       "additionalProperties": false
+    },
+    "AxisTitleSpec": {
+      "description": "An axis' title: text, or literal text and fields' labels in order.",
+      "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/TitleParts" }]
     },
     "BarLabelPlaceSpec": {
       "description": "Where bars' labels go: past each bar's end (`outside`, the default for bars not stacked, just inside where past would leave the plot), or inside it at its root, middle, or tip (`attachment`: \"start\", \"center\", \"end\"; stacked bars' labels are inside, centered by default).",
@@ -679,7 +614,7 @@
           "properties": { "by": { "title": "By", "$ref": "#/$defs/StyleMapSpec" } },
           "additionalProperties": false
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "labels": {
           "title": "Labels",
           "description": "Write each bar's value at its end (or, stacked, inside each segment): `true`, or how. Labels that do not fit are left out.",
@@ -1051,7 +986,7 @@
           "minimum": 0,
           "maximum": 1
         },
-        "label": { "title": "Label", "type": "string" }
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" }
       },
       "anyOf": [
         {
@@ -1173,7 +1108,7 @@
           "minimum": 0,
           "maximum": 1
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "selected": {
           "title": "Selected",
           "description": "What a selection holds of the mark (items or series selected, or the rows a row selection highlights); as drawn by default.",
@@ -1833,7 +1768,11 @@
           "$ref": "#/$defs/ScalePadding",
           "default": "auto"
         },
-        "title": { "title": "Title", "description": "Axis title.", "type": "string" },
+        "title": {
+          "title": "Title",
+          "description": "Axis title: text, or text and fields' labels (`[{ label: \"p99\" }]`).",
+          "$ref": "#/$defs/AxisTitleSpec"
+        },
         "grid": {
           "title": "Grid",
           "description": "Grid lines across the plot, and where they are drawn among the marks (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.",
@@ -1918,7 +1857,7 @@
         },
         "fields": {
           "title": "Fields",
-          "description": "How fields are named and their values written, by field name or as rules applied in order (see `FieldDisplaysSpec`). Specs check them; charts do not read them yet (docs/guide/fields.md).",
+          "description": "How fields are named and their values written, by field name or as rules applied in order (see `FieldDisplaysSpec`): axes, legends, series' names, tooltips, labels, gauges, and the text alternative write fields through them (docs/guide/fields.md).",
           "$ref": "#/$defs/FieldDisplaysSpec"
         },
         "marks": { "title": "Marks", "type": "array", "items": { "$ref": "#/$defs/MarkSpec" } },
@@ -2065,7 +2004,6 @@
               "$ref": "#/$defs/ScalePadding",
               "default": "auto"
             },
-            "title": { "title": "Title", "description": "Axis title.", "type": "string" },
             "grid": {
               "title": "Grid",
               "description": "Grid lines across the plot, and where they are drawn among the marks (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.",
@@ -2091,7 +2029,8 @@
               "description": "Draw the axis. Default true.",
               "type": "boolean",
               "default": true
-            }
+            },
+            "title": { "title": "Title", "description": "Axis title.", "type": "string" }
           },
           "additionalProperties": false
         },
@@ -2755,7 +2694,7 @@
           "default": 8,
           "minimum": 0
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "selected": {
           "title": "Selected",
           "description": "What a selection holds of the mark (items or series selected, or the rows a row selection highlights); as drawn by default.",
@@ -4061,7 +4000,7 @@
         },
         "fill": { "title": "Fill", "type": "string" },
         "fillOpacity": { "title": "Fill opacity", "type": "number", "minimum": 0, "maximum": 1 },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "x": { "title": "X", "type": "string" },
         "y": { "title": "Y", "type": "string" },
         "stack": {
@@ -4643,7 +4582,7 @@
       "minItems": 1
     },
     "LabelPart": {
-      "description": "One part of a label's text: literal text, a field's value of the row the label is at (written with `format`), the name of the series it labels (`{ series: true }`), or its value there (`{ value: true }`, the value the geometry has at the label's place, written with `format`).",
+      "description": "One part of a label's text: literal text, a field's value of the row the label is at (written with `format`, else as the field's display writes it), the name of the series it labels (`{ series: true }`), its value there (`{ value: true }`, the value the geometry has at the label's place, written with `format`, else as its field's display writes it), or a field's label (`{ label }`, its name without one).",
       "anyOf": [
         {
           "type": "object",
@@ -4652,15 +4591,26 @@
             "format": { "title": "Format", "$ref": "#/$defs/FormatSpec" },
             "style": { "title": "Style", "$ref": "#/$defs/PartStyle" },
             "series": { "title": "Series", "const": true },
-            "value": { "title": "Value", "const": true }
+            "value": { "title": "Value", "const": true },
+            "label": { "title": "Label", "type": "string" }
           },
           "anyOf": [
-            { "required": ["field"], "properties": { "series": false, "value": false } },
+            {
+              "required": ["field"],
+              "properties": { "series": false, "value": false, "label": false }
+            },
             {
               "required": ["series"],
-              "properties": { "field": false, "format": false, "value": false }
+              "properties": { "field": false, "format": false, "value": false, "label": false }
             },
-            { "required": ["value"], "properties": { "field": false, "series": false } }
+            {
+              "required": ["value"],
+              "properties": { "field": false, "series": false, "label": false }
+            },
+            {
+              "required": ["label"],
+              "properties": { "field": false, "format": false, "series": false, "value": false }
+            }
           ],
           "additionalProperties": false
         },
@@ -5044,7 +4994,7 @@
         "label": {
           "title": "Label",
           "description": "Legend and tooltip name for a single-field line without `series`.",
-          "type": "string"
+          "$ref": "#/$defs/NameSpec"
         },
         "color": {
           "title": "Color",
@@ -5340,6 +5290,31 @@
       "required": ["type"],
       "additionalProperties": false
     },
+    "NamePart": {
+      "description": "A part of a series' name: literal text, the series' own name (`{ series: true }`: its value field's label, or its series value as its field's display writes it), the value of a field constant within the series (`{ field }`: the mark's series field, or a line's or area's color field), written through its display, or a field's label (`{ label }`, its name without one).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "series": { "title": "Series", "const": true },
+            "field": { "title": "Field", "type": "string" },
+            "label": { "title": "Label", "type": "string" }
+          },
+          "anyOf": [
+            { "required": ["series"], "properties": { "field": false, "label": false } },
+            { "required": ["field"], "properties": { "series": false, "label": false } },
+            { "required": ["label"], "properties": { "series": false, "field": false } }
+          ],
+          "additionalProperties": false
+        },
+        { "type": "string" }
+      ]
+    },
+    "NameParts": { "type": "array", "items": { "$ref": "#/$defs/NamePart" }, "minItems": 1 },
+    "NameSpec": {
+      "description": "A series mark's name: text naming its one series, or parts naming each series (`[{ series: true }, \" p99\"]`).",
+      "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/NameParts" }]
+    },
     "NavigatorSpec": {
       "description": "The range navigator's options.",
       "type": "object",
@@ -5607,6 +5582,75 @@
       "required": ["type"],
       "additionalProperties": false
     },
+    "PanelAxisSpec": {
+      "description": "A panel's own axis, or a 3D chart's z axis: an axis whose title is text (titles of parts are the chart's x, y, and yRight's, and axis guides').",
+      "type": "object",
+      "properties": {
+        "type": {
+          "title": "Type",
+          "description": "Inferred from the data when omitted: time fields get \"time\".",
+          "type": "string",
+          "enum": ["linear", "log", "time"]
+        },
+        "domain": {
+          "title": "Domain",
+          "description": "Fixed domain. Time domains are epoch milliseconds.",
+          "type": "array",
+          "prefixItems": [{ "type": "number" }, { "type": "number" }],
+          "items": false,
+          "minItems": 2
+        },
+        "nice": {
+          "title": "Nice",
+          "description": "Extend the domain to round tick values. Default true for y, and for x when it measures horizontal bars.",
+          "type": "boolean"
+        },
+        "zero": {
+          "title": "Zero",
+          "description": "Include zero in the domain. Default true for the value axis of areas and bars.",
+          "type": "boolean"
+        },
+        "padding": {
+          "title": "Padding",
+          "description": "Room between the data and the plot's edges: \"auto\" by default (see `ScalePadding`).",
+          "$ref": "#/$defs/ScalePadding",
+          "default": "auto"
+        },
+        "grid": {
+          "title": "Grid",
+          "description": "Grid lines across the plot, and where they are drawn among the marks (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.",
+          "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/GridLinesSpec" }]
+        },
+        "ticks": {
+          "title": "Ticks",
+          "description": "Which ticks it draws: about how many (a number), one `every` so often, or exactly `values`.",
+          "$ref": "#/$defs/TicksSpec"
+        },
+        "format": {
+          "title": "Format",
+          "description": "How tick labels are written: Intl options, or a pattern (`{ number: \",.2f\" }`, `{ time: \"%H:%M\" }`).",
+          "$ref": "#/$defs/FormatSpec"
+        },
+        "tooltipFormat": {
+          "title": "Tooltip format",
+          "description": "How tooltips, the keyboard's announcements, and crosshair labels write one value of the axis, such as `{ weekday: \"short\", month: \"short\", day: \"numeric\" }` or `{ time: \"%a %H:%M\" }`, leaving tick labels as they are: as `format` takes them; `format` by default.",
+          "$ref": "#/$defs/FormatSpec"
+        },
+        "show": {
+          "title": "Show",
+          "description": "Draw the axis. Default true.",
+          "type": "boolean",
+          "default": true
+        },
+        "style": {
+          "title": "Style",
+          "description": "How the axis' parts look: its line, ticks, tick labels, title, and grid lines.",
+          "$ref": "#/$defs/AxisStyles"
+        },
+        "title": { "title": "Title", "description": "Axis title.", "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "PanelInteractionSpec": {
       "description": "A panel's own `interaction`: the chart's settings but `sync`.",
       "type": "object",
@@ -5689,17 +5733,17 @@
         "x": {
           "title": "X",
           "description": "The panel's x axis: the chart's `x`, with these settings in place of its own (`format` replaces the chart's whole). Panels sharing an x scale take their first panel's.",
-          "$ref": "#/$defs/AxisSpec"
+          "$ref": "#/$defs/PanelAxisSpec"
         },
         "y": {
           "title": "Y",
           "description": "The panel's y axis: the chart's `y`, with these settings in place of its own (`format` replaces the chart's whole).",
-          "$ref": "#/$defs/AxisSpec"
+          "$ref": "#/$defs/PanelAxisSpec"
         },
         "yRight": {
           "title": "Y right",
           "description": "The panel's right y axis, for its marks with `axis: \"right\"`: the chart's `yRight`, with these settings.",
-          "$ref": "#/$defs/AxisSpec"
+          "$ref": "#/$defs/PanelAxisSpec"
         },
         "interaction": {
           "title": "Interaction",
@@ -6121,7 +6165,7 @@
           "description": "With a category `x` or `y`, points packed across their band (or their dodged share of it) without overlap, in order of their values, as a beeswarm; points that do not fit stand at its edges.",
           "type": "boolean"
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "selected": {
           "title": "Selected",
           "description": "What a selection holds of the mark (items or series selected, or the rows a row selection highlights); as drawn by default.",
@@ -6719,7 +6763,7 @@
           "default": 1,
           "minimum": 0
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "selected": {
           "title": "Selected",
           "description": "What a selection holds of the mark (items or series selected, or the rows a row selection highlights); as drawn by default.",
@@ -8381,6 +8425,19 @@
       "type": "string",
       "enum": ["millisecond", "second", "minute", "hour", "day", "week", "month", "year"]
     },
+    "TitlePart": {
+      "description": "A part of an axis' title: literal text, or a field's label (`{ label: \"p99\" }`).",
+      "anyOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": { "label": { "title": "Label", "type": "string" } },
+          "required": ["label"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "TitleParts": { "type": "array", "items": { "$ref": "#/$defs/TitlePart" }, "minItems": 1 },
     "TitleSpec": {
       "description": "The chart's title with where it goes and how it looks.",
       "type": "object",
@@ -8885,7 +8942,7 @@
           "minimum": 0,
           "maximum": 1
         },
-        "label": { "title": "Label", "type": "string" },
+        "label": { "title": "Label", "$ref": "#/$defs/NameSpec" },
         "selected": {
           "title": "Selected",
           "description": "What a selection holds of the mark (items or series selected, or the rows a row selection highlights); as drawn by default.",
@@ -9088,7 +9145,11 @@
           "$ref": "#/$defs/ScalePadding",
           "default": "auto"
         },
-        "title": { "title": "Title", "description": "Axis title.", "type": "string" },
+        "title": {
+          "title": "Title",
+          "description": "Axis title: text, or text and fields' labels (`[{ label: \"p99\" }]`).",
+          "$ref": "#/$defs/AxisTitleSpec"
+        },
         "grid": {
           "title": "Grid",
           "description": "Grid lines across the plot, and where they are drawn among the marks (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.",

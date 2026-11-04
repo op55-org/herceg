@@ -26,6 +26,7 @@ import { facet } from "../../src/model/facet.ts";
 import { type ChartConfig, ChartModel, type Inspection } from "../../src/model/model.ts";
 import { Nearest } from "../../src/model/nearest.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -59,7 +60,7 @@ describe("inspected points", () => {
         area(data, { x: "t", y1: "a", y2: "b" }),
       ],
     });
-    const at = model.xScale()!.map(2);
+    const at = xScale(model)!.map(2);
     expect(identities(model.inspect(at, 150))).toEqual([
       { mark: 1, markId: "latency", key: '["latency","a"]', label: "a", row: 3 },
       { mark: 2, markId: undefined, key: '[2,"a–b"]', label: "a–b", row: 3 },
@@ -101,7 +102,7 @@ describe("inspected points", () => {
     const requests = table({ ms: [120, 340, 90, 410], size: [1, 2, 3, 4] });
     const slow = rowView(requests, { filter: col("ms").gt(200) });
     const model = build({ marks: [point(slow, { x: "size", y: "ms" })] });
-    const at = model.inspect(model.xScale()!.map(4), model.yScale()!.map(410));
+    const at = model.inspect(xScale(model)!.map(4), yScale(model)!.map(410));
     // The view's second row is the table's fourth.
     expect(identities(at)![0]!.row).toBe(3);
   });
@@ -109,14 +110,14 @@ describe("inspected points", () => {
   it("tell apart two uses of one mark", () => {
     const shared = line(data, { x: "t", y: "a" });
     const model = build({ marks: [shared, shared] });
-    const marks = model.inspect(model.xScale()!.map(2), 150)!.points.map((p) => p.mark);
+    const marks = model.inspect(xScale(model)!.map(2), 150)!.points.map((p) => p.mark);
     expect(marks).toEqual([0, 1]);
   });
 
   it("give a heatmap cell's row: the last of the rows in that cell", () => {
     const cells = table({ x: ["a", "b", "a"], y: ["p", "p", "p"], v: [1, 2, 3] });
     const model = build({ marks: [heatmap(cells, { x: "x", y: "y", color: "v" })] });
-    const inspection = model.inspect(model.xScale()!.map(0), model.yScale()!.map(0));
+    const inspection = model.inspect(xScale(model)!.map(0), yScale(model)!.map(0));
     expect(identities(inspection)).toEqual([
       { mark: 0, markId: undefined, key: '[0,"cells"]', label: "p", row: 2 },
     ]);
@@ -126,7 +127,7 @@ describe("inspected points", () => {
     const model = build({
       marks: [custom(data, { x: "t", y: "b", draw: () => {} })],
     });
-    expect(identities(model.inspect(model.xScale()!.map(1), 150))![0]!.row).toBe(1);
+    expect(identities(model.inspect(xScale(model)!.map(1), 150))![0]!.row).toBe(1);
   });
 
   it("give no row for points that summarize rows", () => {
@@ -275,7 +276,7 @@ describe("nearest bars", () => {
     // In a bar, and at its end.
     for (const value of [2, 10]) {
       take.mockClear();
-      const [px, py] = [model.xScale()!.map(n / 2), model.yScale()!.map(value)];
+      const [px, py] = [xScale(model)!.map(n / 2), yScale(model)!.map(value)];
       expect(model.inspect(px, py, "nearest")?.points[0]?.row).toBe(n / 2);
       expect(take.mock.calls.length).toBeLessThan(10);
     }

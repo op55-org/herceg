@@ -22,12 +22,13 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import type { AreaGeometry, LabelsGeometry, Scene } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { pickKit } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, 300, 1);
   return { model, scene: model.scene(estimateText) };
@@ -38,7 +39,7 @@ const areasOf = (scene: Scene, panel = 0) =>
 
 /** Each run of an area's top edge: its first and last x, in data units (`unit`s of them). */
 function spans(model: ChartModel, geometry: AreaGeometry, unit = 1): [number, number][] {
-  const x = model.xScale()!;
+  const x = xScale(model)!;
   const { upper } = geometry;
   const at = (point: number) => Math.round((x.invert(upper.coords[point * 2]!) / unit) * 100) / 100;
   return upper.starts.flatMap((start, r) =>
@@ -186,7 +187,7 @@ describe("stack support", () => {
       const { model, scene } = build({
         marks: [area(rows, { x: "t", y: "v", series: "s", continuity: { maxGap: 2 }, stack })],
       });
-      const x = model.xScale()!;
+      const x = xScale(model)!;
       const plot = scene.panels[0]!.plot;
       const at = (t: number) =>
         (model.inspect(x.map(t), plot.y + 5) as AxisInspection | undefined)?.points.length ?? 0;
@@ -205,7 +206,7 @@ describe("stack support", () => {
         }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const found = model.inspect(x.map(4), scene.panels[0]!.plot.y + 5) as
       | AxisInspection
       | undefined;
@@ -257,9 +258,9 @@ describe("stack support", () => {
     const union = build(config("union"));
     const { model, scene } = build(config("intersection"));
     // b's 90 at x = 8 stands alone: in the union's domain, not the intersection's.
-    expect(union.model.yScale()!.domain[1]).toBeGreaterThanOrEqual(90);
-    expect(model.yScale()!.domain[1]).toBeLessThan(20);
-    const x = model.xScale()!;
+    expect(yScale(union.model)!.domain[1]).toBeGreaterThanOrEqual(90);
+    expect(yScale(model)!.domain[1]).toBeLessThan(20);
+    const x = xScale(model)!;
     const plot = scene.panels[0]!.plot;
     const at = (t: number) => {
       const found = model.inspect(x.map(t), plot.y + 5) as AxisInspection;
@@ -276,7 +277,7 @@ describe("stack support", () => {
         g.kind === "labels"
           ? [...(g as LabelsGeometry).items].map((item) => [
               item.text,
-              Math.round(built.model.xScale()!.invert(item.x)),
+              Math.round(xScale(built.model)!.invert(item.x)),
             ])
           : [],
       ).sort();
@@ -330,8 +331,8 @@ describe("stack support", () => {
       ],
     });
     const picked = new Picker(pickKit).pick(model, {
-      x: model.xScale()!.map(5.9),
-      y: model.yScale()!.map(0.5),
+      x: xScale(model)!.map(5.9),
+      y: yScale(model)!.map(0.5),
       slop: 4,
     });
     const part = picked?.item.part;
@@ -357,7 +358,7 @@ describe("stack support", () => {
         }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const plot = scene.panels[0]!.plot;
     const at = (t: number) =>
       (model.inspect(x.map(t), plot.y + 5) as AxisInspection | undefined)?.points.length ?? 0;

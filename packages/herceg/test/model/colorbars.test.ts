@@ -30,7 +30,7 @@ import {
 const guides = guideCompiler(GUIDE_KIT);
 
 function build(config: ChartConfig, width = 640, height = 360) {
-  const model = new ChartModel({ locale: "en-US", ...config }, undefined, guides);
+  const model = new ChartModel({ locale: "en-US", ...config }, undefined, [guides]);
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }
@@ -202,7 +202,7 @@ describe("colorbars", () => {
         guides: [colorbar({ scale: { mark: "m", channel: "color" } })],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(640, 360, 1);
     const scene = model.scene(estimateText);

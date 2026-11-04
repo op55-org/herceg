@@ -40,7 +40,7 @@ const sales = table({
 
 function build(config: ChartConfig, { compilers = false, width = 600, height = 400 } = {}) {
   const model = compilers
-    ? new ChartModel({ locale: "en-US", ...config }, undefined, ...staticCompilers())
+    ? new ChartModel({ locale: "en-US", ...config }, undefined, staticCompilers())
     : new ChartModel({ locale: "en-US", ...config });
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };

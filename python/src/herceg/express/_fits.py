@@ -27,6 +27,7 @@ from ._common import (
     check_grid_size,
     check_n_boot,
     checking,
+    column_name,
     complete,
     dropped_sentence,
     express,
@@ -369,7 +370,7 @@ def regplot(
     chart = make_chart(
         point_table, options, sentence=sentence, palette=palette, x_label=x, y_label=y
     )
-    label = None if series else y
+    label = None if series else column_name(chart, y)
     # Estimates beside x under the fitted values' name, apart from x's when y is x.
     estimate_table = _estimate_table(estimates, variables, x, fitted, (low, high))
     paint = neutral(options.get("theme"))

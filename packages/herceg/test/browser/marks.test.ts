@@ -24,6 +24,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import { cloudPainter } from "../../src/render/webgl.ts";
 import type { RasterGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { labelsOf, MOUSE, modelOf, panelGroups } from "./helpers.ts";
 import { hasWebGL2 } from "./webgl.ts";
 
@@ -66,8 +67,8 @@ describe("new marks in the browser", () => {
       y: Float64Array.from({ length: n }, (_, i) => Math.floor(i / 100)),
     });
     const chart = createChart(host, { marks: [point(pts, { x: "x", y: "y" })] });
-    const x = modelOf(chart).xScale()!;
-    const y = modelOf(chart).yScale()!;
+    const x = xScale(modelOf(chart))!;
+    const y = yScale(modelOf(chart))!;
     hover(chart.root, x.map(42) + 1, y.map(7) + 1);
     await frame();
     const tooltip = tooltipOf(chart.root);
@@ -94,8 +95,8 @@ describe("new marks in the browser", () => {
     expect(chart.root.querySelector("canvas")).not.toBeNull();
     expect(chart.root.querySelector("linearGradient")).not.toBeNull();
     expect(chart.root.textContent).toContain("Index");
-    const xs = modelOf(chart).xScale()!;
-    const ys = modelOf(chart).yScale()!;
+    const xs = xScale(modelOf(chart))!;
+    const ys = yScale(modelOf(chart))!;
     hover(chart.root, xs.map(3), ys.map(2));
     await frame();
     expect(tooltipOf(chart.root).textContent).toContain("203");
@@ -113,8 +114,8 @@ describe("new marks in the browser", () => {
     });
     const canvas = chart.root.querySelector("canvas")!;
     const ratio = canvas.width / canvas.clientWidth;
-    const xs = modelOf(chart).xScale()!;
-    const ys = modelOf(chart).yScale()!;
+    const xs = xScale(modelOf(chart))!;
+    const ys = yScale(modelOf(chart))!;
     hover(chart.root, xs.map(1234), ys.map(7));
     await frame();
     const tooltip = tooltipOf(chart.root);
@@ -290,8 +291,8 @@ describe("new marks in the browser", () => {
     const drawn = [...paths()].map((path) => path.getAttribute("d"));
     for (const d of drawn) expect(svg).toContain(`d="${d}"`);
     // At minute 1 the 500s have no row: the tooltip names the series that do.
-    const x = modelOf(chart).xScale()!;
-    const y = modelOf(chart).yScale()!;
+    const x = xScale(modelOf(chart))!;
+    const y = yScale(modelOf(chart))!;
     hover(chart.root, x.map(1), y.map(4));
     await frame();
     expect(tooltipOf(chart.root).textContent).toBe("120024045");
@@ -339,8 +340,8 @@ describe("new marks in the browser", () => {
     const chart = createChart(host, {
       marks: [bar(sales, { x: ["a", "b"], y: "region" })],
     });
-    const y = modelOf(chart).yScale()!;
-    const [left, right] = modelOf(chart).xScale()!.range;
+    const y = yScale(modelOf(chart))!;
+    const [left, right] = xScale(modelOf(chart))!.range;
     hover(chart.root, right - 4, y.map(1) + 3);
     await frame();
     const tooltip = tooltipOf(chart.root);
@@ -360,7 +361,7 @@ describe("new marks in the browser", () => {
     const chart = createChart(host, {
       marks: [bar(sales, { x: "month", y: "units" }), line(sales, { x: "month", y: "goal" })],
     });
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     hover(chart.root, x.map(1) + 5, 100);
     await frame();
     expect(tooltipOf(chart.root).textContent).toBe("Febunits5goal4");
@@ -392,7 +393,7 @@ describe("new marks in the browser", () => {
         expect(chart.root.querySelectorAll('path[fill-rule="evenodd"]')).toHaveLength(2);
       else expect(chart.root.querySelector("canvas")).not.toBeNull();
       const model = modelOf(chart);
-      const [x, y] = [model.xScale()!, model.yScale()!];
+      const [x, y] = [xScale(model)!, yScale(model)!];
       hover(chart.root, x.map(0.2), y.map(0.3));
       await frame();
       expect(tooltipOf(chart.root).textContent).toContain("z5 – 8");
@@ -412,7 +413,7 @@ describe("new marks in the browser", () => {
     const chart = createChart(host, {
       marks: [line(casts, { x: "temperature", y: "depth", orient: "y" })],
     });
-    const y = modelOf(chart).yScale()!;
+    const y = yScale(modelOf(chart))!;
     hover(chart.root, 300, y.map(20) + 2);
     await frame();
     expect(tooltipOf(chart.root).textContent).toBe("20temperature11");
@@ -617,8 +618,8 @@ describe("new marks in the browser", () => {
     const alpha = (x: number, y: number) =>
       canvas.getContext("2d")!.getImageData(Math.round(x * ratio), Math.round(y * ratio), 1, 1)
         .data[3];
-    const sx = modelOf(chart).xScale()!;
-    const sy = modelOf(chart).yScale()!;
+    const sx = xScale(modelOf(chart))!;
+    const sy = yScale(modelOf(chart))!;
     // No round cap reaches past the line's end (y = 7.3 is between grid lines).
     expect(alpha(sx.map(4) - 2, sy.map(7.3))).toBe(255);
     expect(alpha(sx.map(4) + 3, sy.map(7.3))).toBe(0);
@@ -1105,8 +1106,8 @@ it.each(["svg", "canvas"] as const)(
       }
       hover(
         chart.root,
-        model.xScale()!.map(horizontal ? 0.5 : 1),
-        model.yScale()!.map(horizontal ? 1 : 0.5),
+        xScale(model)!.map(horizontal ? 0.5 : 1),
+        yScale(model)!.map(horizontal ? 1 : 0.5),
       );
       await frame();
       expect(tooltipOf(chart.root).textContent).toContain("0 – 2: 1");

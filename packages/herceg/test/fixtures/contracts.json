@@ -2835,7 +2835,7 @@
       "code": "invalid-option",
       "stage": "load",
       "path": "marks[0].label.content[1]",
-      "message": "label.content[1]: expected text, { field }, { series: true }, or { value: true }",
+      "message": "label.content[1]: expected text, { field }, { series: true }, { value: true }, or { label }",
       "python": "rule label.content[1]: expected text, or hg.LabelPart(field=...)"
     },
     {

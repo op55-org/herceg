@@ -11,6 +11,7 @@ import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
 import { ChartModel } from "../../src/model/model.ts";
 import type { AreaGeometry, LineGeometry } from "../../src/scene/scene.ts";
+import { panelSeries, xScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function seeded(seed: number) {
@@ -57,7 +58,7 @@ function chart(data: Table, kind: Kind, width: number) {
  */
 function drawn(model: ChartModel) {
   const scene = model.scene(estimateText);
-  const [x0, x1] = model.xScale()!.domain;
+  const [x0, x1] = xScale(model)!.domain;
   const paths = scene.panels[0]!.marks.map((geometry) => {
     const path =
       geometry.kind === "line" ? (geometry as LineGeometry).path : (geometry as AreaGeometry).upper;
@@ -271,6 +272,6 @@ describe("long-format indexes", () => {
     const panels = model.panels();
     expect(panels.length).toBe(NAMES.length);
     for (const { key } of panels)
-      expect(model.panelSeries(key).every((s) => s.stream === undefined)).toBe(true);
+      expect(panelSeries(model, key).every((s) => s.stream === undefined)).toBe(true);
   });
 });

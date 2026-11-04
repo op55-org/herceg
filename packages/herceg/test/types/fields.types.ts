@@ -111,12 +111,29 @@ export const twoWays: FieldDisplays = {
   // @ts-expect-error a mapping matches one way
   service: { mappings: [{ value: "a", regex: "b", text: "c" }] },
 };
-// The chart's options do not take fields: charts do not read them yet.
-// @ts-expect-error not a chart option yet
-createChart(element, { fields, marks: [] });
+// Charts take displays, and series' names and axis titles name fields by their labels.
+createChart(element, {
+  fields,
+  x: { title: [{ label: "time" }] },
+  y: { title: [{ label: "latency" }, " (p99)"] },
+  marks: [
+    line(requests, {
+      x: "time",
+      y: "latency",
+      series: "service",
+      label: [{ series: true }, " p99"],
+    }),
+    line(requests, { x: "time", y: "memory", label: [{ label: "memory" }, " used"] }),
+  ],
+});
+// @ts-expect-error the table has no field "latncy"
+line(requests, { x: "time", y: "latency", label: [{ label: "latncy" }] });
+// @ts-expect-error a series' name reads no values
+line(requests, { x: "time", y: "latency", label: [{ value: true }] });
 export const spec: ChartSpec = {
   fields: { latency: { format: { duration: "millisecond" } } },
-  marks: [],
+  y: { title: [{ label: "latency" }] },
+  marks: [{ type: "line", data: "requests", x: "time", y: "latency", label: [{ series: true }] }],
 };
 
 // displayOf: typed by the table's field, or by a kind.

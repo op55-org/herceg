@@ -45,6 +45,7 @@ from ._encoding import (
     Fraction,
     ItemAnchor,
     Label,
+    LabelPart,
     MarkAnchor,
     MarkStyle,
     Measure,
@@ -56,6 +57,7 @@ from ._encoding import (
     SunburstLabels,
     SymbolName,
     TreemapLabels,
+    axis_title_spec,
     channel_spec,
     choice_option,
     condition_spec,
@@ -70,6 +72,7 @@ from ._encoding import (
     label_spec,
     length_spec,
     mark_style_spec,
+    name_spec,
     output_problem,
     pixels_option,
     tagged_spec,
@@ -108,7 +111,7 @@ from ._events import (
     viewport_option,
     visibility_option,
 )
-from ._fields import writes
+from ._fields import FieldDisplays, TableName, fields_spec, writes
 from ._guides import (
     _NUMBER_FORMAT,
     _TIME_FORMAT,
@@ -538,7 +541,7 @@ class AxisOptions:
 
     type: Literal["linear", "log", "time"] | None = None
     domain: tuple[float | _dt.datetime, float | _dt.datetime] | None = None
-    title: str | None = None
+    title: str | Sequence[str | LabelPart] | None = None
     nice: bool | None = None
     zero: bool | None = None
     padding: Padding | None = None
@@ -593,7 +596,7 @@ class AxisOptions:
                 if self.domain is not None
                 else None
             ),
-            "title": self.title,
+            "title": axis_title_spec(self.title, "AxisOptions title"),
             "nice": _flag(self.nice, "AxisOptions nice"),
             "zero": _flag(self.zero, "AxisOptions zero"),
             "padding": padding_spec(self.padding, "AxisOptions padding"),
@@ -1064,6 +1067,12 @@ class _SharedOptions(TypedDict, total=False):
     navigator: bool | Navigator | dict[str, Any] | None
 
 
+class _DisplayOptions(TypedDict, total=False):
+    """How the chart names columns and writes their values (``hg.FieldDisplay``)."""
+
+    fields: FieldDisplays | None
+
+
 class _LayoutOptions(TypedDict, total=False):
     facet: str | None
     facet_columns: int | None
@@ -1088,7 +1097,7 @@ class _StateOptions(TypedDict, total=False):
     drill_root: DrillRoot | str | None
 
 
-class ChartUpdate(_SharedOptions, total=False):
+class ChartUpdate(_SharedOptions, _DisplayOptions, total=False):
     """Chart options a live chart can change (``widget.update``): those of
     ``Chart`` but data, facets, and panels. ``None`` takes an option's default."""
 
@@ -1103,15 +1112,25 @@ class ChartOptions(ChartUpdate, _LayoutOptions, _BindingOptions, _StateOptions, 
     layout: Grid | Mapping[str, Any] | None
 
 
-class HelperOptions(_SharedOptions, _LayoutOptions, _BindingOptions, _StateOptions, total=False):
+class _HelperAxes(TypedDict, total=False):
+    x_axis: AxisOptions | dict[str, Any] | None
+    y_axis: AxisOptions | dict[str, Any] | None
+    z_axis: AxisOptions | dict[str, Any] | None
+
+
+class RadarOptions(
+    _SharedOptions, _LayoutOptions, _BindingOptions, _StateOptions, _HelperAxes, total=False
+):
+    """Chart options as ``hg.radar`` takes them, after its own: the
+    helpers' (``HelperOptions``) but ``fields``, which are its spokes; give
+    the chart's field displays as ``hg.Chart(data, fields=...).radar(...)``."""
+
+
+class HelperOptions(RadarOptions, _DisplayOptions, total=False):
     """Chart options as the one-call helpers (``hg.line``, ``hg.scatter``, ...)
     take them, after their own: ``x_axis``, ``y_axis``, and ``z_axis`` are the
     chart's ``x``, ``y``, and ``z``, since the helpers' ``x``, ``y``, and ``z``
     name columns."""
-
-    x_axis: AxisOptions | dict[str, Any] | None
-    y_axis: AxisOptions | dict[str, Any] | None
-    z_axis: AxisOptions | dict[str, Any] | None
 
 
 _P = ParamSpec("_P")
@@ -1325,6 +1344,7 @@ class Chart:
         *,
         title: str | Title | dict[str, Any] | None = None,
         description: str | None = None,
+        fields: FieldDisplays | None = None,
         width: int | None = None,
         height: int | None = None,
         x: AxisOptions | dict[str, Any] | None = None,
@@ -1474,6 +1494,9 @@ class Chart:
         self._origins: dict[int, int] = {}
         # Whether tables marks add are made from the chart's data (express charts).
         self._made_from_data = False
+        # Data the chart's table was computed from (an express function's input),
+        # which field displays' matches name as that table.
+        self._computed_from: Any = None
         self._default = self._table(data) if data is not None else None
         self._marks: list[tuple[dict[str, Any], int | None]] = []
         # The nodes table of each network, by the network's place in `_marks`.
@@ -1484,6 +1507,7 @@ class Chart:
         self._settings: dict[str, Any] = {
             "title": title,
             "description": description,
+            "fields": fields,
             "width": width,
             "height": height,
             "x": x,
@@ -1779,7 +1803,7 @@ class Chart:
         continuity: Continuity | Mapping[str, Any] | None = None,
         where: Expr | None = None,
         curve: Curve | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         labels: SeriesLabels | Mapping[str, Any] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
@@ -1858,7 +1882,7 @@ class Chart:
                 "continuity": _continuity(continuity, "line"),
                 "where": condition_spec(where, "line where"),
                 "curve": choice_option(curve, get_args(Curve), "line curve"),
-                "label": label,
+                "label": name_spec(label, "line"),
                 "labels": self._series_labels(labels, "line"),
                 "legend": _mark_legend(legend, "line"),
                 "axis": axis,
@@ -1905,7 +1929,7 @@ class Chart:
         continuity: Continuity | Mapping[str, Any] | None = None,
         where: Expr | None = None,
         curve: Curve | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         labels: SeriesLabels | Mapping[str, Any] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
@@ -2069,7 +2093,7 @@ class Chart:
                 "continuity": _continuity(continuity, "area"),
                 "where": condition_spec(where, "area where"),
                 "curve": choice_option(curve, get_args(Curve), "area curve"),
-                "label": label,
+                "label": name_spec(label, "area"),
                 "labels": self._series_labels(labels, "area"),
                 "legend": _mark_legend(legend, "area"),
                 "axis": axis,
@@ -2108,7 +2132,7 @@ class Chart:
         opacity: float | None = None,
         encode: Encodings | Mapping[str, Any] | None = None,
         style: MarkStyle | Mapping[str, Any] | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         labels: bool | BarLabels | Mapping[str, Any] = False,
         axis: Literal["left", "right"] | None = None,
@@ -2255,7 +2279,7 @@ class Chart:
                 "opacity": opacity,
                 "encode": channels,
                 "style": mark_style_spec(style, ("by",), "bar"),
-                "label": label,
+                "label": name_spec(label, "bar"),
                 "legend": _mark_legend(legend, "bar"),
                 "labels": self._option("bar labels", value_labels._spec)
                 if value_labels
@@ -2294,7 +2318,7 @@ class Chart:
         side: Literal["bottom", "top", "left", "right"] | None = None,
         stroke: str | None = None,
         stroke_width: float | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -2355,7 +2379,7 @@ class Chart:
                 "side": side,
                 "stroke": stroke,
                 "strokeWidth": float(stroke_width) if stroke_width is not None else None,
-                "label": label,
+                "label": name_spec(label, "rug"),
                 "legend": _mark_legend(legend, "rug"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "rug"),
@@ -2392,7 +2416,7 @@ class Chart:
         stroke: str | None = None,
         stroke_width: float | None = None,
         cap: float | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -2506,7 +2530,7 @@ class Chart:
                 "stroke": stroke,
                 "strokeWidth": pixels_option(stroke_width, "errorbar stroke_width"),
                 "cap": pixels_option(cap, "errorbar cap"),
-                "label": label,
+                "label": name_spec(label, "errorbar"),
                 "legend": _mark_legend(legend, "errorbar"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "errorbar"),
@@ -2550,7 +2574,7 @@ class Chart:
         dodge: bool = False,
         jitter: float | Jitter | None = None,
         swarm: bool = False,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -2733,7 +2757,7 @@ class Chart:
                 if spread is not None
                 else None,
                 "swarm": swarm or None,
-                "label": label,
+                "label": name_spec(label, "point"),
                 "legend": _mark_legend(legend, "point"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "point"),
@@ -2773,7 +2797,7 @@ class Chart:
         colors: str | Sequence[str] | None = None,
         color_domain: tuple[float, float] | None = None,
         color_midpoint: float | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -2832,6 +2856,10 @@ class Chart:
                 "fill_opacity": fill_opacity,
             }
             given = next((name for name, value in bars.items() if value is not None), None)
+            if label is not None and not isinstance(label, str):
+                raise ChartError(
+                    "histogram label: a 2D histogram's label titles its colorbar; give text"
+                )
             if given == "series":
                 raise ChartError(
                     "histogram series: a 2D histogram of x and y counts one distribution; "
@@ -2949,7 +2977,7 @@ class Chart:
                 "element": element,
                 "fill": fill,
                 "fillOpacity": fraction_option(fill_opacity, "histogram fill_opacity"),
-                "label": label,
+                "label": name_spec(label, "histogram"),
                 "legend": _mark_legend(legend, "histogram"),
                 "axis": axis,
                 "facet": _mark_facet(facet, "histogram"),
@@ -3129,12 +3157,16 @@ class Chart:
             )
         table = self._mark_table(data)
         self._require(table, value, ("number",), "gauge value")
-        low = 0.0 if min is None else min
-        high = 100.0 if max is None else max
-        for name, end in (("min", low), ("max", high)):
-            if not _finite(end):
+        for name, end in (("min", min), ("max", max)):
+            if end is not None and not _finite(end):
                 raise ChartError(f"gauge {name}: expected a finite number; received {shown(end)}")
-        if not low < high:
+        # Ends the gauge does not give may come from the value column's
+        # display, which the engine reads and checks them by; without
+        # displays they are 0 and 100.
+        displays = self._settings.get("fields") is not None
+        low = min if min is not None else None if displays else 0.0
+        high = max if max is not None else None if displays else 100.0
+        if low is not None and high is not None and not low < high:
             raise ChartError(
                 "gauge min: expected a finite min below a finite max; "
                 f"received {low!r} and {high!r}"
@@ -3220,7 +3252,7 @@ class Chart:
         color: str | None = None,
         fill: str | None = None,
         fill_opacity: float | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -3348,7 +3380,7 @@ class Chart:
         outliers: bool | None = None,
         fill: str | None = None,
         fill_opacity: float | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -3448,7 +3480,7 @@ class Chart:
         inner: Literal["box", "quartiles", "none"] | None = None,
         fill: str | None = None,
         fill_opacity: float | None = None,
-        label: str | None = None,
+        label: str | Sequence[str | LabelPart] | None = None,
         legend: Literal[False] | None = None,
         axis: Literal["left", "right"] | None = None,
         facet: Literal["repeat"] | None = None,
@@ -3528,7 +3560,7 @@ class Chart:
         data: Any,
         series: str | None,
         fill_opacity: float | None,
-        label: str | None,
+        label: str | Sequence[str | LabelPart] | None,
         axis: Literal["left", "right"] | None,
         facet: Literal["repeat"] | None,
         panel: str | None,
@@ -3578,7 +3610,7 @@ class Chart:
                 "series": series,
                 **{key: value for key, value in spec.items() if key != "type"},
                 "fillOpacity": fraction_option(fill_opacity, f"{kind} fill_opacity"),
-                "label": label,
+                "label": name_spec(label, kind),
                 "axis": axis,
                 "facet": _mark_facet(facet, kind),
                 "panel": panel,
@@ -3854,11 +3886,9 @@ class Chart:
                     'formats do not; give a number format, such as hg.Format(number=",.0f")'
                 )
         tree = {*(path or ()), node, parent}
-        for i, field in _part_fields(spec):
+        for at, field in _part_fields(spec):
             if field not in tree:
-                self._require(
-                    table, field, ("category", "number"), f"{kind} labels.content[{i}].field"
-                )
+                self._require(table, field, ("category", "number"), f"{kind} labels.content{at}")
         return spec
 
     @_check_method_options
@@ -5945,9 +5975,11 @@ class Chart:
     # Internals -------------------------------------------------------------
 
     def _spec_options(self) -> dict[str, Any]:
-        """The spec's chart options, with its row selection, whose tables are named
-        once the marks are known."""
+        """The spec's chart options, with its field displays and row selection,
+        whose tables are named once the marks are known."""
         options = self._options
+        if self._settings.get("fields") is not None:
+            options = {**options, "fields": self._fields_spec(self._settings["fields"])}
         if self._panel_guides:
             given = len(options.get("guides") or [])
             panel_guides = located("guides", lambda: guides_spec(self._panel_guides, given))
@@ -6126,6 +6158,11 @@ class Chart:
                 source = self._source_table(str(following["mark"]))
                 if source is not None:
                     used.setdefault(source, set()).update(_label_fields(spec))
+        # Axes' titles name columns by their labels: those of the marks' tables.
+        for name in self._titled_fields():
+            for table, fields in used.items():
+                if name in self._tables[table][1].names:
+                    fields.add(name)
         # Columns row selections' conditions set from Python test, and those
         # of the conditions bindings start with.
         for binding in self._row_selection:
@@ -6170,6 +6207,32 @@ class Chart:
             if isinstance(source := self._tables[table][0], Ordered):
                 used[table].add(source.by)
         return used
+
+    def _titled_fields(self) -> set[str]:
+        """The columns axes' titles of parts name by their labels
+        (``hg.LabelPart(label="ms")``), where field displays label them."""
+        if self._settings.get("fields") is None:
+            return set()
+        named: set[str] = set()
+
+        def read(value: Any) -> None:
+            if isinstance(value, dict):
+                title = value.get("title")
+                if isinstance(title, list):
+                    named.update(
+                        part["label"]
+                        for part in title
+                        if isinstance(part, dict) and isinstance(part.get("label"), str)
+                    )
+                for item in value.values():
+                    read(item)
+            elif isinstance(value, list):
+                for item in value:
+                    read(item)
+
+        # Chart axes, scales, and guides, and panels' own.
+        read([self._options, guides_spec(self._panel_guides), self._layout_spec()])
+        return named
 
     def _used_columns(self) -> dict[str, dict[str, Column]]:
         """The columns sent, by spec table name; other columns are never sent,
@@ -6238,6 +6301,23 @@ class Chart:
             }
             for index, (mark, table) in enumerate(self._marks)
         ]
+
+    def _fields_spec(self, fields: Any) -> Any:
+        """``fields`` as the spec takes it, data matched as tables by the names of the chart's."""
+        return located(None, lambda: fields_spec(fields, "Chart fields", self._name_of), "Chart")
+
+    def _name_of(self, data: Any) -> str:
+        """The spec's name of the table of ``data``, which the chart or a mark
+        draws, or which an express function computed the chart's table from."""
+        for index, (source, _) in enumerate(self._tables):
+            if source is data:
+                return table_name(index)
+        if data is not None and data is self._computed_from and self._default is not None:
+            return table_name(self._default)
+        raise ChartError(
+            "Match table: the chart and its marks draw no such data; give data they draw, "
+            "or a table's name"
+        )
 
     def _table_names(self) -> list[tuple[Any, str]]:
         """Each data source given to the chart or its marks, with its spec table name."""
@@ -6979,8 +7059,8 @@ class Chart:
         text = label.get("field") if isinstance(label, dict) else None
         # Written as content parts are: times too, in the chart's zone.
         self._require(table, text, _ANY, "text label field")
-        for i, field in _part_fields(label):
-            self._require(table, field, _ANY, f"text label.content[{i}].field")
+        for at, field in _part_fields(label):
+            self._require(table, field, _ANY, f"text label.content{at}")
 
     def _annotation_table(
         self, data: Any, positions: dict[str, Any], label: Any, role: str
@@ -7017,8 +7097,8 @@ class Chart:
         for at, field in names:
             self._require(table, field, ("category",), f"{role} {at}")
         self._require(table, text, ("category", "number"), f"{role} label field")
-        for i, part in parts:
-            self._require(table, part, _ANY, f"{role} label.content[{i}].field")
+        for at, part in parts:
+            self._require(table, part, _ANY, f"{role} label.content{at}")
         return table
 
     def _add(self, spec: dict[str, Any], table: int | None) -> Chart:
@@ -7031,6 +7111,14 @@ class Chart:
             )
         if self._unchecked is not None:
             check_hints(*self._unchecked)
+        # A series' name of parts reads columns of the mark's table.
+        name = spec.get("label")
+        if isinstance(name, list) and table is not None:
+            for i, part in enumerate(name):
+                for key in ("field", "label"):
+                    if isinstance(part, dict) and part.get(key) is not None:
+                        method = _method(spec["type"])
+                        self._require(table, part[key], _ANY, f"{method} label[{i}].{key}")
         if (
             table is not None
             and isinstance(self._tables[table][0], View)
@@ -7819,7 +7907,8 @@ _NODE_FIELDS = ("node", "color", "size")
 _CHART = Role("Chart")
 
 OPTIONS = (
-    *("title", "description", "width", "height", "x", "y", "y_right", "legend", "padding"),
+    *("title", "description", "fields", "width", "height", "x", "y", "y_right", "legend"),
+    "padding",
     *("scales", "guides"),
     *("inspection", "tooltip"),
     *("zoom", "pan", "brush", "select", "bindings", "limits", "sync", "animation"),
@@ -7965,8 +8054,14 @@ def _x_option(settings: Mapping[str, Any], options: Sequence[str]) -> str | None
     return used or ("x seams" if seams not in (None, False) else None)
 
 
-def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
-    """The spec's chart options from Chart's keyword arguments; unset ones are left out."""
+def _any_table(data: Any) -> str:
+    """A table's name for data matched before the chart's tables are known: checked, not named."""
+    return ""
+
+
+def spec_options(settings: dict[str, Any], table_name: TableName = _any_table) -> dict[str, Any]:
+    """The spec's chart options from Chart's keyword arguments, unset ones
+    left out; data field displays match as tables named by ``table_name``."""
     tooltip = settings["tooltip"]
     animation = settings["animation"]
     for name in ("width", "height"):
@@ -8034,6 +8129,9 @@ def spec_options(settings: dict[str, Any]) -> dict[str, Any]:
     options = {
         "title": title_spec(settings["title"], "Chart title", placed=True),
         "description": settings["description"],
+        "fields": located(
+            None, lambda: fields_spec(settings.get("fields"), "Chart fields", table_name), "Chart"
+        ),
         "width": settings["width"],
         "height": settings["height"],
         "x": _axis(settings["x"]),
@@ -8341,28 +8439,34 @@ def _read(source: _Columns, field: str, role: str, path: str | None = None) -> C
         raise ChartError(f"{role}: column {field!r}: {problem}", path=path) from None
 
 
-def _part_fields(label: Any) -> list[tuple[int, Any]]:
-    """The columns a label's parts name, by the parts' places in its content."""
+def _part_fields(label: Any) -> list[tuple[str, Any]]:
+    """The columns a label's parts name (``field``, ``label``), by their
+    places in its content (``"[1].field"``)."""
     content = label.get("content") if isinstance(label, dict) else None
     return [
-        (i, part["field"])
+        (f"[{i}].{name}", part[name])
         for i, part in enumerate(content or ())
-        if isinstance(part, dict) and part.get("field") is not None
+        for name in ("field", "label")
+        if isinstance(part, dict) and part.get(name) is not None
     ]
 
 
 def _label_fields(spec: dict[str, Any]) -> set[str]:
-    """The columns a mark's labels read: their field, and their parts'."""
+    """The columns a mark's labels and series' names read: their field, and
+    their parts' (a ``label`` part reads the column's display)."""
     fields: set[str] = set()
     for key in ("label", "labels"):
         label = spec.get(key)
-        if not isinstance(label, dict):
-            continue
-        if isinstance(label.get("field"), str):
-            fields.add(label["field"])
-        for part in label.get("content") or ():
-            if isinstance(part, dict) and isinstance(part.get("field"), str):
-                fields.add(part["field"])
+        # A series' name of parts, or a label's content.
+        parts = label if isinstance(label, list) else []
+        if isinstance(label, dict):
+            if isinstance(label.get("field"), str):
+                fields.add(label["field"])
+            parts = label.get("content") or []
+        for part in parts:
+            for name in ("field", "label"):
+                if isinstance(part, dict) and isinstance(part.get(name), str):
+                    fields.add(part[name])
     return fields
 
 
@@ -8482,6 +8586,13 @@ def _axis(
         raise at.field("seams").error("only the chart's x axis takes seams; drop them")
     if role == "Chart z" and axis.style is not None:
         raise at.field("style").error("a 3D chart's axes take the theme's styles; drop style")
+    # A panel's own axis and a 3D chart's z are laid out before parts are written.
+    if role.startswith("Panel") or role == "Chart z":
+        if axis.title is not None and not isinstance(axis.title, str):
+            raise at.field("title").error(
+                "a panel's own axis title and a 3D chart's z title are text; give text, or "
+                "the title of parts on the chart's axis"
+            )
     for name in ("scope", "repeat"):
         if role not in ("Chart x", "Chart y", "Chart y_right") and getattr(axis, name) is not None:
             raise at.field(name).error(
@@ -8979,9 +9090,11 @@ def _size(value: Any, role: str) -> None:
 
 
 def _gauge_bands(
-    bands: Sequence[float | tuple[float, str]] | None, low: float, high: float
+    bands: Sequence[float | tuple[float, str]] | None, low: float | None, high: float | None
 ) -> list[dict[str, Any]] | None:
-    """Gauge bands as the spec takes them, checked as the engine checks them."""
+    """Gauge bands as the spec takes them, checked as the engine checks them:
+    against the dial's ends where they are known (``None`` for an end the
+    value column's display may give, which the engine checks)."""
     if bands is None:
         return None
     if not listlike(bands):
@@ -8999,12 +9112,20 @@ def _gauge_bands(
             to, color = band
         else:
             to, color = band, None
-        if not (_finite(to) and low < to <= high):
+        if (
+            not _finite(to)
+            or (low is not None and not low < to)
+            or (high is not None and to > high)
+        ):
+            ends = [
+                *([f"above min ({low:g})"] if low is not None else []),
+                *([f"at most max ({high:g})"] if high is not None else []),
+            ]
             raise ChartError(
-                f"gauge bands: expected ends above min ({low:g}) and at most max ({high:g}); "
+                f"gauge bands: expected {'ends ' + ' and '.join(ends) if ends else 'finite ends'}; "
                 f"received {shown(to)}"
             )
-        if not to > previous:
+        if previous is not None and not to > previous:
             raise ChartError(
                 f"gauge bands: expected ends in ascending order; received {to:g} after {previous:g}"
             )
@@ -9205,7 +9326,7 @@ def _unknown_option(function: Callable[..., Any], name: str, known: set[str]) ->
     return f"{location}: no option {name!r}; {hint}"
 
 
-def _rows_chart_of(data: Any, options: HelperOptions) -> tuple[Chart, Tooltip | None]:
+def _rows_chart_of(data: Any, options: RadarOptions) -> tuple[Chart, Tooltip | None]:
     """The chart of a helper whose mark's points are rows, and the mark's
     tooltip: the ``fields`` of the helper's ``tooltip``, which are the mark's."""
     tooltip = options.get("tooltip")
@@ -9217,7 +9338,7 @@ def _rows_chart_of(data: Any, options: HelperOptions) -> tuple[Chart, Tooltip | 
     return chart, Tooltip(fields=tooltip.fields)
 
 
-def _chart_of(data: Any, options: HelperOptions) -> Chart:
+def _chart_of(data: Any, options: RadarOptions) -> Chart:
     """A helper's chart: its ``x_axis``, ``y_axis``, and ``z_axis`` are the chart's
     ``x``, ``y``, and ``z``."""
     settings: dict[str, Any] = dict(options)
@@ -9248,7 +9369,7 @@ def line(
     continuity: Continuity | Mapping[str, Any] | None = None,
     where: Expr | None = None,
     curve: Curve | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     labels: SeriesLabels | Mapping[str, Any] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
@@ -9326,7 +9447,7 @@ def area(
     continuity: Continuity | Mapping[str, Any] | None = None,
     where: Expr | None = None,
     curve: Curve | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     labels: SeriesLabels | Mapping[str, Any] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
@@ -9408,7 +9529,7 @@ def bar(
     opacity: float | None = None,
     encode: Encodings | Mapping[str, Any] | None = None,
     style: MarkStyle | Mapping[str, Any] | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     labels: bool | BarLabels | Mapping[str, Any] = False,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
@@ -9489,7 +9610,7 @@ def scatter(
     dodge: bool = False,
     jitter: float | Jitter | None = None,
     swarm: bool = False,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
@@ -9886,7 +10007,7 @@ def histogram(
     colors: str | Sequence[str] | None = None,
     color_domain: tuple[float, float] | None = None,
     color_midpoint: float | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
@@ -10033,7 +10154,7 @@ def boxplot(
     color: str | None = None,
     fill: str | None = None,
     fill_opacity: float | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
@@ -10090,7 +10211,7 @@ def boxen(
     outliers: bool | None = None,
     fill: str | None = None,
     fill_opacity: float | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
@@ -10141,7 +10262,7 @@ def violin(
     inner: Literal["box", "quartiles", "none"] | None = None,
     fill: str | None = None,
     fill_opacity: float | None = None,
-    label: str | None = None,
+    label: str | Sequence[str | LabelPart] | None = None,
     axis: Literal["left", "right"] | None = None,
     panel: str | None = None,
     clip: Clip | None = None,
@@ -10284,7 +10405,7 @@ def radar(
     panel: str | None = None,
     halo: HaloOption | None = None,
     id: str | None = None,
-    **options: Unpack[HelperOptions],
+    **options: Unpack[RadarOptions],
 ) -> Chart:
     """A radar of ``value`` per ``category``, or of the columns ``fields`` per row."""
     chart, tooltip = _rows_chart_of(data, options)

@@ -23,6 +23,7 @@ import type {
   TextGeometry,
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import { xScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -93,7 +94,7 @@ describe("annotations over a table in facets", () => {
       facet: facet("region"),
     });
     // The rule at 9 has no region: no panel draws it, and no domain reaches it.
-    expect(model.xScale()!.domain[1]).toBeLessThan(9);
+    expect(xScale(model)!.domain[1]).toBeLessThan(9);
     expect(model.dataXExtent()![1]).toBe(3);
     expect(scene.panels.flatMap((p) => of(p, "rule"))).toHaveLength(4);
   });

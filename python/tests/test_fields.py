@@ -248,3 +248,213 @@ def test_kind_rules_refuse_only_what_none_of_their_kinds_takes():
     # A rule naming columns is checked against the data, not here.
     named = hg.FieldDisplay(match=hg.Match(field="host", kind="category"), min=0)
     assert named._spec()["min"] == 0
+
+
+HOSTS = {
+    "t": [0, 1, 2, 3],
+    "ms": [450, 66_000, 95_000, 120_000],
+    "host": ["a", "b", "a", "b"],
+}
+DISPLAYS = {
+    "ms": hg.FieldDisplay(label="Latency", format=hg.Format(duration="millisecond")),
+    "host": hg.FieldDisplay(mappings=[hg.Mapping(value="a", text="Alpha")]),
+}
+
+
+def test_charts_and_helpers_take_fields_and_draw_through_them():
+    chart = hg.Chart(HOSTS, fields=DISPLAYS, width=500, height=300).line(
+        x="t", y="ms", series="host"
+    )
+    assert chart.to_spec()[0]["fields"] == {
+        "ms": {"label": "Latency", "format": {"duration": "millisecond"}},
+        "host": {"mappings": [{"value": "a", "text": "Alpha"}]},
+    }
+    drawn = set(texts(chart))
+    assert {"1m", "2m", "Alpha"} <= drawn
+    assert "a" not in drawn
+    helper = hg.line(HOSTS, x="t", y="ms", fields={"ms": {"label": "Latency"}})
+    assert helper.to_spec()[0]["fields"] == {"ms": {"label": "Latency"}}
+    # One series has no legend; the text alternative names it.
+    assert "Latency: 4 points" in helper.to_svg()
+
+
+def test_matches_name_data_as_the_charts_tables():
+    other = {"t": [0, 1], "ms": [1, 2]}
+    rule = hg.FieldDisplay(match=hg.Match(field="ms", table=other), label="Other")
+    chart = hg.Chart(HOSTS, fields=[rule]).line(x="t", y="ms").line(x="t", y="ms", data=other)
+    assert chart.to_spec()[0]["fields"] == [
+        {"match": {"field": "ms", "table": "data2"}, "label": "Other"}
+    ]
+    unknown = hg.Chart(HOSTS, fields=[rule]).line(x="t", y="ms")
+    with pytest.raises(hg.ChartError) as error:
+        unknown.to_spec()
+    assert str(error.value).startswith("Match table: the chart and its marks draw no such data")
+    assert error.value.path == "fields[0].match.table"
+    with pytest.raises(hg.ChartError, match=r"^FieldDisplay min: 5 is not below max 1") as bad:
+        hg.Chart(HOSTS, fields=[{"min": 5, "max": 1}])
+    assert bad.value.path == "fields[0].min"
+
+
+def test_series_names_and_axis_titles_take_label_parts():
+    chart = hg.Chart(
+        HOSTS,
+        fields=DISPLAYS,
+        width=500,
+        height=300,
+        y=hg.AxisOptions(title=[hg.LabelPart(label="ms"), " (p99)"]),
+    ).line(x="t", y="ms", series="host", label=[hg.LabelPart(series=True), " ", {"label": "ms"}])
+    spec = chart.to_spec()[0]
+    assert spec["y"]["title"] == [{"label": "ms"}, " (p99)"]
+    assert spec["marks"][0]["label"] == [{"series": True}, " ", {"label": "ms"}]
+    assert {"Latency (p99)", "Alpha Latency", "b Latency"} <= set(texts(chart))
+    bar = hg.Chart(HOSTS, fields=DISPLAYS).bar(
+        x="host", y="ms", labels={"content": [hg.LabelPart(label="ms"), ": ", {"value": True}]}
+    )
+    assert "Latency: 2m" in texts(bar)
+
+
+@pytest.mark.parametrize(
+    ("label", "message", "path"),
+    [
+        (
+            [hg.LabelPart(value=True)],
+            "line label[0]: a series' name has no value; use hg.LabelPart(series=True), "
+            "(field=...), or (label=...)",
+            "marks[0].label[0]",
+        ),
+        (
+            [hg.LabelPart(label="nope")],
+            "line label[0].label: no column 'nope'",
+            "marks[0].label[0].label",
+        ),
+        (
+            [hg.LabelPart(series=True, style={"color": "red"})],
+            "line label[0] style: a name is written in the legend's and tooltip's look; drop style",
+            "marks[0].label[0].style",
+        ),
+        ([], "line label: expected text, or a list of parts", "marks[0].label"),
+    ],
+)
+def test_series_names_refuse_parts_a_name_cannot_read(label, message, path):
+    with pytest.raises(hg.ChartError) as error:
+        hg.Chart(HOSTS).line(x="t", y="ms", series="host", label=label)
+    assert str(error.value).startswith(message)
+    assert error.value.path == path
+
+
+def test_axis_titles_send_the_columns_their_labels_name():
+    data = {**HOSTS, "p50": [1, 2, 3, 4]}
+    displays = {**DISPLAYS, "p50": hg.FieldDisplay(label="Median")}
+    title = [hg.LabelPart(label="ms"), " and ", hg.LabelPart(label="p50")]
+    for chart in (
+        hg.Chart(data, fields=displays, y=hg.AxisOptions(title=title)).line(x="t", y="ms"),
+        hg.Chart(data, fields=displays, guides=[hg.AxisGuide(scale="y", title=title)]).line(
+            x="t", y="ms"
+        ),
+    ):
+        assert "p50" in chart.to_spec()[0]["data"]["data"]["columns"]
+        assert "Latency and Median" in texts(chart)
+    # Without displays a label is the column's name, so the column stays home.
+    plain = hg.Chart(data, y=hg.AxisOptions(title=title)).line(x="t", y="ms")
+    assert "p50" not in plain.to_spec()[0]["data"]["data"]["columns"]
+
+
+def test_tree_labels_refuse_columns_labels():
+    with pytest.raises(hg.ChartError, match=r"TreemapLabels content\[0\]: tree labels write"):
+        hg.TreemapLabels(content=[hg.LabelPart(label="v")])
+
+
+def test_panel_and_z_axis_titles_are_text():
+    part = [hg.LabelPart(label="ms"), " p99"]
+    panel = hg.Panel(id="p", x=hg.AxisOptions(title=part))
+    with pytest.raises(hg.ChartError, match="Panel x title: a panel's own axis title"):
+        hg.Chart(HOSTS, panels=[panel]).line(x="t", y="ms", panel="p").to_spec()
+    with pytest.raises(hg.ChartError, match="Chart z title: a panel's own axis title"):
+        hg.Chart(HOSTS, z=hg.AxisOptions(title=part)).point_3d(x="t", y="ms", z="ms").to_spec()
+
+
+def test_axis_titles_and_label_parts_refuse_what_they_cannot_read():
+    with pytest.raises(hg.ChartError, match=r"^AxisOptions title\[0\]: an axis' title names"):
+        hg.Chart(HOSTS, y=hg.AxisOptions(title=[hg.LabelPart(series=True)])).line(x="t", y="ms")
+    with pytest.raises(hg.ChartError, match=r"^LabelPart format: a column's label is written"):
+        hg.LabelPart(label="ms", format=hg.Format(number=".1f"))
+    with pytest.raises(hg.ChartError, match=r"^LabelPart: give field, series=True, value=True, or"):
+        hg.LabelPart(label="ms", field="ms")
+    with pytest.raises(hg.ChartError, match=r"^radar fields"):
+        hg.radar(HOSTS, fields={"ms": hg.FieldDisplay(label="Latency")})  # type: ignore[arg-type]
+
+
+def test_express_titles_and_single_series_by_labels_where_the_chart_has_fields():
+    import herceg.express as hx
+
+    plain = hx.lineplot(HOSTS, x="t", y="ms").to_spec()[0]
+    assert plain["y"]["title"] == "ms"
+    labeled = hx.lineplot(HOSTS, x="t", y="ms", fields=DISPLAYS)
+    spec = labeled.to_spec()[0]
+    assert spec["y"]["title"] == [{"label": "ms"}]
+    # The line and its band share one entry, keyed by the column whatever its label.
+    assert [mark.get("label") for mark in spec["marks"]] == [[{"label": "ms"}]] * 2
+    assert "Latency" in texts(labeled)
+
+
+def test_live_charts_change_fields():
+    from herceg._live import LiveChart
+
+    live = LiveChart(hg.Chart(HOSTS, fields=DISPLAYS).line(x="t", y="ms"))
+    message = live.update({"fields": {"ms": hg.FieldDisplay(label="p99")}})
+    assert message == ({"type": "options", "options": {"fields": {"ms": {"label": "p99"}}}}, [])
+    assert live.to_spec()[0]["fields"] == {"ms": {"label": "p99"}}
+
+
+def test_live_charts_match_the_data_they_adopt():
+    from herceg._live import LiveChart
+
+    live = LiveChart(hg.Chart(HOSTS, fields=DISPLAYS).line(x="t", y="ms"))
+    other = dict(HOSTS)
+    assert live.adopt(LiveChart(hg.Chart(other, fields=DISPLAYS).line(x="t", y="ms"))) is None
+    rules = [hg.FieldDisplay(match=hg.Match(table=other, field="ms"), label="Latency")]
+    message = live.update({"fields": rules})
+    assert message is not None
+    assert message[0]["options"]["fields"][0]["match"]["field"] == "ms"
+    with pytest.raises(hg.ChartError, match="draw no such data"):
+        live.update({"fields": [hg.FieldDisplay(match=hg.Match(table=HOSTS), label="Old")]})
+
+
+def test_express_applies_rules_naming_its_data_to_the_table_it_computes():
+    import herceg.express as hx
+
+    rules = [hg.FieldDisplay(match=hg.Match(table=HOSTS, field="ms"), label="Latency")]
+    chart = hx.lineplot(HOSTS, x="t", y="ms", fields=rules)
+    spec = chart.to_spec()[0]
+    assert spec["fields"][0]["match"] == {"table": spec["marks"][0]["data"], "field": "ms"}
+    assert "Latency" in texts(chart)
+    # Recomputed from other data, the rules name the data they name.
+    with pytest.raises(hg.ChartError, match="draw no such data"):
+        hx.recompute(chart, dict(HOSTS)).to_spec()
+    # Recomputed from the same data, they still name it: the call keeps it, uncopied.
+    for rule in (rules[0], {"match": {"table": HOSTS, "field": "ms"}, "label": "Latency"}):
+        again = hx.recompute(hx.lineplot(HOSTS, x="t", y="ms", fields=[rule]), HOSTS)
+        assert again.to_spec()[0]["fields"][0]["label"] == "Latency"
+    # A column named "table" is a display like any other, copied with the call.
+    displays = {"table": {"label": "Original"}}
+    made = hx.lineplot(HOSTS, x="t", y="ms", fields=displays)
+    displays["table"]["label"] = "Changed"
+    assert hx.recompute(made, HOSTS).to_spec()[0]["fields"] == {"table": {"label": "Original"}}
+
+
+def test_gauges_check_bands_against_the_ends_their_value_column_may_give():
+    loads = {"load": [1200.0, 3400.0]}
+    displays = {"load": hg.FieldDisplay(min=0, max=5000)}
+    spec = hg.Chart(loads, fields=displays).gauge("load", bands=[1000, 5000]).to_spec()[0]
+    assert spec["marks"][0]["bands"] == [{"to": 1000.0}, {"to": 5000.0}]
+    # Without displays, the dial runs from 0 to 100.
+    with pytest.raises(hg.ChartError, match=r"at most max \(100\); received 1000"):
+        hg.Chart(loads).gauge("load", bands=[1000, 5000])
+    assert "5,000" in texts(hg.Chart(loads, fields=displays).gauge("load", bands=[1000, 5000]))
+    # An end the gauge gives is checked against the other only where it gives both.
+    assert (
+        hg.Chart(loads, fields=displays).gauge("load", min=200).to_spec()[0]["marks"][0]["min"]
+        == 200
+    )
+    with pytest.raises(hg.ChartError, match=r"^gauge min: expected a finite min below"):
+        hg.Chart(loads, fields=displays).gauge("load", min=300, max=200)

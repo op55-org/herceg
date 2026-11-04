@@ -19,6 +19,7 @@ import { LIGHT } from "../../src/theme.ts";
 import { clustermap } from "../fixtures/clustermap.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { stopsOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const linkage = () => table({ first: [0, 2, 5], second: [1, 3, 4], height: [1, 2, 4] });
@@ -47,7 +48,7 @@ describe("dendrogram", () => {
     });
     const leaves = Array.from({ length: n }, (_, i) => String(i));
     const { model, scene } = build({ marks: [dendrogram(data, { ...options, leaves })] });
-    expect(model.xScale()!.categories).toEqual(leaves);
+    expect(xScale(model)!.categories).toEqual(leaves);
     expect(segments(scene.panels[0]!.marks).count).toBe(3 * (n - 1));
   });
 
@@ -60,7 +61,7 @@ describe("dendrogram", () => {
         y: { show: false },
       });
       const { plot } = scene.panels[0]!;
-      const scale = side === "bottom" || side === "top" ? model.xScale()! : model.yScale()!;
+      const scale = side === "bottom" || side === "top" ? xScale(model)! : yScale(model)!;
       expect(scale.categories).toEqual(["c", "d", "a", "b"]);
       // scipy.cluster.hierarchy.dendrogram(Z, no_plot=True), reordered here
       // into linkage row order: the first merge is the right-hand pair.
@@ -201,7 +202,7 @@ describe("dendrogram", () => {
       marks: [dendrogram(linkage(), { ...options, strokeWidth: 0 })],
     });
     expect(scene.panels[0]!.marks).toEqual([]);
-    expect(model.xScale()!.categories).toEqual(["c", "d", "a", "b"]);
+    expect(xScale(model)!.categories).toEqual(["c", "d", "a", "b"]);
     expect(describeChart(model)).toContain("4 leaves, 3 merges");
   });
 
@@ -211,7 +212,7 @@ describe("dendrogram", () => {
         dendrogram(table({ first: [], second: [], height: [] }), { ...options, leaves: ["only"] }),
       ],
     });
-    expect(model.xScale()!.categories).toEqual(["only"]);
+    expect(xScale(model)!.categories).toEqual(["only"]);
     expect(scene.panels[0]!.marks).toEqual([]);
     expect(describeChart(model)).toContain("Dendrogram: 1 leaf, 0 merges.");
   });
@@ -256,7 +257,7 @@ describe("dendrogram", () => {
     data.set("first", 2, 4);
     data.set("second", 2, 5);
     model.scene(estimateText);
-    expect(model.xScale()!.categories).toEqual(["a", "b", "c", "d"]);
+    expect(xScale(model)!.categories).toEqual(["a", "b", "c", "d"]);
     data.set("height", 1, -1);
     expect(() => model.scene(estimateText)).toThrow(/row 1, field "height"/);
   });

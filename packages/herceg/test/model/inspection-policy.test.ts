@@ -23,7 +23,7 @@ function build(config: ChartConfig) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(600, 300, 1);
   model.scene(estimateText);

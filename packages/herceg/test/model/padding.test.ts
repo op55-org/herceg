@@ -12,13 +12,14 @@ import { NAVIGATOR_PANEL, rangeNavigator } from "../../src/model/navigator.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import type { LineGeometry, ShapesGeometry } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 400, height = 200) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, height, 1);
   const scene = model.scene(estimateText);
@@ -31,9 +32,9 @@ const plain = (options: object = {}) => line(rows, { x: "t", y: "v", ...options 
 describe("automatic padding", () => {
   contractTest("scale.padding.auto.lines", () => {
     // Plain lines keep their domain; markers keep room for their reach.
-    expect(build({ marks: [plain()] }).model.xScale()!.domain).toEqual([0, 10]);
+    expect(xScale(build({ marks: [plain()] }).model)!.domain).toEqual([0, 10]);
     const { model, plot } = build({ marks: [plain({ markers: true })] });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     // A circle of radius 3: its edge on the plot's.
     expect(x.map(0)).toBeCloseTo(plot.x + 3, 3);
     expect(x.map(10)).toBeCloseTo(plot.x + plot.width - 3, 3);
@@ -41,19 +42,19 @@ describe("automatic padding", () => {
     const ringed = build({
       marks: [plain({ markers: true, style: { marker: { stroke: "#000", strokeWidth: 4 } } })],
     });
-    expect(ringed.model.xScale()!.map(0)).toBeCloseTo(ringed.plot.x + 5, 3);
+    expect(xScale(ringed.model)!.map(0)).toBeCloseTo(ringed.plot.x + 5, 3);
   });
 
   contractTest("scale.padding.auto.bars", () => {
     // Bars keep their baseline on zero; labels get room at their ends.
     const labeled = build({ marks: [bar(rows, { x: "t", y: "v", labels: true })] });
-    const y = labeled.model.yScale()!;
+    const y = yScale(labeled.model)!;
     expect(y.domain[0]).toBe(0);
     expect(y.domain[1]).toBeGreaterThan(10);
     // Bars of a width of their own keep half of it beyond their slots.
-    const slots = build({ marks: [bar(rows, { x: "t", y: "v" })] }).model.xScale()!.domain;
+    const slots = xScale(build({ marks: [bar(rows, { x: "t", y: "v" })] }).model)!.domain;
     const wide = build({ marks: [bar(rows, { x: "t", y: "v", width: { px: 60 } })] });
-    const x = wide.model.xScale()!;
+    const x = xScale(wide.model)!;
     expect(x.domain[0]).toBeLessThan(slots[0]!);
     expect(x.map(slots[0]!)).toBeCloseTo(wide.plot.x + 30, 3);
   });
@@ -61,8 +62,8 @@ describe("automatic padding", () => {
   contractTest("scale.padding.auto.tiny", () => {
     // A plot less than twice as wide as the room asked keeps the data's domain.
     const big = point(rows, { x: "t", y: "v", radius: 12 });
-    expect(build({ marks: [big] }, 400).model.xScale()!.domain[0]).toBeLessThan(0);
-    expect(build({ marks: [big] }, 80).model.xScale()!.domain).toEqual([0, 10]);
+    expect(xScale(build({ marks: [big] }, 400).model)!.domain[0]).toBeLessThan(0);
+    expect(xScale(build({ marks: [big] }, 80).model)!.domain).toEqual([0, 10]);
   });
 });
 
@@ -70,7 +71,7 @@ describe("padding given", () => {
   contractTest("scale.padding.share", () => {
     // A share of the rounded domain at each end; ticks stay within it.
     const { model } = build({ marks: [plain()], x: { padding: 0.1 } });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(x.domain[0]).toBeCloseTo(-1, 9);
     expect(x.domain[1]).toBeCloseTo(11, 9);
     const ticks = model.panels()[0]!.plans.x.ticks;
@@ -81,7 +82,7 @@ describe("padding given", () => {
       marks: [line(table({ t: [1, 100], v: [1, 2] }), { x: "t", y: "v" })],
       x: { type: "log", padding: 0.1 },
     });
-    const [lo, hi] = log.model.xScale()!.domain;
+    const [lo, hi] = xScale(log.model)!.domain;
     expect(Math.log10(lo!)).toBeCloseTo(-0.2, 9);
     expect(Math.log10(hi!)).toBeCloseTo(2.2, 9);
   });
@@ -92,7 +93,7 @@ describe("padding given", () => {
       marks: [point(rows, { x: "t", y: "v", radius: 6 })],
       x: { padding: { px: 20 } },
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(x.map(0)).toBeCloseTo(plot.x + 20, 3);
     expect(x.map(10)).toBeCloseTo(plot.x + plot.width - 20, 3);
   });
@@ -103,22 +104,22 @@ describe("padding given", () => {
       marks: [point(rows, { x: "t", y: "v", radius: 6 })],
       x: { padding: 0 },
     });
-    expect(model.xScale()!.domain).toEqual([0, 10]);
+    expect(xScale(model)!.domain).toEqual([0, 10]);
   });
 
   contractTest("scale.padding.views", () => {
     // A domain set and a view are exact unless padding is given; then padded too.
     const set = build({ marks: [point(rows, { x: "t", y: "v" })], x: { domain: [2, 8] } });
-    expect(set.model.xScale()!.domain).toEqual([2, 8]);
+    expect(xScale(set.model)!.domain).toEqual([2, 8]);
     const padded = build({
       marks: [point(rows, { x: "t", y: "v" })],
       x: { domain: [2, 8], padding: { px: 10 } },
     });
-    expect(padded.model.xScale()!.map(2)).toBeCloseTo(padded.plot.x + 10, 3);
+    expect(xScale(padded.model)!.map(2)).toBeCloseTo(padded.plot.x + 10, 3);
     setViewport(padded.model, [4, 6]);
     padded.model.scene(estimateText);
     expect(padded.model.getViewport().x).toEqual([4, 6]);
-    expect(padded.model.xScale()!.map(4)).toBeCloseTo(padded.plot.x + 10, 3);
+    expect(xScale(padded.model)!.map(4)).toBeCloseTo(padded.plot.x + 10, 3);
   });
 
   contractTest("scale.padding.y-fit", () => {
@@ -129,8 +130,8 @@ describe("padding given", () => {
       marks: [line(wide, { x: "t", y: "v" })],
       x: { domain: [0, 10], padding: 0.4 },
     });
-    expect(model.xScale()!.domain[0]).toBeCloseTo(-4, 9);
-    expect(model.yScale()!.domain[1]).toBeLessThan(100);
+    expect(xScale(model)!.domain[0]).toBeCloseTo(-4, 9);
+    expect(yScale(model)!.domain[1]).toBeLessThan(100);
   });
 
   contractTest("scale.padding.impossible", () => {
@@ -217,7 +218,7 @@ describe("padding given", () => {
       [{ px: 10 }, 0.2],
     ] as const) {
       const { model, scene } = build({ marks: [plain()], x: { padding: x }, y: { padding: y } });
-      const drawn = { x: model.xScale()!.domain, y: model.yScale()!.domain };
+      const drawn = { x: xScale(model)!.domain, y: yScale(model)!.domain };
       const { plans } = model.panels()[0]!;
       model.setTransitionDomains({
         x: drawn.x as [number, number],
@@ -226,8 +227,8 @@ describe("padding given", () => {
         ticks: { x: plans.x.within!, y: plans.y.within!, yRight: null },
       });
       const moving = model.scene(estimateText);
-      expect(model.xScale()!.domain).toEqual(drawn.x);
-      expect(model.yScale()!.domain).toEqual(drawn.y);
+      expect(xScale(model)!.domain).toEqual(drawn.x);
+      expect(yScale(model)!.domain).toEqual(drawn.y);
       expect(ticks(moving)).toEqual(ticks(scene));
     }
   });
@@ -242,7 +243,7 @@ describe("padding given", () => {
     });
     setViewport(model, [5, 40]);
     const scene = model.scene(estimateText);
-    const shown = model.xScale()!.domain;
+    const shown = xScale(model)!.domain;
     const strip = scene.panels.find(({ key }) => key === NAVIGATOR_PANEL)!;
     const frame = strip.marks.find(({ key }) => key === "navigator-frame") as ShapesGeometry;
     // Faded before the view, and not after it: the window reaches the rail's end.

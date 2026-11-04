@@ -3,12 +3,19 @@
 // field; calculations, bins, and aggregates make some). Colors and legend
 // entries follow a field back to the table it first came from, so a
 // filtered or aggregated copy of a table's `region` colors its values as
-// the table does (see model/identity.ts).
+// the table does (see model/identity.ts), and field displays matching a
+// table follow a field so (fields/rules.ts, `lineOf`).
 
 import type { Table } from "./table.ts";
 
-/** A derived table's source, kept alive as long as the derived table is, and its fields from it. */
-const origins = new WeakMap<Table, { source: Table; passes(field: string): boolean }>();
+/** Derived tables' origins: each one's source and its fields from it. */
+export type Origins = Pick<
+  WeakMap<Table, { source: Table; passes(field: string): boolean }>,
+  "get"
+>;
+
+/** Each derived table's origin, kept alive as long as the derived table is. */
+export const origins = new WeakMap<Table, { source: Table; passes(field: string): boolean }>();
 
 /** Records that `derived` is made from `source`, the fields `passes` accepts unchanged. */
 export function setOrigin(derived: Table, source: Table, passes: (field: string) => boolean): void {
@@ -25,18 +32,4 @@ export function rootOf(table: Table, fields: readonly string[]): Table {
     origin = origins.get(table);
   }
   return table;
-}
-
-/**
- * The tables `field` of `table` comes from unchanged, nearest first:
- * `table`, then each source while the field passes through the step that
- * made the table before it (field displays matching a table follow it so).
- */
-export function lineOf(table: Table, field: string): Table[] {
-  const line = [table];
-  for (let origin = origins.get(table); origin?.passes(field); origin = origins.get(table)) {
-    table = origin.source;
-    line.push(table);
-  }
-  return line;
 }

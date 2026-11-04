@@ -50,7 +50,7 @@ import {
 export interface TreemapLabels<S extends Schema> {
   at?: "top-left" | "center";
   parents?: boolean;
-  content?: readonly Exclude<LabelPartOf<keyof S & string>, { series: true }>[];
+  content?: readonly Exclude<LabelPartOf<keyof S & string>, { series: true } | { label: string }>[];
   style?: TextStyle;
 }
 

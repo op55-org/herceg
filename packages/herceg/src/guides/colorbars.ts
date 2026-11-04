@@ -127,20 +127,30 @@ export function measureColorbar(
       },
     ),
   };
+  // A ramp of a field's values is written in its display's format, unless
+  // the colorbar has one: a time field's as times, in the zone it writes in.
+  const field = scale.kind === "ramp" ? scale.ramp.field : scale.field;
+  const time = field?.kind === "time";
   const context: AxisContext = {
-    type: "linear",
+    type: time ? "time" : "linear",
     spec: undefined,
-    zone: "UTC",
+    zone: time ? field.zone : "UTC",
     locale: text.locale,
   };
   const major = axis.layers[0]!;
   const planner = tickPlanner(
     kit,
     ticks,
-    options.format,
+    options.format ?? field?.format,
     context,
     "color",
-    { ticks: `${plan.path}.ticks`, format: `${plan.path}.format` },
+    {
+      ticks: `${plan.path}.ticks`,
+      format:
+        options.format || !field?.format
+          ? `${plan.path}.format`
+          : `chart ${field.from.format}.format`,
+    },
     major.labels ? major.labels.duplicates : "hide",
   );
   const count = countOf(ticks) ?? Math.max(2, Math.round(length / 40));

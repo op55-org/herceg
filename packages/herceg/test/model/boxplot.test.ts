@@ -8,6 +8,7 @@ import { facet } from "../../src/model/facet.ts";
 import { type AxisInspection, type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import type { PointGeometry, RectGeometry, Scene, SegmentGeometry } from "../../src/scene/scene.ts";
 import { legendOf } from "../helpers/guides.ts";
+import { panelSeries, yScale } from "../helpers/scales.ts";
 
 describe("boxStats", () => {
   it("gives quartiles, and whiskers on the most extreme values within 1.5 IQR", () => {
@@ -53,7 +54,7 @@ describe("boxplot", () => {
     // s/b holds 8 to 11 and 100: 100 is beyond its whisker.
     expect(geometry<PointGeometry>(scene, "point").map((m) => m.count)).toEqual([0, 1]);
     // The y domain reaches the outlier.
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(100);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(100);
     // The two series' boxes in a category sit side by side, not on top of each other.
     const [a, b] = boxes.map((m) => m.rects[0]!);
     expect(b).toBeGreaterThan(a! + boxes[0]!.rects[2]!);
@@ -72,7 +73,7 @@ describe("boxplot", () => {
 
   it("lays boxes along y when the categories are on y", () => {
     const { scene, model } = build({ marks: [boxplot(latency, { x: "ms", y: "region" })] });
-    expect(model.yScale()!.type).toBe("band");
+    expect(yScale(model)!.type).toBe("band");
     const [box] = geometry<RectGeometry>(scene, "rect");
     // Wider than tall: the box spans values along x.
     expect(box!.rects[2]!).toBeGreaterThan(box!.rects[3]!);
@@ -90,7 +91,7 @@ describe("boxplot", () => {
     expect(geometry<RectGeometry>(scene, "rect")[0]!.count).toBe(1);
     expect(geometry<SegmentGeometry>(scene, "segments")[0]!.count).toBe(7);
     expect(geometry<PointGeometry>(scene, "point")[0]!.count).toBe(1);
-    expect(model.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(model)!.domain[0]).toBeGreaterThan(0);
   });
 
   it("finds horizontal boxes in view by their whiskers, and grouped boxes where they are", () => {
@@ -123,7 +124,7 @@ describe("boxplot", () => {
     expect(geometry<RectGeometry>(scene, "rect")).toHaveLength(2);
     const faceted = table({ g: ["a", "b"], p: ["P", "Q"], v: [1, 2] });
     const split = build({ marks: [boxplot(faceted, { x: "g", y: "v" })], facet: facet("p") });
-    expect(split.model.panels().map((p) => split.model.panelSeries(p.key)[0]!.length)).toEqual([
+    expect(split.model.panels().map((p) => panelSeries(split.model, p.key)[0]!.length)).toEqual([
       1, 1,
     ]);
   });

@@ -29,12 +29,13 @@ import type {
 import type { ChartError } from "../../src/spec/errors.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { legendOf } from "../helpers/guides.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(600, 300, 1);
   return model;
@@ -74,7 +75,7 @@ describe("identity", () => {
     expect(legendOf(scene).map(({ label }) => label)).toEqual(["f", "m"]);
     // Inspection still reads each mark's own series.
     const panel = scene.panels[0]!;
-    const inspection = model.inspect(model.xScale()!.map(0), panel.plot.y + 5)!;
+    const inspection = model.inspect(xScale(model)!.map(0), panel.plot.y + 5)!;
     expect(inspection.points.map(({ label }) => label)).toEqual(["f", "m", "f", "m"]);
   });
 
@@ -190,7 +191,7 @@ describe("identity", () => {
       ["m", false],
     ]);
     const panel = scene.panels[0]!;
-    const inspection = model.inspect(model.xScale()!.map(0), panel.plot.y + 5)!;
+    const inspection = model.inspect(xScale(model)!.map(0), panel.plot.y + 5)!;
     expect(inspection.points.map(({ label }) => label)).toEqual(["m", "m"]);
   });
 
@@ -201,7 +202,7 @@ describe("identity", () => {
     model.hidden.add(sex("f"));
     const scene = model.scene(estimateText);
     const [m] = kinds<RectGeometry>(scene, "rect");
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     expect(m!.rects[1]! + m!.rects[3]!).toBeCloseTo(y.map(0), 3);
     expect(m!.rects[1]).toBeCloseTo(y.map(3), 3);
   });
@@ -334,7 +335,7 @@ describe("identity", () => {
     model.hidden.add(eu.key);
     model.scene(estimateText);
     // Service b stands on the zero line, not on the hidden a's values.
-    expect(model.yScale()!.domain[1]).toBeLessThan(2);
+    expect(yScale(model)!.domain[1]).toBeLessThan(2);
   });
 
   it("leaves out of stacks what is hidden through a declared scale, too", () => {
@@ -353,7 +354,7 @@ describe("identity", () => {
     expect(eu.key).toBe(identityKey({ scale: "color" }, "eu"));
     model.hidden.add(eu.key);
     model.scene(estimateText);
-    expect(model.yScale()!.domain[1]).toBeLessThanOrEqual(20);
+    expect(yScale(model)!.domain[1]).toBeLessThanOrEqual(20);
   });
 
   it("colors a lone pie through a declared scale", () => {

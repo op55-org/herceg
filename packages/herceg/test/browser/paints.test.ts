@@ -6,6 +6,7 @@ import { type Chart, createChart } from "../../src/dom/chart.ts";
 import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { rangeNavigator } from "../../src/model/navigator.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -25,8 +26,8 @@ function hovered(chart: Chart): { swatch: string | undefined; dot: string | null
   chart.root.dispatchEvent(
     new PointerEvent("pointermove", {
       bubbles: true,
-      clientX: rect.left + model.xScale()!.map(0),
-      clientY: rect.top + model.yScale()!.map(1),
+      clientX: rect.left + xScale(model)!.map(0),
+      clientY: rect.top + yScale(model)!.map(1),
     }),
   );
   chart.render();
@@ -59,8 +60,8 @@ it.each(["svg", "canvas"] as const)(
     try {
       await chart.loading;
       const model = modelOf(chart);
-      const px = model.xScale()!.map(0.5);
-      const py = model.yScale()!.map(1.5);
+      const px = xScale(model)!.map(0.5);
+      const py = yScale(model)!.map(1.5);
       if (renderer === "canvas") {
         const canvas = chart.root.querySelector("canvas")!;
         const ratio = canvas.width / 600;

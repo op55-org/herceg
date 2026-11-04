@@ -41,6 +41,7 @@ function summarize(
   name: string,
   locale: string | undefined,
   rank: (row: number) => number = (row) => row,
+  f = (v: number) => formatNumber(v, locale),
 ): string {
   let points = 0;
   let min = Infinity;
@@ -57,7 +58,6 @@ function summarize(
     if (lastRow < 0 || rank(range[3]) > rank(lastRow)) [last, lastRow] = [range[2], range[3]];
   }
   if (lastRow < 0) return `${name}: no data`;
-  const f = (v: number) => formatNumber(v, locale);
   return `${name}: ${points} ${points === 1 ? "point" : "points"}, from ${f(min)} to ${f(max)}, last ${f(last)}`;
 }
 
@@ -97,7 +97,8 @@ export function describeChart(model: ChartModel): string {
     const name = (s: Series) => {
       if (!sides) return s.label;
       const onRight = model.onRight(s);
-      const unit = (onRight ? config.yRight : config.y)?.title;
+      // Titles of parts are text by now: the guide compiler writes them.
+      const unit = (onRight ? config.yRight : config.y)?.title as string | undefined;
       return `${s.label} (${onRight ? "right" : "left"} axis${unit ? `, ${unit}` : ""})`;
     };
     for (const s of series.slice(0, MAX_SERIES)) {
@@ -111,8 +112,10 @@ export function describeChart(model: ChartModel): string {
           locale: config.locale,
           log: y?.type === "log",
           bands: model.bands,
-        }) ?? summarize(drawn, name(s), config.locale, mark?.rows?.().rank);
+        }) ?? summarize(drawn, name(s), config.locale, mark?.rows?.().rank, s.write?.());
       parts.push(`${sentence}.`);
+      // A value field's description follows its first series (parts without text are left out).
+      if (!parts.includes(s.about)) parts.push(s.about);
     }
     if (series.length > MAX_SERIES) parts.push(`${series.length - MAX_SERIES} more series.`);
   }

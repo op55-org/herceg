@@ -9,6 +9,7 @@ import {
 import type { TimeZone } from "../format/zone.ts";
 import type { AxisOptions } from "../guides/options.ts";
 import type { Breaks } from "../lod/m4.ts";
+import type { AxisBands } from "../marks/mark.ts";
 import {
   BandScale,
   LinearScale,
@@ -64,8 +65,12 @@ export interface AxisContext {
   plan?:
     | ((ticker: PositionScale, count: number) => { ticks: number[]; labels: string[] })
     | undefined;
-  /** How one value is written, where the guide compiler writes them. */
-  formatValue?: Formatter | undefined;
+  /**
+   * How one value is written, where the guide compiler writes them; marked
+   * `own` where it is the axis' own `tooltipFormat`, which field displays'
+   * formats do not write over (fields/chart.ts, `ShownField.over`).
+   */
+  formatValue?: (Formatter & { readonly own?: true }) | undefined;
   /**
    * Padding the axis' settings give (the guide compiler's, other than
    * "auto"), in place of the room marks ask for at its ends.
@@ -282,19 +287,22 @@ export function tickCountOf({ type, spec }: AxisContext, size: number, across: b
 }
 
 /**
- * A band axis. Labels are thinned to every k-th band so neighbors do not
- * overlap: `size` is the room the largest label takes along the axis (for
- * horizontal labels their width, for vertical ones a line height).
+ * A band axis over `bands`, labeled with their texts where they have them
+ * (its scale's categories stay their labels). Labels are thinned to every
+ * k-th band so neighbors do not overlap: `size` is the room the largest
+ * label takes along the axis (for horizontal labels their width, for
+ * vertical ones a line height).
  */
 export function planBandAxis(
-  categories: readonly string[],
+  bands: AxisBands,
   range: readonly [number, number],
   padding: number,
   size: number,
 ): AxisPlan {
+  const categories = bands.labels;
   const scale = new BandScale(categories, range, padding);
   const every = Math.max(1, Math.ceil((size + 6) / Math.max(1e-9, Math.abs(scale.step))));
   const ticks: number[] = [];
   for (let i = 0; i < categories.length; i += every) ticks.push(i);
-  return { scale, ticks, labels: ticks.map((i) => categories[i]!) };
+  return { scale, ticks, labels: ticks.map((i) => bands.texts[i]!) };
 }

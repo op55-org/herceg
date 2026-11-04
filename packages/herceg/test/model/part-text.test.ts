@@ -33,7 +33,7 @@ function build(config: ChartConfig, width = 400, height = 240): Scene {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", legend: false, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, height, 1);
   return model.scene(estimateText);

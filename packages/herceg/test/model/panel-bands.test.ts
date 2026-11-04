@@ -16,6 +16,7 @@ import type { RectGeometry, Scene, SegmentGeometry } from "../../src/scene/scene
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -469,7 +470,7 @@ describe("categories resolved per panel", () => {
     });
     const [base] = model.series();
     for (const { key } of model.panels()) {
-      const [units, cost] = model.panelSeries(key);
+      const [units, cost] = panelSeries(model, key);
       // The chart's band index of every row, which every panel shares.
       expect(units!.x).toBe(base!.x);
       // The panel's bands, found by chart band: N's b (0) and d (3).
@@ -500,7 +501,7 @@ describe("categories resolved per panel", () => {
     );
     expect(categories(model)[5]).toEqual(["p10", "p11"]);
     // Rows 5 and 17 hold p10 and p11; row 0 p0, of another panel.
-    const part = model.panelSeries("r5")[0]!;
+    const part = panelSeries(model, "r5")[0]!;
     const band = (row: number) => part.x[row]!;
     expect([5, 17, 0].map((row) => part.places!.x!.at(band(row)))).toEqual([0, 1, -1]);
     // Rows 5 and 29 are p10, 17 and 41 p11: two bars each, stacked or not.
@@ -525,7 +526,7 @@ describe("categories resolved per panel", () => {
     });
     expect(categories(model)[0]).toEqual(["c0", `c${count - 1}`]);
     expect(categories(model)[1]).toHaveLength(count - 2);
-    const places = model.panelSeries("A")[0]!.places!.x!;
+    const places = panelSeries(model, "A")[0]!.places!.x!;
     expect([0, 1, count - 2, count - 1, count].map((band) => places.at(band))).toEqual([
       0, -1, -1, 1, -1,
     ]);

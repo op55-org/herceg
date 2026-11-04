@@ -491,7 +491,7 @@ describe("maps", () => {
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(600, 300, 1);
     expect(rampsOf(model.scene(estimateText)).map((ramp) => ramp.title.text)).toEqual(["gdp"]);

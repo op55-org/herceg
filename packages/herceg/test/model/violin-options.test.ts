@@ -20,6 +20,7 @@ import type { ChartSpec, ViolinSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import legacyViolins from "./fixtures/violin-legacy.json";
 
 const data = () =>
@@ -103,7 +104,7 @@ describe("violin options", () => {
           [horizontal ? "x" : "y"]: { type: "log", nice: false },
         });
         const marks = scene.panels[0]!.marks;
-        const across = horizontal ? model.xScale()! : model.yScale()!;
+        const across = horizontal ? xScale(model)! : yScale(model)!;
         const axis = horizontal ? 0 : 1;
         const lines = marks.filter((m) => m.key.endsWith("|quartiles")) as LineGeometry[];
         const medians = marks.filter((m) => m.key.endsWith("|median-line")) as LineGeometry[];
@@ -174,7 +175,7 @@ describe("violin options", () => {
       const invisible = (samples: typeof small) =>
         violin(samples, { ...axes, bandwidth: 1e308, inner: "none", label: "invisible" });
       const distant = build({ ...config, marks: [visible(), invisible(huge)] });
-      const valueScale = (model: ChartModel) => (horizontal ? model.xScale()! : model.yScale()!);
+      const valueScale = (model: ChartModel) => (horizontal ? xScale(model)! : yScale(model)!);
       expect(valueScale(distant.model).domain).toEqual(valueScale(reference.model).domain);
       const { model, scene } = build({ ...config, marks: [visible(), invisible(small)] });
       const panel = model.panels()[0]!;
@@ -186,12 +187,12 @@ describe("violin options", () => {
           "visible",
         ]);
       expect(stopsOf(model, panel.key).map((s) => s.label)).toEqual(["visible"]);
-      const undrawn = model.panelSeries(panel.key).find((s) => s.label === "invisible")!;
+      const undrawn = panelSeries(model, panel.key).find((s) => s.label === "invisible")!;
       expect(positionOf(model, undrawn.key, 0)).toBeUndefined();
       const onlyInvisible = build({ marks: [invisible(small)] });
       expect(stopsOf(onlyInvisible.model, "")).toEqual([]);
       expect(
-        positionOf(onlyInvisible.model, onlyInvisible.model.panelSeries("")[0]!.key, 0),
+        positionOf(onlyInvisible.model, panelSeries(onlyInvisible.model, "")[0]!.key, 0),
       ).toBeUndefined();
       expect(scene.panels[0]!.marks.some((m) => m.key.startsWith(`${undrawn.key}|`))).toBe(false);
       for (const inner of [undefined, "box", "quartiles"] as const) {
@@ -381,7 +382,7 @@ describe("violin options", () => {
         ],
         [horizontal ? "x" : "y"]: { domain: [0, 10], nice: false },
       });
-      const along = horizontal ? model.yScale()! : model.xScale()!;
+      const along = horizontal ? yScale(model)! : xScale(model)!;
       const axis = horizontal ? 1 : 0;
       const areas = scene.panels[0]!.marks.filter((m) => m.kind === "area") as (AreaGeometry & {
         lower: Polyline;
@@ -391,14 +392,14 @@ describe("violin options", () => {
       const [lo, hi] = extent(areas[1]!.upper, axis, 1);
       expect(horizontal ? hi <= center : lo >= center).toBe(true);
       const before = Array.from(areas[1]!.upper.coords.subarray(0, areas[1]!.upper.count * 2));
-      model.hidden.add(model.panelSeries(model.panels()[0]!.key)[0]!.key);
+      model.hidden.add(panelSeries(model, model.panels()[0]!.key)[0]!.key);
       const remaining = model
         .scene(estimateText)
         .panels[0]!.marks.find((m) => m.kind === "area") as AreaGeometry;
       expect(Array.from(remaining.upper.coords.subarray(0, remaining.upper.count * 2))).toEqual(
         before,
       );
-      const across = horizontal ? model.xScale()! : model.yScale()!;
+      const across = horizontal ? xScale(model)! : yScale(model)!;
       const offset = along.bandwidth! * 0.1 * (horizontal ? -1 : 1);
       const [px, py] = horizontal
         ? [across.map(6), center + offset]
@@ -450,8 +451,8 @@ describe("violin options", () => {
     });
     expect(legendOf(scene).map((entry) => entry.label)).toEqual(["first", "second"]);
     const areas = scene.panels[0]!.marks.filter((m) => m.kind === "area") as AreaGeometry[];
-    expect(extent(areas[0]!.upper, 0)[1]).toBeLessThan(model.xScale()!.map(0));
-    expect(extent(areas[1]!.upper, 0)[0]).toBeGreaterThan(model.xScale()!.map(1));
+    expect(extent(areas[0]!.upper, 0)[1]).toBeLessThan(xScale(model)!.map(0));
+    expect(extent(areas[1]!.upper, 0)[0]).toBeGreaterThan(xScale(model)!.map(1));
   });
 
   it.each([
@@ -480,7 +481,7 @@ describe("violin options", () => {
         expect(medians.map((m) => m.path.starts.length)).toEqual([2, 2]);
         expect(dashed[0]!.dash).toEqual([4, 3]);
         expect(medians[0]!.dash).toBeUndefined();
-        const across = horizontal ? model.xScale()! : model.yScale()!;
+        const across = horizontal ? xScale(model)! : yScale(model)!;
         expect(dashed[0]!.path.coords[horizontal ? 0 : 1]).toBeCloseTo(across.map(1.5), 4);
         expect(dashed[0]!.path.coords[horizontal ? 4 : 5]).toBeCloseTo(across.map(2.5), 4);
         expect(medians[0]!.path.coords[horizontal ? 0 : 1]).toBeCloseTo(across.map(2), 4);
@@ -536,7 +537,7 @@ describe("violin options", () => {
         },
         120,
       );
-      const along = horizontal ? model.yScale()! : model.xScale()!;
+      const along = horizontal ? yScale(model)! : xScale(model)!;
       const axis = horizontal ? 1 : 0;
       const half = along.bandwidth! * 0.4;
       expect(half).toBeLessThan(3);
@@ -593,16 +594,16 @@ describe("violin options", () => {
     const options = { x: "g", y: "v", series: "s", split: true, inner: "none" } as const;
     const { model, scene } = build({ marks: [violin(samples, options)] });
     const before = scene.panels[0]!.marks.filter((m) => m.kind === "area") as AreaGeometry[];
-    expect(extent(before[1]!.upper, 0)[0]).toBeGreaterThan(model.xScale()!.map(0));
+    expect(extent(before[1]!.upper, 0)[0]).toBeGreaterThan(xScale(model)!.map(0));
     samples.dropFirst(2);
     const after = model
       .scene(estimateText)
       .panels[0]!.marks.find((m) => m.kind === "area") as AreaGeometry;
-    expect(extent(after.upper, 0)[1]).toBeLessThan(model.xScale()!.map(0));
+    expect(extent(after.upper, 0)[1]).toBeLessThan(xScale(model)!.map(0));
     // Rebuilding a mark from the same current data assigns the same side.
     const rebuilt = build({ marks: [violin(samples, options)] });
     const area = rebuilt.scene.panels[0]!.marks.find((m) => m.kind === "area") as AreaGeometry;
-    expect(extent(area.upper, 0)[1]).toBeLessThan(rebuilt.model.xScale()!.map(0));
+    expect(extent(area.upper, 0)[1]).toBeLessThan(xScale(rebuilt.model)!.map(0));
   });
 
   it("removes inner marks while retaining the constant-value density fallback", () => {
@@ -616,7 +617,7 @@ describe("violin options", () => {
       (m) => m.kind === "segments",
     ) as SegmentGeometry[];
     expect(segments.map((m) => m.count)).toEqual([1, 1]);
-    expect(segments[0]!.coords[0]).toBeCloseTo(result.model.xScale()!.map(0), 4);
+    expect(segments[0]!.coords[0]).toBeCloseTo(xScale(result.model)!.map(0), 4);
     expect(segments[0]!.coords[2]).toBeLessThan(segments[0]!.coords[0]!);
     expect(segments[1]!.coords[2]).toBeGreaterThan(segments[1]!.coords[0]!);
   });

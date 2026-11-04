@@ -15,6 +15,7 @@ import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { AxisGuide, Scene } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import { contractTest } from "../helpers/contracts.ts";
+import { yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const guides = guideCompiler(GUIDE_KIT);
@@ -24,7 +25,9 @@ const hours = Array.from({ length: 49 }, (_, i) => start + i * HOUR);
 const week = table({ t: time(hours), v: hours.map((_, i) => Math.sin(i / 5) * 40 + 50) });
 
 function build(config: ChartConfig, width = 800, height = 300) {
-  const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, guides);
+  const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config }, undefined, [
+    guides,
+  ]);
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }
@@ -175,7 +178,7 @@ describe("ticks every so often", () => {
     expect(() => {
       const content = [{ value: true, format: { maximumFractionDigits: 0, fiscal: { start: 7 } } }];
       const marks = [line(data, { x: "x", y: "v", labels: { at: "last", content } as never })];
-      const model = new ChartModel({ marks }, undefined, ...staticCompilers());
+      const model = new ChartModel({ marks }, undefined, staticCompilers());
       model.setSize(400, 200, 1);
       model.scene(estimateText);
     }).toThrow(/content\[0\]\.format\.fiscal: Intl options write no fiscal year/);
@@ -505,7 +508,7 @@ describe("scales", () => {
       y: { domain: [0, 50], title: "ms" },
       scales: { y: { domain: [0, 100] } },
     });
-    expect(model.yScale()!.domain).toEqual([0, 100]);
+    expect(yScale(model)!.domain).toEqual([0, 100]);
   });
 
   it("scope subplots' scales as the short forms do, checked as the model reads them", () => {
@@ -576,7 +579,7 @@ describe("what needs the guide compiler", () => {
       x: { ticks: { every: "day" } },
     });
     model.setSize(800, 300);
-    model.use(guides);
+    model.use([guides]);
     model.scene(estimateText);
     expect(xTicks(model).every((t) => (t - start) % (24 * HOUR) === 0)).toBe(true);
   });

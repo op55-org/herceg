@@ -271,7 +271,7 @@ describe("drawn-mark records", () => {
         locale: "en-US",
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(400, 300, 1);
     const [regions, labels, lines] = sceneOf(model).records;
@@ -292,7 +292,7 @@ describe("drawn-mark records", () => {
         locale: "en-US",
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(400, 300, 1);
     const stores = [selectionStore(values), selectionStore(sorted)];
@@ -334,7 +334,7 @@ describe("drawn-mark records", () => {
       const model = new ChartModel(
         { marks: [mark], locale: "en-US" },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(400, 300, 1);
       const store = selectionStore(rows);

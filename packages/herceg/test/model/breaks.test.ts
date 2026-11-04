@@ -24,6 +24,7 @@ import type {
 } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const HOUR = 3_600_000;
@@ -61,7 +62,7 @@ describe("charts with time axis breaks", () => {
   it("draw weekdays side by side, with half a slot of room at the ends", () => {
     const prices = weekdays(10);
     const { model } = build({ marks: [candlestick(prices, fields)], x: { breaks: weekend() } });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const days = Array.from(prices.numbers("t" as never));
     const gaps = days.slice(1).map((d, i) => x.map(d) - x.map(days[i]!));
     // Friday to Monday is a day apart like any other.
@@ -89,7 +90,7 @@ describe("charts with time axis breaks", () => {
       marks: [candlestick(prices, fields)],
       x: { breaks: weekend() },
     });
-    const [, top] = model.yScale()!.domain;
+    const [, top] = yScale(model)!.domain;
     expect(top).toBeLessThan(200);
     const segments = scene.panels[0]!.marks.filter(
       (m) => m.kind === "segments",
@@ -101,7 +102,7 @@ describe("charts with time axis breaks", () => {
     const path = (lines.scene.panels[0]!.marks[0] as LineGeometry).path;
     expect(path.count).toBe(10);
     expect(path.starts).toEqual([0]);
-    expect(lines.model.yScale()!.domain[1]).toBeLessThan(200);
+    expect(yScale(lines.model)!.domain[1]).toBeLessThan(200);
   });
 
   it("leave out of lines along y and of swarms the times a break hides", () => {
@@ -126,7 +127,7 @@ describe("charts with time axis breaks", () => {
       x: { breaks: weekend(), domain: [utc(2025, 10, 10), utc(2025, 10, 14)] },
     });
     const drawn = swarmed.scene.panels[0]!.marks[0] as PointGeometry;
-    const center = swarmed.model.yScale()!.map(0);
+    const center = yScale(swarmed.model)!.map(0);
     expect(drawn.count).toBe(2);
     expect([drawn.coords[1], drawn.coords[3]]).toEqual([center, center]);
   });
@@ -153,7 +154,7 @@ describe("charts with time axis breaks", () => {
     // A view from Friday 18:00 to Monday 06:00: a quarter to three quarters of the segment.
     setViewport(model, [utc(2025, 10, 10, 18), utc(2025, 10, 13, 6)]);
     model.scene(estimateText);
-    const [lo, hi] = model.yScale()!.domain;
+    const [lo, hi] = yScale(model)!.domain;
     expect(lo).toBeLessThanOrEqual(175);
     expect(lo).toBeGreaterThan(150);
     expect(hi).toBeGreaterThanOrEqual(225 - 25);
@@ -170,7 +171,7 @@ describe("charts with time axis breaks", () => {
       marks: [line(data, { x: "t", y: "v" })],
       x: { breaks: weekend() },
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const { plot } = scene.panels[0]!;
     // A pointer just after the seam is nearest Monday 00:00 on screen.
     const seam = x.map(utc(2025, 10, 13));
@@ -186,9 +187,9 @@ describe("charts with time axis breaks", () => {
     const minutes = table({ t: time(many), v: many.map(() => 1) });
     minutes.set("v", 1, Number.NaN);
     const chart = build({ marks: [line(minutes, { x: "t", y: "v" })], x: { breaks: weekend() } });
-    const at = chart.model.xScale()!.map(utc(2025, 10, 11));
+    const at = xScale(chart.model)!.map(utc(2025, 10, 11));
     const found = chart.model.inspect(at, chart.scene.panels[0]!.plot.y + 5)!;
-    expect(found.axis === "x" && chart.model.xScale()!.breaks!.hides(found.value)).toBe(false);
+    expect(found.axis === "x" && xScale(chart.model)!.breaks!.hides(found.value)).toBe(false);
   });
 
   it("refuse breaks on axes that are not time, and fixed domains inside a break", () => {
@@ -207,7 +208,7 @@ describe("charts with time axis breaks", () => {
     const { model } = build({ marks: [candlestick(prices, fields)], x: { breaks: weekend() } });
     setViewport(model, [utc(2025, 10, 11, 1), utc(2025, 10, 12, 1)]);
     model.scene(estimateText);
-    expect(model.xScale()!.domain).toEqual([utc(2025, 10, 10, 23), utc(2025, 10, 13, 1)]);
+    expect(xScale(model)!.domain).toEqual([utc(2025, 10, 10, 23), utc(2025, 10, 13, 1)]);
   });
 
   it("share their breaks across panels, and stream", () => {
@@ -341,7 +342,7 @@ describe("lines and bands across breaks at the view's edges", () => {
     });
     const { upper } = scene.panels[0]!.marks[0] as AreaGeometry;
     expect(upper.count).toBe(2);
-    const top = model.yScale()!.map(100);
+    const top = yScale(model)!.map(100);
     for (let i = 0; i < upper.count; i++) expect(upper.coords[i * 2 + 1]).not.toBeCloseTo(top, 0);
   });
 });
@@ -380,7 +381,7 @@ describe("rules of breaks at their limits", () => {
       calls++;
       return collapse(value);
     };
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const hit = model.inspect(x.map(utc(2025, 10, 13)), scene.panels[0]!.plot.y + 5)!;
     expect(hit).toBeDefined();
     expect(calls).toBeLessThan(500);
@@ -420,8 +421,8 @@ describe("breaks with more than one x scale, and nearest points", () => {
       x: { breaks: timeBreaks([{ from: 1, to: 49 }]), domain: [0, 100] },
       y: { domain: [-1, 1] },
     });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     // 60 is 12 of time shown from 0 and 20 from 80.
     const hit = model.inspect(x.map(60), y.map(0))!;
     expect(hit.axis === "x" && hit.value).toBe(0);
@@ -455,7 +456,7 @@ describe("specs with time axis breaks", () => {
       breaks: [{ weekdays: ["sat", "sun"] }],
     });
     const { model } = build(config);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(x.map(utc(2025, 10, 13)) - x.map(utc(2025, 10, 10))).toBeCloseTo(
       x.range[1] - x.range[0],
       6,
@@ -496,8 +497,8 @@ describe("OHLC bars", () => {
     expect(marks.find((m) => m.key.endsWith("|body")) as RectGeometry | undefined).toBeUndefined();
     // Days 0 and 2 rise (a close at the open counts); day 1 falls.
     expect([rising.count, falling.count]).toEqual([6, 3]);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const [stem, open, close] = [0, 1, 2].map((i) =>
       Array.from(falling.coords.subarray(i * 4, i * 4 + 4)),
     );

@@ -11,6 +11,7 @@ import { panels } from "../../src/model/panels.ts";
 import type { AreaGeometry, RectGeometry } from "../../src/scene/scene.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { axisOf, positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries, xScale, yScale } from "../helpers/scales.ts";
 import legacy from "./fixtures/histogram-legacy.json";
 
 function build(config: ChartConfig) {
@@ -64,8 +65,8 @@ describe("histogram options", () => {
           opacity: m.fillOpacity,
         })),
       ).toEqual(fixture.geometry);
-      expect(model.xScale()!.domain).toEqual(fixture.x);
-      expect(model.yScale()!.domain).toEqual(fixture.y);
+      expect(xScale(model)!.domain).toEqual(fixture.x);
+      expect(yScale(model)!.domain).toEqual(fixture.y);
       expect(describeChart(model)).toBe(fixture.summary);
     },
   );
@@ -78,7 +79,7 @@ describe("histogram options", () => {
     const { model } = build({ marks: [histogram(data, { x: "v", bins: edges })] });
     expect(values(model)).toEqual([[2, 1, 2]]);
     expect([...model.series()[0]!.x]).toEqual([0.5, 1.5, 6]);
-    expect(model.xScale()!.domain).toEqual([0, 10]);
+    expect(xScale(model)!.domain).toEqual([0, 10]);
     expect(describeChart(model)).toContain("5 missing or outside the bins");
   });
 
@@ -135,7 +136,7 @@ describe("histogram options", () => {
       });
       const { model } = build({ marks: [mark] });
       expect(values(model)).toEqual([[1, 2]]);
-      expect((horizontal ? model.yScale() : model.xScale())!.type).toBe("time");
+      expect((horizontal ? yScale(model) : xScale(model))!.type).toBe("time");
       const hit = positionOf(model, stopsOf(model, "")[0]!.key, 0)!;
       expect(hit.axis).toBe(horizontal ? "y" : "x");
       expect(hit.points[0]!.text).toMatch(/Jan 1.* – .*Jan 2.*: 1$/);
@@ -153,21 +154,21 @@ describe("histogram options", () => {
     expect([...b!.x0!]).toEqual([2, 0]);
     expect([...b!.x]).toEqual([2, 3]);
     expect(a!.sorted).toBe(false);
-    expect(model.xScale()!.domain[0]).toBe(0);
-    expect(model.yScale()!.domain).toEqual([0, 4]);
+    expect(xScale(model)!.domain[0]).toBe(0);
+    expect(yScale(model)!.domain).toEqual([0, 4]);
     expect(model.inspectorOf("")?.mode).toBe("nearest-y");
     expect(axisOf(model)).toBe("y");
     expect(stopsOf(model, "")).toHaveLength(1);
-    const hit = model.inspect(model.xScale()!.map(1), model.yScale()!.map(1))!;
+    const hit = model.inspect(xScale(model)!.map(1), yScale(model)!.map(1))!;
     expect(hit.axis).toBe("y");
     expect(hit.points.map((p) => p.text)).toEqual(["0 – 2: 2", "0 – 2: 0"]);
     expect(hit.points.every((p) => p.row === undefined)).toBe(true);
     expect(positionOf(model, a!.key, 1)!.points.map((p) => p.value)).toEqual([0, 3]);
     const rect = rectangles(scene)[0]!.rects;
-    expect(rect[0]).toBeCloseTo(model.xScale()!.map(0), 4);
-    expect(rect[2]).toBeCloseTo(model.xScale()!.map(2) - model.xScale()!.map(0), 4);
-    expect(rect[1]).toBeCloseTo(model.yScale()!.map(2) + 0.5, 4);
-    expect(rect[3]).toBeCloseTo(Math.abs(model.yScale()!.map(2) - model.yScale()!.map(0)) - 1, 4);
+    expect(rect[0]).toBeCloseTo(xScale(model)!.map(0), 4);
+    expect(rect[2]).toBeCloseTo(xScale(model)!.map(2) - xScale(model)!.map(0), 4);
+    expect(rect[1]).toBeCloseTo(yScale(model)!.map(2) + 0.5, 4);
+    expect(rect[3]).toBeCloseTo(Math.abs(yScale(model)!.map(2) - yScale(model)!.map(0)) - 1, 4);
     expect(describeChart(model)).toContain("a: 2 values in 2 bins from 0 to 4");
   });
 
@@ -325,7 +326,7 @@ describe("histogram options", () => {
         x: { scope: "panel" },
         y: { scope: resolution },
       });
-      const centers = model.panels().map((p) => [...model.panelSeries(p.key)[0]!.y]);
+      const centers = model.panels().map((p) => [...panelSeries(model, p.key)[0]!.y]);
       if (resolution === "chart")
         expect(centers.every((c) => JSON.stringify(c) === JSON.stringify(centers[0]))).toBe(true);
       if (resolution === "row") {
@@ -363,18 +364,18 @@ describe("histogram options", () => {
       facet: facet("f"),
       y: { scope: "panel" },
     });
-    expect(model.panelSeries("p").map((s) => [...s.values])).toEqual([
+    expect(panelSeries(model, "p").map((s) => [...s.values])).toEqual([
       [0.5, 0],
       [0.5, 0],
     ]);
-    expect(model.panelSeries("q").map((s) => [...s.values])).toEqual([[0, 1], []]);
+    expect(panelSeries(model, "q").map((s) => [...s.values])).toEqual([[0, 1], []]);
     const first = scene.panels[0]!.marks.find((m) => m.kind === "rect") as RectGeometry;
     const second = scene.panels[1]!.marks.find((m) => m.kind === "rect") as RectGeometry;
     // As grouped bars do, a series without rows in a panel keeps its share of each bin.
     expect(second.rects[3]!).toBeCloseTo(first.rects[3]!, 4);
     model.hidden.add(model.series().find((s) => s.label === "b")!.key);
     model.scene(estimateText);
-    expect([...model.panelSeries("p")[0]!.values]).toEqual([0.5, 0]);
+    expect([...panelSeries(model, "p")[0]!.values]).toEqual([0.5, 0]);
   });
 
   it.each(["chart", "panel", "row", "column"] as ScaleScope[])(
@@ -387,7 +388,7 @@ describe("histogram options", () => {
         y: { scope: resolution },
       });
       for (const panel of model.panels()) {
-        expect([...model.panelSeries(panel.key)[0]!.y]).toEqual([0.5, 2]);
+        expect([...panelSeries(model, panel.key)[0]!.y]).toEqual([0.5, 2]);
         expect(panel.y.domain).toEqual([0, 3]);
       }
     },
@@ -398,7 +399,7 @@ describe("histogram options", () => {
       y: { type: "log" },
     });
     expect(rectangles(scene)[0]!.count).toBe(2);
-    expect(model.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(model)!.domain[0]).toBeGreaterThan(0);
     expect(positionOf(model, model.series()[0]!.key, 0)).toBeUndefined();
     expect(positionOf(model, model.series()[0]!.key, 1)!.points[0]!.text).toBe("1 – 3: 1");
   });
@@ -437,7 +438,7 @@ describe("histogram options", () => {
       marks: [histogram(table({ v: [1, 1, 3] }), { y: "v", bins: [0, 2, 4] })],
       x: { type: "log", domain: [10, 0.1] },
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const rect = rectangles(scene)[0]!.rects;
     expect(rect[0]).toBeCloseTo(x.map(2), 4);
     expect(rect[0]! + rect[2]!).toBeCloseTo(x.map(0.1), 4);
@@ -506,7 +507,7 @@ describe("histogram options", () => {
     expect([...a!.y]).toEqual([1 / 3, 1, 0, Number.NaN]);
     expect([...b!.y0!]).toEqual([1 / 3, 1, 0, Number.NaN]);
     expect([...b!.y]).toEqual([1, 1, 1, Number.NaN]);
-    expect(model.yScale()!.domain).toEqual([0, 1]);
+    expect(yScale(model)!.domain).toEqual([0, 1]);
     // An empty bin draws nothing; a series' empty share neither.
     expect(rectangles(scene).map((m) => m.count)).toEqual([2, 2]);
     expect(positionOf(model, a!.key, 0)!.points[0]!.text).toBe("0 – 1: 0.333 share (1 raw)");
@@ -523,8 +524,8 @@ describe("histogram options", () => {
     const points = (line: AreaGeometry["upper"]) =>
       Array.from({ length: line.count }, (_, i) => [line.coords[i * 2]!, line.coords[i * 2 + 1]!]);
     const step = build({ marks: [histogram(data, { x: "v", bins, element: "step" })] });
-    const x = step.model.xScale()!;
-    const y = step.model.yScale()!;
+    const x = xScale(step.model)!;
+    const y = yScale(step.model)!;
     const [single] = areas(step.scene);
     expect(points(single!.upper)).toEqual(
       [0, 1, 1, 2, 2, 3].map((edge, i) => [
@@ -539,7 +540,7 @@ describe("histogram options", () => {
       marks: [histogram(data, { x: "v", bins, series: "g", stack: true, element: "poly" })],
     });
     const [, top] = areas(stacked.scene);
-    const sy = stacked.model.yScale()!;
+    const sy = yScale(stacked.model)!;
     expect(points(top!.upper).map(([, py]) => py)).toEqual(
       [1, 2, 1].map((v) => expect.closeTo(sy.map(v), 3)),
     );
@@ -552,8 +553,8 @@ describe("histogram options", () => {
     expect(areas(overlaid.scene).map((m) => m.fillOpacity)).toEqual([0.25, 0.25]);
     // Horizontal steps run along y, their measures along x.
     const horizontal = build({ marks: [histogram(data, { y: "v", bins, element: "step" })] });
-    const hx = horizontal.model.xScale()!;
-    const hy = horizontal.model.yScale()!;
+    const hx = xScale(horizontal.model)!;
+    const hy = yScale(horizontal.model)!;
     expect(points(areas(horizontal.scene)[0]!.upper)[0]).toEqual([
       expect.closeTo(hx.map(1), 3),
       expect.closeTo(hy.map(0), 3),

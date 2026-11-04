@@ -405,7 +405,7 @@ listed in the schema's own description too:
 - Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are "#rgb" or "#rrggbb" colors.
 - Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads (["field", name], numbers for "+").
 - A scale of scales named other than x, y, or yRight gives its type.
-- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, numbering systems) are what its Intl takes.
+- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.
 - Number patterns (",.2f") and time intervals ("6 hours") are written as herceg reads them; a break's dates ("YYYY-MM-DD") are days of the calendar, "24:00" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).
 - Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.
 - Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.

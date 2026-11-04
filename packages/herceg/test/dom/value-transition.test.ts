@@ -91,7 +91,7 @@ function chart(config: Partial<ChartConfig> & Pick<ChartConfig, "marks">) {
   const model = new ChartModel(
     { locale: "en-US", animation: VALUES, ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(600, 300, 1);
   return model;
@@ -1485,7 +1485,7 @@ describe("axes moving with values", () => {
         ],
       },
       undefined,
-      guideCompiler(GUIDE_KIT),
+      [guideCompiler(GUIDE_KIT)],
     );
     model.setSize(600, 300, 1);
     expect(change(model, () => data.set("y", 2, 45)).tween).toBeUndefined();

@@ -16,6 +16,7 @@ import { panels } from "../../src/model/panels.ts";
 import type { PointGeometry, RectGeometry, Scene, SegmentGeometry } from "../../src/scene/scene.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import { positionOf } from "../helpers/keyboard.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -65,7 +66,7 @@ describe("dodge", () => {
     }
     // Inspection reports each point where it is drawn, and picks it there.
     const [first] = xs(points[2]!);
-    const y = model.yScale()!.map(4);
+    const y = yScale(model)!.map(4);
     const found = model.inspect(first!, y, "nearest")!;
     expect(found.points.map(({ label, value }) => [label, value])).toEqual([["x", 4]]);
     expect(found.points[0]!.px).toBeCloseTo(first!, 3);
@@ -158,7 +159,7 @@ describe("jitter", () => {
     });
     const scene = model.scene(estimateText);
     const [points] = of<PointGeometry>(scene, "point");
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const band = Math.abs(x.bandwidth!);
     const offsets = xs(points!).map((px, i) => px - x.map(i % 2 ? 1 : 0));
     // Rows are drawn in order: row i at its band's center plus its jitter.
@@ -200,16 +201,16 @@ describe("jitter", () => {
       const lo = Math.min(
         ...Array.from({ length: bars[s]!.count }, (_, i) => bars[s]!.rects[i * 4]!),
       );
-      const share = Math.abs(model.xScale()!.bandwidth!) / 2;
+      const share = Math.abs(xScale(model)!.bandwidth!) / 2;
       for (const px of xs(p)) {
         const band = px < 300 ? 0 : 1;
-        const center = model.xScale()!.map(band) - share / 2 + s * share;
+        const center = xScale(model)!.map(band) - share / 2 + s * share;
         expect(Math.abs(px - center)).toBeLessThanOrEqual(share / 2 + 1e-3);
       }
       expect(lo).toBeGreaterThan(0);
     });
     const [first] = xs(points[1]!);
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     const at = points[1]!.coords[1]!;
     const found = model.inspect(first!, at, "nearest")!;
     expect(found.points[0]!.px).toBeCloseTo(first!, 3);
@@ -432,7 +433,7 @@ describe("dodge across marks and panels", () => {
     const [a] = of<RectGeometry>(first.scene(estimateText), "rect");
     const [left, top, width] = [a!.rects[0]!, a!.rects[1]!, a!.rects[2]!];
     // A point a pixel and a half from bar a's anchor, which is its share's top center.
-    const model = near(first.xScale()!.invert(left + width / 2 + 1.5));
+    const model = near(xScale(first)!.invert(left + width / 2 + 1.5));
     model.scene(estimateText);
     const found = model.inspect(left + width / 2, top, "nearest")!;
     expect(found.points[0]!.label).toBe("a");

@@ -171,7 +171,9 @@ export function followingLabels(
       lineRatio: style?.lineHeight ?? frame.theme.roles.text.lineHeight,
     };
     const time = drawnIn[along === "x" ? "y" : "x"].type === "time";
-    const text = content(anchor.row, s.label, anchor.value, time);
+    // A band's edges are its two fields'.
+    const field = s.range ? source.identity?.values[following.edge === "lower" ? 0 : 1] : s.field;
+    const text = content(anchor.row, s.label, anchor.value, time, field);
     if (!text) continue;
     labels.push({
       key: `${s.key}|${at}`,
@@ -186,7 +188,7 @@ export function followingLabels(
         visible: true,
       },
       text,
-      parts: content.styled?.(anchor.row, s.label, anchor.value, time, paint, frame),
+      parts: content.styled?.(anchor.row, s.label, anchor.value, time, paint, frame, field),
       paint,
       place: { outside: place?.outside, reserve: place?.reserve, offset: place?.offset },
       halo: kit.textHalo({ ...paint, halo: style?.halo ?? following.halo ?? "auto" }, under),

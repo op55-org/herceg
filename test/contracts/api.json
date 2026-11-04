@@ -123,8 +123,7 @@
       "without": {
         "version": "The spec format's version, which specs carry and charts made in TypeScript do not need.",
         "data": "A spec's named tables; TypeScript's marks take their tables themselves.",
-        "layout": "TypeScript's panels (herceg/layout's panels()) carry the layout with the panels.",
-        "fields": "Charts do not read field displays yet; specs check them (docs/guide/fields.md)."
+        "layout": "TypeScript's panels (herceg/layout's panels()) carry the layout with the panels."
       },
       "only": {
         "fonts": "Fonts the browser loads for Canvas text and exports, by URL: not part of a portable spec.",
@@ -176,8 +175,7 @@
     "chart python": {
       "without": {
         "version": "Written by to_spec(); a chart made in Python does not need it.",
-        "marks": "Python adds marks with the chart's methods (chart.line(...)).",
-        "fields": "Charts do not read field displays yet; specs check them (docs/guide/fields.md)."
+        "marks": "Python adds marks with the chart's methods (chart.line(...))."
       },
       "spread": {
         "interaction": {
@@ -263,6 +261,9 @@
         "scope": "Python's one hg.AxisOptions serves every axis; z refuses the chart's 2D axes' (`Chart z scope: only the chart's x, y, and y_right take scope; move it there`).",
         "repeat": "As scope.",
         "style": "Python's one hg.AxisOptions serves every axis; z refuses style (`Chart z style: a 3D chart's axes take the theme's styles; drop style`)."
+      },
+      "untyped": {
+        "title": "Python's one hg.AxisOptions serves every axis; z refuses a title of parts (`Chart z title: a panel's own axis title and a 3D chart's z title are text; give text, or the title of parts on the chart's axis`), as the spec's validator does."
       }
     },
     "chart update z": {
@@ -272,6 +273,9 @@
         "scope": "As chart python z's.",
         "repeat": "As chart python z's.",
         "style": "As chart python z's."
+      },
+      "untyped": {
+        "title": "As chart python z's."
       }
     },
     "panel python": {
@@ -905,14 +909,6 @@
         "bar": "As text.",
         "tooltip": "As text.",
         "crosshair": "As text."
-      }
-    },
-    "settings AxisSpec hg.AxisOptions": {
-      "only": {
-        "breaks": "Python's one hg.AxisOptions serves every axis; a panel's refuses the chart's x's (`Panel x seams: only the chart's x axis takes seams; drop them`).",
-        "seams": "As breaks.",
-        "scope": "Python's one hg.AxisOptions serves every axis; a panel's refuses the chart's (`Panel x scope: only the chart's x, y, and y_right take scope; move it there`).",
-        "repeat": "As scope."
       }
     },
     "settings MarkTooltipSpec hg.Tooltip": {
@@ -1551,6 +1547,175 @@
       "untyped": {
         "item": "Python's hg.ItemAnchor takes the item's names as text, or hg.col(column) for the spec's `{ field }`.",
         "offset": "Python's hg.ItemAnchor takes its offset as (right, down) pixels, where the spec writes `{ x, y }`."
+      }
+    },
+    "settings PanelAxisSpec hg.AxisOptions": {
+      "only": {
+        "breaks": "Python's one hg.AxisOptions serves every axis; a panel's refuses the chart's x's (`Panel x seams: only the chart's x axis takes seams; drop them`).",
+        "seams": "As breaks.",
+        "scope": "Python's one hg.AxisOptions serves every axis; a panel's refuses the chart's (`Panel x scope: only the chart's x, y, and y_right take scope; move it there`).",
+        "repeat": "As scope."
+      },
+      "untyped": {
+        "title": "Python's one hg.AxisOptions serves every axis; a panel's refuses a title of parts (`Panel x title: a panel's own axis title and a 3D chart's z title are text; give text, or the title of parts on the chart's axis`), as the spec's validator does."
+      }
+    },
+    "settings PanelAxisSpec AxisOptions": {
+      "untyped": {
+        "title": "TypeScript's panels() take the chart's AxisOptions; a panel's refuses a title of parts (`chart panels[0].x.title: a subplot's own axis title is text; give text, or the title of parts on the chart's x`)."
+      }
+    },
+    "mark line python label": {
+      "only": {
+        "value": "Python's one hg.LabelPart serves labels' content, series' names, and axes' titles; a name refuses value (`line label[0]: a series' name has no value; use hg.LabelPart(series=True), (field=...), or (label=...)`), as the spec's validator does.",
+        "format": "Python's one hg.LabelPart; a name refuses format and style (`line label[0].format: a name is written in the legend's and tooltip's look; drop format`), as the spec's validator does.",
+        "style": "As format."
+      }
+    },
+    "mark area python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark bar python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark point python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark histogram python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark boxplot python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark boxen python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark violin python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark rug python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "mark errorbar python label": {
+      "only": {
+        "value": "As mark line python label's.",
+        "format": "As mark line python label's.",
+        "style": "As mark line python label's."
+      }
+    },
+    "chart python x title": {
+      "only": {
+        "field": "Python's one hg.LabelPart serves labels' content, series' names, and axes' titles; a title takes text and (label=...) (`AxisOptions title[0]: an axis' title names columns by their labels; give text, or hg.LabelPart(label=...)`), as the spec's validator does.",
+        "series": "As field.",
+        "value": "As field.",
+        "format": "As field.",
+        "style": "As field."
+      }
+    },
+    "chart python y title": {
+      "only": {
+        "field": "As chart python x title's.",
+        "series": "As chart python x title's.",
+        "value": "As chart python x title's.",
+        "format": "As chart python x title's.",
+        "style": "As chart python x title's."
+      }
+    },
+    "chart update x title": {
+      "only": {
+        "field": "As chart python x title's.",
+        "series": "As chart python x title's.",
+        "value": "As chart python x title's.",
+        "format": "As chart python x title's.",
+        "style": "As chart python x title's."
+      }
+    },
+    "chart update y title": {
+      "only": {
+        "field": "As chart python x title's.",
+        "series": "As chart python x title's.",
+        "value": "As chart python x title's.",
+        "format": "As chart python x title's.",
+        "style": "As chart python x title's."
+      }
+    },
+    "chart python guides title": {
+      "only": {
+        "field": "Python's one hg.LabelPart serves labels' content, series' names, and axes' titles; a guide's axis title takes text and (label=...) (`axis title[0]: an axis' title names columns by their labels; give text, or hg.LabelPart(label=...)`), as the spec's validator does.",
+        "series": "As field.",
+        "value": "As field.",
+        "format": "As field."
+      }
+    },
+    "chart update guides title": {
+      "only": {
+        "field": "As chart python guides title's.",
+        "series": "As chart python guides title's.",
+        "value": "As chart python guides title's.",
+        "format": "As chart python guides title's."
+      }
+    },
+    "mark treemap python labels content": {
+      "choices": {
+        "label": {
+          "takes": ["*"],
+          "reason": "Python's one hg.LabelPart serves every label's content; a tree's refuses label (`TreemapLabels content[0]: tree labels write their items' values, not columns' labels; give text, a column, or the value`), as the spec's types do."
+        }
+      }
+    },
+    "mark sunburst python labels content": {
+      "choices": {
+        "label": {
+          "takes": ["*"],
+          "reason": "As mark treemap python labels content's (`SunburstLabels content[0]: ...`)."
+        }
+      }
+    },
+    "mark radar helper options": {
+      "without": {
+        "fields": "hg.radar's fields are its value columns (fields=[\"speed\", \"power\"]), as the radar mark's are; field displays go to hg.Chart(fields=...)."
+      }
+    },
+    "chart python fields": {
+      "without": {
+        "link": "No surface draws a field's link yet; hg.FieldDisplay takes link when one does."
+      }
+    },
+    "chart update fields": {
+      "without": {
+        "link": "As chart python fields'."
       }
     }
   }

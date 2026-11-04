@@ -11,6 +11,7 @@ import { renderToSVG } from "../../src/render/static.ts";
 import { SequentialScale } from "../../src/scale/color.ts";
 import type { RasterGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 const GRAY = ["#000000", "#ffffff"];
 
@@ -299,8 +300,8 @@ describe("reduced heatmaps", () => {
     const cellValue = (c: number, r: number) => (c === 1 ? Number.NaN : c * 10 + r);
     const { model, raster } = reduced(grid(7, 5, cellValue), 3, 2);
     expect(raster.columns).toBe(3);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     expect(model.inspect(x.map(2), y.map(3))!.points[0]).toMatchObject({ label: "r3", value: 23 });
     expect(model.inspect(x.map(0), y.map(4))!.points[0]!.value).toBe(4);
     // Cell (1, 0) has no value, though its pixel shows its neighbors'.
@@ -334,8 +335,8 @@ describe("reduced heatmaps", () => {
     expect(raster.columns).toBeLessThanOrEqual(Math.floor(plot.width * 2));
     expect(raster.rows).toBeLessThanOrEqual(Math.floor(plot.height * 2));
     expect(raster.pixels.length).toBe(raster.columns * raster.rows * 4);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     // The last row in each picked cell is the one reported.
     const last = new Map<number, number>();
     for (let row = 0; row < count; row++) last.set(r[row]! * side + c[row]!, row);

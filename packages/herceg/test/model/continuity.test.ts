@@ -15,12 +15,13 @@ import { panels } from "../../src/model/panels.ts";
 import { staticCompilers } from "../../src/render/compilers.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { AreaGeometry, LineGeometry } from "../../src/scene/scene.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(width, 300, 1);
   return { model, scene: model.scene(estimateText) };
@@ -53,7 +54,7 @@ describe("continuity", () => {
     const path = (scene.panels[0]!.marks[0] as LineGeometry).path;
     expect(path.starts.length).toBe(3);
     // Each day's line ends at its last hour and the next starts at midnight.
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     expect(runs(path).map((run) => [x.invert(run[0]![0]), x.invert(run.at(-1)![0])])).toEqual(
       [0, 1, 2].map((d) => [expect.closeTo(d * DAY, -3), expect.closeTo(d * DAY + 23 * HOUR, -3)]),
     );
@@ -94,7 +95,7 @@ describe("continuity", () => {
     const days = Math.ceil((n * 60_000) / DAY);
     expect(path.starts.length).toBe(days);
     expect(path.count).toBeLessThan(n / 20);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     for (const run of runs(path)) {
       const day = Math.floor(x.invert(run[0]![0]) / DAY + 1e-6);
       for (const [px] of run) expect(Math.floor(x.invert(px) / DAY + 1e-6)).toBe(day);
@@ -107,8 +108,8 @@ describe("continuity", () => {
       marks: [line(t, { x: "t", y: "v", continuity: { defined: col("ok").eq(1) } })],
     });
     expect((scene.panels[0]!.marks[0] as LineGeometry).path.starts).toEqual([0, 2]);
-    expect(model.yScale()!.domain[1]).toBeLessThan(50);
-    const x = model.xScale()!;
+    expect(yScale(model)!.domain[1]).toBeLessThan(50);
+    const x = xScale(model)!;
     // Inside the gap the rejected row leaves, the line reads nothing; beside it, its own points.
     const y = scene.panels[0]!.plot.y + 5;
     expect(model.inspect(x.map(2), y)).toBeUndefined();
@@ -146,8 +147,8 @@ describe("where", () => {
       marks: [line(runs3, { x: "t", y: "e", where: col("e").lt(col("limit")) })],
     });
     const path = (scene.panels[0]!.marks[0] as LineGeometry).path;
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const [first, second] = runs(path);
     // The first run ends where e reaches 1: halfway from t = 1 to 2.
     expect(x.invert(first!.at(-1)![0])).toBeCloseTo(1.5, 6);
@@ -162,7 +163,7 @@ describe("where", () => {
       const { model, scene } = build({
         marks: [line(runs3, { x: "t", y: "e", curve, where: col("e").lt(col("limit")) })],
       });
-      const x = model.xScale()!;
+      const x = xScale(model)!;
       return runs((scene.panels[0]!.marks[0] as LineGeometry).path).map((run) => [
         x.invert(run[0]![0]),
         x.invert(run.at(-1)![0]),
@@ -195,7 +196,7 @@ describe("where", () => {
       marks: [line(data, { x: "t", y: "e", curve: "step", where: col("e").lt(col("limit")) })],
     });
     const [first] = runs((scene.panels[0]!.marks[0] as LineGeometry).path);
-    expect(model.xScale()!.invert(first!.at(-1)![0])).toBeCloseTo(7 * HOUR, -3);
+    expect(xScale(model)!.invert(first!.at(-1)![0])).toBeCloseTo(7 * HOUR, -3);
   });
 
   it("meet a condition at a row a break hides at the break's seam", () => {
@@ -219,8 +220,8 @@ describe("where", () => {
           const [run] = runs(g.kind === "line" ? g.path : g.upper);
           expect(run!.length, `${g.kind} ${field} ${op}`).toBe(op === "ge" ? 3 : 2);
           const [x, y] = op === "ge" ? run![0]! : run!.at(-1)!;
-          expect(x).toBeCloseTo(model.xScale()!.map(6), 3);
-          expect(y).toBeCloseTo(model.yScale()!.map(4), 3);
+          expect(x).toBeCloseTo(xScale(model)!.map(6), 3);
+          expect(y).toBeCloseTo(yScale(model)!.map(4), 3);
         }
       }
   });
@@ -245,8 +246,8 @@ describe("where", () => {
         });
         const g = scene.panels[0]!.marks[0] as LineGeometry | AreaGeometry;
         const [x, y] = runs(g.kind === "line" ? g.path : g.upper)[0]![0]!;
-        const [x0, x1] = [model.xScale()!.map(0), model.xScale()!.map(10)];
-        const [y0, y1] = [model.yScale()!.map(0), model.yScale()!.map(10)];
+        const [x0, x1] = [xScale(model)!.map(0), xScale(model)!.map(10)];
+        const [y0, y1] = [yScale(model)!.map(0), yScale(model)!.map(10)];
         expect(x).toBeCloseTo(x0 + along * (x1 - x0), 3);
         expect(y).toBeCloseTo(y0 + along * (y1 - y0), 3);
       }
@@ -315,7 +316,7 @@ describe("where", () => {
     expect(drawnRuns()).toBe(1);
     stream.append({ t: [5, 6], v: [5, 5] });
     expect(drawnRuns()).toBe(1);
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(5);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(5);
   });
 
   it("keep the part of a run in view in the y domain, up to its crossing", () => {
@@ -325,7 +326,7 @@ describe("where", () => {
       x: { domain: [2, 3] },
       marks: [line(fall, { x: "x", y: "y", where: col("y").gt(0) })],
     });
-    const [lo, hi] = model.yScale()!.domain;
+    const [lo, hi] = yScale(model)!.domain;
     expect(lo).toBeLessThanOrEqual(4);
     expect(hi).toBeGreaterThanOrEqual(6);
     expect(hi).toBeLessThan(10);
@@ -347,7 +348,7 @@ describe("where", () => {
     expect(north!.count).toBe(3);
     // In S, Mar (row 4, -5) is left out: Feb and Apr each run to where v crosses 0.
     expect(south!.starts).toEqual([0, 2]);
-    const zero = model.yScale()!.map(0);
+    const zero = yScale(model)!.map(0);
     for (const run of runs(south!))
       expect(run.at(-1)![1] <= zero + 0.5 && run[0]![1] <= zero + 0.5).toBe(true);
   });
@@ -358,7 +359,7 @@ describe("where", () => {
       x: { domain: [2, 3] },
       marks: [line(fall, { x: "x", y: "y", curve: "step-after", continuity: { maxGap: 100 } })],
     });
-    const [lo, hi] = model.yScale()!.domain;
+    const [lo, hi] = yScale(model)!.domain;
     expect(hi).toBeGreaterThanOrEqual(10);
     expect(lo).toBeGreaterThan(5);
   });
@@ -367,7 +368,7 @@ describe("where", () => {
     // A streaming window's domain stays the window's, whatever its last rows' values.
     const data = table({ t: [0, 1, 2, 3], e: [0.5, 0.5, 2, 2] });
     const { model } = build({ marks: [line(data, { x: "t", y: "e", where: col("e").lt(1) })] });
-    expect(model.xScale()!.domain).toEqual([0, 3]);
+    expect(xScale(model)!.domain).toEqual([0, 3]);
   });
 
   it("leave outliers it rejects out of the values' domain along y", () => {
@@ -383,7 +384,7 @@ describe("where", () => {
       ],
     });
     // The outlier does not count; the line's crossings at 50 do.
-    expect(model.xScale()!.domain[1]).toBe(50);
+    expect(xScale(model)!.domain[1]).toBe(50);
   });
 
   it("keep crossings in the values' domain: along y, and of unsorted lines", () => {
@@ -395,13 +396,13 @@ describe("where", () => {
       area(casts, { x: "temperature", y: "depth", orient: "y", where: cold }),
     ]) {
       const { model } = build({ marks: [mark] });
-      expect(model.xScale()!.domain[1]).toBeGreaterThanOrEqual(50);
+      expect(xScale(model)!.domain[1]).toBeGreaterThanOrEqual(50);
     }
     const unsorted = table({ x: [0, 2, 1, 3], v: [10, 30, 10, 30] });
     const { model } = build({
       marks: [line(unsorted, { x: "x", y: "v", where: col("v").lt(20) })],
     });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(20);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(20);
   });
 
   it("meet conditions where lines on log scales are drawn", () => {
@@ -412,7 +413,7 @@ describe("where", () => {
       marks: [line(decades, { x: "x", y: "e", curve: "step", where: col("e").lt(5) })],
     });
     const [run] = runs((step.scene.panels[0]!.marks[0] as LineGeometry).path);
-    expect(step.model.xScale()!.invert(run!.at(-1)![0])).toBeCloseTo(10, 6);
+    expect(xScale(step.model)!.invert(run!.at(-1)![0])).toBeCloseTo(10, 6);
     // A straight line from 1 to 100 on a log y meets 10 half way.
     const rising = table({ x: [0, 1], e: [1, 100] });
     const straight = build({
@@ -421,8 +422,8 @@ describe("where", () => {
     });
     const [first] = runs((straight.scene.panels[0]!.marks[0] as LineGeometry).path);
     const [px, py] = first!.at(-1)!;
-    expect(straight.model.xScale()!.invert(px)).toBeCloseTo(0.5, 6);
-    expect(straight.model.yScale()!.invert(py)).toBeCloseTo(10, 4);
+    expect(xScale(straight.model)!.invert(px)).toBeCloseTo(0.5, 6);
+    expect(yScale(straight.model)!.invert(py)).toBeCloseTo(10, 4);
     // A condition on the positions meets them as x draws them, whatever y's scale.
     const early = table({ x: [1, 100], e: [1, 100] });
     const before = build({
@@ -430,15 +431,15 @@ describe("where", () => {
       marks: [line(early, { x: "x", y: "e", where: col("x").lt(10) })],
     });
     const [ended] = runs((before.scene.panels[0]!.marks[0] as LineGeometry).path);
-    expect(before.model.xScale()!.invert(ended!.at(-1)![0])).toBeCloseTo(10, 4);
+    expect(xScale(before.model)!.invert(ended!.at(-1)![0])).toBeCloseTo(10, 4);
     // On a log x, half way along is 10, where the line is at 50.5; y's domain holds it.
     const along = build({
       x: { type: "log" },
       marks: [line(early, { x: "x", y: "e", where: col("x").lt(10) })],
     });
     const [half] = runs((along.scene.panels[0]!.marks[0] as LineGeometry).path);
-    expect(along.model.yScale()!.invert(half!.at(-1)![1])).toBeCloseTo(50.5, 4);
-    expect(along.model.yScale()!.domain[1]).toBeGreaterThanOrEqual(50.5);
+    expect(yScale(along.model)!.invert(half!.at(-1)![1])).toBeCloseTo(50.5, 4);
+    expect(yScale(along.model)!.domain[1]).toBeGreaterThanOrEqual(50.5);
     // So do marks in every panel, on panels' own log axes.
     const repeated = build({
       panels: panels([
@@ -447,14 +448,14 @@ describe("where", () => {
       ]),
       marks: [line(early, { x: "x", y: "e", where: col("x").lt(10), panel: "*" })],
     });
-    expect(repeated.model.yScale()!.domain[1]).toBeGreaterThanOrEqual(50.5);
+    expect(yScale(repeated.model)!.domain[1]).toBeGreaterThanOrEqual(50.5);
     // In a view on log axes, values between observations are between their logs.
     const zoomed = build({
       x: { type: "log", domain: [2, 3] },
       y: { type: "log", nice: false },
       marks: [line(early, { x: "x", y: "e", continuity: { maxGap: 1000 } })],
     });
-    const [lo, hi] = zoomed.model.yScale()!.domain;
+    const [lo, hi] = yScale(zoomed.model)!.domain;
     expect(lo).toBeCloseTo(2, 6);
     expect(hi).toBeCloseTo(3, 6);
   });

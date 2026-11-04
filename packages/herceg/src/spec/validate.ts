@@ -42,11 +42,13 @@ import type {
   MarkAnchorSpec,
   MarkerStyle,
   MarkStyleSpec,
+  NamePart,
   OrdinalScaleSpec,
   PartStyle,
   SeriesStyle,
   StackSpec,
   StyleMapSpec,
+  TitlePart,
 } from "./encoding.ts";
 import { ChartError, type ChartErrorCode } from "./errors.ts";
 import type {
@@ -88,6 +90,7 @@ import {
   type LegendTarget,
   type MarkSpec,
   type NavigatorSpec,
+  type PanelAxisSpec,
   type PanelInteractionSpec,
   type PanelLayoutSpec,
   type PanelSpec,
@@ -809,7 +812,7 @@ function axisChecks(spec: Record<string, unknown>): ChecksOf<AxisSpec> {
     },
     nice: boolean,
     zero: boolean,
-    title: string,
+    title: axisTitle,
     grid,
     padding,
     ticks: ticks(spec.type),
@@ -1174,7 +1177,16 @@ function anyAxis(v: unknown, path: string, chart: boolean): void {
       fail(`${path}.scope`, "scope on the chart's x, y, or yRight only", spec.scope);
     if (spec.repeat !== undefined)
       fail(`${path}.repeat`, "repeat on the chart's x, y, or yRight only", spec.repeat);
-    properties(spec, path, axisChecks(spec));
+    // Titles of parts are the chart's axes' and guides'.
+    if (Array.isArray(spec.title))
+      throw refusal(
+        `${path}.title`,
+        "a panel's own axis title and a 3D chart's z title are text; give text, or the title of parts on the chart's axis",
+      );
+    properties(spec, path, {
+      ...axisChecks(spec),
+      title: string,
+    } satisfies ChecksOf<PanelAxisSpec>);
   }
 }
 
@@ -1648,7 +1660,7 @@ function axisGuide(guide: Record<string, unknown>, path: string, type: unknown):
           side,
         );
     },
-    title: string,
+    title: axisTitle,
     ticks: ticks(type),
     format: axisFormat(type),
     tick: tickMark,
@@ -1987,12 +1999,18 @@ function treeLabels(placement: Record<string, Check>): Check {
     if (l.overlap !== undefined)
       throw refusal(`${path}.overlap`, "names show where they fit; drop overlap");
     properties(l, path, { ...placement, content: labelContent, style: textStyle });
-    for (const [i, part] of (Array.isArray(l.content) ? l.content : []).entries())
+    for (const [i, part] of (Array.isArray(l.content) ? l.content : []).entries()) {
       if (isRecord(part) && "series" in part)
         throw refusal(
           `${path}.content[${i}]`,
           "names a series, and tree items are none; give text, a field, or the value",
         );
+      if (isRecord(part) && "label" in part)
+        throw refusal(
+          `${path}.content[${i}]`,
+          "tree items' names are their fields' values; give text, a field, or the value",
+        );
+    }
   };
 }
 
@@ -2199,13 +2217,13 @@ const PART_BLOCK = [
   "font",
 ];
 
-/** A part of a label's text: literal text, a field's value, the series' name, or the value. */
+/** A part of a label's text: literal text, a field's value, the series' name, the value, or a field's label. */
 const labelPart: Check = (v, path) => {
   if (typeof v === "string") return;
   object(v, path);
   const part = v as Record<string, unknown>;
-  if (["field", "series", "value"].filter((key) => key in part).length !== 1)
-    fail(path, "text, { field }, { series: true }, or { value: true }", v);
+  if (["field", "series", "value", "label"].filter((key) => key in part).length !== 1)
+    fail(path, "text, { field }, { series: true }, { value: true }, or { label }", v);
   const yes: Check = (t, at) => {
     if (t !== true) fail(at, "true", t);
   };
@@ -2213,11 +2231,67 @@ const labelPart: Check = (v, path) => {
     field,
     series: yes,
     value: yes,
+    label: field,
     format: axisFormat(undefined),
     style: partStyle,
   } satisfies ChecksOf<Exclude<LabelPart, string>>);
-  if ("series" in part && "format" in part)
-    fail(`${path}.format`, "no format: a series' name is written as it is", part.format);
+  if (("series" in part || "label" in part) && "format" in part)
+    fail(
+      `${path}.format`,
+      `no format: ${"series" in part ? "a series' name" : "a field's label"} is written as it is`,
+      part.format,
+    );
+};
+
+/**
+ * A series mark's name: text, or parts: literal text, `{ series: true }`,
+ * a field's value (`{ field }`), or a field's label (`{ label }`). Which
+ * fields a name reads is checked where charts draw it.
+ */
+const seriesName: Check = (v, path) => {
+  if (typeof v === "string") return;
+  if (!Array.isArray(v) || v.length === 0)
+    fail(path, 'text, or a list of parts, such as [{ series: true }, " p99"]', v);
+  for (const [i, part] of v.entries()) {
+    const at = `${path}[${i}]`;
+    if (typeof part === "string") continue;
+    object(part, at);
+    const keys = Object.keys(part as object);
+    if ("value" in (part as object))
+      throw refusal(
+        at,
+        "a series' name has no value; use { series: true }, { field }, or { label }",
+      );
+    for (const look of ["style", "format"])
+      if (keys.includes(look))
+        throw refusal(
+          `${at}.${look}`,
+          `a name is written in the legend's and tooltip's look; drop ${look}`,
+        );
+    if (keys.length !== 1 || !["series", "field", "label"].includes(keys[0]!))
+      fail(at, "text, { series: true }, { field }, or { label }", part);
+    properties(part as Record<string, unknown>, at, {
+      series: (t, p) => {
+        if (t !== true) fail(p, "true", t);
+      },
+      field,
+      label: field,
+    } satisfies ChecksOf<Exclude<NamePart, string>>);
+  }
+};
+
+/** An axis' title: text, or text and fields' labels (`{ label }`). */
+const axisTitle: Check = (v, path) => {
+  if (typeof v === "string") return;
+  if (!Array.isArray(v) || v.length === 0)
+    fail(path, 'text, or a list of parts, such as [{ label: "p99" }, " (ms)"]', v);
+  for (const [i, part] of v.entries()) {
+    if (typeof part === "string") continue;
+    object(part, `${path}[${i}]`);
+    checkProperties(part as Record<string, unknown>, `${path}[${i}]`, ["label"], {
+      label: field,
+    } satisfies ChecksOf<Exclude<TitlePart, string>>);
+  }
 };
 
 /** A label's text made of parts, at least one. */
@@ -2589,7 +2663,7 @@ const MARKS: MarkChecks = {
       opacity: fraction,
       strokeOpacity: fraction,
       curve,
-      label: string,
+      label: seriesName,
       labels: seriesLabels(false),
       color: string,
       encode: encodings(MARK_CHANNELS.line!.encode),
@@ -2640,7 +2714,7 @@ const MARKS: MarkChecks = {
       strokeOpacity: fraction,
       opacity: fraction,
       curve,
-      label: string,
+      label: seriesName,
       labels: seriesLabels(true),
       color: string,
       encode: encodings(MARK_CHANNELS.area!.encode),
@@ -2774,7 +2848,7 @@ const MARKS: MarkChecks = {
       color: string,
       encode: encodings(MARK_CHANNELS.bar!.encode),
       style: markStyle(true),
-      label: string,
+      label: seriesName,
       labels: (v, path) => {
         if (typeof v === "boolean") return;
         object(v, path);
@@ -2852,7 +2926,7 @@ const MARKS: MarkChecks = {
       },
       encode: encodings(MARK_CHANNELS.point!.encode),
       sampling: oneOf("none", "pixel"),
-      label: string,
+      label: seriesName,
       dodge: boolean,
       jitter: (v, path) => {
         object(v, path);
@@ -2892,7 +2966,7 @@ const MARKS: MarkChecks = {
       colors: ramp,
       colorDomain: range,
       colorMidpoint: finite,
-      label: string,
+      label: seriesName,
     },
   },
   treemap: {
@@ -3062,7 +3136,7 @@ const MARKS: MarkChecks = {
       series: field,
       fill: string,
       fillOpacity: fraction,
-      label: string,
+      label: seriesName,
     },
   },
   boxen: {
@@ -3086,7 +3160,7 @@ const MARKS: MarkChecks = {
       outliers: boolean,
       fill: string,
       fillOpacity: fraction,
-      label: string,
+      label: seriesName,
     },
   },
   violin: {
@@ -3104,7 +3178,7 @@ const MARKS: MarkChecks = {
       bandwidth: positive,
       fill: string,
       fillOpacity: fraction,
-      label: string,
+      label: seriesName,
     },
   },
   candlestick: {
@@ -3142,7 +3216,7 @@ const MARKS: MarkChecks = {
       side: oneOf("bottom", "top", "left", "right"),
       stroke: string,
       strokeWidth: width,
-      label: string,
+      label: seriesName,
     },
   },
   errorbar: {
@@ -3166,7 +3240,7 @@ const MARKS: MarkChecks = {
       stroke: string,
       strokeWidth: width,
       cap: width,
-      label: string,
+      label: seriesName,
       dodge: boolean,
     },
   },

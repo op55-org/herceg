@@ -500,14 +500,25 @@ export class BoxPlotMark extends DistributionMark<BoxPlotSpec, readonly number[]
     ];
   }
 
-  /** A box's statistics, formatted as its value axis formats values. */
+  /**
+   * A box's statistics, formatted as its value axis formats values, through
+   * the display of the field they summarize, or of a precomputed box's
+   * fields, each its own.
+   */
   pointText(series: Series, row: number, format: AxisFormat): string {
-    const f = this.horizontal ? format.x : format.y;
+    const f = this.valueFormat(series, format);
     const { stats, groups } = this.summaryOf(series);
     const stat = (name: Stat) => stats[name][row]!;
+    const axis = this.horizontal ? format.x : format.y;
+    // A precomputed box's statistics are each a field's own, written as the axis writes them without a display.
+    const own = (name: Stat) => {
+      const field = this.spec.median === undefined ? undefined : this.spec[name];
+      return field === undefined ? f : (series.fields?.of(this.table, field)?.over(axis) ?? axis);
+    };
+    const w = (name: Stat) => own(name)(stat(name));
     const outliers = groups[row]!.length;
     const n = stat("count");
-    return `median ${f(stat("median"))}, quartiles ${f(stat("q1"))} to ${f(stat("q3"))}, whiskers ${f(stat("low"))} to ${f(stat("high"))}${Number.isFinite(n) ? `, ${n} ${n === 1 ? "value" : "values"}` : ""}${outliers ? `, ${outliers} ${outliers === 1 ? "outlier" : "outliers"}` : ""}${this.selectedText(series, row, f)}`;
+    return `median ${w("median")}, quartiles ${w("q1")} to ${w("q3")}, whiskers ${w("low")} to ${w("high")}${Number.isFinite(n) ? `, ${n} ${n === 1 ? "value" : "values"}` : ""}${outliers ? `, ${outliers} ${outliers === 1 ? "outlier" : "outliers"}` : ""}${this.selectedText(series, row, f)}`;
   }
 }
 

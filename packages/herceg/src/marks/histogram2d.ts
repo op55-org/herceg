@@ -225,7 +225,7 @@ export class Histogram2DMark implements Mark<Frozen<Histogram2DSpec>> {
   readonly view: RowView | undefined;
   readonly tooltip = "cell";
   readonly legendScales = ["ramp"] as const;
-  readonly summarizes = true;
+  readonly summarizes = "counts";
   readonly bandPadding = 0;
   /** Automatic y domains end at the bins' edges rather than at round values. */
   readonly tight = true;

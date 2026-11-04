@@ -23,6 +23,7 @@ import type {
   TextGeometry,
 } from "../../src/scene/scene.ts";
 import { LIGHT } from "../../src/theme.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -54,17 +55,17 @@ describe("rule", () => {
       ],
     });
     // The x domain stretches to include every event.
-    expect(model.xScale()!.domain[1]).toBeGreaterThanOrEqual(start + 30 * hour);
+    expect(xScale(model)!.domain[1]).toBeGreaterThanOrEqual(start + 30 * hour);
     const rules = of(scene, "rule") as RuleGeometry[];
     expect(rules.map((r) => r.label)).toEqual(["v1", "v2", "v3"]);
-    expect(rules[0]!.x1).toBeCloseTo(model.xScale()!.map(start + 2 * hour), 3);
+    expect(rules[0]!.x1).toBeCloseTo(xScale(model)!.map(start + 2 * hour), 3);
     expect(rules[0]!.y1).toBe(scene.panels[0]!.plot.y);
   });
 
   it("leave the domains to the data unless they count toward them", () => {
     const late = rule({ x: start + 100 * hour, label: "late" });
     const { model, scene } = build({ marks: [line(metrics, { x: "time", y: "value" }), late] });
-    expect(model.xScale()!.domain[1]).toBeLessThan(start + 30 * hour);
+    expect(xScale(model)!.domain[1]).toBeLessThan(start + 30 * hour);
     expect(of(scene, "rule")).toHaveLength(0);
     const counted = build({
       marks: [
@@ -72,7 +73,7 @@ describe("rule", () => {
         rule({ x: start + 100 * hour, label: "late", contributeDomain: true }),
       ],
     });
-    expect(counted.model.xScale()!.domain[1]).toBeGreaterThanOrEqual(start + 100 * hour);
+    expect(xScale(counted.model)!.domain[1]).toBeGreaterThanOrEqual(start + 100 * hour);
   });
 
   it("formats number text for the chart's locale and takes Date constants", () => {
@@ -121,7 +122,7 @@ describe("region", () => {
     // Regions draw in mark order, so this one is underneath the line.
     expect(scene.panels[0]!.marks[0]!.kind).toBe("rect");
     const shade = scene.panels[0]!.marks[0] as RectGeometry;
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const [rx, ry, rw, rh] = Array.from(shade.rects.subarray(0, 4));
     expect(rx).toBeCloseTo(x.map(start + 2 * hour), 3);
     expect(rx! + rw!).toBeCloseTo(x.map(start + 4 * hour), 3);
@@ -163,7 +164,7 @@ describe("region", () => {
         region({ y1: 200, y2: 300, contributeDomain: true }),
       ],
     });
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(300);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(300);
     const [rx, , rw] = Array.from((of(scene, "rect")[0] as RectGeometry).rects.subarray(0, 4));
     expect([rx, rw]).toEqual([scene.panels[0]!.plot.x, scene.panels[0]!.plot.width]);
   });
@@ -174,7 +175,7 @@ describe("region", () => {
       marks: [region(boxes, { x1: "x1", x2: "x2", y1: "y1", y2: "y2", contributeDomain: true })],
       x: { domain: [0, 2] },
     });
-    expect(model.yScale()!.domain[1]).toBe(10);
+    expect(yScale(model)!.domain[1]).toBe(10);
   });
 
   it("reaches the bottom of a log axis from zero", () => {
@@ -193,7 +194,7 @@ describe("region", () => {
       marks: [line(positive, { x: "x", y: "y" }), region({ y1: 0, y2: 10 })],
       y: { type: "log", domain: [100, 1] },
     });
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     const [, ry, , rh] = Array.from((of(scene, "rect")[0] as RectGeometry).rects.subarray(0, 4));
     expect(Math.min(ry!, ry! + rh!)).toBeCloseTo(Math.min(y.map(1), y.map(10)), 3);
     expect(Math.max(ry!, ry! + rh!)).toBeCloseTo(Math.max(y.map(1), y.map(10)), 3);
@@ -213,7 +214,7 @@ describe("region", () => {
     const { scene, model } = build({
       marks: [bar(sales, { x: "region", y: "v" }), region({ x1: -0.5, x2: 0.5 }), rule({ x: 2 })],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const shade = of(scene, "rect")[1] as RectGeometry;
     expect(shade.rects[0]).toBeCloseTo(x.map(-0.5), 3);
     expect(shade.rects[0]! + shade.rects[2]!).toBeCloseTo(x.map(0.5), 3);
@@ -239,7 +240,7 @@ describe("region", () => {
         region(notes, { x1: "region", x2: { data: "E" } }),
       ],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const band = (category: string) => x.map(["N", "S", "E"].indexOf(category));
     // "W" has no band: those rows are left out.
     const rules = of(scene, "rule") as RuleGeometry[];
@@ -286,8 +287,8 @@ describe("text", () => {
     const [label] = of(scene, "text") as TextGeometry[];
     expect(of(scene, "text")).toHaveLength(1);
     expect(label!.labels).toEqual(["Peak"]);
-    expect(label!.coords[0]).toBeCloseTo(model.xScale()!.map(start + 5 * hour) + 6, 3);
-    expect(label!.coords[1]).toBeCloseTo(model.yScale()!.map(105) - 8, 3);
+    expect(label!.coords[0]).toBeCloseTo(xScale(model)!.map(start + 5 * hour) + 6, 3);
+    expect(label!.coords[1]).toBeCloseTo(yScale(model)!.map(105) - 8, 3);
     expect([label!.anchor, label!.fill]).toEqual(["start", scene.theme.text]);
   });
 
@@ -315,7 +316,7 @@ describe("text", () => {
     });
     setViewport(model, [start, start + 23 * hour]);
     model.scene(estimateText);
-    expect(model.yScale()!.domain[1]).toBeLessThan(1000);
+    expect(yScale(model)!.domain[1]).toBeLessThan(1000);
   });
 
   it("hides or moves labels that would cover earlier ones", () => {
@@ -336,7 +337,7 @@ describe("text", () => {
           }),
         ],
       });
-      return { label: (of(scene, "text") as TextGeometry[])[0]!, y: model.yScale()! };
+      return { label: (of(scene, "text") as TextGeometry[])[0]!, y: yScale(model)! };
     };
     expect(labels().label.labels).toEqual(["first", "second", "third", "apart"]);
     // Hidden: the first label at a point wins, in row order.
@@ -365,8 +366,8 @@ describe("text", () => {
     const [label] = of(scene, "text") as TextGeometry[];
     expect(label!.labels).toEqual(["one"]);
     const { plot } = scene.panels[0]!;
-    expect(label!.coords[0]).toBeLessThan(model.xScale()!.map(10));
-    expect(label!.coords[1]).toBeGreaterThan(model.yScale()!.map(5));
+    expect(label!.coords[0]).toBeLessThan(xScale(model)!.map(10));
+    expect(label!.coords[1]).toBeGreaterThan(yScale(model)!.map(5));
     expect(label!.coords[1]).toBeLessThan(plot.y + plot.height);
   });
 
@@ -421,7 +422,7 @@ describe("text", () => {
         [x0! - room, y0! - room, x1! + room, y1! + room] as const;
       const dot = (name: string) => {
         const i = names.indexOf(name);
-        return [model.xScale()!.map(xs[i]!), model.yScale()!.map(ys[i]!)] as const;
+        return [xScale(model)!.map(xs[i]!), yScale(model)!.map(ys[i]!)] as const;
       };
       const lines = Array.from({ length: leaders!.count }, (_, k) =>
         Array.from(leaders!.coords.subarray(k * 4, k * 4 + 4)),
@@ -530,7 +531,7 @@ describe("text", () => {
     const [label] = of(scene, "text") as TextGeometry[];
     expect(label!.labels).toEqual(["right edge"]);
     // Moved before its point, the label ends a few pixels short of it.
-    const px = model.xScale()!.map(10);
+    const px = xScale(model)!.map(10);
     expect(label!.coords[0]).toBeLessThan(px - 4);
     expect(label!.coords[0]).toBeGreaterThan(px - 12);
     // An empty label before a visible one at the same point takes no room.
@@ -607,7 +608,7 @@ describe("text", () => {
     model.setSize(240, 200, 1);
     const scene = model.scene(measurePdfText);
     const [label] = of(scene, "text") as TextGeometry[];
-    const gap = model.xScale()!.map(6) - model.xScale()!.map(3);
+    const gap = xScale(model)!.map(6) - xScale(model)!.map(3);
     expect(gap).toBeLessThan(measurePdfText("i".repeat(20), "12px Georgia, serif"));
     expect(label!.labels).toHaveLength(1);
   });

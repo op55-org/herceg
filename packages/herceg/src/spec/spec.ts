@@ -9,6 +9,7 @@
 import type { Expression } from "../data/expression.ts";
 import type {
   AreaLabelsSpec,
+  AxisTitleSpec,
   BarLabelsSpec,
   ChannelSpec,
   ContinuitySpec,
@@ -20,6 +21,7 @@ import type {
   LabelTextSpec,
   MarkAnchorSpec,
   MarkStyleSpec,
+  NameSpec,
   RowChannelSpec,
   SeriesLabelsSpec,
   StackSpec,
@@ -108,8 +110,9 @@ export interface ChartSpec extends StateSpec {
   data?: Record<string, DataSpec>;
   /**
    * How fields are named and their values written, by field name or as
-   * rules applied in order (see `FieldDisplaysSpec`). Specs check them;
-   * charts do not read them yet (docs/guide/fields.md).
+   * rules applied in order (see `FieldDisplaysSpec`): axes, legends,
+   * series' names, tooltips, labels, gauges, and the text alternative
+   * write fields through them (docs/guide/fields.md).
    */
   fields?: FieldDisplaysSpec;
   marks: readonly MarkSpec[];
@@ -222,7 +225,7 @@ export interface ChartSpec extends StateSpec {
    * The vertical axis of 3D charts (`point3d`, `line3d`, and `surface` marks), whose
    * `x` and `y` are the floor's. Only for 3D charts.
    */
-  z?: Omit<AxisSpec, "style">;
+  z?: Omit<PanelAxisSpec, "style">;
   /** Where a 3D chart is seen from at first; the pointer and keyboard turn it. Only for 3D charts. */
   camera?: CameraSpec;
   /**
@@ -303,14 +306,14 @@ export interface PanelSpec {
    * its own (`format` replaces the chart's whole). Panels sharing an x
    * scale take their first panel's.
    */
-  x?: AxisSpec;
+  x?: PanelAxisSpec;
   /**
    * The panel's y axis: the chart's `y`, with these settings in place of
    * its own (`format` replaces the chart's whole).
    */
-  y?: AxisSpec;
+  y?: PanelAxisSpec;
   /** The panel's right y axis, for its marks with `axis: "right"`: the chart's `yRight`, with these settings. */
-  yRight?: AxisSpec;
+  yRight?: PanelAxisSpec;
   /**
    * How the panel answers input: the chart's `interaction`, with these
    * settings in place of its own, one by one; `bindings` replaces the
@@ -640,8 +643,8 @@ export interface AxisSpec {
    * @default "auto"
    */
   padding?: ScalePadding;
-  /** Axis title. */
-  title?: string;
+  /** Axis title: text, or text and fields' labels (`[{ label: "p99" }]`). */
+  title?: AxisTitleSpec;
   /**
    * Grid lines across the plot, and where they are drawn among the marks
    * (`{ zIndex }`). Default true for y, and for x when it measures horizontal bars.
@@ -663,6 +666,15 @@ export interface AxisSpec {
   /** How the axis' parts look: its line, ticks, tick labels, title, and grid lines. */
   style?: AxisStyles;
 }
+
+/**
+ * A panel's own axis, or a 3D chart's z axis: an axis whose title is text
+ * (titles of parts are the chart's x, y, and yRight's, and axis guides').
+ */
+export type PanelAxisSpec = Omit<AxisSpec, "title"> & {
+  /** Axis title. */
+  title?: string;
+};
 
 /** The chart's title with where it goes and how it looks. */
 export interface TitleSpec {
@@ -1461,7 +1473,7 @@ export interface LineSpec extends SeriesBase, RowTooltip, RowItems {
   /** How the line joins its points (see `Curve`); "linear" by default. @default "linear" */
   curve?: Curve;
   /** Legend and tooltip name for a single-field line without `series`. */
-  label?: string;
+  label?: NameSpec;
   /**
    * The lines' color: a category field (a line per value, unless `series`
    * says otherwise), or a color. The short form of `encode.color`;
@@ -1526,7 +1538,7 @@ interface AreaStyle extends SeriesBase, RowTooltip, RowItems {
    * @default "linear"
    */
   curve?: Curve;
-  label?: string;
+  label?: NameSpec;
   /** A label following each area's value edge (a band's `edge`). */
   labels?: AreaLabelsSpec;
 }
@@ -1841,7 +1853,7 @@ export interface BarSpec extends SeriesBase, RowTooltip, RowItems {
   encode?: Pick<EncodingsSpec, "color" | "fill" | "stroke" | "strokeWidth" | "opacity">;
   /** Looks by value: by series, or with `field`, by each bar's value. */
   style?: Pick<MarkStyleSpec, "by">;
-  label?: string;
+  label?: NameSpec;
   /**
    * Write each bar's value at its end (or, stacked, inside each segment):
    * `true`, or how. Labels that do not fit are left out.
@@ -1870,7 +1882,7 @@ interface RugStyle extends SeriesBase, RowTooltip, RowItems {
   stroke?: string;
   /** Tick width in CSS pixels; default 1. @minimum 0 @default 1 */
   strokeWidth?: number;
-  label?: string;
+  label?: NameSpec;
 }
 
 /**
@@ -1944,7 +1956,7 @@ interface ErrorBarStyle extends SeriesBase, RowTooltip, RowItems {
   strokeWidth?: number;
   /** Width of the caps at each end in pixels; 0 for none. Default 8. @minimum 0 @default 8 */
   cap?: number;
-  label?: string;
+  label?: NameSpec;
 }
 
 /**
@@ -2066,7 +2078,7 @@ export type BoxPlotStyle = {
   fill?: string;
   /** Opacity of the boxes' fill; 0.25 by default. @minimum 0 @maximum 1 @default 0.25 */
   fillOpacity?: number;
-  label?: string;
+  label?: NameSpec;
 };
 
 /** Box plots from raw values per category, or one precomputed box per row. */
@@ -2130,7 +2142,7 @@ export interface BoxenSpec extends SeriesBase {
    * @minimum 0 @maximum 1 @default 0.7
    */
   fillOpacity?: number;
-  label?: string;
+  label?: NameSpec;
 }
 
 /**
@@ -2169,7 +2181,7 @@ export interface ViolinSpec extends SeriesBase {
   fill?: string;
   /** Opacity of the violins' fill; 0.25 by default. @minimum 0 @maximum 1 @default 0.25 */
   fillOpacity?: number;
-  label?: string;
+  label?: NameSpec;
 }
 
 /**
@@ -2240,7 +2252,7 @@ interface TreePaintStyle {
  */
 export interface TreeLabelsSpec {
   /** @minItems 1 */
-  content?: readonly Exclude<LabelPart, { series: true }>[];
+  content?: readonly Exclude<LabelPart, { series: true } | { label: string }>[];
   style?: TextStyle;
 }
 
@@ -2681,7 +2693,7 @@ export type Histogram1DSpec = SeriesBase & {
   fill?: string;
   /** @minimum 0 @maximum 1 */
   fillOpacity?: number;
-  label?: string;
+  label?: NameSpec;
 } & ({ x: Field; y?: never; axis?: "left" | "right" } | { y: Field; x?: never; axis?: "left" }) &
   // Stacked (with "fill", as shares of each bin), or with `dodge` side by side within each bin.
   ({ stack?: boolean | "fill"; dodge?: false } | { stack?: false; dodge?: boolean });
@@ -2817,7 +2829,7 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
    * beeswarm; points that do not fit stand at its edges.
    */
   swarm?: boolean;
-  label?: string;
+  label?: NameSpec;
 }
 
 /**

@@ -20,6 +20,7 @@ import { loadSpec } from "../../src/spec/load.ts";
 import type { ScaleScope } from "../../src/spec/spec.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf, stopsOf } from "../helpers/keyboard.ts";
+import { panelSeries } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 400) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -30,7 +31,7 @@ function build(config: ChartConfig, width = 600, height = 400) {
 /** Each series' bin centers and values in a panel, by series label; series without bars are []. */
 function binsOf(model: ChartModel, panel: string): Record<string, { x: number[]; v: number[] }> {
   return Object.fromEntries(
-    model.panelSeries(panel).map((s) => [s.label, { x: [...s.x], v: [...s.values] }]),
+    panelSeries(model, panel).map((s) => [s.label, { x: [...s.x], v: [...s.values] }]),
   );
 }
 
@@ -67,8 +68,8 @@ describe("histograms split by facets", () => {
       t: { x: [], v: [] },
     });
     // One set of edges, shared: every panel's series read the same centers.
-    const [sa] = model.panelSeries(a!);
-    const [sb] = model.panelSeries(b!);
+    const [sa] = panelSeries(model, a!);
+    const [sb] = panelSeries(model, b!);
     expect(sa!.x).toBe(sb!.x);
     expect(model.panels().map((p) => p.x.domain)).toEqual([
       [0, 40],
@@ -94,7 +95,7 @@ describe("histograms split by facets", () => {
     });
     // From the first bin's left edge to the last one's right edge.
     const range = (panel: string) => {
-      const [s] = model.panelSeries(panel);
+      const [s] = panelSeries(model, panel);
       return [s!.x[0]! - 2.5, s!.x[s!.length - 1]! + 2.5];
     };
     expect(range("A")).toEqual(a);
@@ -113,7 +114,7 @@ describe("histograms split by facets", () => {
       facet: facet("region", { columns: 2 }),
       x: { scope: "row" },
     });
-    const first = (key: string) => model.panelSeries(key)[0]!.x;
+    const first = (key: string) => panelSeries(model, key)[0]!.x;
     expect(first("A")).toBe(first("B"));
     expect(first("C")).toBe(first("D"));
     expect([...first("A")]).toEqual([5]);
@@ -129,14 +130,14 @@ describe("histograms split by facets", () => {
     }).model;
     const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
     for (const panel of ["A", "B"])
-      for (const s of percent.panelSeries(panel))
+      for (const s of panelSeries(percent, panel))
         if (s.length > 0) expect(sum([...s.values])).toBeCloseTo(100, 9);
     const density = build({
       marks: [histogram(data, { x: "ms", bins: step, normalize: "density" })],
       facet: facet("region"),
     }).model;
     for (const panel of ["A", "B"]) {
-      const [s] = density.panelSeries(panel);
+      const [s] = panelSeries(density, panel);
       expect(sum([...s!.values].map((value) => value * 5))).toBeCloseTo(1, 9);
     }
     // Stacked: in A, t sits on s; hiding s drops t to zero in every panel,
@@ -145,13 +146,13 @@ describe("histograms split by facets", () => {
       marks: [histogram(data, { x: "ms", series: "service", bins: step, stack: true })],
       facet: facet("region"),
     });
-    const [s, t] = model.panelSeries("A") as [Series, Series];
+    const [s, t] = panelSeries(model, "A") as [Series, Series];
     expect([...t.y0!]).toEqual([...s.values]);
     expect([...t.y].slice(0, 2)).toEqual([3, 0]);
     const counts = t.values;
     model.hidden.add(s.key);
     model.scene(estimateText);
-    const [, after] = model.panelSeries("A") as [Series, Series];
+    const [, after] = panelSeries(model, "A") as [Series, Series];
     expect([...after.y0!].every((value) => value === 0)).toBe(true);
     expect([...after.values]).toEqual([...counts]);
   });
@@ -192,15 +193,15 @@ describe("histograms split by facets", () => {
       marks: [histogram(data, { x: "ms", bins: step })],
       facet: facet("region"),
     });
-    const before = model.panelSeries("B")[0]!;
+    const before = panelSeries(model, "B")[0]!;
     model.scene(estimateText);
-    const again = model.panelSeries("B")[0]!;
+    const again = panelSeries(model, "B")[0]!;
     expect(again.x).toBe(before.x);
     expect(again.values).not.toBe(before.values);
     expect([...again.values]).toEqual([...before.values]);
     data.append({ region: ["B"], service: ["s"], ms: [13] });
     model.scene(estimateText);
-    expect([...model.panelSeries("B")[0]!.values].slice(2, 4)).toEqual([3, 1]);
+    expect([...panelSeries(model, "B")[0]!.values].slice(2, 4)).toEqual([3, 1]);
   });
 
   it("count every panel with one scratch array, however many values the series field has had", () => {
@@ -250,7 +251,7 @@ describe("histograms split by facets", () => {
       marks: [histogram(data, { x: "at", bins: 3 })],
       facet: facet("region"),
     });
-    const [a] = model.panelSeries("A");
+    const [a] = panelSeries(model, "A");
     expect(a!.x[1]! - a!.x[0]!).toBe(day);
     const hit = model.inspect(model.panels()[1]!.x.map(a!.x[2]!), scene.panels[1]!.plot.y + 5);
     expect(hit!.points[0]!.text).toMatch(/Jan 3.* – .*Jan 4.*: 2$/);
@@ -385,7 +386,7 @@ describe("box plots and violins split by facets", () => {
     });
     expect(legendOf(one.scene).map((entry) => entry.label)).toEqual(["y", "x"]);
     expect(legendOf(split.scene).map((entry) => entry.label)).toEqual(["y", "x"]);
-    expect(split.model.panelSeries("Q").map((s) => [s.label, s.length])).toEqual([
+    expect(panelSeries(split.model, "Q").map((s) => [s.label, s.length])).toEqual([
       ["y", 0],
       ["x", 1],
     ]);
@@ -464,7 +465,7 @@ describe("box plots and violins split by facets", () => {
     // The second chart's axis lists c, b, a: the boxes' bands move.
     const first = build({ marks: [boxes] }).model;
     const second = build({ marks: [bar(goals, { x: "product", y: "goal" }), boxes] }).model;
-    const placed = (model: ChartModel) => model.panelSeries("")[model === first ? 0 : 1]!.x;
+    const placed = (model: ChartModel) => panelSeries(model, "")[model === first ? 0 : 1]!.x;
     const before = placed(first);
     expect([...before]).toEqual([0, 1, 2]);
     expect([...placed(second)]).toEqual([2, 1, 0]);

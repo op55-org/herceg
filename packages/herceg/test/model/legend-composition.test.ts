@@ -31,7 +31,7 @@ import {
 import { contractTest } from "../helpers/contracts.ts";
 
 function build(config: ChartConfig, width = 640, height = 360) {
-  const model = new ChartModel({ locale: "en-US", ...config }, undefined, ...staticCompilers());
+  const model = new ChartModel({ locale: "en-US", ...config }, undefined, staticCompilers());
   model.setSize(width, height, 1);
   return { model, scene: model.scene(estimateText) };
 }

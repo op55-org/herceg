@@ -9,6 +9,7 @@ import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import type { PointGeometry, Scene } from "../../src/scene/scene.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
 import layouts from "../fixtures/swarm-layout.json";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -104,7 +105,7 @@ describe("point swarm", () => {
     const [drawn] = pointsOf(scene);
     const placed = coords(drawn!);
     expect(overlaps(placed, 2.5)).toBe(0);
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const half = Math.abs(x.bandwidth!) / 2;
     for (const [px] of placed) {
       const band = Math.round(x.invert(px));
@@ -122,7 +123,7 @@ describe("point swarm", () => {
     const placed = coords(pointsOf(scene)[0]!);
     expect(placed.every(([px, py]) => Number.isFinite(px) && Number.isFinite(py))).toBe(true);
     expect(overlaps(placed, 2.5)).toBe(0);
-    const y = model.yScale()!;
+    const y = yScale(model)!;
     for (const [, py] of placed) {
       const band = Math.round(y.invert(py));
       expect(Math.abs(py - y.map(band))).toBeLessThanOrEqual(Math.abs(y.bandwidth!) / 2);
@@ -140,7 +141,7 @@ describe("point swarm", () => {
         marks: [point(spaced, { x: "g", y: "v", swarm: true, radius: 1 })],
         y: { domain },
       });
-      const center = model.xScale()!.map(0);
+      const center = xScale(model)!.map(0);
       return coords(pointsOf(scene)[0]!).map(([px]) => Math.round(Math.abs(px - center) * 1000));
     };
     // Mirrored along y, every point stands as far from the center as
@@ -162,7 +163,7 @@ describe("point swarm", () => {
     const { model, scene } = build({
       marks: [point(tips, { x: "day", y: "tip", series: "sex", dodge: true, swarm: true })],
     });
-    const x = model.xScale()!;
+    const x = xScale(model)!;
     const quarter = Math.abs(x.bandwidth!) / 4;
     pointsOf(scene).forEach((g, slot) => {
       for (const [px] of coords(g)) {

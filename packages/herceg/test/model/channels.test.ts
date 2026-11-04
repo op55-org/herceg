@@ -14,12 +14,13 @@ import { staticCompilers } from "../../src/render/compilers.ts";
 import type { LineGeometry, PointGeometry } from "../../src/scene/scene.ts";
 import { contractTest } from "../helpers/contracts.ts";
 import { keysOf } from "../helpers/guides.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel(
     { locale: "en-US", timeZone: "UTC", ...config },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(600, 300, 1);
   return { model, scene: model.scene(estimateText) };
@@ -364,7 +365,7 @@ describe("points' channels", () => {
         }),
       ],
     });
-    const at = model.inspect(model.xScale()!.map(1), model.yScale()!.map(2))!;
+    const at = model.inspect(xScale(model)!.map(1), yScale(model)!.map(2))!;
     expect(at.points[0]!.color).toBe("#1f77b4");
   });
 

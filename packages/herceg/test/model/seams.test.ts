@@ -16,6 +16,7 @@ import type { Panel, SegmentGeometry } from "../../src/scene/scene.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { xScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 const data = table({ t: time([0, 20]), v: [1, 2] });
@@ -71,8 +72,8 @@ describe("time-axis seam markers", () => {
     plan.mockRestore();
     const panel = scene.panels[0]!;
     expect(positions(panel)).toEqual([
-      placed(model.xScale()!.map(8)),
-      placed(model.xScale()!.map(12)),
+      placed(xScale(model)!.map(8)),
+      placed(xScale(model)!.map(12)),
     ]);
     const svg = renderSvg(scene);
     const seams = panel.marks[0] as SegmentGeometry;
@@ -102,14 +103,14 @@ describe("time-axis seam markers", () => {
       },
     });
     expect(positions(scene.panels[0]!)).toEqual([
-      placed(model.xScale()!.map(Date.UTC(2025, 2, 10, 13, 30))),
-      placed(model.xScale()!.map(Date.UTC(2025, 2, 11, 13, 30))),
+      placed(xScale(model)!.map(Date.UTC(2025, 2, 10, 13, 30))),
+      placed(xScale(model)!.map(Date.UTC(2025, 2, 11, 13, 30))),
     ]);
   });
 
   it("keeps chronological order on reversed domains", () => {
     const { model, scene } = build({ x: { domain: [20, 0], breaks: gap(), seams: true } });
-    const expected = [8, 12].map((t) => placed(model.xScale()!.map(t)));
+    const expected = [8, 12].map((t) => placed(xScale(model)!.map(t)));
     expect(positions(scene.panels[0]!)).toEqual(expected);
     expect(expected[0]).toBeGreaterThan(expected[1]!);
   });
@@ -127,7 +128,7 @@ describe("time-axis seam markers", () => {
     }
     setViewport(model, [8, 20]);
     expect(positions(model.scene(estimateText).panels[0]!)).toEqual([
-      placed(model.xScale()!.map(12)),
+      placed(xScale(model)!.map(12)),
     ]);
   });
 
@@ -141,7 +142,7 @@ describe("time-axis seam markers", () => {
       for (const ratio of [1, 2, 3]) {
         model.setSize(width, 300, ratio);
         const scene = model.scene(estimateText);
-        const scale = model.xScale()!;
+        const scale = xScale(model)!;
         const expected: number[] = [];
         for (let t = 2; t <= 18; t += 2) {
           const px = placed(scale.map(t));

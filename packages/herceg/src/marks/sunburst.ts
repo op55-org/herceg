@@ -62,7 +62,7 @@ import {
  */
 export interface SunburstLabels<S extends Schema> {
   rotation?: "horizontal" | "radial";
-  content?: readonly Exclude<LabelPartOf<keyof S & string>, { series: true }>[];
+  content?: readonly Exclude<LabelPartOf<keyof S & string>, { series: true } | { label: string }>[];
   style?: TextStyle;
 }
 

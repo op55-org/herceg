@@ -415,7 +415,7 @@ const feed = orderedTable(
 );
 // The feature compiler applies continuity, as charts load it.
 const feedModel = (marks: ConstructorParameters<typeof ChartModel>[0]["marks"]) => {
-  const model = new ChartModel({ marks, legend: false }, undefined, ...staticCompilers());
+  const model = new ChartModel({ marks, legend: false }, undefined, staticCompilers());
   model.setSize(1100, 400, 1);
   model.scene(estimateText);
   return model;
@@ -680,7 +680,7 @@ for (const labelled of [false, true]) {
       ],
     },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(1100, 640, 1);
   drawsLabels(model, labelled ? 30 : 0, labelled);
@@ -773,7 +773,7 @@ const grouped = new ChartModel(
     ],
   },
   undefined,
-  ...staticCompilers(),
+  staticCompilers(),
 );
 grouped.setSize(1100, 400, 1);
 drawsLabels(grouped, 1, true);
@@ -1309,7 +1309,7 @@ const cometChart = (items: boolean) => {
       marks: [comets(items)],
     },
     undefined,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   chart.setSize(960, 640, 1);
   const picker = new Picker({ rowOf, placeAt, lowerPosition });
@@ -1362,7 +1362,7 @@ for (const [name, data] of [
   ["a table", squareRows],
   ["a descending view", rowView(squareRows, { sort: [{ field: "x", order: "descending" }] })],
 ] as const) {
-  const chart = new ChartModel({ marks: [squaresOf(data)] }, undefined, ...staticCompilers());
+  const chart = new ChartModel({ marks: [squaresOf(data)] }, undefined, staticCompilers());
   let width = 800;
   measure(
     `custom: 32,000 items over ${name}, scene`,
@@ -1408,7 +1408,7 @@ measure(
         ],
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     chart.setSize(800, 600, 1);
     chart.scene(estimateText);
@@ -1452,7 +1452,7 @@ for (const through of ["identity", "a channel scale"] as const)
           ],
         },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       chart.setSize(800, 600, 1);
       chart.scene(estimateText);

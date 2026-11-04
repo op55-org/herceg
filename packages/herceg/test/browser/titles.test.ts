@@ -38,7 +38,7 @@ function reach(mark: ChartConfig["marks"][number]): { taken: number; differ: num
       marks: [mark],
     },
     NO_PAGE,
-    ...staticCompilers(),
+    staticCompilers(),
   );
   model.setSize(300, 200, 1);
   const { scene, titles } = titlesOf(model, estimateText);

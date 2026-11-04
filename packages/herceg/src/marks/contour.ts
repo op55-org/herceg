@@ -16,6 +16,7 @@ import {
 } from "../data/table.ts";
 import { lineDrawing } from "../draw/line.ts";
 import { polygonsDrawing } from "../draw/polygons.ts";
+import type { ShownField } from "../fields/chart.ts";
 import { formatNumber } from "../format/format.ts";
 import type { LegendPart } from "../model/legend.ts";
 import { checkColorScale, checkRamp, rampOf, SequentialScale } from "../scale/color.ts";
@@ -165,7 +166,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   readonly table: Table<Schema>;
   readonly tooltip = "cell";
   readonly legendScales: readonly LegendScale[];
-  readonly summarizes = true;
+  readonly summarizes = "values";
   /** Automatic y domains end at the grid's edges rather than at round values. */
   readonly tight = true;
   readonly filled: boolean;
@@ -268,11 +269,15 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     return values;
   }
 
-  /** The series' names and keys: a band per neighboring thresholds, or a line per threshold. */
-  #roster(key: MarkKey, { theme, paint, locale }: BandContext) {
+  /**
+   * The series' names and keys: a band per neighboring thresholds, or a
+   * line per threshold, named by its color field's display (keys stay raw).
+   */
+  #roster(key: MarkKey, { theme, paint, locale, features }: BandContext) {
     const levels = this.#levels();
-    const f = (value: number) => formatNumber(value, locale);
-    const scale = this.#colorScale(theme, paint);
+    const shown = features?.fields?.of(this.table, this.spec.color);
+    const f = shown ? shown.writer() : (value: number) => formatNumber(value, locale);
+    const scale = this.#colorScale(theme, paint, shown);
     if (this.filled)
       return levels.slice(0, -1).map((lo, i) => {
         const hi = levels[i + 1]!;
@@ -301,8 +306,14 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     split = false,
   ): Series[] {
     const roster = this.#roster(key, context);
-    if (split) return roster.map((entry) => withoutParts(entry.key, entry.label, entry.color));
-    return this.#seriesOf(roster, undefined);
+    const series = split
+      ? roster.map((entry) => withoutParts(entry.key, entry.label, entry.color))
+      : this.#seriesOf(roster, undefined);
+    // Its chart's displays, which name the field and its steps.
+    const fields = context.features?.fields;
+    const about = fields?.of(this.table, this.spec.color)?.description;
+    for (const s of series) Object.assign(s, { fields, about });
+    return series;
   }
 
   /** Each panel's contours: of the grid its rows sample, at the thresholds of every panel. */
@@ -313,7 +324,10 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       color: s.color,
       level: this.#levels()[i]!,
     }));
-    return rows.map((panel) => this.#seriesOf(entries, panel));
+    const { fields, about } = roster[0] ?? {};
+    return rows.map((panel) =>
+      this.#seriesOf(entries, panel).map((s) => Object.assign(s, { fields, about })),
+    );
   }
 
   /** The series of the contours of `rows` (every row without them), one per roster entry. */
@@ -464,10 +478,21 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     return undefined;
   }
 
-  /** The scale coloring contours: over `colorDomain`, or the field's extent. */
-  #colorScale(theme: Theme, paint: PaintReader): SequentialScale | undefined {
+  /**
+   * The scale coloring contours: over `colorDomain`, else the color
+   * field's display's bounds (`shown`), or its extent for an end without
+   * one.
+   */
+  #colorScale(
+    theme: Theme,
+    paint: PaintReader,
+    shown: ShownField | undefined,
+  ): SequentialScale | undefined {
     const { spec } = this;
-    const domain = spec.colorDomain ?? this.#valueExtent();
+    const extent = this.#valueExtent();
+    const [lo, hi] = [shown?.min ?? extent?.[0], shown?.max ?? extent?.[1]];
+    const domain =
+      spec.colorDomain ?? (lo === undefined || hi === undefined ? undefined : ([lo, hi] as const));
     if (!domain) return undefined;
     const fallback = spec.colorMidpoint === undefined ? theme.sequential : theme.diverging;
     const ramp = rampOf(spec.colors, fallback, paint, "contour colors");
@@ -492,21 +517,23 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
   ): LegendPart[] {
     if (series.length === 0 || (!this.filled && this.spec.stroke !== undefined)) return [];
     const glyph = this.filled ? "M-5,-5h10v10h-10Z" : "M-6,-1h12v2h-12Z";
-    const title = this.spec.label ?? this.spec.color;
+    const field = this.#shown(series[0]);
+    const title = this.spec.label ?? field?.label ?? this.spec.color;
     const key = keyLegend({
       title,
       channel: "color",
       entries: series.map((s) => ({ label: s.label, glyph, r: 5, color: s.color })),
     });
-    const scale = this.#colorScale(theme, paint);
+    const scale = this.#colorScale(theme, paint, field);
     const colorbar: LegendPart["colorbar"] = this.filled
-      ? { kind: "steps", title, levels: this.#levels(), colors: series.map((s) => s.color) }
+      ? { kind: "steps", title, levels: this.#levels(), colors: series.map((s) => s.color), field }
       : scale &&
         rampLegend({
           stops: scale.legendStops(),
           domain: scale.domain,
           title,
           midpoint: scale.midpoint,
+          field,
         }).colorbar;
     return [{ ...key, colorbar }];
   }
@@ -774,9 +801,14 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
     return s.color;
   }
 
+  /** The display of the color field, from the chart's displays a series carries. */
+  #shown(s: Series | undefined) {
+    return s?.fields?.of(this.table, this.spec.color);
+  }
+
   /** Tooltips name the field. */
-  pointLabel(): string {
-    return this.spec.label ?? this.spec.color;
+  pointLabel(s: Series): string {
+    return this.spec.label ?? this.#shown(s)?.label ?? this.spec.color;
   }
 
   /** A band's range, or a line's level. */
@@ -806,7 +838,7 @@ export class ContourMark implements Mark<Frozen<ContourSpec>> {
       }
     }
     const what = this.filled ? "region" : "line";
-    const field = this.spec.label ?? this.spec.color;
+    const field = this.spec.label ?? this.#shown(parts[0])?.label ?? this.spec.color;
     const heading = this.filled ? `${field} ${name}` : `${field} at ${name}`;
     if (count === 0) return `${heading}: none`;
     return (

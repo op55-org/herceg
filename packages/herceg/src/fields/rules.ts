@@ -3,7 +3,7 @@
 // field through unchanged), and the display a field takes from them: each
 // setting from the last rule giving it, `false` resetting it.
 
-import { lineOf } from "../data/origin.ts";
+import type { Origins } from "../data/origin.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Table } from "../data/table.ts";
 import type { FormatKit } from "../format/patterns.ts";
@@ -196,7 +196,16 @@ export function resolve(rules: readonly Rule[], field: FieldOf, surface: string)
   return { settings, from };
 }
 
-/** The tables `table`'s field `name` comes from unchanged, a row view's from its table. */
-export function linesOf(table: Table | RowView, name: string): Table[] {
-  return lineOf("source" in table ? table.source : table, name);
+/**
+ * The tables field `name` of `table` comes from unchanged, nearest first:
+ * `table`, then each source while the field passes through the step that
+ * made the table before it, as `origins` records them (data/origin.ts).
+ */
+export function lineOf(origins: Origins, table: Table, name: string): Table[] {
+  const line = [table];
+  for (let origin = origins.get(table); origin?.passes(name); origin = origins.get(table)) {
+    table = origin.source;
+    line.push(table);
+  }
+  return line;
 }

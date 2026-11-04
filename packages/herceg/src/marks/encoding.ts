@@ -103,9 +103,46 @@ export type FieldCoordinate<S extends Schema, F extends string = PositionField<S
 /** A part of a label's text, reading fields `F` (see `LabelPart`). */
 export type LabelPartOf<F extends string> =
   | string
-  | { field: F; format?: FormatSpec; style?: PartStyle; series?: never; value?: never }
-  | { series: true; style?: PartStyle; field?: never; value?: never; format?: never }
-  | { value: true; format?: FormatSpec; style?: PartStyle; field?: never; series?: never };
+  | {
+      field: F;
+      format?: FormatSpec;
+      style?: PartStyle;
+      series?: never;
+      value?: never;
+      label?: never;
+    }
+  | {
+      series: true;
+      style?: PartStyle;
+      field?: never;
+      value?: never;
+      format?: never;
+      label?: never;
+    }
+  | {
+      value: true;
+      format?: FormatSpec;
+      style?: PartStyle;
+      field?: never;
+      series?: never;
+      label?: never;
+    }
+  | { label: F; style?: PartStyle; field?: never; series?: never; value?: never; format?: never };
+
+/** A part of a series' name, of category fields `F` and labels of fields `L` (see `NamePart`). */
+export type NamePartOf<F extends string, L extends string> =
+  | string
+  | { series: true; field?: never; label?: never }
+  | { field: F; series?: never; label?: never }
+  | { label: L; series?: never; field?: never };
+
+/**
+ * A series mark's name (see `NameSpec`): text naming its one series, or
+ * parts naming each: `[{ series: true }, " (", { field: "region" }, ") p99"]`.
+ */
+export type SeriesName<S extends Schema> =
+  | string
+  | readonly NamePartOf<CategoryField<S>, keyof S & string>[];
 
 /** Labels following each series of a line (see `SeriesLabelsSpec`). */
 export interface SeriesLabels<S extends Schema> extends Omit<LabelLayoutSpec, "overlapGroup"> {

@@ -122,7 +122,7 @@ export function renderToPDF(
       const options = item as StaticOptions;
       // Validate fitting before laying out a chart with invalid dimensions.
       const page = paperPage(options.width, options.height, settings, resolver);
-      const model = new ChartModel(options, NO_PAGE, ...staticCompilers());
+      const model = new ChartModel(options, NO_PAGE, staticCompilers());
       model.setSize(options.width, options.height, 1, STATIC_RASTER_RATIO);
       // What the bound stores hold now is drawn as a mounted chart draws it.
       options.rowSelection?.highlight(model);

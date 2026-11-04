@@ -40,7 +40,7 @@ import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares, STILL } from "./dodge.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
-import type { CssColor } from "./encoding.ts";
+import type { CssColor, SeriesName } from "./encoding.ts";
 import { histogramFormError } from "./histogram-input.ts";
 import { binGroup, Histogram2DMark, type Histogram2DOptions, weighed } from "./histogram2d.ts";
 import { definedFields } from "./line.ts";
@@ -101,7 +101,7 @@ interface HistogramStyle<S extends Schema> extends SelectionLooks {
    * or 0.25 overlaid.
    */
   fillOpacity?: number;
-  label?: string;
+  label?: SeriesName<S>;
   /** Draw all rows in every facet panel instead of counting that panel's rows. */
   facet?: "repeat";
   /**
@@ -225,7 +225,7 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
   readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
-  readonly summarizes = true;
+  readonly summarizes = "counts";
   readonly zero: "x" | "y";
   readonly #horizontal: boolean;
   readonly #field: string;
@@ -1099,7 +1099,10 @@ export class HistogramMark implements Mark<Frozen<Histogram1DSpec>> {
     let present: { sources: { id: string; label: string }[]; codes: number[] };
     if (field === undefined) {
       present = {
-        sources: [{ id: this.#field, label: this.spec.label ?? this.#field }],
+        // A name of parts is the series' label until the feature compiler names it.
+        sources: [
+          { id: this.#field, label: (this.spec.label as string | undefined) ?? this.#field },
+        ],
         codes: [0],
       };
     } else {

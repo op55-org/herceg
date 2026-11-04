@@ -226,7 +226,7 @@ describe("marks' rows", () => {
       const model = new ChartModel(
         { marks: [mark], locale: "en-US" },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(480, 320, 1);
       return model;
@@ -292,7 +292,7 @@ describe("marks' rows", () => {
           locale: "en-US",
         },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(480, 320, 1);
       return { model, others };
@@ -323,7 +323,7 @@ describe("marks' rows", () => {
         locale: "en-US",
       },
       undefined,
-      ...staticCompilers(),
+      staticCompilers(),
     );
     model.setSize(480, 320, 1);
     const values = () =>
@@ -381,7 +381,7 @@ describe("marks' rows", () => {
     provided.set(whole, Uint32Array.of(0));
     expect(svg(whole)).toEqual(svg(rows([0])));
     // One chart, as the provider's rows change: b's panel alone.
-    const model = new ChartModel(options(whole), undefined, ...staticCompilers());
+    const model = new ChartModel(options(whole), undefined, staticCompilers());
     model.setSize(480, 320, 1);
     const keys = () => {
       model.scene(estimateText);
@@ -504,7 +504,7 @@ describe("marks' rows", () => {
       const model = new ChartModel(
         { marks: [mark], locale: "en-US", legend: true },
         undefined,
-        ...staticCompilers(),
+        staticCompilers(),
       );
       model.setSize(480, 320, 1);
       return model;
@@ -548,11 +548,7 @@ describe("marks' rows", () => {
       y: "y",
       encode: { opacity: { field: "o", scale: { type: "identity" } } },
     });
-    const model = new ChartModel(
-      { marks: [mark], locale: "en-US" },
-      undefined,
-      ...staticCompilers(),
-    );
+    const model = new ChartModel({ marks: [mark], locale: "en-US" }, undefined, staticCompilers());
     model.setSize(480, 320, 1);
     model.scene(estimateText);
     expect([...read]).toEqual([0]);

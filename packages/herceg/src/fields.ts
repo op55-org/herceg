@@ -7,6 +7,7 @@
 // docs/guide/fields.md.
 
 import type { FieldKind } from "./data/column.ts";
+import { origins } from "./data/origin.ts";
 import type { RowView } from "./data/row-view.ts";
 import type { FieldName, PositionField, Schema, Table } from "./data/table.ts";
 import { KINDS, shown } from "./fields/check.ts";
@@ -15,7 +16,7 @@ import {
   type FieldDisplays,
   type FieldOf,
   type FieldRule,
-  linesOf,
+  lineOf,
   resolve,
   rulesOf,
 } from "./fields/rules.ts";
@@ -141,7 +142,7 @@ function fieldOf(of: FieldAsked<Schema, string, DisplayedKind>, surface: string)
     return {
       name: name as string,
       kind: kindOf(source, name as string, surface),
-      tables: linesOf(ref, name as string),
+      tables: lineOf(origins, source, name as string),
     };
   }
   const { kind } = of as { kind?: unknown };

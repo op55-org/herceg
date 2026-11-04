@@ -37,6 +37,7 @@ import type {
   FieldCoordinate,
   ItemKeyed,
   MarkStyle,
+  SeriesName,
 } from "./encoding.ts";
 import type { ContentWriter } from "./features/content.ts";
 import type { PartText } from "./features/part-text.ts";
@@ -154,7 +155,7 @@ interface BarStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   encode?: Pick<Encodings<S>, "color" | "fill" | "stroke" | "strokeWidth" | "opacity">;
   /** Looks by value: by series, or with `field`, by each bar's value. */
   style?: Pick<MarkStyle<S>, "by">;
-  label?: string;
+  label?: SeriesName<S>;
   /**
    * Write each bar's value at its end (or, stacked, inside each segment):
    * `true`, or how (`format`, `style`, `minLength`, or a `field` to write).
@@ -720,7 +721,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           this.#format(frame),
           frame,
           horizontal,
-          !!spec.stack,
+          spec.stack === "fill" ? "fill" : !!spec.stack,
           spec.halo,
           this.#labelOptions,
           this.table,
@@ -836,7 +837,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
           const cap =
             rounding && !square[part] ? Math.min(radius, width / 2, Math.abs(root - tip)) : 0;
           labeled.add(
-            labeled.text(value, row, s.label),
+            labeled.text(value, row, s.label, s.field),
             middle,
             root,
             tip,
@@ -846,7 +847,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
             alpha,
             cap,
             place,
-            names && { name: names[count]!, value, row, series: s.label },
+            names && { name: names[count]!, value, row, series: s.label, field: s.field },
           );
         }
       }
@@ -1182,7 +1183,7 @@ interface LabelGroup {
   /**
    * In charts that animate changed values, per label: its bar's name, the
    * value it shows, its row, and where its text starts along x; and the
-   * series it is of.
+   * series it is of, and that series' value field.
    */
   named?:
     | {
@@ -1191,6 +1192,7 @@ interface LabelGroup {
         rows: number[];
         starts: number[];
         series: string;
+        field: string | undefined;
       }
     | undefined;
 }
@@ -1201,6 +1203,8 @@ interface NamedLabel {
   value: number;
   row: number;
   series: string;
+  /** The series' value field, whose display its value labels write through. */
+  field: string | undefined;
 }
 
 /** A label's text, or its parts where they have looks of their own. */
@@ -1220,6 +1224,8 @@ class ValueLabels {
   readonly #frame: Frame;
   readonly #horizontal: boolean;
   readonly #stacked: boolean;
+  /** Whether the bars are stacked to their shares, which their value labels write. */
+  readonly #shares: boolean;
   /** The mark's `halo`: what labels that need one get. */
   readonly #halo: Halo | undefined;
   readonly #paint: TextPaint;
@@ -1229,7 +1235,9 @@ class ValueLabels {
   readonly #plain: boolean;
   readonly #minLength: number;
   /** Each row's text of a `field` or of parts (`content`), instead of its value. */
-  readonly #field: ((row: number, series: string, value: number) => string) | undefined;
+  readonly #field:
+    | ((row: number, series: string, value: number, time?: boolean, field?: string) => string)
+    | undefined;
   /** Each row's parts, where they have looks of their own. */
   readonly #styled: ContentWriter["styled"];
   readonly #size: number;
@@ -1249,7 +1257,7 @@ class ValueLabels {
     format: Formatter,
     frame: Frame,
     horizontal: boolean,
-    stacked: boolean,
+    stacked: boolean | "fill",
     halo: Halo | undefined,
     options: LabelOptions,
     table: Table,
@@ -1260,7 +1268,8 @@ class ValueLabels {
     this.#frame = frame;
     this.#table = table;
     this.#horizontal = horizontal;
-    this.#stacked = stacked;
+    this.#stacked = !!stacked;
+    this.#shares = stacked === "fill";
     this.#halo = halo;
     const style = options.style && frame.read(options.style, "bar labels.style");
     const paint = labelPaint(theme, style);
@@ -1293,10 +1302,15 @@ class ValueLabels {
    * A label's text: the value written, the row's `field`, or its parts, of
    * the series `series` names; written only once its bar can show it.
    */
-  text(value: number, row: number, series: string): () => Written {
+  text(value: number, row: number, series: string, field?: string): () => Written {
     const styled = this.#styled;
-    if (styled) return () => styled(row, series, value, undefined, this.#paint, this.#frame);
-    return this.#field ? () => this.#field!(row, series, value) : () => this.#format(value);
+    // Values of a field of times are written as times; shares are numbers.
+    const time =
+      !this.#shares && field !== undefined && this.#table.kind(field as never) === "time";
+    if (styled) return () => styled(row, series, value, time, this.#paint, this.#frame, field);
+    return this.#field
+      ? () => this.#field!(row, series, value, time, field)
+      : () => this.#format(value);
   }
 
   /**
@@ -1481,7 +1495,7 @@ class ValueLabels {
         values: !this.#field || this.#styled ? named.values : undefined,
       };
       const write = (i: number, value: number) =>
-        this.text(value, named!.rows[i]!, named!.series)();
+        this.text(value, named!.rows[i]!, named!.series, named!.field)();
       if (!this.#plain) {
         const paint = { ...this.#paint, color: group.fill };
         const itemsAt = (text: Written, x: number, y: number) => {
@@ -1639,8 +1653,8 @@ class ValueLabels {
     group.items.push({ x, y, text });
     const named = this.#named;
     if (named) {
-      const { name, value, row, series } = named;
-      group.named ??= { names: [], values: [], rows: [], starts: [], series };
+      const { name, value, row, series, field } = named;
+      group.named ??= { names: [], values: [], rows: [], starts: [], series, field };
       group.named.names.push(name);
       group.named.values.push(value);
       group.named.rows.push(row);

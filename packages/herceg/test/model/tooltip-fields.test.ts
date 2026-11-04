@@ -28,6 +28,7 @@ import type { ChartError } from "../../src/spec/errors.ts";
 import { loadSpec } from "../../src/spec/load.ts";
 import type { ChartSpec } from "../../src/spec/spec.ts";
 import { validateSpec } from "../../src/spec/validate.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 
 function build(config: ChartConfig) {
   const model = new ChartModel({ locale: "en-US", timeZone: "UTC", ...config });
@@ -51,7 +52,7 @@ const latency = () =>
 
 /** What the points of an inspection at x show of their rows. */
 function fieldsAt(model: ChartModel, x: number, y = 150) {
-  return model.inspect(model.xScale()!.map(x), y)!.points.map((p) => p.fields);
+  return model.inspect(xScale(model)!.map(x), y)!.points.map((p) => p.fields);
 }
 
 describe("tooltip fields", () => {
@@ -74,7 +75,7 @@ describe("tooltip fields", () => {
       ],
       x: { format: { weekday: "short", month: "short", day: "numeric" } },
     });
-    const inspection = model.inspect(model.xScale()!.map(start + DAY), 150)!;
+    const inspection = model.inspect(xScale(model)!.map(start + DAY), 150)!;
     expect(inspection.label).toBe("Tue, Jan 20");
     expect(inspection.points[0]!.text).toBe("304");
     expect(inspection.points[0]!.fields).toEqual([
@@ -107,7 +108,7 @@ describe("tooltip fields", () => {
       x: { tooltipFormat: { weekday: "short", month: "short", day: "numeric" } },
       y: { tooltipFormat: { style: "unit", unit: "millisecond" } },
     });
-    const inspection = model.inspect(model.xScale()!.map(start + DAY), 150)!;
+    const inspection = model.inspect(xScale(model)!.map(start + DAY), 150)!;
     expect([inspection.label, inspection.points[0]!.text]).toEqual(["Tue, Jan 20", "304 ms"]);
     const ticks = model.panels()[0]!.plans;
     expect(ticks.x.labels).toContain("Jan 20");
@@ -166,7 +167,7 @@ describe("tooltip fields", () => {
     const model = build({ marks: [mark] });
     data.append({ t: [3], v: [4], n: [40], region: ["S"] });
     model.scene(estimateText);
-    const at = model.inspect(model.xScale()!.map(3), model.yScale()!.map(4))!;
+    const at = model.inspect(xScale(model)!.map(3), yScale(model)!.map(4))!;
     expect([at.points[0]!.row, at.points[0]!.fields![0]!.value]).toEqual([2, 40]);
     const faceted = build({ marks: [mark], facet: facet("region") });
     const south = faceted.panels().find(({ key }) => key === "S")!;

@@ -16,6 +16,7 @@ import type { ChartSpec } from "../../src/spec/spec.ts";
 import { legendOf } from "../helpers/guides.ts";
 import { positionOf } from "../helpers/keyboard.ts";
 import { withPicker } from "../helpers/picker.ts";
+import { xScale, yScale } from "../helpers/scales.ts";
 import { setViewport } from "../helpers/views.ts";
 
 function build(config: ChartConfig, width = 600, height = 300) {
@@ -50,14 +51,14 @@ const wicks = custom(prices, {
 describe("custom marks", () => {
   it("draw with the chart's scales, and their fields set the axes", () => {
     const { scene, model } = build({ marks: [wicks] });
-    expect(model.xScale()!.type).toBe("time");
-    const [lo, hi] = model.yScale()!.domain;
+    expect(xScale(model)!.type).toBe("time");
+    const [lo, hi] = yScale(model)!.domain;
     expect(lo).toBeLessThanOrEqual(9);
     expect(hi).toBeGreaterThanOrEqual(20);
     const shapes = (scene.panels[0]!.marks[0] as ShapesGeometry).shapes as PathShape[];
     expect(shapes).toHaveLength(3);
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     expect(shapes[2]!.d).toBe(
       `M${Math.round(x.map(start + 2 * day) * 10) / 10} ${Math.round(y.map(9) * 10) / 10}L${
         Math.round(x.map(start + 2 * day) * 10) / 10
@@ -206,7 +207,7 @@ describe("custom marks with series", () => {
     ]);
     expect(a!.color).not.toBe(b!.color);
     // The axes fit the series' values.
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(60);
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(60);
     // Shapes are drawn in their series' color.
     const shapes = (scene.panels[0]!.marks[0] as ShapesGeometry).shapes as PathShape[];
     expect(shapes.filter((shape) => shape.stroke === a!.color)).toHaveLength(3);
@@ -221,8 +222,8 @@ describe("custom marks with series", () => {
       draw() {},
     });
     const { model } = build({ marks: [mark] });
-    const x = model.xScale()!;
-    const y = model.yScale()!;
+    const x = xScale(model)!;
+    const y = yScale(model)!;
     const inspection = model.inspect(x.map(1.2), y.map(30), "nearest-x")!;
     expect(inspection.value).toBe(1);
     expect(inspection.points.map(({ label, text }) => [label, text])).toEqual([
@@ -232,7 +233,7 @@ describe("custom marks with series", () => {
     expect(model.inspectorOf("")?.mode).toBe("nearest-x");
     // Without pointText, the text is the y value, as for lines.
     const plain = build({ marks: [lollipops([])] }).model;
-    const at = plain.inspect(plain.xScale()!.map(2), plain.yScale()!.map(60), "nearest")!;
+    const at = plain.inspect(xScale(plain)!.map(2), yScale(plain)!.map(60), "nearest")!;
     const point = at.points[0]!;
     expect([point.label, point.text]).toEqual(["b", "60"]);
   });
@@ -262,8 +263,8 @@ describe("custom marks with series", () => {
     ]);
     const shapes = (scene.panels[0]!.marks[0] as ShapesGeometry).shapes as PathShape[];
     expect(shapes.some((shape) => shape.stroke === b!.color)).toBe(false);
-    expect(model.yScale()!.domain[1]).toBeLessThan(60);
-    const { x, y } = { x: model.xScale()!, y: model.yScale()! };
+    expect(yScale(model)!.domain[1]).toBeLessThan(60);
+    const { x, y } = { x: xScale(model)!, y: yScale(model)! };
     expect(model.inspect(x.map(1), y.map(20))!.points.map((p) => p.label)).toEqual(["a"]);
   });
 
@@ -318,29 +319,29 @@ describe("custom marks with series", () => {
   it("put zero in the axis they are drawn from zero along, as bars do", () => {
     const stems = (zero?: "x" | "y") => ({ ...(zero && { zero }), draw() {} });
     const fit = build({ marks: [custom(load, { x: "time", y: "cpu", ...stems() })] }).model;
-    expect(fit.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(fit)!.domain[0]).toBeGreaterThan(0);
     const from = build({ marks: [custom(load, { x: "time", y: "cpu", ...stems("y") })] }).model;
-    expect(from.yScale()!.domain[0]).toBe(0);
+    expect(yScale(from)!.domain[0]).toBe(0);
     // Marks without series stand on it whenever they draw.
     const glyphs = build({
       marks: [custom(prices, { x: "time", y: ["low", "high"], series: false, ...stems("y") })],
     }).model;
-    expect(glyphs.yScale()!.domain[0]).toBe(0);
+    expect(yScale(glyphs)!.domain[0]).toBe(0);
     const sideways = build({
       marks: [custom(prices, { x: ["low", "high"], series: false, ...stems("x") })],
     }).model;
-    expect(sideways.xScale()!.domain[0]).toBe(0);
+    expect(xScale(sideways)!.domain[0]).toBe(0);
     // The axis has the last word, with series or without.
     const cut = build({
       marks: [custom(load, { x: "time", y: "cpu", ...stems("y") })],
       y: { zero: false },
     }).model;
-    expect(cut.yScale()!.domain[0]).toBeGreaterThan(0);
+    expect(yScale(cut)!.domain[0]).toBeGreaterThan(0);
     const cutGlyphs = build({
       marks: [custom(prices, { x: "time", y: ["low", "high"], series: false, ...stems("y") })],
       y: { zero: false, nice: false },
     }).model;
-    expect(cutGlyphs.yScale()!.domain).toEqual([9, 20]);
+    expect(yScale(cutGlyphs)!.domain).toEqual([9, 20]);
     expect(() => custom(load, { x: "time", y: "cpu", zero: "z" as never, draw() {} })).toThrow(
       'custom zero: expected "x" or "y"; received "z"',
     );
@@ -379,7 +380,7 @@ describe("custom marks with series", () => {
     model.setSize(600, 300, 1);
     setViewport(model, [4, 6]);
     model.scene(estimateText);
-    const [lo, hi] = model.yScale()!.domain;
+    const [lo, hi] = yScale(model)!.domain;
     expect(lo).toBeLessThanOrEqual(0);
     expect(hi).toBeGreaterThanOrEqual(100);
   });
@@ -388,8 +389,8 @@ describe("custom marks with series", () => {
     const { model, scene } = build({ marks: [wicks] });
     expect(model.series()).toEqual([]);
     expect(legendOf(scene)).toEqual([]);
-    expect(model.yScale()!.domain[1]).toBeGreaterThanOrEqual(20);
-    expect(model.inspect(model.xScale()!.map(start), model.yScale()!.map(10))).toBeUndefined();
+    expect(yScale(model)!.domain[1]).toBeGreaterThanOrEqual(20);
+    expect(model.inspect(xScale(model)!.map(start), yScale(model)!.map(10))).toBeUndefined();
     expect(wicks.spec).toEqual({ type: "custom" });
   });
 
@@ -409,9 +410,9 @@ describe("custom marks with series", () => {
     expect(model.series().map((s) => s.label)).toEqual(["start – end"]);
     expect(seen.at(-1)!.map((s) => [s.label, s.length])).toEqual([["start – end", 2]]);
     expect(legendOf(scene)).toEqual([]);
-    expect(model.xScale()!.domain).toEqual([0, 3]);
+    expect(xScale(model)!.domain).toEqual([0, 3]);
     // Their items are read and picked by shape, and this draw draws none.
-    const [px, py] = [model.xScale()!.map(0), model.yScale()!.map(1)];
+    const [px, py] = [xScale(model)!.map(0), yScale(model)!.map(1)];
     expect(model.inspect(px, py)).toBeUndefined();
     expect(withPicker(model).picker!(px, py)).toBeUndefined();
     const none = build({ marks: [gantt({ series: false })] });

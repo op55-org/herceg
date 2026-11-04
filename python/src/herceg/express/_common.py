@@ -24,6 +24,7 @@ import numpy as np
 
 from .._chart import AxisOptions, Chart, HelperOptions, Panel, _chart_of, _colors, helper
 from .._data import Column, Table, listlike
+from .._encoding import LabelPart
 from .._errors import (
     ChartError,
     Role,
@@ -36,6 +37,7 @@ from .._errors import (
     refusing,
     shown,
 )
+from .._fields import Match
 from .._rows import SelectionBinding
 from .._style import Theme, Tokens, _built
 from ._numerics import ErrorFunction, Estimator
@@ -223,6 +225,8 @@ def express(function: _F) -> _F:
             _MAKING.reset(token)
         arguments = dict(bound.arguments)
         data = arguments.pop("data", None)
+        # Field displays matching the data's table apply to the table computed from it.
+        chart._computed_from = data
         arguments.update(arguments.pop("options", {}))
         arguments.update(making.resolved)
         _CALLS[chart] = Call(
@@ -381,10 +385,15 @@ def _copied(value: Any) -> Any:
     """`value` with its lists, tuples, sets, dicts, arrays, and option
     objects (``hg.AxisOptions``, ``hg.Jitter``, ...) copied, so the caller changing
     one later (a palette list, an axis title) leaves the call as it was;
-    functions, and the table a ``SelectionBinding`` names, are the same
-    objects."""
+    functions, the table a ``SelectionBinding`` names, and the data a field
+    display's match names (``hg.Match(table=)``, or a rule dict's
+    ``{"match": {"table": ...}}``) are the same objects, which name tables by
+    being them."""
     if type(value) is dict:
-        return {key: _copied(item) for key, item in value.items()}
+        return {
+            key: _match_copied(item) if key == "match" else _copied(item)
+            for key, item in value.items()
+        }
     if type(value) in (list, tuple, set):
         return type(value)(_copied(item) for item in value)
     if isinstance(value, np.ndarray):
@@ -392,10 +401,20 @@ def _copied(value: Any) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type) and not callable(value):
         out = copy.copy(value)
         for item in dataclasses.fields(value):
-            if not (isinstance(value, SelectionBinding) and item.name == "data"):
+            kept = (isinstance(value, SelectionBinding) and item.name == "data") or (
+                isinstance(value, Match) and item.name == "table"
+            )
+            if not kept:
                 object.__setattr__(out, item.name, _copied(getattr(value, item.name)))
         return out
     return value
+
+
+def _match_copied(match: Any) -> Any:
+    """A rule's match copied as `_copied` copies, its table the same object."""
+    if type(match) is not dict:
+        return _copied(match)
+    return {key: item if key == "table" else _copied(item) for key, item in match.items()}
 
 
 def _check_express_chart(chart: Any, owner: str) -> None:
@@ -1113,6 +1132,15 @@ def axis_defaults(settings: dict[str, Any], axis: str, **defaults: Any) -> None:
         settings[axis] = dataclasses.replace(given, **unset)
 
 
+def column_name(chart: Chart | Mapping[str, Any], column: str) -> Any:
+    """How a series or an axis of ``column`` alone is named: by the column's
+    label (``hg.LabelPart(label=...)``) where the chart has field displays,
+    so they name it, else by the column's name. (``chart``: a chart, or the
+    options it is made with.)"""
+    settings = chart._settings if isinstance(chart, Chart) else chart
+    return [LabelPart(label=column)] if settings.get("fields") is not None else column
+
+
 def make_chart(
     data: Mapping[str, Column] | None,
     options: Mapping[str, Any],
@@ -1144,7 +1172,9 @@ def make_chart(
     for axis, label in (("x_axis", x_label), ("y_axis", y_label)):
         # Titled by the column unless the caller's axis titles itself.
         if label is not None:
-            axis_defaults(settings, axis, title=label)
+            column = isinstance(data, Mapping) and label in data
+            titled = column_name(settings, label) if column else label
+            axis_defaults(settings, axis, title=titled)
     given = settings.get("description")
     settings["description"] = f"{given} {sentence}".strip() if given else sentence.strip()
     chart = _chart_of(data, settings)  # type: ignore[arg-type]

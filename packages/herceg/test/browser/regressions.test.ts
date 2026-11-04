@@ -5,6 +5,7 @@ import { table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { schedule } from "../../src/dom/scheduler.ts";
 import { line } from "../../src/marks/line.ts";
+import { xScale } from "../helpers/scales.ts";
 import { modelOf } from "./helpers.ts";
 
 let host: HTMLDivElement;
@@ -163,7 +164,7 @@ describe("runtime regressions", () => {
       interaction: { zoom: true },
       marks: [line(data, { x: "x", y: "y" })],
     });
-    const before = modelOf(chart).xScale()!;
+    const before = xScale(modelOf(chart))!;
     const px = before.map(10);
     const rect = chart.root.getBoundingClientRect();
     chart.root.dispatchEvent(
@@ -176,7 +177,7 @@ describe("runtime regressions", () => {
       }),
     );
     chart.render();
-    const after = modelOf(chart).xScale()!;
+    const after = xScale(modelOf(chart))!;
     expect(after.domain[0]).toBeGreaterThan(0);
     expect(after.map(10)).toBeCloseTo(px, 0);
     chart.destroy();

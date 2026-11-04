@@ -14,6 +14,7 @@ import { panels } from "../../src/model/panels.ts";
 import { paintCanvas } from "../../src/render/canvas.ts";
 import { timeBreaks } from "../../src/scale/breaks.ts";
 import type { SegmentGeometry } from "../../src/scene/scene.ts";
+import { xScale, yRightScale, yScale } from "../helpers/scales.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { MOUSE, modelOf } from "./helpers.ts";
 
@@ -143,7 +144,7 @@ describe("time axes with breaks", () => {
     chart.render();
     const plot = model.panels()[0]!.plot;
     const ratio = window.devicePixelRatio;
-    const px = Math.round(model.xScale()!.map(8) * ratio);
+    const px = Math.round(xScale(model)!.map(8) * ratio);
     const cleared = context.getImageData(
       px,
       Math.ceil(plot.y * ratio),
@@ -163,7 +164,7 @@ describe("time axes with breaks", () => {
     });
     // The pointer over Monday 2025-10-13, just past the first weekend's seam.
     const anchor = utc(2025, 10, 13, 2);
-    const scale = modelOf(chart).xScale()!;
+    const scale = xScale(modelOf(chart))!;
     // Whole pixels, as pointer events report them.
     const px = Math.round(scale.map(anchor));
     const share = (px - scale.range[0]) / (scale.range[1] - scale.range[0]);
@@ -171,7 +172,7 @@ describe("time axes with breaks", () => {
     wheel(chart, px, -300);
     chart.render();
     // The anchor keeps its share of the view, in time shown.
-    const zoomed = modelOf(chart).xScale()!;
+    const zoomed = xScale(modelOf(chart))!;
     const breaks = zoomed.breaks!;
     const [start, end] = zoomed.domain.map((t) => breaks.collapse(t));
     expect((breaks.collapse(value) - start!) / (end! - start!)).toBeCloseTo(share, 9);
@@ -197,7 +198,7 @@ describe("time axes with breaks", () => {
     });
     // The brush loads on demand.
     await chart.loading;
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     const from = utc(2025, 10, 10, 12);
     const to = utc(2025, 10, 13, 12);
     drag(chart, x.map(from), x.map(to));
@@ -206,13 +207,13 @@ describe("time axes with breaks", () => {
     expect(Math.abs(hi - to)).toBeLessThan(HOUR);
     chart.render();
     // A day of time shown: Friday's afternoon and Monday's morning, half each.
-    const zoomed = modelOf(chart).xScale()!;
+    const zoomed = xScale(modelOf(chart))!;
     const seam = zoomed.map(utc(2025, 10, 13));
     expect(seam - zoomed.range[0]).toBeCloseTo((zoomed.range[1] - zoomed.range[0]) / 2, 0);
     // A brush on the seam selects the end of the break, the first time shown after it.
     chart.update({ interaction: { brush: "x" } });
     chart.render();
-    const scale = modelOf(chart).xScale()!;
+    const scale = xScale(modelOf(chart))!;
     const start = scale.map(utc(2025, 10, 13));
     drag(chart, start, start + 40);
     await frame();
@@ -228,7 +229,7 @@ describe("time axes with breaks", () => {
       marks: [line(data, { x: "t", y: "v" })],
       x: { breaks: weekend() },
     });
-    const x = modelOf(chart).xScale()!;
+    const x = xScale(modelOf(chart))!;
     const seam = x.map(utc(2025, 10, 13));
     pointer(chart.root, "pointermove", seam + 0.3, 150);
     await frame();
@@ -393,8 +394,8 @@ describe("crosshair labels", () => {
       marks: [line(data, { x: "t", y: "a" }), line(data, { x: "t", y: "b", axis: "right" })],
     });
     await chart.loading;
-    const x = modelOf(chart).xScale()!;
-    const y = modelOf(chart).yScale()!;
+    const x = xScale(modelOf(chart))!;
+    const y = yScale(modelOf(chart))!;
     pointer(chart.root, "pointermove", x.map(utc(2025, 1, 6, 2)), y.map(15));
     await frame();
     const shown = labels(chart);
@@ -421,8 +422,8 @@ describe("crosshair labels", () => {
     });
     await chart.loading;
     const measure = vi.spyOn(CanvasRenderingContext2D.prototype, "measureText");
-    const x = modelOf(chart).xScale()!;
-    const y = modelOf(chart).yScale()!;
+    const x = xScale(modelOf(chart))!;
+    const y = yScale(modelOf(chart))!;
     const root = chart.root.getBoundingClientRect();
     for (const at of [utc(2025, 1, 6), utc(2025, 1, 7)]) {
       pointer(chart.root, "pointermove", x.map(at), y.map(15));
@@ -447,7 +448,7 @@ describe("crosshair labels", () => {
       marks: [bar(data, { x: "sales", y: "region" })],
     });
     await chart.loading;
-    const y = modelOf(chart).yScale()!;
+    const y = yScale(modelOf(chart))!;
     pointer(chart.root, "pointermove", 300, y.map(1));
     await frame();
     // The x axis is not drawn, so only the category is labeled.
@@ -467,7 +468,7 @@ describe("crosshair labels", () => {
       marks: [line(data, { x: "t", y: "v", axis: "right" })],
     });
     await right.loading;
-    const scale = modelOf(right).yRightScale()!;
+    const scale = yRightScale(modelOf(right))!;
     pointer(right.root, "pointermove", right.toPixel(1, { axis: "x" })!, scale.map(2.5));
     await frame();
     // The x value and the right axis' value; there is no left axis to label.

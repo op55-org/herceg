@@ -5,6 +5,7 @@
 
 import { rootOf } from "../data/origin.ts";
 import type { Table } from "../data/table.ts";
+import type { FieldDisplays } from "../fields/rules.ts";
 import type { Fonts } from "../fonts/registry.ts";
 import { type Formatter, formatNumber } from "../format/format.ts";
 import type {
@@ -28,10 +29,11 @@ import { Polyline } from "../lod/polyline.ts";
 import type { DrawnMark } from "../marks/drawn.ts";
 import { isLayoutMark, type LayoutMark, tablesOf, viewOf } from "../marks/layout-mark.ts";
 import {
+  type AxisBands,
   type AxisFormat,
   type BandContext,
-  type BandList,
   type Bands,
+  type ChartBands,
   type ChartMark,
   checkOption,
   type Frame,
@@ -103,8 +105,10 @@ import { type CompiledFeatures, type FeatureCompiler, needsFeatures } from "./fe
 import {
   type AxesState,
   type CompiledGuides,
+  type Compilers,
   GUIDE_KIT,
   type GuideCompiler,
+  LOADED,
   type MarkRoom,
   needsGuides,
   type OwnScales,
@@ -138,7 +142,6 @@ export type ChartConfig = Omit<
   ChartSpec,
   | "marks"
   | "data"
-  // Specs check field displays; charts do not read them yet.
   | "fields"
   | "width"
   | "height"
@@ -159,6 +162,8 @@ export type ChartConfig = Omit<
    * itself; with facets or panels, layout marks that have a panel each.
    */
   marks: readonly ChartMark[];
+  /** How fields are named and their values written (see `ChartSpec.fields`). */
+  fields?: FieldDisplays | undefined;
   x?: XAxisConfig | undefined;
   y?: ChartAxisOptions | undefined;
   yRight?: ChartAxisOptions | undefined;
@@ -524,7 +529,7 @@ export class ChartModel {
   #placed: [PanelLayout, PanelLayout] | undefined;
   /** Scenes built so far. */
   #scenes = 0;
-  #bands: Bands = {};
+  #bands: ChartBands = {};
   /** Splits series into the panels of the chart's facet or subplots. */
   #splitter: { layout: PanelLayout; splitter: ReturnType<PanelLayout["splitter"]> } | undefined;
   /** Each panel of the last scene, for inspection and scales. */
@@ -575,17 +580,15 @@ export class ChartModel {
 
   /**
    * `page` resolves themes that follow the page: "auto" and CSS variables.
-   * `guides` plans guides beyond the default: a configuration that needs it
-   * (see `needsGuides`) draws as it asks only with it. `features` draws the
-   * marks' features: a configuration that needs it (see `needsFeatures`)
-   * draws no scene without it.
+   * Of `compilers`, the guide compiler plans guides beyond the default: a
+   * configuration that needs it (see `needsGuides`) draws as it asks only
+   * with it. The feature compiler draws the marks' features: a
+   * configuration that needs it (see `needsFeatures`) draws no scene
+   * without it, nor one that gives field displays without the display code
+   * (`LOADED`).
    */
-  constructor(
-    config: ChartConfig,
-    page?: ThemeEnvironment,
-    guides?: GuideCompiler,
-    features?: FeatureCompiler,
-  ) {
+  constructor(config: ChartConfig, page?: ThemeEnvironment, compilers: Compilers = []) {
+    const [guides, features] = compilers;
     this.#guides = guides;
     this.#features = features;
     this.#configure(config, page);
@@ -688,9 +691,10 @@ export class ChartModel {
     this.#style(theme);
   }
 
-  /** Which of the guide compiler and the feature compiler the configuration needs and the model lacks. */
-  lacks(): [boolean, boolean] {
+  /** Which of the guide compiler, the feature compiler, and the display code the configuration needs and the model lacks. */
+  lacks(): [boolean, boolean, boolean] {
     const config = this.#source;
+    const features = needsFeatures(config);
     // Panels' own visibility, and marks hidden whole or rows by value, show
     // on legends as the guide compiler lists them.
     return [
@@ -698,16 +702,17 @@ export class ChartModel {
         (needsGuides(config) ||
           this.hidden.panels.size > 0 ||
           [...this.hidden].some((key) => key.startsWith('{"mark":'))),
-      !this.#features && (needsFeatures(config) || this.#clash),
+      !this.#features && (features > 0 || this.#clash),
+      !LOADED[2] && features > 1,
     ];
   }
 
   /**
-   * Plans guides with `guides` and draws features with `features` from now
-   * on (each when given), resolving styles in `page`; throws for what they
-   * refuse of the configuration.
+   * Plans guides and draws features with `compilers` from now on (each
+   * when given), resolving styles in `page`; throws for what they refuse of
+   * the configuration.
    */
-  use(guides?: GuideCompiler, features?: FeatureCompiler, page?: ThemeEnvironment): void {
+  use([guides, features]: Compilers, page?: ThemeEnvironment): void {
     this.#guides ||= guides;
     this.#features ||= features;
     this.#configure(this.#source, page);
@@ -1101,9 +1106,8 @@ export class ChartModel {
   }
 
   /** Union of the marks' bands by key, keeping the previous list while unchanged. */
-  #bandList(axis: "x" | "y", context: BandContext): BandList {
+  #bandList(axis: "x" | "y", context: BandContext): AxisBands {
     const seen = new Set<string>();
-    const keys: string[] = [];
     const labels: string[] = [];
     for (const mark of this.#marks) {
       const bands = mark.bands?.(axis, context);
@@ -1111,16 +1115,21 @@ export class ChartModel {
       bands.keys.forEach((key, i) => {
         if (seen.has(key)) return;
         seen.add(key);
-        keys.push(key);
         labels.push(bands.labels[i]!);
       });
     }
+    const keys = [...seen];
+    // Categories as the displays of the fields on the axis write them, where they agree.
+    const texts = this.#compiled?.categories(axis, keys, labels) ?? labels;
     const previous = this.#bands[axis];
     const same =
       previous?.keys.length === keys.length &&
-      previous.keys.every((key, i) => key === keys[i] && previous.labels[i] === labels[i]);
+      previous.keys.every(
+        (key, i) =>
+          key === keys[i] && previous.labels[i] === labels[i] && previous.texts[i] === texts[i],
+      );
     // Frozen: axes share the labels with the chart's panels, which show them to applications.
-    return same ? previous : { keys, labels: Object.freeze(labels) };
+    return same ? previous : { keys, labels: Object.freeze(labels), texts };
   }
 
   #resolveSeries(bands: Bands, context: BandContext): MarkSeries[] {
@@ -1485,7 +1494,7 @@ export class ChartModel {
     // The categories of every mark placing them along an axis. Scale types
     // are found once marks are in their panels: a category scale in one
     // subplot leaves another's alone.
-    const bands: Bands = {};
+    const bands: ChartBands = {};
     for (const axis of ["x", "y"] as const)
       if (this.#marks.some((mark) => mark.channelKind(axis) === "category"))
         bands[axis] = this.#bandList(axis, context);
@@ -1916,7 +1925,7 @@ export class ChartModel {
     let xLines = 1;
     for (const i of xShown)
       if (xContexts[xGroupAt[i]!]!.type === "band")
-        for (const label of bandsOf("x", i).labels)
+        for (const label of bandsOf("x", i).texts)
           if (label.includes("\n")) xLines = Math.max(xLines, lineCount(label));
     const xLineHeight =
       tallest(xLabelPaints) +
@@ -1957,7 +1966,7 @@ export class ChartModel {
         const h = xGroupAt[i]!;
         const context = xContexts[h]!;
         return context.type === "band"
-          ? planBandAxis(bandsOf("x", i).labels, [0, pixels], 0, 0)
+          ? planBandAxis(bandsOf("x", i), [0, pixels], 0, 0)
           : planAxis(context, xDomains[h]!, [0, pixels], xTicks(context, pixels));
       },
     });
@@ -1971,13 +1980,19 @@ export class ChartModel {
     // those panels' title styles are read.
     const titleAt = xContexts.map(() => -1);
     for (const i of xShown) titleAt[xGroupAt[i]!] = i;
-    const ownTitle = (i: number) => (xOuter[i] ? panelX(i)?.title : undefined);
+    // Titles of parts are text by now: the guide compiler writes them (guides/titles.ts).
+    const ownTitle = (i: number) =>
+      xOuter[i] ? (panelX(i)?.title as string | undefined) : undefined;
     const xTitled = placement?.cells
       ? panelIndexes.filter(ownTitle)
       : titleAt.filter((i, h) => i >= 0 && xContexts[h]!.spec?.title);
     const xTitleHeight = tallest(
       xTitled.map((i) => styles.axisText("axisTitle", "x", i)),
-      xTitled.map((i) => (placement?.cells ? ownTitle(i) : xContexts[xGroupAt[i]!]!.spec?.title)),
+      xTitled.map((i) =>
+        placement?.cells
+          ? ownTitle(i)
+          : (xContexts[xGroupAt[i]!]!.spec?.title as string | undefined),
+      ),
     );
     const xTitle = xTitled.length ? xTitleHeight + GAP : 0; // y labels' boxes reach below the bottom tick as far as above the top one.
     const below =
@@ -2111,7 +2126,7 @@ export class ChartModel {
       const upward = bands.y !== undefined && numericBands(bands.y);
       const paint = showsY("y", i) ? tickPaint("y", i) : theme.style.tickLabel;
       const plan = planBandAxis(
-        bandsOf("y", i).labels,
+        bandsOf("y", i),
         upward ? [y + size, y] : [y, y + size],
         padding("y"),
         paint.lineHeight,
@@ -2178,7 +2193,7 @@ export class ChartModel {
       );
       const titleHeight = tallest(
         titled.map((i) => styles.axisText("axisTitle", axis, i)),
-        titled.map((i) => panelAxis(i, axis)?.title),
+        titled.map((i) => panelAxis(i, axis)?.title as string | undefined),
       );
       const title = titled.length ? titleHeight + GAP : 0;
       return {
@@ -2210,7 +2225,6 @@ export class ChartModel {
     // Each x group's plan for panels `plotWidth` wide, the first starting at `left`.
     const planCategoriesX = (h: number, range: readonly [number, number]): AxisPlan => {
       const first = xGroupAt.indexOf(h);
-      const categories = bandsOf("x", first).labels;
       // Spaced for the widest of the group's labels drawn, in their styles
       // and boxes.
       const widest = Math.max(
@@ -2220,10 +2234,10 @@ export class ChartModel {
           .map((i) => {
             const paint = tickPaint("x", i);
             const [, right, , left] = paint.background ? paint.padding : [0, 0, 0, 0];
-            return this.#widest(categories, measure, paint.css) + left + right;
+            return this.#widest(bandsOf("x", first).texts, measure, paint.css) + left + right;
           }),
       );
-      return planBandAxis(categories, range, padding("x"), widest);
+      return planBandAxis(bandsOf("x", first), range, padding("x"), widest);
     };
     // A domain other than the group's, as a navigator's strip plans the unzoomed one.
     const planX = (
@@ -2501,8 +2515,10 @@ export class ChartModel {
       let format = xFormats.get(key);
       if (!format) {
         const context = xContexts[h]!;
-        const { scale } = xPlanOf(h, i);
-        format = context.type === "band" ? categoryOf(scale) : valueFormat(context, scale);
+        format =
+          context.type === "band"
+            ? categoryOf(bandsOf("x", i).texts)
+            : valueFormat(context, xPlanOf(h, i).scale);
         xFormats.set(key, format);
       }
       return format;
@@ -2513,9 +2529,11 @@ export class ChartModel {
       const key = `${side.axis} ${g} ${plotHs[i]}`;
       let format = formats.get(key);
       if (!format) {
-        const { scale } = side.plans[i]!;
         const context = side.contexts[g]!;
-        format = context.type === "band" ? categoryOf(scale) : valueFormat(context, scale);
+        format =
+          context.type === "band"
+            ? categoryOf(bandsOf("y", i).texts)
+            : valueFormat(context, side.plans[i]!.scale);
         formats.set(key, format);
       }
       return format;
@@ -2526,7 +2544,7 @@ export class ChartModel {
     // (in a layout of cells, under each labeled panel's own labels): under
     // one panel's plot, at the chart's bottom.
     const xTitleOf = (h: number, i: number, plot: Rect): AxisGuide["title"] => {
-      const text = titleAt[h] === i ? xContexts[h]!.spec?.title : undefined;
+      const text = titleAt[h] === i ? (xContexts[h]!.spec?.title as string | undefined) : undefined;
       const own = placement?.cells ? ownTitle(i) : undefined;
       // Only titles drawn read their styles.
       if (!text && !own) return undefined;
@@ -2615,7 +2633,7 @@ export class ChartModel {
       // A layout mark draws its rows in the panel, which has no axes.
       if (item) {
         this.#items ??= new item.mark.views(this);
-        this.#items.fields = this.fields?.(locale, zone, GUIDE_KIT);
+        this.#items.fields = this.fields?.(locale, zone, GUIDE_KIT, this.#featured);
         // Its room is its plot: drawn on the plot's paint, its halos on the plot's fill.
         const paint = styles.plot(i);
         const frame = {
@@ -2664,7 +2682,7 @@ export class ChartModel {
         if (!labels.labeled[i]) continue;
         const title =
           config.panels || i === labels.first
-            ? panelAxis(i, right ? "yRight" : "y")?.title
+            ? (panelAxis(i, right ? "yRight" : "y")?.title as string | undefined)
             : undefined;
         // At the chart's edge along the plot, or where the panels' layout says.
         const size = labels.titleHeight;
@@ -2807,6 +2825,7 @@ export class ChartModel {
           locale,
           zone,
           GUIDE_KIT,
+          this.#featured,
           xContexts[h]!.type === "time" ? formatXOf(h, i) : undefined,
         ),
       });
@@ -3287,7 +3306,12 @@ export class ChartModel {
     this.#floats.clear();
     this.#doubles.clear();
     this.#bytes.clear();
-    items.fields = this.fields?.(locale, this.#config.timeZone ?? "local", GUIDE_KIT);
+    items.fields = this.fields?.(
+      locale,
+      this.#config.timeZone ?? "local",
+      GUIDE_KIT,
+      this.#featured,
+    );
     const paint = this.#styles.plot(0);
     const under = plotSurface(paint?.fill);
     const { guides, box, inside } = header;
@@ -3316,16 +3340,6 @@ export class ChartModel {
     return scene;
   }
 
-  /** x scale of the last scene's first panel (the only one without facets). */
-  xScale(): PositionScale | undefined {
-    return this.#views[0]?.inspector.frame.x;
-  }
-
-  /** y scale of the last scene's first panel. */
-  yScale(): PositionScale | undefined {
-    return this.#views[0]?.inspector.frame.y;
-  }
-
   /** The y scale a mark's values are placed with: in the first panel drawing it. */
   yScaleOf(mark: Mark): PositionScale | undefined {
     const inspector = this.#viewOf(mark)?.inspector;
@@ -3339,11 +3353,6 @@ export class ChartModel {
       (mark && this.#views.find(({ inspector }) => inspector.marks.some((m) => m.mark === mark))) ??
       this.#views[0]
     );
-  }
-
-  /** Scale of the right y axis in the last scene, when marks use it. */
-  yRightScale(): PositionScale | undefined {
-    return this.#views[0]?.inspector.rightFrame?.y;
   }
 
   /**
@@ -3425,7 +3434,6 @@ export class ChartModel {
     return this.#entries;
   }
 
-  /** The series a panel of the last scene draws; with facets, the parts of series in it. */
   /** Whether the last scene's inspections name their panel: in charts with facets or subplots. */
   get namesPanels(): boolean {
     return this.#namesPanels;
@@ -3434,11 +3442,6 @@ export class ChartModel {
   /** What panel `panel` of the last scene inspects: its marks, their series, and its frame. */
   inspectorOf(panel: string): Inspector | undefined {
     return this.#views.find(({ key }) => key === panel)?.inspector;
-  }
-
-  panelSeries(panel: string): Series[] {
-    const view = this.#views.find(({ key }) => key === panel);
-    return view ? view.inspector.marks.flatMap(({ series }) => series) : [];
   }
 
   /** The panel whose plot holds a pixel, if any. */
@@ -3503,7 +3506,7 @@ export class ChartModel {
   }
 
   /** The chart's bands as of the last scene, which band indices in series name. */
-  get bands(): Bands {
+  get bands(): ChartBands {
     return this.#bands;
   }
 
@@ -3677,9 +3680,9 @@ function numberFormatter(locale: string | undefined): Formatter {
   return (value) => formatNumber(value, locale);
 }
 
-/** The category at a band index. */
-function categoryOf(scale: PositionScale): Formatter {
-  return (value) => scale.categories?.[Math.round(value)] ?? "";
+/** The category at a band index, as its axis writes it. */
+function categoryOf(texts: readonly string[]): Formatter {
+  return (value) => texts[Math.round(value)] ?? "";
 }
 
 /** The y axis a mark's values are on. */

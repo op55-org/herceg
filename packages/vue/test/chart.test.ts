@@ -177,6 +177,24 @@ describe("<Chart>", () => {
     expect(host.textContent).toContain("4!");
   });
 
+  it("takes field displays, comparing the tables their rules match by identity", async () => {
+    // Two unnamed tables write the same JSON: only the one the line draws matches.
+    const { view, chart } = chartRef();
+    const drawn = table({ t: [0, 1], v: [1, 2] });
+    const other = table({ t: [0, 1], v: [1, 2] });
+    const fields = shallowRef([{ match: { table: drawn, field: "v" }, label: "Volume" }]);
+    mount(
+      `<Chart ref="view" renderer="svg" :fields="fields"><Line :data="drawn" x="t" y="v" /></Chart>`,
+      () => ({ drawn, view, fields }),
+    );
+    await chart().loading;
+    expect(chart().toSVG()).toContain("Volume: 2 points");
+    fields.value = [{ match: { table: other, field: "v" }, label: "Volume" }];
+    await nextTick();
+    await frame();
+    expect(chart().toSVG()).not.toContain("Volume");
+  });
+
   for (const stack of ["fill", "center", "wiggle"] as const) {
     it(`passes ${stack} and inside-out area options through Vue`, () => {
       const { view, chart } = chartRef();

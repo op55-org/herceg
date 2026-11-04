@@ -20,7 +20,7 @@ import type { SelectionLooks } from "../spec/state.ts";
 import { colored } from "./colored.ts";
 import { BandShares } from "./dodge.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
-import type { CssColor } from "./encoding.ts";
+import type { CssColor, SeriesName } from "./encoding.ts";
 import {
   type AxisFormat,
   type BandContext,
@@ -76,7 +76,7 @@ export type DistributionOptions<S extends Schema> = (
   fill?: string;
   /** Opacity of the shapes' fill; 0.25 by default. */
   fillOpacity?: number;
-  label?: string;
+  label?: SeriesName<S>;
   /** With the chart's `facet`, draw all rows in every panel instead of splitting them. */
   facet?: "repeat";
   /**
@@ -165,7 +165,7 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   readonly view: RowView | undefined;
   readonly identity: MarkSources;
   readonly tooltip: "x" | "y";
-  readonly summarizes = true;
+  readonly summarizes = "values";
   readonly bandPadding = 0.2;
   abstract readonly inset: { readonly x: number; readonly y: number };
   /** True when categories are on y and values on x. */
@@ -279,6 +279,12 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   }
 
   /** Resolved groups eligible for drawing and navigation; by default, every summary row. */
+  /** How a series' values are written: its axis' format, through its value field's display. */
+  protected valueFormat(series: Series | undefined, format: AxisFormat): (value: number) => string {
+    const axis = this.horizontal ? format.x : format.y;
+    return series?.write?.(axis) ?? axis;
+  }
+
   protected drawnSeries(series: Series[]): Series[] {
     return series;
   }
@@ -649,7 +655,8 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
   ): Series[] {
     // Facets summarize each panel's rows (summarizePanels).
     if (split) {
-      const label = this.spec.label ?? this.value;
+      // A name of parts is the series' label until the feature compiler names it.
+      const label = (this.spec.label as string | undefined) ?? this.value;
       return this.rosterIds().map((name) => {
         const id = seriesKey(key, name);
         const series = this.spec.series === undefined ? label : name;
@@ -692,12 +699,18 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
       const positions = this.#placed(summary, indices);
       const median = summary.stats.median;
       const sources = new Map(summary.split.sources().map((source) => [source.id, source]));
-      const series = roster.map(({ key, label, color }, i) => {
+      const series = roster.map(({ key, label, color, write, fields, about }, i) => {
         // Without a series field, the one series has every summary row.
         const found = sources.get(ids[i]!);
         const length = found ? (found.rows?.length ?? median.length) : 0;
         const rows = found ? found.rows : NO_ROWS;
-        return this.#series(key, label, color, positions, median, rows, length);
+        // Written as the whole series is: through its value field's display.
+        return {
+          ...this.#series(key, label, color, positions, median, rows, length),
+          write,
+          fields,
+          about,
+        };
       });
       return this.drawnSeries(series);
     });
@@ -924,7 +937,9 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
    * parts in every panel, each read with its own summary.
    */
   summarize(parts: readonly Series[], name: string, { format }: SummaryContext): string {
-    const f = this.horizontal ? format.x : format.y;
+    const f = this.valueFormat(parts[0], format);
+    // Categories as their field's display writes them.
+    const category = parts[0]?.fields?.of(this.table, this.category)?.writer();
     let count = 0;
     // The lowest and highest medians, and their categories.
     let lowest: [number, string] | undefined;
@@ -939,7 +954,10 @@ export abstract class DistributionMark<T extends BoxPlotSpec | BoxenSpec | Violi
         const value = median[row]!;
         if (!Number.isFinite(value)) continue;
         count++;
-        const label = () => labels.dictionary[labels.codes[row]!]!;
+        const label = () => {
+          const raw = labels.dictionary[labels.codes[row]!]!;
+          return category ? category(raw) : raw;
+        };
         if (!lowest || value < lowest[0]) lowest = [value, label()];
         if (!highest || value > highest[0]) highest = [value, label()];
       }

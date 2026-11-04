@@ -6,7 +6,8 @@
 // that loading it later shares no code with the chart's own.
 
 import type { Formatter } from "../format/format.ts";
-import { formatWriter } from "../format/patterns.ts";
+import { intlWrites } from "../format/intl-options.ts";
+import { formatWriter, formOf } from "../format/patterns.ts";
 import type { FieldReaders, InspectedField } from "../marks/tooltip-fields.ts";
 import type { Inspection } from "../model/model.ts";
 import type { Theme } from "../theme.ts";
@@ -15,38 +16,59 @@ import type { RenderTooltip, Tooltip } from "./tooltip.ts";
 const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
 
 /**
- * Reads tooltip fields in a chart's locale and zone, written with their
- * formats (any form, `FormatSpec`), else numbers as the chart's other
- * numbers, and times as `times` does (the x axis' formatter, on time axes)
- * or as dates and times.
+ * Reads tooltip fields in a chart's locale and zone, through the chart's
+ * field displays (missing values, mappings, labels): written with their
+ * formats (any form of their kind's, `FormatSpec`), else their displays',
+ * else numbers as the chart's other numbers, and times as `times` does (the
+ * x axis' formatter, on time axes) or as dates and times. A format of the
+ * wrong kind is refused as it is first read, as a malformed one is.
  */
-export const fieldReader: FieldReaders = (locale, zone, kit, times) => {
+export const fieldReader: FieldReaders = (locale, zone, kit, features, times) => {
   const numbers = (value: number) => kit.formatNumber(value, locale);
   const formats = new Map<string, Formatter>();
-  const write = (kind: string, format: object | undefined, at: string): Formatter => {
-    if (!format)
-      return kind === "number" ? numbers : (times ?? kit.timeFormatter(DATE_TIME, zone, locale));
+  const fallback = (kind: string): Formatter =>
+    kind === "number" ? numbers : (times ?? kit.timeFormatter(DATE_TIME, zone, locale));
+  const write = (field: string, kind: InspectedField["kind"], format: object, at: string) => {
     const key = `${kind} ${JSON.stringify(format)}`;
     let formatter = formats.get(key);
     if (!formatter) {
       formatter = formatWriter(kit, format, kind === "time", zone, locale, at);
+      const form = formOf(format, at);
+      // As a display's format of the wrong kind is refused (fields/check.ts, `misfit`).
+      if (
+        kind === "category" ||
+        (form === "intl" ? !intlWrites(format, kind) : (form === "time") !== (kind === "time"))
+      )
+        throw new Error(
+          `${at}: ${JSON.stringify(field)} holds ${kind === "category" ? "categories" : `${kind}s`}; ${
+            kind === "category"
+              ? "formats are for numbers and times; drop format"
+              : kind === "time"
+                ? "give { time } or Intl date options"
+                : "give a number format"
+          }`,
+        );
       formats.set(key, formatter);
     }
     return formatter;
   };
-  return (table, tooltip, row) =>
-    tooltip?.fields?.map((entry, i) => {
-      const { field, label = field, format } = typeof entry === "string" ? { field: entry } : entry;
-      const value = table!.value(field, row);
-      const kind = table!.kind(field) as InspectedField["kind"];
+  return (mark, row) =>
+    mark?.spec.tooltip?.fields?.map((entry, i) => {
+      const table = mark.table!;
+      const { field, label, format } = typeof entry === "string" ? { field: entry } : entry;
+      const value = table.value(field, row);
+      const kind = table.kind(field) as InspectedField["kind"];
+      const own = format && write(field, kind, format, `tooltip.fields[${i}].format`);
+      const shown = features?.fields?.of(table, field);
       // Times beyond what dates hold (an infinity among them) have no date to write.
-      const text =
-        value === null || (kind === "time" && !(Math.abs(value as number) <= 8.64e15))
+      const text = shown
+        ? shown.writer(own, fallback(kind))(value)
+        : value === null || (kind === "time" && !(Math.abs(value as number) <= 8.64e15))
           ? "–"
           : typeof value === "string"
             ? value
-            : write(kind, format, `tooltip.fields[${i}].format`)(value);
-      return { field, label, kind, value, text };
+            : (own ?? fallback(kind))(value);
+      return { field, label: label ?? shown?.label ?? field, kind, value, text };
     });
 };
 
