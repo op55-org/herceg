@@ -36,8 +36,10 @@ by name, regular expression, kind, and table.
   alternative write fields through their displays ([Charts](#charts)), and
   so do pies, funnels, treemaps, sunbursts, Sankey diagrams, networks,
   maps, and radars ([Layout marks](#layout-marks)).
-- Grids take `fields: compileFields(rules)`: headers, descriptions, cells,
-  group keys, and aggregates ([Grids](#grids)).
+- Grids take `fields` as charts do (rules, or `compileFields(rules)`
+  shared with charts): headers, descriptions, cells, group keys, and
+  aggregates, and pivot grids' rows, value headings, and cells
+  ([Grids](#grids)).
 - Specs carry `fields`, and `validateSpec` checks it, with paths.
 - Displays color values ([Colors](#colors)): thresholds and mapping colors
   color bars, lines, areas, and regions colored by a number field without a
@@ -265,8 +267,8 @@ createChart(element, {
   field's link (`InspectedField.link`, `{ url, text }`); targets do not.
 - **Static output** writes a tooltip field's link text in SVG titles, as
   unpinned tooltips do, and draws no links.
-- **Grids** do not draw links yet: `compileFields(...).column(...)` gives
-  each column's `link(table, row)` for the cells that will.
+- **Grids** do not draw links yet; their models resolve each column's
+  link for the cells that will.
 - A field a part names must be in the table of the field linked: the
   surface reading the link refuses it as it first reads that table
   (`chart fields.trace.link.url[3].field: no field "span" in the table of
@@ -444,18 +446,26 @@ name nodes by their raw paths, while the breadcrumbs draw "Europe".
 
 ## Grids
 
-Grids take displays through `herceg/fields` alone, compiled once:
-`createGridModel({ ..., fields: compileFields(rules) })`, then
-`model.setFields(...)` to change them. Headers read fields' labels and
-descriptions, cells write through the displays, and group rows write keys
-and aggregates by operation and kind. Grids without `fields` load none of
-it. See [Grids](grids.md#field-displays). Grid cells do not draw links
-yet ([Links](#links)).
+Grid models take `fields` as charts do: displays by field name or rules,
+which the model compiles when it is given them, or `compileFields(rules)`
+from `herceg/fields`, compiled once and shared among grids and charts
+(charts take it too). `model.update({ fields })` changes them. Headers
+read fields' labels and descriptions, cells write through the displays,
+group rows write keys and aggregates by operation and kind, and pivot
+grids write their rows column, value headings, and cells through them.
+See [Grids](grids.md#field-displays). Grid cells do not draw links or
+display colors yet ([Links](#links)).
+
+```ts
+const fields = compileFields([{ match: "latency", format: { duration: "millisecond" } }]);
+createGridModel({ data: rowView(requests), columns: [{ field: "latency" }], fields });
+createChart(element, { fields, marks: [line(requests, { x: "time", y: "latency" })] });
+```
 
 ## Reading displays in TypeScript
 
 `herceg/fields` is its own entry: charts that do not import it pay
-nothing for it.
+nothing for it, and grids carry what they compile.
 
 ```ts
 import { compileFields, displayOf, fieldsOf } from "herceg/fields";
@@ -489,8 +499,8 @@ displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; 
   surface's format where neither its own nor the field's applies (grids'
   times, to the second).
 - `compileFields(fields)` checks the rules once and returns their
-  `displayOf`, for surfaces resolving many fields, and `column(...)`, what
-  a grid column shows through them (`ColumnDisplay`), which grids call.
+  `displayOf`, for application code resolving many fields; charts and
+  grids given its result share the one compilation.
 - `fieldsOf(table, displays)` writes rules for a table's fields, each
   display typed by its field's kind and checked against the schema, its
   link's `{ field }` parts typed by the table's fields; the rules match

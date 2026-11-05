@@ -60,12 +60,18 @@ export type GroupKey = readonly (string | number | null)[];
 /** Operations whose result is a value of their field, so a time stays a time. */
 type KeepsKind = "mean" | "min" | "max";
 
-type ResultKind<S extends Schema, A> = A extends { op: KeepsKind; field: infer F }
-  ? F extends keyof S
-    ? S[F] extends "time"
-      ? "time"
-      : "number"
+/** The kind of field `F`'s values, where an operation keeps it (distributes over `F`). */
+type FieldKind<S extends Schema, F> = F extends keyof S
+  ? S[F] extends "time"
+    ? "time"
     : "number"
+  : "number";
+
+/** What operation `Op` gives over a field of kind `K` (distributes over `Op`, so a widened operation gives either). */
+type OpKind<Op, K> = Op extends KeepsKind ? K : "number";
+
+type ResultKind<S extends Schema, A> = A extends { op: infer Op; field?: infer F }
+  ? OpKind<Op, FieldKind<S, F>>
   : "number";
 
 /** The fields of a groups' table: the grouping fields, then each aggregate. */

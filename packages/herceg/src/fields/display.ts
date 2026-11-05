@@ -12,7 +12,6 @@ import type { TimeZone } from "../format/zone.ts";
 import type { DisplayedKind, FieldDisplay, MissingDisplay, ValueMapping } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import { checkFormat, holds, misfit } from "./check.ts";
-import type { ColumnDisplay, GridColumnSettings } from "./grid.ts";
 import { type LinkRows, type LinkWrite, linker, type RowLink } from "./links.ts";
 import type { FieldDisplays, FieldOf, Resolved } from "./rules.ts";
 
@@ -82,9 +81,9 @@ export interface DisplayedField<K extends DisplayedKind = DisplayedKind> {
 }
 
 /**
- * Field displays checked and compiled once: what surfaces that take field
- * display through an explicit import read, and displays of many fields
- * without checking the rules again for each.
+ * Field displays checked and compiled once (`compileFields`): what charts
+ * and grids given them write with, so many surfaces share one compilation,
+ * and displays of many fields without checking the rules again for each.
  */
 export interface CompiledFields {
   /** The displays, as given. */
@@ -98,18 +97,11 @@ export interface CompiledFields {
     of: { table: Table<S> | RowView<S>; field: F },
     settings?: DisplaySettings,
   ): DisplayedField<S[F] & DisplayedKind>;
-  /**
-   * What a grid column (its field, and its own title and format) of a field
-   * of `kind` in `table` (a table, or a remote source's name) shows through
-   * the displays, in the grid's locale and zone (`settings`): grid models
-   * call it where they are given displays.
-   */
-  column<S extends Schema>(
-    column: GridColumnSettings,
-    kind: DisplayedKind,
-    table: Table<S> | string | undefined,
-    settings: DisplaySettings,
-  ): ColumnDisplay;
+}
+
+/** Whether `fields` were compiled (`compileFields`): rules and records hold no functions. */
+export function isCompiled(fields: FieldDisplays | CompiledFields): fields is CompiledFields {
+  return typeof (fields as Partial<CompiledFields> | null)?.displayOf === "function";
 }
 
 /** What grid cells read a field's values from: a table, or a remote grid's window of rows. */

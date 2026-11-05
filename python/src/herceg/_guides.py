@@ -264,8 +264,19 @@ def _check_number_pattern(pattern: str, role: str) -> None:
             f"{role}: {shown(pattern)} is not a number pattern herceg reads; write "
             '[sign][,][.precision][~][type] with type d, f, e, g, s, or %, such as ",.2f"'
         )
-    if match.group(5) in ("g", "s") and match.group(3) == "0":
-        raise ChartError(f"{role}: {shown(pattern)} asks for 0 significant digits; give 1 or more")
+    # d3-format's bounds, which are Intl's; a pattern without a type is "g".
+    kind = match.group(5) or "g"
+    precision = match.group(3)
+    if precision is None:
+        return
+    if kind in ("g", "s") and not 1 <= int(precision) <= 21:
+        raise ChartError(
+            f"{role}: {shown(pattern)} asks for {int(precision)} significant digits; give 1 to 21"
+        )
+    if kind in ("f", "e", "%") and int(precision) > 20:
+        raise ChartError(
+            f"{role}: {shown(pattern)} asks for {int(precision)} decimals; give 0 to 20"
+        )
 
 
 def _check_time_pattern(pattern: str, role: str) -> None:

@@ -9,6 +9,7 @@ data. Grids are TypeScript and React only; Python has none.
 - [Sorting and selecting](#sorting-and-selecting)
 - [Events](#events)
 - [Columns](#columns)
+- [Formats](#formats)
 - [Field displays](#field-displays)
 - [Linking a grid and a chart](#linking-a-grid-and-a-chart)
 - [Grouped rows](#grouped-rows)
@@ -45,7 +46,7 @@ grids of the same rows share the view and the selection store.
 | Column option | Means |
 | --- | --- |
 | `field`, `title` | The field shown, and its header (its [display's](#field-displays) label, else the field's name, by default). |
-| `format` | Intl options for the field's kind (none for categories); other format forms come from [field displays](#field-displays). Numbers align to the end. |
+| `format` | How values are written, in any form axes take (see [Formats](#formats)); none for categories. Numbers align to the end. |
 | `width` | Pixels: 120 by default, at least 32. |
 | `aggregate` | In a [grouped grid](#grouped-rows), the group's value to show. |
 
@@ -53,9 +54,9 @@ grids of the same rows share the view and the selection store.
 | --- | --- |
 | `data` | A row view. |
 | `columns` | The columns, as above. |
-| `timeZone`, `locale` | How times and numbers are written (the runtime's locale and `"local"` zone by default). |
+| `timeZone`, `locale` | How times and numbers are written (the runtime's locale and `"local"` zone by default); an unknown zone is refused as the model is made. |
 | `rowHeight` | Pixels per row; 28 by default. |
-| `fields` | [Field displays](#field-displays), from `compileFields(rules)`; without them, missing values are empty. |
+| `fields` | [Field displays](#field-displays): rules as charts take them, or `compileFields(rules)` shared with other grids and charts; without them, missing values are empty. |
 | `selectionStore`, `channel` | Where selected rows go (`"grid-rows"` by default). |
 | `selection` | `{ click: "toggle" }`: a plain click on the one row selected clears it (`"only"`, the default, keeps it). |
 | `groups` | Row groups to show (see [below](#grouped-rows)). |
@@ -146,11 +147,42 @@ model.setColumns(JSON.parse(localStorage.layout));
   grid too narrow for them, pinned columns scroll with the others until it
   widens.
 
+## Formats
+
+A column's `format` takes every form axes take, by its field's kind, so a
+column writes durations, bytes, and patterns as an axis does:
+
+```ts
+createGridModel({
+  data: rowView(requests),
+  columns: [
+    { field: "time", format: { time: "%Y-%m-%d %H:%M" } },
+    { field: "latency", format: { duration: "millisecond" } }, // "1m 6s"
+    { field: "bytes", format: { binary: "B" } }, // "1.5 MiB"
+    { field: "requests", format: { number: ".3~s", suffix: " req" } }, // "1.23k req"
+  ],
+});
+```
+
+| Field kind | `format` |
+| --- | --- |
+| Numbers | Intl options; `{ number }`, a d3-like pattern, with `prefix` and `suffix`; `{ duration }`; `{ si }` and `{ binary }` prefixes (see [Formats](axes-and-legends.md#formats)) |
+| Times | Intl date options; `{ time }`, a strftime pattern, with a `fiscal` year |
+| Categories | none: written as they are, or as their field's display maps them |
+
+Without a format, numbers have up to two decimals (three significant
+digits below 1), and times are written to the second. A format the field's
+kind does not take is refused, in TypeScript and when the column is
+described (`grid columns[1].format: "service" holds categories; formats are
+for numbers and times; drop format`).
+
 ## Field displays
 
-A grid given `fields`, [field displays](fields.md) compiled by
-`compileFields` from `herceg/fields`, writes its fields as charts given
-the same rules do. Grids without them load none of that code.
+A grid given `fields`, [field displays](fields.md) by field name or as
+rules, as charts take them, writes its fields as charts given the same
+rules do. The model compiles them when it is given them;
+`compileFields(rules)` from `herceg/fields` compiles them once for several
+grids and charts to share.
 
 ```ts
 import { compileFields } from "herceg/fields";
@@ -161,18 +193,18 @@ const fields = compileFields([
   { match: "status", mappings: [{ value: "200", text: "OK" }, { regex: "^5", text: "Server error" }] },
 ]);
 const model = createGridModel({ data: rowView(requests), columns: [{ field: "time" }, { field: "status" }, { field: "latency" }], fields });
-model.setFields(compileFields(otherRules)); // new text; layout, sort, groups, selection, and scroll stay
+createChart(element, { fields, marks: [line(requests, { x: "time", y: "latency" })] });
+model.update({ fields: { latency: { format: { duration: "second" } } } }); // new text; layout, sort, groups, selection, and scroll stay
 ```
 
 - **Headers** read the column's `title`, else the field's label. The
   field's description is the header's `title`: its tooltip and accessible
   description. Sorting and column changes are announced by these titles.
 - **Cells** write a value as the display does: its missing text, then its
-  mappings, then its format, in every form displays take. A column's own
-  `format` (Intl options) replaces the field's, while the mappings and
-  missing text stay. Times without a format are written to the second, as
-  grids write them without displays. A category value's text is written
-  once, the first time a cell shows it.
+  mappings, then its format. A column's own `format` replaces the field's,
+  while the mappings and missing text stay. Times without a format are
+  written to the second, as grids write them without displays. A category
+  value's text is written once, the first time a cell shows it.
 - **Group rows** write keys through their fields' displays ("(missing)"
   where a display gives no missing text), and a column's `aggregate` by
   its operation and kind: the field's own `min`, `max`, `mean`, and `sum`
@@ -180,8 +212,13 @@ model.setFields(compileFields(otherRules)); // new text; layout, sort, groups, s
   and aggregates that change the kind (a sum of times), as plain numbers.
 - **Remote grids** match rules naming a table (`{ match: { table:
   "requests" } }`) by the source's `schema.source` name.
-- Pivot grids take no `fields` yet; they keep their `missing` and
-  `valueFormat` options.
+- **`model.update({ fields })`** gives new displays, or none with
+  `undefined`; what it leaves out stays. The whole update is checked and
+  compiled before any of it applies, so one that is refused (a malformed
+  rule, a format a field's kind cannot take) changes nothing, and
+  listeners hear of one that applies once.
+- Rules are checked as the grid is made and as `update` takes them
+  (`grid fields[1].match.regex: ...`), as charts check theirs.
 
 ## Linking a grid and a chart
 
@@ -265,21 +302,36 @@ which grids without one never load.
 import { createPivotGrid, createPivotGridModel } from "herceg/grid/pivot";
 
 const model = createPivotGridModel({
-  data: traffic,
+  data: traffic, // pivotRows(view, { rows: "region", pivot: "status", ops: { n: count(), latency: mean("latency") } })
+  fields: { latency: { format: { duration: "millisecond" } }, status: { mappings: [{ value: "503", text: "Unavailable" }] } },
   rowColumn: { title: "Region", width: 100 },
-  aggregates: { latency: { title: "Latency (ms)", format: { maximumFractionDigits: 1 } } },
+  aggregates: { latency: { title: "Latency" }, n: { title: "Requests" } },
 });
-createPivotGrid(element, { model, ariaLabel: "Requests by region and service" });
+createPivotGrid(element, { model, ariaLabel: "Requests by region and status" });
 model.pinColumn("region", "left");
 ```
 
 - A row per pivot row; columns for the rows field, each value and
   aggregate, and the totals. With several aggregates, a header row of
   values spans their aggregates' columns.
-- Absent combinations are blank; a missing key reads "(missing)".
+- **Field displays** (`fields`, as other grids take them) title the rows
+  column by its field's label and write its keys, head each pivot value's
+  columns by its text ("Unavailable"; the columns' ids keep the raw
+  value), and write an aggregate of a field that keeps its kind (a `min`,
+  `max`, `mean`, or `sum` of numbers; a `min`, `max`, or `mean` of times)
+  in the field's format, without its mappings. Counts and aggregates that
+  change the kind are plain numbers; aggregates' titles stay their `title`,
+  else their name. `model.update({ fields })` takes new ones.
+- **Formats**: `rowColumn.format` and each aggregate's `format` take every
+  form for their kind, over the field's display; `valueFormat` writes the
+  pivot field's values (numbers or times) over their columns, over its
+  display's format.
+- Absent combinations are blank; a missing value is empty unless its
+  field's display gives missing text, and a missing key reads "(missing)",
+  or its field's missing text.
 - Generated columns take the usual commands by id, with full titles
-  ("api, Latency (ms)") as their accessible names. A value streaming in
-  later gets columns of its own without moving the columns in view.
+  ("api, Latency") as their accessible names. A value streaming in later
+  gets columns of its own without moving the columns in view.
 - Clicking a header sorts the rows by its column (absent and missing last),
   without touching the view's order.
 - Selecting a row selects its rows of the view, so a chart restricted to
@@ -305,6 +357,10 @@ const model = createRemoteGridModel({
 });
 createRemoteGrid(element, { model, ariaLabel: "Failed requests" });
 ```
+
+Columns take the same [formats](#formats), and the model the same
+[`fields`](#field-displays) and `update`, as local grids: rules naming a
+table match the source's name.
 
 **The query** (`GridQuery`) is plain JSON a server can run: a version (1),
 the source's name, a filter (a portable expression, as `col(...)`

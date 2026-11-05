@@ -10,6 +10,7 @@ import { table } from "../../src/data/table.ts";
 import { describeInspection } from "../../src/dom/tooltip.ts";
 import { fieldReader } from "../../src/dom/tooltip-content.ts";
 import { linkable } from "../../src/fields/check.ts";
+import { columnDisplay } from "../../src/fields/grid.ts";
 import {
   compileFields,
   displayOf,
@@ -130,23 +131,31 @@ describe("link text", () => {
   });
 
   it("writes the field's own value as the surface does: a grid's cells", () => {
-    const column = compileFields({
+    const fields = compileFields({
       latency: { link: { url: ["/l/", { value: true }], text: ["~", { value: true }] } },
-    }).column({ field: "latency", format: { maximumFractionDigits: 0 } }, "number", traces, {
-      locale: "en-US",
     });
+    const column = columnDisplay(
+      fields,
+      { field: "latency", format: { maximumFractionDigits: 0 } },
+      "number",
+      traces,
+      { locale: "en-US" },
+    );
     expect(column.link(traces, 0)).toEqual({ url: "/l/1.5", text: "~2" });
   });
 
   it("writes fields of the table the display is of, whatever reads the rows", () => {
     // A remote grid's source by name, its rows read by a reader of its own.
-    const column = compileFields([
+    const fields = compileFields([
       { match: { table: "requests", field: "status" }, mappings: [{ value: "200", text: "OK" }] },
       {
         match: { table: "requests", field: "id" },
         link: { url: "/r", text: [{ field: "status" }] },
       },
-    ]).column({ field: "id" }, "category", "requests", { locale: "en-US" });
+    ]);
+    const column = columnDisplay(fields, { field: "id" }, "category", "requests", {
+      locale: "en-US",
+    });
     const rows: LinkRows = {
       has: (field) => field === "id" || field === "status",
       kind: () => "category",

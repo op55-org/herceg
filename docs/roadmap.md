@@ -74,8 +74,8 @@ The long-term target covers the major chart families. Not yet available:
 
 - **Field displays everywhere.** Charts, layout marks, and grids read
   `fields` ([Field displays](guide/fields.md)), marks take their colors
-  and thresholds, and pinned tooltips draw their links; next are pivot
-  grids, grid cells colored by display colors and drawing links, links of
+  and thresholds, and pinned tooltips draw their links; next are grid
+  cells colored by display colors and drawing links, links of
   fields holding whole URLs, and axes agreeing on their fields per subplot
   rather than over the chart.
 - Animation of categories that come and go.

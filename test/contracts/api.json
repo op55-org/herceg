@@ -1754,7 +1754,17 @@
         "missing": "Python takes missing values as text, or a dict of their text and color (`missing={\"text\": \"n/a\", \"color\": \"#9e9e9e\"}`), checked as hg.FieldDisplay is made, rather than an object of its own."
       }
     },
-    "chart update fields": {
+    "chart typescript fields": {
+      "only": {
+        "displays": "TypeScript charts also take a compileFields result (CompiledFields), one compilation charts and grids share: these are the rules it compiled, which specs carry themselves.",
+        "displayOf": "As displays: the compiled result's reader, a function, which specs cannot hold."
+      }
+    },
+    "settings CompiledFields|FieldDisplay|FieldRule hg.FieldDisplay": {
+      "without": {
+        "displays": "TypeScript's compileFields result (CompiledFields), one compilation charts and grids share; Python gives charts the displays themselves (fields=), which they compile.",
+        "displayOf": "As displays."
+      },
       "untyped": {
         "missing": "Python takes missing values as text, or a dict of their text and color (`missing={\"text\": \"n/a\", \"color\": \"#9e9e9e\"}`), checked as hg.FieldDisplay is made, rather than an object of its own."
       }

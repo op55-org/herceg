@@ -1,6 +1,6 @@
 // Grids given field displays (`fields: compileFields(rules)`): headers
 // titled and described by labels and descriptions, cells, missing values,
-// group keys, and aggregates written through them; `setFields` keeping the
+// group keys, and aggregates written through them; `update` keeping the
 // grid's state; remote grids matching rules by their source's name; and
 // category texts kept per dictionary as it grows, compacts, and resets.
 import { describe, expect, it } from "vitest";
@@ -113,10 +113,10 @@ describe("grids given field displays", () => {
     const make = () =>
       createGridModel({
         data: rowView(requests()),
-        columns: [{ field: "ms", format: { time: "%H" } as never }],
+        columns: [{ field: "id" }, { field: "ms", format: { time: "%H" } as never }],
         fields: compileFields(RULES),
       });
-    expect(make).toThrow('settings.format: "ms" holds numbers; give a number format');
+    expect(make).toThrow('grid columns[1].format: "ms" holds numbers; give a number format');
   });
 
   it("write group keys through their fields' displays, and aggregates by operation and kind", () => {
@@ -204,7 +204,7 @@ describe("grids given field displays", () => {
     expect(model.textAt(model.rowIndexOfGroup(["a"]), 0)).toBe("A (1)");
   });
 
-  it("take new displays with setFields, keeping layout, sort, groups, selection, and scroll", () => {
+  it("take new displays with update, keeping layout, sort, groups, selection, and scroll", () => {
     const data = rowView(
       table({
         id: Float64Array.from({ length: 200 }, (_, i) => i),
@@ -241,13 +241,17 @@ describe("grids given field displays", () => {
     const row = model.rowIndexOfGroup(["web"]) + 1;
     expect(model.textAt(row, model.columnIndex("ms"))).toBe("1,980");
 
-    model.setFields(
-      compileFields({
+    // Rules as charts take them, compiled by the model; listeners hear once.
+    let heard = 0;
+    model.subscribe(() => heard++);
+    model.update({
+      fields: {
         ms: { label: "Latency", format: { duration: "millisecond" } },
         host: { label: "Host" },
-      }),
-    );
-    expect(model.revision).toBeGreaterThan(revision);
+      },
+    });
+    expect(heard).toBe(1);
+    expect(model.revision).toBe(revision + 1);
     expect(model.columnLayout.map(({ title }) => title)).toEqual(["Host", "id", "Latency"]);
     expect(model.textAt(row, model.columnIndex("ms"))).toBe("1s 980ms");
     expect(model.textAt(model.rowIndexOfGroup(["web"]), 2)).toBe("990ms");
@@ -260,7 +264,7 @@ describe("grids given field displays", () => {
       expanded: model.isExpanded(["web"]),
     }).toEqual(before);
 
-    model.setFields(undefined);
+    model.update({ fields: undefined });
     expect(model.columnLayout.map(({ title }) => title)).toEqual(["host", "id", "ms"]);
     expect(model.textAt(row, model.columnIndex("ms"))).toBe("1,980");
   });
@@ -330,7 +334,7 @@ describe("remote grids given field displays", () => {
     expect(texts).toContainEqual(["unknown (1)", "5ms"]);
 
     const revision = model.revision;
-    model.setFields(undefined);
+    model.update({ fields: undefined });
     expect(model.revision).toBeGreaterThan(revision);
     expect(model.columnLayout.map(({ title }) => title)).toEqual(["host", "ms"]);
     model.dispose();

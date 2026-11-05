@@ -1,14 +1,16 @@
 // What a grid writes of a field through field displays (grid models'
-// `fields`, from `compileFields`): a column's header and description, its
-// cells, its values as group keys, and aggregates of its values in its
-// units. Grids reach it only through the compiled displays they are given,
-// so a grid without them carries none of it (docs/guide/grids.md).
+// `fields`): a column's header and description, its cells, its values as
+// group keys, and aggregates of its values in its units
+// (docs/guide/grids.md).
 
+import type { Schema, Table } from "../data/table.ts";
+import { FULL_TIME } from "../format/format.ts";
+import type { DisplayedKind } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
-import type { DisplayedField, FieldColumns } from "./display.ts";
+import type { CompiledFields, DisplaySettings, FieldColumns } from "./display.ts";
 import type { LinkRows, RowLink } from "./links.ts";
 
-/** What a grid column shows through its field's display (see `CompiledFields.column`). */
+/** What a grid column shows through its field's display (see `columnDisplay`). */
 export interface ColumnDisplay {
   /** The header's text: the column's own title, else the field's label. */
   readonly title: string;
@@ -42,15 +44,25 @@ export interface GridColumnSettings {
 }
 
 /**
- * What a grid column of the field `shown` displays shows, titled `title`
- * where the column gives one.
+ * What a grid column (its field, and its own title and format) of a field
+ * of `kind` in `table` (a table, or a remote source's name, which rules
+ * naming tables match) shows through `fields`, in the grid's locale and
+ * zone. Times without a format are written to the second, as grids write
+ * them; missing values are empty in cells and "(missing)" in group keys
+ * where the field gives no missing text.
  */
-export function columnDisplay(
-  shown: DisplayedField,
-  title: string | undefined,
-  key: DisplayedField["text"],
+export function columnDisplay<S extends Schema>(
+  fields: CompiledFields,
+  { field, title, format }: GridColumnSettings,
+  kind: DisplayedKind,
+  table: Table<S> | string | undefined,
+  { locale, timeZone }: Pick<DisplaySettings, "locale" | "timeZone">,
 ): ColumnDisplay {
-  const { field, kind, text } = shown;
+  const of = { field, kind, table } as { field: string; kind: DisplayedKind };
+  const settings = { locale, timeZone, format, defaultFormat: FULL_TIME };
+  const shown = fields.displayOf(of, { ...settings, missing: "" });
+  const key = fields.displayOf(of, { ...settings, missing: "(missing)" }).text;
+  const { text } = shown;
   // Each dictionary's entries shown so far, as written, by code: codes keep
   // their entries while the dictionary only grows at its end.
   const tables = new WeakMap<readonly string[], { revision: unknown; texts: string[] }>();

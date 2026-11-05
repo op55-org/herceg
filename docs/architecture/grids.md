@@ -21,7 +21,7 @@ A grid's state lives in a DOM-free model (`grid/model.ts`, also the entry
 | Part | Owner | Holds |
 | --- | --- | --- |
 | Query | The row view | Filter and sort, changed through `view.setQuery` |
-| Presentation | The column list | Order, widths, pins, hidden columns, formats |
+| Presentation | The column list and the model's options | Order, widths, pins, hidden columns, formats; field displays (`fields`, changed by `update`) |
 | Interaction | The model | Viewport and scroll, focused cell, selection anchor (selected rows live in a `SelectionStore` channel) |
 
 The view, store, and table belong to the application. Several grids share
@@ -40,17 +40,27 @@ in view. A new query, a reset, or a top row gone keep the pixel offset. The
 focus keeps to its row; when the row leaves it goes to the row now at its
 index.
 
-**Formatting** reads values through one Intl formatter per column, made
-once (`format/format.ts` caches them), and keeps no strings. A grid given
-field displays (`fields`, compiled by `compileFields` in `herceg/fields`)
-asks them for each column's display instead (`CompiledFields.column`,
-`fields/grid.ts`): its title, description, cell text, key text, and
-aggregate text. The display code lives in `herceg/fields`, so grids
-without displays load none of it; the grid core only stores the compiled
-displays and calls them. A category column's texts are kept per
-dictionary entry, written the first time a cell shows the entry (a
-`WeakMap` keyed by the dictionary, reset by its compaction revision), so
-a mapping runs once per category value shown, not once per drawn cell.
+**Formatting** writes values through one writer per column, made once
+from the column's format, in any form axes take (Intl formatters are
+cached by `format/format.ts`, patterns by `format/patterns.ts`), and keeps
+no strings. Formats are checked against the field's kind as columns are
+described, naming the column's path. A grid given field displays
+(`fields`) asks them for each column's display instead (`columnDisplay`,
+`fields/grid.ts`): its title, description, cell text, key text, aggregate
+text, and link. The display code (rules, checks, format writers) is part
+of the grid core, since a model writes cells synchronously: rules given to
+a model are compiled when it is given them (`fields/compiled.ts`), and a
+`compileFields(rules)` result is taken as it is, so grids and charts can
+share one compilation. A category column's texts are kept per dictionary
+entry, written the first time a cell shows the entry (a `WeakMap` keyed by
+the dictionary, reset by its compaction revision), so a mapping runs once
+per category value shown, not once per drawn cell.
+
+`model.update({ fields })` makes what every column shows with the new
+displays (`restyle`: for a pivot, its generated columns too) before it
+changes anything, so a refused update leaves the model as it was; the
+column list, sort, groups, selection, focus, and scroll are kept, and
+listeners are told once.
 
 Models are held weakly by what they follow, so a model no one keeps stops
 on its own; `dispose()` stops it at once.

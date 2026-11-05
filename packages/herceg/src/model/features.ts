@@ -8,7 +8,7 @@
 import type { Table } from "../data/table.ts";
 import type { ChartFieldKit, ChartFields } from "../fields/chart.ts";
 import type { mappedColors, stepsAt } from "../fields/colors.ts";
-import type { Steps } from "../fields/display.ts";
+import type { CompiledFields, Steps } from "../fields/display.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { GuideFields } from "../guides/fields.ts";
@@ -59,10 +59,11 @@ export type FeatureKit = GuideKit & { isColor(value: string): boolean };
 export interface DisplayCode {
   /**
    * `fields` checked and compiled for a chart in `locale` and `zone` (see
-   * fields/chart.ts), once for the displays given there.
+   * fields/chart.ts), once for the displays given there (those of a
+   * `compileFields` result).
    */
   chartFieldsOf(
-    fields: FieldDisplays,
+    fields: FieldDisplays | CompiledFields,
     kit: ChartFieldKit,
     locale: string | undefined,
     zone: TimeZone,

@@ -5,6 +5,7 @@
 
 import { rootOf } from "../data/origin.ts";
 import type { Table } from "../data/table.ts";
+import type { CompiledFields } from "../fields/display.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { Fonts } from "../fonts/registry.ts";
 import { type Formatter, formatNumber } from "../format/format.ts";
@@ -162,8 +163,11 @@ export type ChartConfig = Omit<
    * itself; with facets or panels, layout marks that have a panel each.
    */
   marks: readonly ChartMark[];
-  /** How fields are named and their values written (see `ChartSpec.fields`). */
-  fields?: FieldDisplays | undefined;
+  /**
+   * How fields are named and their values written (see `ChartSpec.fields`),
+   * or displays `compileFields` compiled, which charts and grids share.
+   */
+  fields?: FieldDisplays | CompiledFields | undefined;
   x?: XAxisConfig | undefined;
   y?: ChartAxisOptions | undefined;
   yRight?: ChartAxisOptions | undefined;

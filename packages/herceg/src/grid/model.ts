@@ -34,7 +34,9 @@ import {
 } from "./base.ts";
 import {
   type ColumnContent,
+  checkKeys,
   describeColumns,
+  type FormatSettings,
   type GridColumn,
   type PlacedColumn,
 } from "./columns.ts";
@@ -57,6 +59,7 @@ export {
   BaseGridModel,
   type FocusMove,
   type GridFocus,
+  type GridPresentation,
   type GridRange,
   type GridRef,
   type GridSelectionOptions,
@@ -172,10 +175,17 @@ export interface GridPivot {
   readonly revision: number;
   /** Whether the pivot stopped at a limit: its rows show what they held, and select nothing. */
   readonly stopped: boolean;
-  /** The columns generated now, laid out as `current` left them, or as `given` (by `setColumns`) says. */
+  /** Refuses `settings` that cannot write what the pivot shows, changing nothing; `columns` then takes them. */
+  check(settings: FormatSettings): void;
+  /**
+   * The columns generated now, laid out as `current` left them, or as
+   * `given` (by `setColumns`) says, written as `settings` say. Throws
+   * before anything changes where they refuse what the pivot shows.
+   */
   columns(
     current: readonly Column[],
     given: readonly GridColumn[] | null,
+    settings: FormatSettings,
   ): { columns: Column[]; contents: Map<string, ColumnContent> };
 }
 
@@ -230,7 +240,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
 
   /** `pivot`, from `createPivotGridModel`, shows a pivot's rows. */
   constructor(options: GridModelOptions<S>, pivot?: GridPivot) {
-    super(options);
+    super(options, pivot ? "pivot grid" : "grid", options.data.source as unknown as Table);
     const { data, selectionStore: store } = options;
     this.data = data;
     this.#table = data.source as unknown as Table;
@@ -273,6 +283,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       const generated = pivot.columns(
         this.columnList as readonly Column[],
         columns as readonly GridColumn[],
+        this.settings,
       );
       this.#pivotRevision = pivot.revision;
       this.takeColumns(generated.columns as Column<S>[], generated.contents);
@@ -284,6 +295,21 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       columns.map((column) => ({ ...column, id: column.id ?? column.field })) as Column<S>[],
       contents,
     );
+  }
+
+  protected restyle(settings: FormatSettings): () => void {
+    const pivot = this.#pivot;
+    if (pivot) {
+      pivot.check(settings);
+      // Once the settings are the model's: the columns generated as the
+      // pivot is now and written as they say, as catching up generates them.
+      return () => this.#generate(pivot);
+    }
+    const columns = this.columnList;
+    const contents = describeColumns(this.#table, columns as readonly GridColumn[], settings);
+    // Group rows write keys of grouping fields no column shows too.
+    checkKeys(this.#table, this.#groups?.by ?? [], settings, this.#table);
+    return () => this.takeColumns(columns, contents);
   }
 
   // Groups
@@ -757,6 +783,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
       if (aggregate !== undefined && !groups.aggregates.some(({ name }) => name === aggregate))
         throw new Error(`Column "${id ?? field}" shows "${aggregate}", which the groups lack`);
     }
+    checkKeys(this.#table, groups.by, this.settings, this.#table);
     return groups as unknown as RowGroups;
   }
 
@@ -770,7 +797,7 @@ export class GridModel<S extends Schema = Schema> extends BaseGridModel<S> {
    * view stays where it was, and sort keys of columns gone go too.
    */
   #generate(pivot: GridPivot) {
-    const generated = pivot.columns(this.columnList as readonly Column[], null);
+    const generated = pivot.columns(this.columnList as readonly Column[], null, this.settings);
     this.#pivotRevision = pivot.revision;
     // Rows sort by the columns there are; the others' keys go.
     const keys = this.#groupSort.filter(({ field }) => pivot.fields.has(field));

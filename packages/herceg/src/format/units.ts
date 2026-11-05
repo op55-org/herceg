@@ -100,11 +100,14 @@ function durations(
     "a whole number of units from 1 to 7",
   );
   const minus = minusSign(locale);
-  const digits = (n: number, decimals: number) =>
-    kit.numberFormatter(
+  // The Intl formatter of each number of decimals, made once as values first need it.
+  const formatters: Formatter[] = [];
+  const intl = (decimals: number) =>
+    (formatters[decimals] ??= kit.numberFormatter(
       { minimumFractionDigits: decimals, maximumFractionDigits: decimals },
       locale,
-    )(n);
+    ));
+  const digits = (n: number, decimals: number) => intl(decimals)(n);
   return (size, negative, step) => {
     // From the largest unit the value has one of (the smallest, for less).
     let first = 0;
@@ -159,6 +162,13 @@ function prefixed(
   const highest = symbols.length - 1 + lowest;
   /** `size` over `base` to the `k`, multiplying by whole powers below 1. */
   const scaled = (size: number, k: number) => (k < 0 ? size * base ** -k : size / base ** k);
+  // The Intl formatter of each range of decimals, made once as values first need it.
+  const formatters: Formatter[] = [];
+  const intl = (fewest: number, most: number) =>
+    (formatters[fewest * 21 + most] ??= kit.numberFormatter(
+      { minimumFractionDigits: fewest, maximumFractionDigits: most },
+      locale,
+    ));
   return (size, negative, step) => {
     let k = 0;
     if (size > 0) {
@@ -181,10 +191,7 @@ function prefixed(
         k++;
         continue;
       }
-      const text = kit.numberFormatter(
-        { minimumFractionDigits: fewest, maximumFractionDigits: most },
-        locale,
-      )(negative ? -rounded : rounded);
+      const text = intl(fewest, most)(negative ? -rounded : rounded);
       const symbol = symbols[k - lowest]! + unit;
       return symbol ? `${text} ${symbol}` : text;
     }
@@ -214,8 +221,18 @@ function shown(value: unknown): string {
     : String(value);
 }
 
-/** The locale's minus sign, as Intl writes negative numbers. */
+/** Minus signs by locale tag; emptied when full, since a page uses a few locales but may spell them many ways. */
+const minuses = new Map<string | undefined, string>();
+const MINUSES = 32;
+
+/** The locale's minus sign, as Intl writes negative numbers; found once per locale. */
 export function minusSign(locale: string | undefined): string {
-  const parts = new Intl.NumberFormat(locale).formatToParts(-1);
-  return parts.find((part) => part.type === "minusSign")?.value ?? "-";
+  let minus = minuses.get(locale);
+  if (minus === undefined) {
+    const parts = new Intl.NumberFormat(locale).formatToParts(-1);
+    minus = parts.find((part) => part.type === "minusSign")?.value ?? "-";
+    if (minuses.size >= MINUSES) minuses.clear();
+    minuses.set(locale, minus);
+  }
+  return minus;
 }

@@ -67,7 +67,7 @@ describe("grid columns", () => {
     );
     expect(make([{ field: "x", width: 0 }] as never)).toThrow(/width of at least 32 pixels/);
     expect(make([{ field: "host", format: { style: "percent" } }] as never)).toThrow(
-      /take no format/,
+      'grid columns[0].format: "host" holds categories; formats are for numbers and times; drop format',
     );
   });
 

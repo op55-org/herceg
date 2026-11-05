@@ -35,8 +35,11 @@ for every surface: charts' `fields` (TypeScript, the adapters, specs, and
 `hg.Chart(fields=...)`) write axes, legends, series' names, tooltips,
 labels, gauges, color ramps, the text alternative, and layout marks'
 names and amounts (pies, funnels, trees, Sankey diagrams, networks, maps,
-radars) through them, grids take them as `fields: compileFields(rules)`,
-and `herceg/fields` reads them for application code. Series marks' `label`
+radars) through them, grids take them as charts do (headers, cells,
+group rows, and pivots; `model.update({ fields })` changes them), a
+`compileFields(rules)` result is one compilation charts and grids share,
+and `herceg/fields` reads them for application code. Grid columns take
+every format form, by their field's kind. Series marks' `label`
 and axes' `title` take parts (`{ series: true }`, `{ field }`,
 `{ label }`, text). Displays also color values: a number field's
 `thresholds`, and colors of mappings and missing values, color bars,

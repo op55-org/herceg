@@ -47,20 +47,17 @@ createGridModel({
   // @ts-expect-error a number field takes number formats, not date formats
   columns: [{ field: "latency", format: { dateStyle: "medium" } }],
 });
-// Columns' own formats are Intl options; field displays give the other forms.
+// Columns' own formats take every form axes take, by the field's kind.
 const displayed = createGridModel({
   data: rowView(requests),
-  columns: [{ field: "latency", format: { maximumFractionDigits: 0 } }, { field: "at" }],
+  columns: [
+    { field: "latency", format: { duration: "millisecond", maxUnits: 1 } },
+    { field: "latency", id: "pattern", format: { number: ",.1f", suffix: " ms" } },
+    { field: "latency", id: "si", format: { si: "s", decimals: 1 } },
+    { field: "at", format: { time: "%Y Q%q", fiscal: { start: 4 } } },
+  ],
   fields: compileFields({ latency: { label: "Latency", format: { duration: "millisecond" } } }),
 });
-createGridModel({
-  data: rowView(requests),
-  // @ts-expect-error a column's own format is Intl options
-  columns: [{ field: "latency", format: { duration: "millisecond" } }],
-});
-displayed.setFields(compileFields([{ match: { kind: "number" }, missing: "–" }]));
-displayed.setFields(undefined);
-expectTypeOf(displayed.columnTitle("latency")).toEqualTypeOf<string>();
 createGridModel({
   data: rowView(requests),
   // @ts-expect-error a time field takes time formats
@@ -68,10 +65,42 @@ createGridModel({
 });
 createGridModel({
   data: rowView(requests),
+  // @ts-expect-error categories take no format
+  columns: [{ field: "host", format: { number: ",.0f" } }],
+});
+createGridModel({
+  data: rowView(requests),
+  // @ts-expect-error numbers have no fiscal years
+  columns: [{ field: "latency", format: { number: ",.0f", fiscal: { start: 4 } } }],
+});
+// Field displays: rules as charts take them, or compiled once and shared.
+createGridModel({
+  data: rowView(requests),
   columns: [{ field: "latency" }],
-  // @ts-expect-error displays compiled with compileFields, not rules
   fields: { latency: { label: "Latency" } },
 });
+createGridModel({
+  data: rowView(requests),
+  columns: [{ field: "latency" }],
+  fields: [{ match: { kind: "number" }, missing: "–" }],
+});
+const shared = compileFields([{ match: "latency", format: { duration: "millisecond" } }]);
+createChart(document.body, { fields: shared, marks: [point(requests, { x: "at", y: "latency" })] });
+displayed.update({ fields: shared });
+displayed.update({ fields: [{ match: { kind: "number" }, missing: "–" }] });
+displayed.update({ fields: undefined });
+displayed.update({});
+// @ts-expect-error update takes the presentation, not columns
+displayed.update({ columns: [] });
+// @ts-expect-error setFields is update({ fields })
+displayed.setFields(undefined);
+createGridModel({
+  data: rowView(requests),
+  columns: [{ field: "latency" }],
+  // @ts-expect-error a display's settings are checked
+  fields: { latency: { lable: "Latency" } },
+});
+expectTypeOf(displayed.columnTitle("latency")).toEqualTypeOf<string>();
 model.setSort([{ field: "latency", order: "descending" }]);
 // @ts-expect-error sort keys are the table's fields
 model.setSort([{ field: "missing" }]);
