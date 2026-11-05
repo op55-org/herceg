@@ -50,7 +50,20 @@ describe("number patterns", () => {
     // Padding, currency, and other bases are not in the subset.
     for (const pattern of ["08.2f", "$,.2f", ">8", "x", ".2r"])
       expect(() => number(pattern, 1)).toThrow(/with type d, f, e, g, s, or %/);
-    expect(() => number(".0g", 1)).toThrow(/0 significant digits/);
+    expect(() => number(".0g", 1)).toThrow(/0 significant digits; give 1 to 21/);
+    // Out of Intl's bounds: refused as the pattern is read, not as a value is written.
+    const compiled = (pattern: string) => () =>
+      numberPattern(GUIDE_KIT, { number: pattern }, "en-US", "x.format");
+    expect(compiled(".22g")).toThrow(
+      'x.format.number: ".22g" asks for 22 significant digits; give 1 to 21',
+    );
+    expect(compiled(".22")).toThrow("asks for 22 significant digits");
+    expect(compiled(",.21f")).toThrow(
+      'x.format.number: ",.21f" asks for 21 decimals; give 0 to 20',
+    );
+    expect(compiled(".21%")).toThrow("asks for 21 decimals");
+    expect(number(".21g", 1 / 3)).toMatch(/^0\.3{15}/);
+    expect(number(".20e", 1)).toBe("1.00000000000000000000e+0");
   });
 });
 

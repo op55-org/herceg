@@ -2,6 +2,7 @@
 import { expectTypeOf } from "vitest";
 import { count, max, mean, median, sum } from "../../src/data/aggregations.ts";
 import { time } from "../../src/data/column.ts";
+import type { GroupAggregate } from "../../src/data/groups.ts";
 import { pivotRows } from "../../src/data/pivot.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore } from "../../src/data/selection.ts";
@@ -54,8 +55,53 @@ const model = createPivotGridModel({
   selectionStore: selectionStore(requests),
 });
 expectTypeOf(model).toEqualTypeOf<PivotGridModel<Requests>>();
-// @ts-expect-error pivot grids take no field displays yet
-model.setFields(undefined);
+// Field displays, formats of every form by kind, and update, as other grids take them.
+createPivotGridModel({
+  data: pivot,
+  fields: { latency: { format: { duration: "millisecond" } }, host: { label: "Host" } },
+  rowColumn: { title: "Region" },
+  aggregates: {
+    avg: { format: { number: ",.1f", suffix: " ms" } },
+    last: { format: { time: "%b %d" } },
+    total: { format: { duration: "millisecond" } },
+  },
+});
+createPivotGridModel({
+  data: pivotRows(rowView(requests), { rows: "at", pivot: "latency", ops: { n: count() } }),
+  rowColumn: { format: { time: "%Y-%m-%d" } },
+  valueFormat: { binary: "B" },
+});
+createPivotGridModel({
+  data: pivot,
+  // @ts-expect-error the pivot field holds categories, which take no format
+  valueFormat: { time: "%b %d" },
+});
+createPivotGridModel({
+  data: pivot,
+  // @ts-expect-error the rows field holds categories
+  rowColumn: { format: { number: ",.0f" } },
+});
+createPivotGridModel({
+  data: pivot,
+  // @ts-expect-error a count is a number
+  aggregates: { n: { format: { time: "%H" } } },
+});
+createPivotGridModel({
+  data: pivot,
+  // @ts-expect-error a time's maximum is a time
+  aggregates: { last: { format: { number: ",.0f" } } },
+});
+// Widened aggregates may be of either kind: a time's maximum among them takes a time format.
+const widened: Record<string, GroupAggregate<"at" | "latency">> = { last: max("at"), n: count() };
+const either = pivotRows(rowView(requests), { rows: "region", pivot: "host", ops: widened });
+createPivotGridModel({ data: either, aggregates: { last: { format: { time: "%b %d" } } } });
+createPivotGridModel({ data: either, aggregates: { n: { format: { number: ",.0f" } } } });
+model.update({ fields: [{ match: { kind: "number" }, missing: "–" }] });
+createPivotGridModel({
+  data: pivot,
+  // @ts-expect-error missing text comes from field displays
+  missing: "n/a",
+});
 createPivotGridModel({
   data: pivot,
   // @ts-expect-error aggregates by the pivot's names

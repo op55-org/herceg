@@ -147,6 +147,13 @@ def test_ticks_and_formats_refuse_what_they_cannot_say_in_python_names():
         hg.Format()
     with pytest.raises(ValueError, match='Format number: ",.2q" is not a number pattern'):
         hg.Format(number=",.2q")
+    with pytest.raises(ValueError, match='Format number: ".22g" asks for 22 significant digits'):
+        hg.Format(number=".22g")
+    with pytest.raises(ValueError, match='Format number: ",.21f" asks for 21 decimals; give 0 to'):
+        hg.Format(number=",.21f")
+    with pytest.raises(ValueError, match='Format number: ".0" asks for 0 significant digits'):
+        hg.Format(number=".0")
+    assert hg.Format(number=".21g")._spec() == {"number": ".21g"}
     with pytest.raises(ValueError, match='Format time: "%U" at character 4 of "%H %U"'):
         hg.Format(time="%H %U")
     with pytest.raises(hg.ChartError, match="AxisOptions format: Python functions cannot travel"):

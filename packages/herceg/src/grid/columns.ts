@@ -1,35 +1,38 @@
 // Grid columns: which fields a grid shows, in what order and width, which
 // are pinned to its edges, and how their values read as text. Values are
-// formatted when a cell is drawn, by one Intl formatter per column; no
-// formatted string is kept. A grid given field displays (`fields`, from
-// `herceg/fields`) writes headers, cells, and group rows through them
-// instead (fields/grid.ts), which keeps a category's texts per dictionary
-// entry.
+// written when a cell is drawn, by one writer per column (a format in any
+// form axes take); no written string is kept. A grid given field displays
+// (`fields`) writes headers, cells, and group rows through them instead
+// (fields/grid.ts), which keeps a category's texts per dictionary entry.
 
 import type { Fields } from "../data/expression.ts";
 import type { PositionField, Schema, Table } from "../data/table.ts";
+import { checkFormat, holds, misfit } from "../fields/check.ts";
+import { KIT } from "../fields/compiled.ts";
 import type { CompiledFields } from "../fields/display.ts";
-import {
-  type Formatter,
-  FULL_TIME,
-  type NumberFormat,
-  numberFormatter,
-  type TimeFormat,
-  timeFormatter,
-} from "../format/format.ts";
+import { columnDisplay } from "../fields/grid.ts";
+import { type Formatter, FULL_TIME, numberFormatter, timeFormatter } from "../format/format.ts";
+import { formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { FormatSpec, NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
 
-type FormatOf<K> = K extends "number" ? NumberFormat : K extends "time" ? TimeFormat : never;
+/** The formats a field of kind `K` takes: every number or time form, as axes take them; none for categories. */
+export type FormatOf<K> = K extends "number"
+  ? NumberFormatSpec
+  : K extends "time"
+    ? TimeFormatSpec
+    : never;
 
 /** A side of the grid a column can be pinned to. */
 export type PinSide = "left" | "right";
 
 /**
- * A field shown in a grid. `format` is Intl options for the field's kind:
- * number options for numbers, date and time options for times, none for
- * categories; with the grid's `fields`, over the field's display, whose
- * mappings and missing text it keeps (the other forms of formats are given
- * in `fields`).
+ * A field shown in a grid. `format` writes its values in any form axes
+ * take, by the field's kind: Intl options, `{ number }` patterns with
+ * `prefix` and `suffix`, durations, SI and binary prefixes for numbers;
+ * Intl date options and `{ time }` patterns (with fiscal years) for times;
+ * none for categories. With the grid's `fields`, it replaces the field's
+ * format, while the field's mappings and missing text stay.
  */
 export type GridColumn<S extends Schema = Schema> = {
   [F in PositionField<S>]: {
@@ -76,14 +79,19 @@ export interface GridColumnLayout {
 }
 
 export interface FormatSettings {
-  locale: string | undefined;
-  timeZone: TimeZone;
+  /** What messages name the grid: "grid", "remote grid", or "pivot grid". */
+  readonly surface: string;
+  readonly locale: string | undefined;
+  readonly timeZone: TimeZone;
   /** Text for missing values. */
-  missing: string;
+  readonly missing: string;
   /** The field displays the grid writes through, where it is given them. */
-  fields?: CompiledFields | undefined;
-  /** What displays' rules naming tables match for a remote grid: its source's name. */
-  source?: string;
+  readonly fields?: CompiledFields | undefined;
+  /**
+   * What displays' rules naming tables match: a remote grid's source by its
+   * name, or the table a pivot's values come from; the table read otherwise.
+   */
+  readonly source?: string | Table | undefined;
 }
 
 /** What a column shows, apart from where: made by `setColumns`, kept while columns only move, resize, pin, or hide. */
@@ -95,10 +103,10 @@ export interface ColumnContent {
   text(fields: Fields, position: number): string;
   /** A value of the column's field as text: a label, a number, or a time; null for missing. */
   format(value: string | number | null): string;
-  /** With field displays: an aggregate of the field's values in its units, without mappings; `format` writes it otherwise. */
-  readonly amount?: (value: number) => string;
-  /** With field displays: a group's key, a missing one by its field's missing text, else "(missing)". */
-  readonly key?: (value: string | number | null) => string;
+  /** An aggregate of the field's values in its units (a mean, a sum) as text: in its format, without mappings. */
+  readonly amount: (value: number) => string;
+  /** A group's key as text: a missing one by its field's missing text, else "(missing)". */
+  readonly key: (value: string | number | null) => string;
   /** With field displays: the field's description, the header's title and accessible description. */
   readonly description?: string | undefined;
   readonly aggregate: string | undefined;
@@ -129,35 +137,47 @@ export function describeColumns(
   settings: FormatSettings,
 ): Map<string, ColumnContent> {
   const contents = new Map<string, ColumnContent>();
-  for (const column of columns) {
-    const { field } = column;
-    if (!table.has(field)) throw new Error(`Unknown grid field "${field}"`);
-    const kind = table.kind(field);
-    if (kind === "geometry") throw new Error(`Grids cannot show geometry ("${field}")`);
-    const id = column.id ?? field;
+  columns.forEach((column, i) => {
+    const id = column.id ?? column.field;
     if (contents.has(id)) throw new Error(`Two grid columns have the id "${id}"`);
-    const width = column.width ?? WIDTH;
-    if (!(Number.isFinite(width) && width >= MIN_COLUMN_WIDTH))
-      throw new RangeError(
-        `Column "${id}" needs a width of at least ${MIN_COLUMN_WIDTH} pixels, not ${width}`,
-      );
-    if (column.pin !== undefined && column.pin !== "left" && column.pin !== "right")
-      throw new TypeError(`Column "${id}" pins to "left" or "right", not "${column.pin}"`);
-    if (column.format !== undefined && kind === "category")
-      throw new TypeError(`Column "${id}" shows categories, which take no format`);
-    const format = valueFormatter(kind, column.format, settings);
-    contents.set(id, {
-      kind,
-      title: column.title ?? field,
-      align: column.align ?? (kind === "number" ? "end" : "start"),
-      text: reader(field, kind, format, settings.missing),
-      format,
-      aggregate: column.aggregate,
-      // Written through the grid's field displays, where it has them.
-      ...settings.fields?.column(column, kind, settings.source ?? (table as Table), settings),
-    });
-  }
+    contents.set(id, describeColumn(table, column, settings, `${settings.surface} columns[${i}]`));
+  });
   return contents;
+}
+
+/** Checks a column against a table's fields, and says what it shows; `at` names it in messages. */
+export function describeColumn(
+  table: Pick<Fields, "has" | "kind">,
+  column: GridColumn,
+  settings: FormatSettings,
+  at: string,
+): ColumnContent {
+  const { field } = column;
+  if (!table.has(field)) throw new Error(`Unknown grid field "${field}"`);
+  const kind = table.kind(field);
+  if (kind === "geometry") throw new Error(`Grids cannot show geometry ("${field}")`);
+  const id = column.id ?? field;
+  const width = column.width ?? WIDTH;
+  if (!(Number.isFinite(width) && width >= MIN_COLUMN_WIDTH))
+    throw new RangeError(
+      `Column "${id}" needs a width of at least ${MIN_COLUMN_WIDTH} pixels, not ${width}`,
+    );
+  if (column.pin !== undefined && column.pin !== "left" && column.pin !== "right")
+    throw new TypeError(`Column "${id}" pins to "left" or "right", not "${column.pin}"`);
+  const format = valueFormatter(kind, settings, column.format, `${at}.format`, field);
+  return {
+    kind,
+    title: column.title ?? field,
+    align: column.align ?? (kind === "number" ? "end" : "start"),
+    text: reader(field, kind, format, settings.missing),
+    format,
+    amount: format,
+    key: (value) => (value === null ? "(missing)" : format(value)),
+    aggregate: column.aggregate,
+    // Written through the grid's field displays, where it has them.
+    ...(settings.fields &&
+      columnDisplay(settings.fields, column, kind, settings.source ?? (table as Table), settings)),
+  };
 }
 
 /**
@@ -235,25 +255,25 @@ function reader(
 }
 
 /**
- * What writes values of a kind as text, with Intl options for numbers or
- * times; values of `field` of `table` (group keys), given, as its display
- * does where the grid has field displays.
+ * What writes values of a kind as text: in `format`, any form axes take,
+ * checked against the kind (refused naming its path `at` and the values'
+ * holder `name`); else numbers readably and times to the second. Missing
+ * values are `settings.missing`.
  */
 export function valueFormatter(
   kind: "number" | "time" | "category",
-  format: NumberFormat | TimeFormat | undefined,
   settings: FormatSettings,
-  field?: string,
-  table?: Table,
+  format?: FormatSpec,
+  at = "",
+  name = "",
 ): (value: string | number | null) => string {
-  const shown =
-    field !== undefined &&
-    settings.fields?.column({ field }, kind, settings.source ?? table, settings);
-  if (shown) return shown.key;
   const { locale, timeZone, missing } = settings;
+  if (format !== undefined) checkKind(kind, format, at, name);
   if (kind === "category") return (value) => (value === null ? missing : String(value));
   if (kind === "time") {
-    const write = timeFormatter((format as TimeFormat | undefined) ?? FULL_TIME, timeZone, locale);
+    const write = format
+      ? formatWriter(KIT, format, true, timeZone, locale, at)
+      : timeFormatter(FULL_TIME, timeZone, locale);
     const number = readableNumber(locale);
     return (value) => {
       if (value === null || Number.isNaN(value)) return missing;
@@ -263,8 +283,76 @@ export function valueFormatter(
         : number(value as number);
     };
   }
-  const write = format ? numberFormatter(format as NumberFormat, locale) : readableNumber(locale);
+  const write = format
+    ? formatWriter(KIT, format, false, timeZone, locale, at)
+    : readableNumber(locale);
   return (value) => (value === null || Number.isNaN(value) ? missing : write(value as number));
+}
+
+/**
+ * What writes the values of `field` of `table` as group keys: through the
+ * field's display where the grid has displays, else as `valueFormatter`
+ * writes them, with "(missing)" for a missing key; in `format` (checked as
+ * `valueFormatter` checks it, named `at`) over the display's.
+ */
+export function keyFormatter(
+  kind: "number" | "time" | "category",
+  settings: FormatSettings,
+  field: string,
+  table?: Table,
+  format?: FormatSpec,
+  at?: string,
+): (value: string | number | null) => string {
+  const write = valueFormatter(kind, settings, format, at, field);
+  if (settings.fields)
+    return columnDisplay(
+      settings.fields,
+      { field, format },
+      kind,
+      settings.source ?? table,
+      settings,
+    ).key;
+  return (value) => (value === null ? "(missing)" : write(value));
+}
+
+/**
+ * Refuses displays that cannot write the group keys of `fields` (of
+ * `table`), as group rows will: before the settings or groups that would
+ * write them are taken, not as rows are read.
+ */
+export function checkKeys(
+  table: Pick<Fields, "kind">,
+  fields: readonly string[],
+  settings: FormatSettings,
+  source?: Table,
+): void {
+  if (settings.fields)
+    for (const field of fields)
+      keyFormatter(table.kind(field) as "number" | "time" | "category", settings, field, source);
+}
+
+/**
+ * Refuses a format malformed, or of a form that `kind`'s values do not
+ * take, naming its path `at` and what holds the values (`name`).
+ */
+function checkKind(
+  kind: "number" | "time" | "category",
+  format: FormatSpec,
+  at: string,
+  name: string,
+) {
+  checkFormat(format, at, KIT);
+  const wrong = misfit(kind, "format", format);
+  if (!wrong) return;
+  // The option's own name: `format`, or a pivot's `valueFormat`.
+  const option = /\w+$/.exec(at)![0];
+  throw new Error(
+    `${at}: ${
+      kind === "category"
+        ? `${holds(name, kind)}; formats are for numbers and times; drop ${option}`
+        : wrong.problem(holds(name, kind))
+    }`,
+  );
 }
 
 /** Two decimals for most numbers, three significant digits for small ones, as tooltips show them. */

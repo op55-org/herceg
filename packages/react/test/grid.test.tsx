@@ -207,7 +207,7 @@ describe("<Grid>", () => {
           columns: [{ field: "id" }, { field: "ms" }],
         }),
       );
-      useEffect(() => model.setFields(fields), [model, fields]);
+      useEffect(() => model.update({ fields }), [model, fields]);
       return (
         <Profiler id="grid" onRender={() => renders++}>
           <Grid model={model} ariaLabel="Requests" style={{ height: 300 }} />

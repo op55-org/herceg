@@ -1,34 +1,17 @@
-// herceg/fields: field display for application code and for surfaces that
-// take it through an explicit import. `displayOf` resolves field displays
-// (`fields`, the record or rules charts take) for one field: its label,
-// description, bounds, and each value's text, as surfaces write them;
-// `compileFields` checks and compiles them once; `fieldsOf` writes rules
-// for a table's fields, checked against its schema. See
+// herceg/fields: field display for application code. `displayOf` resolves
+// field displays (`fields`, the record or rules charts and grids take) for
+// one field: its label, description, bounds, and each value's text, as
+// surfaces write them; `compileFields` checks and compiles them once, for
+// application code and for charts and grids to share; `fieldsOf` writes
+// rules for a table's fields, checked against its schema. See
 // docs/guide/fields.md.
 
 import type { FieldKind } from "./data/column.ts";
-import { origins } from "./data/origin.ts";
 import type { RowView } from "./data/row-view.ts";
 import type { FieldName, PositionField, Schema, Table } from "./data/table.ts";
-import { KINDS, shown } from "./fields/check.ts";
-import {
-  type CompiledFields,
-  type DisplayedField,
-  type DisplaySettings,
-  displayed,
-} from "./fields/display.ts";
-import { columnDisplay } from "./fields/grid.ts";
-import type { LinkRows, LinkWrite } from "./fields/links.ts";
-import {
-  type FieldDisplays,
-  type FieldOf,
-  type FieldRule,
-  lineOf,
-  resolve,
-  rulesOf,
-} from "./fields/rules.ts";
-import { FULL_TIME, formatNumber, numberFormatter, timeFormatter } from "./format/format.ts";
-import { toWall } from "./format/zone.ts";
+import { compile, type FieldAsked, KIT, kindOf } from "./fields/compiled.ts";
+import type { DisplayedField, DisplaySettings } from "./fields/display.ts";
+import { type FieldDisplays, type FieldRule, resolve, rulesOf } from "./fields/rules.ts";
 import type {
   CategoryFieldDisplay,
   DisplayedKind,
@@ -36,13 +19,13 @@ import type {
   TimeFieldDisplay,
 } from "./spec/fields.ts";
 
+export { compileFields } from "./fields/compiled.ts";
 export type {
   CompiledFields,
   DisplayedField,
   DisplaySettings,
   FieldColumns,
 } from "./fields/display.ts";
-export type { ColumnDisplay, GridColumnSettings } from "./fields/grid.ts";
 export type { LinkRows, RowLink } from "./fields/links.ts";
 export type { FieldDisplays, FieldMatch, FieldRule, TableRef } from "./fields/rules.ts";
 export type {
@@ -62,9 +45,6 @@ export type {
   ValueMapping,
 } from "./spec/fields.ts";
 
-/** The formatters and zone arithmetic displays write with: application code has no chart to hand them. */
-const KIT = { numberFormatter, timeFormatter, toWall, formatNumber };
-
 /** The display a field of kind `K` takes (what its kind writes), its link's parts naming fields `F`. */
 export type DisplayFor<K extends FieldKind, F extends string = string> = K extends "number"
   ? NumberFieldDisplay<F>
@@ -73,74 +53,6 @@ export type DisplayFor<K extends FieldKind, F extends string = string> = K exten
     : K extends "category"
       ? CategoryFieldDisplay<F>
       : never;
-
-/** What a display is asked for: a table's field, or a field by name and kind, of a table by name. */
-type FieldAsked<S extends Schema, F extends PositionField<S>, K extends DisplayedKind> =
-  | { table: Table<S> | RowView<S>; field: F }
-  | { field: string; kind: K; table?: string };
-
-/**
- * `fields` (displays by name, or rules) checked and compiled, to resolve
- * displays of fields from: `compileFields(rules).displayOf(...)`.
- */
-export function compileFields(fields: FieldDisplays): CompiledFields {
-  const { displays, displayOf } = compiled(fields, "compileFields");
-  return {
-    displays,
-    displayOf,
-    column: ({ field, title, format }, kind, table, { locale, timeZone }) => {
-      const of = { field, kind, table } as { field: string; kind: DisplayedKind };
-      // Times to the second, as grids write them; missing values empty in
-      // cells and "(missing)" in group keys where the field gives no text.
-      const settings = { locale, timeZone, format, defaultFormat: FULL_TIME };
-      return columnDisplay(
-        displayOf(of, { ...settings, missing: "" }),
-        title,
-        displayOf(of, { ...settings, missing: "(missing)" }).text,
-      );
-    },
-  };
-}
-
-function compiled(
-  displays: FieldDisplays,
-  surface: string,
-): Pick<CompiledFields, "displays" | "displayOf"> {
-  const rules = rulesOf(displays, surface, KIT);
-  const displayOf = (
-    of: FieldAsked<Schema, string, DisplayedKind>,
-    settings: DisplaySettings = {},
-  ): DisplayedField => {
-    const field = fieldOf(of, surface);
-    // Links write other fields of their rows through those fields' displays,
-    // in the surface's place and missing text, without its own format; the
-    // fields of the table this display is of, which rules naming tables
-    // match, whatever reads the rows.
-    const { format: _, ...others } = settings;
-    const texts = new WeakMap<LinkRows, Map<string, DisplayedField["text"]>>();
-    const textOf = (rows: LinkRows, name: string) => {
-      let byName = texts.get(rows);
-      if (!byName) {
-        byName = new Map();
-        texts.set(rows, byName);
-      }
-      let text = byName.get(name);
-      if (!text) {
-        const other: FieldOf = {
-          name,
-          kind: rows.kind(name) as DisplayedKind,
-          tables: field.tables && lineOf(origins, field.tables[0]!, name),
-          table: field.table,
-        };
-        text = displayed(other, resolve(rules, other, surface), KIT, others, surface, textOf).text;
-        byName.set(name, text);
-      }
-      return text as LinkWrite;
-    };
-    return displayed(field, resolve(rules, field, surface), KIT, settings, surface, textOf);
-  };
-  return { displays, displayOf: displayOf as CompiledFields["displayOf"] };
-}
 
 /**
  * A field's display from `fields` (displays by name, or rules): its label,
@@ -169,36 +81,10 @@ export function displayOf(
   of: FieldAsked<Schema, string, DisplayedKind>,
   settings?: DisplaySettings,
 ): DisplayedField {
-  return compiled(fields, "displayOf").displayOf(
+  return compile(fields, "displayOf").displayOf(
     of as { field: string; kind: DisplayedKind },
     settings,
   );
-}
-
-/** The field `of` asks for, refused where its table lacks it or its kind is not one displays write. */
-function fieldOf(of: FieldAsked<Schema, string, DisplayedKind>, surface: string): FieldOf {
-  const { field: name, table } = of as { field: unknown; table?: unknown; kind?: unknown };
-  if (typeof table === "object" && table !== null) {
-    const ref = table as Table | RowView;
-    const source = "source" in ref ? ref.source : ref;
-    return {
-      name: name as string,
-      kind: kindOf(source, name as string, surface),
-      tables: lineOf(origins, source, name as string),
-    };
-  }
-  const { kind } = of as { kind?: unknown };
-  if (typeof name !== "string")
-    throw new Error(`${surface} field: expected a field's name; received ${shown(name)}`);
-  if (!KINDS.includes(kind as DisplayedKind))
-    throw new Error(
-      `${surface} kind: expected "number", "time", or "category"; received ${shown(kind)}`,
-    );
-  if (table !== undefined && typeof table !== "string")
-    throw new Error(
-      `${surface} table: expected a table, a row view, or a table's name; received ${shown(table)}`,
-    );
-  return { name, kind: kind as DisplayedKind, table };
 }
 
 /**
@@ -222,21 +108,4 @@ export function fieldsOf<S extends Schema>(
     resolve([rule], { name, kind: kindOf(source, name, "fieldsOf"), tables: [source] }, "fieldsOf");
     return { ...rule.settings, match: { table: source, field: name } };
   });
-}
-
-/** The kind of `table`'s field `name`, refused where the table lacks it or displays write none of it. */
-function kindOf(table: Table, name: string, surface: string): DisplayedKind {
-  if (!table.has(name))
-    throw new Error(
-      `${surface}: no field ${JSON.stringify(name)}; the table has ${table
-        .fields()
-        .map((field) => JSON.stringify(field))
-        .join(", ")}`,
-    );
-  const kind = table.kind(name);
-  if (kind === "geometry")
-    throw new Error(
-      `${surface}: ${JSON.stringify(name)} holds shapes, which displays do not write; give a number, time, or category field`,
-    );
-  return kind;
 }

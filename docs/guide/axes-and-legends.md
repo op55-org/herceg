@@ -111,7 +111,7 @@ channels read by name, and position scales of a mark's own (see
 | `format` (Python `hg.Format`) | Writes |
 | --- | --- |
 | Intl options | `Intl.NumberFormat` options on number axes, `Intl.DateTimeFormat` on time axes (Python: a dict of the camelCase names). |
-| `{ number: ",.2f" }` | A d3-format pattern `[sign][,][.precision][~][type]`: sign `-`, `+`, `(`, or space; `,` groups thousands; `~` trims zeros; type `d`, `f`, `e`, `g`, `s` (SI, `"1.5k"`), `%`, or none. Digits and separators are the locale's. |
+| `{ number: ",.2f" }` | A d3-format pattern `[sign][,][.precision][~][type]`: sign `-`, `+`, `(`, or space; `,` groups thousands; `~` trims zeros; type `d`, `f`, `e`, `g`, `s` (SI, `"1.5k"`), `%`, or none; precision 1 to 21 significant digits (`g`, `s`, none) or 0 to 20 decimals (`f`, `e`, `%`). Digits and separators are the locale's. |
 | `{ time: "%b %d %H:%M" }` | A strftime pattern in the chart's time zone: `%Y %y %q %m %d %e %H %I %M %S %L %p %a %A %b %B %z %%`, `%q` the quarter (1 to 4); `%-d` drops padding. |
 | `{ time: "FY%y Q%q", fiscal: { start: 7, name? } }` | Years and quarters of a fiscal year starting on the first of month `start`, named by the year it ends in (`name: "end"`, the default) or starts in (`"start"`). Months and days stay the calendar's. |
 | `{ number: ",.0f", prefix: "$", suffix: " req/s" }` | A number pattern with text around the number, inside its sign: "-$1,234", "($1,234)". |

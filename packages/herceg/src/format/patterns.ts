@@ -167,33 +167,40 @@ export function numberPattern(
     const type = kind || "g";
     const trim = tilde !== undefined || !kind;
     const precision = given !== undefined ? Number(given) : kind ? 6 : 12;
-    if ((type === "g" || type === "s") && precision === 0)
-      throw new Error(`${where}: "${pattern}" asks for 0 significant digits; give 1 or more`);
-    const digits = (value: number, options: Intl.NumberFormatOptions) =>
-      kit.numberFormatter({ useGrouping: !!comma, ...options }, locale)(value);
-    const significant = {
-      minimumSignificantDigits: trim ? 1 : precision,
-      maximumSignificantDigits: precision,
-    };
-    const fixed = (p: number) => ({
-      minimumFractionDigits: trim ? 0 : p,
-      maximumFractionDigits: p,
-    });
+    // d3-format's bounds, which are Intl's: built once here, not as values are written.
+    if ((type === "g" || type === "s") && !(precision >= 1 && precision <= 21))
+      throw new Error(
+        `${where}: "${pattern}" asks for ${precision} significant digits; give 1 to 21`,
+      );
+    if ("fe%".includes(type) && precision > 20)
+      throw new Error(`${where}: "${pattern}" asks for ${precision} decimals; give 0 to 20`);
+    // The Intl formatters the pattern writes with, made once each, as values
+    // first need them: by decimals (0 to 20), significant digits, and plain.
+    const formatters: Formatter[] = [];
+    const intl = (key: number, options: Intl.NumberFormatOptions) =>
+      (formatters[key] ??= kit.numberFormatter({ useGrouping: !!comma, ...options }, locale));
+    const fixed = (p: number) =>
+      intl(p, { minimumFractionDigits: trim ? 0 : p, maximumFractionDigits: p });
+    const significant = () =>
+      intl(21, {
+        minimumSignificantDigits: trim ? 1 : precision,
+        maximumSignificantDigits: precision,
+      });
     /** A mantissa and exponent as toExponential writes them, the mantissa in the locale ("1.2e+4"). */
     const exponential = (text: string) => {
       const [mantissa, exponent] = text.split("e");
       const decimals = mantissa!.split(".")[1]?.length ?? 0;
-      return `${digits(Number(mantissa), fixed(decimals))}e${exponent}`;
+      return `${fixed(decimals)(Number(mantissa))}e${exponent}`;
     };
     /** |value| as the type writes it, and the value its digits show (for the sign). */
     const body = (x: number): [string, number] => {
       switch (type) {
         case "d":
-          return [digits(Math.round(x), { maximumFractionDigits: 0 }), Math.round(x)];
+          return [fixed(0)(Math.round(x)), Math.round(x)];
         case "f":
-          return [digits(x, fixed(precision)), Number(x.toFixed(precision))];
+          return [fixed(precision)(x), Number(x.toFixed(precision))];
         case "%":
-          return [`${digits(x * 100, fixed(precision))}%`, Number((x * 100).toFixed(precision))];
+          return [`${fixed(precision)(x * 100)}%`, Number((x * 100).toFixed(precision))];
         case "e": {
           const text = x.toExponential(precision);
           return [exponential(text), Number(text)];
@@ -201,19 +208,19 @@ export function numberPattern(
         case "s": {
           const shown = x === 0 ? 0 : Number(x.toPrecision(precision));
           const k = shown === 0 ? 0 : Math.max(-8, Math.min(8, Math.floor(Math.log10(shown) / 3)));
-          return [digits(shown / 10 ** (3 * k), significant) + PREFIXES[k + 8]!, shown];
+          return [significant()(shown / 10 ** (3 * k)) + PREFIXES[k + 8]!, shown];
         }
         default: {
           // Exponential where toPrecision writes one, as d3-format does.
           const text = x.toPrecision(precision);
           const shown = Number(text);
-          return [text.includes("e") ? exponential(text) : digits(shown, significant), shown];
+          return [text.includes("e") ? exponential(text) : significant()(shown), shown];
         }
       }
     };
     const minus = minusSign(locale);
     return (value) => {
-      if (!Number.isFinite(value)) return digits(value, {});
+      if (!Number.isFinite(value)) return intl(22, {})(value);
       // The text around the number goes inside its sign, as d3-format's "$" does: "-$5".
       const [written, shown] = body(Math.abs(value));
       const text = prefix + written + suffix;
@@ -225,6 +232,8 @@ export function numberPattern(
 }
 
 const DIRECTIVE = /%(-?)(.?)/g;
+/** Dates end 8.64e15 ms from 1970 either way. */
+const LAST_DATE = 8.64e15;
 const NAMES = "aAbBp";
 const NUMBERS = "YymdeHIMSLq";
 
@@ -305,8 +314,11 @@ export function timePattern(
           period.formatToParts(wall).find((part) => part.type === "dayPeriod")?.value ?? ""),
     };
     return (t) => {
-      if (!Number.isFinite(t)) return "";
+      // Times past the ends of dates, or whose wall time in the zone is, have
+      // no calendar fields to write.
+      if (!(Math.abs(t) <= LAST_DATE)) return "";
       const wall = kit.toWall(zone, t);
+      if (!(Math.abs(wall) <= LAST_DATE)) return "";
       const date = new Date(wall);
       const hours = date.getUTCHours();
       const month = date.getUTCMonth();

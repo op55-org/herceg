@@ -11,6 +11,7 @@ import { displayedContent } from "../marks/features/label-displays.ts";
 import { naming } from "../marks/features/names.ts";
 import { type ChartFieldKit, type ChartFields, chartFields } from "./chart.ts";
 import { mappedColors, stepsAt } from "./colors.ts";
+import { type CompiledFields, isCompiled } from "./display.ts";
 import type { FieldDisplays } from "./rules.ts";
 
 /**
@@ -22,11 +23,14 @@ const compiled = new WeakMap<FieldDisplays, Map<string, ChartFields>>();
 
 /** See `DisplayCode.chartFields`. */
 export function chartFieldsOf(
-  fields: FieldDisplays,
+  given: FieldDisplays | CompiledFields,
   kit: ChartFieldKit,
   locale: string | undefined,
   zone: TimeZone,
 ): ChartFields {
+  // Displays `compileFields` compiled for grids and application code write
+  // with a chart's code here, compiled once for every chart given them.
+  const fields = isCompiled(given) ? given.displays : given;
   let byPlace = compiled.get(fields);
   if (!byPlace) {
     byPlace = new Map();

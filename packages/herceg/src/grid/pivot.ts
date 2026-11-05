@@ -8,29 +8,45 @@
 // takes this through `GridPivot`, so grids that show no pivot load none of it.
 
 import type { Fields } from "../data/expression.ts";
+import type { GroupSchema, NamedAggregate } from "../data/groups.ts";
 import { type PivotColumn, type PivotValue, pivotGroups, type RowPivot } from "../data/pivot.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { SelectionStore } from "../data/selection.ts";
 import type { Schema, Table } from "../data/table.ts";
-import type { NumberFormat, TimeFormat } from "../format/format.ts";
+import { keyPath } from "../fields/check.ts";
+import type { CompiledFields } from "../fields/display.ts";
+import { columnDisplay } from "../fields/grid.ts";
+import type { FieldDisplays } from "../fields/rules.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { NumberFormatSpec, TimeFormatSpec } from "../spec/guides.ts";
 import {
   type ColumnContent,
-  describeColumns,
+  describeColumn,
+  type FormatOf,
   type FormatSettings,
   type GridColumn,
+  keyFormatter,
   MIN_COLUMN_WIDTH,
   valueFormatter,
 } from "./columns.ts";
 import { GridModel, type GridPivot } from "./model.ts";
 
-/** How a pivot grid's column shows: its title, width (120 pixels by default), alignment, and Intl format. */
-export interface PivotColumnOptions {
+/**
+ * How a pivot grid's column shows: its title, width (120 pixels by
+ * default), alignment, and format, in any form axes take for the kind `K`
+ * of its values (none for categories).
+ */
+export interface PivotColumnOptions<K = "number" | "time"> {
   title?: string;
   width?: number;
   align?: "start" | "center" | "end";
-  format?: NumberFormat | TimeFormat;
+  format?: FormatOf<K>;
 }
+
+/** The kind of a pivot's aggregate `K`: what its operation gives; either, where the aggregates are not known. */
+type AggregateKind<S extends Schema, O, K extends keyof O> = unknown extends O[K]
+  ? "number" | "time"
+  : GroupSchema<S, never, O>[K & string];
 
 export interface PivotGridModelOptions<
   S extends Schema = Schema,
@@ -40,12 +56,20 @@ export interface PivotGridModelOptions<
 > {
   /** The pivot to show; the application owns it. */
   data: RowPivot<S, R, P, O>;
-  /** The rows field's column, titled by the field by default. */
-  rowColumn?: PivotColumnOptions;
-  /** Each aggregate's columns, by its name, titled by it by default. */
-  aggregates?: { readonly [K in keyof O]?: PivotColumnOptions };
-  /** Intl options for the pivot field's values over their columns, when they are numbers or times. */
-  valueFormat?: NumberFormat | TimeFormat;
+  /** The rows field's column, titled by the field's label (with `fields`), else the field, by default. */
+  rowColumn?: PivotColumnOptions<S[R & keyof S]>;
+  /** Each aggregate's columns, by its name, titled by it by default; formats of its result's kind. */
+  aggregates?: { readonly [K in keyof O]?: PivotColumnOptions<AggregateKind<S, O, K>> };
+  /** The format of the pivot field's values over their columns, over its display's: numbers' or times' forms. */
+  valueFormat?: FormatOf<S[P & keyof S]>;
+  /**
+   * Field displays, as grids take them (see `GridSettings.fields`): the rows
+   * field's column, each pivot value over its columns, and aggregates of a
+   * field that keep its kind (its minimums, maximums, means, and sums) are
+   * written through them. Without them, missing values are empty and
+   * missing keys read "(missing)".
+   */
+  fields?: FieldDisplays | CompiledFields | undefined;
   /** Where the selected rows go; a store of the grid's own when left out. */
   selectionStore?: SelectionStore<S>;
   /** The store's channel for the selected rows; "grid-rows" by default. */
@@ -56,8 +80,6 @@ export interface PivotGridModelOptions<
   locale?: string;
   /** Zone times are shown in: "UTC", an IANA zone, or "local" (the default). */
   timeZone?: TimeZone;
-  /** Text of missing values; empty by default (missing keys read "(missing)"). */
-  missing?: string;
 }
 
 /**
@@ -81,7 +103,6 @@ export type PivotGridModel<S extends Schema = Schema> = Omit<
   | "rowAt"
   | "identityAt"
   | "rowIndexOf"
-  | "setFields"
 > & {
   /** The view the pivot pivots. */
   readonly data: RowView<S>;
@@ -109,15 +130,11 @@ export function createPivotGridModel<S extends Schema, R extends string, P exten
 ): PivotGridModel<S> {
   const { data, rowColumn, aggregates, valueFormat, ...rest } = options;
   const pivot = data as unknown as RowPivot;
-  const settings: FormatSettings = {
-    locale: options.locale,
-    timeZone: options.timeZone ?? "local",
-    missing: options.missing ?? "",
-  };
-  const layout = new PivotLayout(pivot, settings, {
-    rowColumn: rowColumn ?? {},
+  const layout = new PivotLayout(pivot, {
+    // Typed by kind for callers; checked by kind as the grid is made.
+    rowColumn: (rowColumn ?? {}) as PivotColumnOptions,
     aggregates: (aggregates ?? {}) as Record<string, PivotColumnOptions | undefined>,
-    valueFormat,
+    valueFormat: valueFormat as NumberFormatSpec | TimeFormatSpec | undefined,
   });
   const model: GridModel = new GridModel(
     { ...(rest as unknown as Omit<PivotGridModelOptions, "data">), data: pivot.view, columns: [] },
@@ -143,7 +160,19 @@ type Column = GridColumn & { readonly id: string };
 interface LayoutOptions {
   readonly rowColumn: PivotColumnOptions;
   readonly aggregates: Record<string, PivotColumnOptions | undefined>;
-  readonly valueFormat: NumberFormat | TimeFormat | undefined;
+  readonly valueFormat: NumberFormatSpec | TimeFormatSpec | undefined;
+}
+
+/** What the pivot's columns are written with, as of one state of the grid's settings. */
+interface Written {
+  readonly settings: FormatSettings;
+  readonly rows: Described;
+  /** A pivot value as it heads its columns. */
+  readonly heading: (value: string | number | null) => string;
+  /** Each aggregate's values' writer, by name. */
+  readonly aggregates: ReadonlyMap<string, (value: number) => string>;
+  /** What each generated column shows, by id: kept while it is generated, so its cells need no writing again. */
+  contents: Map<string, ColumnContent>;
 }
 
 /** A generated column: its full title (for menus and announcements) and what it shows. */
@@ -159,15 +188,14 @@ class PivotLayout implements GridPivot {
   readonly rows: Table;
   readonly fields: Fields;
   readonly #pivot: RowPivot;
-  readonly #settings: FormatSettings;
   readonly #options: LayoutOptions;
-  readonly #rowColumn: Described;
+  /** What the columns are written with, and what `check` made for settings not taken yet. */
+  #written: Written | null = null;
+  #staged: Written | null = null;
   /** The crosstab the revision was last counted for, and its values. */
   #seen: object | null = null;
   #values: readonly PivotValue[] = [];
   #revision = 0;
-  /** What each generated column shows, by id: kept while it is generated, so its cells need no writing again. */
-  #contents = new Map<string, ColumnContent>();
   /**
    * The layout of columns not generated now, by id, given back when they
    * are again, with the column each followed in an order the user chose
@@ -177,9 +205,8 @@ class PivotLayout implements GridPivot {
   /** The columns' ids in their own order as last generated: what tells an order the user chose. */
   #order: readonly string[] = [];
 
-  constructor(pivot: RowPivot, settings: FormatSettings, options: LayoutOptions) {
+  constructor(pivot: RowPivot, options: LayoutOptions) {
     this.#pivot = pivot;
-    this.#settings = settings;
     this.#options = options;
     this.groups = pivotGroups(pivot);
     const rowTable = pivot.rowTable as unknown as Table;
@@ -188,28 +215,10 @@ class PivotLayout implements GridPivot {
     // Generated ids are JSON arrays starting so: a rows field named like one would be two columns.
     if (field.startsWith('["pivot"'))
       throw new Error(`A pivot grid's rows field cannot be named like its columns ("${field}")`);
-    const { title, width, align, format } = options.rowColumn;
+    const { width } = options.rowColumn;
     check(field, { field, ...(width !== undefined && { width }) });
     for (const [name, aggregate] of Object.entries(options.aggregates))
       if (aggregate?.width !== undefined) check(name, { field: name, width: aggregate.width });
-    const column = {
-      field,
-      ...(title !== undefined && { title }),
-      ...(align !== undefined && { align }),
-      ...(format !== undefined && { format }),
-    } as GridColumn;
-    const content = describeColumns(rowTable, [column], settings).get(field)!;
-    const missing = settings.missing || "(missing)";
-    this.#rowColumn = {
-      title: content.title,
-      width,
-      content: {
-        ...content,
-        // A row whose key is missing is a row of its own.
-        text: (table, row) =>
-          (table as Table).value(field, row) === null ? missing : content.text(table, row),
-      },
-    };
     this.fields = {
       fields: () => [field, ...pivot.read().columns.map(({ id }) => id)],
       has: (name) => name === field || pivot.read().column(name) !== undefined,
@@ -240,8 +249,9 @@ class PivotLayout implements GridPivot {
   columns(
     current: readonly Column[],
     given: readonly GridColumn[] | null,
+    settings: FormatSettings,
   ): { columns: Column[]; contents: Map<string, ColumnContent> } {
-    const described = this.#describe();
+    const described = this.#describe(settings);
     // Layouts by id: the columns', then those given (to restore).
     const layouts = new Map<string, Layout>();
     for (const column of current) layouts.set(column.id, layoutOf(column));
@@ -292,54 +302,134 @@ class PivotLayout implements GridPivot {
         ...layout,
       } as Column;
     });
-    this.#contents = contents;
+    this.#written!.contents = contents;
     return { columns, contents };
   }
 
-  /** Every column the pivot generates now, in their own order, by id. */
-  #describe(): Map<string, Described> {
+  check(settings: FormatSettings): void {
+    this.#staged = this.#writtenFor(settings);
+  }
+
+  /**
+   * What writes the columns as `settings` say: made again for other
+   * settings, checking every aggregate's format whether or not the pivot
+   * has columns of it yet. Throws, changing nothing, where they refuse it.
+   */
+  #writtenFor(settings: FormatSettings): Written {
+    for (const written of [this.#written, this.#staged])
+      if (written?.settings === settings) return written;
+    const pivot = this.#pivot;
+    const source = pivot.view.source as unknown as Table;
+    const kind = source.kind(pivot.pivot) as "number" | "time" | "category";
+    const at = `${settings.surface} valueFormat`;
+    const { valueFormat } = this.#options;
+    return {
+      settings,
+      rows: this.#describeRows(settings),
+      // Values head their columns as group keys are written, in `valueFormat`.
+      heading: keyFormatter(kind, settings, pivot.pivot, source, valueFormat, at),
+      aggregates: new Map(
+        pivot.aggregates.map((aggregate) => [
+          aggregate.name,
+          this.#writer(aggregate, this.#options.aggregates[aggregate.name] ?? {}, settings),
+        ]),
+      ),
+      contents: new Map(),
+    };
+  }
+
+  /**
+   * Every column the pivot generates now, in their own order, by id,
+   * written as `settings` say. Throws before anything changes where
+   * `settings` refuse what it shows.
+   */
+  #describe(settings: FormatSettings): Map<string, Described> {
     const pivot = this.#pivot;
     const crosstab = pivot.read();
-    const settings = this.#settings;
     const several = pivot.aggregates.length > 1;
-    const kind = (pivot.view.source as unknown as Table).kind(pivot.pivot) as
-      | "number"
-      | "time"
-      | "category";
-    const label = valueFormatter(kind, this.#options.valueFormat, settings);
-    const missing = settings.missing || "(missing)";
-    const described = new Map<string, Described>([[pivot.rows, this.#rowColumn]]);
+    const options = (name: string) => this.#options.aggregates[name] ?? {};
+    const written = this.#writtenFor(settings);
+    const described = new Map<string, Described>([[pivot.rows, written.rows]]);
     for (const column of crosstab.columns) {
       const { name } = column.aggregate;
-      const options = this.#options.aggregates[name] ?? {};
-      const aggregate = options.title ?? name;
-      const heading =
-        column.kind === "total" ? "Total" : column.value === null ? missing : label(column.value);
+      const own = options(name);
+      const aggregate = own.title ?? name;
+      const value =
+        column.kind === "total" ? "Total" : written.heading(column.value as string | number | null);
       const content =
-        this.#contents.get(column.id) ??
-        this.#content(column, options, {
-          title: several ? aggregate : heading,
-          heading: several ? heading : undefined,
+        written.contents.get(column.id) ??
+        this.#content(column, own, written.aggregates.get(name)!, {
+          title: several ? aggregate : value,
+          heading: several ? value : undefined,
         });
       described.set(column.id, {
-        title: several ? `${heading}, ${aggregate}` : heading,
+        title: several ? `${value}, ${aggregate}` : value,
         content,
-        width: options.width,
+        width: own.width,
       });
     }
+    this.#written = written;
+    this.#staged = null;
     return described;
+  }
+
+  /** The rows field's column: through its display where the grid has displays, a missing key as group keys are written. */
+  #describeRows(settings: FormatSettings): Described {
+    const field = this.#pivot.rows;
+    const { title, width, align, format } = this.#options.rowColumn;
+    const column = {
+      field,
+      ...(title !== undefined && { title }),
+      ...(align !== undefined && { align }),
+      ...(format !== undefined && { format }),
+    } as GridColumn;
+    const content = describeColumn(this.rows, column, settings, `${settings.surface} rowColumn`);
+    return {
+      title: content.title,
+      width,
+      content: {
+        ...content,
+        // A row whose key is missing is a row of its own.
+        text: (table, row) =>
+          (table as Table).value(field, row) === null
+            ? content.key(null)
+            : content.text(table, row),
+      },
+    };
+  }
+
+  /**
+   * What writes an aggregate's values: an aggregate of its own field that
+   * keeps the field's kind (not a count) through the field's display, in
+   * its format without its mappings; others, and every aggregate without
+   * displays, plainly. The column's own format comes first.
+   */
+  #writer(
+    { name, op, field }: NamedAggregate,
+    options: PivotColumnOptions,
+    settings: FormatSettings,
+  ): (value: number) => string {
+    const pivot = this.#pivot;
+    const kind = (pivot.table as unknown as Table).kind(name) as "number" | "time";
+    const { format } = options;
+    const at = `${settings.surface} aggregates${keyPath(name)}.format`;
+    const plain = valueFormatter(kind, settings, format, at, name);
+    const source = pivot.view.source as unknown as Table;
+    if (!settings.fields || field === undefined || op === "count" || source.kind(field) !== kind)
+      return plain;
+    return columnDisplay(settings.fields, { field, format }, kind, source, settings).amount;
   }
 
   /** What a generated column shows: its aggregate's value in each row, read from the crosstab as it is. */
   #content(
     column: PivotColumn,
     options: PivotColumnOptions,
+    format: (value: number) => string,
     { title, heading }: { title: string; heading: string | undefined },
   ): ColumnContent {
     const pivot = this.#pivot;
     const { name } = column.aggregate;
     const kind = (pivot.table as unknown as Table).kind(name) as "number" | "time";
-    const format = valueFormatter(kind, options.format, this.#settings);
     const value = column.kind === "value" ? column.value : undefined;
     const text =
       column.kind === "total"
@@ -351,12 +441,15 @@ class PivotLayout implements GridPivot {
             const at = index < 0 ? undefined : crosstab.value(row, index, name);
             return at === undefined ? "" : format(at);
           };
+    const written = format as (value: string | number | null) => string;
     return {
       kind,
       title,
       align: options.align ?? "end",
       text,
-      format,
+      format: written,
+      amount: format,
+      key: written,
       aggregate: name,
       ...(heading !== undefined && {
         heading: {

@@ -493,10 +493,35 @@ describe("column menus", () => {
     expect(labels).toEqual(["id", "Latency", "Time", "host"]);
     await userEvent.keyboard("{Escape}");
     // New displays rewrite the headers in place.
-    grid.model.setFields(undefined);
+    grid.model.update({ fields: undefined });
     await frames();
     expect(headers(grid)).toEqual(["id", "ms", "host"]);
     expect(header(grid, "ms").hasAttribute("title")).toBe(false);
+  });
+
+  it("write cells in every format form, and write them again as update gives displays", async () => {
+    const grid = mount([
+      { field: "ms", format: { duration: "millisecond" } },
+      { field: "id", format: { number: ",.1f", prefix: "#" } },
+      { field: "at", format: { binary: "B" } },
+    ] as GridColumn[]);
+    await frames();
+    const texts = (row: number) => cellsOf(rowAt(grid, row)).map((cell) => cell.textContent);
+    expect(texts(1)).toEqual(["37ms", "#1.0", "1,000 B"]);
+    expect(texts(3)).toEqual(["111ms", "#3.0", "2.9 KiB"]);
+    const { revision } = grid.model;
+    grid.model.update({
+      fields: [
+        { match: "ms", label: "Latency", mappings: [{ value: 37, text: "fast" }] },
+        { match: { kind: "number" }, missing: "–" },
+      ],
+    });
+    await frames();
+    expect(grid.drawnRevision).toBe(revision + 1);
+    expect(headers(grid)).toEqual(["Latency", "id", "at"]);
+    // The column's own format stays over the field's; mappings come first.
+    expect(texts(1)).toEqual(["fast", "#1.0", "1,000 B"]);
+    expect(texts(3)).toEqual(["111ms", "#3.0", "2.9 KiB"]);
   });
 
   it("show hidden columns again with their checks, staying open, and keep the last one shown", async () => {

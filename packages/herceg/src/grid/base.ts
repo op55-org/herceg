@@ -8,8 +8,11 @@
 
 import type { GroupKey } from "../data/groups.ts";
 import type { SortKey } from "../data/order.ts";
-import type { Schema } from "../data/table.ts";
+import type { Schema, Table } from "../data/table.ts";
+import { compiledFields } from "../fields/compiled.ts";
 import type { CompiledFields } from "../fields/display.ts";
+import type { FieldDisplays } from "../fields/rules.ts";
+import { timeFormatter } from "../format/format.ts";
 import type { TimeZone } from "../format/zone.ts";
 import {
   type ColumnContent,
@@ -35,15 +38,25 @@ export interface GridSettings {
   /** Zone times are shown in: "UTC", an IANA zone, or "local" (the default). */
   timeZone?: TimeZone;
   /**
-   * Field displays (`compileFields(rules)` from `herceg/fields`): headers
-   * take their fields' labels and descriptions, and cells and group rows
-   * write values through them (missing text, mappings, every format).
-   * Without them, numbers and times are written with Intl options, and
-   * missing values are empty.
+   * Field displays: displays by field name or rules, as charts take them,
+   * compiled when given, or `compileFields(rules)` from `herceg/fields`, to
+   * share one compilation among grids and charts. Headers take their
+   * fields' labels and descriptions, and cells and group rows write values
+   * through them (missing text, mappings, formats). Without them, values
+   * are written in their columns' formats, and missing values are empty.
    */
-  fields?: CompiledFields | undefined;
+  fields?: FieldDisplays | CompiledFields | undefined;
   /** How clicks select rows (see `GridSelectionOptions`). */
   selection?: GridSelectionOptions;
+}
+
+/**
+ * What a grid model's `update` takes: what is given changes (undefined
+ * clears it), what is left out stays.
+ */
+export interface GridPresentation {
+  /** Field displays, as the model's option takes them (see `GridSettings.fields`). */
+  fields?: FieldDisplays | CompiledFields | undefined;
 }
 
 /** How a grid's clicks select its rows. */
@@ -176,7 +189,8 @@ const ROW_HEIGHT = 28;
  */
 export abstract class BaseGridModel<S extends Schema = Schema> {
   readonly rowHeight: number;
-  protected readonly settings: FormatSettings;
+  /** How values are written: replaced whole by `update`. */
+  protected settings: FormatSettings;
   /** The columns, shown or hidden, in order: the one record of their layout. */
   #columns: readonly Column<S>[] = [];
   /** What each column shows, by id, made when the columns are set. */
@@ -204,7 +218,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   /** What a plain click on the one row selected does (`selection.click`). */
   readonly #clicks: "toggle" | "only";
 
-  constructor(options: GridSettings) {
+  /**
+   * `surface` names the grid in messages ("grid", "remote grid", "pivot
+   * grid"); rules naming tables match `source`, the table its rows are of
+   * or a remote source's name.
+   */
+  constructor(options: GridSettings, surface: string, source: Table | string) {
     this.rowHeight = options.rowHeight ?? ROW_HEIGHT;
     if (!(Number.isFinite(this.rowHeight) && this.rowHeight > 0))
       throw new RangeError(`A grid's rowHeight must be positive, not ${this.rowHeight}`);
@@ -214,11 +233,22 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
         `grid selection.click: expected "toggle" or "only"; received ${JSON.stringify(click)}`,
       );
     this.#clicks = click;
+    const timeZone = options.timeZone ?? "local";
+    // Refused as the grid is made, whichever formats would read the zone later.
+    try {
+      timeFormatter({}, timeZone);
+    } catch {
+      throw new RangeError(
+        `${surface} timeZone: ${JSON.stringify(timeZone)} is not a time zone; give "UTC", "local", or an IANA zone such as "Europe/Belgrade"`,
+      );
+    }
     this.settings = {
+      surface,
       locale: options.locale,
-      timeZone: options.timeZone ?? "local",
+      timeZone,
       missing: "",
-      fields: options.fields,
+      fields: compiledFields(options.fields, surface),
+      source,
     };
   }
 
@@ -255,13 +285,26 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
   abstract setColumns(columns: readonly GridColumn<S>[]): void;
 
   /**
-   * Writes headers, cells, and group rows through these field displays
-   * (`compileFields(rules)`), or without any; the columns' layout, the
+   * Changes how the grid presents its columns: `fields` (field displays),
+   * as given, or cleared with undefined; what is left out stays. The whole
+   * update is checked and compiled before any of it applies, so a refused
+   * one changes nothing; listeners are told once. The columns' layout, the
    * sort, groups, selection, and scroll stay.
    */
-  setFields(fields: CompiledFields | undefined): void {
-    this.settings.fields = fields;
-    this.setColumns(this.columns);
+  update(options: GridPresentation): void {
+    const { surface } = this.settings;
+    if (typeof options !== "object" || options === null)
+      throw new TypeError(`${surface} update: expected options such as { fields }`);
+    for (const key of Object.keys(options))
+      if (key !== "fields") throw new Error(`${surface} update.${key}: unknown option; use fields`);
+    if (!("fields" in options)) return;
+    const settings = { ...this.settings, fields: compiledFields(options.fields, surface) };
+    const apply = this.restyle(settings);
+    this.#batch(() => {
+      this.settings = settings;
+      apply();
+      this.notify();
+    });
   }
 
   /**
@@ -678,6 +721,12 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /** Brings generated columns up to date before they are read (a pivot's); none by default. */
   protected generated(): void {}
+
+  /**
+   * What the columns show written as `settings` say, checked (throwing
+   * before anything changes), and what then takes it.
+   */
+  protected abstract restyle(settings: FormatSettings): () => void;
 
   /**
    * What the grid shows, catching up with changes since the last read: the

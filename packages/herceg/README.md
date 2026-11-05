@@ -71,7 +71,7 @@ const pdf = renderToPDF(chart); // a mounted chart as it is shown
 | --- | --- |
 | `herceg` | Tables, marks, `createChart`, `renderToSVG`, server snapshots and hydration |
 | `herceg/layout` | Subplot layouts: columns, rows, grids, panels, insets |
-| `herceg/fields` | Field displays for application code and grids: `displayOf`, `compileFields`, `fieldsOf` (charts take `fields` without it) |
+| `herceg/fields` | Field displays for application code: `displayOf`, `compileFields` (one compilation charts and grids share), `fieldsOf`; charts and grids take `fields` without it |
 | `herceg/spec` | Charts from portable JSON specs: `loadSpec`, `validateSpec`, `chartFromSpec`, `specToSVG`, `specToPDF` |
 | `herceg/pdf` | `renderToPDF` |
 | `herceg/image` | `renderToImage`: PNG, JPEG, and WebP for documents |

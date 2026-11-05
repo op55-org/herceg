@@ -8,6 +8,7 @@ import { derive } from "../../src/data/derive.ts";
 import { col } from "../../src/data/expr.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { table } from "../../src/data/table.ts";
+import { columnDisplay } from "../../src/fields/grid.ts";
 import { compileFields, displayOf, type FieldDisplays, fieldsOf } from "../../src/fields.ts";
 
 const hosts = table(
@@ -304,7 +305,7 @@ describe("displays", () => {
   it("write a grid column's cells, each category's text once per dictionary entry as it grows", () => {
     const streamed = table({ status: category(["200", "503", null]), ms: [1, 2, 3] });
     const compiled = compileFields(status);
-    const shown = compiled.column({ field: "status" }, "category", streamed, {});
+    const shown = columnDisplay(compiled, { field: "status" }, "category", streamed, {});
     const rows = () =>
       Array.from({ length: streamed.length }, (_, row) => shown.text(streamed, row));
     // Missing values are a grid's: empty where the field gives no text.
@@ -312,7 +313,7 @@ describe("displays", () => {
     streamed.append({ status: ["404", "200"], ms: [4, 5] });
     expect(rows()).toEqual(["OK", "Server error 03", "unknown", "404", "OK"]);
     // Numbers through the format and mappings.
-    const cpu = compiled.column({ field: "cpu", title: "CPU" }, "number", undefined, {});
+    const cpu = columnDisplay(compiled, { field: "cpu", title: "CPU" }, "number", undefined, {});
     expect([cpu.title, cpu.text(table({ cpu: [95, 42] }), 1)]).toEqual(["CPU", "42%"]);
   });
 

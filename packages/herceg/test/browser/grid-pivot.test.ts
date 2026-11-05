@@ -260,4 +260,48 @@ describe("pivot grids", () => {
     );
     expect(grid.root.querySelector(".hg-body")!.textContent).toBe(before);
   });
+
+  it("head values and write cells through field displays, and again after update", async () => {
+    const t = table({
+      region: category(["eu", "us", "eu", null]),
+      status: category(["200", "503", "503", "200"]),
+      ms: [66_000, 450, 1_500, 20],
+    });
+    const pivot = pivotRows(rowView(t), {
+      rows: "region",
+      pivot: "status",
+      ops: { avg: mean("ms") },
+    });
+    const model = createPivotGridModel({
+      data: pivot,
+      locale: "en-US",
+      fields: {
+        region: { label: "Region", missing: "nowhere" },
+        status: { mappings: [{ value: "503", text: "Unavailable" }] },
+        ms: { format: { duration: "millisecond" } },
+      },
+    });
+    const host = document.createElement("div");
+    host.style.cssText = "width:500px;height:200px";
+    document.body.append(host);
+    hosts.push(host);
+    const grid = createPivotGrid(host, { model, ariaLabel: "Latency by region" });
+    grids.push(grid);
+    await frame();
+    const names = () => leaves(grid).map((cell) => cell.firstChild?.textContent);
+    const body = () =>
+      [...grid.root.querySelectorAll(".hg-body [role=row]")].map((row) =>
+        [...row.querySelectorAll("[role=gridcell]")].map((cell) => cell.textContent),
+      );
+    expect(names()).toEqual(["Region", "200", "Unavailable"]);
+    expect(body()).toEqual([
+      ["eu", "1m 6s", "1s 500ms"],
+      ["us", "", "450ms"],
+      ["nowhere", "20ms", ""],
+    ]);
+    model.update({ fields: undefined });
+    await frame();
+    expect(names()).toEqual(["region", "200", "503"]);
+    expect(body()[2]).toEqual(["(missing)", "20", ""]);
+  });
 });
