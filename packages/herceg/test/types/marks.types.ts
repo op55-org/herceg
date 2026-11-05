@@ -141,6 +141,23 @@ errorbar(band, { x: "x", y1: "low", y2: "high", x1: "low" });
 errorbar(band, { x: "x", y: "low", yError: "high", y1: "low" });
 rule({ x: 1 });
 rule({ y: 1 });
+// Rules and regions at a field's thresholds, its table by name or itself.
+rule({ y: { thresholds: "cpu" }, dash: "--", contributeDomain: true });
+rule({ x: { thresholds: "cpu", table: readings } });
+region({ y: { thresholds: "cpu", table: "readings" }, fillOpacity: 0.12 });
+region({ x: { thresholds: "cpu" }, y1: 0, y2: 1 });
+// @ts-expect-error a range along the other axis has both ends
+region({ y: { thresholds: "cpu" }, x1: 0 });
+// @ts-expect-error a range along the other axis has both ends
+region({ x: { thresholds: "cpu" }, y2: 1 });
+// @ts-expect-error bands at thresholds along y take no y range
+region({ y: { thresholds: "cpu" }, y1: 0, y2: 1 });
+// @ts-expect-error bands at thresholds go along x or along y
+region({ x: { thresholds: "cpu" }, y: { thresholds: "cpu" } });
+// @ts-expect-error rules at thresholds stand for steps, not a table's rows
+rule(readings, { y: { thresholds: "cpu" } });
+// @ts-expect-error a place at thresholds names a field
+rule({ y: { thresholds: 3 } });
 // @ts-expect-error a rule needs a position
 rule({});
 // @ts-expect-error a rule is vertical or horizontal
@@ -530,8 +547,10 @@ point(dots, { x: "at", y: "cpu", color: { field: "stage", scale: "stages" } });
 point(dots, { x: "at", y: "cpu", encode: { color: { field: "cpu" }, size: { field: "cpu" } } });
 // A number field's values as widths through an identity scale of the chart's.
 line(dots, { x: "at", y: "cpu", encode: { strokeWidth: { field: "cpu", scale: "raw" } } });
-// @ts-expect-error colors map number fields only on points
+// A number field without a scale takes the colors the chart's field displays give it.
 line(dots, { x: "at", y: "cpu", encode: { color: { field: "cpu" } } });
+// @ts-expect-error widths read a number field through a channel scale; display colors are colors
+line(dots, { x: "at", y: "cpu", encode: { strokeWidth: { field: "cpu" } } });
 // @ts-expect-error sizes map number fields
 point(dots, { x: "at", y: "cpu", size: { field: "stage", scale: { type: "identity" } } });
 

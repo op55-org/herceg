@@ -7,6 +7,8 @@
 
 import type { Table } from "../data/table.ts";
 import type { ChartFieldKit, ChartFields } from "../fields/chart.ts";
+import type { mappedColors, stepsAt } from "../fields/colors.ts";
+import type { Steps } from "../fields/display.ts";
 import type { FieldDisplays } from "../fields/rules.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { GuideFields } from "../guides/fields.ts";
@@ -69,6 +71,8 @@ export interface DisplayCode {
   naming: typeof naming;
   displayedContent: typeof displayedContent;
   itemLegends: typeof itemLegends;
+  mappedColors: typeof mappedColors;
+  stepsAt: typeof stepsAt;
 }
 
 /**
@@ -150,6 +154,12 @@ export interface CompiledFeatures {
   /** The keys of the values of declared domains `mark`'s series stand for, which it owns in legends. */
   domainKeys(mark: ChartMark): string[];
   /**
+   * The legend parts `listDomains` last made for `mark` (keys of display
+   * colors), which it owns: listed in legends unless its `legend` is false,
+   * and shown by guides naming its color whatever its `legend`.
+   */
+  ownParts(mark: ChartMark): readonly LegendPart[];
+  /**
    * An annotation's legend entries by its labels (`Mark.labelEntries`, in
    * the mark's look): a region painted per row's in the paint of the first
    * row holding each label; others' as they are.
@@ -228,6 +238,8 @@ export interface MarkFeatures {
   room?(): [number, number];
   /** How labels of parts (`content`: a bar's, an annotation's) are written (marks/features/content.ts). */
   readonly content?: ContentWriter | undefined;
+  /** For rules and regions at a field's thresholds: the steps the chart's displays give it. */
+  readonly steps?: Steps | undefined;
   /** Which rows connect, where a stack of a series field breaks (marks/union-stack.ts). */
   readonly continuity?: Connections | undefined;
   /**
@@ -236,6 +248,11 @@ export interface MarkFeatures {
    * and the channel scales' domains; undefined where no channel reads rows.
    */
   rowLooks?(): RowLooks | undefined;
+  /**
+   * The number fields whose display colors color the mark's paint (fills,
+   * strokes), read without a scale: its legend shows a key of each.
+   */
+  readonly displayColors?: readonly string[] | undefined;
   /**
    * For custom marks: a channel's output for a row of their table (a
    * color, a width, an opacity), undefined where the row has none or the
@@ -398,8 +415,8 @@ export interface SeriesFeatures {
   rows?: { readonly paints: readonly RowPaint[]; of(row: number): number } | undefined;
   /** For points: what their channels give each row (`PointLooks`), which every series of the mark shares. */
   points?: PointLooks | undefined;
-  /** For bars colored by a field other than the series': a key of its values' colors. */
-  key?(): GlyphKey | undefined;
+  /** For bars colored by a field other than the series': the legend's key of its values' colors. */
+  legend?(): LegendPart | undefined;
 }
 
 /** How an observation of a line or area is drawn: its stroke's (or dot's) color, opacity, and width. */

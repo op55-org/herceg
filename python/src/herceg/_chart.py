@@ -111,7 +111,7 @@ from ._events import (
     viewport_option,
     visibility_option,
 )
-from ._fields import FieldDisplays, TableName, fields_spec, writes
+from ._fields import AtThresholds, FieldDisplays, TableName, fields_spec, writes
 from ._guides import (
     _NUMBER_FORMAT,
     _TIME_FORMAT,
@@ -5167,8 +5167,8 @@ class Chart:
     def rule(
         self,
         *,
-        x: Coordinate | None = None,
-        y: Coordinate | None = None,
+        x: Coordinate | AtThresholds | None = None,
+        y: Coordinate | AtThresholds | None = None,
         span: tuple[Coordinate, Coordinate] | None = None,
         label: str | Label | Mapping[str, Any] | None = None,
         data: Any = None,
@@ -5198,6 +5198,9 @@ class Chart:
         axis. ``label`` is text, or an ``hg.Label``: a column of labels
         (``field``), placed at the rule's start, center, or end, or outside
         the plot beside the axis (``hg.LabelPlace``), in a style of its own.
+        ``hg.AtThresholds("p99")`` draws a rule at each step of the thresholds
+        the chart's ``fields`` give the column, each in its step's color
+        unless ``stroke`` is given.
         Rules count toward the axes' domains only with
         ``contribute_domain=True``; otherwise they show where the data is.
         Without ``clip``, a rule at a value is left out while the value is out
@@ -5224,7 +5227,19 @@ class Chart:
             )
         places = {"x": x, "y": y, **({"span[0]": span[0], "span[1]": span[1]} if span else {})}
         table = self._annotation_table(data, places, label_json, "rule")
-        place = {"x": coordinate_spec(x, "rule x"), "y": coordinate_spec(y, "rule y")}
+        at = "x" if isinstance(x, AtThresholds) else "y" if isinstance(y, AtThresholds) else None
+        if at is not None and table is not None:
+            raise ChartError(
+                f"rule {at}: rules at thresholds stand for steps, not rows; "
+                "give span and label no columns"
+            )
+        # Places at thresholds name their tables once the chart's are known (`_mark_specs`).
+        place = {
+            name: value
+            if isinstance(value, AtThresholds)
+            else coordinate_spec(value, f"rule {name}")
+            for name, value in (("x", x), ("y", y))
+        }
         if _flag(drag, "rule drag"):
             if table is not None:
                 raise ChartError(
@@ -5270,6 +5285,8 @@ class Chart:
     def region(
         self,
         *,
+        x: AtThresholds | None = None,
+        y: AtThresholds | None = None,
         x1: Coordinate | None = None,
         x2: Coordinate | None = None,
         y1: Coordinate | None = None,
@@ -5299,7 +5316,11 @@ class Chart:
 
         Numbers or datetimes shade one region; column names shade one per
         row; ``hg.Fraction``, ``hg.Pixels``, and ``hg.DataPosition`` place
-        an edge as they do rules. ``label`` is text or an ``hg.Label``,
+        an edge as they do rules. ``y=hg.AtThresholds("p99")`` (or ``x``)
+        shades a band from each step of the thresholds the chart's
+        ``fields`` give the column to the next, the last to the plot's end
+        and the base from its start where the thresholds give a base color,
+        each in its step's color unless ``fill`` is given. ``label`` is text or an ``hg.Label``,
         along the ``side`` its place names (top by default), inside or
         outside the region. ``stroke`` and ``stroke_width`` outline each
         region (in its fill's color, 1 pixel wide, by default), and
@@ -5317,11 +5338,23 @@ class Chart:
         names each row's item, which selections and transitions follow across
         replaced data.
         """
-        for start, end, name in ((x1, x2, "x"), (y1, y2, "y")):
+        if x is not None and y is not None:
+            raise ChartError("region: bands at thresholds go along x or along y; give one")
+        for steps, start, end, name in ((x, x1, x2, "x"), (y, y1, y2, "y")):
+            if steps is not None and not isinstance(steps, AtThresholds):
+                raise ChartError(
+                    f"region {name}: places bands at a column's thresholds, such as "
+                    f'hg.AtThresholds("p99"); give {name}1 and {name}2 for a range'
+                )
+            if steps is not None and (start is not None or end is not None):
+                raise ChartError(
+                    f"region: {name} places bands at thresholds, and {name}1 and {name}2 a range; "
+                    "give one"
+                )
             if (start is None) != (end is None):
                 missing = f"{name}1" if start is None else f"{name}2"
                 raise ChartError(f"region {missing}: needs both {name}1 and {name}2, or neither")
-        if x1 is None and y1 is None:
+        if x1 is None and y1 is None and x is None and y is None:
             raise ChartError("region: needs x1 and x2, y1 and y2, or both")
         # Outlines are checked here, as the engine checks a spec.
         if stroke is not None and not isinstance(stroke, str):
@@ -5339,6 +5372,12 @@ class Chart:
         table = self._annotation_table(
             data, {"x1": x1, "x2": x2, "y1": y1, "y2": y2}, label_json, "region"
         )
+        along = "x" if x is not None else "y" if y is not None else None
+        if along is not None and (table is not None or encode is not None):
+            raise ChartError(
+                f"region {along}: regions at thresholds stand for steps, not rows; "
+                "give the other places and label no columns, and drop encode"
+            )
         channels = self._option(
             "region encode", lambda: encodings_spec(encode, _REGION_CHANNELS, "region")
         )
@@ -5364,6 +5403,9 @@ class Chart:
             {
                 "type": "region",
                 "halo": _halo(halo, "region"),
+                # Named once the chart's tables are known (`_mark_specs`).
+                "x": x,
+                "y": y,
                 "x1": coordinate_spec(x1, "region x1"),
                 "x2": coordinate_spec(x2, "region x2"),
                 "y1": coordinate_spec(y1, "region y1"),
@@ -6163,6 +6205,23 @@ class Chart:
             for table, fields in used.items():
                 if name in self._tables[table][1].names:
                     fields.add(name)
+        # Places at thresholds read their column of the table they name, or of
+        # every table the marks read that holds it.
+        for spec, _ in self._marks:
+            for place in (spec.get("x"), spec.get("y")):
+                if not isinstance(place, AtThresholds):
+                    continue
+                for table, fields in used.items():
+                    named = place.table
+                    # Data objects match by identity: a DataFrame's == compares cells.
+                    whose = (
+                        named is None
+                        or named is self._tables[table][0]
+                        or (named is self._computed_from and table == self._default)
+                        or (isinstance(named, str) and named == table_name(table))
+                    )
+                    if whose and place.field in self._tables[table][1].names:
+                        fields.add(place.field)
         # Columns row selections' conditions set from Python test, and those
         # of the conditions bindings start with.
         for binding in self._row_selection:
@@ -6289,9 +6348,23 @@ class Chart:
         }
 
     def _mark_specs(self) -> list[dict[str, Any]]:
+        def spec_of(index: int, key: str, value: Any) -> Any:
+            # Places at thresholds name the tables the chart draws.
+            if isinstance(value, AtThresholds):
+                return located(
+                    f"marks[{index}].{key}",
+                    lambda: value._spec(self._name_of),
+                    "AtThresholds",
+                )
+            return value
+
         return [
             {
-                **{key: value for key, value in mark.items() if value is not None},
+                **{
+                    key: spec_of(index, key, value)
+                    for key, value in mark.items()
+                    if value is not None
+                },
                 **({"data": table_name(table)} if table is not None else {}),
                 **(
                     {"nodes": table_name(self._node_tables[index])}

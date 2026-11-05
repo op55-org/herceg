@@ -455,7 +455,9 @@ describe("what each kind of label takes", () => {
       'marks[0].label.leader: labels that hide are drawn at their place and draw none; use overlap "move"',
     );
     expect(() =>
-      validateSpec(spec({ type: "region", y1: 1, y2: 2, label: { text: "x", leader: true } })),
+      validateSpec(
+        spec({ type: "region", x: { thresholds: "v" }, label: { text: "x", leader: true } }),
+      ),
     ).toThrow(
       "marks[0].label.leader: region labels slide along their side and draw none; drop leader",
     );

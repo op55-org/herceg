@@ -50,8 +50,11 @@ export type {
   FieldDisplay,
   FieldLink,
   LinkPart,
+  MissingDisplay,
   NumberFieldDisplay,
   NumberMapping,
+  ThresholdStep,
+  Thresholds,
   TimeFieldDisplay,
   ValueMapping,
 } from "./spec/fields.ts";

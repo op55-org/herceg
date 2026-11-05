@@ -52,6 +52,12 @@ export interface InspectedField {
   value: number | string | null;
   /** The value as the tooltip writes it. */
   text: string;
+  /**
+   * The value's color, as the chart's field displays give it (thresholds,
+   * mappings, missing values; see `displayOf`), where they give it one; the
+   * built-in tooltip draws it as a swatch beside the value.
+   */
+  color?: string;
 }
 
 /** The fields `mark`'s tooltip shows of `row`; undefined for a mark without any. */

@@ -5,7 +5,7 @@
 // annotations' labels, and labels following series share it.
 
 import type { Table } from "../../data/table.ts";
-import type { ChartFields } from "../../fields/chart.ts";
+import type { ChartFields, ShownField } from "../../fields/chart.ts";
 import type { Formatter } from "../../format/format.ts";
 import { formatWriter } from "../../format/patterns.ts";
 import type { FeatureKit } from "../../model/features.ts";
@@ -54,7 +54,8 @@ const TIME = { dateStyle: "medium", timeStyle: "short" } as const;
  * its display's); the value through the display of the labeled series'
  * value field of mark `valued` (`field`, as the writer is told, else the
  * mark's; see `ChartFields.valueDisplay`; the part's format over the
- * display's), else in its part's format, else as numbers, or as times
+ * display's), or through `display` where given (a threshold place's
+ * field's), else in its part's format, else as numbers, or as times
  * where the writer is told it is one; a field's label as its display
  * gives it. `path` names each part
  * (`marks[1].labels.content[0]`) in errors; `has` says what parts the
@@ -70,6 +71,7 @@ export function writeContent(
   has: { series: boolean; value: boolean },
   fields?: ChartFields,
   valued?: Mark,
+  display?: ShownField,
 ): ContentWriter {
   const format = (spec: FormatSpec | undefined, at: string, time: boolean): Formatter => {
     // Intl options write a date for times, in the chart's zone, else a number; other forms as they say.
@@ -120,7 +122,7 @@ export function writeContent(
         if (!write) {
           const own = part.format && format(part.format, at, !!time);
           const fallback = format(undefined, at, !!time);
-          const shown = valued && fields?.valueDisplay(valued, field);
+          const shown = display ?? (valued && fields?.valueDisplay(valued, field));
           write =
             (shown?.kind === (time ? "time" : "number")
               ? shown.writer(own, fallback, "")

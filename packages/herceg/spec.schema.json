@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Herceg chart spec",
-  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
+  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Rules and regions at a field's thresholds need the chart's fields to give that field thresholds, in a table the chart's marks read.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
   "$ref": "#/$defs/ChartSpec",
   "$defs": {
     "AggregateOp": {
@@ -2843,7 +2843,7 @@
       "anyOf": [{ "$ref": "#/$defs/WrappedFacetSpec" }, { "$ref": "#/$defs/GridFacetSpec" }]
     },
     "FieldDisplay": {
-      "description": "How a field of any kind is named and its values written. Each kind takes what it writes: numbers a number format, bounds, and mappings by value or range; times a time format and mappings by value or range; categories mappings by value or regular expression.",
+      "description": "How a field of any kind is named and its values written and colored. Each kind takes what it writes: numbers a number format, bounds, thresholds, and mappings by value or range; times a time format and mappings by value or range; categories mappings by value or regular expression.",
       "type": "object",
       "properties": {
         "format": {
@@ -2860,6 +2860,11 @@
           "title": "Max",
           "description": "The field's upper bound (numbers).",
           "anyOf": [{ "type": "number" }, { "const": false }]
+        },
+        "thresholds": {
+          "title": "Thresholds",
+          "description": "Colors of its values by step (numbers).",
+          "anyOf": [{ "$ref": "#/$defs/Thresholds" }, { "const": false }]
         },
         "mappings": {
           "title": "Mappings",
@@ -2880,8 +2885,8 @@
         },
         "missing": {
           "title": "Missing",
-          "description": "The text of missing values; \"–\" by default.",
-          "anyOf": [{ "type": "string" }, { "const": false }]
+          "description": "How missing values show: their text (\"–\" by default), or their text and color.",
+          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/MissingDisplay" }, { "const": false }]
         },
         "link": { "title": "Link", "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }] }
       },
@@ -2960,8 +2965,8 @@
         },
         "missing": {
           "title": "Missing",
-          "description": "The text of missing values; \"–\" by default.",
-          "anyOf": [{ "type": "string" }, { "const": false }]
+          "description": "How missing values show: their text (\"–\" by default), or their text and color.",
+          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/MissingDisplay" }, { "const": false }]
         },
         "link": { "title": "Link", "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }] },
         "format": {
@@ -2978,6 +2983,11 @@
           "title": "Max",
           "description": "The field's upper bound (numbers).",
           "anyOf": [{ "type": "number" }, { "const": false }]
+        },
+        "thresholds": {
+          "title": "Thresholds",
+          "description": "Colors of its values by step (numbers).",
+          "anyOf": [{ "$ref": "#/$defs/Thresholds" }, { "const": false }]
         },
         "mappings": {
           "title": "Mappings",
@@ -5278,6 +5288,16 @@
       },
       "additionalProperties": false
     },
+    "MissingDisplay": {
+      "description": "How missing values show: their text, their color where surfaces color values, or both.",
+      "type": "object",
+      "properties": {
+        "text": { "title": "Text", "type": "string" },
+        "color": { "title": "Color", "type": "string" }
+      },
+      "anyOf": [{ "required": ["text"] }, { "required": ["color"] }],
+      "additionalProperties": false
+    },
     "Modifier": {
       "description": "A key held with a gesture.",
       "type": "string",
@@ -6412,7 +6432,7 @@
       "additionalProperties": false
     },
     "RegionSpec": {
-      "description": "Shaded regions: from `x1` to `x2` across the plot's height, from `y1` to `y2` across its width, or rectangles with both. Drawn in mark order, so list them before the marks they highlight to draw them underneath.",
+      "description": "Shaded regions: from `x1` to `x2` across the plot's height, from `y1` to `y2` across its width, or rectangles with both; or bands at a field's thresholds. Drawn in mark order, so list them before the marks they highlight to draw them underneath.",
       "type": "object",
       "properties": {
         "halo": {
@@ -6562,12 +6582,36 @@
         "x1": { "title": "X1", "$ref": "#/$defs/AnnotationPosition" },
         "x2": { "title": "X2", "$ref": "#/$defs/AnnotationPosition" },
         "y1": { "title": "Y1", "$ref": "#/$defs/AnnotationPosition" },
-        "y2": { "title": "Y2", "$ref": "#/$defs/AnnotationPosition" }
+        "y2": { "title": "Y2", "$ref": "#/$defs/AnnotationPosition" },
+        "x": { "title": "X", "$ref": "#/$defs/ThresholdPlace" },
+        "y": { "title": "Y", "$ref": "#/$defs/ThresholdPlace" }
       },
       "anyOf": [
-        { "required": ["type", "x1", "x2"], "properties": { "y1": false, "y2": false } },
-        { "required": ["type", "y1", "y2"], "properties": { "x1": false, "x2": false } },
-        { "required": ["type", "x1", "x2", "y1", "y2"] }
+        {
+          "required": ["type", "x1", "x2"],
+          "properties": { "y1": false, "y2": false, "x": false, "y": false }
+        },
+        {
+          "required": ["type", "y1", "y2"],
+          "properties": { "x1": false, "x2": false, "x": false, "y": false }
+        },
+        { "required": ["type", "x1", "x2", "y1", "y2"], "properties": { "x": false, "y": false } },
+        {
+          "required": ["type", "y", "x1", "x2"],
+          "properties": { "y1": false, "y2": false, "x": false }
+        },
+        {
+          "required": ["type", "y"],
+          "properties": { "x1": false, "x2": false, "y1": false, "y2": false, "x": false }
+        },
+        {
+          "required": ["type", "x", "y1", "y2"],
+          "properties": { "x1": false, "x2": false, "y": false }
+        },
+        {
+          "required": ["type", "x"],
+          "properties": { "x1": false, "x2": false, "y1": false, "y2": false, "y": false }
+        }
       ],
       "additionalProperties": false
     },
@@ -6864,8 +6908,12 @@
       ],
       "additionalProperties": false
     },
+    "RulePlace": {
+      "description": "Where a rule stands: a place, or each step of a field's thresholds.",
+      "anyOf": [{ "$ref": "#/$defs/AnnotationPosition" }, { "$ref": "#/$defs/ThresholdPlace" }]
+    },
     "RuleSpec": {
-      "description": "Horizontal (y) or vertical (x) reference lines.",
+      "description": "Horizontal (y) or vertical (x) reference lines, at places or at a field's thresholds.",
       "type": "object",
       "properties": {
         "type": { "title": "Type", "const": "rule" },
@@ -6965,8 +7013,8 @@
           "type": "boolean",
           "default": false
         },
-        "x": { "title": "X", "$ref": "#/$defs/AnnotationPosition" },
-        "y": { "title": "Y", "$ref": "#/$defs/AnnotationPosition" }
+        "x": { "title": "X", "$ref": "#/$defs/RulePlace" },
+        "y": { "title": "Y", "$ref": "#/$defs/RulePlace" }
       },
       "anyOf": [
         { "required": ["type", "x"], "properties": { "y": false } },
@@ -8058,6 +8106,60 @@
       },
       "additionalProperties": false
     },
+    "ThresholdPlace": {
+      "description": "A place at each step of the thresholds the chart's field displays give a number field (`fields`): a rule at each step's value, or a band from each step to the next. Places of no rows: one item per step.",
+      "type": "object",
+      "properties": {
+        "thresholds": {
+          "title": "Thresholds",
+          "description": "The field whose display's thresholds give the places.",
+          "type": "string"
+        },
+        "table": {
+          "title": "Table",
+          "description": "The table whose field it is, by name, where the tables the chart's marks read give it different thresholds.",
+          "type": "string"
+        }
+      },
+      "required": ["thresholds"],
+      "additionalProperties": false
+    },
+    "ThresholdStep": {
+      "description": "A step of thresholds: values from `value` up to the next step's take `color`.",
+      "type": "object",
+      "properties": {
+        "value": { "title": "Value", "type": "number" },
+        "color": { "title": "Color", "type": "string" }
+      },
+      "required": ["value", "color"],
+      "additionalProperties": false
+    },
+    "Thresholds": {
+      "description": "Colors of a number field's values by step: a value takes the color of the last step at or below it, and values below the first step `base` (none by default: the surface's own paint). With `mode: \"percent\"`, step values are percents of the field's `min` to `max`, which it must give.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "title": "Mode",
+          "description": "\"absolute\" (the default): steps are values of the field; \"percent\": percents of its min to max.",
+          "type": "string",
+          "enum": ["absolute", "percent"]
+        },
+        "base": {
+          "title": "Base",
+          "description": "The color of values below the first step.",
+          "type": "string"
+        },
+        "steps": {
+          "title": "Steps",
+          "description": "Steps in ascending order of value.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ThresholdStep" },
+          "minItems": 1
+        }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    },
     "TickLabelsSpec": {
       "description": "How a layer's tick labels are written and placed.",
       "type": "object",
@@ -8763,11 +8865,12 @@
       "additionalProperties": false
     },
     "ValueMapping": {
-      "description": "Values shown as `text`, matched by one value (a category, a number, or a time in epoch milliseconds), by a range of numbers or times (`between`, both ends included, null for an open end), or, for categories, by a regular expression (`regex`; `$1`, `$2` in `text` write its groups). The first mapping that matches a value applies.",
+      "description": "Values shown as `text` and in `color` (either, or both), matched by one value (a category, a number, or a time in epoch milliseconds), by a range of numbers or times (`between`, both ends included, null for an open end), or, for categories, by a regular expression (`regex`; `$1`, `$2` in `text` write its groups). The first mapping that matches a value applies: without `text` the value is written by the format, and without `color` it is colored by the thresholds.",
       "type": "object",
       "properties": {
-        "value": { "title": "Value", "anyOf": [{ "type": "number" }, { "type": "string" }] },
         "text": { "title": "Text", "type": "string" },
+        "color": { "title": "Color", "type": "string" },
+        "value": { "title": "Value", "anyOf": [{ "type": "number" }, { "type": "string" }] },
         "between": {
           "title": "Between",
           "type": "array",
@@ -8782,9 +8885,12 @@
         "regex": { "title": "Regex", "type": "string", "examples": ["^5(\\d\\d)$"] }
       },
       "anyOf": [
-        { "required": ["value", "text"], "properties": { "between": false, "regex": false } },
-        { "required": ["between", "text"], "properties": { "value": false, "regex": false } },
-        { "required": ["regex", "text"], "properties": { "value": false, "between": false } }
+        { "required": ["text", "value"], "properties": { "between": false, "regex": false } },
+        { "required": ["text", "between"], "properties": { "value": false, "regex": false } },
+        { "required": ["text", "regex"], "properties": { "value": false, "between": false } },
+        { "required": ["color", "value"], "properties": { "between": false, "regex": false } },
+        { "required": ["color", "between"], "properties": { "value": false, "regex": false } },
+        { "required": ["color", "regex"], "properties": { "value": false, "between": false } }
       ],
       "additionalProperties": false
     },

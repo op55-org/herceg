@@ -73,9 +73,10 @@ The long-term target covers the major chart families. Not yet available:
 ## Axes, legends, and layout
 
 - **Field displays everywhere.** Charts, layout marks, and grids read
-  `fields` ([Field displays](guide/fields.md)); next are pivot grids,
-  colors and thresholds from a field's values, links, and axes agreeing
-  on their fields per subplot rather than over the chart.
+  `fields` ([Field displays](guide/fields.md)), marks take their colors
+  and thresholds; next are pivot grids, grid cells colored by display
+  colors, links, and axes agreeing on their fields per subplot rather than
+  over the chart.
 - Animation of categories that come and go.
 - More than one axis per side, log color scales, legend scrolling, and
   colorbar handles.

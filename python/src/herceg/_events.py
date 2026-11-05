@@ -165,6 +165,8 @@ class InspectedField:
     value: Value | None
     #: The value as the tooltip writes it.
     text: str
+    #: The value's color, as the chart's field displays give it; None without one.
+    color: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1468,6 +1470,7 @@ def decode_inspection(payload: Any) -> Inspection | None:
                         kind=field["kind"],
                         value=_value(field["value"], field["kind"] == "time"),
                         text=field["text"],
+                        color=field.get("color"),
                     )
                     for field in point.get("fields", ())
                 ),

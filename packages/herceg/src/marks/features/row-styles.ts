@@ -6,7 +6,7 @@
 
 import type { Table } from "../../data/table.ts";
 import type { ChartFields } from "../../fields/chart.ts";
-import type { RowLooks, RowPaint } from "../../model/features.ts";
+import type { MarkFeatures, RowLooks, RowPaint } from "../../model/features.ts";
 import type { EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
 import type { GlyphKey } from "../mark.ts";
@@ -160,10 +160,19 @@ export class RowStyles {
       (c.kind === "condition" ||
         c.kind === "identity" ||
         c.kind === "scaled" ||
+        c.kind === "display" ||
         (c.kind === "field" && c.field !== spec.series));
     this.byRow =
       [this.#fill, this.#stroke, this.#width, this.#opacity].some(rowWise) ||
       this.#by !== undefined;
+  }
+
+  /** The number fields whose display colors fill and outline the rows, read without a scale. */
+  get displayColors(): string[] | undefined {
+    const fields = [this.#fill, this.#stroke].flatMap((c) =>
+      c?.kind === "display" ? [c.field] : [],
+    );
+    return fields.length > 0 ? fields : undefined;
   }
 
   /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
@@ -216,7 +225,8 @@ export class RowStyles {
   /**
    * A key of the colors a field other than the series field gives rows: the
    * values the rows drawn hold, in the scale's order, for the table's version,
-   * written as the field's display writes them.
+   * written as the field's display writes them. Keys of display colors
+   * are the chart's (`displayColors`).
    */
   key(): GlyphKey | undefined {
     const fill = this.#fill;
@@ -464,7 +474,10 @@ export function rowLooks(
   scales: ScaleOf,
   path: string,
   isColor: (value: string) => boolean,
-): { use(theme: Theme, paint: PaintReader): void; rowLooks(): RowLooks | undefined } {
+): Pick<MarkFeatures, "displayColors"> & {
+  use(theme: Theme, paint: PaintReader): void;
+  rowLooks(): RowLooks | undefined;
+} {
   if (!table)
     throw new Error(
       `${path} encode: channels read the rows of a table; give the mark one, or drop encode`,
@@ -481,7 +494,11 @@ export function rowLooks(
     return rows;
   };
   const styles = new RowStyles(spec, table, drawn, scales, path, isColor);
-  return { use: (theme, paint) => styles.use(theme, paint), rowLooks: () => styles.looks() };
+  return {
+    use: (theme, paint) => styles.use(theme, paint),
+    rowLooks: () => styles.looks(),
+    displayColors: styles.displayColors,
+  };
 }
 
 /** A series style's or a look's paint properties it sets. */

@@ -11,17 +11,26 @@ import type { Table } from "../data/table.ts";
 import type { Formatter } from "../format/format.ts";
 import { formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
+import type { ValueColors } from "../marks/features/channels.ts";
+import { type KeyKit, keyLegendWith } from "../marks/key-legend.ts";
 import type { GlyphKey, Mark } from "../marks/mark.ts";
 import type { TreeView } from "../marks/tree-data.ts";
+import type { LegendPart } from "../model/legend.ts";
 import type { DisplayedKind } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
-import type { Setting } from "./check.ts";
+import { keyPath, type Setting } from "./check.ts";
+import { colorKey, type DisplayTones, displayTones } from "./colors.ts";
 import {
+  colorer,
   DATE_TIME,
   type DisplayKit,
   mapper,
+  missingText,
   missingValue,
   type ResolvedDisplay,
+  type Steps,
+  stepAt,
+  stepsOf,
 } from "./display.ts";
 import { type FieldDisplays, lineOf, resolve, rulesOf } from "./rules.ts";
 
@@ -59,6 +68,20 @@ export interface ShownField {
   ): (value: number | string | null) => string;
   /** Its values as `writer()` writes them. */
   readonly text: (value: number | string | null) => string;
+  /**
+   * Its values' display colors (see `DisplayedField.color`): undefined for
+   * a value none gives a color; the writer itself undefined where its
+   * display gives no colors (no thresholds, nor colors of mappings or of
+   * missing values).
+   */
+  readonly color: ((value: number | string | null) => string | undefined) | undefined;
+  /** Its thresholds' steps, values in its units (see `Steps`); undefined without thresholds. */
+  readonly steps: Steps | undefined;
+  /**
+   * Its display colors as marks coloring by them read them (see
+   * `ValueColors`), for a number field whose display gives colors.
+   */
+  readonly values: ValueColors | undefined;
   /**
    * A writer of amounts computed from its values in its units (a slice's
    * sum, a node's total): its format, else `fallback`, and its missing
@@ -124,6 +147,44 @@ export interface ChartFields {
    */
   of(table: Table | RowView | undefined, name: string): ShownField | undefined;
   /**
+   * The display of a number field `name` of no table, as rules not naming
+   * tables give it (a threshold place no mark's table resolves).
+   */
+  named(name: string): ShownField | undefined;
+  /**
+   * A legend key of the display colors of number field `name` of `table`
+   * (see `colorKey`), its colors read by `paint`; undefined where its
+   * display gives none.
+   */
+  colorKey(
+    table: Table | RowView | undefined,
+    name: string,
+    paint: (color: string) => string,
+  ): GlyphKey | undefined;
+  /**
+   * The legend part of `colorKey`'s key: a key of glyphs as every mark's
+   * keys are drawn (marks/key-legend.ts).
+   */
+  colorLegend(
+    table: Table | RowView | undefined,
+    name: string,
+    paint: (color: string) => string,
+  ): LegendPart | undefined;
+  /**
+   * Number field `name` of `table`'s display colors as a mark coloring by
+   * it with a ramp of its own (points, heatmaps) draws them in its place
+   * (see `DisplayTones`), where the mark gives none of `colors`,
+   * `colorDomain`, and `colorMidpoint` (its `spec`) and the display gives
+   * colors; colors read by `paint`, values without one in `none`.
+   */
+  tones(
+    table: Table | RowView | undefined,
+    name: string,
+    spec: { colors?: unknown; colorDomain?: unknown; colorMidpoint?: unknown },
+    none: string | undefined,
+    paint: (color: string, path: string) => string,
+  ): DisplayTones | undefined;
+  /**
    * The display `mark`'s labels write their `{ value: true }` parts
    * through: that of a series' value field (`field`, where the label says
    * which), else of the mark's value field, or of several of one kind whose
@@ -173,10 +234,11 @@ export interface ChartFields {
 
 /**
  * What a chart's displays use of its code, handed in (see `GuideKit`): its
- * formatters, and derived tables' origins (data/origin.ts), which rules
- * naming tables match along.
+ * formatters, the text helpers keys of display colors are laid out with,
+ * and derived tables' origins (data/origin.ts), which rules naming tables
+ * match along.
  */
-export type ChartFieldKit = DisplayKit & { origins: Origins };
+export type ChartFieldKit = DisplayKit & KeyKit & { origins: Origins };
 
 /**
  * `fields` checked and compiled for a chart in `locale` and `zone`, whose
@@ -199,18 +261,21 @@ export function chartFields(
     times ??= kit.timeFormatter(DATE_TIME, zone, locale);
     return times(value);
   };
-  const shown = (table: Table, name: string): ShownField | undefined => {
-    if (!table.has(name)) return undefined;
-    const kind = table.kind(name);
+  // Each field's resolved display, kept beside what it was resolved from for keys of its colors.
+  const displays = new WeakMap<ShownField, ResolvedDisplay>();
+  const shown = (table: Table | undefined, name: string): ShownField | undefined => {
+    if (table && !table.has(name)) return undefined;
+    const kind = table ? table.kind(name) : "number";
     if (kind === "geometry") return undefined;
     const resolved = resolve(
       rules,
-      { name, kind, tables: lineOf(kit.origins, table, name) },
+      table ? { name, kind, tables: lineOf(kit.origins, table, name) } : { name, kind },
       "chart",
     );
     const display = resolved.settings as ResolvedDisplay;
     if (Object.keys(display).length === 0) return undefined;
-    const { format, mappings, missing: own, label } = display;
+    const { format, mappings, label } = display;
+    const own = missingText(display.missing);
     const write =
       format &&
       formatWriter(
@@ -222,6 +287,8 @@ export function chartFields(
         `chart ${resolved.from.format}.format`,
       );
     const mapped = mappings && mapper(mappings);
+    const color = colorer(kind, display, mapped);
+    const steps = stepsOf(display);
     const writer: ShownField["writer"] = (
       ownFormat,
       fallback = kind === "time" ? dates : numbers,
@@ -231,9 +298,9 @@ export function chartFields(
       return (value) =>
         missingValue(kind, value)
           ? (own ?? missing)
-          : (mapped?.(value!) ?? (typeof value === "string" ? value : writes(value!)));
+          : (mapped?.(value!)?.text ?? (typeof value === "string" ? value : writes(value!)));
     };
-    return {
+    const made: ShownField = {
       field: name,
       kind,
       label: label ?? name,
@@ -245,13 +312,18 @@ export function chartFields(
       zone,
       from: resolved.from,
       formatKey: format ? normalized(format) : "",
-      textKey: mappings || own !== undefined ? JSON.stringify([mappings, own]) : "",
+      textKey: textKey(mappings, own),
       writer,
       text: writer(),
+      color,
+      steps,
+      values: color && kind === "number" ? valueColors(display, steps, color) : undefined,
       amount: (fallback) => (value) =>
         missingValue(kind, value) ? (own ?? "–") : (write ?? fallback)(value),
       over: (axis, numbers) => writer(axis?.own ? axis : undefined, numbers ? undefined : axis),
     };
+    displays.set(made, display);
+    return made;
   };
   const of: ChartFields["of"] = (ref, name) => {
     if (!ref) return undefined;
@@ -283,8 +355,45 @@ export function chartFields(
     );
     return texts.size === 1 ? [...texts][0]! : value;
   };
+  // Fields of no table, by name.
+  const unbound = new Map<string, ShownField | undefined>();
+  const tones = new WeakMap<ShownField, WeakMap<object, Map<string | undefined, DisplayTones>>>();
   return {
     of,
+    named: (name) => {
+      if (!unbound.has(name)) unbound.set(name, shown(undefined, name));
+      return unbound.get(name);
+    },
+    colorKey: (table, name, paint) => {
+      const field = of(table, name);
+      return field?.values && colorKey(field, displays.get(field)!, field.amount(numbers), paint);
+    },
+    colorLegend: (table, name, paint) => {
+      const field = of(table, name);
+      const key =
+        field?.values && colorKey(field, displays.get(field)!, field.amount(numbers), paint);
+      return key && keyLegendWith(kit, key);
+    },
+    tones: (table, name, spec, none, paint) => {
+      const field = of(table, name);
+      // A ramp the mark is given wins, whole.
+      if (!field?.values || (spec.colors ?? spec.colorDomain ?? spec.colorMidpoint) !== undefined)
+        return undefined;
+      // Made again only as what draws them changes: a mark asks each frame.
+      // Kept per paint reader (charts sharing displays) and per color of
+      // values without one (marks drawing them differently share a field).
+      const byPaint = tones.get(field) ?? new WeakMap();
+      tones.set(field, byPaint);
+      const byNone = byPaint.get(paint) ?? new Map();
+      byPaint.set(paint, byNone);
+      const made = byNone.get(none);
+      if (made) return made;
+      const read = (color: string) => paint(color, `chart ${keyPath(name)}`);
+      const key = colorKey(field, displays.get(field)!, field.amount(numbers), read);
+      const fresh = displayTones(field, none, read, key && keyLegendWith(kit, key));
+      byNone.set(none, fresh);
+      return fresh;
+    },
     valueDisplay: (mark, field) => {
       if (fills(mark)) return undefined;
       const shown = (field === undefined ? (mark.identity?.values ?? []) : [field]).map((one) =>
@@ -403,6 +512,62 @@ function holds(table: Table, name: string): ReadonlySet<string> {
     byName.set(name, held);
   }
   return held.values;
+}
+
+/**
+ * The display colors of a number field's values as marks read them: the
+ * colors of its mappings, its base, its steps, and missing values, each
+ * once, and each value's place among them (one more; 0 for none, -1 for
+ * missing values without a color).
+ */
+function valueColors(
+  display: ResolvedDisplay,
+  steps: Steps | undefined,
+  color: (value: number) => string | undefined,
+): ValueColors {
+  const colors = [
+    ...new Set([
+      ...(display.mappings ?? []).flatMap((mapping) => mapping.color ?? []),
+      ...(steps ? [steps.base ?? [], steps.colors].flat() : []),
+      ...(typeof display.missing === "object" && display.missing.color !== undefined
+        ? [display.missing.color]
+        : []),
+    ]),
+  ];
+  const places = new Map(colors.map((one, i) => [one, i + 1]));
+  // Without mapping colors, a value's place follows from its step alone:
+  // marks ask for each row's, so this skips the color's lookup.
+  if (steps && !display.mappings?.some((mapping) => mapping.color !== undefined)) {
+    const byStep = [steps.base, ...steps.colors].map((one) =>
+      one === undefined ? 0 : places.get(one)!,
+    );
+    const lost = typeof display.missing === "object" ? display.missing.color : undefined;
+    const missing = lost === undefined ? -1 : places.get(lost)!;
+    return {
+      colors,
+      index: (value) => (Number.isNaN(value) ? missing : byStep[stepAt(steps, value)]!),
+    };
+  }
+  return {
+    colors,
+    index: (value) => {
+      const shown = color(value);
+      if (shown !== undefined) return places.get(shown)!;
+      return Number.isNaN(value) ? -1 : 0;
+    },
+  };
+}
+
+/**
+ * What a display writes of values beyond their format, normalized, which a
+ * category axis' fields agree on: its mappings' text (their colors write
+ * nothing) and its missing text; "" where it writes nothing of its own.
+ */
+function textKey(mappings: ResolvedDisplay["mappings"], missing: string | undefined): string {
+  const texts = mappings?.some((mapping) => mapping.text !== undefined)
+    ? mappings.map(({ color: _, ...mapping }) => mapping)
+    : undefined;
+  return texts || missing !== undefined ? JSON.stringify([texts, missing]) : "";
 }
 
 /**

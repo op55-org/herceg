@@ -35,7 +35,6 @@ import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { AxisCells, stepCell } from "./heatmap-cells.ts";
 import { paint, rasterAxes } from "./heatmap-raster.ts";
 import { histogramFormError, perAxisBins } from "./histogram-input.ts";
-import { rampLegend } from "./legend-parts.ts";
 import {
   type AxisFormat,
   type BandContext,
@@ -52,6 +51,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
+import { rampLegend } from "./ramp-legend.ts";
 import { type MarkRows, rowsOf } from "./rows.ts";
 import type { Series } from "./series.ts";
 

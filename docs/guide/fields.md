@@ -1,15 +1,17 @@
 # Field displays
 
-A field display says how a field is named and how its values are written:
-its label, description, format, bounds, missing text, and value mappings.
-It is given once, for every surface that writes the field, by field name or
-as rules matching fields by name, regular expression, kind, and table.
+A field display says how a field is named, how its values are written, and
+how they are colored: its label, description, format, bounds, missing
+text, value mappings, and thresholds. It is given once, for every surface
+that writes or colors the field, by field name or as rules matching fields
+by name, regular expression, kind, and table.
 
 - [What works today](#what-works-today)
 - [Displays](#displays)
 - [Rules](#rules)
 - [How a value is written](#how-a-value-is-written)
 - [Mappings](#mappings)
+- [Colors](#colors)
 - [Charts](#charts)
 - [Axes](#axes)
 - [Names](#names)
@@ -36,9 +38,15 @@ as rules matching fields by name, regular expression, kind, and table.
 - Grids take `fields: compileFields(rules)`: headers, descriptions, cells,
   group keys, and aggregates ([Grids](#grids)).
 - Specs carry `fields`, and `validateSpec` checks it, with paths.
-- Python builds and checks `hg.FieldDisplay`, `hg.Match`, and `hg.Mapping`.
-- Colors and thresholds from displays, and links, are planned
-  ([roadmap](../roadmap.md)).
+- Displays color values ([Colors](#colors)): thresholds and mapping colors
+  color bars, lines, areas, and regions colored by a number field without a
+  scale, points and heatmaps without a ramp of their own, series and bars
+  of a category field, gauges' bands and dials, and tooltip fields'
+  swatches; legends show a key of the colors; rules and regions stand at a
+  field's thresholds.
+- Python builds and checks `hg.FieldDisplay`, `hg.Match`, `hg.Mapping`,
+  `hg.Thresholds`, and `hg.AtThresholds`.
+- Links from displays are planned ([roadmap](../roadmap.md)).
 - Every format form a display takes (durations, SI and binary prefixes,
   text around number patterns) works today wherever charts take a format:
   see [Formats](axes-and-legends.md#formats).
@@ -51,8 +59,9 @@ as rules matching fields by name, regular expression, kind, and table.
 | `description` | A sentence about the field, for surfaces that describe fields. |
 | `format` | How values are written, in any [format](axes-and-legends.md#formats) form: number forms for number fields, time forms for times. Categories take none. |
 | `min`, `max` | A number field's bounds, for surfaces that show a value against them. Never an axis' domain. |
-| `missing` | The text of missing values (null, NaN, and missing times): "–" by default. |
-| `mappings` | Values written as given text (see [Mappings](#mappings)). |
+| `missing` | The text of missing values (null, NaN, and missing times): "–" by default; or `{ text, color }`, either or both. |
+| `mappings` | Values written as given text, colored in a given color, or both (see [Mappings](#mappings)). |
+| `thresholds` | A number field's colors by step (see [Colors](#colors)). |
 | `link` | A link built from the row's values. Typed and checked; no surface draws links yet. |
 
 Every setting also takes `false`, which resets it to its default, as if no
@@ -62,7 +71,8 @@ earlier rule had given it.
 const fields = {
   latency: { label: "Latency", description: "Time to the last byte.", format: { duration: "millisecond" }, min: 0, max: 120_000 },
   bytes: { label: "Response size", format: { binary: "B" }, missing: "not sent" },
-  status: { mappings: [{ value: "200", text: "OK" }, { regex: "^5(\\d\\d)$", text: "Server error $1" }] },
+  status: { mappings: [{ value: "200", text: "OK" }, { regex: "^5(\\d\\d)$", text: "Server error $1", color: "#c62828" }] },
+  p99: { format: { duration: "millisecond" }, thresholds: { base: "#2e7d32", steps: [{ value: 200, color: "#f9a825" }, { value: 500, color: "#c62828" }] } },
 };
 ```
 
@@ -125,9 +135,78 @@ Every surface writes a value in the same order:
 | `{ between: [0.9, null], text: "Healthy" }` | Numbers or times from the first end to the second, both included; `null` leaves an end open. |
 | `{ regex: "^5(\\d\\d)$", text: "Server error $1" }` | Categories matching a JavaScript regular expression; `$1` to `$9` in `text` write its groups. |
 
-A mapping gives one of `value`, `between`, and `regex`, and `text`.
-Category fields take values and regular expressions; number and time
-fields take values and ranges.
+A mapping gives one of `value`, `between`, and `regex`, and `text`,
+`color`, or both. Category fields take values and regular expressions;
+number and time fields take values and ranges. A mapping without `text`
+leaves the value written as it would be, and colors it.
+
+## Colors
+
+A value's display color is, in order: a missing value's `missing` color;
+the first matching mapping's color; for number fields, its threshold step's
+color. Values none of these colors have no display color.
+
+```ts
+thresholds: {
+  mode: "absolute",           // or "percent": step values are percents of the field's min to max
+  base: "#2e7d32",            // values below the first step; none without it
+  steps: [{ value: 200, color: "#f9a825" }, { value: 500, color: "#c62828" }],
+}
+```
+
+Values from a step's value up to the next step's take its color, so 200 is
+the 200 step's. Steps ascend by value. Percent steps need the field's `min`
+and `max`; filters, streaming, and the viewport never move them. Thresholds
+are for number fields; categories take colors from mappings.
+
+| Surface | Takes display colors |
+| --- | --- |
+| Bars, lines, areas, regions | `encode.color` (or `fill`, `stroke`) `: { field: "p99" }`, a number field without a scale: bars and regions per row, lines and areas along their length, each piece in the color of the observation it arrives at. Values without a display color take the theme's muted color, as values a channel scale leaves unmapped do. A field without display colors is refused, naming both fixes. |
+| Points, heatmaps | `color: "p99"` where the mark gives none of `colors`, `colorDomain`, and `colorMidpoint` (those keep its ramp). Points without a display color take the theme's muted color; heatmap cells without one are transparent. Points and cells missing the value are not drawn, as with a ramp. A heatmap's `reduce: "sum"` keeps its ramp, as sums are not the field's values. |
+| Series and bars of a category field | Mapping colors give their values' colors (`series: "status"`, `color: "status"`) where no declared scale colors the field; values without a mapping color take the palette's, and bars and regions missing the value `missing`'s color. |
+| Gauges | Without `bands`, a band per step within the gauge's ends, and the dial in its value's step's color. |
+| Tooltips | A tooltip field's value color, as a swatch beside it, and `InspectedField.color`. |
+| Legends | A mark coloring by display colors lists a key of them (below). |
+| Application code | `displayOf(...).color(value)` (see [Reading displays](#reading-displays-in-typescript)). |
+
+A declared color scale (`scales.color`) colors its values whole, display
+colors or not, and a mark's own paint (`color: "#hex"`, `stroke`) wins.
+Field displays of one value must agree on its color: two displays giving
+`"503"` of `status` different colors, as a table and a table derived from
+it can, are refused as a drawing error naming both rules.
+
+**Keys.** A mark coloring by display colors shows a key in its legend, as
+marks show keys of sizes and shapes: an entry per color a value can take.
+Number fields list color mappings first, then steps, each written by its
+mapping's text, else by what of its range earlier mappings leave it, in
+the display's format ("< 200ms", "200ms – 500ms", "≥ 500ms", or "> 500ms"
+after a mapping of values up to 500). Category fields list each value a mapping
+colors, by its text. Keys explain colors; their entries hide and select
+nothing, and `getLegend()` does not list them. Missing values are left
+out of keys.
+
+**Threshold places.** Rules and regions stand at a field's steps:
+
+```ts
+rule({ y: { thresholds: "p99" }, dash: "--", contributeDomain: true })   // a rule at each step
+region({ y: { thresholds: "p99" }, fillOpacity: 0.12 })                 // a band from each step to the next
+```
+
+Each rule or band is in its step's color unless the mark gives `stroke`
+(rules) or `fill` (regions). Bands run from each step to the next, the last
+to the plot's end, and from the plot's start to the first step where the
+thresholds give a `base`. The steps are those of the field's display in
+the tables the chart's marks read (a field of no table where none reads
+it); where tables give the field different steps (percent steps with
+different bounds), the place names its table, `{ thresholds: "p99", table:
+latency }` (specs: the table's name), and a table without the field is
+refused. Label parts' `{ value: true }` write the step's value through the
+field's display ("500ms"); a base band's writes nothing. `contributeDomain`
+adds the steps' values, never the bands' open ends. Each rule or band is
+keyed by its step's value as written (a percent step by its percent; the
+base band by `"base"`), so adding a step renames no other: events report
+them as items of their mark, `item: '["slo","500"]'` for a rule with id
+"slo", with no rows. Rules at thresholds cannot be dragged.
 
 ## Charts
 
@@ -156,7 +235,7 @@ The y axis writes "1s 500ms", the legend and tooltips name the series
 | Legends | Series' names; entries several series share through a color field, and a declared color domain's entries without rows, by the value's text (as the marks holding the value write it); keys of category fields, and color ramps, by the field's label and text. |
 | Tooltips | Series' names, each series' values through its value field (each end of a range through its own; a box plot's statistics through the field it summarizes), the fields points encode as size, color, opacity, and shape, a candle's prices and a cell's edges through their fields, and tooltip fields' labels and text. |
 | Labels | `{ field }` and `{ value: true }` parts; bars' value labels and annotations' labels of a field. |
-| Gauges | `label`, `format`, `min`, `max`. |
+| Gauges | `label`, `format`, `min`, `max`; bands and the dial's color from `thresholds`. |
 | Color ramps | A number field's `min` and `max` as the ramp's default domain (points, heatmaps, contours), an end it does not give from the data; colorbars write the field's format, a time field's as times; contours name their levels through their color field. |
 | Text alternative | Series' names, their values, and a value field's `description`, once, after its first series. |
 
@@ -264,9 +343,13 @@ whatever `fields.latency.label` says.
   times alike (a band's labels through the field of the edge they follow),
   and `{ label }` writes a field's label. Bars' value labels and annotations' labels of a field
   write through the displays without parts.
+- Tooltip fields take their value's display color as a swatch beside the
+  value (`InspectedField.color`).
 - Gauges take the value field's `label`, `format`, `min`, and `max`, each
   under the gauge's own; an end the gauge does not give comes from the
   display, and ends that cross are refused, naming where each is given.
+  Without `bands` of their own, they take a band per threshold step within
+  their ends, and the dial takes its value's step's color.
 
 ## Layout marks
 
@@ -314,6 +397,7 @@ const latency = displayOf(fields, { table: requests, field: "latency" });
 latency.label; // "Latency"
 latency.text(66_000); // "1m 6s"
 latency.text(Number.NaN); // "–"
+latency.color(66_000); // its step's color, or undefined
 
 // A field by name and kind, of a table by name, as specs name them.
 const quota = [{ match: { table: "quotas", field: "bytes_in" }, label: "Quota" }];
@@ -327,7 +411,8 @@ displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; 
   `format`, which replaces the field's while its mappings and missing text
   still apply, and the surface's own `missing` text, for fields whose
   displays give none ("–" by default).
-- A display's `text(value)` writes a value; `format(value)` writes a value
+- A display's `text(value)` writes a value, and `color(value)` gives its
+  display color (undefined for none); `format(value)` writes a value
   computed from the field's values (a sum, a mean) in its format and
   missing text, without the mappings. `settings.defaultFormat` gives a
   surface's format where neither its own nor the field's applies (grids'
@@ -383,6 +468,11 @@ status = hg.FieldDisplay(label="Status", mappings=[
     hg.Mapping(regex=r"^5(\d\d)$", text="Server error $1"),
 ])
 health = hg.FieldDisplay(mappings=[hg.Mapping(between=(0.9, None), text="Healthy")])
+p99 = hg.FieldDisplay(
+    format=hg.Format(duration="millisecond"),
+    missing={"text": "no data", "color": "#9e9e9e"},
+    thresholds=hg.Thresholds(base="#2e7d32", steps=[(200, "#f9a825"), (500, "#c62828")]),
+)
 ```
 
 - Each setting takes `False`, which resets it.
@@ -396,6 +486,13 @@ health = hg.FieldDisplay(mappings=[hg.Mapping(between=(0.9, None), text="Healthy
   are TypeScript's alone.
 - `hg.Match(table=)` takes data the chart draws, written as the chart's
   table name, or a spec table's name.
+- `hg.Mapping(color=...)` colors values, with or without `text`;
+  `missing=` takes text, or a dict of `text` and `color`;
+  `hg.Thresholds(steps=[(value, color), ...], base=..., mode="percent")`
+  takes steps as pairs or dicts.
+- `rule(y=hg.AtThresholds("p99"))` and `region(y=hg.AtThresholds("p99"))`
+  stand at a column's steps; `hg.AtThresholds("p99", table=data)` names
+  whose, as `hg.Match(table=)` does.
 - Marks' `label=` and axes' `title=` take parts: text and
   `hg.LabelPart(series=True)`, `hg.LabelPart(field=...)`, and
   `hg.LabelPart(label=...)`. `herceg.express` names single series and
@@ -426,4 +523,14 @@ wrong, and what to give instead.
 | A name field that does not split series | `line (mark 0) label[0].field: "zone" does not split the series; a name reads the series field or the color field ("host" or "region")` |
 | A name field that changes within a series (the chart's drawing error) | `line (mark 0) label[2].field: "region" changes within series "db-2"; a name reads a field constant within each series` |
 | A tooltip field's format of the wrong kind | `tooltip.fields[0].format: "time" holds times; give { time } or Intl date options` |
-| Python | `FieldDisplay min: 120000 is not below max 0; give min below max`; `Match kind: expected "number", "time", or "category"; received "geometry"`; `Mapping: give value, between, or regex, one of them` |
+| Steps out of order | `chart fields.p99.thresholds.steps[1].value: steps ascend; 200 follows 500; order the steps by value` |
+| A step without a color | `chart fields.p99.thresholds.steps[0].color: expected a color; received nothing` |
+| Percent steps without bounds | `chart fields.cpu: percent thresholds (fields[1]) need min and max; give both` |
+| Thresholds on a category field | `chart fields.status.thresholds: "status" holds categories; thresholds are for number fields; color categories with mappings` |
+| A mapping with neither text nor color | `chart fields.status.mappings[0]: give text, color, or both` |
+| A color channel on a number field with no display colors | `bar (mark 0) encode.color.field: field "p99" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: "identity" }), or give fields.p99 thresholds or mappings with colors` |
+| One value, two colors (the chart's drawing error) | `chart fields: "503" of "status" is "#c62828" (fields[0]) and "#ff0000" (fields[1]); one value has one color` |
+| A place at a field without thresholds | `rule (mark 1) y.thresholds: fields give "p99" no thresholds; give fields.p99.thresholds, or place the rule at a value` |
+| A place where tables disagree | `rule "hot" y.thresholds: "cpu" of "a" and of "b" take different thresholds; give table` |
+| A place naming a table without the field | `rule (mark 1) y.thresholds: table "other" has no field "p99"; give a table whose p99 has thresholds` |
+| Python | `FieldDisplay min: 120000 is not below max 0; give min below max`; `Match kind: expected "number", "time", or "category"; received "geometry"`; `Mapping: give value, between, or regex, one of them`; `Thresholds steps[1]: steps ascend; 200 follows 500; order the steps by value`; `AtThresholds field: expected a column name; received 3` |

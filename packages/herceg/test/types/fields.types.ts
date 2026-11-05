@@ -111,6 +111,15 @@ export const twoWays: FieldDisplays = {
   // @ts-expect-error a mapping matches one way
   service: { mappings: [{ value: "a", regex: "b", text: "c" }] },
 };
+export const showsNothing: FieldDisplays = {
+  // @ts-expect-error a mapping shows text, a color, or both
+  service: { mappings: [{ value: "a" }] },
+  // @ts-expect-error missing values show text, a color, or both
+  p99: { missing: {} },
+};
+export const colorsOnly: FieldDisplays = {
+  service: { mappings: [{ value: "a", color: "red" }], missing: { color: "gray" } },
+};
 // Charts take displays, and series' names and axis titles name fields by their labels.
 createChart(element, {
   fields,

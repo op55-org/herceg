@@ -82,6 +82,15 @@ export type Channel<V, S extends Schema> =
 /** A channel of each row's own look: any but the series' names (see `Channel`). */
 export type RowChannel<V, S extends Schema> = Exclude<Channel<V, S>, { series: true }>;
 
+/**
+ * A color channel (see `Channel`), which also reads a number field without
+ * a scale: its values take the colors the chart's field displays give
+ * them (thresholds, and mappings with colors; docs/guide/fields.md).
+ */
+export type ColorChannel<S extends Schema> =
+  | Channel<string, S>
+  | { field: NumberField<S>; scale?: never };
+
 /** A number or time field through the channel's own mapping: a color ramp, sizes by area, opacities. */
 export interface MappedField<S extends Schema> {
   field: NumericField<S>;
@@ -159,9 +168,9 @@ export interface AreaLabels<S extends Schema> extends SeriesLabels<S> {
 
 /** A mark's channels (each mark takes those it draws). */
 export interface Encodings<S extends Schema> {
-  color?: Channel<string, S>;
-  fill?: Channel<string, S>;
-  stroke?: Channel<string, S>;
+  color?: ColorChannel<S>;
+  fill?: ColorChannel<S>;
+  stroke?: ColorChannel<S>;
   dash?: Channel<Dash, S>;
   symbol?: Channel<SymbolName, S>;
   strokeWidth?: Channel<number, S>;

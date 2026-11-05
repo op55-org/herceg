@@ -196,10 +196,10 @@ export interface LegendContent {
   panelLegends?: typeof PanelLegends | undefined;
   /**
    * The chart's compiled features, when it has any: the keys of the declared
-   * domains' values a mark's entries stand for, drawn or not, and
-   * annotations' entries in the paint of their rows.
+   * domains' values a mark's entries stand for, drawn or not, of the parts
+   * they list for a mark, and annotations' entries in the paint of their rows.
    */
-  features?: Pick<CompiledFeatures, "domainKeys" | "labelLooks"> | undefined;
+  features?: Pick<CompiledFeatures, "domainKeys" | "ownParts" | "labelLooks"> | undefined;
 }
 
 /**

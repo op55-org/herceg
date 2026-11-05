@@ -68,7 +68,16 @@ export const fieldReader: FieldReaders = (locale, zone, kit, features, times) =>
           : typeof value === "string"
             ? value
             : (own ?? fallback(kind))(value);
-      return { field, label: label ?? shown?.label ?? field, kind, value, text };
+      const color = shown?.color?.(value);
+      const read: InspectedField = {
+        field,
+        label: label ?? shown?.label ?? field,
+        kind,
+        value,
+        text,
+      };
+      if (color !== undefined) read.color = color;
+      return read;
     });
 };
 
@@ -110,14 +119,15 @@ export function ownContent(
     // Line breaks in labels break the tooltip's lines too.
     header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
     element.append(header);
-    const row = (name: string, text: string, color?: string) => {
+    // A point's swatch is its series', and its label reads as its name; a field's is its value's.
+    const row = (name: string, text: string, color?: string, field = false) => {
       const line = document.createElement("div");
       line.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
       const swatch = document.createElement("span");
       swatch.style.cssText = `width:8px;height:8px;border-radius:2px;background:${color ?? "none"};flex:none`;
       const label = document.createElement("span");
       label.textContent = name;
-      label.style.cssText = `flex:1;color:${color ? theme.text : theme.muted}`;
+      label.style.cssText = `flex:1;color:${color && !field ? theme.text : theme.muted}`;
       const value = document.createElement("span");
       value.textContent = text;
       value.style.cssText = "font-weight:600;margin-left:12px";
@@ -126,7 +136,7 @@ export function ownContent(
     };
     for (const point of inspection.points) {
       row(point.label, point.text, point.color);
-      for (const field of point.fields ?? []) row(field.label, field.text);
+      for (const field of point.fields ?? []) row(field.label, field.text, field.color, true);
     }
   };
   tooltip.show = (inspection, theme, pointer, bounds) => {

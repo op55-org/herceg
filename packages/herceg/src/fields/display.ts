@@ -1,15 +1,15 @@
-// A field's display, resolved from its rules, for writing values: its
-// label, description, bounds, and each value's text, written in the order
-// every surface writes values: a missing value takes `missing`; otherwise
-// the first mapping that matches gives its text; otherwise the format
-// writes the value.
+// A field's display, resolved from its rules, for writing and coloring
+// values: its label, description, bounds, and each value's text and color,
+// in the order every surface reads them: a missing value takes `missing`;
+// otherwise the first mapping that matches gives its text and color;
+// otherwise the format writes the value and the thresholds color it.
 
 import type { RowView } from "../data/row-view.ts";
 import type { PositionField, ReadValue, Schema, Table } from "../data/table.ts";
 import type { Formatter } from "../format/format.ts";
 import { type FormatKit, formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
-import type { DisplayedKind, FieldDisplay, ValueMapping } from "../spec/fields.ts";
+import type { DisplayedKind, FieldDisplay, MissingDisplay, ValueMapping } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import { checkFormat, holds, misfit } from "./check.ts";
 import type { ColumnDisplay, GridColumnSettings } from "./grid.ts";
@@ -63,6 +63,12 @@ export interface DisplayedField<K extends DisplayedKind = DisplayedKind> {
    * sum, a maximum) is written, since it is not one of them.
    */
   format(value: ReadValue<K>): string;
+  /**
+   * A value's display color: the missing color for a missing value, its
+   * mapping's color, or its step's (`thresholds`); undefined where none
+   * gives one, which surfaces draw in their own paint.
+   */
+  color(value: ReadValue<K>): string | undefined;
 }
 
 /**
@@ -153,13 +159,104 @@ export function displayed<K extends DisplayedKind>(
         ? kit.timeFormatter(DATE_TIME, timeZone, locale)
         : undefined;
   const mapped = display.mappings && mapper(display.mappings);
-  const { label = name, description, min, max, missing = fallback } = display;
+  const { label = name, description, min, max } = display;
+  const missing = missingText(display.missing) ?? fallback;
   // A value not missing is a number or text.
   const format = (value: ReadValue<K>) =>
     missingValue(kind, value) ? missing : typeof value === "string" ? value : write!(value!);
   const text = (value: ReadValue<K>) =>
-    (missingValue(kind, value) ? undefined : mapped?.(value!)) ?? format(value);
-  return { field: name, kind, label, description, min, max, text, format };
+    (missingValue(kind, value) ? undefined : mapped?.(value!)?.text) ?? format(value);
+  const color = colorer(kind, display, mapped) ?? (() => undefined);
+  return { field: name, kind, label, description, min, max, text, format, color };
+}
+
+/** The text of missing values a display's `missing` gives, if it gives one. */
+export function missingText(missing: string | MissingDisplay | undefined): string | undefined {
+  return typeof missing === "object" ? missing.text : missing;
+}
+
+/**
+ * A display's thresholds, their steps' values in the field's units (a
+ * percent step's turned into a value between the display's bounds), and
+ * the keys of what they place: each step's value as given ("500"; a
+ * percent step's percent, "70"), whatever bounds turn it into.
+ */
+export interface Steps {
+  readonly base: string | undefined;
+  readonly keys: readonly string[];
+  readonly values: readonly number[];
+  readonly colors: readonly string[];
+}
+
+/** The steps of `display`'s thresholds; undefined without thresholds. */
+export function stepsOf(display: ResolvedDisplay): Steps | undefined {
+  const { thresholds, min = 0, max = 0 } = display;
+  if (!thresholds) return undefined;
+  const { steps } = thresholds;
+  const percent = thresholds.mode === "percent";
+  return {
+    base: thresholds.base,
+    keys: steps.map(({ value }) => String(value)),
+    values: steps.map(({ value }) => (percent ? between(min, max, value) : value)),
+    colors: steps.map(({ color }) => color),
+  };
+}
+
+/**
+ * `percent` of the way from `min` to `max`: the bounds themselves at 0 and
+ * 100, exact for whole percents of whole bounds, and in units of the larger
+ * bound where the span overflows (near the largest numbers).
+ */
+function between(min: number, max: number, percent: number): number {
+  if (percent === 0) return min;
+  if (percent === 100) return max;
+  const at = min + ((max - min) * percent) / 100;
+  if (Number.isFinite(at)) return at;
+  // In units of the larger bound, nothing overflows before the result does.
+  const unit = Math.max(Math.abs(min), Math.abs(max));
+  const [lo, hi] = [min / unit, max / unit];
+  return (lo + (hi - lo) * (percent / 100)) * unit;
+}
+
+/**
+ * Which of `steps` colors `value`: the number of steps at or below it, so 0
+ * for the base (values below the first step) and i for step i - 1. Steps
+ * include their own value.
+ */
+export function stepAt(steps: Steps, value: number): number {
+  const { values } = steps;
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (values[mid]! <= value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * A display's colors of values of `kind`: the missing color, else the
+ * first matching mapping's color (`mapped`), else the color of the step
+ * the value is in; undefined where the display gives no colors.
+ */
+export function colorer(
+  kind: DisplayedKind,
+  display: ResolvedDisplay,
+  mapped: ((value: number | string) => Shown | undefined) | undefined,
+): ((value: number | string | null) => string | undefined) | undefined {
+  const steps = stepsOf(display);
+  const lost = typeof display.missing === "object" ? display.missing.color : undefined;
+  if (!steps && lost === undefined && !display.mappings?.some((one) => one.color !== undefined))
+    return undefined;
+  return (value) => {
+    if (missingValue(kind, value)) return lost;
+    const shown = mapped?.(value!);
+    if (shown?.color !== undefined) return shown.color;
+    if (!steps || typeof value !== "number") return undefined;
+    const at = stepAt(steps, value);
+    return at === 0 ? steps.base : steps.colors[at - 1];
+  };
 }
 
 /**
@@ -174,11 +271,21 @@ export function missingValue(kind: DisplayedKind, value: number | string | null)
   );
 }
 
-/** The text of the first of `mappings` that matches a value, or undefined where none does. */
+/** What a mapping shows a value as: its text and color, either of which it may leave out. */
+export interface Shown {
+  readonly text?: string | undefined;
+  readonly color?: string | undefined;
+}
+
+/**
+ * What the first of `mappings` that matches a value shows it as (its text,
+ * a regular expression's groups written into it, and its color), or
+ * undefined where none matches.
+ */
 export function mapper(
   mappings: readonly ValueMapping[],
-): (value: number | string) => string | undefined {
-  const tests = mappings.map((mapping): ((value: number | string) => string | undefined) => {
+): (value: number | string) => Shown | undefined {
+  const tests = mappings.map((mapping): ((value: number | string) => Shown | undefined) => {
     const { text } = mapping;
     if (mapping.regex !== undefined) {
       const pattern = new RegExp(mapping.regex);
@@ -186,7 +293,10 @@ export function mapper(
         const match = typeof value === "string" ? pattern.exec(value) : null;
         // "$1" to "$9" write the expression's groups.
         return match
-          ? text.replace(/\$(\d)/g, (_, group: string) => match[Number(group)] ?? "")
+          ? {
+              text: text?.replace(/\$(\d)/g, (_, group: string) => match[Number(group)] ?? ""),
+              color: mapping.color,
+            }
           : undefined;
       };
     }
@@ -196,15 +306,15 @@ export function mapper(
         typeof value === "number" &&
         (from === null || value >= from) &&
         (to === null || value <= to)
-          ? text
+          ? mapping
           : undefined;
     }
-    return (value) => (value === mapping.value ? text : undefined);
+    return (value) => (value === mapping.value ? mapping : undefined);
   });
   return (value) => {
     for (const test of tests) {
-      const text = test(value);
-      if (text !== undefined) return text;
+      const shown = test(value);
+      if (shown) return shown;
     }
     return undefined;
   };

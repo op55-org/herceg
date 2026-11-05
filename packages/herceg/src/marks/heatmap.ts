@@ -10,6 +10,7 @@ import {
 } from "../data/table.ts";
 import { rasterDrawing } from "../draw/raster.ts";
 import type { ChartFields, ShownField } from "../fields/chart.ts";
+import type { DisplayTones } from "../fields/colors.ts";
 import { CellIndex } from "../lod/cell-index.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
@@ -32,7 +33,6 @@ import {
   stepCell,
 } from "./heatmap-cells.ts";
 import { paint, rasterAxes } from "./heatmap-raster.ts";
-import { rampLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type AxisFormat,
@@ -55,6 +55,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
+import { rampLegend } from "./ramp-legend.ts";
 import { isRowView, type MarkRows, numbersAt, rowCount, rowsOf } from "./rows.ts";
 import { type BandPlaces, placeAt, rowOf, type Series } from "./series.ts";
 import { checkTooltip, type MarkTooltip } from "./tooltip-fields.ts";
@@ -763,6 +764,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   ): LegendPart[] {
     const scale = series[0] && this.#colorScale(theme, paint, series[0]);
     if (!scale) return [];
+    // Display colors show as a key of them.
+    if ("legend" in scale) return scale.legend ? [scale.legend] : [];
     const field = this.#toneOf(series[0]!);
     const title = this.spec.label ?? field?.label ?? this.spec.color;
     const { domain, midpoint } = scale;
@@ -794,8 +797,18 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
    * without one, or with `reduce: "sum"`, the extent of its cells' sums
    * (with facets, of every panel's).
    */
-  #colorScale(theme: Theme, paint: PaintReader, s: Series): SequentialScale | undefined {
+  #colorScale(
+    theme: Theme,
+    paint: PaintReader,
+    s: Series,
+  ): SequentialScale | DisplayTones | undefined {
     const { spec } = this;
+    // Without a ramp of its own, cells take the field's display colors, cells without one none.
+    const tones =
+      spec.reduce === "sum"
+        ? undefined
+        : s.fields?.tones(this.table, spec.color, spec, undefined, paint);
+    if (tones) return tones;
     const extent = this.#valueExtent(s);
     const tone = spec.reduce === "sum" ? undefined : this.#toneOf(s);
     const lo = tone?.min ?? extent?.[0];
@@ -1052,7 +1065,7 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
   #image(
     s: Series,
     frame: Frame,
-    colors: SequentialScale,
+    colors: SequentialScale | DisplayTones,
     key: string,
     held?: HeldCells,
   ): RasterGeometry[] {
@@ -1061,6 +1074,8 @@ export class HeatmapMark implements Mark<Frozen<HeatmapSpec>> {
     const downAxis = this.resolve(s, "y", y);
     const inputs = [
       this,
+      // Display colors cells take, made again as they or the colors they read change.
+      "legend" in colors ? colors : undefined,
       held?.lit,
       this.table.version,
       acrossAxis.ordinals,

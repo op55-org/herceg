@@ -29,7 +29,7 @@ import { contourFormError } from "./contour-input.ts";
 import { bandRings, GridTracer, type ScalarGrid, type Traced } from "./contour-trace.ts";
 import type { DrawnMark, PickedItem, PickQuery } from "./drawn.ts";
 import { distinct } from "./heatmap-cells.ts";
-import { keyLegend, rampLegend } from "./legend-parts.ts";
+import { keyLegend } from "./legend-parts.ts";
 import { definedFields } from "./line.ts";
 import {
   type BandContext,
@@ -48,6 +48,7 @@ import {
   type SummaryContext,
   seriesKey,
 } from "./mark.ts";
+import { rampLegend } from "./ramp-legend.ts";
 import type { Series } from "./series.ts";
 import { clipSegment, distanceToStroke } from "./shapes.ts";
 import { refuseValues } from "./still.ts";

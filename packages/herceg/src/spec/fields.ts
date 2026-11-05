@@ -1,46 +1,80 @@
 // Portable types of field display: how a field is named and its values are
-// written, given once for every surface (docs/guide/fields.md). Displays
-// are given by field name, or as rules matching fields by name, regular
-// expression, kind, or table, applied in order.
+// written and colored, given once for every surface (docs/guide/fields.md).
+// Displays are given by field name, or as rules matching fields by name,
+// regular expression, kind, or table, applied in order.
 
 import type { FormatSpec, NumberFormatSpec, TimeFormatSpec } from "./guides.ts";
 
 /** A kind of field displays write: numbers, times, or categories. */
 export type DisplayedKind = "number" | "time" | "category";
 
+/** What a mapping shows: text, a color, or both. */
+type ShownAs = { text: string; color?: string } | { text?: string; color: string };
+
 /**
- * Values shown as `text`, matched by one value (a category, a number, or a
- * time in epoch milliseconds), by a range of numbers or times (`between`,
- * both ends included, null for an open end), or, for categories, by a
- * regular expression (`regex`; `$1`, `$2` in `text` write its groups). The
- * first mapping that matches a value applies.
+ * Values shown as `text` and in `color` (either, or both), matched by one
+ * value (a category, a number, or a time in epoch milliseconds), by a range
+ * of numbers or times (`between`, both ends included, null for an open
+ * end), or, for categories, by a regular expression (`regex`; `$1`, `$2` in
+ * `text` write its groups). The first mapping that matches a value
+ * applies: without `text` the value is written by the format, and without
+ * `color` it is colored by the thresholds.
  */
-export type ValueMapping =
-  | { value: number | string; text: string; between?: never; regex?: never }
-  | {
-      /** @minItems 2 @maxItems 2 */
-      between: readonly [number | null, number | null];
-      text: string;
-      value?: never;
-      regex?: never;
-    }
-  | {
-      /** @examples ["^5(\\d\\d)$"] */
-      regex: string;
-      text: string;
-      value?: never;
-      between?: never;
-    };
+export type ValueMapping = ShownAs &
+  (
+    | { value: number | string; between?: never; regex?: never }
+    | {
+        /** @minItems 2 @maxItems 2 */
+        between: readonly [number | null, number | null];
+        value?: never;
+        regex?: never;
+      }
+    | {
+        /** @examples ["^5(\\d\\d)$"] */
+        regex: string;
+        value?: never;
+        between?: never;
+      }
+  );
 
 /** Mappings of numbers and times: by value or by range. */
-export type NumberMapping =
-  | { value: number; text: string; between?: never }
-  | { between: readonly [number | null, number | null]; text: string; value?: never };
+export type NumberMapping = ShownAs &
+  (
+    | { value: number; between?: never }
+    | { between: readonly [number | null, number | null]; value?: never }
+  );
 
 /** Mappings of categories: by value or by regular expression. */
-export type CategoryMapping =
-  | { value: string; text: string; regex?: never }
-  | { regex: string; text: string; value?: never };
+export type CategoryMapping = ShownAs &
+  ({ value: string; regex?: never } | { regex: string; value?: never });
+
+/** A step of thresholds: values from `value` up to the next step's take `color`. */
+export interface ThresholdStep {
+  value: number;
+  color: string;
+}
+
+/**
+ * Colors of a number field's values by step: a value takes the color of
+ * the last step at or below it, and values below the first step `base`
+ * (none by default: the surface's own paint). With `mode: "percent"`, step
+ * values are percents of the field's `min` to `max`, which it must give.
+ */
+export interface Thresholds {
+  /** "absolute" (the default): steps are values of the field; "percent": percents of its min to max. */
+  mode?: "absolute" | "percent";
+  /** The color of values below the first step. */
+  base?: string;
+  /**
+   * Steps in ascending order of value.
+   *
+   * @minItems 1
+   */
+  steps: readonly ThresholdStep[];
+}
+
+/** How missing values show: their text, their color where surfaces color values, or both. */
+export type MissingDisplay = { text: string; color?: string } | { text?: string; color: string };
 
 /** A part of a link: literal text, a field of the row, or the field's own value. */
 export type LinkPart = string | { field: string; value?: never } | { value: true; field?: never };
@@ -66,8 +100,8 @@ interface DisplayBase {
   label?: string | false;
   /** What the field is, for accessible descriptions. */
   description?: string | false;
-  /** The text of missing values; "–" by default. */
-  missing?: string | false;
+  /** How missing values show: their text ("–" by default), or their text and color. */
+  missing?: string | MissingDisplay | false;
   link?: FieldLink | false;
 }
 
@@ -81,6 +115,8 @@ export interface NumberFieldDisplay extends DisplayBase {
   min?: number | false;
   /** The field's upper bound, as `min`. */
   max?: number | false;
+  /** Colors of its values by step. */
+  thresholds?: Thresholds | false;
   mappings?: readonly NumberMapping[] | false;
 }
 
@@ -96,10 +132,11 @@ export interface CategoryFieldDisplay extends DisplayBase {
 }
 
 /**
- * How a field of any kind is named and its values written. Each kind takes
- * what it writes: numbers a number format, bounds, and mappings by value
- * or range; times a time format and mappings by value or range; categories
- * mappings by value or regular expression.
+ * How a field of any kind is named and its values written and colored.
+ * Each kind takes what it writes: numbers a number format, bounds,
+ * thresholds, and mappings by value or range; times a time format and
+ * mappings by value or range; categories mappings by value or regular
+ * expression.
  */
 export interface FieldDisplay extends DisplayBase {
   /** How values are written: number forms for numbers, time forms for times. */
@@ -108,6 +145,8 @@ export interface FieldDisplay extends DisplayBase {
   min?: number | false;
   /** The field's upper bound (numbers). */
   max?: number | false;
+  /** Colors of its values by step (numbers). */
+  thresholds?: Thresholds | false;
   mappings?: readonly ValueMapping[] | false;
 }
 

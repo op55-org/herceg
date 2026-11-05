@@ -138,7 +138,7 @@ from ._events import (
     ViewportEvent,
     VisibilityState,
 )
-from ._fields import FieldDisplay, Mapping, Match
+from ._fields import AtThresholds, FieldDisplay, Mapping, Match, Thresholds
 from ._guides import (
     AxisGuide,
     ChannelScale,
@@ -211,6 +211,7 @@ from ._style import (
 __all__ = [
     "Animation",
     "area",
+    "AtThresholds",
     "axis",
     "AxisGuide",
     "AxisLabelTarget",
@@ -370,6 +371,7 @@ __all__ = [
     "TextBox",
     "TextStyle",
     "Theme",
+    "Thresholds",
     "Tick",
     "TickLabels",
     "TickLayer",

@@ -19,6 +19,8 @@ export interface CategoryScale {
   place(value: string): number | undefined;
   /** A value's output, as `OrdinalScale.output`. */
   output<V>(value: string, defaults: readonly V[], fallback: V): V;
+  /** The output of missing values, where the scale gives them one. */
+  missing?(): string | undefined;
 }
 
 /** A field of a mark's table a scale reads its values from. */
@@ -103,21 +105,28 @@ export class OrdinalScale implements CategoryScale {
  * A field's values' colors where the chart declares no "color" scale: the
  * chart's colors of what each value stands for (see model/identity.ts), by
  * the identity keys `prefix` starts, so a bar or point colored by a field
- * has the color the series of that value have: the colors at the chart's
- * palette slots for those keys, which the compilation hands over before
- * each scene.
+ * has the color the series of that value have: the color the chart's field
+ * displays give the value, else the color at the chart's palette slot for
+ * its key, which the compilation hands over before each scene.
  */
 export class IdentityColors implements CategoryScale {
   readonly name = "color";
   readonly spec = undefined;
   readonly #prefix: string;
   readonly #chart: { slot: ((key: string) => number) | undefined };
+  /** A value's display color (null: missing values'), which it takes over the palette's (fields/colors.ts). */
+  readonly #shown: ((value: string | null) => string | undefined) | undefined;
   /** Values in the order first colored, which keys of colors list them in. */
   readonly #places = new Map<string, number>();
 
-  constructor(prefix: string, chart: { slot: ((key: string) => number) | undefined }) {
+  constructor(
+    prefix: string,
+    chart: { slot: ((key: string) => number) | undefined },
+    shown?: (value: string | null) => string | undefined,
+  ) {
     this.#prefix = prefix;
     this.#chart = chart;
+    this.#shown = shown;
   }
 
   read(): void {}
@@ -138,7 +147,13 @@ export class IdentityColors implements CategoryScale {
 
   output<V>(value: string, defaults: readonly V[], fallback: V): V {
     this.place(value);
+    const shown = this.#shown?.(value);
+    if (shown !== undefined) return shown as V;
     const slot = this.#chart.slot?.(this.key(value));
     return slot !== undefined && defaults.length > 0 ? defaults[slot % defaults.length]! : fallback;
+  }
+
+  missing(): string | undefined {
+    return this.#shown?.(null);
   }
 }

@@ -1,4 +1,5 @@
 import {
+  type AtThresholds,
   type ChartError,
   type ChartEvents,
   type ChartListener,
@@ -253,9 +254,14 @@ function sameMark(a: ChartMark, b: ChartMark): boolean {
     tables.length === others.length &&
     tables.every((table, i) => table === others[i]) &&
     viewOf(a) === viewOf(b) &&
+    thresholdsTable(a) === thresholdsTable(b) &&
     canonical(a.spec) === canonical(b.spec)
   );
 }
+
+/** The table a rule or region at thresholds names: itself, which specs name only by its name. */
+const thresholdsTable = (mark: ChartMark) =>
+  (mark as { thresholds?: AtThresholds }).thresholds?.table;
 
 /** What an inspection is made on (`basisOf`). */
 interface Basis {

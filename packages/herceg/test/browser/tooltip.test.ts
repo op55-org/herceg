@@ -79,6 +79,24 @@ describe("the tooltip", () => {
     );
   });
 
+  it("shows a field's display color beside its value, its label still the field's", async () => {
+    const chart = await mount({
+      fields: { requests: { thresholds: { steps: [{ value: 12_000, color: "#c62828" }] } } },
+      marks: [line(requests(), { x: "t", y: "p99", tooltip: { fields: ["requests"] } })],
+    });
+    hover(chart, 1);
+    const [header, , field] = box(chart)!.children as unknown as HTMLElement[];
+    const [swatch, label] = [...field!.children] as HTMLElement[];
+    expect(swatch!.style.background).toBe("rgb(198, 40, 40)");
+    // Muted, as the header: the swatch is the value's, not a series'.
+    expect(label!.style.color).toBe(header!.style.color);
+    hover(chart, 0);
+    // A value without a display color has no swatch.
+    expect(
+      ((box(chart)!.children[2] as HTMLElement).firstChild as HTMLElement).style.background,
+    ).toBe("none");
+  });
+
   it("shows content of the application's own in its box, as text or a node", async () => {
     const seen: Inspection[] = [];
     const chart = await mount({

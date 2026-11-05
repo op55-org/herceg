@@ -178,7 +178,8 @@ def test_displays_write_rules_and_records_in_the_specs_names():
             lambda: hg.Mapping(between=(0.9, 0.5), text="a"),
             "Mapping between: 0.9 is above 0.5; give from, then to",
         ),
-        (lambda: hg.Mapping(value="1"), "Mapping text: expected text; received None"),
+        (lambda: hg.Mapping(value="1"), "Mapping: give text, color, or both"),
+        (lambda: hg.Mapping(value="1", text=2), "Mapping text: expected text; received 2"),
         (
             lambda: hg.FieldDisplay(
                 match=hg.Match(kind="time"), format=hg.Format(duration="second")

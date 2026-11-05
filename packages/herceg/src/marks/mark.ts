@@ -23,6 +23,7 @@ import type { NameSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Clip, Frozen, MarkTooltipSpec } from "../spec/spec.ts";
 import type { PaintReader, Theme } from "../theme.ts";
+import type { AtThresholds } from "./annotation.ts";
 import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
 import type { ContentWriter } from "./features/content.ts";
 import type { DrawnItems } from "./layout-mark.ts";
@@ -418,6 +419,12 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    */
   readonly featured?: boolean;
   /**
+   * For rules and regions at a field's thresholds: where, as given (the
+   * field, and the table whose field it is), which the feature compiler
+   * resolves to the steps the chart's displays give it (`MarkFeatures.steps`).
+   */
+  readonly thresholds?: AtThresholds | undefined;
+  /**
    * What the mark's series stand for, for their colors and legend entries
    * (see model/identity.ts): the values of the category field splitting
    * its rows into series (`field`), or without one, the value fields its
@@ -488,13 +495,15 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /**
    * For marks placing values on a scale of the chart's own by their places
    * (annotations): the extent of those along `axis` on scale `name`, of
-   * `rows` (every row without them); with `log`, of positive values only.
+   * `rows` (every row without them); with `log`, of positive values only;
+   * in a chart of compiled `features` (as extents are).
    */
   scaleExtent?(
     name: string,
     axis: "x" | "y",
     log: boolean,
     rows?: RowParts,
+    features?: CompiledFeatures,
   ): readonly [number, number] | undefined;
   /**
    * The series' points summarize rows of the table (histogram bins, box
@@ -592,18 +601,22 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /**
    * x extent; with `log`, of positive values only. On a time axis with
    * `breaks`, room a mark leaves at the ends is time shown. Marks reading
-   * rows without series (annotations) read only `rows`, when given.
+   * rows without series (annotations) read only `rows`, when given. In a
+   * chart of compiled `features`: annotations at thresholds read the
+   * chart's steps.
    */
   xExtent(
     series: readonly Series[],
     log: boolean,
     breaks?: Breaks,
     rows?: RowParts,
+    features?: CompiledFeatures,
   ): readonly [number, number] | undefined;
   /**
    * y extent of what the x range [x0, x1] shows; with `log`, of positive
    * values only; with x `breaks`, of points they do not hide; for
-   * annotations, of `rows` only, when given.
+   * annotations, of `rows` only, when given; in a chart of compiled
+   * `features`, as `xExtent`.
    */
   yExtent(
     series: readonly Series[],
@@ -612,6 +625,7 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
     log: boolean,
     breaks?: Breaks,
     rows?: RowParts,
+    features?: CompiledFeatures,
   ): readonly [number, number] | undefined;
   /**
    * The mark's part of the scene. `key` identifies the mark, for marks whose
@@ -765,13 +779,15 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
    * (annotations), which the chart's data summary would otherwise leave
    * out: of `rows` only, when given, and of rows placed on layout items
    * only those whose items drew together in one of `frames` (where the
-   * mark drew).
+   * mark drew). `features` are the chart's compiled features, which
+   * places at thresholds read their steps from.
    */
   describe?(
     format: AxisFormat,
     locale: string | undefined,
     rows?: RowParts,
     frames?: readonly Frame[],
+    features?: CompiledFeatures,
   ): string | undefined;
   /**
    * Pixels the mark draws past its data at the ends of its value axis (the

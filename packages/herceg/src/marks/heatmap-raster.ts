@@ -179,7 +179,7 @@ export function paint(
   source: PaintSource,
   x: AxisRaster,
   y: AxisRaster,
-  colors: SequentialScale,
+  colors: Pick<SequentialScale, "write">,
   reduce: "mean" | "max" | "min",
   pixels: Uint8ClampedArray,
   buffer: (stage: string) => Float64Array,
@@ -300,7 +300,7 @@ function paintWhole(
   xPixels: Float64Array,
   yPixels: Float64Array,
   across: number,
-  colors: SequentialScale,
+  colors: Pick<SequentialScale, "write">,
   pixels: Uint8ClampedArray,
 ): void {
   for (const turn = new Turns(source); turn.next(); ) {

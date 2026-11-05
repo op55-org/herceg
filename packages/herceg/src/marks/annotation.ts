@@ -4,25 +4,29 @@
 // own. A place along an axis is a value (a constant or a field), or any
 // coordinate (spec/place.ts): a category, a value on a scale of the chart's
 // own, a fraction of the plot or pixels (constants or a field's), each
-// moved by an offset. This module resolves them for the three marks.
+// moved by an offset. Rules and regions at a field's thresholds draw an
+// item per step, of no rows. This module resolves them for the three marks.
 
 import type { FieldKind, NumericArray } from "../data/column.ts";
+import type { RowView } from "../data/row-view.ts";
 import type { Schema, Table } from "../data/table.ts";
 import { leaderDrawingOf } from "../draw/leaders.ts";
 import { markupOf, n } from "../draw/markup.ts";
+import type { Steps } from "../fields/display.ts";
 import { type Formatter, formatNumber, lazyFormat, numberFormatter } from "../format/format.ts";
 import { coordinateAt } from "../layout/position.ts";
+import type { CompiledFeatures } from "../model/features.ts";
 import type { PositionScale } from "../scale/scale.ts";
 import type { Drawing, Rect, SegmentGeometry } from "../scene/scene.ts";
 import type { LabelSpec, Overlap } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import type { Coordinate, ItemCoordinate, ItemRef } from "../spec/place.ts";
-import type { AnnotationPosition, AnnotationValue, Frozen } from "../spec/spec.ts";
+import type { AnnotationPosition, AnnotationValue, Frozen, ThresholdPlace } from "../spec/spec.ts";
 import type { StrokeStyle } from "../spec/style.ts";
 import { dashPattern } from "../style/style.ts";
 import type { ContentWriter } from "./features/content.ts";
 import { markKey, rowKey, shownItems } from "./hidden.ts";
-import { type Frame, type MarkKey, type RowParts, requireField } from "./mark.ts";
+import { type Frame, type Mark, type MarkKey, type RowParts, requireField } from "./mark.ts";
 
 /** Kinds of fields places on a scale read: values, and categories in their bands. */
 const POSITIONS: readonly FieldKind[] = ["number", "time", "category"];
@@ -56,6 +60,110 @@ export interface ItemRefOf<C extends string> {
 /** An edge of a layout item's box along an axis (see `ItemCoordinate`), its names typed by the table. */
 export interface ItemPlace<C extends string> extends Omit<ItemCoordinate, "item"> {
   item: ItemRefOf<C>;
+}
+
+/**
+ * A place at each step of a field's thresholds (`ThresholdPlace`), as the
+ * TypeScript options take it: the table whose field it is by its name, or
+ * itself (or a row view of it).
+ */
+export interface AtThresholds {
+  /** The field whose display's thresholds give the places. */
+  thresholds: string;
+  /** Whose field: where the tables the chart's marks read give it different thresholds. */
+  // biome-ignore lint/suspicious/noExplicitAny: tables of any schema, compared by identity.
+  table?: string | Table<any> | RowView<any>;
+}
+
+/** Whether `position` is a place at a field's thresholds. */
+export function atThresholds(position: unknown): position is AtThresholds {
+  return typeof position === "object" && position !== null && "thresholds" in position;
+}
+
+/**
+ * The place at a field's thresholds `spec` gives at x or y, copied (its
+ * table kept by identity), and `spec` with it as specs hold it: a table
+ * given itself by its name, or left out where it has none. `role` names
+ * the mark in messages.
+ */
+export function thresholdPlace<T extends { x?: unknown; y?: unknown }>(
+  spec: T,
+  role: string,
+): [T, AtThresholds | undefined] {
+  const axis = atThresholds(spec.x) ? "x" : atThresholds(spec.y) ? "y" : undefined;
+  if (!axis) return [spec, undefined];
+  const at = spec[axis] as AtThresholds;
+  if (typeof at.thresholds !== "string" || at.thresholds === "")
+    throw new Error(
+      `${role} ${axis}.thresholds: expected a field's name; received ${JSON.stringify(at.thresholds)}`,
+    );
+  const { thresholds, table } = at;
+  const kept: AtThresholds = Object.freeze(
+    table === undefined ? { thresholds } : { thresholds, table },
+  );
+  if (table === undefined || typeof table === "string") return [spec, kept];
+  const name = ("source" in table ? table.source : table).name;
+  const held: ThresholdPlace = name === undefined ? { thresholds } : { thresholds, table: name };
+  return [{ ...spec, [axis]: held }, kept];
+}
+
+/**
+ * A field's steps as an annotation's items, each keyed by its step (its
+ * value as written, a percent step by its percent): rules at the steps'
+ * values (column `at`), or `bands` from each step to the next (`from` and
+ * `to`), the last open above, and one below the first, keyed "base", where
+ * the steps give a base color.
+ */
+export function stepItems(
+  steps: Steps,
+  bands: boolean,
+): { keys: readonly string[]; colors: readonly string[]; columns: Record<string, Float64Array> } {
+  const { base, keys, values, colors } = steps;
+  if (!bands) return { keys, colors, columns: { at: Float64Array.from(values) } };
+  const from = base === undefined ? values : [-Infinity, ...values];
+  return {
+    keys: base === undefined ? keys : ["base", ...keys],
+    colors: base === undefined ? colors : [base, ...colors],
+    columns: {
+      from: Float64Array.from(from),
+      to: Float64Array.from(from, (_, k) => (from[k + 1] ?? Infinity) as number),
+    },
+  };
+}
+
+/** An annotation's items: its places' data, and at thresholds each item's step key and color. */
+export interface Items {
+  readonly data: AnnotationData;
+  readonly keys?: readonly string[] | undefined;
+  readonly colors?: readonly string[] | undefined;
+}
+
+/**
+ * The items of mark `mark` in a chart of compiled `features`: at a
+ * field's thresholds (`at`), of the steps the features give it, made by
+ * `make` from their columns once per steps (rules, or `bands`); else, and
+ * until then (none), `base`'s.
+ */
+export function itemsIn(
+  mark: Mark,
+  base: AnnotationData,
+  at: boolean,
+  bands: boolean,
+  make: (columns: Record<string, Float64Array>) => AnnotationData,
+): (features: CompiledFeatures | undefined) => Items {
+  const made = new WeakMap<Steps, Items>();
+  const own: Items = { data: base };
+  return (features) => {
+    const steps = at ? features?.of(mark)?.steps : undefined;
+    if (!steps) return own;
+    let items = made.get(steps);
+    if (!items) {
+      const { keys, colors, columns } = stepItems(steps, bands);
+      items = { data: make(columns), keys, colors };
+      made.set(steps, items);
+    }
+    return items;
+  };
 }
 
 /** Epoch milliseconds for dates, in values and coordinates; numbers, fields, and other coordinates pass through. */
@@ -215,8 +323,10 @@ export function leadersGeometry(
 /** How leaders draw (made once). */
 let leaders: Drawing<SegmentGeometry> | undefined;
 
-/** The field a place reads, if any: its own, or its share's or pixels'. */
-function fieldOf(position: Frozen<AnnotationPosition> | undefined): string | undefined {
+/** The field a place reads, if any: its own, or its share's or pixels'; none at thresholds. */
+function fieldOf(
+  position: Frozen<AnnotationPosition | ThresholdPlace> | undefined,
+): string | undefined {
   if (typeof position !== "object") return typeof position === "string" ? position : undefined;
   if ("item" in position) return itemFields(position.item)[0];
   const share =
@@ -234,7 +344,7 @@ export function itemFields(item: Frozen<ItemRef>): string[] {
  * label's content is a field, or it paints rows (a region's `encode`).
  */
 export function readsTable(
-  positions: readonly (Frozen<AnnotationPosition> | undefined)[],
+  positions: readonly (Frozen<AnnotationPosition | ThresholdPlace> | undefined)[],
   label: string | Frozen<LabelSpec> | undefined,
   encode?: object,
 ): boolean {
@@ -266,11 +376,14 @@ export class AnnotationData {
   readonly #onItems: readonly Frozen<ItemCoordinate>[];
   /** The scales of the axes places are on, unless they name one of the chart's own. */
   readonly #scales: { readonly x: string; readonly y: string };
+  /** Values places name in place of a table's fields (`stepItems`), of items of no rows. */
+  readonly #columns: Readonly<Record<string, Float64Array>> | undefined;
 
   /**
    * `positions` are named by their axis (`x`, `y1`, ...); others (a rule's
    * `span`) lie along `across`. `encode` paints rows: a region's, which then
-   * reads its table whatever its places.
+   * reads its table whatever its places. Places naming `columns` read their
+   * values, an item each, open ends (infinities) at the view's edges.
    */
   constructor(
     table: Table | undefined,
@@ -280,7 +393,9 @@ export class AnnotationData {
     scales: { x: string; y: string },
     across: "x" | "y" = "x",
     encode?: object,
+    columns?: Record<string, Float64Array>,
   ) {
+    this.#columns = columns;
     this.label = label;
     this.layout = labelLayout(label, role);
     this.#role = role;
@@ -321,7 +436,7 @@ export class AnnotationData {
           ),
         ]
       : undefined;
-    if (!readsTable(Object.values(positions), label, encode)) {
+    if (columns || !readsTable(Object.values(positions), label, encode)) {
       this.table = undefined;
       return;
     }
@@ -366,9 +481,10 @@ export class AnnotationData {
     this.table = table;
   }
 
-  /** Items to draw: one per row when reading a table, otherwise one. */
+  /** Items to draw: one per row when reading a table, one per value of its columns, otherwise one. */
   get count(): number {
-    return this.table ? this.table.length : 1;
+    const columns = this.#columns;
+    return this.table ? this.table.length : columns ? Object.values(columns)[0]!.length : 1;
   }
 
   /** How many items `rows` holds: every item without them. */
@@ -428,6 +544,8 @@ export class AnnotationData {
 
   /** A field's place: its values on a scale, or its categories in their bands. */
   #field(field: string, coordinate: Coordinate, scale?: string): Place {
+    const column = this.#columns?.[field];
+    if (column) return { kind: "value", channel: column, coordinate, scale };
     return this.table!.kind(field as never) === "category"
       ? { kind: "category", value: undefined, coordinate }
       : { kind: "value", channel: this.#column(field), coordinate, scale };
@@ -466,6 +584,7 @@ export class AnnotationData {
   ): number | undefined {
     // A value is on the axis' scale, `scale`, or on one of the chart's own.
     const own = this.#scales;
+    const columns = this.#columns;
     return coordinateAt(place.coordinate, axis, {
       plot: frame.plot,
       chart: frame.chart ?? frame.plot,
@@ -477,7 +596,8 @@ export class AnnotationData {
           const index = on.categories?.indexOf(value) ?? -1;
           return index < 0 ? undefined : on.map(index);
         }
-        if (!Number.isFinite(value)) return undefined;
+        // Only columns' open ends are endless.
+        if (Number.isNaN(value) || (!columns && !Number.isFinite(value))) return undefined;
         if (low && on.type === "log" && value <= 0) {
           const [a, b] = on.domain[0] <= on.domain[1] ? on.domain : [on.domain[1], on.domain[0]];
           return on.map(a) < on.map(b) ? -Infinity : Infinity;
@@ -527,7 +647,7 @@ export class AnnotationData {
     if (position === undefined) return undefined;
     const place = this.place(position);
     const field = place.kind === "value" && !place.scale ? fieldOf(position) : undefined;
-    return field === undefined ? undefined : this.table!.kind(field as never);
+    return field === undefined || !this.table ? undefined : this.table.kind(field as never);
   }
 
   /** Whether items have text to draw. */
