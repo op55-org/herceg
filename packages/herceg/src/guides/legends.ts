@@ -265,7 +265,16 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
   ): PlacedLegend[] => {
     const owners = ownersOf(marks, places, content.features);
     const paint = text.paint ?? same;
-    const partsOf = partOwners(kit, marks, planned.drawsOwn, places, theme, text.locale, paint);
+    const partsOf = partOwners(
+      kit,
+      marks,
+      planned.drawsOwn,
+      places,
+      theme,
+      text.locale,
+      paint,
+      content.parts,
+    );
     // Marks left out of legends (`legend: false`, annotations not listed by
     // their labels) are left out of those that show what no guide names;
     // guides naming them show them. Their entries come after the others',
@@ -762,7 +771,7 @@ function ownersOf(
  * The marks and channels of each legend part (a color ramp, a key of
  * sizes, symbols, or colors): marks with the same scale share one part.
  * Layout marks own their parts too (by their ids or places), which guides
- * may name.
+ * may name. Each part is as `parts`, the chart's, shows it.
  */
 function partOwners(
   kit: GuideKit,
@@ -772,11 +781,14 @@ function partOwners(
   theme: Theme,
   locale: string | undefined,
   paint: PaintReader,
+  parts: readonly LegendPart[],
 ) {
   const owners = new Map<
     string,
     { owners: { mark: string | number; channel: ChannelRef["channel"] }[]; part: LegendPart }
   >();
+  // Parts as the chart shows them (layout marks' written through field displays), by key.
+  const shown = new Map(parts.map((part) => [part.key, part]));
   const format = (value: number) => kit.formatNumber(value, locale);
   const own = (part: LegendPart, mark: string | number) => {
     // Keys of sizes and shapes say so; ramps and color keys show color.
@@ -785,7 +797,7 @@ function partOwners(
     const owner = { mark, channel };
     const shared = owners.get(part.key);
     if (shared) shared.owners.push(owner);
-    else owners.set(part.key, { owners: [owner], part });
+    else owners.set(part.key, { owners: [owner], part: shown.get(part.key) ?? part });
   };
   for (const { mark, series } of marks)
     for (const part of mark.legends?.(series, theme, format, paint) ?? [])

@@ -81,6 +81,7 @@ export type PivotGridModel<S extends Schema = Schema> = Omit<
   | "rowAt"
   | "identityAt"
   | "rowIndexOf"
+  | "setFields"
 > & {
   /** The view the pivot pivots. */
   readonly data: RowView<S>;

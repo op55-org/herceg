@@ -10,6 +10,7 @@ import {
 } from "../draw/arc.ts";
 import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { INNER_CUT, OUTER_CUT, type RingGeometry, ringDrawing } from "../draw/rings.ts";
+import type { ItemText } from "../fields/chart.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { layoutPartition } from "../layout/partition.ts";
 import { labelFor, oneLineText, textItem } from "../layout/text.ts";
@@ -143,6 +144,7 @@ export class SunburstMark implements LayoutMark {
   readonly spec: Frozen<SunburstSpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources | undefined;
   /** Clicks and Enter drill into nodes with `interaction.zoom`, and charts select their rows. */
   readonly interactions = ["zoom"] as const;
@@ -206,6 +208,7 @@ export class SunburstMark implements LayoutMark {
     this.featured = this.#labels.featured;
     this.table = table;
     this.measure = spec.value ?? "Count";
+    this.measureField = spec.value;
     // Items stand for their color field's values, as series of that field do.
     this.identity = { field: this.#data.colorField, read: secondOf };
   }
@@ -236,6 +239,11 @@ export class SunburstMark implements LayoutMark {
     const root = frame.root?.length ? data.rootOf(frame.id, frame.root) : 0;
     const view = root > 0 ? data.drilled(root, frame.rows) : data.view(frame.rows);
     const { tree, group } = view;
+    // Names, totals, and fields' labels as the chart's field displays write them, where it has any.
+    const fieldText = frame.features?.fields?.items(this.table);
+    const written = fieldText?.tree(view, data.encoding) ?? view;
+    const amount =
+      fieldText?.amount(this.spec.value) ?? ((sum: number) => formatNumber(sum, locale));
     // Breadcrumbs take a strip above the tree in charts that drill.
     const crumbed = this.spec.breadcrumbs ?? (frame.drillable || root > 0);
     const path = crumbed ? data.breadcrumbs(frame.id, view, frame) : undefined;
@@ -491,15 +499,18 @@ export class SunburstMark implements LayoutMark {
     const rootKey = root > 0 ? data.keyOf(frame.id, view, 0) : undefined;
     // The middle's parent is the root's own, in the whole tree, read as drawn.
     const above = data.parentKey(frame.id, view);
+    const pathText = (node: number) =>
+      [...written.prefix, ...pathOf(written.tree, node)].join(" / ");
     const itemOf = (node: number): LayoutItem => {
       const outline = new ArcPath();
-      const label = [...view.prefix, ...pathOf(tree, node)].join(" / ");
+      // Its path as the fields' displays write it (`written`); keys read `view`.
+      const label = pathText(node);
       const key = data.keyOf(frame.id, view, node);
       if (node === 0) {
         // The root in the middle: its total, the whole of what is shown.
         const outer = hole - radial / 2;
         traceSector(outline, cx, cy, 0, outer, START, START + TAU, 0);
-        const text = `${formatNumber(total, locale)}${data.selectedText(counts, 0, locale)}`;
+        const text = `${amount(total)}${data.selectedText(counts, 0, locale, fieldText)}`;
         return {
           key,
           label,
@@ -520,7 +531,7 @@ export class SunburstMark implements LayoutMark {
         label,
         color: fills[node] ?? colorOf(node) ?? theme.muted,
         value: shown[node]!,
-        text: `${formatNumber(shown[node]!, locale)} (${percent(shown[node]! / total)}${where(view)})${data.selectedText(counts, node, locale)}`,
+        text: `${amount(shown[node]!)} (${percent(shown[node]! / total)}${where(written)})${data.selectedText(counts, node, locale, fieldText)}`,
         px: cx + ((r0 + r1) / 2) * Math.cos(mid),
         py: cy + ((r0 + r1) / 2) * Math.sin(mid),
         outline: outline.d,
@@ -536,7 +547,7 @@ export class SunburstMark implements LayoutMark {
       return {
         key: data.keyOf(frame.id, view, node),
         names,
-        label: names.join(" / "),
+        label: pathText(node),
         value: shown[node]!,
         ...sectorInfo(cx, cy, r0, r1, a0, a1),
         depth: tree.depth[node]!,
@@ -624,12 +635,12 @@ export class SunburstMark implements LayoutMark {
         const at = navigation.indexOf(key);
         return at < 0 ? -1 : at + first;
       },
-      summary: () => this.#summary(view, shown, locale, percent),
+      summary: () => this.#summary(written, shown, percent, amount, fieldText),
       rowsOf: (key, of) => (of === this.table ? data.rowsOf(frame.id, view, key) : undefined),
       soleRow: (key, of) => (of === this.table ? data.soleRow(frame.id, view, key) : undefined),
       // An empty center goes up a level when clicked, though it is no item.
       drill: data.drill(
-        frame.id,
+        frame,
         root,
         view,
         path?.crumbs ?? [],
@@ -672,7 +683,6 @@ export class SunburstMark implements LayoutMark {
   ): Geometry[] {
     const { theme, measure, locale } = frame;
     const labels = this.#labels;
-    const { tree } = view;
     const { angular } = this.#gap;
     const { cx, cy, hole } = middle;
     const font = `${theme.fontSize}px ${theme.font}`;
@@ -684,8 +694,21 @@ export class SunburstMark implements LayoutMark {
     // An unfilled sector shows the plot behind it.
     const inkOf = (fill: string | undefined, opacity: number) =>
       contrastingText(fill ?? backdrop, fill === undefined ? 1 : opacity, backdrop) || theme.text;
+    // Fields' values, the value, and names as the chart's field displays
+    // write them, where it has any; parts and rows read `view` itself.
+    const fieldText = frame.features?.fields?.items(this.table);
+    const written = fieldText?.tree(view, this.#data.encoding) ?? view;
     const write = (node: number) =>
-      labels.parts(view, node, shown[node]!, () => this.#data.soleRowOf(view, node), locale);
+      labels.parts(
+        view,
+        node,
+        shown[node]!,
+        () => this.#data.soleRowOf(view, node),
+        locale,
+        fieldText,
+        fieldText?.amount(this.spec.value),
+        written.tree.names,
+      );
     // A node's label for value transitions: its items at its middle, as drawn.
     const keep = (
       node: number,
@@ -709,7 +732,7 @@ export class SunburstMark implements LayoutMark {
       const ink = inkOf(middle.centerColor, middle.centerOpacity);
       if (!labels.styled) {
         const room = across(lineHeight);
-        const name = room >= 8 && labelFor(view.prefix.at(-1) ?? "", room, measure, font);
+        const name = room >= 8 && labelFor(written.prefix.at(-1) ?? "", room, measure, font);
         if (name) {
           plain.set(ink, { coords: [cx, cy], labels: [name] });
           if (labeled) keep(0, [plainAt(name, cx, cy, ink)], cx, cy, 0);
@@ -779,7 +802,7 @@ export class SunburstMark implements LayoutMark {
           // No name keeps a box narrower than nothing inside: not measured.
           if (!fits(0, lineHeight)) continue;
           // The whole name first, then shorter and shorter cuts of it.
-          const name = oneLineText(tree.names[node]!);
+          const name = oneLineText(written.tree.names[node]!);
           const width = measure(name, font);
           let text = fits(width, lineHeight) ? name : "";
           for (let room = width * 0.8; !text && room >= LEAST_NAME; room *= 0.8) {
@@ -847,20 +870,22 @@ export class SunburstMark implements LayoutMark {
   #summary(
     view: TreeView,
     shown: Float64Array,
-    locale: string | undefined,
     percent: (value: number) => string,
+    amount: (value: number) => string,
+    text: ItemText | undefined,
   ): string {
     const { tree } = view;
-    const fields = this.spec.path?.join(" / ") ?? this.spec.node!;
-    const what = `${this.spec.value ? `${this.spec.value} by ${fields}` : fields}${where(view)}`;
+    const label = (field: string) => text?.label(field) ?? field;
+    const fields = this.spec.path?.map(label).join(" / ") ?? label(this.spec.node!);
+    const what = `${this.spec.value ? `${label(this.spec.value)} by ${fields}` : fields}${where(view)}`;
     const total = shown[0]!;
     if (!(total > 0)) return `Sunburst of ${what}, with nothing to show.`;
     // The branches drawn: shown, and with rows (in a facet panel, its own).
     const visible = this.#data.largest(view.tops, shown);
     const largest = visible
       .slice(0, 3)
-      .map(({ node, label }) => `${label} ${percent(shown[node]! / total)}`);
-    return `Sunburst of ${what}: ${count(this.#data.leaves(tree, shown), "leaf", "leaves")} in ${count(visible.length, "group", "groups")} totaling ${formatNumber(total, locale)}. Largest: ${largest.join(", ")}.`;
+      .map(({ node }) => `${tree.names[node]} ${percent(shown[node]! / total)}`);
+    return `Sunburst of ${what}: ${count(this.#data.leaves(tree, shown), "leaf", "leaves")} in ${count(visible.length, "group", "groups")} totaling ${amount(total)}. Largest: ${largest.join(", ")}.`;
   }
 }
 

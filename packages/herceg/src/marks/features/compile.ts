@@ -42,6 +42,7 @@ import type { ChartErrorCode } from "../../spec/errors.ts";
 import type { FormatSpec } from "../../spec/guides.ts";
 import type { AreaSpec, BarSpec, LineSpec, TextSpec } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
+import type { LayoutMark } from "../layout-mark.ts";
 import type { ChartMark, Frame, Mark, Palette } from "../mark.ts";
 import type { Series } from "../series.ts";
 import { ChannelScale, channelScaleProblem, wholeTable } from "./channel-scales.ts";
@@ -344,6 +345,26 @@ function compile(
   const drawings = new Map<Mark, Drawings>();
   // How marks write the legend entries they share through color fields (see `naming`).
   const entryDisplays = new Map<string, [Table, string][]>();
+  // What layout items' legend entries and parts are named by, as the display code names them.
+  const itemNames =
+    fields &&
+    kit.loaded[2]?.itemLegends(
+      (config.marks as readonly Mark[]).filter(
+        (mark) => !marks.includes(mark),
+      ) as unknown as LayoutMark[],
+      // As `#itemColor` (model.ts) keys what items stand for.
+      (mark) =>
+        declared
+          ? prefixIn("color", mark.spec.panel)
+          : identities.field(
+              mark.identity!.table ?? mark.table!,
+              mark.identity!.field,
+              config.marks.indexOf(mark as never),
+            ),
+      (mark) => config.marks.indexOf(mark as never),
+      fields,
+      config.locale,
+    );
   marks.forEach((mark, at) => {
     // Named by its place among the chart's marks, layout marks included.
     const index = identities.positions[at]!;
@@ -363,6 +384,7 @@ function compile(
           fields,
           where,
           entryDisplays,
+          itemNames,
         );
       if (named)
         byMark.set(mark, named(byMark.get(mark) ?? { use() {}, palette: (p) => p, attach() {} }));
@@ -571,8 +593,8 @@ function compile(
     },
     of: (mark) => byMark.get(mark),
     labels: (drawings) => panelLabels(kit, drawings, (mark) => byMark.get(mark)),
-    listDomains: (entries, plain) => {
-      let out = [...entries];
+    listDomains: (entries, plain, parts) => {
+      let out = itemNames?.write(entries, parts, theme, paint) ?? [...entries];
       for (const [prefix, { scale, marks, reads }] of listed) {
         const domain = scale.spec?.domain;
         // Marks left out of legends list it where guides name them, and only there.
@@ -610,6 +632,7 @@ function compile(
     update(t, slot, p) {
       theme = t;
       paint = p;
+      itemNames?.scene();
       chart.slot = slot;
       for (const scale of scales.values()) scale.update();
       // Every reader of a channel scale is known: its domain spans them all, whatever their order.

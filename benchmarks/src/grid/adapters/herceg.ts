@@ -2,13 +2,17 @@
 // fixture's typed columns without copying them. Sorting and filtering go
 // through the view (`setQuery`); appends, evictions, and updates go through
 // the table (`append`, `dropFirst`, `set`), and the view and grid follow it.
-// Columns use the shared Intl formats, start alignment (Herceg aligns
-// numbers to the end by default), and the default 10 rows of overscan.
+// Columns are written through field displays (`herceg/fields`) on every
+// column, which give the shared Intl formats and the missing text the other
+// grids write (a grid without them writes missing values as ""), with start
+// alignment (Herceg aligns numbers to the end by default) and the default
+// 10 rows of overscan.
 // Scrolling sets the grid's scroll offset as a user's scroll would; when the
 // scroller is already at the offset, it tells the model (`scrollTo`), which
 // matters after Herceg kept the rows in view in place across a change.
 
 import { col, encodedCategory, rowView, type Schema, Table, time } from "herceg";
+import { compileFields } from "herceg/fields";
 import { createGrid, createGridModel, type GridColumn, type GridModel } from "herceg/grid";
 import {
   type Adapter,
@@ -22,6 +26,13 @@ import {
 import { FORMAT, type GridTable } from "../fixture.ts";
 
 export const THEME = { extends: "light", font: "Arial, sans-serif", fontSize: 13 } as const;
+
+/** Every column's display: the shared formats by kind, and the shared missing text. */
+const FIELDS = compileFields([
+  { missing: FORMAT.missing },
+  { match: { kind: "number" }, format: FORMAT.number },
+  { match: { kind: "time" }, format: FORMAT.time },
+]);
 
 /** A Herceg table over the fixture's arrays: numbers and times adopted, categories by code. */
 export function hercegTable(fixture: GridTable): Table<Schema> {
@@ -63,8 +74,6 @@ export function hercegHandle(
     field: field.name,
     width: COLUMN_WIDTH,
     align: "start",
-    ...(field.kind === "number" && { format: FORMAT.number }),
-    ...(field.kind === "time" && { format: FORMAT.time }),
   }));
   const model = createGridModel({
     data: view,
@@ -72,7 +81,7 @@ export function hercegHandle(
     rowHeight: ROW_HEIGHT,
     locale: FORMAT.locale,
     timeZone: FORMAT.timeZone,
-    missing: FORMAT.missing,
+    fields: FIELDS,
   });
   const grid = attach(model);
   const scroller = () => container.querySelector<HTMLElement>(".hg-scroller")!;
@@ -194,7 +203,7 @@ export function hercegHandle(
 
 export const adapter: Adapter = {
   id: "herceg",
-  renderer: "DOM rows and cells (10 rows and 2 columns of overscan)",
+  renderer: "DOM rows and cells written through field displays (10 rows and 2 columns of overscan)",
   processing: { sort: "native (row view)", filter: "native (row view, expression)" },
   prepare: hercegTable,
   mount: (container, fixture, input) =>

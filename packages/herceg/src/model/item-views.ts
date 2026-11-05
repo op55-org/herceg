@@ -992,7 +992,11 @@ export class ItemViews {
       camera,
       index,
       indices,
-      measure: mark.measure,
+      // What the values measure, by its field's label where it is a field.
+      measure:
+        mark.measureField === undefined
+          ? mark.measure
+          : (frame.features?.fields?.of(mark.table, mark.measureField)?.label ?? mark.measure),
       marks,
       state: key,
     });

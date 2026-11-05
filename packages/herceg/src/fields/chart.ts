@@ -4,6 +4,7 @@
 // surfaces they hand writers to: axes, legends, series names, tooltips,
 // labels, gauges, and the text alternative (docs/guide/fields.md).
 
+import type { HierarchyEncoding } from "../data/hierarchy.ts";
 import type { Origins } from "../data/origin.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Table } from "../data/table.ts";
@@ -11,6 +12,7 @@ import type { Formatter } from "../format/format.ts";
 import { formatWriter } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
 import type { GlyphKey, Mark } from "../marks/mark.ts";
+import type { TreeView } from "../marks/tree-data.ts";
 import type { DisplayedKind } from "../spec/fields.ts";
 import type { FormatSpec } from "../spec/guides.ts";
 import type { Setting } from "./check.ts";
@@ -55,6 +57,14 @@ export interface ShownField {
     fallback?: Formatter,
     missing?: string,
   ): (value: number | string | null) => string;
+  /** Its values as `writer()` writes them. */
+  readonly text: (value: number | string | null) => string;
+  /**
+   * A writer of amounts computed from its values in its units (a slice's
+   * sum, a node's total): its format, else `fallback`, and its missing
+   * text, never its mappings, which name its values alone.
+   */
+  amount(fallback: Formatter): (value: number) => string;
   /**
    * A writer of its values in a tooltip, over the axis' writer `axis`: the
    * axis' own `tooltipFormat` (a writer marked `own`, `AxisContext`) over
@@ -63,6 +73,46 @@ export interface ShownField {
    * rather than as the axis' numbers. Without `axis`, as `writer()`.
    */
   over(axis?: Formatter & { readonly own?: true }, numbers?: boolean): (value: number) => string;
+}
+
+/** How a layout mark writes its items' text through the displays (see `ChartFields.items`). */
+export interface ItemText {
+  /**
+   * A writer of values of field `field` (a slice's category, a node's
+   * size) as its display writes them, with `own` (a label part's format)
+   * over its format and `missing` as the surface's missing text ("–" by
+   * default); undefined where it has no display.
+   */
+  value(
+    field: string | undefined,
+    own?: Formatter,
+    missing?: string,
+  ): ShownField["text"] | undefined;
+  /**
+   * A writer of amounts of field `field` (a slice's sum, a node's total):
+   * its format, without its mappings, which name single values, and
+   * numbers as charts write them where it gives none; undefined where it
+   * has no display.
+   */
+  amount(field: string | undefined): ((value: number) => string) | undefined;
+  /**
+   * A writer of values along a scale fields `fields` share (a radar's
+   * rings): the format their displays agree on, without mappings;
+   * undefined where they give none or disagree.
+   */
+  scale(fields: readonly string[]): ((value: number) => string) | undefined;
+  /** Field `field`'s label, else its name. */
+  label(field: string): string;
+  /** `values`, values of field `field` (a radar's series), as its display writes them; as they are without one. */
+  texts(field: string | undefined, values: readonly string[]): readonly string[];
+  /**
+   * `view`, a view of a tree its `encoding` names, with its nodes' names and
+   * the names of the path to its root as the display of each level's field
+   * writes them (a level below the path's last field's is the last's): what
+   * items, labels, and summaries write, made once per view. Keys, drills,
+   * selections, and labels' parts read `view` itself.
+   */
+  tree(view: TreeView, encoding: HierarchyEncoding): TreeView;
 }
 
 /** A chart's field displays, resolved per field and table as asked. */
@@ -105,6 +155,20 @@ export interface ChartFields {
    * the field has no display. Scales and colors read the raw values.
    */
   key(table: Table | RowView | undefined, name: string, key: GlyphKey): GlyphKey;
+  /**
+   * How a layout mark of `table` writes its items' text through the
+   * displays: names, amounts, and fields' labels. Layout marks ask for it
+   * only where the chart has displays, and write as they are otherwise.
+   */
+  items(table: Table | RowView | undefined): ItemText;
+  /**
+   * `values`, names a layout mark reads from the fields `reads` names (a
+   * Sankey diagram's sources and targets), each as `entry` writes it.
+   */
+  names(
+    reads: readonly (readonly [Table | undefined, string | undefined])[],
+    values: readonly string[],
+  ): string[];
 }
 
 /**
@@ -183,6 +247,9 @@ export function chartFields(
       formatKey: format ? normalized(format) : "",
       textKey: mappings || own !== undefined ? JSON.stringify([mappings, own]) : "",
       writer,
+      text: writer(),
+      amount: (fallback) => (value) =>
+        missingValue(kind, value) ? (own ?? "–") : (write ?? fallback)(value),
       over: (axis, numbers) => writer(axis?.own ? axis : undefined, numbers ? undefined : axis),
     };
   };
@@ -196,6 +263,25 @@ export function chartFields(
     }
     if (!byName.has(name)) byName.set(name, shown(table, name));
     return byName.get(name);
+  };
+  // Trees written (`ItemText.tree`), by the view each writes: views are kept
+  // while their data is, so a redraw writes no names again.
+  const trees = new WeakMap<TreeView, TreeView>();
+  const entry: ChartFields["entry"] = (reads, value) => {
+    // A category field holds the values its dictionary does.
+    const holding = reads.filter(
+      ([table, name]) =>
+        name === undefined ||
+        !table?.has(name) ||
+        table.kind(name) !== "category" ||
+        holds(table, name).has(value),
+    );
+    const texts = new Set(
+      (holding.length > 0 ? holding : reads).map(([table, name]) =>
+        name === undefined ? value : (of(table, name)?.text(value) ?? value),
+      ),
+    );
+    return texts.size === 1 ? [...texts][0]! : value;
   };
   return {
     of,
@@ -216,27 +302,58 @@ export function chartFields(
         ? first
         : undefined;
     },
-    entry: (reads, value) => {
-      // A category field holds the values its dictionary does.
-      const holding = reads.filter(
-        ([table, name]) =>
-          name === undefined ||
-          !table?.has(name) ||
-          table.kind(name) !== "category" ||
-          holds(table, name).has(value),
-      );
-      const texts = new Set(
-        (holding.length > 0 ? holding : reads).map(([table, name]) =>
-          name === undefined ? value : (of(table, name)?.writer()(value) ?? value),
-        ),
-      );
-      return texts.size === 1 ? [...texts][0]! : value;
-    },
+    entry,
     labeled: (table, name, row, fallback) => {
       const shown = of(table, name);
       // Times as dates, not by the surface's numbers.
       const write = shown?.writer(undefined, shown.kind === "time" ? undefined : fallback);
       return shown && `${shown.label} ${write!(table.value(name as never, row))}`;
+    },
+    names: (reads, values) => values.map((value) => entry(reads, value)),
+    items: (table) => {
+      const shown = (field: string | undefined) =>
+        field === undefined ? undefined : of(table, field);
+      return {
+        value: (field, own, missing) =>
+          own || missing !== undefined
+            ? shown(field)?.writer(own, undefined, missing)
+            : shown(field)?.text,
+        amount: (field) => shown(field)?.amount(numbers),
+        scale: (names) => {
+          const [first, ...rest] = names.map(shown);
+          return first?.format && rest.every((other) => other?.formatKey === first.formatKey)
+            ? first.amount(numbers)
+            : undefined;
+        },
+        label: (field) => shown(field)?.label ?? field,
+        texts: (field, values) => {
+          const write = shown(field)?.text;
+          return write ? values.map(write) : values;
+        },
+        tree: (view, encoding) => {
+          let written = trees.get(view);
+          if (written) return written;
+          const writers = ("path" in encoding ? encoding.path : [encoding.id]).map(
+            (field) => shown(field)?.text,
+          );
+          // A name at level -1, the whole tree's root, is as it is.
+          const at = (name: string, level: number) =>
+            (level < 0 ? undefined : writers[Math.min(level, writers.length - 1)])?.(name) ?? name;
+          const { tree, prefix } = view;
+          written = {
+            ...view,
+            prefix: prefix.map(at),
+            tree: {
+              ...tree,
+              names: tree.names.map((name, node) =>
+                at(name, prefix.length + tree.depth[node]! - 1),
+              ),
+            },
+          };
+          trees.set(view, written);
+          return written;
+        },
+      };
     },
     key: (table, name, key) => {
       const shown = of(table, name);

@@ -3,6 +3,7 @@ import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts
 import { labelsDrawing, textDrawing } from "../draw/labels.ts";
 import { n } from "../draw/markup.ts";
 import { SPLIT_LEFT, SPLIT_RIGHT, type TileGeometry, tileDrawing } from "../draw/tiles.ts";
+import type { ItemText } from "../fields/chart.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { labelFor } from "../layout/text.ts";
 import { CUT_LEFT, CUT_RIGHT, layoutTreemap } from "../layout/treemap.ts";
@@ -103,6 +104,7 @@ export class TreemapMark implements LayoutMark {
   readonly spec: Frozen<TreemapSpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources | undefined;
   /** Clicks and Enter drill into nodes with `interaction.zoom`, and charts select their rows. */
   readonly interactions = ["zoom"] as const;
@@ -148,6 +150,7 @@ export class TreemapMark implements LayoutMark {
     this.featured = this.#labels.featured;
     this.table = table;
     this.measure = spec.value ?? "Count";
+    this.measureField = spec.value;
     // Items stand for their color field's values, as series of that field do.
     this.identity = { field: this.#data.colorField, read: secondOf };
   }
@@ -180,6 +183,11 @@ export class TreemapMark implements LayoutMark {
     const root = frame.root?.length ? data.rootOf(frame.id, frame.root) : 0;
     const view = root > 0 ? data.drilled(root, frame.rows) : data.view(frame.rows);
     const { tree, group } = view;
+    // Names, totals, and fields' labels as the chart's field displays write them, where it has any.
+    const fieldText = frame.features?.fields?.items(this.table);
+    const written = fieldText?.tree(view, data.encoding) ?? view;
+    const amount =
+      fieldText?.amount(this.spec.value) ?? ((sum: number) => formatNumber(sum, locale));
     // Breadcrumbs take a strip above the tree in charts that drill.
     const crumbed = this.spec.breadcrumbs ?? (frame.drillable || root > 0);
     const path = crumbed ? data.breadcrumbs(frame.id, view, frame) : undefined;
@@ -400,14 +408,17 @@ export class TreemapMark implements LayoutMark {
     const percent = numberFormatter({ style: "percent", maximumFractionDigits: 1 }, locale);
     const total = shown[0]!;
     const rootKey = root > 0 ? data.keyOf(frame.id, view, 0) : undefined;
+    // A node's path, as the fields' displays write it (`written`); keys read `view`.
+    const pathText = (node: number) =>
+      [...written.prefix, ...pathOf(written.tree, node)].join(" / ");
     const itemOf = (node: number): LayoutItem => {
       const [x, y, w, h] = boxes.subarray(node * 4, node * 4 + 4) as unknown as number[];
       return {
         key: data.keyOf(frame.id, view, node),
-        label: [...view.prefix, ...pathOf(tree, node)].join(" / "),
+        label: pathText(node),
         color: fills[node] ?? colorOf(node) ?? theme.muted,
         value: shown[node]!,
-        text: `${formatNumber(shown[node]!, locale)} (${percent(shown[node]! / total)}${where(view)})${data.selectedText(counts, node, locale)}`,
+        text: `${amount(shown[node]!)} (${percent(shown[node]! / total)}${where(written)})${data.selectedText(counts, node, locale, fieldText)}`,
         px: x! + w! / 2,
         py: y! + h! / 2,
         outline: `M${n(x!)} ${n(y!)}h${n(w!)}v${n(h!)}h${n(-w!)}Z`,
@@ -442,7 +453,7 @@ export class TreemapMark implements LayoutMark {
           return {
             key: data.keyOf(frame.id, view, node),
             names,
-            label: names.join(" / "),
+            label: pathText(node),
             value: shown[node]!,
             box: { x: x!, y: y!, width: width!, height: height! },
             depth: tree.depth[node]!,
@@ -472,10 +483,10 @@ export class TreemapMark implements LayoutMark {
       },
       item: navigation.item,
       indexOf: navigation.indexOf,
-      summary: () => this.#summary(view, shown, locale, percent),
+      summary: () => this.#summary(written, shown, percent, amount, fieldText),
       rowsOf: (key, of) => (of === this.table ? data.rowsOf(frame.id, view, key) : undefined),
       soleRow: (key, of) => (of === this.table ? data.soleRow(frame.id, view, key) : undefined),
-      drill: data.drill(frame.id, root, view, path?.crumbs ?? []),
+      drill: data.drill(frame, root, view, path?.crumbs ?? []),
     };
   }
 
@@ -508,6 +519,10 @@ export class TreemapMark implements LayoutMark {
     const { theme, measure, locale } = frame;
     const labels = this.#labels;
     const { tree } = view;
+    // Fields' values, the value, and names as the chart's field displays
+    // write them, where it has any; parts and rows read `view` itself.
+    const fieldText = frame.features?.fields?.items(this.table);
+    const { names } = (fieldText?.tree(view, this.#data.encoding) ?? view).tree;
     const backdrop = frame.surface ?? surface(theme);
     const centered = labels.at === "center";
     const plain = new Map<string, { coords: number[]; labels: string[] }>();
@@ -565,7 +580,7 @@ export class TreemapMark implements LayoutMark {
       const left = x + INSET;
       if (!labels.styled) {
         if (height < lineHeight + 2) continue;
-        const text = labelFor(tree.names[node]!, width, measure, font);
+        const text = labelFor(names[node]!, width, measure, font);
         if (!text) continue;
         const anchor = centered ? "middle" : "start";
         const key = `${anchor}\u0000${inkOf(node)}`;
@@ -587,6 +602,9 @@ export class TreemapMark implements LayoutMark {
         shown[node]!,
         () => this.#data.soleRowOf(view, node),
         locale,
+        fieldText,
+        fieldText?.amount(this.spec.value),
+        names,
       );
       if (!parts) continue;
       const paint = labels.paint(frame, inkOf(node));
@@ -627,12 +645,14 @@ export class TreemapMark implements LayoutMark {
   #summary(
     view: TreeView,
     shown: Float64Array,
-    locale: string | undefined,
     percent: (value: number) => string,
+    amount: (value: number) => string,
+    text: ItemText | undefined,
   ): string {
     const { tree } = view;
-    const fields = this.spec.path?.join(" / ") ?? this.spec.node!;
-    const what = `${this.spec.value ? `${this.spec.value} by ${fields}` : fields}${where(view)}`;
+    const label = (field: string) => text?.label(field) ?? field;
+    const fields = this.spec.path?.map(label).join(" / ") ?? label(this.spec.node!);
+    const what = `${this.spec.value ? `${label(this.spec.value)} by ${fields}` : fields}${where(view)}`;
     const total = shown[0]!;
     if (!(total > 0)) return `Treemap of ${what}, with nothing to show.`;
     const leaves = this.#data.leaves(tree, shown);
@@ -640,8 +660,8 @@ export class TreemapMark implements LayoutMark {
     const visible = this.#data.largest(view.tops, shown);
     const largest = visible
       .slice(0, 3)
-      .map(({ node, label }) => `${label} ${percent(shown[node]! / total)}`);
-    return `Treemap of ${what}: ${count(leaves, "leaf", "leaves")} in ${count(visible.length, "group", "groups")} totaling ${formatNumber(total, locale)}. Largest: ${largest.join(", ")}.`;
+      .map(({ node }) => `${tree.names[node]} ${percent(shown[node]! / total)}`);
+    return `Treemap of ${what}: ${count(leaves, "leaf", "leaves")} in ${count(visible.length, "group", "groups")} totaling ${amount(total)}. Largest: ${largest.join(", ")}.`;
   }
 }
 

@@ -275,6 +275,47 @@ describe("displays", () => {
     expect(missing([{ missing: "n/a" }, { match: "cpu", missing: false }])).toBe("");
   });
 
+  it("write values computed from the field's in its format and missing text, without mappings", () => {
+    const display = displayOf(status, { table: hosts, field: "cpu" });
+    // A mean of 50 is not the value 50 the mapping names.
+    expect(display.format(50)).toBe("50%");
+    expect(display.text(50)).toBe("Half");
+    expect(display.format(Number.NaN)).toBe("–");
+    expect(displayOf(status, { table: hosts, field: "status" }).format("200")).toBe("200");
+  });
+
+  it("take a surface's default format of the kind it writes, under the field's", () => {
+    const at = Date.UTC(2026, 0, 1, 12, 30, 15);
+    const shown = (fields: FieldDisplays, field: "time" | "cpu", value: number) =>
+      displayOf(
+        fields,
+        { table: hosts, field },
+        { timeZone: "UTC", locale: "en-US", defaultFormat: { timeStyle: "medium" } },
+      ).text(value);
+    expect(shown({}, "time", at)).toBe("12:30:15 PM");
+    expect(shown({ time: { format: { time: "%H:%M" } } }, "time", at)).toBe("12:30");
+    // Numbers keep theirs: the default writes times.
+    expect(shown({}, "cpu", 42.5)).toBe("42.5");
+    expect(() =>
+      displayOf({}, { table: hosts, field: "cpu" }, { defaultFormat: { number: "q" } }),
+    ).toThrow(/^displayOf settings.defaultFormat/);
+  });
+
+  it("write a grid column's cells, each category's text once per dictionary entry as it grows", () => {
+    const streamed = table({ status: category(["200", "503", null]), ms: [1, 2, 3] });
+    const compiled = compileFields(status);
+    const shown = compiled.column({ field: "status" }, "category", streamed, {});
+    const rows = () =>
+      Array.from({ length: streamed.length }, (_, row) => shown.text(streamed, row));
+    // Missing values are a grid's: empty where the field gives no text.
+    expect(rows()).toEqual(["OK", "Server error 03", "unknown"]);
+    streamed.append({ status: ["404", "200"], ms: [4, 5] });
+    expect(rows()).toEqual(["OK", "Server error 03", "unknown", "404", "OK"]);
+    // Numbers through the format and mappings.
+    const cpu = compiled.column({ field: "cpu", title: "CPU" }, "number", undefined, {});
+    expect([cpu.title, cpu.text(table({ cpu: [95, 42] }), 1)]).toEqual(["CPU", "42%"]);
+  });
+
   it("are resolved from rules compiled once", () => {
     const compiled = compileFields([{ match: { kind: "number" }, format: { si: "B" } }]);
     expect(compiled.displayOf({ field: "size", kind: "number" }).text(1500)).toBe("1.5 kB");

@@ -153,6 +153,9 @@ hg.Chart(sales, zoom=True).treemap(path=["region", "country"], value="revenue")
   has Up and whole-tree buttons. Each change is announced.
 - When a row selection takes clicks, a click selects the node's rows and
   Enter still drills.
+- Steps are named by their raw values in `setDrillRoot`, `getDrillRoot`,
+  and `drill` events; the breadcrumbs and announcements write them through
+  the chart's [field displays](fields.md#layout-marks).
 - `setDrillRoot` works with or without `interaction.zoom` and is followed by
   a `drill` event, which also reports when the data (or options replacing
   the table) lose the drilled node and the tree shows its nearest remaining
@@ -473,6 +476,12 @@ chart.getItems({ mark: "cells" }); // { revision, items: [{ key, names, label, v
   `"nearest-y"`. `tooltip.fields` show more of an
   item's row where the item is one row (slices, stages, nodes, links of one
   row); items summing several rows show none.
+- **Field displays.** With the chart's `fields`, items' names, their sums
+  and values, and the fields they name are written through the displays,
+  in legends, labels, tooltips, breadcrumbs, and the text alternative
+  ([Layout marks](fields.md#layout-marks)); keys, hiding, selections, and
+  drills keep the raw values. Gauges take their value field's display as
+  [before](fields.md#tooltips-labels-and-gauges).
 - **Animation.** Pies and gauges animate changed values; the others show
   them at once.
 - **Facets and subplots.** See [Layout](layout.md#layout-marks-in-panels).

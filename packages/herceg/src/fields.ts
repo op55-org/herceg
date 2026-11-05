@@ -11,7 +11,13 @@ import { origins } from "./data/origin.ts";
 import type { RowView } from "./data/row-view.ts";
 import type { FieldName, PositionField, Schema, Table } from "./data/table.ts";
 import { KINDS, shown } from "./fields/check.ts";
-import { type DisplayedField, type DisplaySettings, displayed } from "./fields/display.ts";
+import {
+  type CompiledFields,
+  type DisplayedField,
+  type DisplaySettings,
+  displayed,
+} from "./fields/display.ts";
+import { columnDisplay } from "./fields/grid.ts";
 import {
   type FieldDisplays,
   type FieldOf,
@@ -20,7 +26,7 @@ import {
   resolve,
   rulesOf,
 } from "./fields/rules.ts";
-import { formatNumber, numberFormatter, timeFormatter } from "./format/format.ts";
+import { FULL_TIME, formatNumber, numberFormatter, timeFormatter } from "./format/format.ts";
 import { toWall } from "./format/zone.ts";
 import type {
   CategoryFieldDisplay,
@@ -29,7 +35,13 @@ import type {
   TimeFieldDisplay,
 } from "./spec/fields.ts";
 
-export type { DisplayedField, DisplaySettings } from "./fields/display.ts";
+export type {
+  CompiledFields,
+  DisplayedField,
+  DisplaySettings,
+  FieldColumns,
+} from "./fields/display.ts";
+export type { ColumnDisplay, GridColumnSettings } from "./fields/grid.ts";
 export type { FieldDisplays, FieldMatch, FieldRule, TableRef } from "./fields/rules.ts";
 export type {
   CategoryFieldDisplay,
@@ -62,33 +74,32 @@ type FieldAsked<S extends Schema, F extends PositionField<S>, K extends Displaye
   | { field: string; kind: K; table?: string };
 
 /**
- * Field displays checked and compiled once: what surfaces that take field
- * display through an explicit import read, and displays of many fields
- * without checking the rules again for each.
- */
-export interface CompiledFields {
-  /** The displays, as given. */
-  readonly displays: FieldDisplays;
-  /** A field's display, as `displayOf` gives it. */
-  displayOf<K extends DisplayedKind>(
-    of: { field: string; kind: K; table?: string },
-    settings?: DisplaySettings,
-  ): DisplayedField<K>;
-  displayOf<S extends Schema, F extends PositionField<S>>(
-    of: { table: Table<S> | RowView<S>; field: F },
-    settings?: DisplaySettings,
-  ): DisplayedField<S[F] & DisplayedKind>;
-}
-
-/**
  * `fields` (displays by name, or rules) checked and compiled, to resolve
  * displays of fields from: `compileFields(rules).displayOf(...)`.
  */
 export function compileFields(fields: FieldDisplays): CompiledFields {
-  return compiled(fields, "compileFields");
+  const { displays, displayOf } = compiled(fields, "compileFields");
+  return {
+    displays,
+    displayOf,
+    column: ({ field, title, format }, kind, table, { locale, timeZone }) => {
+      const of = { field, kind, table } as { field: string; kind: DisplayedKind };
+      // Times to the second, as grids write them; missing values empty in
+      // cells and "(missing)" in group keys where the field gives no text.
+      const settings = { locale, timeZone, format, defaultFormat: FULL_TIME };
+      return columnDisplay(
+        displayOf(of, { ...settings, missing: "" }),
+        title,
+        displayOf(of, { ...settings, missing: "(missing)" }).text,
+      );
+    },
+  };
 }
 
-function compiled(displays: FieldDisplays, surface: string): CompiledFields {
+function compiled(
+  displays: FieldDisplays,
+  surface: string,
+): Pick<CompiledFields, "displays" | "displayOf"> {
   const rules = rulesOf(displays, surface, KIT);
   const displayOf = (
     of: FieldAsked<Schema, string, DisplayedKind>,

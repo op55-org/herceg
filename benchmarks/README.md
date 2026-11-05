@@ -367,8 +367,12 @@ reads them through `getCellContent`.
 it can be set. Cells read the same: `en-US` numbers with two decimals and no
 minus sign on values that round to zero, times in UTC as `MM/DD/YYYY,
 HH:MM:SS`, and an em dash for missing values (`FORMAT` in the fixture).
-Herceg takes these as Intl options on its columns; the other adapters call
-the same formatters when they render a cell.
+Herceg writes every column through field displays (`fields:
+compileFields(rules)` from `herceg/fields`: the Intl options by kind and
+the em dash as their missing text), since a grid without displays writes
+missing values as empty; the other adapters call the same formatters when
+they render a cell. The Herceg grid measured therefore includes
+`herceg/fields` and its per-cell display path.
 
 ### Verification
 
@@ -433,7 +437,7 @@ Each adapter documents its configuration at the top of its file.
 
 | Grid | Input | Sorting and filtering | Updates | Rendering |
 | --- | --- | --- | --- | --- |
-| Herceg | Table over the fixture's arrays | Row view (`setQuery`): typed-array comparators, filter expressions | `Table.append`, `dropFirst`, `set` | DOM rows and cells, 10 rows and 2 columns of overscan |
+| Herceg | Table over the fixture's arrays; field displays on every column | Row view (`setQuery`): typed-array comparators, filter expressions | `Table.append`, `dropFirst`, `set` | DOM rows and cells, 10 rows and 2 columns of overscan |
 | TanStack Table 9 + Virtual 3 | Row objects | Native sorted and filtered row models (`basic` comparator, `sortUndefined: "last"`, `inNumberRange`, a membership filter function) | A new data array keeping unchanged row objects | React 19 DOM table, flushSync, 10 rows and 3 columns of overscan |
 | AG Grid Community 36 | Row objects, `getRowId` | Native sorting with a comparator keeping missing values last, `deltaSort`; native number filter; the external filter for membership (Community has no set filter) | Synchronous transactions (`applyTransaction`) | DOM rows and cells, `rowBuffer` 10, animations off |
 | Glide Data Grid 6 | The fixture's arrays through `getCellContent` | External: adapter code, labeled as such | Writes to the arrays; `updateCells` when order is unchanged | Canvas 2D, React 19 |

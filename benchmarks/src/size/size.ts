@@ -31,6 +31,7 @@ const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-pdf-document": "herceg",
   "herceg-pdf-fonts": "herceg",
   "herceg-grid": "herceg",
+  "herceg-grid-fields": "herceg",
   "herceg-pivot": "herceg",
   "herceg-grid-pivot": "herceg",
   "herceg-grid-remote": "herceg",

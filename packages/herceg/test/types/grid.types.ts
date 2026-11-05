@@ -9,6 +9,7 @@ import { selectionStore } from "../../src/data/selection.ts";
 import { type Schema, Table, table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { createGrid, type Grid } from "../../src/dom/grid.ts";
+import { compileFields } from "../../src/fields.ts";
 import { createGridModel, type GridColumn, type GridModel } from "../../src/grid/model.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { point } from "../../src/marks/point.ts";
@@ -45,6 +46,31 @@ createGridModel({
   data: rowView(requests),
   // @ts-expect-error a number field takes number formats, not date formats
   columns: [{ field: "latency", format: { dateStyle: "medium" } }],
+});
+// Columns' own formats are Intl options; field displays give the other forms.
+const displayed = createGridModel({
+  data: rowView(requests),
+  columns: [{ field: "latency", format: { maximumFractionDigits: 0 } }, { field: "at" }],
+  fields: compileFields({ latency: { label: "Latency", format: { duration: "millisecond" } } }),
+});
+createGridModel({
+  data: rowView(requests),
+  // @ts-expect-error a column's own format is Intl options
+  columns: [{ field: "latency", format: { duration: "millisecond" } }],
+});
+displayed.setFields(compileFields([{ match: { kind: "number" }, missing: "–" }]));
+displayed.setFields(undefined);
+expectTypeOf(displayed.columnTitle("latency")).toEqualTypeOf<string>();
+createGridModel({
+  data: rowView(requests),
+  // @ts-expect-error a time field takes time formats
+  columns: [{ field: "at", format: { duration: "millisecond" } }],
+});
+createGridModel({
+  data: rowView(requests),
+  columns: [{ field: "latency" }],
+  // @ts-expect-error displays compiled with compileFields, not rules
+  fields: { latency: { label: "Latency" } },
 });
 model.setSort([{ field: "latency", order: "descending" }]);
 // @ts-expect-error sort keys are the table's fields

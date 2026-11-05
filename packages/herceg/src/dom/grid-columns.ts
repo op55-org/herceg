@@ -268,8 +268,7 @@ export class ColumnControls<S extends Schema> {
   }
 
   #titleOf(id: string): string {
-    const column = this.#host.model.columns.find((other) => other.id === id);
-    return column ? (column.title ?? column.field) : id;
+    return this.#host.model.columnTitle(id);
   }
 
   #sayPlace(id: string) {
@@ -400,7 +399,7 @@ export class ColumnControls<S extends Schema> {
       (other): MenuItem => ({
         // Column ids may be any text; a prefix keeps them apart from actions.
         key: `column:${other.id}`,
-        label: other.title ?? other.field,
+        label: model.columnTitle(other.id!),
         checked: !other.hidden,
         disabled: !other.hidden && shown <= 1,
         run: () => {

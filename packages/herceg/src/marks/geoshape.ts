@@ -5,6 +5,7 @@
 import type { FieldKind } from "../data/column.ts";
 import type { CategoryField, GeometryField, NumberField, Schema, Table } from "../data/table.ts";
 import { polygonsDrawing, roomPolygonPath } from "../draw/polygons.ts";
+import type { ChartFields } from "../fields/chart.ts";
 import { formatNumber } from "../format/format.ts";
 import type { GeoExtent, PixelShape } from "../geo/project.ts";
 import { extendExtent } from "../geo/project.ts";
@@ -115,6 +116,7 @@ export class GeoShapeMark implements GeoLayer {
   readonly spec: Frozen<GeoShapeSpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources | undefined;
   readonly reach: number;
   /** The geometry field. */
@@ -159,6 +161,7 @@ export class GeoShapeMark implements GeoLayer {
     this.table = table;
     this.field = field;
     this.measure = spec.color ?? spec.label ?? "Region";
+    this.measureField = spec.color;
     // Regions of a category color stand for its values, as series of it do.
     this.identity =
       this.#colorKind === "category"
@@ -214,15 +217,28 @@ export class GeoShapeMark implements GeoLayer {
   }
 
   /** Its color ramp's legend, which guides naming the layer show. */
-  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
-    return legendParts(...this.scales(theme, locale, paint));
+  legends(
+    theme: Theme,
+    locale: string | undefined,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): LegendPart[] {
+    return legendParts(...this.scales(theme, locale, paint, fields));
   }
 
-  scales(theme: Theme, _locale: unknown, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
+  scales(
+    theme: Theme,
+    _locale: unknown,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): [ColorRamp[], GlyphKey[]] {
     const scale = this.#scale(theme, paint);
     if (!scale) return [[], []];
     const { domain, midpoint } = scale;
-    return [[{ stops: scale.legendStops(), domain, midpoint, title: this.spec.color! }], []];
+    // Titled by its field's label, its values in its format.
+    const field = fields?.of(this.table, this.spec.color!);
+    const title = field?.label ?? this.spec.color!;
+    return [[{ stops: scale.legendStops(), domain, midpoint, title, field }], []];
   }
 
   extent(into: GeoExtent, rows?: Uint32Array): void {
@@ -344,21 +360,33 @@ export class GeoShapeMark implements GeoLayer {
     const selected = frame.selected?.(table);
     const names =
       spec.labelField === undefined ? undefined : table.categories(spec.labelField as never);
+    // Names and values as their fields' displays write them, where the chart has any.
+    const fieldText = frame.features?.fields?.items(table);
+    const name = fieldText?.value(spec.labelField);
+    const write = fieldText?.value(spec.color, undefined, "no data");
     const nameOf = (row: number) => {
       const code = names ? names.codes[row]! : -1;
-      return code >= 0 ? names!.dictionary[code]! : `${spec.label ?? "Region"} ${row + 1}`;
+      const named = names?.dictionary[code];
+      if (named !== undefined) return name?.(named) ?? named;
+      // Missing: its display's missing text, where it gives one, else its place.
+      const place = `${spec.label ?? "Region"} ${row + 1}`;
+      return fieldText?.value(spec.labelField, undefined, place)?.(null) ?? place;
     };
     const format = (value: number) => formatNumber(value, locale);
-    const measure = this.measure;
+    const field = this.measureField;
+    const measure = field === undefined ? this.measure : (fieldText?.label(field) ?? this.measure);
     const item = (position: number): LayoutItem => {
       const row = drawn.rows[position]!;
       const shape = drawn.shapes[position]!;
       const value = values ? values[row]! : Number.NaN;
       let text = "";
-      if (values) text = Number.isFinite(value) ? format(value) : "no data";
+      if (values) text = write?.(value) ?? (Number.isFinite(value) ? format(value) : "no data");
       else if (categories) {
         const code = categories.codes[row]!;
-        text = code < 0 ? "no data" : categories.dictionary[code]!;
+        text =
+          code < 0
+            ? (write?.(null) ?? "no data")
+            : (write?.(categories.dictionary[code]!) ?? categories.dictionary[code]!);
       }
       const [ax, ay] = anchorOf(shape);
       let [px, py] = move ? [move.x + move.k * ax, move.y + move.k * ay] : [ax, ay];
@@ -418,7 +446,7 @@ export class GeoShapeMark implements GeoLayer {
       count: drawn.rows.length,
       item,
       indexOf: positionOf,
-      summary: () => this.#summary(drawn, nameOf, values, categories, format),
+      summary: () => this.#summary(drawn, nameOf, values, categories, format, write, measure),
       rowsOf(key, of) {
         const position = of === table ? positionOf(key) : -1;
         return position < 0 ? undefined : [drawn.rows[position]!];
@@ -442,12 +470,15 @@ export class GeoShapeMark implements GeoLayer {
     nameOf: (row: number) => string,
     values: ArrayLike<number> | undefined,
     categories: { codes: Int32Array; dictionary: readonly string[] } | undefined,
-    format: (value: number) => string,
+    plain: (value: number) => string,
+    write: ((value: number | string) => string) | undefined,
+    field: string,
   ): string {
     const count = drawn.rows.length;
     const regions = plural(count, "region", "regions");
     if (count === 0) return "Map with no regions to show.";
-    const field = this.spec.color;
+    // Values as the color field's display writes them, where it has one.
+    const format = write ?? plain;
     if (values) {
       let low = -1;
       let high = -1;
@@ -477,7 +508,10 @@ export class GeoShapeMark implements GeoLayer {
           counts.set(category, (counts.get(category) ?? 0) + 1);
         }
       }
-      const listed = [...counts].slice(0, LISTED).map(([category, n]) => `${category} ${n}`);
+      // Counted by value, named as written: mappings rename, never merge.
+      const listed = [...counts]
+        .slice(0, LISTED)
+        .map(([category, n]) => `${write?.(category) ?? category} ${n}`);
       if (counts.size > LISTED) listed.push(`${counts.size - LISTED} more`);
       let text = `Map of ${regions} colored by ${field}: ${listed.join(", ")}.`;
       if (missing > 0) text += ` ${plural(missing, "region has", "regions have")} no value.`;

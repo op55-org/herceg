@@ -9,6 +9,7 @@ data. Grids are TypeScript and React only; Python has none.
 - [Sorting and selecting](#sorting-and-selecting)
 - [Events](#events)
 - [Columns](#columns)
+- [Field displays](#field-displays)
 - [Linking a grid and a chart](#linking-a-grid-and-a-chart)
 - [Grouped rows](#grouped-rows)
 - [Pivots](#pivots)
@@ -43,8 +44,8 @@ grids of the same rows share the view and the selection store.
 
 | Column option | Means |
 | --- | --- |
-| `field`, `title` | The field shown, and its header (the field's name by default). |
-| `format` | Intl options for the field's kind (none for categories). Numbers align to the end. |
+| `field`, `title` | The field shown, and its header (its [display's](#field-displays) label, else the field's name, by default). |
+| `format` | Intl options for the field's kind (none for categories); other format forms come from [field displays](#field-displays). Numbers align to the end. |
 | `width` | Pixels: 120 by default, at least 32. |
 | `aggregate` | In a [grouped grid](#grouped-rows), the group's value to show. |
 
@@ -54,7 +55,7 @@ grids of the same rows share the view and the selection store.
 | `columns` | The columns, as above. |
 | `timeZone`, `locale` | How times and numbers are written (the runtime's locale and `"local"` zone by default). |
 | `rowHeight` | Pixels per row; 28 by default. |
-| `missing` | Text for missing values (empty by default). |
+| `fields` | [Field displays](#field-displays), from `compileFields(rules)`; without them, missing values are empty. |
 | `selectionStore`, `channel` | Where selected rows go (`"grid-rows"` by default). |
 | `selection` | `{ click: "toggle" }`: a plain click on the one row selected clears it (`"only"`, the default, keeps it). |
 | `groups` | Row groups to show (see [below](#grouped-rows)). |
@@ -144,6 +145,43 @@ model.setColumns(JSON.parse(localStorage.layout));
   (`model.canPin(id)` asks first). `setColumns` takes pins as given; in a
   grid too narrow for them, pinned columns scroll with the others until it
   widens.
+
+## Field displays
+
+A grid given `fields`, [field displays](fields.md) compiled by
+`compileFields` from `herceg/fields`, writes its fields as charts given
+the same rules do. Grids without them load none of that code.
+
+```ts
+import { compileFields } from "herceg/fields";
+
+const fields = compileFields([
+  { match: { kind: "number" }, missing: "—" },
+  { match: "latency", label: "Latency", description: "Time to the last byte.", format: { duration: "millisecond" } },
+  { match: "status", mappings: [{ value: "200", text: "OK" }, { regex: "^5", text: "Server error" }] },
+]);
+const model = createGridModel({ data: rowView(requests), columns: [{ field: "time" }, { field: "status" }, { field: "latency" }], fields });
+model.setFields(compileFields(otherRules)); // new text; layout, sort, groups, selection, and scroll stay
+```
+
+- **Headers** read the column's `title`, else the field's label. The
+  field's description is the header's `title`: its tooltip and accessible
+  description. Sorting and column changes are announced by these titles.
+- **Cells** write a value as the display does: its missing text, then its
+  mappings, then its format, in every form displays take. A column's own
+  `format` (Intl options) replaces the field's, while the mappings and
+  missing text stay. Times without a format are written to the second, as
+  grids write them without displays. A category value's text is written
+  once, the first time a cell shows it.
+- **Group rows** write keys through their fields' displays ("(missing)"
+  where a display gives no missing text), and a column's `aggregate` by
+  its operation and kind: the field's own `min`, `max`, `mean`, and `sum`
+  in its format, without its mappings, which name single values; counts,
+  and aggregates that change the kind (a sum of times), as plain numbers.
+- **Remote grids** match rules naming a table (`{ match: { table:
+  "requests" } }`) by the source's `schema.source` name.
+- Pivot grids take no `fields` yet; they keep their `missing` and
+  `valueFormat` options.
 
 ## Linking a grid and a chart
 

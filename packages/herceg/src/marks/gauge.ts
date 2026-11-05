@@ -72,6 +72,7 @@ export class GaugeMark implements LayoutMark, FormatUser {
   readonly spec: Frozen<GaugeSpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string;
   /** A format other than Intl options, which the feature compiler writes, handing its writer over. */
   readonly featured: boolean;
   #formats: FormatWrite | undefined;
@@ -85,6 +86,7 @@ export class GaugeMark implements LayoutMark, FormatUser {
     this.featured = lazyFormat(spec.format);
     this.table = table;
     this.measure = spec.value;
+    this.measureField = spec.value;
     // Ends the gauge gives are checked now; ends a field's display may give, once it is known.
     for (const [name, end] of [
       ["min", spec.min],

@@ -88,20 +88,20 @@ describe("grid columns", () => {
       ],
       locale: "en-US",
       timeZone: "UTC",
-      missing: "–",
     });
-    expect(column(model, "v")).toEqual(["1,234.57", "0.000123", "–", "∞", "-2"]);
-    expect(column(model, "pct")).toEqual(["123,457%", "0%", "–", "∞%", "-200%"]);
+    // Missing values are empty without field displays.
+    expect(column(model, "v")).toEqual(["1,234.57", "0.000123", "", "∞", "-2"]);
+    expect(column(model, "pct")).toEqual(["123,457%", "0%", "", "∞%", "-200%"]);
     expect(column(model, "at")).toEqual([
       "Jan 2, 2026, 03:04:05",
-      "–",
+      "",
       "Jan 1, 1970, 00:00:00",
       // Past the range dates can show: the number itself.
       "8,640,000,000,000,001",
       "Jun 1, 2026, 00:00:00",
     ]);
     expect(column(model, "day")[0]).toBe("Jan 2, 2026");
-    expect(column(model, "host")).toEqual(["web", "–", "api", "web", "db"]);
+    expect(column(model, "host")).toEqual(["web", "", "api", "web", "db"]);
   });
 });
 

@@ -176,6 +176,8 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const { source } = options;
     this.source = source;
     this.schema = source.schema;
+    // Field displays' rules naming tables match a remote grid's source by its name.
+    this.settings.source = this.schema.source;
     const selection = options.selectionStore ?? remoteSelectionStore(this.schema);
     if (selection.schema.source !== this.schema.source)
       throw new Error(
@@ -1307,12 +1309,14 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     const group = query.group!;
     const by = group.by;
     const fields = this.schema.fields as Record<string, "number" | "time" | "category">;
-    const formats = by.map(
-      (field) =>
-        layout.find((column) => column.field === field)?.content.format ??
-        valueFormatter(fields[field]!, undefined, settings),
-    );
-    const missing = settings.missing || "(missing)";
+    const formats = by.map((field) => {
+      const content = layout.find((column) => column.field === field)?.content;
+      return (
+        content?.key ??
+        content?.format ??
+        valueFormatter(fields[field]!, undefined, settings, field)
+      );
+    });
     const count = numberFormatter({ maximumFractionDigits: 0 }, settings.locale);
     const value = (
       block: Block,
@@ -1323,7 +1327,8 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
     ) => {
       const depth = parent.length;
       const v = k < depth ? parent[k]! : groupValue(block, depth, row, by);
-      return v === null ? missing : format(v);
+      // Displays write missing keys themselves.
+      return v === null && !settings.fields ? "(missing)" : format(v);
     };
     const write = layout.map(
       (column, c): ((block: Block, row: number, parent: GroupKey) => string) => {
@@ -1333,13 +1338,15 @@ export class RemoteGridModel<S extends Schema = Schema> extends BaseGridModel<S>
         const k = by.indexOf(column.field);
         if (k >= 0)
           return (block, row, parent) =>
-            k <= parent.length ? value(block, row, parent, k, column.content.format) : "";
+            k <= parent.length
+              ? value(block, row, parent, k, column.content.key ?? column.content.format)
+              : "";
         const aggregate = group.aggregate.find(({ as }) => as === column.content.aggregate);
         if (!aggregate) return () => "";
         const kind = aggregateKind(aggregate, fields) as "number" | "time";
         const format =
           aggregate.field === column.field && kind === column.kind && aggregate.op !== "count"
-            ? column.content.format
+            ? (column.content.amount ?? column.content.format)
             : valueFormatter(kind, undefined, settings);
         return (block, row) => format((block.data!.columns[aggregate.as] as Float64Array)[row]!);
       },

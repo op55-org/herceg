@@ -27,7 +27,7 @@ hg.scatter(cars, x="weight", y="mpg", series="origin", zoom="xy")
 hg.heatmap(load, x="hour", y="host", color="cpu", colors="viridis")
 hg.treemap(sales, ["region", "country"], "revenue")
 
-# Columns named and their values written once, for axes, legends, and tooltips
+# Columns named and their values written once, for axes, legends, tooltips, and slices
 p99 = hg.FieldDisplay(label="99th percentile", format=hg.Format(duration="millisecond"))
 hg.Chart(df, fields={"p99": p99}).line(x="time", y="p99")
 

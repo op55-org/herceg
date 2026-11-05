@@ -7,6 +7,7 @@ import { selectionStore } from "../../src/data/selection.ts";
 import { type Schema, type Table, table } from "../../src/data/table.ts";
 import { createChart } from "../../src/dom/chart.ts";
 import { createGrid, type Grid, type GridOptions } from "../../src/dom/grid.ts";
+import { compileFields } from "../../src/fields.ts";
 import { createGridModel, type GridColumn, type GridModel } from "../../src/grid/model.ts";
 import { point } from "../../src/marks/point.ts";
 import { resolveTheme } from "../../src/theme.ts";
@@ -142,7 +143,7 @@ describe("grids", () => {
       createGridModel({
         data: rowView(t),
         columns: [{ field: "v" }, { field: "tag" }],
-        missing: "n/a",
+        fields: compileFields([{ missing: "n/a" }]),
       }),
     );
     expect(texts(rowAt(grid, 1))).toEqual(["n/a", "n/a"]);

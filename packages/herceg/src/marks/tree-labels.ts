@@ -7,6 +7,7 @@
 
 import type { Table } from "../data/table.ts";
 import { labelHalo } from "../draw/label-halo.ts";
+import type { ItemText } from "../fields/chart.ts";
 import { oneLineText } from "../layout/text.ts";
 import type { TextItem } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
@@ -204,7 +205,10 @@ export class TreeLabels {
   /**
    * What node `node` of `view` says, valued `value`, its parts in their
    * styles, numbers written for `locale` (`row` gives the one row it stands
-   * for, if any); undefined where it writes nothing.
+   * for, if any), and with the chart's field displays fields' values as
+   * `text` writes them, the value as `amount` does, and the node's name as
+   * `names` (the view's names written) does; undefined where it writes
+   * nothing.
    */
   parts(
     view: TreeView,
@@ -212,10 +216,13 @@ export class TreeLabels {
     value: number,
     row: () => number | undefined,
     locale: string | undefined,
+    text?: ItemText,
+    amount?: (value: number) => string,
+    names = view.tree.names,
   ): WrittenParts | undefined {
     const parts = this.#write
-      ? this.#write(view, node, value, row, locale)
-      : [{ text: oneLineText(view.tree.names[node]!), style: undefined }];
+      ? this.#write(view, node, value, row, locale, text, amount)
+      : [{ text: oneLineText(names[node]!), style: undefined }];
     return parts.some(({ text }) => text.trim()) ? parts : undefined;
   }
 

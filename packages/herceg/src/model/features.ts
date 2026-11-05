@@ -16,6 +16,7 @@ import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { PointSink, Polyline } from "../lod/polyline.ts";
 import type { ContentWriter } from "../marks/features/content.ts";
+import type { itemLegends } from "../marks/features/item-legends.ts";
 import type { displayedContent } from "../marks/features/label-displays.ts";
 import type { naming } from "../marks/features/names.ts";
 import type { TracedEdge } from "../marks/features/provenance.ts";
@@ -33,7 +34,7 @@ import type { PaintReader, Theme } from "../theme.ts";
 import type { clearDomain } from "./clearance.ts";
 import type { GuideKit } from "./guides.ts";
 import type { TableName } from "./identity.ts";
-import type { LegendEntry } from "./legend.ts";
+import type { LegendEntry, LegendPart } from "./legend.ts";
 import type { ChartConfig } from "./model.ts";
 
 /**
@@ -67,6 +68,7 @@ export interface DisplayCode {
   guideFields(config: ChartConfig, fields: ChartFields): GuideFields;
   naming: typeof naming;
   displayedContent: typeof displayedContent;
+  itemLegends: typeof itemLegends;
 }
 
 /**
@@ -139,9 +141,12 @@ export interface CompiledFeatures {
    * that series and layout items stand for in place of the entries of its
    * values: an entry per value in the domain's order, drawn or not. A
    * `plain` legend (no guides to name marks left out of legends) lists none
-   * of the scales only those read.
+   * of the scales only those read. With field displays, entries layout
+   * items stand for are named as the marks sharing them write their value
+   * alike, and layout marks' `parts` are written through the displays, in
+   * place, keeping their keys.
    */
-  listDomains(entries: readonly LegendEntry[], plain: boolean): LegendEntry[];
+  listDomains(entries: readonly LegendEntry[], plain: boolean, parts: LegendPart[]): LegendEntry[];
   /** The keys of the values of declared domains `mark`'s series stand for, which it owns in legends. */
   domainKeys(mark: ChartMark): string[];
   /**

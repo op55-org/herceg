@@ -11,6 +11,7 @@
 // in subplots, the layers naming a panel are its map.
 
 import type { Table } from "../data/table.ts";
+import type { ChartFields } from "../fields/chart.ts";
 import {
   degreeBox,
   emptyExtent,
@@ -80,8 +81,13 @@ export interface GeoLayer extends LayoutMark {
   readonly reach: number;
   /** Draws the layer; `frame.id` is the layer's identity among the map's layers. */
   place(frame: MapFrame): LayoutResult;
-  /** The layer's continuous color scales and size keys for the legend. */
-  scales(theme: Theme, locale: string | undefined, paint: PaintReader): [ColorRamp[], GlyphKey[]];
+  /** The layer's continuous color scales and size keys for the legend, written as `fields` do. */
+  scales(
+    theme: Theme,
+    locale: string | undefined,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): [ColorRamp[], GlyphKey[]];
 }
 
 export function isGeoLayer(mark: LayoutMark): mark is GeoLayer {
@@ -123,6 +129,7 @@ export class GeoMap implements LayoutMark {
   readonly table = undefined;
   readonly otherTables: readonly Table[];
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly layers: readonly GeoLayer[];
   /** Each layer's index among the chart's marks. */
   readonly indices: readonly number[];
@@ -143,6 +150,7 @@ export class GeoMap implements LayoutMark {
       ...(layer.otherTables ?? []),
     ]);
     this.measure = layers[0]?.measure ?? "";
+    this.measureField = layers[0]?.measureField;
   }
 
   /** A layer's identity: its `id`, or its index among the chart's marks. */
@@ -172,8 +180,15 @@ export class GeoMap implements LayoutMark {
    * Every layer's scales, each with a legend of its own: fields of the same
    * name in different layers may measure different things.
    */
-  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
-    return this.layers.flatMap((layer) => legendParts(...layer.scales(theme, locale, paint)));
+  legends(
+    theme: Theme,
+    locale: string | undefined,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): LegendPart[] {
+    return this.layers.flatMap((layer) =>
+      legendParts(...layer.scales(theme, locale, paint, fields)),
+    );
   }
 
   /**

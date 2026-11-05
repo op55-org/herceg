@@ -10,6 +10,7 @@ import {
 } from "../draw/arc.ts";
 import { textDrawing } from "../draw/labels.ts";
 import { segmentDrawing } from "../draw/segments.ts";
+import type { ItemText } from "../fields/chart.ts";
 import { formatNumber, numberFormatter } from "../format/format.ts";
 import { ELBOW, placePieLabels, RUN } from "../layout/pie-labels.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
@@ -66,6 +67,11 @@ const TAU = 2 * Math.PI;
 /** Space between neighboring slices, in pixels. */
 const GAP = 2;
 
+/** A slice, and its category's code. */
+interface Slice extends PieSlice {
+  readonly code: number;
+}
+
 /** What a selection holds of each category, by code: its rows' count and sum, and the rows counted. */
 interface Held {
   rows: Float64Array;
@@ -81,6 +87,7 @@ export class PieMark implements LayoutMark {
   readonly spec: Frozen<PieSpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources;
   /** Clicks select a slice's rows, and a selection of them is drawn as a share of each slice. */
   readonly selects = true;
@@ -110,6 +117,7 @@ export class PieMark implements LayoutMark {
     }
     this.table = table;
     this.measure = spec.value ?? "Count";
+    this.measureField = spec.value;
     // Slices stand for their category field's values, as series of it do.
     this.identity = { field: spec.category, read: secondOf };
   }
@@ -193,16 +201,25 @@ export class PieMark implements LayoutMark {
     });
   }
 
-  /** Every category with rows among `rows` (all rows by default), in slice order. */
-  #slices(id: string | number, rows?: Uint32Array): PieSlice[] {
+  /**
+   * Every category with rows among `rows` (all rows by default), in slice
+   * order, keyed by the category and labeled as `name` writes it (its
+   * display, where the chart has field displays).
+   */
+  #slices(id: string | number, rows?: Uint32Array, name?: (value: string) => string): Slice[] {
     const sums = this.#sums(rows);
     const { dictionary } = this.table.categories(this.spec.category);
-    const slices: PieSlice[] = [];
+    const slices: Slice[] = [];
     for (let code = 0; code < dictionary.length; code++) {
       // A category whose sum overflows a double has no slice.
       if (!(sums[code]! > 0 && sums[code]! < Number.POSITIVE_INFINITY)) continue;
-      const label = dictionary[code]!;
-      slices.push({ key: JSON.stringify([id, label]), label, value: sums[code]! });
+      const value = dictionary[code]!;
+      slices.push({
+        key: JSON.stringify([id, value]),
+        label: name?.(value) ?? value,
+        value: sums[code]!,
+        code,
+      });
     }
     if ((this.spec.sort ?? "value") === "value") slices.sort((a, b) => b.value - a.value);
     return slices;
@@ -216,7 +233,13 @@ export class PieMark implements LayoutMark {
     const { bounds, theme, measure, hidden, locale } = frame;
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
-    const slices = this.#slices(frame.id, frame.rows).filter(({ key }) => !hidden.has(key));
+    // Names and sums as the fields' displays write them, where the chart has any.
+    const fieldText = frame.features?.fields?.items(this.table);
+    const { value } = this.spec;
+    const amount = fieldText?.amount(value) ?? ((sum: number) => formatNumber(sum, locale));
+    const slices = this.#slices(frame.id, frame.rows, fieldText?.value(this.spec.category)).filter(
+      ({ key }) => !hidden.has(key),
+    );
     // Each slice's share, through fractions of the largest, so a total of
     // huge values does not overflow.
     const largest = Math.max(0, ...slices.map(({ value }) => value));
@@ -267,9 +290,7 @@ export class PieMark implements LayoutMark {
     // from its inner edge, covering that share of its area, the rest dimmed.
     const selected = frame.selected?.(this.table);
     const held = selected && this.#heldOf(selected, frame.rows);
-    const { dictionary } = this.table.categories(this.spec.category);
-    const codeOf = new Map(dictionary.map((label, code) => [label, code]));
-    const heldShare = (slice: PieSlice) => held!.sums[codeOf.get(slice.label)!]! / slice.value;
+    const heldShare = (slice: Slice) => held!.sums[slice.code]! / slice.value;
     const geometry = draw(slices, ends, r, labeled);
     if (held) {
       const [whole] = geometry.splice(0, 1) as [ArcGeometry];
@@ -297,7 +318,16 @@ export class PieMark implements LayoutMark {
         const a0 = angle(i > 0 ? at[i - 1]! : 0);
         const a1 = angle(at[i]!);
         return sectorPaints(inner, radius, a0, a1, cut)
-          ? [{ key, names: [label], label, value, ...sectorInfo(cx, cy, inner, radius, a0, a1) }]
+          ? [
+              // Named by its raw category, labeled as written.
+              {
+                key,
+                names: [secondOf(key)!],
+                label,
+                value,
+                ...sectorInfo(cx, cy, inner, radius, a0, a1),
+              },
+            ]
           : [];
       });
     };
@@ -327,22 +357,26 @@ export class PieMark implements LayoutMark {
       const outline = new ArcPath();
       traceSector(outline, cx, cy, r0, r, a0, a1, gap);
       const mid = (a0 + a1) / 2;
-      const code = codeOf.get(slice.label)!;
-      const measure = this.spec.value;
+      const { code } = slice;
       items[i] = {
         key: slice.key,
         label: slice.label,
         color: frame.color(slice.key),
         value: slice.value,
-        text: `${formatNumber(slice.value, locale)} (${percent(share(slice.value))})${
+        text: `${amount(slice.value)} (${percent(share(slice.value))})${
           held
             ? heldText(
                 held.rows[code]!,
                 held.of[code]!,
-                measure === undefined
+                value === undefined
                   ? undefined
-                  : { field: measure, held: held.sums[code]!, of: slice.value },
-                (value) => formatNumber(value, locale),
+                  : {
+                      field: fieldText?.label(value) ?? value,
+                      held: held.sums[code]!,
+                      of: slice.value,
+                    },
+                (count) => formatNumber(count, locale),
+                amount,
               )
             : ""
         }`,
@@ -382,18 +416,17 @@ export class PieMark implements LayoutMark {
       rowsOf: (key, table) => {
         const slice = table === this.table ? slices.find((s) => s.key === key) : undefined;
         if (!slice) return undefined;
-        const code = codeOf.get(slice.label);
         const rows: number[] = [];
         this.#eachRow(frame.rows, (row, at) => {
-          if (at === code) rows.push(row);
+          if (at === slice.code) rows.push(row);
         });
         return rows;
       },
       soleRow: (key, table) => {
         const slice = table === this.table ? slices.find((s) => s.key === key) : undefined;
-        return slice && this.#solesOf(frame.rows).of(codeOf.get(slice.label)!);
+        return slice && this.#solesOf(frame.rows).of(slice.code);
       },
-      summary: () => this.#summary(slices, largest * relative, share, locale, percent),
+      summary: () => this.#summary(slices, largest * relative, share, percent, amount, fieldText),
     };
   }
 
@@ -504,18 +537,19 @@ export class PieMark implements LayoutMark {
     slices: readonly PieSlice[],
     total: number,
     share: (value: number) => number,
-    locale: string | undefined,
     percent: (value: number) => string,
+    amount: (value: number) => string,
+    text: ItemText | undefined,
   ): string {
-    const what = this.spec.value
-      ? `${this.spec.value} by ${this.spec.category}`
-      : this.spec.category;
+    const label = (field: string) => text?.label(field) ?? field;
+    const { category, value } = this.spec;
+    const what = value ? `${label(value)} by ${label(category)}` : label(category);
     if (slices.length === 0) return `Pie of ${what}, with nothing to show.`;
     const largest = [...slices]
       .sort((a, b) => b.value - a.value)
       .slice(0, 3)
       .map(({ label, value }) => `${label} ${percent(share(value))}`);
-    return `Pie of ${what}: ${slices.length} ${slices.length === 1 ? "slice" : "slices"} totaling ${formatNumber(total, locale)}. Largest: ${largest.join(", ")}.`;
+    return `Pie of ${what}: ${slices.length} ${slices.length === 1 ? "slice" : "slices"} totaling ${amount(total)}. Largest: ${largest.join(", ")}.`;
   }
 }
 

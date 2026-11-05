@@ -98,6 +98,17 @@ export function formatNumber(value: number, locale?: string): string {
   return numberFormatter(options, locale)(value);
 }
 
+/** Full timestamps, to the second, as grid cells and tooltips show them. */
+export const FULL_TIME: TimeFormat = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+};
+
 const MINUTE_FORMAT: TimeFormat = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
 const SECOND_FORMAT: TimeFormat = { ...MINUTE_FORMAT, second: "2-digit" };
 

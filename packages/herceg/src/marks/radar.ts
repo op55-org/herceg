@@ -6,6 +6,7 @@ import { SvgPath } from "../draw/markup.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import { symbolPath } from "../draw/symbols.ts";
+import type { ItemText } from "../fields/chart.ts";
 import { formatNumber, numberTickLabels } from "../format/format.ts";
 import { fitTickLabels, placeSpokeLabels, type SpokeLabel } from "../layout/radar-labels.ts";
 import { oneLineText } from "../layout/text.ts";
@@ -86,8 +87,8 @@ const REACH = 24;
  * series and spoke pairs they fill.
  */
 interface Values {
-  spokes: string[];
-  series: string[];
+  spokes: readonly string[];
+  series: readonly string[];
   /** Series s's values are entries `starts[s]` to `starts[s + 1]`. */
   starts: Int32Array;
   /** Each entry's spoke (there are at most MAX_SPOKES) and its finite value. */
@@ -124,6 +125,7 @@ export class RadarMark implements LayoutMark {
   readonly spec: Frozen<RadarSpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources | undefined;
   /** The series and spokes the table names, every facet panel's, and the table version. */
   #named: { version: number; series: Used | undefined; spokes: Used | undefined } | undefined;
@@ -162,6 +164,8 @@ export class RadarMark implements LayoutMark {
       throw new RangeError(`radar fillOpacity: expected a number from 0 to 1; received ${opacity}`);
     this.table = table;
     this.measure = spec.label ?? spec.value ?? "Value";
+    // A label of its own names it, not a field.
+    this.measureField = spec.label === undefined ? spec.value : undefined;
     // Polygons of a series field stand for its values, as series of it do.
     this.identity = spec.series === undefined ? undefined : { field: spec.series, read: secondOf };
     // The spokes of a long table are its data: with rows, too few or too many is a mistake now.
@@ -262,11 +266,28 @@ export class RadarMark implements LayoutMark {
     refuseValues(frame.keyed, this.spec.type);
     const { bounds, theme, measure, hidden, locale } = frame;
     const data = this.#values(frame.rows);
-    const { spokes, series, spoke, value } = data;
+    const { spoke, value } = data;
+    // Spokes, series, and values as the chart's field displays write them,
+    // where it has any (a radar of value fields, its spokes by their labels).
+    const { spec } = this;
+    const fieldText = frame.features?.fields?.items(this.table);
+    const { measureField } = this;
+    const { spokes, series } = fieldText
+      ? {
+          spokes: spec.fields
+            ? data.spokes.map((field) => fieldText.label(field))
+            : fieldText.texts(spec.category, data.spokes),
+          // One polygon without a series field is named by what it measures.
+          series:
+            spec.series === undefined && measureField !== undefined
+              ? data.series.map(() => fieldText.label(measureField))
+              : fieldText.texts(spec.series, data.series),
+        }
+      : data;
     const count = spokes.length;
-    const keys = series.map((name) => this.#key(frame.id, name));
+    const keys = data.series.map((name) => this.#key(frame.id, name));
     const shown = series.flatMap((_, s) => (hidden.has(keys[s]!) ? [] : [s]));
-    if (count < 3 || count > MAX_SPOKES) return this.#empty(shown.length, count);
+    if (count < 3 || count > MAX_SPOKES) return this.#empty(shown.length, count, fieldText);
     const colors = keys.map((key) => frame.color(key));
     const font = `${theme.fontSize}px ${theme.font}`;
     const lineHeight = Math.round(theme.fontSize * 1.25);
@@ -300,7 +321,11 @@ export class RadarMark implements LayoutMark {
     geometry.push(...this.#polygons(drawn, data, colors, frame));
     // The rim's value continues the rings' steps unless a given domain ends between them.
     const stepped = rings.length > 0 && ticks[ticks.length - 1] === hi;
-    geometry.push(this.#ticks(rings, hi, stepped, place, labeled.labels, frame, font, lineHeight));
+    // The rings' values, and the range, in the format the value fields' displays agree on.
+    const scale = fieldText?.scale(spec.fields ?? [spec.value!]);
+    geometry.push(
+      this.#ticks(rings, hi, stepped, place, labeled.labels, frame, font, lineHeight, scale),
+    );
     for (const anchor of ["start", "middle", "end"] as const) {
       const placed = labeled.labels.filter((label) => label.anchor === anchor);
       if (placed.length === 0) continue;
@@ -318,9 +343,11 @@ export class RadarMark implements LayoutMark {
     }
 
     const { entries, owners, at } = drawn;
-    const f = (v: number) => formatNumber(v, locale);
+    const f = scale ?? ((v: number) => formatNumber(v, locale));
+    // Each spoke's values: of the value field, or of the spoke's own field.
+    const write = (k: number) => fieldText?.value(spec.value ?? spec.fields![k]) ?? f;
     const keyOf = (i: number) =>
-      JSON.stringify([frame.id, series[owners[i]!], spokes[spoke[entries[i]!]!]]);
+      JSON.stringify([frame.id, data.series[owners[i]!], data.spokes[spoke[entries[i]!]!]]);
     const itemOf = (i: number): LayoutItem => {
       const v = value[entries[i]!]!;
       const range =
@@ -336,7 +363,7 @@ export class RadarMark implements LayoutMark {
         label: series[owners[i]!]!,
         color: colors[owners[i]!]!,
         value: v,
-        text: `${spokes[spoke[entries[i]!]!]}: ${f(v)} (${range})`,
+        text: `${spokes[spoke[entries[i]!]!]}: ${write(spoke[entries[i]!]!)(v)} (${range})`,
         px,
         py,
         outline: symbolPath("circle", px, py, POINT_RADIUS + 3),
@@ -365,7 +392,7 @@ export class RadarMark implements LayoutMark {
         places ??= new Map(entries.map((_, i) => [keyOf(i), i]));
         return places.get(key) ?? -1;
       },
-      summary: () => this.#summary(data, drawn, lo, hi, locale),
+      summary: () => this.#summary({ ...data, spokes, series }, drawn, lo, hi, f, write, fieldText),
     };
   }
 
@@ -534,7 +561,8 @@ export class RadarMark implements LayoutMark {
 
   /**
    * The rings' values beside the first spoke, the rim's first, as many as
-   * fit; the center, where every spoke meets, is left unlabeled.
+   * fit, written as `scale` writes them where given (the value fields'
+   * format); the center, where every spoke meets, is left unlabeled.
    */
   #ticks(
     rings: readonly number[],
@@ -545,13 +573,16 @@ export class RadarMark implements LayoutMark {
     frame: LayoutFrame,
     font: string,
     lineHeight: number,
+    scale?: (value: number) => string,
   ): TextGeometry {
     const { locale } = frame;
     const values = [...rings, hi];
     // Rings and rim alike, unless the rim is off their steps and needs its own precision.
-    const texts = stepped
-      ? numberTickLabels(values, locale)
-      : [...numberTickLabels(rings, locale), formatNumber(hi, locale)];
+    const texts = scale
+      ? values.map(scale)
+      : stepped
+        ? numberTickLabels(values, locale)
+        : [...numberTickLabels(rings, locale), formatNumber(hi, locale)];
     const ticks = values
       .map((v, i) => ({ text: texts[i]!, x: place.cx + 4, y: place.cy - place.distance(v) }))
       .reverse();
@@ -570,8 +601,8 @@ export class RadarMark implements LayoutMark {
   }
 
   /** What a radar of too few or too many spokes draws: nothing, and a sentence saying why. */
-  #empty(series: number, spokes: number): LayoutResult {
-    const what = this.#what();
+  #empty(series: number, spokes: number, text: ItemText | undefined): LayoutResult {
+    const what = this.#what(text);
     const why =
       series === 0 || spokes === 0
         ? `Radar of ${what}, with nothing to show.`
@@ -590,15 +621,25 @@ export class RadarMark implements LayoutMark {
     };
   }
 
-  #what(): string {
+  /** What the radar shows, its fields named by their labels where `text` (the chart's field displays) gives them. */
+  #what(text?: ItemText): string {
     const { spec } = this;
+    const label = (field: string) => text?.label(field) ?? field;
     return spec.fields
-      ? (spec.label ?? spec.fields.join(", "))
-      : `${spec.value} by ${spec.category}`;
+      ? (spec.label ?? spec.fields.map(label).join(", "))
+      : `${label(spec.value!)} by ${label(spec.category!)}`;
   }
 
-  #summary(data: Values, drawn: Drawn, lo: number, hi: number, locale: string | undefined): string {
-    const what = this.#what();
+  #summary(
+    data: Values,
+    drawn: Drawn,
+    lo: number,
+    hi: number,
+    f: (value: number) => string,
+    write: (spoke: number) => (value: number) => string,
+    text: ItemText | undefined,
+  ): string {
+    const what = this.#what(text);
     const { spokes, series, spoke, value } = data;
     const { entries, owners, polygons } = drawn;
     if (entries.length === 0) return `Radar of ${what}, with nothing to show.`;
@@ -608,12 +649,11 @@ export class RadarMark implements LayoutMark {
       if (value[e]! > value[entries[highest]!]!) highest = i;
       if (value[e]! < value[entries[lowest]!]!) lowest = i;
     });
-    const f = (v: number) => formatNumber(v, locale);
     // A radar of one polygon names only spokes.
     const name = (i: number) => {
       const e = entries[i]!;
       const owner = series.length > 1 ? `${series[owners[i]!]}'s ` : "";
-      return `${owner}${spokes[spoke[e]!]} ${f(value[e]!)}`;
+      return `${owner}${spokes[spoke[e]!]} ${write(spoke[e]!)(value[e]!)}`;
     };
     // The series with values here: in a facet panel, some may have none.
     const filled = polygons.filter(({ from, to }) => to > from).length;

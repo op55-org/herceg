@@ -17,6 +17,7 @@ import {
 } from "../data/hierarchy.ts";
 import type { Table } from "../data/table.ts";
 import { textDrawing } from "../draw/labels.ts";
+import type { ItemText } from "../fields/chart.ts";
 import { formatNumber } from "../format/format.ts";
 import { fitText, oneLineText } from "../layout/text.ts";
 import type { ProvenanceGroup } from "../model/items.ts";
@@ -117,6 +118,8 @@ export interface DrillRoot {
 export interface Drill extends DrillRoot {
   /** Where the breadcrumbs name the whole tree (key null) and each step, in pixels. */
   readonly crumbs: readonly (Rect & { key: string | null; label: string })[];
+  /** The path's steps as the breadcrumbs name them, drawn or not: through the chart's field displays. */
+  readonly labels: readonly string[];
   /** The item key of a node named by its key or its names from the top level down; undefined for none. */
   find(node: string | readonly string[]): string | undefined;
   /** The path to the node keyed `key`, from the top level down to it. */
@@ -454,17 +457,23 @@ export class TreeData {
 
   /**
    * What a tree drilled into `root` (0 for none) of the whole tree, drawn as
-   * `view`, tells the chart: its key, its path, the breadcrumbs `crumbs`
-   * drew, which nodes open in the view, and where a click on no item goes up (`out`).
+   * `view` on `frame`, tells the chart: its key, its path, the breadcrumbs
+   * `crumbs` drew, which nodes open in the view, and where a click on no
+   * item goes up (`out`).
    */
   drill(
-    id: string | number,
+    frame: LayoutFrame,
     root: number,
     view: TreeView,
     crumbs: Breadcrumbs["crumbs"],
     out?: (x: number, y: number) => boolean,
   ): Drill {
+    const { id } = frame;
     const whole = this.view();
+    // Steps named as the breadcrumbs name them, for announcements.
+    const names = this.#names(frame);
+    const labels: string[] = [];
+    for (let at = root; at > 0; at = whole.tree.parent[at]!) labels.unshift(names[at]!);
     const pathTo = (node: number): DrillStep[] => {
       const steps: DrillStep[] = [];
       for (let at = node; at > 0; at = whole.tree.parent[at]!)
@@ -484,6 +493,7 @@ export class TreeData {
       key: root > 0 ? this.keyOf(id, whole, root) : null,
       path: pathTo(root),
       crumbs,
+      labels,
       find: (node) => {
         const at =
           typeof node === "string" ? this.nodeOf(id, whole, node) : childAlong(whole.tree, node);
@@ -498,6 +508,13 @@ export class TreeData {
       opensInTree: (key) => opens(this.view(view.rows), key),
       ...(out && { out }),
     };
+  }
+
+  /** The whole tree's names as the chart's field displays on `frame` write them, where it has any. */
+  #names(frame: LayoutFrame): readonly string[] {
+    const whole = this.view();
+    return (frame.features?.fields?.items(this.table).tree(whole, this.encoding) ?? whole).tree
+      .names;
   }
 
   /**
@@ -521,7 +538,9 @@ export class TreeData {
     if (view.nodes)
       for (let at = view.nodes[0]!; at > 0; at = whole.tree.parent[at]!) path.push(at);
     const nodes: (number | null)[] = [null, ...path.reverse()];
-    const labelOf = (node: number | null) => (node === null ? ALL : whole.tree.names[node]!);
+    // Steps named as the chart's field displays write them, keyed raw.
+    const names = this.#names(frame);
+    const labelOf = (node: number | null) => (node === null ? ALL : names[node]!);
     // Steps' names as the strip writes them, on its one line.
     const oneLine = (node: number | null) => oneLineText(labelOf(node));
     const separator = measure(SEPARATOR, font);
@@ -727,7 +746,12 @@ export class TreeData {
   }
 
   /** The text an item adds for what a highlighted selection holds of its node. */
-  selectedText(held: Held | undefined, node: number, locale: string | undefined): string {
+  selectedText(
+    held: Held | undefined,
+    node: number,
+    locale: string | undefined,
+    text?: ItemText,
+  ): string {
     if (!held) return "";
     const value = this.#value;
     return heldText(
@@ -735,8 +759,9 @@ export class TreeData {
       held.rows[node]!,
       value === undefined
         ? undefined
-        : { field: value, held: held.values[node]!, of: held.of[node]! },
+        : { field: text?.label(value) ?? value, held: held.values[node]!, of: held.of[node]! },
       (n) => formatNumber(n, locale),
+      text?.amount(value),
     );
   }
 

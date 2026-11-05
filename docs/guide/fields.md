@@ -14,6 +14,8 @@ as rules matching fields by name, regular expression, kind, and table.
 - [Axes](#axes)
 - [Names](#names)
 - [Tooltips, labels, and gauges](#tooltips-labels-and-gauges)
+- [Layout marks](#layout-marks)
+- [Grids](#grids)
 - [Reading displays in TypeScript](#reading-displays-in-typescript)
 - [Specs](#specs)
 - [Python](#python)
@@ -28,11 +30,15 @@ as rules matching fields by name, regular expression, kind, and table.
 - Charts take `fields`: `createChart`, the React, Vue, and Svelte
   `<Chart>`, specs, and Python's `hg.Chart(fields=...)`. Axes, legends,
   series names, tooltips, labels, gauges, color ramps, and the text
-  alternative write fields through their displays ([Charts](#charts)).
+  alternative write fields through their displays ([Charts](#charts)), and
+  so do pies, funnels, treemaps, sunbursts, Sankey diagrams, networks,
+  maps, and radars ([Layout marks](#layout-marks)).
+- Grids take `fields: compileFields(rules)`: headers, descriptions, cells,
+  group keys, and aggregates ([Grids](#grids)).
 - Specs carry `fields`, and `validateSpec` checks it, with paths.
 - Python builds and checks `hg.FieldDisplay`, `hg.Match`, and `hg.Mapping`.
-- Grids and layout marks taking displays, colors and thresholds, and
-  links are planned ([roadmap](../roadmap.md)).
+- Colors and thresholds from displays, and links, are planned
+  ([roadmap](../roadmap.md)).
 - Every format form a display takes (durations, SI and binary prefixes,
   text around number patterns) works today wherever charts take a format:
   see [Formats](axes-and-legends.md#formats).
@@ -262,6 +268,40 @@ whatever `fields.latency.label` says.
   under the gauge's own; an end the gauge does not give comes from the
   display, and ends that cross are refused, naming where each is given.
 
+## Layout marks
+
+Layout marks write their items' names through the displays of the fields
+they read them from, sums in their value field's format, and fields by
+their labels, in legends, drawn labels, tooltips, breadcrumbs, the text
+alternative, and the inspections events carry.
+
+| Mark | Names | Amounts | Labels of |
+| --- | --- | --- | --- |
+| Pie, funnel | Slices and stages, through `category` | Sums through `value` | `category` and `value`, in the summary and selected shares |
+| Treemap, sunburst | Each level's nodes through its `path` field (deeper levels through the last; `id` for id and parent trees) | Values through `value` | the path fields and `value` |
+| Sankey | Nodes, through `source` and `target` where their displays write the name alike | Flows and totals through `value` | `value` |
+| Network | Nodes, through `source`, `target`, and `node` where they agree; groups through `color`; link labels through `linkLabelField` | Links and totals through `value`; sizes through `size` | `value`, `color`, `size` |
+| Map regions and points | Through `labelField`; legend entries of a category `color` through it | Values through `color`; sizes through `size`, in the size key | `color` (the ramp's title) and `size` (the key's) |
+| Radar | Spokes through `category`, or `fields` by their labels; series through `series` | Values through `value` | `category` and `value` |
+
+Sums, totals, and means are written in the value field's format and missing
+text, without its mappings, which name single values. Label parts of
+treemaps and sunbursts take `{ field }` and `{ value: true }` as series
+marks' labels do.
+
+Names never key anything: items' keys, legend entries, hiding, selections,
+`rowsOf`, and drills stay raw. `setDrillRoot(["eu"])` and `drill` events
+name nodes by their raw paths, while the breadcrumbs draw "Europe".
+
+## Grids
+
+Grids take displays through `herceg/fields` alone, compiled once:
+`createGridModel({ ..., fields: compileFields(rules) })`, then
+`model.setFields(...)` to change them. Headers read fields' labels and
+descriptions, cells write through the displays, and group rows write keys
+and aggregates by operation and kind. Grids without `fields` load none of
+it. See [Grids](grids.md#field-displays).
+
 ## Reading displays in TypeScript
 
 `herceg/fields` is its own entry: charts that do not import it pay
@@ -287,8 +327,14 @@ displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; 
   `format`, which replaces the field's while its mappings and missing text
   still apply, and the surface's own `missing` text, for fields whose
   displays give none ("–" by default).
+- A display's `text(value)` writes a value; `format(value)` writes a value
+  computed from the field's values (a sum, a mean) in its format and
+  missing text, without the mappings. `settings.defaultFormat` gives a
+  surface's format where neither its own nor the field's applies (grids'
+  times, to the second).
 - `compileFields(fields)` checks the rules once and returns their
-  `displayOf`, for surfaces resolving many fields.
+  `displayOf`, for surfaces resolving many fields, and `column(...)`, what
+  a grid column shows through them (`ColumnDisplay`), which grids call.
 - `fieldsOf(table, displays)` writes rules for a table's fields, each
   display typed by its field's kind and checked against the schema; the
   rules match that table's fields wherever they are drawn.
@@ -344,7 +390,10 @@ health = hg.FieldDisplay(mappings=[hg.Mapping(between=(0.9, None), text="Healthy
   an open end; `value` takes text, a number, or a datetime.
 - Regular expressions are JavaScript's, passed through as given.
 - `hg.Chart(fields=...)` takes displays (a dict by column, or a list of
-  rules) for every mark of the chart; widgets and Streamlit carry them.
+  rules) for every mark of the chart, layout marks too
+  (`hg.Chart(sales, fields=...).pie("region", "revenue")` names slices
+  through the region's display); widgets and Streamlit carry them. Grids
+  are TypeScript's alone.
 - `hg.Match(table=)` takes data the chart draws, written as the chart's
   table name, or a spec table's name.
 - Marks' `label=` and axes' `title=` take parts: text and

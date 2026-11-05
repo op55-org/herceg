@@ -270,6 +270,7 @@ export class GraphMark implements LayoutMark {
   readonly nodes: Table | undefined;
   readonly otherTables: readonly Table[];
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources | undefined;
   /** Dragging moves nodes with `interaction.drag`, and charts select rows of either table. */
   readonly interactions = ["plane", "lasso", "drag"] as const;
@@ -319,6 +320,7 @@ export class GraphMark implements LayoutMark {
     this.nodes = nodes;
     this.otherTables = nodes ? [nodes] : [];
     this.measure = spec.value ?? "Links";
+    this.measureField = spec.value;
     // Nodes colored by a field of the nodes table stand for its values.
     this.identity =
       nodes && spec.color !== undefined
@@ -703,6 +705,30 @@ export class GraphMark implements LayoutMark {
     const network = rows ? this.#part(whole, rows) : whole;
     const { names, source, target, value, group, groups } = network;
     const count = names.length;
+    // Names, labels, and amounts through the fields' displays, where the chart
+    // has any: node names as the fields naming them write them where they
+    // agree. Keys stay raw.
+    const { spec, table, nodes: nodeTable } = this;
+    const fields = frame.features?.fields;
+    const linkText = fields?.items(table);
+    const nodeText = fields?.items(nodeTable);
+    const reads: (readonly [Table, string])[] = [
+      [table, spec.source],
+      [table, spec.target],
+    ];
+    if (nodeTable) reads.push([nodeTable, spec.node!]);
+    const written: Network = fields
+      ? {
+          ...network,
+          names: fields.names(reads, network.names),
+          labels: network.labels.map(
+            (label) => linkText!.value(spec.linkLabelField)?.(label) ?? label,
+          ),
+        }
+      : network;
+    const format = (v: number) => formatNumber(v, locale);
+    const amount = linkText?.amount(spec.value) ?? format;
+    const valueLabel = linkText?.label(spec.value!) ?? spec.value;
     const directed = this.spec.directed === true;
 
     // Group colors; nodes without a group are muted, unless no node has one.
@@ -954,27 +980,33 @@ export class GraphMark implements LayoutMark {
     const leftward =
       this.#layout.type === "circular" ? (node: number) => x(node) < middle : () => false;
     if (labeled)
-      geometry.push(...this.#labels(network, nodes, degree, at, radii, frame, placed, leftward));
+      geometry.push(...this.#labels(written, nodes, degree, at, radii, frame, placed, leftward));
     if (network.label)
-      geometry.push(...this.#linkLabels(network, links, route, at, radii, nodes, frame, placed));
+      geometry.push(...this.#linkLabels(written, links, route, at, radii, nodes, frame, placed));
 
-    const format = (v: number) => formatNumber(v, locale);
+    const nodeLabel = (field: string) => nodeText?.label(field) ?? field;
+    const groupText = nodeText?.value(spec.color);
+    const sizeText = nodeText?.value(spec.size) ?? format;
     const nodeItem = (node: number): LayoutItem => {
       const details: string[] = [];
-      if (group[node]! >= 0) details.push(`${this.spec.color} ${groups[group[node]!]}`);
+      const { color, size } = spec;
+      if (group[node]! >= 0) {
+        const name = groups[group[node]!]!;
+        details.push(`${nodeLabel(color!)} ${groupText?.(name) ?? name}`);
+      }
       if (network.size && Number.isFinite(network.size[node]))
-        details.push(`${this.spec.size} ${format(network.size[node]!)}`);
+        details.push(`${nodeLabel(size!)} ${sizeText(network.size[node]!)}`);
       let text = plural(degree[node]!, "link", "links");
       // Links' totals are finite, but a node's sum of them can overflow.
       const total = weight[node]! < Number.POSITIVE_INFINITY ? weight[node]! : Number.NaN;
-      if (this.spec.value !== undefined)
-        text += `, ${this.spec.value} ${Number.isNaN(total) ? "too large to total" : format(total)}`;
+      if (spec.value !== undefined)
+        text += `, ${valueLabel} ${Number.isNaN(total) ? "too large to total" : amount(total)}`;
       if (details.length > 0) text += ` (${details.join(", ")})`;
       return {
         key: JSON.stringify([frame.id, names[node]]),
-        label: names[node]!,
+        label: written.names[node]!,
         color: colorOf(node),
-        value: this.spec.value === undefined ? degree[node]! : total,
+        value: spec.value === undefined ? degree[node]! : total,
         text,
         px: x(node),
         py: y(node),
@@ -986,14 +1018,14 @@ export class GraphMark implements LayoutMark {
       const [s, t] = endsOf(network, link);
       const r = route(link);
       const code = network.label?.[link] ?? -1;
-      const named = code >= 0 ? `${network.labels[code]}: ` : "";
+      const named = code >= 0 ? `${written.labels[code]}: ` : "";
       const [mx, my] = r.middle();
       return {
         key: JSON.stringify([frame.id, names[s], names[t]]),
-        label: `${names[s]} ${directed ? "→" : "—"} ${names[t]}`,
+        label: `${written.names[s]} ${directed ? "→" : "—"} ${written.names[t]}`,
         color: linkColor(link),
         value: value[link]!,
-        text: `${named}${format(value[link]!)}`,
+        text: `${named}${amount(value[link]!)}`,
         px: mx,
         py: my,
         outline: routePath(r, widthOf(link) / 2 + 2),
@@ -1233,7 +1265,7 @@ export class GraphMark implements LayoutMark {
         const place = placeOfLink(linkOfKey(parts));
         return place < 0 ? -1 : nodes.length + place;
       },
-      summary: () => this.#summary(network, nodes, links, degree, locale, places),
+      summary: () => this.#summary(written, nodes, links, degree, places, amount, valueLabel),
       // A node stands for its rows of the nodes table, a link for those of the links table.
       rowsOf: (key, table) => {
         const parts = keyParts(key);
@@ -1588,8 +1620,9 @@ export class GraphMark implements LayoutMark {
     nodes: readonly number[],
     links: readonly number[],
     degree: Int32Array,
-    locale: string | undefined,
     places: NodePositions,
+    amount: (value: number) => string,
+    valueLabel: string | undefined,
   ): string {
     const { names, loops, overflowed } = network;
     let left = "";
@@ -1619,7 +1652,7 @@ export class GraphMark implements LayoutMark {
         if (network.value[link]! > network.value[strongest]!) strongest = link;
       const arrow = this.spec.directed ? "→" : "—";
       const [s, t] = endsOf(network, strongest);
-      text += ` Strongest link: ${names[s]} ${arrow} ${names[t]}, ${this.spec.value} ${formatNumber(network.value[strongest]!, locale)}.`;
+      text += ` Strongest link: ${names[s]} ${arrow} ${names[t]}, ${valueLabel} ${amount(network.value[strongest]!)}.`;
     }
     return text + left;
   }
