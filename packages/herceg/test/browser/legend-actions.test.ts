@@ -1,5 +1,5 @@
 // What a legend's entries do (`legend.action`): hide (the default), select
-// the series they name (with state support), or nothing of the chart's own.
+// the series they name, or nothing of the chart's own.
 import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { table } from "../../src/data/table.ts";
@@ -8,7 +8,6 @@ import type { ChartEvents } from "../../src/dom/events.ts";
 import { legend } from "../../src/guides/options.ts";
 import { line } from "../../src/marks/line.ts";
 import { pie } from "../../src/marks/pie.ts";
-import { chartState } from "../../src/state.ts";
 
 let host: HTMLDivElement;
 const charts: Chart[] = [];
@@ -59,7 +58,7 @@ const API = '["lines","api"]';
 describe("a legend that selects", () => {
   it("selects the series an entry names, adds with Shift, and clears on the one selected", async () => {
     // A1's legend, selecting lines instead of hiding them.
-    const chart = await mount({ state: chartState, legend: { action: "select" } });
+    const chart = await mount({ legend: { action: "select" } });
     const selections = heard(chart, "select");
     const clicks = heard(chart, "click");
     press(chart, "auth");
@@ -82,7 +81,7 @@ describe("a legend that selects", () => {
   });
 
   it("selects from the keyboard, as the button's own click", async () => {
-    const chart = await mount({ state: chartState, legend: { action: "select" } });
+    const chart = await mount({ legend: { action: "select" } });
     const selections = heard(chart, "select");
     press(chart, "api", { detail: 0 });
     expect(selections.at(-1)).toMatchObject({ cause: "keyboard" });
@@ -91,7 +90,6 @@ describe("a legend that selects", () => {
 
   it("in a legend the guides list, too", async () => {
     const chart = await mount({
-      state: chartState,
       legend: false,
       guides: [legend({ action: "select" })],
     });
@@ -101,7 +99,6 @@ describe("a legend that selects", () => {
 
   it("selects a layout mark's items, as a pie's slices", async () => {
     const chart = await mount({
-      state: chartState,
       legend: { action: "select" },
       marks: [
         pie(table({ fruit: ["apple", "pear", "fig"], n: [3, 2, 1] }), {
@@ -123,21 +120,6 @@ describe("a legend that selects", () => {
     press(chart, "apple");
     expect(chart.selection).toMatchObject({ kind: "items", items: ['["slices","apple"]'] });
   });
-
-  it("needs state support", async () => {
-    const errors: string[] = [];
-    const chart = createChart(host, {
-      marks: [line(metrics(), { x: "t", y: ["auth", "api"] })],
-      legend: { action: "select" },
-      onError: (error) => errors.push(`${error.code} ${error.message}`),
-    });
-    charts.push(chart);
-    // Refused once the interaction code reads the options: `loading` rejects.
-    await chart.loading?.catch(() => {});
-    expect(errors).toEqual([
-      "unsupported legend action: needs state support; give the chart state: chartState, from herceg/state",
-    ]);
-  });
 });
 
 describe("a legend that does nothing", () => {
@@ -154,7 +136,7 @@ describe("a legend that does nothing", () => {
 
   it("shows nothing hidden more widely than its entry, a mark whole", async () => {
     for (const action of [false, "select"] as const) {
-      const chart = await mount({ state: chartState, legend: { action } });
+      const chart = await mount({ legend: { action } });
       const whole = '{"mark":"lines"}';
       chart.setHiddenKeys([whole]);
       chart.render();
@@ -179,7 +161,7 @@ describe("a legend that hides", () => {
   });
 
   it("says so again on its entries once it selected or did nothing", async () => {
-    const chart = await mount({ state: chartState, legend: { action: "select" } });
+    const chart = await mount({ legend: { action: "select" } });
     press(chart, "auth");
     const hiding = (label: string) => {
       const button = entry(chart, label);

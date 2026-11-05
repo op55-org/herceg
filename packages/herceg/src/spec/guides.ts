@@ -487,7 +487,7 @@ export interface LegendOptionsSpec {
    * and shows what it names; "select" selects it, as a series selection
    * (Shift adds it or takes it out; a click on the one selected clears
    * it); `false`, nothing of the chart's own (`click` events still report
-   * it). "select" needs state support (`herceg/state`). @default "hide"
+   * it). @default "hide"
    */
   action?: LegendAction;
 }

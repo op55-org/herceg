@@ -3,7 +3,7 @@
 // boxed as guides draw it.
 
 import { bisect } from "../data/bisect.ts";
-import type { Rect, TextItem } from "../scene/scene.ts";
+import type { Rect, SegmentsItem, TextItem } from "../scene/scene.ts";
 import { haloOf, type ResolvedHalo, type TextPaint } from "../style/style.ts";
 
 /**
@@ -223,6 +223,27 @@ function moved(at: TextAt, dx: number, dy: number): TextAt {
 /** The halo of guide text in `paint` drawn over `surface`, or over its box when it has one. */
 export function textHalo(paint: TextPaint, surface: string): ResolvedHalo | undefined {
   return haloOf(paint.halo, paint.background?.fill ?? surface);
+}
+
+/**
+ * A line through each line of `item`'s text, which starts at its x (as a
+ * hidden series' legend label is struck through), faded as the text is by
+ * `opacity`, a share of its paint's.
+ */
+export function struckThrough(item: TextItem, measure: MeasureText, opacity: number): SegmentsItem {
+  const { x, y, paint } = item;
+  return {
+    type: "segments",
+    coords: item.text
+      .split("\n")
+      .flatMap((line, k) => [
+        x,
+        y + k * paint.lineHeight,
+        x + measure(line, paint.css),
+        y + k * paint.lineHeight,
+      ]),
+    paint: { stroke: paint.color, strokeWidth: 1, dash: [], opacity: paint.opacity * opacity },
+  };
 }
 
 /**

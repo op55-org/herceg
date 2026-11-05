@@ -26,8 +26,7 @@ export type { Provenance, ProvenanceGroup, SourceCondition } from "../model/prov
 
 /**
  * An opaque name of one chart's state as one of its reports saw it (each
- * state event's `basis`, and `chart.basis` now), for conditional writes:
- * charts with state support (`herceg/state`) report it.
+ * state event's `basis`, and `chart.basis` now), for conditional writes.
  */
 export type Basis = string & { readonly __basis: unique symbol };
 
@@ -38,8 +37,7 @@ export type Basis = string & { readonly __basis: unique symbol };
  * otherwise it changes nothing and the state is reported again, with
  * cause "api". So an answer that took time (a server's, a Streamlit
  * rerun's) never undoes what the user did meanwhile. A basis of another
- * chart, or of one since destroyed, is refused. It needs state support
- * (`herceg/state`), as bases do.
+ * chart, or of one since destroyed, is refused.
  */
 export interface Conditional {
   expected?: Basis | undefined;
@@ -173,25 +171,24 @@ export interface InputEvent {
 
 /**
  * What every change of the chart's state reports with it: what made it,
- * the chart's `revision` once it applied, and with state support
- * (`herceg/state`) the basis a write answering the report gives as
- * `expected`.
+ * the chart's `revision` once it applied, and the basis a write answering
+ * the report gives as `expected`.
  */
 export interface StateChange {
   cause: ChangeCause;
   revision: number;
-  basis?: Basis;
+  basis: Basis;
 }
 
 /**
- * A change of view, with the chart's `revision` once it applied and, with
- * state support, its basis and the chart's whole view after it (`state`,
- * as the `viewport` option takes it) (see `ChartEvents.viewport`).
+ * A change of view, with the chart's `revision` once it applied, its
+ * basis, and the chart's whole view after it (`state`, as the `viewport`
+ * option takes it) (see `ChartEvents.viewport`).
  */
 export interface ViewportEvent extends ViewReport {
   readonly revision: number;
-  readonly basis?: Basis;
-  readonly state?: ViewportState;
+  readonly basis: Basis;
+  readonly state: ViewportState;
 }
 
 /** What a `select` event reports (see `ChartEvents.select`). */
@@ -206,14 +203,13 @@ export interface SelectEvent extends StateChange {
   phase: Phase;
   /** A brush's: what it belongs to; for a clear, what it belonged to; empty for items and series. */
   owner: SelectionOwner;
-  /** With state support: the selection committed, which a gesture's previews leave as it was. */
-  state?: ChartSelection | null;
+  /** The selection committed, which a gesture's previews leave as it was. */
+  state: ChartSelection | null;
   /**
    * What the selection holds on each table its marks read, as a condition
    * on that table's fields: for filtering row views, or a product's
    * queries. A table is left out where no condition says it exactly (a
-   * lasso, a stack's tops, rows without names). It needs state support:
-   * without, reading it throws, naming `herceg/state`.
+   * lasso, a stack's tops, rows without names).
    */
   conditions: readonly SelectionCondition[];
   /**
@@ -315,8 +311,8 @@ export interface ChartEvents {
    */
   drill: ItemChanges["drill"] &
     StateChange & {
-      /** With state support: the whole state, as the `drillRoot` option takes it. */
-      state?: DrillState;
+      /** The whole state, as the `drillRoot` option takes it. */
+      state: DrillState;
     };
   /**
    * A network's node was moved (dragged, Shift with the arrow keys, or
@@ -355,8 +351,8 @@ export interface ChartEvents {
   visibility: StateChange & {
     hiddenKeys: readonly string[];
     panels?: PanelVisibility;
-    /** With state support: the whole state, as the `visibility` option takes it. */
-    state?: VisibilityState;
+    /** The whole state, as the `visibility` option takes it. */
+    state: VisibilityState;
   };
   /**
    * The chart drew a frame of its data, axes, and legend (a cursor or
@@ -377,9 +373,28 @@ export interface ChartEvents {
 
 export type ChartListener<K extends keyof ChartEvents> = (event: ChartEvents[K]) => void;
 
+/**
+ * An event as the chart's code makes it, before its state adds what
+ * listeners hear with every report of a state (see `ChartState.report`):
+ * the basis, the whole state, and a selection's conditions.
+ */
+export type Unextended<E> = E extends unknown ? Omit<E, "basis" | "state" | "conditions"> : never;
+
+/** Makes an event as the chart's code made it into the event listeners hear (see `Unextended`). */
+type Report = <K extends keyof ChartEvents>(
+  type: K,
+  event: Unextended<ChartEvents[K]>,
+) => ChartEvents[K];
+
 /** Listeners by event. A listener that throws is reported; the others still run. */
 export class Emitter {
   readonly #listeners = new Map<keyof ChartEvents, Set<(event: never) => void>>();
+  /** Makes each event emitted as listeners hear it: the chart's state's `report`. */
+  readonly #report: Report;
+
+  constructor(report: Report) {
+    this.#report = report;
+  }
 
   on<K extends keyof ChartEvents>(type: K, listener: ChartListener<K>): () => void {
     let set = this.#listeners.get(type);
@@ -396,7 +411,13 @@ export class Emitter {
     return (this.#listeners.get(type)?.size ?? 0) > 0;
   }
 
-  emit<K extends keyof ChartEvents>(type: K, event: ChartEvents[K]): void {
+  /** Reports `event`, as the chart's state makes it, to the listeners of `type`. */
+  emit<K extends keyof ChartEvents>(type: K, event: Unextended<ChartEvents[K]>): void {
+    this.deliver(type, this.#report(type, event));
+  }
+
+  /** Gives the listeners of `type` an event as it is. */
+  deliver<K extends keyof ChartEvents>(type: K, event: ChartEvents[K]): void {
     for (const listener of [...(this.#listeners.get(type) ?? [])]) {
       try {
         (listener as ChartListener<K>)(event);

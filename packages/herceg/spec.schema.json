@@ -4761,7 +4761,7 @@
         "style": { "title": "Style", "$ref": "#/$defs/LegendStyles" },
         "action": {
           "title": "Action",
-          "description": "What a click (or Enter) on an entry does: \"hide\" (the default) hides and shows what it names; \"select\" selects it, as a series selection (Shift adds it or takes it out; a click on the one selected clears it); `false`, nothing of the chart's own (`click` events still report it). \"select\" needs state support (`herceg/state`).",
+          "description": "What a click (or Enter) on an entry does: \"hide\" (the default) hides and shows what it names; \"select\" selects it, as a series selection (Shift adds it or takes it out; a click on the one selected clears it); `false`, nothing of the chart's own (`click` events still report it).",
           "$ref": "#/$defs/LegendAction",
           "default": "hide"
         }
@@ -4821,7 +4821,7 @@
         "style": { "title": "Style", "$ref": "#/$defs/LegendStyles" },
         "action": {
           "title": "Action",
-          "description": "What a click (or Enter) on an entry does: \"hide\" (the default) hides and shows what it names; \"select\" selects it, as a series selection (Shift adds it or takes it out; a click on the one selected clears it); `false`, nothing of the chart's own (`click` events still report it). \"select\" needs state support (`herceg/state`).",
+          "description": "What a click (or Enter) on an entry does: \"hide\" (the default) hides and shows what it names; \"select\" selects it, as a series selection (Shift adds it or takes it out; a click on the one selected clears it); `false`, nothing of the chart's own (`click` events still report it).",
           "$ref": "#/$defs/LegendAction",
           "default": "hide"
         }

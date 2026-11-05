@@ -223,8 +223,8 @@ createChart(month, { marks: [line(hours, { x: "at", y: "load" })], interaction: 
   or `select` event and what synced charts receive follow with that frame,
   naming the panels it draws. On a chart of facets, subplots, maps, or
   networks, whose panels and planes that frame draws, views and selections
-  apply with it, in the order they were set; reading a panel's back
-  (`getViewport({ panel })`) waits for `chart.ready`. What synced charts
+  apply with it, in the order they were set; until then a panel's view
+  (`getViewport({ panel })`) reads as the calls waiting ask for it. What synced charts
   share before then takes its place in the same order (selections, whose
   categories that frame draws, always wait for it), and is not shared
   back. The frame reports and shares each state as it is then: a
@@ -371,7 +371,6 @@ focus goes back to the chart.
 
 ```ts
 const chart = createChart(element, {
-  state: chartState, // pin() and pinned need state support
   marks: [line(sales, { id: "sales", x: "day", y: ["east", "west"] })],
   tooltip: { pin: "click" },
   renderTooltip: (inspection) => {
@@ -413,10 +412,9 @@ widget.pin(value=datetime(2025, 4, 1), axis="x")
   from an event or a reference (`{ mark: "sales", item: [...] }`);
   `value`, a number, epoch ms on time axes, or a category's name; `axis`
   is the inspection's by default; `panel`, needed in charts of several, a
-  panel's key. Pins asked for before the first frame wait for it; one
-  that then finds nothing to read is reported let go. A pin at a value
-  nothing reads lets any pin go. Both need [state support](#chart-state);
-  `pinned` is `undefined` without it.
+  panel's key. Pins asked for before the first frame wait for it, and
+  `pinned` reads them at once; one that then finds nothing to read is
+  reported let go. A pin at a value nothing reads lets any pin go.
 - **Options.** `tooltip.pin` with `inspection: false` is refused: nothing
   is inspected to pin.
 
@@ -500,16 +498,16 @@ chart.on("contextMenu", ({ pointer }) => pointer.inPlot && addAnnotation(pointer
 
 | Event | Reports |
 | --- | --- |
-| `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), and each panel's whole view (`views`); with state support, `state`. A map's or network's view is its plane's ranges. |
-| `select` | The `selection` ([Selections](#selections)), its `phase` (`"preview"`, `"commit"`, `"cancel"`), a brush's `owner` (scale instances and panels), `cause`, `revision`, and with `rowSelection`, `rows` per table; with [state support](#chart-state), `basis`, `state`, and `conditions` (each table's condition, and its `source` through [derived tables](data.md#derived-tables)). |
+| `viewport` | One whole change of view: `viewRevision`, `cause`, `revision`, `panel`, the scale instances changed (`scales`), each panel's whole view (`views`), and the chart's whole view as the option takes it (`state`). A map's or network's view is its plane's ranges. |
+| `select` | The `selection` ([Selections](#selections)), its `phase` (`"preview"`, `"commit"`, `"cancel"`), a brush's `owner` (scale instances and panels), `cause`, `revision`, the selection committed (`state`), `conditions` (each table's condition, and its `source` through [derived tables](data.md#derived-tables)), and with `rowSelection`, `rows` per table. |
 | `hover` | What the pointer or keyboard cursor is on, or what inspection reads there, changed: an input event (below). A cursor another chart shares (cause `"sync"`) or `showCursor` shows (`"api"`) reports once drawn. |
 | `click` | A press released without moving on a plot, an item, an axis label, or a legend entry, or Enter on the keyboard cursor (cause `"keyboard"`): an input event; with `rowSelection`, `rows`. |
 | `contextMenu` | A secondary press (a right click, a long press): an input event with its `pointer`. While a listener listens, the browser's own menu stays off the plots and items (not off axes or legends). |
 | `edge` | A view near an end of its extent: `scale`, `instance`, `panels`, `side`, `domain`, `bound`, `cause`. |
 | `rowSelection` | A bound channel changed, by any writer: `table`, `channel`, `selection`, `phase` (the writing gesture's, another chart's live brush's too), `cause` (this chart's gesture, click, or key, or `"sync"` for another writer), and `revision`. |
-| `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, and `panels` for panels' own legends; with state support, `state`. |
-| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled (with state support, its `state`); a network node moved, or a [rule dragged](#dragging-rules) (`markId`, `phase`), each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
-| `pin` | The tooltip was [pinned](#pinned-tooltips) or let go: `at` (null when let go), its `inspection`, `cause`, `revision`; with state support, `basis`. |
+| `visibility` | Series hidden or shown: `hiddenKeys`, `cause`, `revision`, `panels` for panels' own legends, and the whole state (`state`). |
+| `camera`, `drill`, `itemMove` | A 3D chart turned; a tree drilled (with its whole `state`); a network node moved, or a [rule dragged](#dragging-rules) (`markId`, `phase`), each with `cause` and `revision`. Subplots' carry `panels: [id]`. They also follow `setCamera`, `setDrillRoot`, `setItemPosition`. |
+| `pin` | The tooltip was [pinned](#pinned-tooltips) or let go: `at` (null when let go), its `inspection`, `cause`, `revision`. |
 | `render` | A frame of the data, or a selection over it, was drawn, for overlays that follow the panels: the `revision` on screen. |
 | `error` | A `ChartError`, once per failed change. |
 
@@ -522,8 +520,9 @@ that change's cause: a click's, a key's, or `"sync"`. `chart.revision` counts ch
 (views, selection, bound row selections, visibility, drill roots,
 cameras, moved nodes); each state event carries the revision its change
 made, `render` the revision a frame drew, and `hover` and `click` the
-revision of the frame the pointer or key acted on. With [state support](#chart-state), each state event also carries the
-`basis` a conditional write gives as `expected`. A change is on screen
+revision of the frame the pointer or key acted on. Each state event also
+carries the `basis` a [conditional write](#chart-state) gives as
+`expected`. A change is on screen
 once a `render` of its revision or a later one arrives
 (`chart.drawnRevision` reads the last, undefined until a frame draws; a
 change that fails to draw never renders):
@@ -669,10 +668,8 @@ kinds; each replaces the others.
 
 ```ts
 import { createChart, point } from "herceg";
-import { chartState } from "herceg/state";
 
 const chart = createChart(element, {
-  state: chartState, // items and series need state support (see Chart state)
   marks: [
     point(cars, {
       id: "cars",
@@ -707,8 +704,8 @@ chart.point(x="weight", y="mpg", series="origin", id="cars",
   `action`), a legend entry selects the series it names instead of hiding
   them: alone, or with Shift added or removed; a press on the one selected
   clears. Entries show which are selected (`aria-pressed`) and dim the
-  others. It needs state support; `action: false` makes entries do nothing
-  of the chart's own, `click` still reporting them.
+  others. `action: false` makes entries do nothing of the chart's own,
+  `click` still reporting them.
 - **Setting it.** `chart.select` takes a selection of any kind; a brush's
   x range alone may be a pair (`chart.select([from, to])`). Items and
   series are named by the keys events give (`target.item`,
@@ -764,29 +761,19 @@ which `bindings` can give other gestures.
 ## Chart state
 
 A chart's state is what its user changes: the selection, the view, what
-is hidden, a tree's drill root, and the pinned tooltip. Charts report it in events. With
-state support they also take it as options, and take writes that apply
-only if the user has not changed it meanwhile. State support is a module
-of its own, so charts that never set their state from outside do not
-load it:
+is hidden, a tree's drill root, and the pinned tooltip. Charts report it
+in events, take it as options, and take writes that apply only if the
+user has not changed it meanwhile:
 
 ```ts
 import { createChart } from "herceg";
-import { chartState } from "herceg/state";
 
 createChart(element, {
-  state: chartState,
   marks,
   viewport: { x: saved.range },
   visibility: { hidden: saved.hidden },
 });
 ```
-
-React, Vue, Svelte, and Python's live charts include it, as do charts
-from specs (`loadSpec`). A chart without it refuses what needs it, naming
-the import: the state options, `interaction.select`, selections of items
-and series, `expected`, `chart.basis`, and reading `select` events'
-`conditions`.
 
 **State options.** `selection`, `viewport`, `visibility`, and `drillRoot`
 set the chart's first state. They are not values the chart holds to: the
@@ -805,10 +792,10 @@ the options never loops. Given as `undefined`, an option is forgotten.
 | `visibility` | `{ hidden, panels? }`: keys hidden, and per subplot what its legend hid and showed | `visibility`'s `state` |
 | `drillRoot` | An item key or a path of names, null for the whole tree, or `{ panels }` | `drill`'s `state` |
 
-With state support, state events carry the whole state as its option
-takes it (`state`). Drill roots apply once the first frame has drawn the
-trees. The pinned tooltip has no option: `chart.pin` sets it, with
-`expected` too, and `chart.pinned` reads it.
+State events carry the whole state as its option takes it (`state`).
+Drill roots apply once the first frame has drawn the trees. The pinned
+tooltip has no option: `chart.pin` sets it, with `expected` too, and
+`chart.pinned` reads it.
 
 **Conditional writes.** Each state event carries a `basis`, and
 `chart.basis` names the chart's state now. Given as `expected`, a setter

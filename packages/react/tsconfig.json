@@ -9,8 +9,7 @@
       "herceg": ["../herceg/src/index.ts"],
       "herceg/grid": ["../herceg/src/grid.ts"],
       "herceg/fields": ["../herceg/src/fields.ts"],
-      "herceg/layout": ["../herceg/src/layout.ts"],
-      "herceg/state": ["../herceg/src/state.ts"]
+      "herceg/layout": ["../herceg/src/layout.ts"]
     }
   },
   "include": ["src", "test", "vitest.config.ts"]

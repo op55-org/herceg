@@ -8,6 +8,7 @@ import {
   centeredLines,
   lineCount,
   type MeasureText,
+  struckThrough,
   textHalo,
   textHeight,
   textItem,
@@ -391,8 +392,9 @@ function entryItems(entries: readonly LegendItem[], text: LegendText): GuideItem
       text.surface,
       text.measure,
     );
-    // A hidden series' label is drawn at a share of its paint's opacity.
-    items.push(opacity === undefined ? label : { ...label, opacity });
+    // A hidden series' label is drawn at a share of its paint's opacity, struck through.
+    if (opacity === undefined) items.push(label);
+    else items.push({ ...label, opacity }, struckThrough(label, text.measure, opacity));
   }
   return items;
 }

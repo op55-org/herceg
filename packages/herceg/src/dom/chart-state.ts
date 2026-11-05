@@ -1,20 +1,11 @@
-// State support (`herceg/state`): what only applications that set a
-// chart's state from outside need, given in options as `state: chartState`
-// so that charts without it carry none of it: state options and their
-// equality, each report's basis and its state's whole value, conditional
-// writes, what a selection stands for in each table (conditions), and
-// selections of items and series, with the drawing of their looks.
+// A chart's state as applications set and read it from outside: the state
+// options and their equality, each report's basis and its state's whole
+// value, conditional writes (`expected`), what a selection stands for in
+// each table (conditions), and selections of items and series named by
+// reference, with the loading of their looks. The chart (chart.ts)
+// owns one: its setters write through `write`, and its emitter reports
+// every event through `report`.
 
-import type {
-  Basis,
-  ChartEvents,
-  Conditional,
-  Emitter,
-  PanelTarget,
-  StateChange,
-  ViewportEvent,
-} from "../dom/events.ts";
-import type { Chart } from "../dom/handle.ts";
 import { unmappable } from "../lod/m4.ts";
 import { DIM, type Mark } from "../marks/mark.ts";
 import { placeAt, rowOf } from "../marks/series.ts";
@@ -22,67 +13,52 @@ import { conditionsOf } from "../model/conditions.ts";
 import { GUIDE_KIT } from "../model/guides.ts";
 import type { HighlightKit } from "../model/highlight.ts";
 import { type ChartModel, type ViewChange, viewKey } from "../model/model.ts";
-import type { Panels } from "../model/panels.ts";
 import type { SelectionOwner } from "../model/selected-rows.ts";
-import { CLOUD_POINTS, type Scene } from "../scene/scene.ts";
+import { CLOUD_POINTS } from "../scene/scene.ts";
 import { ChartError } from "../spec/errors.ts";
 import {
   type ChartSelection,
   type DrillState,
+  eachPanel,
   type ItemReference,
-  type PinTarget,
   type SeriesReference,
   STATE_OPTIONS,
   type StateSpec,
   type ViewportState,
   type ViewState,
-  type VisibilityState,
 } from "../spec/state.ts";
+import type {
+  Basis,
+  ChartEvents,
+  Conditional,
+  Emitter,
+  PanelTarget,
+  StateChange,
+  Unextended,
+  ViewportEvent,
+} from "./events.ts";
 
-/** What a chart lends the state support it attaches. */
+/** What a chart lends its state. */
 export interface StateHost {
-  readonly chart: Chart;
   readonly model: ChartModel;
+  /** The chart's emitter, which delivers a refused write's report again. */
   readonly events: Emitter;
+  /** The chart's revision (see `Chart.revision`). */
+  revision(): number;
+  /** The revision on screen; undefined before the first frame. */
+  drawnRevision(): number | undefined;
+  selection(): ChartSelection | null;
   /**
-   * Calls `change`, which calls a method of the chart's that changes state
-   * `name`, with cause "options", ending a gesture that changes it first;
-   * drill roots after the first frame, whose trees they need.
+   * Sets state `name` to `value`, in `panel` (the chart's, for none), as
+   * its setter does, reporting cause "options".
    */
-  as(name: keyof StateSpec, change: () => void): void;
+  set(name: keyof StateSpec, value: unknown, panel: string | undefined): void;
   /** Draws the scene again on the next frame. */
   invalidate(): void;
 }
 
-/** State support, which a chart attaches once and keeps for its life. */
-export interface ChartStateSupport {
-  attach(host: StateHost): AttachedState;
-  /**
-   * The scene of a static export (SVG, images, PDF, snapshots) of
-   * `options`, which `draw` draws of `model`, with the state options among
-   * them applied as a chart's first state.
-   */
-  exported(
-    model: ChartModel,
-    options: StateSpec & { panels?: Panels | undefined },
-    draw: () => Scene,
-  ): Scene;
-}
-
-/**
- * A chart's state support: what the chart asks of it. Attached, it also
- * wraps the chart's setters, which take `expected` and references to
- * items and series, and gives the chart its `basis`.
- */
-export interface AttachedState {
-  /** What loads to draw items' and series' looks, while it does. */
-  readonly loading: Promise<void> | undefined;
-  /** Applies the state options among `options` whose value is not the one last given (see `StateSpec`). */
-  options(options: StateSpec): void;
-}
-
 /** The methods that take `expected`. */
-type Setter =
+export type Setter =
   | "select"
   | "setViewport"
   | "setHiddenKeys"
@@ -91,56 +67,6 @@ type Setter =
   | "setCamera"
   | "setItemPosition"
   | "pin";
-
-/** `import { chartState } from "herceg/state"`: give it as the `state` option. */
-export const chartState: ChartStateSupport = {
-  attach: (host) => new ChartState(host),
-  exported: (model, { selection, viewport, visibility, drillRoot, panels }, draw) => {
-    // Brushes draw on the page, and looks load: neither is drawn here.
-    if (selection)
-      throw new ChartError({
-        code: "unsupported",
-        path: "selection",
-        message: "selection: a static export draws no selection; leave it out",
-      });
-    if (visibility) {
-      // Keys of a legend group's series stand for the group (see `HiddenKeys.has`).
-      const { hidden } = model;
-      for (const key of visibility.hidden) hidden.add(key);
-      if (visibility.panels) {
-        if (!panels)
-          throw new ChartError({
-            code: "unsupported",
-            path: "visibility.panels",
-            message: "visibility panels: the chart has no subplots; drop panels",
-          });
-        hidden.panels = panels.own(visibility.panels, hidden.panels);
-      }
-    }
-    // Drawn once first, for the legend entries, panels, and trees the state names.
-    if (!viewport && !visibility && drillRoot === undefined) return draw();
-    draw();
-    for (const [panel, view] of eachPanel(viewport)) {
-      const { x = null, y = null, yRight = null } = (view ?? {}) as ViewState;
-      // A map's or network's plane keeps a view of its own, as a chart's does.
-      if (model.items?.ownsView(panel)) model.items.setView({ x, y }, panel);
-      else model.applyViews(model.viewChanges({ x, y, yRight }, panel));
-    }
-    for (const [panel, node] of eachPanel(drillRoot)) {
-      if (!model.items) throw new Error("drillRoot: the chart has no tree to drill");
-      model.items.setDrillRoot(node as string | readonly string[] | null, panel);
-    }
-    return draw();
-  },
-};
-
-/** A state's value for the chart, or for each panel where they have their own (see `Scoped`). */
-function eachPanel(state: unknown): [string | undefined, unknown][] {
-  if (state === undefined) return [];
-  return state && typeof state === "object" && "panels" in state
-    ? Object.entries(state.panels as Record<string, unknown>)
-    : [[undefined, state]];
-}
 
 /** What the drawing of items' and series' looks shares with charts (see `HighlightKit`). */
 const LOOKS_KIT: HighlightKit = {
@@ -160,9 +86,6 @@ const OPTIONS = {
   drill: "drillRoot",
 } as const;
 
-/** What `update` takes that changes state alone: state options, and state support, which a chart keeps. */
-const STATE_KEYS = new Set<string>([...STATE_OPTIONS, "state"]);
-
 /** Lists states hold as sets, which compare equal in any order and with repeats. */
 const SETS = new Set(["items", "series", "hidden", "shown"]);
 
@@ -181,19 +104,19 @@ const REPORTS = [
 /** The reports of states conditional writes write, whose changes are recorded. */
 const RECORDED = new Set<string>(REPORTS.slice(0, -1));
 
-/** The state each setter writes, as the event reporting it is named, and where it takes its target (`expected`). */
-const WRITES: Record<Setter, readonly [(typeof REPORTS)[number], number]> = {
-  select: ["select", 1],
-  setViewport: ["viewport", 1],
-  setHiddenKeys: ["visibility", 1],
-  setVisibility: ["visibility", 2],
-  setDrillRoot: ["drill", 1],
-  setCamera: ["camera", 1],
-  setItemPosition: ["itemMove", 2],
-  pin: ["pin", 1],
+/** The state each setter writes, as the event reporting it is named. */
+const WRITES: Record<Setter, (typeof REPORTS)[number]> = {
+  select: "select",
+  setViewport: "viewport",
+  setHiddenKeys: "visibility",
+  setVisibility: "visibility",
+  setDrillRoot: "drill",
+  setCamera: "camera",
+  setItemPosition: "itemMove",
+  pin: "pin",
 };
 
-class ChartState implements AttachedState {
+export class ChartState {
   readonly #host: StateHost;
   /** Names this chart in the bases it reports, so another chart's are told apart. */
   readonly #token = Math.random().toString(36).slice(2, 10);
@@ -209,8 +132,6 @@ class ChartState implements AttachedState {
    * its report (which may wait for a frame, or for listeners).
    */
   readonly #mutated = new Map<string, number>();
-  /** The chart's emitter's own `emit`, which reports without recording: a refused write's report is no change. */
-  readonly #emit: Emitter["emit"];
   /**
    * The states written by calls waiting for the first frame (which draws
    * the panels they name): until it draws them, every basis is older.
@@ -224,67 +145,67 @@ class ChartState implements AttachedState {
    * nothing and ends no gesture.
    */
   readonly #reported = new Map<string, string>();
-  #looks: (() => void) | undefined;
+  #looks = false;
   #looksLoading: Promise<void> | undefined;
 
   constructor(host: StateHost) {
     this.#host = host;
-    // Every change of a state is reported: each report is recorded, then
-    // extended once, before any listener hears it (and changes it again).
-    const { events } = host;
-    const emit = events.emit.bind(events);
-    this.#emit = (type, event) => emit(type, events.has(type) ? this.#extend(type, event) : event);
-    events.emit = (type, event) => {
-      if (RECORDED.has(type)) this.#record(type, event as StateChange);
-      this.#emit(type, event);
-    };
-    // Changes of view are reported only to listeners: these are always heard.
-    events.on("viewport", () => {});
-    // The pinned tooltip, which the interaction controller keeps once it
-    // has loaded; a pin asked for before then waits for it.
-    const { model } = host;
-    Object.assign(host.chart, {
-      pin: (at: PinTarget | null) => {
-        const named =
-          at && "item" in at ? { ...at, item: this.#keyOf(at.item, "pin.item", "pin item") } : at;
-        if (model.pins) model.pins.pin(named, "api");
-        else model.pinning = { at: named };
-      },
-    });
-    Object.defineProperty(host.chart, "pinned", {
-      get: () => (model.pins ? model.pins.pinned : (model.pinning?.at ?? null)),
-    });
-    // Conditional writes, and items and series by reference: the setters, wrapped.
-    const chart = host.chart as unknown as Record<Setter, (...args: unknown[]) => void>;
-    for (const [where, [, at]] of Object.entries(WRITES) as [Setter, (typeof WRITES)[Setter]][]) {
-      const write = chart[where].bind(chart);
-      chart[where] = (...args) => {
-        const target = (args[at] ?? {}) as PanelTarget & Conditional;
-        const [type] = WRITES[where];
-        if (target.expected !== undefined && this.#refused(where, target, args[0] as ViewChange))
-          return;
-        if (where === "select") args[0] = this.#named(args[0] as ChartSelection | null);
-        // What it changes, found before it does: a reset's, what it resets.
-        const scopes = this.#scopesOf(type, target, args[0] as ViewChange);
-        const made = host.chart.revision + 1;
-        write(...args);
-        // A change made is newer than every earlier basis, reported or not
-        // yet; so is one waiting for the first frame, once it makes it.
-        if (host.chart.revision >= made)
-          for (const scope of scopes ?? [])
-            this.#mutated.set(scope, Math.max(this.#mutated.get(scope) ?? 0, made));
-        else if (host.chart.drawnRevision === undefined) this.#waiting.add(type);
-      };
-    }
-    // State options alone change the state, not what the chart draws it
-    // with; an empty update reads the page and the host again.
-    const { update } = host.chart;
-    host.chart.update = (options) => {
-      const keys = Object.keys(options);
-      if (keys.length && keys.every((key) => STATE_KEYS.has(key))) this.options(options);
-      else update.call(host.chart, options);
-    };
-    Object.defineProperty(chart, "basis", { get: () => this.#basisAt(host.chart.revision) });
+  }
+
+  /** What loads to draw items' and series' looks, while it does. */
+  get loading(): Promise<void> | undefined {
+    return this.#looksLoading;
+  }
+
+  /** The basis of the chart's state as of `revision`. */
+  basisAt(revision: number): Basis {
+    return `${this.#token}:${revision}` as Basis;
+  }
+
+  /**
+   * Makes setter `where`'s change, `change`, unless `target.expected` is a
+   * basis the state it writes (in the scope it writes: of `view`, for a
+   * viewport) changed since; then the report of the change that did is
+   * given again, as the state is now, with cause "api". A change made is
+   * newer than every earlier basis. Throws for a basis this chart did not
+   * report.
+   */
+  write(
+    where: Setter,
+    target: PanelTarget & Conditional,
+    view: ViewChange | undefined,
+    change: () => void,
+  ): void {
+    if (target.expected !== undefined && this.#refused(where, target, view)) return;
+    const type = WRITES[where];
+    const host = this.#host;
+    // What it changes, found before it does: a reset's, what it resets.
+    const scopes = this.#scopesOf(type, target, view);
+    const made = host.revision() + 1;
+    change();
+    // A change waiting for the first frame is newer once that frame makes it.
+    if (host.revision() >= made)
+      for (const scope of scopes ?? [])
+        this.#mutated.set(scope, Math.max(this.#mutated.get(scope) ?? 0, made));
+    else if (host.drawnRevision() === undefined) this.#waiting.add(type);
+  }
+
+  /**
+   * An event as listeners hear it (the chart's emitter's hook): a report
+   * of a change of state is recorded, before any listener hears it (and
+   * changes the state again), and extended once.
+   */
+  report<K extends keyof ChartEvents>(type: K, event: Unextended<ChartEvents[K]>): ChartEvents[K] {
+    if (RECORDED.has(type)) this.#record(type, event as StateChange);
+    return this.#heard(type, event);
+  }
+
+  /** An event extended where anyone hears it; views always, whose whole state `#reported` keeps. */
+  #heard<K extends keyof ChartEvents>(type: K, event: Unextended<ChartEvents[K]>): ChartEvents[K] {
+    // Unheard, it reaches no one as it is.
+    return this.#host.events.has(type) || type === "viewport"
+      ? this.#extend(type, event)
+      : (event as never);
   }
 
   /** Records a report of a change (previews are none) as the newest of its scopes, unless a newer one is. */
@@ -302,14 +223,7 @@ class ChartState implements AttachedState {
     else if (kind === "items" || kind === "series") this.#loadLooks();
   }
 
-  get loading(): Promise<void> | undefined {
-    return this.#looksLoading;
-  }
-
-  #basisAt(revision: number): Basis {
-    return `${this.#token}:${revision}` as Basis;
-  }
-
+  /** Applies the state options among `options` whose value is not the one last given (see `StateSpec`). */
   options(options: StateSpec): void {
     for (const name of STATE_OPTIONS) {
       if (!(name in options)) continue;
@@ -322,32 +236,19 @@ class ChartState implements AttachedState {
       if (this.#given.get(name) === key) continue;
       this.#given.set(name, key);
       if (this.#reported.get(name) === key) continue;
-      const { chart, model } = this.#host;
-      // A gesture changing the state ends: a map's or network's too.
-      const as = (name: keyof StateSpec, change: () => void) => {
-        model.items?.endGestures(name);
-        this.#host.as(name, change);
-      };
-      if (name === "selection") as(name, () => chart.select(value as ChartSelection | null));
-      else if (name === "visibility") {
-        const { hidden, panels } = value as VisibilityState;
-        as(name, () => chart.setHiddenKeys(hidden, panels ? { panels } : {}));
-      } else {
+      const { set } = this.#host;
+      if (name === "selection" || name === "visibility") set(name, value, undefined);
+      else
         for (const [panel, state] of eachPanel(value)) {
           // A viewport is the whole view: an axis left out is not zoomed.
           const { x = null, y = null, yRight = null } = (state ?? {}) as ViewState;
-          as(name, () =>
-            name === "viewport"
-              ? chart.setViewport({ x, y, yRight }, { panel })
-              : chart.setDrillRoot(state as string | readonly string[] | null, { panel }),
-          );
+          set(name, name === "viewport" ? { x, y, yRight } : state, panel);
         }
-      }
     }
   }
 
   /** A selection with items or series named by their keys, in one order (null for none); others as given. */
-  #named(selection: ChartSelection | null): ChartSelection | null {
+  named(selection: ChartSelection | null): ChartSelection | null {
     const kind = selection?.kind;
     // Brushes, and ranges along x, are the chart's.
     if (kind === "brush" || !selection || Array.isArray(selection)) return selection;
@@ -361,7 +262,7 @@ class ChartState implements AttachedState {
     if (!Array.isArray(list))
       throw new TypeError(`selection ${kind}: expected a list of keys or references`);
     const keys = list.map((entry: string | ItemReference | SeriesReference, i) =>
-      this.#keyOf(entry, `selection.${kind}[${i}]`, `selection ${kind}[${i}]`),
+      this.keyOf(entry, `selection.${kind}[${i}]`, `selection ${kind}[${i}]`),
     );
     // In one order, so that selections equal by value are equal as written.
     const unique = [...new Set(keys)].sort();
@@ -372,7 +273,7 @@ class ChartState implements AttachedState {
   }
 
   /** An item or series key, as given or as a reference names it (refused, at `path`, for a mark of no such id). */
-  #keyOf(entry: string | ItemReference | SeriesReference, path: string, where: string): string {
+  keyOf(entry: string | ItemReference | SeriesReference, path: string, where: string): string {
     if (typeof entry === "string") return entry;
     const marks = this.#host.model.config.marks as readonly Mark[];
     if (!marks.some(({ spec }) => spec.id === entry?.mark))
@@ -388,11 +289,8 @@ class ChartState implements AttachedState {
   }
 
   /**
-   * Whether method `where`'s write, with `target.expected`, is refused: the
-   * state it writes (in the scope it writes: of `view`, for a viewport)
-   * changed since that basis. If so, the report of the change that did is
-   * given again, as the state is now, with cause "api". Throws for a basis
-   * this chart did not report.
+   * Whether method `where`'s write, with `target.expected`, is refused (see
+   * `write`), reporting the state as it is if so.
    */
   #refused(where: Setter, target: PanelTarget & Conditional, view?: ViewChange): boolean {
     const expected = target.expected!;
@@ -404,18 +302,15 @@ class ChartState implements AttachedState {
         path: "expected",
         message: `${where} expected: the basis is another chart's; give one this chart reported`,
       });
-    const [type] = WRITES[where];
-    // A write of the state waits for the first frame: none checks against it before that.
-    if (this.#waiting.has(type) && this.#host.chart.drawnRevision === undefined) return true;
-    // Nor against a pin asked for and not made yet, which no report has said.
+    const type = WRITES[where];
     const { model } = this.#host;
+    // A write of the state waits for the first frame: none checks against it before that.
+    if (this.#waiting.has(type) && this.#host.drawnRevision() === undefined) return true;
+    // Nor against a pin asked for and not made yet, which no report has said.
     if (type === "pin" && (model.pins ? model.pins.waiting : model.pinning !== undefined))
       return true;
     // A camera a gesture turned, not reported yet: its report, at the next frame, says how it is.
-    if (
-      where === "setCamera" &&
-      (this.#host.model.items?.pendingCamera(target.panel) ?? -1) > revision
-    )
+    if (where === "setCamera" && (model.items?.pendingCamera(target.panel) ?? -1) > revision)
       return true;
     const scope = (this.#scopesOf(type, target, view) ?? []).find(
       (scope) => (this.#mutated.get(scope) ?? -1) > revision,
@@ -423,12 +318,13 @@ class ChartState implements AttachedState {
     if (scope === undefined) return false;
     // A refused write changes nothing and reports the state as it is: as
     // the newest change's report says, or as its report, still to come, will.
+    // Delivered without recording it: it is no change.
     const newest = this.#changed.get(scope);
-    if (newest && newest[1].revision >= this.#mutated.get(scope)!)
-      this.#emit(
-        newest[0] as never,
-        { ...newest[1], cause: "api", revision: this.#host.chart.revision } as never,
-      );
+    if (newest && newest[1].revision >= this.#mutated.get(scope)!) {
+      const type = newest[0] as keyof ChartEvents;
+      const again = { ...newest[1], cause: "api", revision: this.#host.revision() };
+      this.#host.events.deliver(type, this.#heard(type, again as never));
+    }
     return true;
   }
 
@@ -477,7 +373,10 @@ class ChartState implements AttachedState {
     return [`${type} ${model.items?.scopeOf(has, panel) ?? ""}`];
   }
 
-  /** `#scopes` of a write; undefined for one naming a panel the first frame has not drawn yet. */
+  /**
+   * `#scopes` of a write; undefined for one naming a panel the first frame
+   * has not drawn yet (the write waits for that frame, or is refused).
+   */
   #scopesOf(type: string, of: object, view?: ViewChange): string[] | undefined {
     try {
       return this.#scopes(type, of, view);
@@ -487,15 +386,17 @@ class ChartState implements AttachedState {
   }
 
   /** A state event with its basis and its state's whole value; others as they are. */
-  #extend<K extends keyof ChartEvents>(type: K, event: ChartEvents[K]): ChartEvents[K] {
-    if (!(REPORTS as readonly string[]).includes(type)) return event;
-    const report = event as ChartEvents[K] & { revision: number };
-    const extra: Record<string, unknown> = { basis: this.#basisAt(report.revision) };
+  #extend<K extends keyof ChartEvents>(type: K, event: Unextended<ChartEvents[K]>): ChartEvents[K] {
+    // Other events have nothing to add.
+    if (!(REPORTS as readonly string[]).includes(type)) return event as never;
+    const report = event as StateChange;
+    const extra: Record<string, unknown> = { basis: this.basisAt(report.revision) };
+    const host = this.#host;
     if (type === "select") {
       const { selection, owner } = event as ChartEvents["select"];
-      extra.state = this.#host.chart.selection;
+      extra.state = host.selection();
       extra.conditions = conditionsOf(
-        this.#host.model,
+        host.model,
         selection,
         owner.scales.length > 0 ? (owner as SelectionOwner) : null,
       );
@@ -509,7 +410,7 @@ class ChartState implements AttachedState {
     const option = OPTIONS[type as keyof typeof OPTIONS];
     const shown = type === "select" ? (event as ChartEvents["select"]).selection : extra.state;
     if (option) this.#reported.set(option, stateKey(shown));
-    return { ...report, ...extra };
+    return { ...report, ...extra } as ChartEvents[K];
   }
 
   /**
@@ -553,12 +454,13 @@ class ChartState implements AttachedState {
     if (this.#looks || this.#looksLoading) return;
     const host = this.#host;
     const loading = import("../model/highlight.ts").then(({ selectionLooks }) => {
-      this.#looks = selectionLooks(
+      selectionLooks(
         LOOKS_KIT,
         host.model,
-        () => host.chart.selection,
+        () => host.selection(),
         () => host.invalidate(),
       );
+      this.#looks = true;
       this.#looksLoading = undefined;
       host.invalidate();
     });

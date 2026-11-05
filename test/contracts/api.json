@@ -129,8 +129,7 @@
         "fonts": "Fonts the browser loads for Canvas text and exports, by URL: not part of a portable spec.",
         "renderTooltip": "A JavaScript function rendering the tooltip's content: specs hold no functions.",
         "errorMode": "Whether the chart shows its errors in its place or throws them: the page's concern, not the spec's.",
-        "onError": "A JavaScript function told of errors: specs hold no functions.",
-        "state": "State support, herceg/state's chartState: code the chart attaches, which specs do not hold; loadSpec gives it to charts from specs."
+        "onError": "A JavaScript function told of errors: specs hold no functions."
       },
       "untyped": {
         "facet": "TypeScript takes facet()'s Facet, an instance, made and checked once.",
@@ -146,9 +145,6 @@
         "style": "The chart's element's style.",
         "ref": "The chart's handle, once mounted.",
         "initial": "The server's snapshot to hydrate (hydration(snapshot)): read when the chart mounts."
-      },
-      "without": {
-        "state": "The adapter attaches state support (herceg/state) itself."
       }
     },
     "chart svelte": {
@@ -158,15 +154,11 @@
         "style": "The chart's element's style.",
         "chart": "The chart's handle, bound once mounted (bind:chart).",
         "initial": "The server's snapshot to hydrate (hydration(snapshot)): read when the chart mounts."
-      },
-      "without": {
-        "state": "The adapter attaches state support (herceg/state) itself."
       }
     },
     "chart vue": {
       "without": {
-        "renderTooltip": "Vue renders the tooltip's content in the chart's renderTooltip slot.",
-        "state": "The adapter attaches state support (herceg/state) itself."
+        "renderTooltip": "Vue renders the tooltip's content in the chart's renderTooltip slot."
       },
       "only": {
         "initial": "The server's snapshot to hydrate (hydration(snapshot)): read when the chart mounts."
@@ -219,7 +211,6 @@
         "renderTooltip": "TypeScript's alone (see chart typescript).",
         "errorMode": "TypeScript's alone (see chart typescript).",
         "onError": "TypeScript's alone (see chart typescript).",
-        "state": "TypeScript's alone (see chart typescript).",
         "selection": "A widget sets its selection through its selection property and select().",
         "viewport": "A widget sets its view with set_viewport().",
         "visibility": "A widget sets what is hidden through its hidden_keys property.",

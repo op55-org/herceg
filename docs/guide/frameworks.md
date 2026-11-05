@@ -160,9 +160,8 @@ resubscribes the chart.
 ## Chart state
 
 The chart's [state options](interaction.md#chart-state), `selection`,
-`viewport`, `visibility`, and `drillRoot`, are props. The adapters include
-state support, so they need no `state` prop. A state prop sets the
-chart's state when its value changes (by value), and the user's input
+`viewport`, `visibility`, and `drillRoot`, are props. A state prop sets
+the chart's state when its value changes (by value), and the user's input
 changes it too: writing what the chart reports back into the prop
 changes nothing and never loops. When only state props change, the chart
 is told of those alone, and neither rebuilds nor redraws its marks.

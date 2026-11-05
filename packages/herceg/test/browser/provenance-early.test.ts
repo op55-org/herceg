@@ -1,6 +1,6 @@
 // select()'s conditions before a chart's interaction controller and brush
-// have loaded: made at once, with state support, each with its condition
-// through derived tables. A file of its own, so that nothing on its page
+// have loaded: made at once, each with its condition through derived
+// tables. A file of its own, so that nothing on its page
 // has loaded the controller or the brush, and this file does not import
 // helpers.ts, whose import loads the controller.
 import { afterEach, expect, it } from "vitest";
@@ -10,7 +10,6 @@ import { table } from "../../src/data/table.ts";
 import { createChart, forgetInteraction } from "../../src/dom/chart.ts";
 import type { ChartEvents } from "../../src/dom/events.ts";
 import { line } from "../../src/marks/line.ts";
-import { chartState } from "../../src/state.ts";
 
 const host = document.createElement("div");
 host.style.cssText = "width:600px;height:300px";
@@ -27,7 +26,6 @@ it("gives select()'s conditions their source before the controller and the brush
   const days = table({ day: [0, 1, 2, 3, 4], revenue: [5, 1, 7, 8, 2] }, { name: "days" });
   const busy = derive(days).filter(col("revenue").gt(2)).table();
   const chart = createChart(host, {
-    state: chartState,
     renderer: "svg",
     marks: [line(busy, { x: "day", y: "revenue" })],
     interaction: { brush: "x" },

@@ -115,6 +115,50 @@ describe("decorations of a layout mark's chart", () => {
     );
   });
 
+  it("describe only the rows whose items drew: not missing ones, nor those drilled away", () => {
+    const model = new ChartModel({
+      interaction: { zoom: true },
+      marks: [
+        cells(),
+        text(markets, {
+          from: { mark: "cells", item: [{ field: "market" }], at: "top-left" },
+          label: { field: "market" },
+        }),
+      ],
+    });
+    model.setSize(600, 400, 1);
+    model.scene(estimateText);
+    expect(model.annotationSummaries()).toEqual(["Labels: Auburn, AL, Birmingham, AL."]);
+    // Drilled into a column, no column is drawn as an item: no label is.
+    model.items!.setDrillRoot(["Auburn, AL"]);
+    model.scene(estimateText);
+    expect(model.annotationSummaries()).toEqual([]);
+    model.items!.setDrillRoot(null);
+    model.scene(estimateText);
+    expect(model.annotationSummaries()).toEqual(["Labels: Auburn, AL, Birmingham, AL."]);
+  });
+
+  it("describe a row placed on items of two facets only where they drew together", () => {
+    const regional = table({ location: category(["N", "S"]), market: category(["A", "B"]) });
+    const across = text({
+      x: { item: { mark: "cells", item: ["A"] }, at: "center" },
+      y: { item: { mark: "cells", item: ["B"] }, at: "center" },
+      label: "across",
+    });
+    const summaries = (config: Partial<ChartConfig>) => {
+      const model = new ChartModel({
+        marks: [treemap(regional, { id: "cells", path: ["market"] }), across],
+        ...config,
+      });
+      model.setSize(600, 400, 1);
+      model.scene(estimateText);
+      return model.annotationSummaries();
+    };
+    expect(summaries({})).toEqual(["Label: across."]);
+    // A in one facet and B in the other: the text draws in neither.
+    expect(summaries({ facet: facet("location", { header: false }) })).toEqual([]);
+  });
+
   it("leave out rows whose item is not drawn, and place regions and text on items' edges", () => {
     const scene = drawn({
       marks: [

@@ -123,6 +123,8 @@ describe("trees in facet panels", () => {
         path: [{ key: '[0,"Europe"]', label: "Europe" }],
         cause: "pointer",
         revision: chart.revision,
+        basis: chart.basis,
+        state: '[0,"Europe"]',
       },
     ]);
     expect(chart.getDrillRoot({ panel: "2023" })?.key).toBe('[0,"Europe"]');
@@ -198,7 +200,16 @@ describe("trees in facet panels", () => {
     const drills = heard(chart, "drill");
     // `click()` clicks with no count, as a key does.
     chart.root.querySelector<HTMLButtonElement>('[aria-label="Show the whole tree"]')!.click();
-    expect(drills).toEqual([{ key: null, path: [], cause: "keyboard", revision: chart.revision }]);
+    expect(drills).toEqual([
+      {
+        key: null,
+        path: [],
+        cause: "keyboard",
+        revision: chart.revision,
+        basis: chart.basis,
+        state: null,
+      },
+    ]);
   });
 });
 
@@ -221,6 +232,8 @@ describe("trees in subplots", () => {
         panels: ["b"],
         cause: "pointer",
         revision: chart.revision,
+        basis: chart.basis,
+        state: { panels: { a: null, b: '[1,"Asia"]' } },
       },
     ]);
     expect(chart.getDrillRoot({ panel: "a" })?.key).toBeNull();
@@ -243,6 +256,8 @@ describe("trees in subplots", () => {
       panels: ["b"],
       cause: "keyboard",
       revision: chart.revision,
+      basis: chart.basis,
+      state: { panels: { a: null, b: null } },
     });
   });
 

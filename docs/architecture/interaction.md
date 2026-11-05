@@ -290,34 +290,36 @@ drawn in the pointer overlay, clipped to each plot.
 ## Selections and chart state
 
 A chart has one selection (`ChartSelection`, `spec/state.ts`): a brush's
-ranges, or items or series by their keys. Core keeps it, draws brushes,
-and reports changes; everything else about state lives in an opt-in module,
-`herceg/state` (`state/chart-state.ts`), given as `state: chartState`, so a
-line chart carries none of it. Core keeps only the rule: without the
-module it refuses state options, `interaction.select`, selections of items
-and series, `expected`, `chart.basis`, and reading `select` events'
-`conditions`, each with an error naming the import (`needsState`).
+ranges, or items or series by their keys. The chart (`dom/chart.ts`)
+keeps it, draws brushes, and reports changes. What applications need to
+set and read state from outside is the chart's state (`ChartState`,
+`dom/chart-state.ts`), which every chart makes as it is made. It keeps
+the bookkeeping; the chart keeps the state itself and its mutations:
 
-**What the module does.** Attached once at creation (`attach(host)`), it
-wraps the chart's setters and its event emitter rather than adding hooks
-to each:
-
-- **Setters** take `expected` and references to items and series
-  (`{ mark, item }`, `{ mark, series }`), which it turns into keys sorted
-  into one order, so selections equal by value are equal as written.
+- **Setters** write through `ChartState.write`, which answers `expected`
+  at once (a refused write changes nothing), runs the chart's own setter
+  with its cause (`"api"` for methods, `"options"` for state options), and
+  records the change. References to items and series (`{ mark, item }`,
+  `{ mark, series }`) become keys sorted into one order (`named`,
+  `keyOf`), so selections equal by value are equal as written.
 - **`update`** of state options alone applies them as options do, without
   the chart comparing or rebuilding its marks and settings.
-- **Reports** gain each state's whole value as its option takes it
-  (`state`), a `basis`, and for `select`, `conditions`.
-- **State options** apply through the public setters with cause
-  `"options"` (`StateHost.as`, which also ends a gesture changing that
-  state with a `cancel`; maps' and networks' lassos and pans end through
-  their controls, `Controls.end`). A value equal to the one last given, or to what
+- **Reports** go through the emitter's hook (`Emitter`, `dom/events.ts`,
+  made with `ChartState.report`): every state event is recorded before
+  any listener hears it, then extended once with its `basis`, the state's
+  whole value as its option takes it (`state`), and for `select`,
+  `conditions`, made at once. Views are reported and recorded whether or
+  not anyone listens, for write-back equality and refused writes; other
+  events are extended only when heard.
+- **State options** apply through the chart's own setters with cause
+  `"options"` (`StateHost.set`, `#setState`), which also end a gesture
+  changing that state with a `cancel`; maps' and networks' lassos and
+  pans end through their controls, `Controls.end`. A value equal to the one last given, or to what
   the chart last reported (a select event's previews included, so writing
   a preview back does not end the gesture), changes nothing: write-back
   from adapters' and applications' state never loops. Drill roots wait
   for the first frame's trees.
-- **Bases** are the chart's token and a revision. The module records the
+- **Bases** are the chart's token and a revision. The state records the
   revision of the last change of each scope (the selection, each view's
   scale instance, what is hidden, each tree's root, each camera and moved
   node): a setter's as it makes it (`#mutated`, of the scopes found before
@@ -331,10 +333,10 @@ to each:
   A write naming no panel is checked in the scope its setter resolves
   (`ItemViews.scopeOf`). A conditional write is refused if its scopes
   changed after its basis, and reports the state again with cause
-  `"api"` through the chart's own `emit`, unrecorded: that report is no
+  `"api"` through the emitter's `deliver`, unrecorded: that report is no
   change; a change not reported yet reports itself. A basis of another
   chart is refused outright.
-- **Looks** of items and series load on first use
+- **Looks** of items and series load on first use, a chunk of their own
   (`selectionLooks` in `model/highlight.ts`, through `LOOKS_KIT`): the
   highlighter replaces marks' geometry with what a selection holds of
   each (`chosenIn`, cached per selection, mark, and table version), drawn
@@ -358,18 +360,17 @@ to each:
   rather than an approximation; rows written then come from the marks'
   views.
 
-**Static exports** call `state.exported` (`render/static-state.ts`):
-hidden keys apply before the first draw; views and drill roots need a
-drawn scene's scales, planes, and trees, so a first draw is followed by a
-second. Maps' and networks' views go to their planes.
-A selection is refused: exports draw no brush overlay, and a selection's
-looks are a live chart's. Without the module, static options with state
-are refused as live charts' are.
+**Static exports** apply the state options in `drawInState`
+(`render/static-state.ts`): hidden keys apply before the first draw;
+views and drill roots need a drawn scene's scales, planes, and trees, so
+a first draw is followed by a second. Maps' and networks' views go to
+their planes. A selection is refused: exports draw no brush overlay, and
+a selection's looks are a live chart's.
 
-**Adapters** import the module and pass state props as options; when only
-state props change, they pass just those to `update`, which the module
-applies alone. Vue's `v-model` and
-Svelte's `bind:` follow commits. Python's widget starts from the chart's
+**Adapters** pass state props as options; when only state props change,
+they pass just those to `update`, which applies them alone, without
+rebuilding the chart's options. Vue's `v-model` and Svelte's `bind:`
+follow commits. Python's widget starts from the chart's
 first selection and hidden keys, and answers its own conditional writes:
 it compares `expected` with the latest select report's basis, and its own
 writes invalidate every earlier basis. Streamlit carries selections across
@@ -484,9 +485,9 @@ where a mark has `drag`.
   chart's root node, each shadow root around it, and the document),
   Escape, or a second click lets it go. A click's pin toggle is decided
   as the click acts (`#clickPin` returns a function), so clicks queued
-  while picking loads toggle in turn. `pin()` and `pinned` are state support's
-  (`state/chart-state.ts`), which names references and checks `expected`
-  before calling the controller through `model.pins`; a pin asked for
+  while picking loads toggle in turn. The chart's `pin()` checks
+  `expected` and names references through its state before calling the
+  controller through `model.pins`, and `pinned` reads it; a pin asked for
   before the controller loads waits on the model (`model.pinning`), and
   one before the first frame or before picking loads waits in the
   controller (`#pinLater`), applied in the next frame drawn.
@@ -525,8 +526,9 @@ where a mark has `drag`.
   core legend toggles nothing, and a select legend's entries the series
   they name (`selects`); the controller turns a press into a `series`
   selection through `host.select` and marks entries `aria-pressed`. The
-  core keeps no code for it: a select legend without state support is
-  refused when the controller reads the options.
+  chart's legend notes the entry each click is on before it acts
+  (`Legend.clicked`), so a click held while the controller loads is
+  reported as that entry even when a listener took the legend away.
 
 ## Layout controls
 

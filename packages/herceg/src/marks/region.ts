@@ -235,7 +235,12 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
     return this.#data.kind(a) ?? this.#data.kind(b);
   }
 
-  describe(format: AxisFormat, locale: string | undefined, rows?: RowParts): string | undefined {
+  describe(
+    format: AxisFormat,
+    locale: string | undefined,
+    rows?: RowParts,
+    frames?: readonly Frame[],
+  ): string | undefined {
     const data = this.#data;
     const x = this.#places("x");
     const y = this.#places("y");
@@ -262,6 +267,7 @@ export class RegionMark implements Mark<Frozen<RegionSpec>>, LabelledMark {
         return [across && `x ${across}`, down && `y ${down}`].filter(Boolean).join(", ");
       },
       rows,
+      frames,
       format.content,
     );
   }

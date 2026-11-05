@@ -64,10 +64,9 @@ pdf = chart.to_pdf()
 - With `rowSelection`, static exports draw what its stores hold, as a
   mounted chart would.
 - Static options draw the first view, hidden series, and drill root their
-  [state options](interaction.md#chart-state) give, with `state:
-  chartState` from `herceg/state` (charts from specs have it). They
-  refuse a `selection`, which they do not draw: export selected rows
-  through `rowSelection`.
+  [state options](interaction.md#chart-state) give. They refuse a
+  `selection`, which they do not draw: export selected rows through
+  `rowSelection`.
 - Node has no raster backend: on a server, write SVG or PDF, or images
   from Python. See the [roadmap](../roadmap.md).
 - Python's images are rasterized by resvg and encoded by Pillow (`pip

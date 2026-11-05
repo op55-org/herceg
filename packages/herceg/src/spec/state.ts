@@ -3,7 +3,6 @@
 // what is hidden, and the drill root. Each type is the whole state, so the
 // value an event reports can be given back as the option unchanged.
 
-import { ChartError } from "./errors.ts";
 import type { PaintStyle } from "./style.ts";
 
 /** A part of an item's name after its mark's: a name, or an interval of a bin. */
@@ -117,13 +116,12 @@ export type DrillState = Scoped<string | readonly string[] | null>;
 /** The state options (see `StateSpec`). */
 export const STATE_OPTIONS = ["selection", "viewport", "visibility", "drillRoot"] as const;
 
-/** What a chart without state support refuses of what needs it, at `path`. */
-export function needsState(where: string, path = where): ChartError {
-  return new ChartError({
-    code: "unsupported",
-    path,
-    message: `${where}: needs state support; give the chart state: chartState, from herceg/state`,
-  });
+/** A state's value for the chart, or for each panel where they have their own (see `Scoped`). */
+export function eachPanel(state: unknown): [string | undefined, unknown][] {
+  if (state === undefined) return [];
+  return state && typeof state === "object" && "panels" in state
+    ? Object.entries(state.panels as Record<string, unknown>)
+    : [[undefined, state]];
 }
 
 /**

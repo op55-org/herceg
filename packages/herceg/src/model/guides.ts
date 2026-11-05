@@ -11,6 +11,7 @@ import { textItemMarkup } from "../draw/text.ts";
 import {
   type Formatter,
   formatNumber,
+  lazyFormat,
   numberFormatter,
   numberTickLabels,
   timeFormatter,
@@ -22,6 +23,7 @@ import {
   centeredLines,
   fitText,
   type MeasureText,
+  struckThrough,
   textHalo,
   textHeight,
   textItem,
@@ -110,6 +112,7 @@ export const GUIDE_KIT = {
   writtenTicks,
   blankRepeats,
   textItem,
+  struckThrough,
   textLines,
   fitText,
   centeredLines,
@@ -433,11 +436,8 @@ export function needsGuides(config: ChartConfig): boolean {
           axis.padding !== undefined ||
           [axis.ticks, axis.format, axis.tooltipFormat].some(
             (setting) =>
-              typeof setting === "function" ||
               // Patterns, durations, units with prefixes, and Intl options with a fiscal year, which it refuses.
-              ["number", "time", "duration", "si", "binary", "fiscal"].some(
-                (key) => (setting as Record<string, unknown> | undefined)?.[key] !== undefined,
-              ),
+              typeof setting === "function" || lazyFormat(setting as object | undefined),
           )),
     ) ||
     (typeof legend === "object" &&

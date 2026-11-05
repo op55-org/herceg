@@ -10,9 +10,11 @@ to do about it.
 The first release.
 
 - **`herceg`**: the engine, with tables, marks, layouts, interaction,
-  rendering, and export; optional parts as subpaths (`herceg/spec`,
-  `herceg/state`, `herceg/fields`, `herceg/pdf`, `herceg/image`, `herceg/fonts`, `herceg/grid`,
-  `herceg/web`, ...). See [Getting started](docs/guide/getting-started.md).
+  chart state (state options, conditional writes, selections of items and
+  series, pinned tooltips), rendering, and export; optional parts as
+  subpaths (`herceg/spec`, `herceg/fields`, `herceg/pdf`, `herceg/image`,
+  `herceg/fonts`, `herceg/grid`, `herceg/web`, ...). See
+  [Getting started](docs/guide/getting-started.md).
 - **`@herceg/react`, `@herceg/vue`, `@herceg/svelte`**: components over the
   same engine. See [React, Vue, and Svelte](docs/guide/frameworks.md).
 - **`herceg` for Python**: charts from pandas, Polars, PyArrow, and NumPy,

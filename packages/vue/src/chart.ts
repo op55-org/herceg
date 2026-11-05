@@ -21,7 +21,6 @@ import {
   type VisibilityState,
   viewOf,
 } from "herceg";
-import { chartState } from "herceg/state";
 import {
   Comment,
   defineComponent,
@@ -514,14 +513,14 @@ export const Chart = defineComponent({
       const next = rendered!;
       const last = applied;
       if (!chart.value || !last) {
-        const config = { ...next.options, marks: next.marks, onError, state: chartState };
+        const config = { ...next.options, marks: next.marks, onError };
         const created = snapshot
           ? snapshot.hydrate(snapshotHost.value!, config)
           : createChart(container.value!, config);
         // Bindings hear of states as they commit; previews come as events.
         created.on("viewport", (event) => {
           emit("viewport", event);
-          emit("update:viewport", event.state!);
+          emit("update:viewport", event.state);
         });
         created.on("edge", (event) => emit("edge", event));
         created.on("select", (event) => {
@@ -532,13 +531,13 @@ export const Chart = defineComponent({
         created.on("camera", (event) => emit("camera", event));
         created.on("drill", (event) => {
           emit("drill", event);
-          emit("update:drillRoot", event.state!);
+          emit("update:drillRoot", event.state);
         });
         created.on("itemMove", (event) => emit("itemMove", event));
         created.on("pin", (event) => emit("pin", event));
         created.on("visibility", (event) => {
           emit("visibility", event);
-          emit("update:visibility", event.state!);
+          emit("update:visibility", event.state);
         });
         created.on("render", (event) => emit("render", event));
         chart.value = created;

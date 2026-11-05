@@ -18,7 +18,6 @@ import {
   tablesOf,
   viewOf,
 } from "herceg";
-import { chartState } from "herceg/state";
 import {
   Children,
   type CSSProperties,
@@ -43,8 +42,7 @@ import { markBuilder } from "./marks.tsx";
  * chart reports (`onSelect={(e) => setSelection(e.selection)}`, the
  * events' `state` for the others) to keep it in the application's state.
  */
-export interface ChartProps
-  extends Omit<ChartUpdate, "marks" | "renderTooltip" | "onError" | "state"> {
+export interface ChartProps extends Omit<ChartUpdate, "marks" | "renderTooltip" | "onError"> {
   /**
    * The tooltip's content, rendered by React (with the application's
    * context) into the chart's own box, which keeps its placement, the
@@ -520,7 +518,6 @@ export function Chart({
     const config = {
       ...(Object.fromEntries(given) as Omit<ChartOptions, "marks">),
       marks,
-      state: chartState,
     };
     // A second mount (React's strict mode) finds the markup taken: it mounts afresh.
     const created =

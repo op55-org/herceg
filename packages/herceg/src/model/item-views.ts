@@ -12,6 +12,7 @@
 // scene; states stay while their panels do.
 
 import type { Table } from "../data/table.ts";
+import type { PanelDrawing } from "../layout/placer.ts";
 import type { DrawnMark } from "../marks/drawn.ts";
 import type { MovedNodes } from "../marks/graph.ts";
 import {
@@ -379,7 +380,7 @@ export class ItemViews {
   /** What the scene's layout marks drew, as drawn-mark records (marks/drawn.ts). */
   records: DrawnMark[] = [];
   /** Of those, what marks placed by items (decorations) drew. */
-  readonly #decorations = new Set<DrawnMark>();
+  readonly #decorations = new Set<DrawnMark & PanelDrawing>();
   /** Whether a scene has drawn a layout mark, whose views say which states stay (see `#begin`). */
   #drew = false;
   /** Whether the panels are facets or subplots, whose inspections name them, not a chart's one. */
@@ -404,12 +405,24 @@ export class ItemViews {
   /** What decorations draw in those frames, by panel, which the pointer reads instead of the scene's. */
   transitionRecords: ReadonlyMap<string, readonly DrawnMark[]> | undefined;
 
+  /**
+   * The frames decoration `mark` drew in, in the last scene: in `panel`,
+   * or in any panel; undefined for a mark no layout mark's panel drew.
+   */
+  framesOf(mark: Mark, panel?: string): Frame[] | undefined {
+    const frames = [...this.#decorations]
+      .filter((record) => record.of === mark && (panel === undefined || record.panel === panel))
+      .map(({ frame }) => frame);
+    return frames.length ? frames : undefined;
+  }
+
   /** The records the pointer reads: `records`, with a drill's frame's decorations while one plays. */
   drawnRecords(): readonly DrawnMark[] {
     const frame = this.transitionRecords;
     if (!frame) return this.records;
+    const decorations: ReadonlySet<DrawnMark> = this.#decorations;
     const scene = this.records.filter(
-      (record) => !(this.#decorations.has(record) && frame.has(record.panel)),
+      (record) => !(decorations.has(record) && frame.has(record.panel)),
     );
     return [...scene, ...[...frame.values()].flat()];
   }
