@@ -5,6 +5,7 @@
 // chart's modules, and writes with the chart's code handed in (the kit), so
 // that loading it later shares no code with the chart's own.
 
+import type { RowLink } from "../fields/links.ts";
 import type { Formatter } from "../format/format.ts";
 import { intlWrites } from "../format/intl-options.ts";
 import { formatWriter, formOf } from "../format/patterns.ts";
@@ -60,15 +61,17 @@ export const fieldReader: FieldReaders = (locale, zone, kit, features, times) =>
       const kind = table.kind(field) as InspectedField["kind"];
       const own = format && write(field, kind, format, `tooltip.fields[${i}].format`);
       const shown = features?.fields?.of(table, field);
+      const writes = shown?.writer(own, fallback(kind));
       // Times beyond what dates hold (an infinity among them) have no date to write.
-      const text = shown
-        ? shown.writer(own, fallback(kind))(value)
+      const text = writes
+        ? writes(value)
         : value === null || (kind === "time" && !(Math.abs(value as number) <= 8.64e15))
           ? "–"
           : typeof value === "string"
             ? value
             : (own ?? fallback(kind))(value);
       const color = shown?.color?.(value);
+      const link = shown?.link?.(table, row, writes!);
       const read: InspectedField = {
         field,
         label: label ?? shown?.label ?? field,
@@ -77,6 +80,7 @@ export const fieldReader: FieldReaders = (locale, zone, kit, features, times) =>
         text,
       };
       if (color !== undefined) read.color = color;
+      if (link) read.link = link;
       return read;
     });
 };
@@ -86,14 +90,17 @@ export const fieldReader: FieldReaders = (locale, zone, kit, features, times) =>
  * points are, and the content `render()` returns in its box (the built-in
  * content where it returns none). `render`'s content is asked for again
  * only when what the tooltip is at changes, the chart's options or data
- * do (`revision()`: the marks and rows an inspection names), or the
- * content left the box; the box is placed again as that content changes
- * size, as frameworks render it. Returns what stops watching its size.
+ * do (`revision()`: the marks and rows an inspection names), it is pinned
+ * or let go (`pinned()`), or the content left the box; the box is placed
+ * again as that content changes size, as frameworks render it. Fields'
+ * links are links in the built-in content while it is pinned. Returns
+ * what stops watching its size.
  */
 export function ownContent(
   tooltip: Tooltip,
   render: () => RenderTooltip | undefined,
   revision: () => number,
+  pinned: () => boolean,
 ): () => void {
   const { element } = tooltip;
   const document = element.ownerDocument;
@@ -112,15 +119,19 @@ export function ownContent(
   };
   const resized = new ResizeObserver(place);
   resized.observe(element);
-  /** The built-in content, each point's row followed by its fields', which line up under its label. */
-  const builtIn = (inspection: Inspection, theme: Theme) => {
+  /**
+   * The built-in content, each point's row followed by its fields', which
+   * line up under its label; a field's link is written as its text, and is
+   * a link once the tooltip is pinned (`linked`), when it takes the pointer.
+   */
+  const builtIn = (inspection: Inspection, theme: Theme, linked: boolean) => {
     const header = document.createElement("div");
     header.textContent = inspection.label;
     // Line breaks in labels break the tooltip's lines too.
     header.style.cssText = `color:${theme.muted};margin-bottom:2px;white-space:pre`;
     element.append(header);
     // A point's swatch is its series', and its label reads as its name; a field's is its value's.
-    const row = (name: string, text: string, color?: string, field = false) => {
+    const row = (name: string, text: string, color?: string, field = false, link?: RowLink) => {
       const line = document.createElement("div");
       line.style.cssText = "display:flex;align-items:center;gap:6px;white-space:pre";
       const swatch = document.createElement("span");
@@ -128,31 +139,39 @@ export function ownContent(
       const label = document.createElement("span");
       label.textContent = name;
       label.style.cssText = `flex:1;color:${color && !field ? theme.text : theme.muted}`;
-      const value = document.createElement("span");
-      value.textContent = text;
-      value.style.cssText = "font-weight:600;margin-left:12px";
+      const anchor = !!link && linked;
+      const value = document.createElement(anchor ? "a" : "span");
+      value.textContent = link?.text ?? text;
+      value.style.cssText = "font-weight:600;margin-left:12px;color:inherit";
+      if (anchor) {
+        // Its URL is http, https, mailto, or relative (fields/links.ts); it
+        // opens beside the chart, which keeps its state, and knows nothing of it.
+        const a = value as HTMLAnchorElement;
+        a.href = link.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+      }
       line.append(swatch, label, value);
       element.append(line);
     };
     for (const point of inspection.points) {
       row(point.label, point.text, point.color);
-      for (const field of point.fields ?? []) row(field.label, field.text, field.color, true);
+      for (const field of point.fields ?? [])
+        row(field.label, field.text, field.color, true, field.link);
     }
   };
   tooltip.show = (inspection, theme, pointer, bounds) => {
     const own = render();
+    const linked = pinned();
     const key = JSON.stringify(inspection);
     const revised = revision();
     // A framework may have taken its content out of the box (a snippet removed and given again).
-    const kept = !(shown[4] instanceof Node) || element.contains(shown[4]);
-    if (
-      own !== shown[0] ||
-      theme !== shown[1] ||
-      key !== shown[2] ||
-      revised !== shown[3] ||
-      !kept
-    ) {
-      shown = [own, theme, key, revised];
+    const kept = !(shown[5] instanceof Node) || element.contains(shown[5]);
+    const changed =
+      own !== shown[0] || theme !== shown[1] || key !== shown[2] || revised !== shown[3] || !kept;
+    // The built-in content's links are links while pinned: it is drawn again
+    // as the pin changes, the application's content not asked for again.
+    if (changed || (shown[4] !== undefined && linked !== shown[4])) {
       element.style.background = theme.style.tooltip.fill;
       element.style.color = theme.text;
       element.style.border = `1px solid ${theme.style.tooltip.stroke}`;
@@ -162,17 +181,31 @@ export function ownContent(
       const page = element.getRootNode() as Document | ShadowRoot;
       const focused = page.activeElement as HTMLElement | null;
       const within = focused !== element && element.contains(focused);
+      // Links as drawn, live: the one with the focus is found again by its place.
+      const links = element.getElementsByTagName("a");
+      const at = Array.prototype.indexOf.call(links, focused);
       element.replaceChildren();
-      const content = own?.(inspection);
+      const content = changed ? own?.(inspection) : null;
       // Text is shown as text, never parsed as markup.
       if (content != null) element.append(content);
-      else builtIn(inspection, theme);
-      // A fragment leaves its children in the box, not itself.
-      shown.push(content instanceof Node ? element.firstChild : undefined);
+      else builtIn(inspection, theme, linked);
+      // Whether the built-in content was drawn pinned; a fragment leaves its
+      // children in the box, not itself.
+      shown = [
+        own,
+        theme,
+        key,
+        revised,
+        content == null ? linked : undefined,
+        content instanceof Node ? element.firstChild : undefined,
+      ];
       // The focus stays in a pinned tooltip whose content is drawn again:
-      // on the control it was on if the new content has it, else on the box.
+      // on the control it was on if the new content has it, else on the
+      // built-in content's link in its place, else on the box.
       if (within && !element.contains(page.activeElement))
-        (element.contains(focused) ? focused! : element).focus({ preventScroll: true });
+        (element.contains(focused) ? focused! : (content == null && links[at]) || element).focus({
+          preventScroll: true,
+        });
     }
     element.style.display = "block";
     at = [pointer, bounds];

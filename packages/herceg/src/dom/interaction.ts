@@ -3744,6 +3744,7 @@ export class Interaction {
             this.#tooltip,
             () => host.options().renderTooltip,
             () => host.revision(),
+            () => !!this.#pin,
           ),
         );
       })

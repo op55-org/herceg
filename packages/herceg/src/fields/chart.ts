@@ -32,6 +32,7 @@ import {
   stepAt,
   stepsOf,
 } from "./display.ts";
+import { type LinkOf, type LinkWrite, linker } from "./links.ts";
 import { type FieldDisplays, lineOf, resolve, rulesOf } from "./rules.ts";
 
 /** A field a chart shows, as its displays write it. */
@@ -96,6 +97,11 @@ export interface ShownField {
    * rather than as the axis' numbers. Without `axis`, as `writer()`.
    */
   over(axis?: Formatter & { readonly own?: true }, numbers?: boolean): (value: number) => string;
+  /**
+   * Its links (see `DisplayedField.link`), their other fields written
+   * through their displays; undefined where its display gives no link.
+   */
+  readonly link: LinkOf | undefined;
 }
 
 /** How a layout mark writes its items' text through the displays (see `ChartFields.items`). */
@@ -263,6 +269,15 @@ export function chartFields(
   };
   // Each field's resolved display, kept beside what it was resolved from for keys of its colors.
   const displays = new WeakMap<ShownField, ResolvedDisplay>();
+  // Fields links write without a display of their own: as charts write them.
+  const plain =
+    (kind: DisplayedKind): LinkWrite =>
+    (value) =>
+      missingValue(kind, value)
+        ? "–"
+        : typeof value === "string"
+          ? value
+          : (kind === "time" ? dates : numbers)(value!);
   const shown = (table: Table | undefined, name: string): ShownField | undefined => {
     if (table && !table.has(name)) return undefined;
     const kind = table ? table.kind(name) : "number";
@@ -321,6 +336,15 @@ export function chartFields(
       amount: (fallback) => (value) =>
         missingValue(kind, value) ? (own ?? "–") : (write ?? fallback)(value),
       over: (axis, numbers) => writer(axis?.own ? axis : undefined, numbers ? undefined : axis),
+      link:
+        display.link &&
+        linker(
+          display.link,
+          name,
+          `chart ${resolved.from.link}.link`,
+          (rows, other) =>
+            of(rows as Table, other)?.text ?? plain(rows.kind(other) as DisplayedKind),
+        ),
     };
     displays.set(made, display);
     return made;

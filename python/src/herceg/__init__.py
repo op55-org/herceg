@@ -126,6 +126,7 @@ from ._events import (
     Provenance,
     ProvenanceGroup,
     ProvenanceSource,
+    RowLink,
     ScaleInstance,
     ScaleView,
     SelectEvent,
@@ -138,7 +139,7 @@ from ._events import (
     ViewportEvent,
     VisibilityState,
 )
-from ._fields import AtThresholds, FieldDisplay, Mapping, Match, Thresholds
+from ._fields import AtThresholds, FieldDisplay, Link, Mapping, Match, Thresholds
 from ._guides import (
     AxisGuide,
     ChannelScale,
@@ -301,6 +302,7 @@ __all__ = [
     "line",
     "line_3d",
     "LineStyle",
+    "Link",
     "Look",
     "Mapping",
     "MarkAnchor",
@@ -337,6 +339,7 @@ __all__ = [
     "radar",
     "RadarOptions",
     "ResetAction",
+    "RowLink",
     "RowSelection",
     "sankey",
     "save",

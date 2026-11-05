@@ -418,7 +418,7 @@ describe("checks", () => {
     );
   });
 
-  it("check links' shape, which no surface draws yet", () => {
+  it("check links' shape", () => {
     expect(() =>
       text({ cpu: { link: { url: ["https://x/", { value: true }] } } }, "cpu", 1),
     ).not.toThrow();

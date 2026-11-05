@@ -36,6 +36,7 @@ const DISPLAYS = [
   "fields/display.ts",
   "fields/check.ts",
   "fields/colors.ts",
+  "fields/links.ts",
   "format/intl-options.ts",
   "guides/fields.ts",
   "marks/features/item-legends.ts",

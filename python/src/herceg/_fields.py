@@ -5,16 +5,19 @@ once (``fields``) and read by every surface that writes the column.
 applying to every column it matches; ``hg.Match`` matches columns by name,
 regular expression, kind, and table; ``hg.Mapping`` shows values as given
 text, in a given color, or both; ``hg.Thresholds`` colors a number column's
-values by step. Charts take them as ``fields=``: axes, legends, series'
-names, tooltips, labels, gauges, and the text alternative write columns
-through them, and marks colored by a column without a scale take their
-colors; ``hg.AtThresholds`` places rules and regions at a column's steps."""
+values by step; ``hg.Link`` links each value to a URL made of the row's
+values. Charts take them as ``fields=``: axes, legends, series' names,
+tooltips, labels, gauges, and the text alternative write columns through
+them, marks colored by a column without a scale take their colors, and
+pinned tooltips link their fields; ``hg.AtThresholds`` places rules and
+regions at a column's steps."""
 
 from __future__ import annotations
 
 import datetime as _dt
 import functools
 import math
+import re
 from collections.abc import Callable, Sequence
 from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
@@ -23,6 +26,7 @@ from typing import Any, Literal
 import numpy as np
 
 from ._data import _time_ms
+from ._encoding import LabelPart
 from ._errors import ChartError, is_number, key_path, listed, placed, refuses, shown
 from ._guides import _NUMBER_FORMAT, _TIME_FORMAT, FORMS, Format, _check_format, format_spec
 from ._style import _built
@@ -303,6 +307,106 @@ class Match:
         return {key: value for key, value in spec.items() if value is not None}
 
 
+#: A part of a link: literal text, or an ``hg.LabelPart`` reading a column of
+#: the row (``field=``) or the column's own value (``value=True``), or a dict
+#: of those arguments.
+LinkPart = str | LabelPart | MappingABC[str, Any]
+
+#: The schemes links take; a URL without one is relative.
+_SCHEMES = ("http", "https", "mailto")
+
+
+def _linkable(url: str) -> bool:
+    """Whether ``url`` is one links take: http, https, mailto, or relative,
+    its scheme read as browsers parse URLs (after the control characters and
+    spaces before it, and tabs and newlines anywhere, which they drop)."""
+    read = re.sub(r"[\t\n\r]", "", url.lstrip("".join(map(chr, range(33)))))
+    scheme = re.match(r"([A-Za-z][A-Za-z0-9+.-]*):", read)
+    return scheme is None or scheme.group(1).lower() in _SCHEMES
+
+
+def _link_parts(parts: Any, role: str) -> list[str | LabelPart]:
+    """``parts`` as a link takes them: text, or parts reading a column or the value."""
+    if isinstance(parts, (str, bytes, MappingABC)) or not isinstance(parts, Sequence):
+        raise ChartError(f"{role}: expected a list of parts; received {shown(parts)}")
+    made: list[str | LabelPart] = []
+    for i, part in enumerate(parts):
+        at = f"{role}[{i}]"
+        if isinstance(part, str):
+            made.append(part)
+            continue
+        if not isinstance(part, (LabelPart, MappingABC)):
+            raise ChartError(
+                f"{at}: expected text or an hg.LabelPart of field= or value=True; "
+                f"received {shown(part)}"
+            )
+        built = _built(part, LabelPart, at)
+        if built.series or built.label is not None:
+            raise ChartError(
+                f"{at}: a link's part is text, a column (field=), or the value (value=True); "
+                f"give one of them"
+            )
+        for name in ("format", "style"):
+            if getattr(built, name) is not None:
+                raise ChartError(
+                    f"{at} {name}: URLs take values raw, and text through their displays; "
+                    f"drop {name}"
+                )
+        made.append(built)
+    return made
+
+
+@refuses
+@dataclass(frozen=True)
+class Link:
+    """A link from each value of a column: ``url``, a constant URL or a list
+    of parts, and ``text``, a list of parts (the value's text by default). A
+    part is literal text, ``hg.LabelPart(field=...)`` (a column of the
+    row), or ``hg.LabelPart(value=True)`` (the column's own value), or a
+    dict of those arguments::
+
+        hg.FieldDisplay(link=hg.Link(
+            url=["https://traces.example.com/", hg.LabelPart(value=True)],
+            text=["Trace ", hg.LabelPart(value=True)],
+        ))
+
+    URL parts write values raw and URL-encoded: numbers as digits, times as
+    epoch milliseconds, categories as they are; a row missing a value they
+    read has no link. Text parts write values through their displays. Only
+    http, https, mailto, and relative URLs are links; others are written as
+    text, and a URL given with another scheme is refused. Pinned tooltips
+    (``hg.Tooltip(pin="click")``) draw a tooltip field's link, opening in a
+    new tab or window; ``InspectedField.link`` gives it to events."""
+
+    url: str | Sequence[LinkPart]
+    text: Sequence[LinkPart] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.url, str):
+            object.__setattr__(self, "url", _link_parts(self.url, "Link url"))
+        if self.text is not None:
+            object.__setattr__(self, "text", _link_parts(self.text, "Link text"))
+        given = self.url if isinstance(self.url, str) else next(iter(self.url), None)
+        if isinstance(given, str) and not _linkable(given):
+            raise ChartError(
+                f"Link url: {shown(given)} has a scheme links do not take; "
+                "give an http, https, mailto, or relative URL"
+            )
+
+    @property
+    def _fields(self) -> set[str]:
+        """The columns its parts read besides the value."""
+        parts = [*([] if isinstance(self.url, str) else self.url), *(self.text or [])]
+        return {part.field for part in parts if isinstance(part, LabelPart) and part.field}
+
+    def _spec(self) -> dict[str, Any]:
+        def parts(given: Sequence[LinkPart]) -> list[Any]:
+            return [part._spec() if isinstance(part, LabelPart) else part for part in given]
+
+        url = self.url if isinstance(self.url, str) else parts(self.url)
+        return {"url": url, **({"text": parts(self.text)} if self.text is not None else {})}
+
+
 #: A setting a rule gives, or False, which resets it to the default.
 Reset = Literal[False]
 
@@ -329,9 +433,9 @@ class FieldDisplay:
     or Intl options: number forms for numbers, time forms for times),
     ``min`` and ``max`` (a number column's bounds, never an axis' domain),
     ``missing`` (the text of missing values, or a dict of their ``text``
-    and ``color``), ``mappings`` (a list of ``hg.Mapping``), and
-    ``thresholds`` (a number column's ``hg.Thresholds``). Each setting also
-    takes False, which resets it.
+    and ``color``), ``mappings`` (a list of ``hg.Mapping``), ``thresholds``
+    (a number column's ``hg.Thresholds``), and ``link`` (an ``hg.Link``).
+    Each setting also takes False, which resets it.
 
     As a rule in a list, ``match`` says which columns it applies to: a
     column's name or an ``hg.Match``; without it, every column. Rules apply
@@ -357,6 +461,7 @@ class FieldDisplay:
     missing: str | MappingABC[str, str] | Reset | None = None
     mappings: Sequence[Mapping | dict[str, Any]] | Reset | None = None
     thresholds: Thresholds | dict[str, Any] | Reset | None = None
+    link: Link | dict[str, Any] | Reset | None = None
 
     def __post_init__(self) -> None:
         if self.match is not None and not isinstance(self.match, str):
@@ -394,6 +499,8 @@ class FieldDisplay:
             )
         if _given(self.thresholds):
             self.thresholds = _built(self.thresholds, Thresholds, "FieldDisplay thresholds")
+        if _given(self.link):
+            self.link = _built(self.link, Link, "FieldDisplay link")
         for name in ("min", "max"):
             value = getattr(self, name)
             if _given(value) and not (
@@ -473,11 +580,13 @@ class FieldDisplay:
         return None
 
     def _spec(self, table_name: TableName | None = None) -> dict[str, Any]:
-        format, mappings, thresholds = self.format, self.mappings, self.thresholds
+        format, mappings, thresholds, link = self.format, self.mappings, self.thresholds, self.link
         if isinstance(mappings, Sequence):  # each made an hg.Mapping as given
             mappings = [placed(f"mappings[{i}]", m._spec) for i, m in enumerate(mappings)]  # type: ignore[union-attr]
         if isinstance(thresholds, Thresholds):
             thresholds = placed("thresholds", thresholds._spec)
+        if isinstance(link, Link):
+            link = placed("link", link._spec)
         spec = {
             "match": placed("match", lambda: self.match._spec(table_name))  # type: ignore[union-attr]
             if isinstance(self.match, Match)
@@ -490,6 +599,7 @@ class FieldDisplay:
             "missing": dict(self.missing) if isinstance(self.missing, MappingABC) else self.missing,
             "mappings": mappings,
             "thresholds": thresholds,
+            "link": link,
         }
         return {key: value for key, value in spec.items() if value is not None}
 
@@ -534,15 +644,58 @@ def fields_spec(fields: Any, role: str, table_name: TableName | None = None) -> 
     ]
 
 
+def link_rules(fields: Any, role: str) -> list[tuple[str | Match | None, set[str]]]:
+    """The rules of ``fields`` giving a link, in order: each rule's match (a
+    column's name for a display by name) and the columns its link's parts
+    name besides the value (none for a constant link or a reset)."""
+    if fields is None:
+        return []
+    rules: list[tuple[str | None, Any, str]] = (
+        [(name, display, key_path(role, str(name))) for name, display in fields.items()]
+        if isinstance(fields, MappingABC)
+        else [(None, rule, f"{role}[{i}]") for i, rule in enumerate(fields)]
+    )
+    links: list[tuple[str | Match | None, set[str]]] = []
+    for name, rule, at in rules:
+        display = _built(rule, FieldDisplay, at)
+        if display.link is None:
+            continue
+        # A rule's match is made an hg.Match as the display is built.
+        match = name if name is not None else display.match
+        links.append((match, display.link._fields if isinstance(display.link, Link) else set()))
+    return links
+
+
+def link_needs(
+    rules: Sequence[tuple[str | Match | None, set[str]]],
+    matches: Callable[[str | Match | None], bool | None],
+) -> set[str]:
+    """The columns a column's link reads under ``rules`` (``link_rules``):
+    the link of the last rule that surely matches it (``matches`` True)
+    replaces earlier ones, and rules that may match (None) add theirs."""
+    needs: set[str] = set()
+    for match, fields in rules:
+        matched = matches(match)
+        if matched:
+            needs = set(fields)
+        elif matched is None:
+            needs |= fields
+    return needs
+
+
 __all__ = [
     "FORMS",
     "AtThresholds",
     "FieldDisplay",
     "FieldDisplays",
     "Kind",
+    "Link",
+    "LinkPart",
     "Mapping",
     "Match",
     "TableName",
     "Thresholds",
     "fields_spec",
+    "link_needs",
+    "link_rules",
 ]

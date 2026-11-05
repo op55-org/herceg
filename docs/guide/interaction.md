@@ -363,9 +363,11 @@ With `tooltip: { pin: "click" }`, a click on what the tooltip shows pins
 it there, and Enter pins it at the keyboard cursor. A pinned tooltip
 stays as the pointer moves on, takes the pointer and the focus, so links
 and buttons in `renderTooltip` content work, and is a group named
-"Pinned tooltip". Content drawn again as the data changes keeps the
-focus: on the control it was on where the new content has that control,
-else on the tooltip. Escape, a click outside it (off the data, or outside
+"Pinned tooltip". Tooltip fields whose [field display](fields.md#links)
+gives a link are links there, opening in a new tab or window. Content
+drawn again as the data changes keeps the focus: on the control it was
+on where the new content has that control, else on the link in its
+place, else on the tooltip. Escape, a click outside it (off the data, or outside
 the chart), or a second click where it is pinned lets it go, and the
 focus goes back to the chart.
 

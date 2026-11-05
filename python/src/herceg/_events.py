@@ -152,6 +152,15 @@ def decode_edge(payload: Any) -> ViewEdge:
 
 
 @dataclass(frozen=True)
+class RowLink:
+    """A row's link, as its column's ``hg.Link`` makes it: an http, https,
+    mailto, or relative URL, and its text."""
+
+    url: str
+    text: str
+
+
+@dataclass(frozen=True)
 class InspectedField:
     """A column of the row a tooltip is at that its mark's tooltip shows
     (``hg.Tooltip(fields=...)``)."""
@@ -167,6 +176,9 @@ class InspectedField:
     text: str
     #: The value's color, as the chart's field displays give it; None without one.
     color: str | None = None
+    #: The value's link, as the chart's field displays make it (``hg.Link``);
+    #: None without one, or where the row misses a value its URL reads.
+    link: RowLink | None = None
 
 
 @dataclass(frozen=True)
@@ -1471,6 +1483,7 @@ def decode_inspection(payload: Any) -> Inspection | None:
                         value=_value(field["value"], field["kind"] == "time"),
                         text=field["text"],
                         color=field.get("color"),
+                        link=RowLink(**field["link"]) if field.get("link") else None,
                     )
                     for field in point.get("fields", ())
                 ),

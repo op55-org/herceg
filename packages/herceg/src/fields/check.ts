@@ -188,6 +188,8 @@ export function checkDisplay(display: unknown, at: string, kit: FormatKit, rule:
       const { url, text } = settingsOf(value, where, "{ url, text }", ["url", "text"]);
       if (typeof url !== "string") checkParts(url, `${where}.url`);
       if (text !== undefined) checkParts(text, `${where}.text`);
+      const problem = urlProblem(url as string | readonly unknown[]);
+      if (problem) throw new Error(`${where}.url: ${problem}`);
     } else if (key === "min" || key === "max") {
       if (!Number.isFinite(value)) expected(where, "a number", value);
     } else if (typeof value !== "string") expected(where, "text", value);
@@ -297,6 +299,34 @@ function checkParts(parts: unknown, at: string): void {
       expected(`${where}.field`, "a field's name", field);
     if (value !== undefined && value !== true) expected(`${where}.value`, "true", value);
   });
+}
+
+/** The schemes links take; a URL without one is relative. */
+const SCHEMES = ["http", "https", "mailto"];
+
+/**
+ * Whether `url` is one links take: http, https, mailto, or relative. Its
+ * scheme is read as browsers parse URLs, after the control characters and
+ * spaces before it, and tabs and newlines anywhere, which they drop.
+ */
+export function linkable(url: string): boolean {
+  let start = 0;
+  while (url.charCodeAt(start) <= 32) start++;
+  const scheme = /^([a-z][a-z\d+.-]*):/i.exec(url.slice(start).replace(/[\t\n\r]/g, ""));
+  return !scheme || SCHEMES.includes(scheme[1]!.toLowerCase());
+}
+
+/**
+ * The problem with a link's `url` (checked to be text or parts) whose
+ * scheme is given as text, constant or its first part, and is not one
+ * links take; undefined otherwise. Schemes values make are written as
+ * text as each row is read.
+ */
+export function urlProblem(url: string | readonly unknown[]): string | undefined {
+  const given = typeof url === "string" ? url : url[0];
+  return typeof given === "string" && !linkable(given)
+    ? `${shown(given)} has a scheme links do not take; give an http, https, mailto, or relative URL`
+    : undefined;
 }
 
 /** Refuses a malformed match, naming its path `at`; returns the kinds it names. */

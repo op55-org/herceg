@@ -18,6 +18,7 @@ import {
   displayed,
 } from "./fields/display.ts";
 import { columnDisplay } from "./fields/grid.ts";
+import type { LinkRows, LinkWrite } from "./fields/links.ts";
 import {
   type FieldDisplays,
   type FieldOf,
@@ -42,6 +43,7 @@ export type {
   FieldColumns,
 } from "./fields/display.ts";
 export type { ColumnDisplay, GridColumnSettings } from "./fields/grid.ts";
+export type { LinkRows, RowLink } from "./fields/links.ts";
 export type { FieldDisplays, FieldMatch, FieldRule, TableRef } from "./fields/rules.ts";
 export type {
   CategoryFieldDisplay,
@@ -49,6 +51,7 @@ export type {
   DisplayedKind,
   FieldDisplay,
   FieldLink,
+  FieldLinkOf,
   LinkPart,
   MissingDisplay,
   NumberFieldDisplay,
@@ -62,13 +65,13 @@ export type {
 /** The formatters and zone arithmetic displays write with: application code has no chart to hand them. */
 const KIT = { numberFormatter, timeFormatter, toWall, formatNumber };
 
-/** The display a field of kind `K` takes: what its kind writes. */
-export type DisplayFor<K extends FieldKind> = K extends "number"
-  ? NumberFieldDisplay
+/** The display a field of kind `K` takes (what its kind writes), its link's parts naming fields `F`. */
+export type DisplayFor<K extends FieldKind, F extends string = string> = K extends "number"
+  ? NumberFieldDisplay<F>
   : K extends "time"
-    ? TimeFieldDisplay
+    ? TimeFieldDisplay<F>
     : K extends "category"
-      ? CategoryFieldDisplay
+      ? CategoryFieldDisplay<F>
       : never;
 
 /** What a display is asked for: a table's field, or a field by name and kind, of a table by name. */
@@ -109,7 +112,32 @@ function compiled(
     settings: DisplaySettings = {},
   ): DisplayedField => {
     const field = fieldOf(of, surface);
-    return displayed(field, resolve(rules, field, surface), KIT, settings, surface);
+    // Links write other fields of their rows through those fields' displays,
+    // in the surface's place and missing text, without its own format; the
+    // fields of the table this display is of, which rules naming tables
+    // match, whatever reads the rows.
+    const { format: _, ...others } = settings;
+    const texts = new WeakMap<LinkRows, Map<string, DisplayedField["text"]>>();
+    const textOf = (rows: LinkRows, name: string) => {
+      let byName = texts.get(rows);
+      if (!byName) {
+        byName = new Map();
+        texts.set(rows, byName);
+      }
+      let text = byName.get(name);
+      if (!text) {
+        const other: FieldOf = {
+          name,
+          kind: rows.kind(name) as DisplayedKind,
+          tables: field.tables && lineOf(origins, field.tables[0]!, name),
+          table: field.table,
+        };
+        text = displayed(other, resolve(rules, other, surface), KIT, others, surface, textOf).text;
+        byName.set(name, text);
+      }
+      return text as LinkWrite;
+    };
+    return displayed(field, resolve(rules, field, surface), KIT, settings, surface, textOf);
   };
   return { displays, displayOf: displayOf as CompiledFields["displayOf"] };
 }
@@ -185,7 +213,7 @@ function fieldOf(of: FieldAsked<Schema, string, DisplayedKind>, surface: string)
  */
 export function fieldsOf<S extends Schema>(
   table: Table<S> | RowView<S>,
-  displays: { readonly [F in FieldName<S>]?: DisplayFor<S[F]> },
+  displays: { readonly [F in FieldName<S>]?: DisplayFor<S[F], PositionField<S>> },
 ): FieldRule[] {
   const source = ("source" in table ? table.source : table) as unknown as Table;
   // Each a rule naming its field: what the field's kind cannot take is refused.

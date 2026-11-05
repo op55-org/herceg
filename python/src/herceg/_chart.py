@@ -32,7 +32,7 @@ import numpy as np
 from . import _geo, _render
 from ._colors import is_color
 from ._data import UNTYPED, Column, Matrix, Table, listlike
-from ._derive import BinSpec, Derived, Expr, Ordered, View, _fields_of, bin_spec
+from ._derive import BinSpec, Derived, Expr, Ordered, View, _fields_of, _writes, bin_spec
 from ._encoding import (
     SYMBOLS,
     BarLabels,
@@ -111,7 +111,16 @@ from ._events import (
     viewport_option,
     visibility_option,
 )
-from ._fields import AtThresholds, FieldDisplays, TableName, fields_spec, writes
+from ._fields import (
+    AtThresholds,
+    FieldDisplays,
+    Match,
+    TableName,
+    fields_spec,
+    link_needs,
+    link_rules,
+    writes,
+)
 from ._guides import (
     _NUMBER_FORMAT,
     _TIME_FORMAT,
@@ -6175,9 +6184,10 @@ class Chart:
             spec["layout"] = layout
         return spec
 
-    def _used_fields(self) -> dict[int, set[str]]:
-        """The columns each table must send: those marks read, and those derived
-        tables need from their sources."""
+    def _used_fields(self, settings: Mapping[str, Any] | None = None) -> dict[int, set[str]]:
+        """The columns each table must send: those marks read, those links of
+        the field displays of ``settings`` (the chart's by default) read, and
+        those derived tables need from their sources."""
         used: dict[int, set[str]] = {}
         for index, (spec, table) in enumerate(self._marks):
             # A network's node fields are columns of its nodes, not of its links.
@@ -6222,6 +6232,8 @@ class Chart:
                     )
                     if whose and place.field in self._tables[table][1].names:
                         fields.add(place.field)
+        # Links of the displays of columns sent read other columns of their rows.
+        self._add_link_fields(used, (settings or self._settings).get("fields"))
         # Columns row selections' conditions set from Python test, and those
         # of the conditions bindings start with.
         for binding in self._row_selection:
@@ -6267,6 +6279,68 @@ class Chart:
                 used[table].add(source.by)
         return used
 
+    def _add_link_fields(self, used: dict[int, set[str]], fields: Any) -> None:
+        """Adds to each table's columns those the links of its columns sent
+        read under ``fields``, where it has them: each column's link is the
+        last rule's that surely matches it, or any rule's that may (regular
+        expressions are JavaScript's), so the engine never lacks a column a
+        link reads."""
+        rules = located(None, lambda: link_rules(fields, "Chart fields"))
+        if not rules:
+            return
+        for table, names in used.items():
+            columns = self._tables[table][1].names
+            reads: set[str] = set()
+            # A point's symbol may name a shape rather than a column; shapes
+            # have no displays.
+            for name in [
+                name
+                for name in names
+                if name in columns and self._tables[table][1].column(name).kind != "geometry"
+            ]:
+                reads |= link_needs(rules, functools.partial(self._matches, name=name, table=table))
+            names.update(field for field in reads if field in columns)
+
+    def _matches(self, match: str | Match | None, name: str, table: int) -> bool | None:
+        """Whether a rule matching ``match`` applies to column ``name`` of
+        table ``table``: True or False where Python can tell (names, kinds,
+        the tables the column comes from unchanged), None where only the
+        engine can (regular expressions)."""
+        if match is None or isinstance(match, str):
+            return match is None or match == name
+        names = [match.field] if isinstance(match.field, str) else match.field
+        kinds = match._kinds
+        if (names is not None and name not in names) or (
+            kinds is not None and self._tables[table][1].column(name).kind not in kinds
+        ):
+            return False
+        sure = match.regex is None
+        if match.table is None:
+            return True if sure else None
+        # The tables the column comes from unchanged: derived tables' sources
+        # while it passes their steps, and the tables express made them from.
+        line = [table]
+        while True:
+            one = line[-1]
+            if one in self._derived and _passes(self._tables[one][0], name):
+                line.append(self._derived[one])
+            elif one in self._origins and name in self._tables[self._origins[one]][1].names:
+                line.append(self._origins[one])
+            else:
+                break
+        # Data objects match by identity: a DataFrame's == compares cells.
+        named = [
+            match.table is self._tables[one][0]
+            or (match.table is self._computed_from and one == self._default)
+            or (isinstance(match.table, str) and match.table == table_name(one))
+            for one in line
+        ]
+        # The line holds the tables the column comes from unchanged, as the
+        # engine's lineage does: a rule naming one of them matches it.
+        if not any(named):
+            return False
+        return True if sure else None
+
     def _titled_fields(self) -> set[str]:
         """The columns axes' titles of parts name by their labels
         (``hg.LabelPart(label="ms")``), where field displays label them."""
@@ -6293,20 +6367,29 @@ class Chart:
         read([self._options, guides_spec(self._panel_guides), self._layout_spec()])
         return named
 
-    def _used_columns(self) -> dict[str, dict[str, Column]]:
-        """The columns sent, by spec table name; other columns are never sent,
-        but a matrix's coordinates always are: they say its shape."""
-        used = self._used_fields()
+    def _used_columns(
+        self, settings: Mapping[str, Any] | None = None
+    ) -> dict[str, dict[str, Column]]:
+        """The columns sent, by spec table name, under ``settings`` (the
+        chart's by default): those ``_sent_fields`` names."""
+        return {
+            name: {field: self._tables[table][1].column(field) for field in sorted(fields)}
+            for name, (table, fields) in self._sent_fields(settings).items()
+        }
+
+    def _sent_fields(
+        self, settings: Mapping[str, Any] | None = None
+    ) -> dict[str, tuple[int, set[str]]]:
+        """The names of the columns sent, by spec table name, with the
+        table's index; other columns are never sent, but a matrix's
+        coordinates always are: they say its shape."""
+        used = self._used_fields(settings)
         for table, (source, _) in enumerate(self._tables):
             if isinstance(source, Matrix) and table in used:
                 used[table] |= {source.x, source.y}
         return {
-            table_name(table): {
-                # A point's symbol may name a shape rather than a column.
-                field: self._tables[table][1].column(field)
-                for field in sorted(fields)
-                if field in self._tables[table][1].names
-            }
+            # A point's symbol may name a shape rather than a column.
+            table_name(table): (table, fields & set(self._tables[table][1].names))
             for table, fields in used.items()
             if table not in self._derived
         }
@@ -8522,6 +8605,21 @@ def _part_fields(label: Any) -> list[tuple[str, Any]]:
         for name in ("field", "label")
         if isinstance(part, dict) and part.get(name) is not None
     ]
+
+
+def _passes(data: Any, name: str) -> bool:
+    """Whether column ``name`` of the rows of ``data``, a derived table or a
+    view, is its source's unchanged, as the engine's lineage says: no step
+    makes or replaces it, and an aggregate keeps it as a group."""
+    if not isinstance(data, Derived):
+        return True
+    for step in data.steps:
+        if "aggregate" in step:
+            if name not in step.get("by", []) or any(o["as"] == name for o in step["aggregate"]):
+                return False
+        elif name in _writes(step):
+            return False
+    return True
 
 
 def _label_fields(spec: dict[str, Any]) -> set[str]:

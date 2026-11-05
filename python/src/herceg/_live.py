@@ -76,8 +76,11 @@ class LiveChart:
         # What option updates are checked against: the layout marks and the subplots.
         self._layouts = chart._layouts()
         self._subplots = len(chart._panels)
-        # Current columns by table name: only those marks read, as in the spec.
-        self._tables = chart._used_columns()
+        # Current columns by table name: only those marks and links read, as in the spec.
+        self._tables = chart._used_columns(settings)
+        # The columns each table sends under other field displays, as the
+        # chart says: what `update(fields=...)` checks against what was sent.
+        self._sent_fields = chart._sent_fields
         self._ordered = {
             name: spec for name, spec in chart._ordered_specs().items() if name in self._tables
         }
@@ -386,10 +389,30 @@ class LiveChart:
         # Checked before anything changes, as the chart checks it when made.
         check_layout_options(settings, self._layouts, self._subplots)
         options = self._spec_options(settings)
+        if "fields" in changes:
+            self._check_links(settings)
         changed = self._changed_options(options)
         self._settings, self._options = settings, options
         self.overrides.update(changes)
         return ({"type": "options", "options": changed}, []) if changed else None
+
+    def _check_links(self, settings: dict[str, Any]) -> None:
+        """Refuses displays whose links read columns the chart did not send:
+        a live chart's tables hold only those, as their rows were sent, and
+        derived tables compute theirs from them. What the new displays add
+        is judged against the same chart's columns before them, which marks
+        added to it after the widget was made do not change."""
+        before = self._sent_fields(self._settings)
+        sent = located("fields", lambda: self._sent_fields(settings))
+        for name, (_, fields) in sent.items():
+            added = fields - before.get(name, (0, fields))[1]
+            missing = sorted(added - set(self._tables.get(name, added)))
+            if missing:
+                raise ChartError(
+                    f"widget.update fields: a link reads column {missing[0]!r}, which the chart "
+                    "did not send; give the chart these fields when it is made",
+                    path="fields",
+                )
 
     def update_rule(self, id: Any, x: Any, y: Any) -> Message:
         """Moves the rule of id `id` to `x` or `y`, along the axis it stands
@@ -483,6 +506,7 @@ class LiveChart:
         self._sources, self._default = other._sources, other._default
         # Field displays' Match(table=) names the data drawn now.
         self._name_of = other._name_of
+        self._sent_fields = other._sent_fields
         if not tables and not changed:
             return None
         return {"type": "tables", "tables": tables, "options": changed}, buffers

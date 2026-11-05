@@ -124,6 +124,7 @@ export type {
 export { type Hydration, hydrateChart, hydration } from "./dom/hydrate.ts";
 export type { RenderTooltip } from "./dom/tooltip.ts";
 export type { SymbolName } from "./draw/symbols.ts";
+export type { RowLink } from "./fields/links.ts";
 export {
   type AxisGuideOptions,
   type AxisOptions,

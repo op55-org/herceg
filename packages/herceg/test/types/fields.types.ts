@@ -178,3 +178,28 @@ fieldsOf(requests, {
   // @ts-expect-error categories are mapped by value or regex
   service: { mappings: [{ between: [0, 1], text: "low" }] },
 });
+
+// Links: parts of a table's fields in fieldsOf; any name in rules; resolved as { url, text }.
+fieldsOf(requests, {
+  service: {
+    link: { url: ["/services/", { value: true }, "?at=", { field: "time" }], text: ["Open"] },
+  },
+});
+fieldsOf(requests, {
+  // @ts-expect-error the table has no field "tme"
+  service: { link: { url: ["/services/", { field: "tme" }] } },
+});
+export const linked: FieldDisplays = [
+  { match: { kind: "category" }, link: { url: ["/v/", { value: true }, "/", { field: "any" }] } },
+  { match: "service", link: false },
+];
+export const twoParts: FieldDisplays = {
+  // @ts-expect-error a part is text, a field, or the value
+  service: { link: { url: [{ field: "a", value: true }] } },
+};
+const shownLink: { url: string; text: string } | undefined = displayOf(fields, {
+  table: requests,
+  field: "service",
+}).link(requests, 0);
+
+export { shownLink };

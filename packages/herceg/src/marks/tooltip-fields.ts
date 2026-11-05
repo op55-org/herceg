@@ -4,6 +4,7 @@
 
 import type { FieldKind } from "../data/column.ts";
 import type { PositionField, Schema, Table } from "../data/table.ts";
+import type { RowLink } from "../fields/links.ts";
 import type { Formatter } from "../format/format.ts";
 import type { FormatKit } from "../format/patterns.ts";
 import type { TimeZone } from "../format/zone.ts";
@@ -58,6 +59,12 @@ export interface InspectedField {
    * built-in tooltip draws it as a swatch beside the value.
    */
   color?: string;
+  /**
+   * The value's link, as the chart's field displays make it (`link`; see
+   * `displayOf`): an http, https, mailto, or relative URL, and its text,
+   * which the built-in tooltip writes for the value, as a link once pinned.
+   */
+  link?: RowLink;
 }
 
 /** The fields `mark`'s tooltip shows of `row`; undefined for a mark without any. */
