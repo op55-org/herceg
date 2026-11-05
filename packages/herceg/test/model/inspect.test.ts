@@ -123,6 +123,23 @@ describe("inspected points", () => {
     ]);
   });
 
+  it("give the cell under the pointer beside the series read along the axis", () => {
+    const cells = table({ x: ["a", "b"], y: ["p", "p"], v: [1, 2] });
+    const trend = table({ x: ["a", "b"], v: [10, 20] });
+    const model = build({
+      marks: [
+        heatmap(cells, { x: "x", y: "y", color: "v" }),
+        line(trend, { x: "x", y: "v", axis: "right" }),
+      ],
+      inspection: { mode: "nearest-x" },
+    });
+    const inside = model.inspect(xScale(model)!.map(1), yScale(model)!.map(0));
+    expect(inside?.points.map(({ mark, row }) => [mark, row])).toEqual([
+      [1, 1],
+      [0, 1],
+    ]);
+  });
+
   it("give custom marks' rows", () => {
     const model = build({
       marks: [custom(data, { x: "t", y: "b", draw: () => {} })],

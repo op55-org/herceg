@@ -6,7 +6,10 @@ import { table } from "../../src/data/table.ts";
 import { guideCompiler } from "../../src/guides/compile.ts";
 import { axis, type Format } from "../../src/guides/options.ts";
 import { estimateText } from "../../src/layout/text.ts";
+import { bar } from "../../src/marks/bar.ts";
+import { gauge } from "../../src/marks/gauge.ts";
 import { line } from "../../src/marks/line.ts";
+import { rule } from "../../src/marks/rule.ts";
 import { GUIDE_KIT, needsGuides } from "../../src/model/guides.ts";
 import { type ChartConfig, ChartModel } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
@@ -182,6 +185,17 @@ describe("ticks every so often", () => {
       model.setSize(400, 200, 1);
       model.scene(estimateText);
     }).toThrow(/content\[0\]\.format\.fiscal: Intl options write no fiscal year/);
+    // Nor do marks' own formats: bars' labels, annotations' labels, gauges'.
+    const fiscal = { maximumFractionDigits: 0, fiscal: { start: 7 } } as never;
+    for (const [mark, path] of [
+      [bar(data, { x: "x", y: "v", labels: { format: fiscal } }), "bar labels.format"],
+      [rule({ y: 0.5, label: { text: "y", format: fiscal } }), "rule label.format"],
+      [gauge(data, { value: "v", format: fiscal }), "gauge format"],
+    ] as const) {
+      const model = new ChartModel({ marks: [mark] }, undefined, staticCompilers());
+      model.setSize(400, 200, 1);
+      expect(() => model.scene(estimateText), path).toThrow(`${path}.fiscal: ${intl}`);
+    }
     // A chart that would not load the guide compiler loads it to refuse
     // them, for an axis' format or tooltip format, the chart's or a panel's.
     const refused = { maximumFractionDigits: 0, fiscal: { start: 7 } } as never;

@@ -763,9 +763,16 @@ export interface Mark<S extends MarkIdentity = MarkIdentity> extends ChartMark<S
   /**
    * A sentence describing what the mark shows, for marks without series
    * (annotations), which the chart's data summary would otherwise leave
-   * out: of `rows` only, when given.
+   * out: of `rows` only, when given, and of rows placed on layout items
+   * only those whose items drew together in one of `frames` (where the
+   * mark drew).
    */
-  describe?(format: AxisFormat, locale: string | undefined, rows?: RowParts): string | undefined;
+  describe?(
+    format: AxisFormat,
+    locale: string | undefined,
+    rows?: RowParts,
+    frames?: readonly Frame[],
+  ): string | undefined;
   /**
    * Pixels the mark draws past its data at the ends of its value axis (the
    * `zero` axis) that lie away from zero, such as bar labels; automatic

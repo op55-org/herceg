@@ -21,7 +21,6 @@ const ENTRIES = join(ROOT, "src", "size", "entries");
 /** The npm package each entry measures, for version reporting. */
 const ENTRY_PACKAGES: Record<string, string> = {
   "herceg-line": "herceg",
-  "herceg-line-state": "herceg",
   "herceg-line-fields": "herceg",
   "herceg-fields": "herceg",
   "herceg-pdf": "herceg",

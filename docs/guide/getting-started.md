@@ -186,8 +186,8 @@ belongs to. Items and series a click selected (`kind: "items"`,
 sets it ([Selections](interaction.md#selections)).
 
 A chart's state, its selection, views, hidden series, and drill root, can
-also be given as options and written back from its events, with state
-support from `herceg/state` ([Chart state](interaction.md#chart-state)).
+also be given as options and written back from its events
+([Chart state](interaction.md#chart-state)).
 
 ## When a chart cannot draw
 

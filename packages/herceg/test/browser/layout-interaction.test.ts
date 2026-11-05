@@ -22,7 +22,6 @@ import { ChartModel, type ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
 import { renderToSVG } from "../../src/render/static.ts";
-import { chartState } from "../../src/state.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { accessibilityTree, MOUSE, modelOf, pageOrigin, realMouse } from "./helpers.ts";
 
@@ -526,7 +525,7 @@ describe("maps", () => {
   });
 
   it("end a lasso being drawn when a selection option takes its place", async () => {
-    const chart = await map({ state: chartState, interaction: { brush: "lasso" } });
+    const chart = await map({ interaction: { brush: "lasso" } });
     const { x, y } = plane(chart);
     const [top, bottom] = [y.map(4 * radians), y.map(-4 * radians)];
     const [left, right] = [x.map(22 * radians), x.map(48 * radians)];
@@ -680,6 +679,8 @@ describe("treemaps and sunbursts", () => {
         path: [{ key: '[0,"Europe"]', label: "Europe" }],
         cause: "pointer",
         revision: chart.revision,
+        basis: chart.basis,
+        state: '[0,"Europe"]',
       },
     ]);
     expect(chart.getDrillRoot()?.key).toBe('[0,"Europe"]');
@@ -749,6 +750,8 @@ describe("treemaps and sunbursts", () => {
         path: [{ key: '[0,"Europe"]', label: "Europe" }],
         cause: "pointer",
         revision: chart.revision,
+        basis: chart.basis,
+        state: '[0,"Europe"]',
       },
     ]);
     const live = chart.root.querySelector("[aria-live]")!;
@@ -849,6 +852,8 @@ describe("treemaps and sunbursts", () => {
       path: [{ key: '[0,"Europe"]', label: "Europe" }],
       cause: "data",
       revision: chart.revision,
+      basis: chart.basis,
+      state: '[0,"Europe"]',
     });
   });
 
@@ -1250,6 +1255,7 @@ describe("networks", () => {
       phase: "commit",
       cause: "pointer",
       revision: chart.revision,
+      basis: chart.basis,
     });
     expect(where(chart, "a")[0]).toBeCloseTo(ax, 6);
   });

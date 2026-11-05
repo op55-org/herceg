@@ -28,7 +28,6 @@ import {
   time,
 } from "../../src/index.ts";
 import { renderToPDF } from "../../src/pdf.ts";
-import { chartState } from "../../src/state.ts";
 
 declare const timestamps: Float64Array;
 declare const p50Latency: Float64Array;
@@ -491,7 +490,6 @@ chart.on("select", ({ selection, phase }) => [selection, phase, brushed]);
 declare const showOrigins: (series: readonly (string | object)[]) => void;
 const fleet = table({ weight: latencies, mpg: latencies, origin: serviceNames });
 const picking = createChart(element, {
-  state: chartState,
   marks: [
     point(fleet, {
       id: "cars",
@@ -514,7 +512,6 @@ picking.select({ kind: "items", items: [{ mark: "cars", item: ["3"] }] });
 declare const saved: { range: [number, number]; hidden: string[] };
 declare const server: { snap(selection: ChartSelection): Promise<ChartSelection> };
 const stateful = createChart(element, {
-  state: chartState,
   marks: [line(metrics, { x: "time", y: "p50" })],
   viewport: { x: saved.range },
   visibility: { hidden: saved.hidden },

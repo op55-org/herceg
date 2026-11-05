@@ -1,6 +1,6 @@
-// State support (herceg/state): state options and their equality, writing
+// A chart's state from outside: state options and their equality, writing
 // reported state back, conditional writes, conditions, selections of items
-// and series, and what charts without it refuse.
+// and series, and static exports' state options.
 import "./interactive.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { compileExpression } from "../../src/data/expression.ts";
@@ -9,7 +9,7 @@ import { rowView } from "../../src/data/row-view.ts";
 import { selectionStore } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
-import type { Basis, ChartEvents } from "../../src/dom/events.ts";
+import type { ChartEvents } from "../../src/dom/events.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { custom } from "../../src/marks/custom.ts";
 import { errorbar } from "../../src/marks/errorbar.ts";
@@ -27,7 +27,6 @@ import { rowSelection } from "../../src/model/row-selection.ts";
 import { renderToSVG } from "../../src/render/static.ts";
 import { ChartError } from "../../src/spec/errors.ts";
 import type { Look } from "../../src/spec/state.ts";
-import { chartState } from "../../src/state.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { sceneOf } from "./contracts/mount.ts";
 import { MOUSE } from "./helpers.ts";
@@ -82,67 +81,53 @@ function expectRefused(call: () => unknown, code: string, says: RegExp) {
 const brush = (x: readonly [number, number]) =>
   ({ kind: "brush", x, y: null, lasso: null }) as const;
 
-describe("charts without state support", () => {
-  it("refuse state options, naming the module", () => {
-    for (const option of [
-      { selection: null },
-      { viewport: { x: [1, 2] as const } },
-      { visibility: { hidden: ["v"] } },
-      { drillRoot: null },
-    ])
-      expectRefused(() => mount(option), "unsupported", /herceg\/state/);
-  });
-
-  it("refuse items and series, conditional writes, and bases", () => {
-    const chart = mount();
-    expectRefused(
-      () => chart.select({ kind: "items", items: ['[0,"1"]'] }),
-      "unsupported",
-      /selection: needs state support; give the chart state: chartState, from herceg\/state/,
-    );
-    expectRefused(
-      () => chart.setViewport([1, 2], { expected: "a:1" as Basis }),
-      "unsupported",
-      /expected: needs state support/,
-    );
-    expectRefused(() => chart.basis, "unsupported", /basis/);
-    // Brushes are the chart's own.
+describe("a chart", () => {
+  it("takes state options, conditional writes, pins, and items, as it is made", async () => {
+    const chart = mount({
+      marks: [point(data(), { id: "dots", x: "t", y: "v", itemKey: "t" })],
+      inspection: { mode: "nearest" },
+      interaction: { select: "items" },
+      selection: { kind: "items", items: [{ mark: "dots", item: [1] }] },
+      viewport: { x: [0, 3] },
+      visibility: { hidden: [] },
+    });
+    expect(chart.selection).toEqual({ kind: "items", items: ['["dots",1]'] });
+    expect(chart.getViewport().x).toEqual([0, 3]);
+    // A write on a basis older than the change since is refused.
+    const basis = chart.basis;
+    chart.setViewport({ x: [1, 2] });
+    chart.setViewport({ x: [0, 4] }, { expected: basis });
+    expect(chart.getViewport().x).toEqual([1, 2]);
+    chart.setViewport({ x: [0, 4] }, { expected: chart.basis });
+    expect(chart.getViewport().x).toEqual([0, 4]);
+    // Pinned by a reference, and read at once.
+    const pins = heard(chart, "pin");
+    chart.pin({ item: { mark: "dots", item: [2] } });
+    expect(chart.pinned).toMatchObject({ item: '["dots",2]' });
+    await chart.loading;
+    expect(pins.at(-1)?.at).toMatchObject({ item: '["dots",2]' });
+    // What a selection holds, at once.
+    const selects = heard(chart, "select");
     chart.select([1, 2]);
-    expect(brushOf(chart.selection)?.x).toEqual([1, 2]);
-  });
-
-  it("refuse clicks selecting items", () => {
-    expectRefused(
-      () => mount({ interaction: { select: "items" } }),
-      "unsupported",
-      /interaction.select: needs state support/,
+    expect(selects[0]!.conditions).toHaveLength(1);
+    // A tree's drill root.
+    const tree = table({ a: ["x", "x", "y"], b: ["p", "q", "r"], v: [1, 2, 3] });
+    const rings = mount(
+      {
+        marks: [sunburst(tree, { path: ["a", "b"], value: "v" })],
+        interaction: { zoom: true },
+        drillRoot: ["x"],
+      },
+      document.body.appendChild(document.createElement("div")),
     );
-  });
-
-  it("report select events whose conditions throw only when read", () => {
-    const chart = mount();
-    const events = heard(chart, "select");
-    chart.select([1, 2]);
-    const [event] = events;
-    expect({ ...event }).toMatchObject({ phase: "commit", cause: "api" });
-    expect(JSON.parse(JSON.stringify(event))).not.toHaveProperty("conditions");
-    expectRefused(() => event!.conditions, "unsupported", /herceg\/state/);
-  });
-
-  it("refuse state options in static exports", () => {
-    const options = { width: 400, height: 200, marks: [line(data(), { x: "t", y: "v" })] };
-    expectRefused(
-      () => renderToSVG({ ...options, viewport: { x: [1, 2] } }),
-      "unsupported",
-      /herceg\/state/,
-    );
+    rings.render();
+    expect(rings.getDrillRoot()?.key).not.toBeNull();
   });
 });
 
 describe("state options", () => {
   it("give the first state", () => {
     const chart = mount({
-      state: chartState,
       selection: brush([1, 2]),
       viewport: { x: [0, 3] },
       visibility: { hidden: ["v"] },
@@ -155,7 +140,6 @@ describe("state options", () => {
   it("give the whole view: an axis left out is not zoomed, the right one too", () => {
     const source = data();
     const chart = mount({
-      state: chartState,
       marks: [line(source, { x: "t", y: "v" }), line(source, { x: "t", y: "w", axis: "right" })],
       viewport: { x: [1, 3], yRight: [2, 3] },
     });
@@ -166,7 +150,7 @@ describe("state options", () => {
   });
 
   it("change the state when their value changes, and only then", () => {
-    const chart = mount({ state: chartState, selection: brush([1, 2]) });
+    const chart = mount({ selection: brush([1, 2]) });
     const events = heard(chart, "select");
     chart.update({ selection: brush([1, 2]) });
     // The same value written in another order of fields is the same value.
@@ -187,7 +171,7 @@ describe("state options", () => {
   });
 
   it("take what the chart reported back without a change or a loop", () => {
-    const chart = mount({ state: chartState, interaction: { brush: "x", zoom: "x" } });
+    const chart = mount({ interaction: { brush: "x", zoom: "x" } });
     const selects = heard(chart, "select");
     const views = heard(chart, "viewport");
     chart.on("select", (event) => chart.update({ selection: event.selection }));
@@ -204,7 +188,6 @@ describe("state options", () => {
     other.style.cssText = "width:600px;height:300px";
     host.after(other);
     const synced = {
-      state: chartState,
       interaction: { brush: "x", zoom: "x", sync: "g" },
     } as const;
     const pair = [mount(synced), mount(synced, other)] as const;
@@ -229,7 +212,7 @@ describe("state options", () => {
   });
 
   it("report each state whole, with a basis", () => {
-    const chart = mount({ state: chartState });
+    const chart = mount();
     const views = heard(chart, "viewport");
     const hidden = heard(chart, "visibility");
     chart.setViewport({ x: [1, 2] });
@@ -242,7 +225,6 @@ describe("state options", () => {
 
   it("name items and series by their keys, in one order", () => {
     const chart = mount({
-      state: chartState,
       marks: [point(data(), { id: "dots", x: "t", y: "v" })],
     });
     chart.select({
@@ -268,7 +250,7 @@ describe("state options", () => {
 
 describe("conditional writes", () => {
   it("are refused once the state changed since their basis, which is reported again", () => {
-    const chart = mount({ state: chartState });
+    const chart = mount();
     const basis = chart.basis;
     chart.select([1, 2]);
     const events = heard(chart, "select");
@@ -284,7 +266,7 @@ describe("conditional writes", () => {
   });
 
   it("are refused once a gesture changed the state since their basis", async () => {
-    const chart = mount({ state: chartState });
+    const chart = mount();
     await chart.loading;
     const reports = heard(chart, "select");
     chart.select([1, 2]);
@@ -315,7 +297,7 @@ describe("conditional writes", () => {
 
   it("apply after changes of other state and of the data", () => {
     const source = data();
-    const chart = mount({ state: chartState, marks: [line(source, { x: "t", y: "v" })] });
+    const chart = mount({ marks: [line(source, { x: "t", y: "v" })] });
     const basis = chart.basis;
     chart.setViewport({ x: [0, 2] });
     chart.setHiddenKeys(["w"]);
@@ -332,7 +314,7 @@ describe("conditional writes", () => {
   });
 
   it("apply on a basis older than a refused write's, when nothing changed since it", () => {
-    const chart = mount({ state: chartState });
+    const chart = mount();
     const before = chart.basis;
     const reports = heard(chart, "select");
     chart.select([1, 2]);
@@ -347,7 +329,6 @@ describe("conditional writes", () => {
 
   it("are refused over a camera changed and not reported yet", () => {
     const chart = mount({
-      state: chartState,
       interaction: {},
       marks: [
         point3d(table({ x: [0, 1, 2], y: [0, 1, 2], z: [0, 1, 2] }), { x: "x", y: "y", z: "z" }),
@@ -362,7 +343,7 @@ describe("conditional writes", () => {
 
   it("are refused over a change made and not reported yet", () => {
     // Before the first frame, whose reports wait for it.
-    const chart = mount({ state: chartState });
+    const chart = mount();
     const basis = chart.basis;
     chart.select([0, 1]);
     chart.select([2, 3], { expected: basis });
@@ -384,7 +365,7 @@ describe("conditional writes", () => {
 
   it("are refused over a change no listener heard, and one waiting for the first frame", () => {
     const [chart, peer] = [
-      mount({ state: chartState, interaction: { zoom: "x", sync: { viewport: "pair" } } }),
+      mount({ interaction: { zoom: "x", sync: { viewport: "pair" } } }),
       mount(
         { interaction: { zoom: "x", sync: { viewport: "pair" } } },
         document.body.appendChild(document.createElement("div")),
@@ -399,7 +380,6 @@ describe("conditional writes", () => {
     // A subplot's selections wait for the first frame, which draws it.
     const subplots = mount(
       {
-        state: chartState,
         panels: panels([{ id: "p" }]),
         marks: [line(data(), { x: "t", y: "v", panel: "p" })],
       },
@@ -413,7 +393,7 @@ describe("conditional writes", () => {
   });
 
   it("are refused over a reset made in a listener, before its report", () => {
-    const chart = mount({ state: chartState, interaction: { zoom: "x" } });
+    const chart = mount({ interaction: { zoom: "x" } });
     chart.render();
     chart.setViewport({ x: [0, 2] });
     let done = false;
@@ -431,7 +411,6 @@ describe("conditional writes", () => {
     const people = table({ name: ["Ana", "Bo", "Cy"] });
     const talks = table({ from: ["Ana", "Bo"], to: ["Bo", "Cy"] });
     const chart = mount({
-      state: chartState,
       interaction: { zoom: true },
       marks: [graph(talks, { source: "from", target: "to", nodes: people, node: "name" })],
     });
@@ -450,7 +429,6 @@ describe("conditional writes", () => {
     const network = (panel: string) =>
       graph(talks, { source: "from", target: "to", nodes: people, node: "name", panel });
     const planes = mount({
-      state: chartState,
       interaction: { zoom: true },
       panels: panels([{ id: "a" }, { id: "b" }]),
       marks: [network("a"), network("b")],
@@ -461,7 +439,6 @@ describe("conditional writes", () => {
     planes.setViewport(null, { expected: basis });
     expect(planes.getViewport({ panel: "b" }).x).toEqual([0, 10]);
     const mixed = mount({
-      state: chartState,
       interaction: { zoom: true },
       panels: panels([{ id: "a" }, { id: "p" }]),
       marks: [network("a"), line(data(), { x: "t", y: "v", panel: "p" })],
@@ -476,7 +453,6 @@ describe("conditional writes", () => {
   it("check the subplot a write names without naming it", () => {
     const tree = table({ a: ["x", "x", "y"], b: ["p", "q", "r"], v: [1, 2, 3] });
     const chart = mount({
-      state: chartState,
       interaction: { zoom: true },
       panels: panels([{ id: "rings" }]),
       marks: [sunburst(tree, { path: ["a", "b"], value: "v", panel: "rings" })],
@@ -490,26 +466,11 @@ describe("conditional writes", () => {
     expect(chart.getDrillRoot({ panel: "rings" })?.key).toBe(drilled);
   });
 
-  it("are refused over changes made in listeners heard before a module given late", () => {
-    const chart = mount();
-    let basis: Basis | undefined;
-    chart.on("select", (event) => {
-      if (brushOf(event.selection)?.x?.[0] !== 1) return;
-      basis = event.basis;
-      chart.select([5, 6]);
-    });
-    chart.update({ state: chartState });
-    chart.select([1, 2]);
-    expect(basis).toBeDefined();
-    chart.select([3, 4], { expected: basis });
-    expect(brushOf(chart.selection)?.x).toEqual([5, 6]);
-  });
-
   it("refuse a basis another chart reported, or one remounted since", () => {
-    const old = mount({ state: chartState });
+    const old = mount();
     const basis = old.basis;
     old.destroy();
-    const chart = mount({ state: chartState });
+    const chart = mount();
     expectRefused(
       () => chart.select([1, 2], { expected: basis }),
       "invalid-option",
@@ -521,7 +482,7 @@ describe("conditional writes", () => {
 describe("conditions", () => {
   it("say what a brush holds on each table, as conditions on its fields", () => {
     const source = data();
-    const chart = mount({ state: chartState, marks: [line(source, { x: "t", y: "v" })] });
+    const chart = mount({ marks: [line(source, { x: "t", y: "v" })] });
     const events = heard(chart, "select");
     chart.select([1, 3]);
     const [{ table: of, condition }] = events[0]!.conditions as [
@@ -537,7 +498,6 @@ describe("conditions", () => {
     const view = rowView(source, { filter: ["==", ["field", "t"], 0] });
     const store = selectionStore(source);
     const chart = mount({
-      state: chartState,
       marks: [point(view, { id: "p", x: "t", y: "v", series: "s" })],
       rowSelection: rowSelection({ store, channel: "focus" }),
     });
@@ -556,7 +516,6 @@ describe("conditions", () => {
     const marks = table({ t: [0, 1], v: [2, 3] });
     const faceted = mount(
       {
-        state: chartState,
         x: { scope: "panel" },
         facet: facet("host"),
         marks: [line(hosts, { x: "t", y: "v" }), point(marks, { x: "t", y: "v", facet: "repeat" })],
@@ -578,7 +537,6 @@ describe("conditions", () => {
       host: ["a", "a", "a", "b", "b", "b"],
     });
     const chart = mount({
-      state: chartState,
       x: { scope: "panel" },
       facet: facet("host"),
       marks: [line(source, { x: "t", y: "v" })],
@@ -612,7 +570,6 @@ describe("selections of items", () => {
   it("hold the item clicked, not another mark's point of the same row", async () => {
     const source = data();
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: { select: "items" },
       marks: [
@@ -647,7 +604,6 @@ describe("selections of items", () => {
   it("hold their observations as late rows of an ordered table move them", async () => {
     const feed = orderedTable({ t: [0, 2, 4], v: [1, 3, 5] }, { orderBy: "t" });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: { select: "items" },
       marks: [point(feed, { id: "feed", x: "t", y: "v", fill: "#c00" })],
@@ -675,7 +631,6 @@ describe("selections of items", () => {
 describe("looks", () => {
   it("give points and bars an outline of the look's stroke", async () => {
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [
         point(data(), {
@@ -702,7 +657,6 @@ describe("looks", () => {
       y: Float64Array.from({ length: n }, (_, i) => i % 7),
     });
     const chart = mount({
-      state: chartState,
       marks: [
         point(many, {
           id: "dots",
@@ -727,7 +681,6 @@ describe("looks", () => {
     const bound = data();
     const other = table({ t: [0, 1], v: [1, 2] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [
         line(bound, { x: "t", y: "v" }),
@@ -747,7 +700,6 @@ describe("looks", () => {
   it("draw points one by one where the look's fill is translucent, so overlaps darken", async () => {
     const opaque = async (selected: Look) => {
       const chart = mount({
-        state: chartState,
         renderer: "svg",
         marks: [point(data(), { id: "dots", x: "t", y: "v", selected })],
       });
@@ -767,7 +719,6 @@ describe("looks", () => {
   it("draw a heatmap's selected cells in its look", async () => {
     const grid = table({ x: [0, 1, 0, 1], y: ["a", "a", "b", "b"], v: [1, 2, 3, 4] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: {},
       marks: [heatmap(grid, { id: "h", x: "x", y: "y", color: "v", selected: { opacity: 0 } })],
@@ -790,7 +741,6 @@ describe("looks", () => {
     const grid = table({ x, y: x.map((_, i) => (i < 200 ? "a" : "b")), v: x });
     const raster = async (selected: Look) => {
       const chart = mount({
-        state: chartState,
         interaction: {},
         marks: [heatmap(grid, { id: "h", x: "x", y: "y", color: "v", selected })],
       });
@@ -815,7 +765,6 @@ describe("looks", () => {
     const rows = table({ t: [0, 1, 2], v: [0, 2, 0], alpha: [0.2, 0.2, 0.4] });
     const encode = { opacity: { field: "alpha", scale: { type: "identity" } } } as const;
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [line(rows, { id: "l", x: "t", y: "v", encode, selected: { strokeWidth: 3 } })],
     });
@@ -830,7 +779,6 @@ describe("looks", () => {
 
   it("draw a line's opacity in place of its own", async () => {
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [
         line(data(), { id: "l", x: "t", y: ["v", "w"], opacity: 0.2, selected: { opacity: 0.8 } }),
@@ -850,7 +798,6 @@ describe("looks", () => {
 
   it("draw a line's stroke opacity", async () => {
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [line(data(), { id: "l", x: "t", y: ["v", "w"], selected: { strokeOpacity: 0.1 } })],
     });
@@ -869,7 +816,6 @@ describe("looks", () => {
     // Runs of two opacities meeting at a turn, where each is cut.
     const rows = table({ t: [0, 1, 2], v: [0, 2, 0], alpha: [0.2, 0.2, 0.4] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [
         line(rows, {
@@ -896,7 +842,6 @@ describe("looks", () => {
   it("draw a look's dash on error bars", async () => {
     const rows = table({ g: ["a", "b"], lo: [1, 2], hi: [3, 4] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [
         errorbar(rows, {
@@ -916,7 +861,6 @@ describe("looks", () => {
 
   it("draw a named dash in proportion to the width drawn", async () => {
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [
         line(data(), { id: "l", x: "t", y: ["v", "w"], selected: { dash: "--", strokeWidth: 2 } }),
@@ -936,7 +880,6 @@ describe("selections of layout items", () => {
   it("draw the rows a slice stands for, dimming the others", async () => {
     const sales = table({ region: ["a", "b", "c"], revenue: [3, 2, 1] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: {},
       marks: [pie(sales, { id: "slices", category: "region", value: "revenue" })],
@@ -975,7 +918,6 @@ describe("selections of layout items in facets and of changed data", () => {
       host: ["h1", "h1", "h2", "h2"],
     });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: {},
       facet: facet("host"),
@@ -997,7 +939,6 @@ describe("selections of layout items in facets and of changed data", () => {
     const sales = table({ region: ["a", "b"], revenue: [3, 2] });
     const costs = table({ region: ["a", "b"], cost: [1, 1] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: {},
       panels: panels([{ id: "sales" }, { id: "costs" }]),
@@ -1018,7 +959,6 @@ describe("selections of layout items in facets and of changed data", () => {
   it("draw the rows of the item in data replaced since, once laid out", async () => {
     const sales = table({ region: ["a", "b"], revenue: [3, 2] });
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       interaction: {},
       marks: [pie(sales, { id: "slices", category: "region", value: "revenue" })],
@@ -1044,7 +984,6 @@ describe("selections of layout items in facets and of changed data", () => {
         panel: id,
       });
     const chart = mount({
-      state: chartState,
       projection: "equirectangular",
       interaction: {},
       panels: panels([{ id: "a" }, { id: "b" }]),
@@ -1061,7 +1000,6 @@ describe("selections of layout items in facets and of changed data", () => {
     const one = table({ lon: [0, 10, 20], lat: [0, 5, 10] });
     const store = selectionStore(one);
     const chart = mount({
-      state: chartState,
       interaction: {},
       projection: "equirectangular",
       marks: [
@@ -1086,7 +1024,6 @@ describe("selections of layout items in facets and of changed data", () => {
     const view = rowView(source, { filter: ["<", ["field", "t"], 2] });
     const store = selectionStore(source);
     const chart = mount({
-      state: chartState,
       renderer: "svg",
       marks: [line(view, { id: "l", x: "t", y: ["v", "w"] })],
       rowSelection: rowSelection({ store, channel: "focus" }),
@@ -1098,7 +1035,6 @@ describe("selections of layout items in facets and of changed data", () => {
     // Items named by value: a row the view shows later is held too.
     const bars = mount(
       {
-        state: chartState,
         renderer: "svg",
         marks: [
           bar(view, { id: "b", x: "t", y: "v", itemKey: "k", selected: { fill: "#ff0000" } }),
@@ -1125,7 +1061,6 @@ describe("selections of layout items in facets and of changed data", () => {
     const sales = table({ region: ["a", "b", "a"], revenue: [3, 2, 1] });
     const store = selectionStore(sales);
     const chart = mount({
-      state: chartState,
       interaction: {},
       marks: [pie(sales, { id: "slices", category: "region", value: "revenue" })],
       rowSelection: rowSelection({ store, channel: "focus" }),
@@ -1149,7 +1084,6 @@ describe("selections of layout items in facets and of changed data", () => {
     const wide = selectionStore(source);
     const lines = mount(
       {
-        state: chartState,
         marks: [line(source, { id: "l", x: "t", y: ["v", "w"] })],
         rowSelection: rowSelection({ store: wide, channel: "focus" }),
       },
@@ -1166,7 +1100,6 @@ describe("selections of a custom mark's items", () => {
     const source = data();
     const seen: (string | undefined)[][] = [];
     const chart = mount({
-      state: chartState,
       marks: [
         point(source, { id: "dots", x: "t", y: "v" }),
         custom(source, {
@@ -1210,7 +1143,7 @@ describe("selections of a custom mark's items", () => {
         },
       });
     const [a, b] = [ticks("a"), ticks("b")];
-    const chart = mount({ state: chartState, marks: [a, b] });
+    const chart = mount({ marks: [a, b] });
     chart.select({ kind: "series", series: ['[0,"v"]'] });
     await chart.loading;
     chart.render();
@@ -1225,7 +1158,6 @@ describe("selections of a custom mark's items", () => {
     const source = data();
     const seen: Record<string, (string | undefined)[]> = {};
     const chart = mount({
-      state: chartState,
       marks: [
         custom(source, {
           id: "ticks",
@@ -1253,11 +1185,10 @@ describe("selections of a custom mark's items", () => {
   });
 });
 
-describe("static exports with state support", () => {
+describe("static exports", () => {
   const options = () => ({
     width: 400,
     height: 200,
-    state: chartState,
     marks: [line(data(), { x: "t", y: ["v", "w"] })],
   });
 
@@ -1277,7 +1208,6 @@ describe("static exports with state support", () => {
     const network = {
       width: 400,
       height: 200,
-      state: chartState,
       marks: [graph(links, { source: "source", target: "target" })],
     };
     const whole = renderToSVG(network);

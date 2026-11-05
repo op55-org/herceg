@@ -15,7 +15,6 @@ import { line } from "../../src/marks/line.ts";
 import { point } from "../../src/marks/point.ts";
 import { treemap } from "../../src/marks/treemap.ts";
 import { panels } from "../../src/model/panels.ts";
-import { chartState } from "../../src/state.ts";
 import { pinPayload } from "../../src/web/events.ts";
 import { MOUSE } from "./helpers.ts";
 
@@ -108,6 +107,7 @@ describe("a click on what the tooltip shows", () => {
         inspection: expect.objectContaining({ axis: "x", value: 3 }),
         cause: "pointer",
         revision: chart.revision,
+        basis: chart.basis,
       },
     ]);
     const tip = tooltipOf(chart);
@@ -123,7 +123,7 @@ describe("a click on what the tooltip shows", () => {
   });
 
   it("pins at a point of any series, those sharing another's positions too", async () => {
-    const chart = await mount({ state: chartState });
+    const chart = await mount();
     const pins = heard(chart, "pin");
     const clicks = heard(chart, "click");
     // w's point at t = 2; v's is at 2.
@@ -339,7 +339,6 @@ describe("a dashboard", () => {
     const group = `dashboard-${Math.random()}`;
     const opened: string[] = [];
     const options = (): Partial<ChartOptions> => ({
-      state: chartState,
       interaction: { sync: { cursor: group } },
       renderTooltip: (inspection) => {
         const link = document.createElement("a");
@@ -476,7 +475,6 @@ describe("a pin's place", () => {
   it("is the item by its key, whichever row has it after the data is reset", async () => {
     const rows = table({ t: [0, 1, 2, 3, 4], v: [1, 3, 2, 5, 4] });
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest" },
       marks: [point(rows, { id: "dots", x: "t", y: "v", itemKey: "t" })],
     });
@@ -502,7 +500,6 @@ describe("a pin's place", () => {
     ]) {
       const view = rowView(rows);
       const chart = await mount({
-        state: chartState,
         inspection: { mode: "nearest" },
         interaction: { select: "items" },
         marks: [point(view, { id: "dots", x: "t", y: "v", itemKey: "t" })],
@@ -521,7 +518,6 @@ describe("a pin's place", () => {
 
   it("is a value along y where the chart inspects along y", async () => {
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest-y" },
       marks: [line(data(), { x: "t", y: "v" })],
     });
@@ -540,7 +536,6 @@ describe("a pin's place", () => {
       right: [100, 300, 200, 500, 400],
     });
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest-y" },
       marks: [line(both, { x: "t", y: "left" }), line(both, { x: "t", y: "right", axis: "right" })],
     });
@@ -567,7 +562,6 @@ describe("a pin's place", () => {
   it("is nothing at an item the inspection at its value does not read, a heatmap's cell", async () => {
     const cells = table({ t: [0, 1, 2, 3, 4], v: [1, 3, 2, 5, 4], c: [1, 2, 3, 4, 5] });
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest-x" },
       marks: [
         heatmap(cells, { id: "cells", x: "t", y: "v", color: "c" }),
@@ -590,7 +584,6 @@ describe("a pin's place", () => {
   it("says in JSON that a value along y is a time on the right axis alone", async () => {
     const day = Date.UTC(2026, 0, 1);
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest-y" },
       yRight: { type: "time" },
       marks: [
@@ -642,7 +635,7 @@ describe("the keyboard", () => {
 
 describe("pin()", () => {
   it("pins from the application, as a click would, reported with cause api", async () => {
-    const chart = await mount({ state: chartState });
+    const chart = await mount();
     const pins = heard(chart, "pin");
     chart.pin({ value: 2 });
     expect(chart.pinned).toEqual({ value: 2, axis: "x", panel: "" });
@@ -657,7 +650,6 @@ describe("pin()", () => {
   it("waits for the chart's first frame and interaction code, then pins", async () => {
     const chart = createChart(host, {
       renderer: "svg",
-      state: chartState,
       marks: [line(data(), { x: "t", y: "v" })],
     });
     charts.push(chart);
@@ -673,7 +665,6 @@ describe("pin()", () => {
   it("lets a pin that waited go, said so, where nothing reads at its value", async () => {
     const chart = createChart(host, {
       renderer: "svg",
-      state: chartState,
       inspection: { mode: "nearest-x", within: 0 },
       marks: [line(data(), { x: "t", y: "v" })],
     });
@@ -689,7 +680,6 @@ describe("pin()", () => {
 
   it("pins an item by its reference, and refuses what the chart does not draw", async () => {
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest" },
       marks: [point(data(), { id: "dots", x: "t", y: "v", itemKey: "t" })],
     });
@@ -707,7 +697,7 @@ describe("pin()", () => {
   });
 
   it("reports a pin again only when it changes", async () => {
-    const chart = await mount({ state: chartState });
+    const chart = await mount();
     const pins = heard(chart, "pin");
     click(chart, 3, 5);
     const revision = chart.revision;
@@ -722,7 +712,7 @@ describe("pin()", () => {
   });
 
   it("pins nothing at a value nothing reads there, and reports nothing", async () => {
-    const chart = await mount({ state: chartState, inspection: { mode: "nearest-x", within: 0 } });
+    const chart = await mount({ inspection: { mode: "nearest-x", within: 0 } });
     const pins = heard(chart, "pin");
     chart.pin({ value: 1.5 });
     chart.render();
@@ -741,7 +731,6 @@ describe("pin()", () => {
   it("refuses writes on a basis while a pin given before the chart can show it waits", async () => {
     const chart = createChart(host, {
       renderer: "svg",
-      state: chartState,
       marks: [line(data(), { x: "t", y: "v" })],
     });
     charts.push(chart);
@@ -755,7 +744,7 @@ describe("pin()", () => {
   });
 
   it("refuses a write on an older basis once the pin changed since", async () => {
-    const chart = await mount({ state: chartState });
+    const chart = await mount();
     const basis = chart.basis;
     click(chart, 3, 5);
     const pins = heard(chart, "pin");
@@ -764,19 +753,11 @@ describe("pin()", () => {
     // The pin as it is, reported again.
     expect(pins.at(-1)).toMatchObject({ cause: "api", at: chart.pinned });
   });
-
-  it("needs state support", async () => {
-    const chart = await mount();
-    expect(() => chart.pin({ value: 1 })).toThrow(
-      "pin: needs state support; give the chart state: chartState, from herceg/state",
-    );
-  });
 });
 
 describe("one activation, one decision", () => {
   it("pins and selects the same item with one click", async () => {
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest" },
       interaction: { select: "items" },
       marks: [point(data(), { id: "dots", x: "t", y: "v", itemKey: "t" })],
@@ -791,7 +772,7 @@ describe("one activation, one decision", () => {
   });
 
   it("clears a brush with a click off the data, as without pins", async () => {
-    const chart = await mount({ state: chartState, interaction: { brush: "x" } });
+    const chart = await mount({ interaction: { brush: "x" } });
     chart.select({ kind: "brush", x: [1, 2], y: null, lasso: null });
     click(chart, 1.5, 4.6);
     expect(chart.selection).toBeNull();
@@ -799,7 +780,6 @@ describe("one activation, one decision", () => {
 
   it("pins nothing for a chart a selection listener destroyed", async () => {
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest" },
       interaction: { select: "items" },
       marks: [point(data(), { id: "dots", x: "t", y: "v" })],
@@ -829,7 +809,6 @@ describe("one activation, one decision", () => {
 
   it("pins nothing a selection listener's options made mean another thing", async () => {
     const chart = await mount({
-      state: chartState,
       inspection: { mode: "nearest-x" },
       interaction: { select: "items" },
       marks: [point(data(), { id: "dots", x: "t", y: "v", itemKey: "t" })],
@@ -850,7 +829,6 @@ describe("one activation, one decision", () => {
       value: [4, 2, 3],
     });
     const chart = await mount({
-      state: chartState,
       interaction: { zoom: true, select: "items" },
       marks: [treemap(tree, { id: "map", path: ["region", "city"], value: "value" })],
     });
@@ -925,7 +903,6 @@ describe("drilling", () => {
   it("leaves a brush as it is", async () => {
     host.style.width = "800px";
     const chart = await mount({
-      state: chartState,
       interaction: { zoom: true, brush: "x" },
       marks: [
         treemap(tree(), { id: "map", path: ["region", "city"], value: "value", panel: "a" }),

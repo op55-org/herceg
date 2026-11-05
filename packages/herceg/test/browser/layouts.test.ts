@@ -670,7 +670,15 @@ describe("layouts in the browser", () => {
       marks: [marks[0]!],
       panels: panels(columns([1], [panel("a")])),
     });
-    expect(heard).toEqual([{ hiddenKeys: [], cause: "options", revision: chart.revision }]);
+    expect(heard).toEqual([
+      {
+        hiddenKeys: [],
+        cause: "options",
+        revision: chart.revision,
+        basis: chart.basis,
+        state: { hidden: [] },
+      },
+    ]);
     chart.destroy();
   });
 });

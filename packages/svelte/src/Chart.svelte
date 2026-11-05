@@ -21,7 +21,6 @@
     tablesOf,
     viewOf,
   } from "herceg";
-  import { chartState } from "herceg/state";
   import { untrack } from "svelte";
   import { type Basis, basisOf, type ChartProps, canonical, holds, sameMark } from "./chart.js";
   import { type Entry, type LayoutEntry, plain, provideMarks } from "./marks.js";
@@ -268,7 +267,6 @@
     const config = {
       ...(Object.fromEntries(given) as Omit<ChartOptions, "marks">),
       marks: view.marks,
-      state: chartState,
     };
     current = snapshot ? snapshot.hydrate(snapshotHost!, config) : createChart(container, config);
     // Bound state follows the chart's as each change commits; previews come as events.

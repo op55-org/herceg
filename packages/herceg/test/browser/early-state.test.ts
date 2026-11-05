@@ -8,13 +8,13 @@ import { selectionStore } from "../../src/data/selection.ts";
 import { table } from "../../src/data/table.ts";
 import { type Chart, type ChartOptions, createChart } from "../../src/dom/chart.ts";
 import type { ChartEvents } from "../../src/dom/events.ts";
+import { broadcast } from "../../src/dom/sync.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { graph } from "../../src/marks/graph.ts";
 import { line } from "../../src/marks/line.ts";
 import { facet } from "../../src/model/facet.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
-import { chartState } from "../../src/state.ts";
 import { brushOf } from "../helpers/selections.ts";
 
 const hosts: HTMLDivElement[] = [];
@@ -122,9 +122,8 @@ const unselector = mount("unselect");
 const unselected = heard(unselector, "select");
 unselector.select([10, 20]);
 unselector.select(null);
-// So with items, of a chart with state support.
+// So with items.
 const itemized = mount("unselect-items", {
-  state: chartState,
   marks: [line(lines, { id: "l", x: "x", y: "y" })],
 });
 const unitemized = heard(itemized, "select");
@@ -152,6 +151,16 @@ subplots.select([5, 15], { panel: "q" });
 subplots.setViewport(null);
 subplots.select(null);
 subplots.setViewport([20, 40], { panel: "p" });
+// Read before that frame: the views asked for each panel.
+const asked = ["p", "q"].map((panel) => subplots.getViewport({ panel }));
+// So with a view a synced chart shares with a subplot's panel then.
+const synced = mount("early-sub", {
+  panels: panels([{ id: "p" }, { id: "q" }]),
+  marks: ["p", "q"].map((panel) => line(lines, { x: "x", y: "y", panel })),
+  interaction: { zoom: "x", sync: { viewport: { group: "early-sub", panel: "p" } } },
+});
+broadcast("viewport", "early-sub", { receive() {} }, [5, 15]);
+const sharedEarly = synced.getViewport({ panel: "p" });
 const people = table({ name: ["Ana", "Bo", "Cy"], team: ["Data", "Data", "Sales"] });
 const talks = table({ from: ["Ana", "Bo"], to: ["Bo", "Cy"], n: [3, 1] });
 const network = mount("network", {
@@ -263,13 +272,7 @@ const faceted = mount("facets", {
   facet: facet("host"),
 });
 faceted.setViewport([0, 5], { panel: "a" });
-const refusal = (() => {
-  try {
-    faceted.getViewport({ panel: "a" });
-  } catch (error) {
-    return (error as Error).message;
-  }
-})();
+const facetAsked = faceted.getViewport({ panel: "a" });
 
 it("applies a view and a selection set before the first frame at once, and reports them with it", async () => {
   expect(before.panels).toEqual([]);
@@ -289,6 +292,8 @@ it("applies a view and a selection set before the first frame at once, and repor
       views: [
         { panel: "", x: [10, 30], y: null, yRight: null, types: { x: "linear", y: "linear" } },
       ],
+      basis: expect.any(String),
+      state: { x: [10, 30], y: null, yRight: null },
     },
   ]);
   expect(a.revision).toBe(counted.selection);
@@ -341,10 +346,8 @@ it("selects on the right y axis of a chart drawing only that", async () => {
   ]);
 });
 
-it("sets a view of a facet's panel, which the data gives, with the first frame, and says to wait to read it", async () => {
-  expect(refusal).toBe(
-    'getViewport: no panel "a" yet, as the chart draws its panels with its first frame; call it once chart.ready resolves',
-  );
+it("sets a view of a facet's panel, which the data gives, with the first frame, and reads it as asked before", async () => {
+  expect(facetAsked).toEqual({ x: [0, 5], y: null, yRight: null });
   await faceted.ready;
   expect(faceted.getViewport({ panel: "a" }).x).toEqual([0, 5]);
 });
@@ -386,8 +389,14 @@ it("takes categories shared by name before the first frame, once it draws them",
 });
 
 it("sets a view of a subplot's panel, or of a network, set before the first frame with it", async () => {
-  await Promise.all([subplots.ready, network.ready]);
+  expect(asked).toEqual([
+    { x: [20, 40], y: null, yRight: null },
+    { x: null, y: null, yRight: null },
+  ]);
+  expect(sharedEarly.x).toEqual([5, 15]);
+  await Promise.all([subplots.ready, network.ready, synced.ready]);
   expect(subplots.getViewport({ panel: "p" }).x).toEqual([20, 40]);
+  expect(synced.getViewport({ panel: "p" }).x).toEqual([5, 15]);
   expect(subplots.getViewport({ panel: "q" }).x).not.toEqual([10, 30]);
   expect(subplots.selection).toBeNull();
   expect(network.getViewport()).toMatchObject({ x: [0, 50], y: [0, 50] });

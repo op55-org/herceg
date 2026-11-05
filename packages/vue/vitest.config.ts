@@ -15,10 +15,6 @@ export default defineConfig({
         find: /^herceg\/layout$/,
         replacement: new URL("../herceg/src/layout.ts", import.meta.url).pathname,
       },
-      {
-        find: /^herceg\/state$/,
-        replacement: new URL("../herceg/src/state.ts", import.meta.url).pathname,
-      },
       // Vue's full build compiles the tests' inline templates at runtime, as
       // an SFC compiler would at build time.
       { find: /^vue$/, replacement: "vue/dist/vue.esm-browser.js" },

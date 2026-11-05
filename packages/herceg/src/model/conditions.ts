@@ -1,10 +1,10 @@
 // What a chart's selection stands for in each table its marks read: a
 // condition on that table's fields, which a product forwards to its queries
 // and a row view filters by (the `conditions` of `select` events), with the
-// condition through derived tables. Made at once, as `select` reports, with
-// state support. Where no condition says exactly which rows the selection
-// holds (a lasso, a stack's tops, a summary's statistics, rows named by
-// their identity), the table has none: a condition is never approximated.
+// condition through derived tables. Made at once, as `select` reports.
+// Where no condition says exactly which rows the selection holds (a lasso,
+// a stack's tops, a summary's statistics, rows named by their identity),
+// the table has none: a condition is never approximated.
 
 import type { Expression } from "../data/expression.ts";
 import { type SourceCondition, sourceOf } from "../data/lineage.ts";

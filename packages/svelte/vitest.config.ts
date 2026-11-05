@@ -11,10 +11,6 @@ const herceg = [
     find: /^herceg\/layout$/,
     replacement: new URL("../herceg/src/layout.ts", import.meta.url).pathname,
   },
-  {
-    find: /^herceg\/state$/,
-    replacement: new URL("../herceg/src/state.ts", import.meta.url).pathname,
-  },
 ];
 
 /**

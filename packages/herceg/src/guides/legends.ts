@@ -1464,6 +1464,8 @@ function entryItems(
     text.measure,
   );
   items.push(opacity === undefined ? label : { ...label, opacity });
+  // A hidden series' label is struck through, as the live legend's is.
+  if (entry.hidden) items.push(kit.struckThrough(label, text.measure, HIDDEN));
   return items;
 }
 

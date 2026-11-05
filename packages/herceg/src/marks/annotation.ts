@@ -262,6 +262,8 @@ export class AnnotationData {
    */
   readonly follows: readonly string[] | undefined;
   readonly #role: string;
+  /** Its places on layout items: a row draws only where they name items drawn. */
+  readonly #onItems: readonly Frozen<ItemCoordinate>[];
   /** The scales of the axes places are on, unless they name one of the chart's own. */
   readonly #scales: { readonly x: string; readonly y: string };
 
@@ -304,6 +306,9 @@ export class AnnotationData {
     }
     this.scaled = scaled;
     const places = Object.values(positions).filter((place) => place !== undefined);
+    this.#onItems = places.filter(
+      (place): place is Frozen<ItemCoordinate> => typeof place === "object" && "item" in place,
+    );
     this.follows = places.every(
       (place) =>
         typeof place === "object" && ("item" in place || "fraction" in place || "px" in place),
@@ -494,16 +499,21 @@ export class AnnotationData {
             path: "item.mark",
             message: `${this.#role} ${axis}: places on items of "${ref.mark}" need it drawn in the panel; draw the ${this.#role} in its chart, or in its panel`,
           });
-        const names: string[] = [];
-        for (const name of ref.item) {
-          const value =
-            typeof name === "string" ? name : this.table!.value(name.field as never, item);
-          if (typeof value !== "string") return undefined;
-          names.push(value);
-        }
-        return drawn.named(names)?.box;
+        const names = this.#names(ref, item);
+        return names && drawn.named(names)?.box;
       },
     });
+  }
+
+  /** The names of the item `ref` names for item `item`; undefined where a field's value is no name. */
+  #names(ref: Frozen<ItemRef>, item: number): string[] | undefined {
+    const names: string[] = [];
+    for (const name of ref.item) {
+      const value = typeof name === "string" ? name : this.table!.value(name.field as never, item);
+      if (typeof value !== "string") return undefined;
+      names.push(value);
+    }
+    return names;
   }
 
   /**
@@ -593,21 +603,29 @@ export class AnnotationData {
    * A sentence for the chart's text alternative listing the items of
    * `rows` (every item without them): their text and where they are, as
    * `where` describes it (undefined for items that are not drawn), such as
-   * "Rules: deploy v41 (x 03:00), deploy v42 (x 08:30)." At most ten items
-   * are listed; labels of parts are written by `content`, at the value
-   * `valued` gives an item.
+   * "Rules: deploy v41 (x 03:00), deploy v42 (x 08:30)." Items placed on
+   * layout items are listed only where those all drew in one of `frames`. At most ten items are listed; labels of
+   * parts are written by `content`, at the value `valued` gives an item.
    */
   summary(
     [one, many]: [string, string],
     locale: string | undefined,
     where: (item: number) => string | undefined,
     rows?: RowParts,
+    frames?: readonly Frame[],
     content?: ContentWriter,
     valued?: (item: number) => number,
   ): string | undefined {
     const items: string[] = [];
     let total = 0;
     this.each(rows, (i) => {
+      // Placed on layout items, it draws only in a frame where they all drew.
+      const drew = (frame: Frame) =>
+        this.#onItems.every(({ item: ref }) => {
+          const names = this.#names(ref, i);
+          return !!names && !!frame.items?.(ref.mark)?.named(names);
+        });
+      if (frames && !frames.some(drew)) return;
       const at = where(i);
       if (at === undefined) return;
       total++;

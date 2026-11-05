@@ -174,6 +174,28 @@ describe("the interaction controller", () => {
     chart.destroy();
   });
 
+  it("reports a legend entry clicked while it loaded, which a listener removed as it hid it", async () => {
+    const module = await import("../../src/dom/interaction.ts");
+    let attach = (_: typeof module) => {};
+    forgetInteraction(() => new Promise((resolve) => (attach = resolve)));
+    const two = table({ t: [0, 1], a: [1, 2], b: [3, 4] });
+    const chart = createChart(host, { marks: [line(two, { x: "t", y: ["a", "b"] })] });
+    const clicks: { target: unknown }[] = [];
+    chart.on("click", (event) => clicks.push(event));
+    // Hiding a series takes the legend away.
+    chart.on("visibility", () => {
+      chart.update({ legend: false });
+      chart.render();
+    });
+    const button = [...chart.root.querySelectorAll("button")].find((b) => b.textContent === "b")!;
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+    expect(chart.root.querySelectorAll("button")).toHaveLength(0);
+    attach(module);
+    for (let loading = chart.loading; loading; loading = chart.loading) await loading;
+    expect(clicks.map(({ target }) => target)).toMatchObject([{ kind: "legendEntry", label: "b" }]);
+    chart.destroy();
+  });
+
   it("loads after the first frame, which draws without it", async () => {
     const chart = createChart(host, { marks: [line(data(), { x: "t", y: "v" })] });
     expect(chart.root.querySelectorAll("svg path[clip-path]")).toHaveLength(1);

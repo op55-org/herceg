@@ -258,7 +258,12 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
     return data.entries(key, locale, rows, data.writer(locale, pattern));
   }
 
-  describe(format: AxisFormat, locale: string | undefined, rows?: RowParts): string | undefined {
+  describe(
+    format: AxisFormat,
+    locale: string | undefined,
+    rows?: RowParts,
+    frames?: readonly Frame[],
+  ): string | undefined {
     const vertical = this.spec.x !== undefined;
     const place = this.#data.place(vertical ? this.spec.x! : this.spec.y!);
     const f = vertical ? format.x : format.y;
@@ -280,6 +285,7 @@ export class RuleMark implements Mark<Frozen<RuleSpec>>, LabelledMark {
         return Number.isFinite(value) ? `${vertical ? "x" : "y"} ${f(value)}` : undefined;
       },
       rows,
+      frames,
       format.content,
       (i) => this.#data.value(place, i),
     );

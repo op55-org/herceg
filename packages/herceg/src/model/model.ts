@@ -477,7 +477,7 @@ export class ChartModel {
     | ((x: number, y: number, accept?: (mark: Mark) => boolean) => Picked | undefined)
     | undefined;
   /**
-   * The pinned tooltip, which state support's `pin` and `pinned` reach:
+   * The pinned tooltip, which the chart's `pin` and `pinned` reach:
    * set by a chart's interaction controller once it has loaded; until
    * then, `pinning` holds the pin asked for, which it makes as it attaches.
    * `waiting`: a pin asked for waits for a frame to find its place.
@@ -3471,7 +3471,12 @@ export class ChartModel {
    */
   annotationSummaries(panel?: string): string[] {
     const describe = (mark: Mark, view?: string, rows?: RowParts) =>
-      mark.describe?.(this.formatsOf(mark, view), this.#config.locale, rows) ?? [];
+      mark.describe?.(
+        this.formatsOf(mark, view),
+        this.#config.locale,
+        rows,
+        this.#items?.framesOf(mark, view),
+      ) ?? [];
     return (
       this.#panels?.annotations(this.#views, this.#marks, describe, panel) ??
       this.#marks.flatMap((mark) => describe(mark))

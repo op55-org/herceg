@@ -11,7 +11,6 @@ import type { ChartEvents } from "../../src/dom/events.ts";
 import { bar } from "../../src/marks/bar.ts";
 import { line } from "../../src/marks/line.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
-import { chartState } from "../../src/state.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { MOUSE } from "./helpers.ts";
 
@@ -125,7 +124,7 @@ describe("a brush's gesture", () => {
   });
 
   it("ends when a state option sets another selection, which stands", async () => {
-    const chart = await mount({ state: chartState });
+    const chart = await mount();
     const events = heard(chart, "select");
     await press(chart, 1, 2);
     chart.update({ selection: { kind: "brush", x: [4, 5], y: null, lasso: null } });
@@ -139,7 +138,7 @@ describe("a brush's gesture", () => {
   });
 
   it("goes on while what it previews is written back, as bindings write it", async () => {
-    const chart = await mount({ state: chartState });
+    const chart = await mount();
     const events = heard(chart, "select");
     chart.on("select", ({ selection }) => chart.update({ selection }));
     await press(chart, 1, 2, 3);

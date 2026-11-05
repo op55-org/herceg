@@ -520,6 +520,28 @@ describe("entries of your own", () => {
     expect(hidden.opacity).toBeCloseTo(0.25 * 0.4, 5);
   });
 
+  it("strike a hidden series' label through, as the live legend does", () => {
+    const two = [line(wide, { x: "t", y: ["North", "South"] })];
+    // The chart's own legend, and one the guide compiler lays out.
+    for (const legend of [undefined, { columns: 1 }]) {
+      const { model } = build({ marks: two, ...(legend && { legend }) });
+      model.hidden.add(entriesOf(model.scene(estimateText))[1]!.key);
+      const items = guidesOf(model.scene(estimateText), "legend")[0]!.items;
+      const label = items.find(
+        (item): item is TextItem => item.type === "text" && item.text === "South",
+      )!;
+      const struck = items.filter((item): item is SegmentsItem => item.type === "segments");
+      expect(struck).toHaveLength(1);
+      expect(struck[0]!.coords).toEqual([
+        label.x,
+        label.y,
+        label.x + estimateText("South", label.paint.css),
+        label.y,
+      ]);
+      expect(struck[0]!.paint).toMatchObject({ stroke: label.paint.color, strokeWidth: 1 });
+    }
+  });
+
   it("draw annotations' samples as they look, and toggle them whole", () => {
     const zone = region({ x1: 0, x2: 1, fill: "#ff0000", id: "zone" });
     const { scene, model } = build({

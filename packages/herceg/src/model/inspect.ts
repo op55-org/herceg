@@ -350,14 +350,21 @@ export class Inspector {
         by = owner;
       }
     }
-    if (!shared) {
-      if (points.length === 0) return undefined;
-      // Each series' own point: the crosshair stays at the pointer, or the latest or earliest read.
-      const at = side ? snapped : yAxis.frame[axis].invert(axis === "x" ? px : py);
-      return this.#inspection(axis, at, points, yAxis);
+    // Cells are read under the pointer, beside the series read along the axis.
+    const cells: InspectedPoint[] = [];
+    for (const { mark, visible, frame } of this.marks) {
+      const hit = mark.tooltip === "cell" ? mark.pick?.(visible, px, py, frame) : undefined;
+      const point = hit && this.#point(hit.series, hit.position);
+      if (point) cells.push(point);
     }
-    if (!Number.isFinite(snapped)) return undefined;
+    if (!shared || !Number.isFinite(snapped)) {
+      if (points.length + cells.length === 0) return undefined;
+      // Each series' own point: the crosshair stays at the pointer, or the latest or earliest read.
+      const at = side && points.length ? snapped : yAxis.frame[axis].invert(axis === "x" ? px : py);
+      return this.#inspection(axis, at, [...points, ...cells], yAxis);
+    }
     const inspection = this.inspectAt(axis, snapped, series, yAxis);
+    inspection.points.push(...cells);
     // The cursor stands where the series snapped to draws the value.
     return by?.mark.bound?.[axis]
       ? { ...inspection, position: by.frame[axis].map(snapped) }

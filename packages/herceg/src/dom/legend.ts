@@ -19,6 +19,14 @@ export interface Entry {
   panel?: string | undefined;
   /** Its click shows what it names: hidden, or hidden in some panels only (`LegendItem.mixed`). */
   show?: boolean | undefined;
+  /** Its legend and item as last drawn: what a click on it is on. */
+  drawn?: LegendClick | undefined;
+}
+
+/** A legend entry clicked: its legend and item, as drawn when the click came. */
+export interface LegendClick {
+  guide: LegendGuide;
+  item: LegendItem;
 }
 
 /**
@@ -27,6 +35,12 @@ export interface Entry {
  */
 export class Legend {
   readonly element: HTMLDivElement;
+  /**
+   * The entry each click was on, noted before the click acts, which may
+   * take the entry away (a listener hiding the legend): for a click the
+   * chart holds until its interaction code loads.
+   */
+  readonly clicked = new WeakMap<Event, LegendClick>();
   readonly #entries: Map<string, Entry>;
 
   /**
@@ -52,10 +66,12 @@ export class Legend {
     this.element.style.cssText = "position:absolute;left:0;top:0;width:100%;height:0;direction:ltr";
     this.#entries = adopted?.entries ?? new Map();
     // One listener for every button, those adopted included.
-    this.element.addEventListener("click", ({ target, detail }) => {
+    this.element.addEventListener("click", (event) => {
+      const { target, detail } = event;
       // A second click before the legend is drawn again undoes the first.
       for (const entry of this.#entries.values())
-        if (entry.button.contains(target as Node))
+        if (entry.button.contains(target as Node)) {
+          if (entry.drawn) this.clicked.set(event, entry.drawn);
           entry.show = !toggle(
             (entry.show && entry.shows) || entry.targets,
             entry.panel,
@@ -63,6 +79,7 @@ export class Legend {
             // A button pressed from the keyboard clicks with no count.
             detail === 0 ? "keyboard" : "pointer",
           );
+        }
     });
   }
 
@@ -89,6 +106,7 @@ export class Legend {
           entry = { button, swatch, label, text: label, shown: "", targets: item.key };
           this.#entries.set(id, entry);
         }
+        entry.drawn = { guide: legend, item };
         entry.targets = item.targets ?? item.key;
         entry.shows = item.shows;
         entry.panel = legend.panel;

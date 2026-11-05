@@ -31,14 +31,13 @@ import type {
   AxisGuide,
   LabelBox,
   LegendGuide,
-  LegendItem,
   PlotRect,
   Scene,
   TextItem,
   tickLabelGap,
 } from "../scene/scene.ts";
 import type { BrushSpec, CursorShowSpec, Snap, ZoomSpec } from "../spec/spec.ts";
-import type { ChartSelection, needsState, Phase, PinTarget } from "../spec/state.ts";
+import type { ChartSelection, Phase, PinTarget } from "../spec/state.ts";
 import type { surface } from "../theme.ts";
 import type { CrosshairLabels } from "./axis-labels.ts";
 import type { Brush } from "./brush.ts";
@@ -55,6 +54,7 @@ import type {
   Target,
 } from "./events.ts";
 import type { CursorPosition } from "./handle.ts";
+import type { LegendClick } from "./legend.ts";
 import { frameCount } from "./scheduler.ts";
 import type { svgElement } from "./svg-layer.ts";
 import { describeInspection, Tooltip } from "./tooltip.ts";
@@ -107,7 +107,6 @@ export interface InteractionKit extends PickKit {
   keys: readonly string[];
   /** Below this many pixels, a press is a click rather than a drag. */
   dragThreshold: number;
-  needsState: typeof needsState;
 }
 
 /** What a chart lends its controller. */
@@ -120,6 +119,8 @@ export interface InteractionHost {
   readonly live: HTMLElement;
   /** The legend's element, whose presses and clicks are its own. */
   readonly legend: HTMLElement;
+  /** The entry each click on the legend was on, as drawn then (see `Legend.clicked`). */
+  readonly legendClicks: WeakMap<Event, LegendClick>;
   readonly events: Emitter;
   /** Unique in the page: prefixes the ids the controller's drawings need. */
   readonly id: string;
@@ -327,20 +328,10 @@ function inverter(
  * The bindings of a chart's options, compiled, and those of subplots with
  * settings of their own, by id; throws for those it refuses.
  */
-function bindingsOf(options: ChartOptions, kit: InteractionKit): Compiled {
-  const { interaction, rowSelection, panels, tooltip, inspection, legend, guides } = options;
+function bindingsOf(options: ChartOptions): Compiled {
+  const { interaction, rowSelection, panels, tooltip, inspection } = options;
   if (typeof tooltip === "object" && tooltip.pin && inspection === false)
     throw new Error("tooltip.pin: pins what the pointer inspects; drop inspection: false");
-  // Legends selecting series select through state support.
-  const selects = [legend, ...(guides ?? [])].findIndex((l) => {
-    const { type = "legend", action } = (l ?? {}) as { type?: string; action?: unknown };
-    return type === "legend" && action === "select";
-  });
-  if (selects >= 0 && !options.state)
-    throw kit.needsState(
-      "legend action",
-      selects === 0 ? "legend.action" : `guides[${selects - 1}].action`,
-    );
   const brushesRows = rowSelection?.bindings.some(({ events }) => events.includes("brush"));
   const own = new Map<string, Bindings>();
   for (const [i, { id, interaction: settings }] of (panels?.declared ?? []).entries())
@@ -500,7 +491,7 @@ export class Interaction {
     this.#host = host;
     this.#kit = kit;
     // Bindings it refuses throw before anything is installed.
-    const compiled = bindingsOf(host.options(), kit);
+    const compiled = bindingsOf(host.options());
     [this.#bindings] = compiled;
     const { svgElement } = kit;
     const document = host.root.ownerDocument;
@@ -519,7 +510,7 @@ export class Interaction {
     host.overlay.append(...this.#crosshairs, this.#dots, this.#outline);
     this.#listen();
     this.configure(compiled);
-    // State support pins through the model; a pin it asked for before now is made now.
+    // The chart's \`pin\` pins through the model; a pin it asked for before now is made now.
     const { model } = host;
     model.pins = this;
     const asked = model.pinning;
@@ -634,7 +625,7 @@ export class Interaction {
 
   /** Throws for bindings of `options` it would refuse, as `configure` does, changing nothing. */
   check(options: ChartOptions): void {
-    bindingsOf(options, this.#kit);
+    bindingsOf(options);
   }
 
   /**
@@ -1164,7 +1155,7 @@ export class Interaction {
    * changing anything, for bindings it refuses (a gesture bound twice, a key
    * the cursor takes).
    */
-  configure([bindings, own]: Compiled = bindingsOf(this.#host.options(), this.#kit)): void {
+  configure([bindings, own]: Compiled = bindingsOf(this.#host.options())): void {
     const host = this.#host;
     const options = host.options();
     this.#bindings = bindings;
@@ -1519,10 +1510,13 @@ export class Interaction {
 
   /**
    * The legend entry `element` is in: undefined outside the legend, null
-   * on the legend between its entries.
+   * on the legend between its entries. For a `click`, the one it was on.
    */
-  #legendEntry(element: EventTarget | null | undefined): LegendEntryTarget | null | undefined {
-    const found = this.#legendItem(element);
+  #legendEntry(
+    element: EventTarget | null | undefined,
+    click?: Event,
+  ): LegendEntryTarget | null | undefined {
+    const found = this.#legendItem(element, click);
     return (
       found && {
         kind: "legendEntry",
@@ -1533,10 +1527,17 @@ export class Interaction {
     );
   }
 
-  /** The legend and entry `element` is in: undefined outside the legend, null between its entries. */
+  /**
+   * The legend and entry `element` is in: undefined outside the legend,
+   * null between its entries. For a `click`, the one it was on as the
+   * legend drew it then, gone since or not (a click held while this loaded).
+   */
   #legendItem(
     element: EventTarget | null | undefined,
-  ): { guide: LegendGuide; item: LegendItem } | null | undefined {
+    click?: Event,
+  ): LegendClick | null | undefined {
+    const clicked = click && this.#host.legendClicks.get(click);
+    if (clicked) return clicked;
     const legend = this.#host.legend;
     if (!(element instanceof Node) || !legend.contains(element)) return undefined;
     const button = (element instanceof Element ? element : element.parentElement)?.closest(
@@ -1560,8 +1561,8 @@ export class Interaction {
    * selected, or taken out where they all are; pressed again as the only
    * ones selected, none.
    */
-  #legendSelect(element: EventTarget | null, add: boolean, cause: ChangeCause): void {
-    const found = this.#legendItem(element);
+  #legendSelect(click: MouseEvent, add: boolean, cause: ChangeCause): void {
+    const found = this.#legendItem(click.target, click);
     if (found?.guide.action !== "select") return;
     const host = this.#host;
     const [kind, keys] = this.#legendNames(found.item.selects ?? found.item.key);
@@ -2776,7 +2777,7 @@ export class Interaction {
     // down to the button), reported after (as it comes back up). One the
     // chart held before this loaded is read as it is played.
     const legendClick = (event: MouseEvent): InputEvent | undefined => {
-      const target = host.events.has("click") ? this.#legendEntry(event.target) : undefined;
+      const target = host.events.has("click") ? this.#legendEntry(event.target, event) : undefined;
       if (!target) return undefined;
       const { x, y } = local(event);
       // A button pressed from the keyboard clicks with no count.
@@ -2795,7 +2796,7 @@ export class Interaction {
       const click = read?.event === event ? read.click : legendClick(event);
       read = undefined;
       // A legend that selects selects first: the click is reported after.
-      this.#legendSelect(event.target, event.shiftKey, event.detail === 0 ? "keyboard" : "pointer");
+      this.#legendSelect(event, event.shiftKey, event.detail === 0 ? "keyboard" : "pointer");
       // After input still waiting to be read, in order.
       if (click && this.#pending.length) this.#pending.push({ type: "legend", click });
       else if (click) host.events.emit("click", click);

@@ -43,11 +43,6 @@
       "import": "./dist/fonts.js",
       "default": "./dist/fonts.js"
     },
-    "./state": {
-      "types": "./dist/state.d.ts",
-      "import": "./dist/state.js",
-      "default": "./dist/state.js"
-    },
     "./fields": {
       "types": "./dist/fields.d.ts",
       "import": "./dist/fields.js",

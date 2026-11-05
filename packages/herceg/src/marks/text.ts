@@ -315,7 +315,12 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
     return data.entries(key, locale, rows, data.writer(locale, pattern));
   }
 
-  describe(format: AxisFormat, locale: string | undefined, rows?: RowParts): string | undefined {
+  describe(
+    format: AxisFormat,
+    locale: string | undefined,
+    rows?: RowParts,
+    frames?: readonly Frame[],
+  ): string | undefined {
     const data = this.#data;
     const x = data.place(this.#x);
     const y = data.place(this.#y);
@@ -338,6 +343,7 @@ export class TextMark implements Mark<Frozen<TextSpec>>, LabelledMark {
           .join(", ");
       },
       rows,
+      frames,
       format.content,
     );
   }
