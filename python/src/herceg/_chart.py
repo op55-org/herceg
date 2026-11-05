@@ -32,11 +32,22 @@ import numpy as np
 from . import _geo, _render
 from ._colors import is_color
 from ._data import UNTYPED, Column, Matrix, Table, listlike
-from ._derive import BinSpec, Derived, Expr, Ordered, View, _fields_of, _writes, bin_spec
+from ._derive import (
+    BinSpec,
+    Condition,
+    Derived,
+    Expr,
+    Ordered,
+    View,
+    _fields_of,
+    _writes,
+    bin_spec,
+)
 from ._encoding import (
     SYMBOLS,
     BarLabels,
     Channel,
+    ChannelOption,
     Continuity,
     Coordinate,
     DataPosition,
@@ -2567,17 +2578,17 @@ class Chart:
         item_key: str | None = None,
         data: Any = None,
         radius: float | None = None,
-        size: str | Channel | Mapping[str, Any] | Expr | None = None,
+        size: str | ChannelOption | None = None,
         radius_range: tuple[float, float] | None = None,
         fill: str | None = None,
-        fill_opacity: float | str | Channel | Mapping[str, Any] | Expr | None = None,
+        fill_opacity: float | str | ChannelOption | None = None,
         stroke: str | None = None,
         stroke_width: float | None = None,
-        color: str | Channel | Mapping[str, Any] | Expr | None = None,
+        color: str | ChannelOption | None = None,
         colors: str | Sequence[str] | None = None,
         color_domain: tuple[float, float] | None = None,
         color_midpoint: float | None = None,
-        symbol: str | Channel | Mapping[str, Any] | Expr | None = None,
+        symbol: str | ChannelOption | None = None,
         encode: Encodings | Mapping[str, Any] | None = None,
         sampling: Literal["none", "pixel"] | None = None,
         dodge: bool = False,
@@ -2651,10 +2662,13 @@ class Chart:
             ("fill_opacity", fill_opacity),
             ("symbol", symbol),
         ):
-            # A symbol's dict may map values to symbols; others' dicts are channels.
+            # A symbol's dict may map values to symbols; others' dicts are
+            # channels; a list is channels tried in order.
             given = forms - {"field"} if option == "symbol" else forms
-            if isinstance(value, (Channel, Expr)) or (
-                isinstance(value, Mapping) and (option != "symbol" or bool(set(value) & given))
+            if (
+                isinstance(value, (Channel, Expr, Condition))
+                or listlike(value)
+                or (isinstance(value, Mapping) and (option != "symbol" or bool(set(value) & given)))
             ):
                 self._check_channel_dict(value, "point", _camel(option))
                 role = f"point {option}"
@@ -2671,7 +2685,12 @@ class Chart:
             ),
         ):
             constant = option == "fill_opacity" and _finite(value)
-            if not (value is None or constant or isinstance(value, (str, Channel, Expr, Mapping))):
+            if not (
+                value is None
+                or constant
+                or isinstance(value, (str, Channel, Expr, Condition, Mapping))
+                or listlike(value)
+            ):
                 raise ChartError(
                     f"point {option}: expected {expected}; received {shown(value)}",
                     path=self._path("point", option),
@@ -5391,14 +5410,15 @@ class Chart:
             "region encode", lambda: encodings_spec(encode, _REGION_CHANNELS, "region")
         )
         if channels:
-            for name, channel in channels.items():
-                if isinstance(channel, Mapping) and "series" in channel:
-                    raise ChartError(
-                        f"region {python_path(f'encode.{name}')}: regions have no series "
-                        "whose names it could read; give hg.Channel(field=...) or value=..., "
-                        "or hg.when(...)",
-                        path=self._path("region", python_path(f"encode.{name}")),
-                    )
+            for name, given in channels.items():
+                for at, channel in _entries(f"encode.{name}", given):
+                    if isinstance(channel, Mapping) and "series" in channel:
+                        raise ChartError(
+                            f"region {python_path(at)}: regions have no series whose names "
+                            "it could read; give hg.Channel(field=...) or value=..., or "
+                            "hg.when(...)",
+                            path=self._path("region", python_path(at)),
+                        )
             # Channels paint each row of the mark's data, or the chart's.
             if table is None and data is None and self._default is None:
                 raise ChartError(
@@ -5695,12 +5715,15 @@ class Chart:
                 )
             # Channels in encode, and a point's color, size, opacity, and symbol of their own.
             channels = [
-                (f"encode.{name}", channel) for name, channel in (mark.get("encode") or {}).items()
+                entry
+                for name, given in (mark.get("encode") or {}).items()
+                for entry in _entries(f"encode.{name}", given)
             ]
             channels += [
-                (name, mark[name])
+                entry
                 for name in ("color", "size", "fillOpacity", "symbol")
-                if isinstance(mark.get(name), dict)
+                if isinstance(mark.get(name), (dict, list))
+                for entry in _entries(name, mark[name])
             ]
             for name, channel in channels:
                 scale = channel.get("scale") if isinstance(channel, dict) else None
@@ -6861,7 +6884,12 @@ class Chart:
     def _check_channel_dict(self, channel: Any, mark: str, at: str) -> None:
         """Refuses a channel given as a dict whose column name or constant is
         not one, at its own path (``at`` as the spec names it, ``encode.fill``),
-        as the engine's validator does, before the dict makes an ``hg.Channel``."""
+        as the engine's validator does, before the dict makes an ``hg.Channel``;
+        a list's dicts each, at theirs (``encode.fill[1]``)."""
+        if listlike(channel):
+            for i, entry in enumerate(channel):
+                self._check_channel_dict(entry, mark, f"{at}[{i}]")
+            return
         if not isinstance(channel, Mapping):
             return
 
@@ -6882,30 +6910,36 @@ class Chart:
         ):
             refuse("scale", "a scale's name, or hg.IdentityScale()")
         if "value" in channel:
-            problem = output_problem(at.rpartition(".")[2], channel["value"], is_color)
+            name = at.rpartition(".")[2].partition("[")[0]
+            problem = output_problem(name, channel["value"], is_color)
             if problem:
                 refuse("value", problem)
 
     def _check_outputs(self, channels: Mapping[str, Any], mark: str, prefix: str) -> None:
         """Refuses channels' constants and conditions' branches that are not
         what each channel draws, at their paths, as the engine does."""
-        for name, channel in channels.items():
-            if not isinstance(channel, Mapping):
-                continue
+        for name, given in channels.items():
+            for at, channel in _entries(f"{prefix}{name}", given):
+                self._check_output(name, channel, mark, at)
+
+    def _check_output(self, name: str, channel: Any, mark: str, at: str) -> None:
+        """Refuses a channel's constant or condition's branch that is not what
+        channel ``name`` draws, at ``at``, as the engine does."""
+        if isinstance(channel, Mapping):
+            condition = channel.get("condition") or {}
             branches = (
                 [("value", channel["value"])]
                 if "value" in channel
                 else [
-                    ("condition.then", channel["condition"]["then"]),
-                    ("condition.otherwise", channel["condition"]["otherwise"]),
+                    (f"condition.{key}", condition[key])
+                    for key in ("then", "otherwise")
+                    if key in condition
                 ]
-                if "condition" in channel
-                else []
             )
             for key, value in branches:
                 problem = output_problem(name, value, is_color)
                 if problem:
-                    path = self._path(mark, python_path(f"{prefix}{name}.{key}"))
+                    path = self._path(mark, python_path(f"{at}.{key}"))
                     raise ChartError(
                         f"{mark} {path.partition('.')[2]}: expected {problem}; "
                         f"received {shown(value)}",
@@ -6938,28 +6972,41 @@ class Chart:
             # Lines, areas, and bars color by categories, through a scale.
             if column:
                 self._require(table, color, ("category",), f"{mark} color")
-        for name, channel in (channels or {}).items():
-            field = channel.get("field") if isinstance(channel, dict) else None
-            if field is not None:
-                option = python_path(f"encode.{name}.field")
-                # Through an identity scale (its own, or one of the chart's), a
-                # number field's values are widths and opacities.
-                scale = channel.get("scale")
-                named = (
-                    (self._options.get("scales") or {}).get(scale, {})
-                    if isinstance(scale, str)
-                    else {}
+        for name, given in (channels or {}).items():
+            for at, channel in _entries(f"encode.{name}", given):
+                self._check_channel_field(table, channel, mark, at)
+
+    def _check_channel_field(self, table: int, channel: Any, mark: str, at: str) -> None:
+        """Refuses a channel's column the data lacks, or holding values the
+        channel does not read through its scale, and a rank test's column
+        holding no numbers or times, as the engine would as it draws."""
+        if not isinstance(channel, dict):
+            return
+        when = (channel.get("condition") or {}).get("when")
+        if isinstance(when, dict):
+            ranked = python_path(f"{at}.condition.when.field")
+            self._require(table, when["field"], (*_NUMERIC, "category"), f"{mark} {ranked}")
+            if self._kind(table, when["field"]) == "category":
+                raise ChartError(
+                    f"{mark} {ranked}: column {when['field']!r} holds categories; ranks are of "
+                    "numbers and times",
+                    code="field-type",
+                    path=self._path(mark, ranked),
                 )
-                identity = isinstance(scale, Mapping) or named.get("type") == "identity"
-                # A channel scale (one with a range) maps numbers and times.
-                kinds = (
-                    _NUMERIC
-                    if "range" in named
-                    else ("category", "number")
-                    if identity
-                    else ("category",)
-                )
-                self._require(table, field, kinds, f"{mark} {option}")
+        field = channel.get("field")
+        if field is None:
+            return
+        option = python_path(f"{at}.field")
+        # Through an identity scale (its own, or one of the chart's), a
+        # number field's values are widths and opacities.
+        scale = channel.get("scale")
+        named = (self._options.get("scales") or {}).get(scale, {}) if isinstance(scale, str) else {}
+        identity = isinstance(scale, Mapping) or named.get("type") == "identity"
+        # A channel scale (one with a range) maps numbers and times.
+        kinds = (
+            _NUMERIC if "range" in named else ("category", "number") if identity else ("category",)
+        )
+        self._require(table, field, kinds, f"{mark} {option}")
 
     def _check_series_style(
         self,
@@ -7145,11 +7192,20 @@ class Chart:
                     code="unsupported",
                     path=self._path("point", at),
                 )
-        given = [(f"encode.{name}", name, channel) for name, channel in encoded.items()] + [
-            (name, "opacity" if name == "fillOpacity" else name, channel)
+        given = [
+            (at, name, entry)
+            for name, channel in encoded.items()
+            for at, entry in _entries(f"encode.{name}", channel)
+        ] + [
+            (at, "opacity" if name == "fillOpacity" else name, entry)
             for name, channel in channels.items()
+            for at, entry in _entries(name, channel)
         ]
         for at, name, channel in given:
+            if isinstance(channel, Mapping) and isinstance(
+                (channel.get("condition") or {}).get("when"), dict
+            ):
+                self._check_channel_field(table, channel, "point", at)
             field = channel.get("field") if isinstance(channel, Mapping) else None
             if field is None:
                 continue
@@ -7168,7 +7224,8 @@ class Chart:
                 )
         color = encoded.get("fill") or encoded.get("color") or channels.get("color")
         if color is not None and any(option is not None for option in ramp):
-            field = color.get("field")
+            # A list's colors are its entries'; a ramp colors a number column alone.
+            field = color.get("field") if isinstance(color, Mapping) else None
             if not (
                 field is not None
                 and color.get("scale") is None
@@ -8516,7 +8573,8 @@ def _fields(spec: dict[str, Any]) -> set[str]:
         if isinstance(value, str):
             fields.add(value)
         elif isinstance(value, list):
-            fields.update(value)
+            # Fields' names (a point's channel list is `_feature_fields`').
+            fields.update(name for name in value if isinstance(name, str))
         elif (field := coordinate_field_spec(value)) is not None:
             # A column's place, or the share or pixels a column gives.
             fields.add(field)
@@ -8552,6 +8610,14 @@ def coordinate_field_spec(place: Any) -> str | None:
     return None
 
 
+def _entries(at: str, channel: Any) -> list[tuple[str, Any]]:
+    """A channel's spec with its place, or a list's entries with theirs
+    (``encode.color[1]``)."""
+    if isinstance(channel, list):
+        return [(f"{at}[{i}]", entry) for i, entry in enumerate(channel)]
+    return [(at, channel)]
+
+
 def _feature_fields(spec: dict[str, Any]) -> set[str]:
     """The columns a mark's encodings, conditions, styles by value, labels,
     and places read."""
@@ -8561,13 +8627,15 @@ def _feature_fields(spec: dict[str, Any]) -> set[str]:
     channels += [
         spec[key]
         for key in ("color", "size", "fillOpacity", "symbol")
-        if isinstance(spec.get(key), dict)
+        if isinstance(spec.get(key), (dict, list))
     ]
-    for channel in channels:
+    # A list's entries each, and the column a rank test ranks by.
+    for _, channel in [entry for given in channels for entry in _entries("", given)]:
         if "field" in channel:
             fields.add(channel["field"])
         elif "condition" in channel:
-            fields |= _fields_of(channel["condition"]["when"])
+            when = channel["condition"]["when"]
+            fields |= {when["field"]} if isinstance(when, dict) else _fields_of(when)
     fields |= _fields_of(spec.get("where"))
     continuity = spec.get("continuity") or {}
     fields |= _fields_of(continuity.get("defined"))
@@ -9765,17 +9833,17 @@ def scatter(
     series: str | Literal[False] | None = None,
     item_key: str | None = None,
     radius: float | None = None,
-    size: str | Channel | Mapping[str, Any] | Expr | None = None,
+    size: str | ChannelOption | None = None,
     radius_range: tuple[float, float] | None = None,
     fill: str | None = None,
-    fill_opacity: float | str | Channel | Mapping[str, Any] | Expr | None = None,
+    fill_opacity: float | str | ChannelOption | None = None,
     stroke: str | None = None,
     stroke_width: float | None = None,
-    color: str | Channel | Mapping[str, Any] | Expr | None = None,
+    color: str | ChannelOption | None = None,
     colors: str | Sequence[str] | None = None,
     color_domain: tuple[float, float] | None = None,
     color_midpoint: float | None = None,
-    symbol: str | Channel | Mapping[str, Any] | Expr | None = None,
+    symbol: str | ChannelOption | None = None,
     encode: Encodings | Mapping[str, Any] | None = None,
     sampling: Literal["none", "pixel"] | None = None,
     dodge: bool = False,

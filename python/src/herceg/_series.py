@@ -23,8 +23,10 @@ def series_of(
     for a name that is no column."""
     if paint is not None or (encode or {}).get(paint_name) is not None:
         return None
-    # A point's color may be a channel itself, as encode's is.
+    # A point's color may be a channel itself, as encode's is; a list splits no series.
     channel = (encode or {}).get("color", color)
+    if isinstance(channel, list):
+        return None
     if isinstance(channel, Mapping) and isinstance(channel.get("scale"), Mapping):
         # Colors read as they are (an identity scale) stand for nothing to split by.
         return None

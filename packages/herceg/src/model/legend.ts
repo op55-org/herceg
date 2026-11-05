@@ -199,7 +199,9 @@ export interface LegendContent {
    * domains' values a mark's entries stand for, drawn or not, of the parts
    * they list for a mark, and annotations' entries in the paint of their rows.
    */
-  features?: Pick<CompiledFeatures, "domainKeys" | "ownParts" | "labelLooks"> | undefined;
+  features?:
+    | Pick<CompiledFeatures, "domainKeys" | "ownParts" | "ownsKeys" | "labelLooks">
+    | undefined;
 }
 
 /**

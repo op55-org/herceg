@@ -261,9 +261,12 @@ export function wholeTable(table: Table): MarkRows {
   return { table, positions: undefined, revision: String(table.version) };
 }
 
-/** Revisions across every channel scale, so a sum of them changes whenever one does. */
+/**
+ * Revisions across every channel scale and rank test (ranks.ts), so a sum
+ * of them changes whenever one does.
+ */
 let revisions = 0;
-function nextRevision(): number {
+export function nextRevision(): number {
   return ++revisions;
 }
 

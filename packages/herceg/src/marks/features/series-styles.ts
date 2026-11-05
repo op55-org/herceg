@@ -1,35 +1,47 @@
 // Looks of series of connected marks (lines, areas): their color and paint
 // from channels and `style.by`. A channel reading rows (a field other than
-// the series', a condition, an identity scale) gives a series runs of looks
-// along it (runs.ts), drawn in stretches (run-paths.ts); a style map by a
-// field reads the field's value over each series' rows, which must be one,
+// the series', a condition, an identity scale, a list) gives a series runs
+// of looks along it (runs.ts), drawn in stretches (run-paths.ts); a list
+// ending in the series' color (`seriesTail`) colors the series, and the
+// observations its other entries give no output; a style map by a field
+// reads the field's value over each series' rows, which must be one,
 // checked once, then as rows are appended only the new rows.
 
 import type { MarkRows } from "../../data/row-view.ts";
 import type { Table } from "../../data/table.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { Geometry } from "../../scene/scene.ts";
-import type { ChannelSpec, EncodingsSpec, SeriesStyle, StyleMapSpec } from "../../spec/encoding.ts";
+import type {
+  ChannelsSpec,
+  EncodingsSpec,
+  SeriesStyle,
+  StyleMapSpec,
+} from "../../spec/encoding.ts";
 import type { Dash } from "../../spec/spec.ts";
 import type { PaintReader, Theme } from "../../theme.ts";
+import type { GlyphKey } from "../mark.ts";
 import type { Series } from "../series.ts";
 import {
   type Channel,
   type Check,
   categoryField,
+  channelRevision,
   colorShortForm,
   compileChannel,
+  displayFields,
   outputCheck,
   rowReader,
   type ScaleOf,
-  scaledRevision,
+  seriesTail,
 } from "./channels.ts";
 import type { Where } from "./compile.ts";
+import { categoryKey, keyedFields } from "./row-styles.ts";
 import { firstAfter, type Look, type RunPart, type Runs, StyleRuns, subset } from "./runs.ts";
 import { translucent } from "./translucent.ts";
 
 /** The paint a series takes from the features, over its mark's flat paint. */
 export interface SeriesPaint {
+  /** The color a stack's layer draws in where its rows all take one look, its series keeping its own. */
   color?: string | undefined;
   stroke?: string | undefined;
   fill?: string | undefined;
@@ -124,6 +136,11 @@ export class SeriesStyles {
   readonly #by: Reader<SeriesStyle> | undefined;
   /** Whether a series' color needs its rows (a field other than the series field, or a condition). */
   readonly #byRows: boolean;
+  /** Whether that color's list ends in the series' color, which observations without one take. */
+  readonly #paintTail: boolean;
+  /** Color lists (the paint's, but an entry coloring the series, and an outline's): scales read in them key their values (`keys`). */
+  readonly #listed: readonly Channel<string>[];
+  #keys: { version: number; subset: string | undefined; keys: GlyphKey[] } | undefined;
   /** The runs of channels reading rows, where some do. */
   readonly #runs: StyleRuns | undefined;
   /** Channels reading rows through channel scales, whose domains other marks' rows may move. */
@@ -197,11 +214,13 @@ export class SeriesStyles {
           ? undefined
           : colorShortForm(spec.color, table, `${path} color`, isColor)));
     let rows = false;
+    let tailed = false;
+    const listed: Channel<string>[] = [];
     let colorField: string | undefined;
     const parts: RunPart[] = [];
     const scaled: Channel<unknown>[] = [];
     const reader = <V>(
-      channel: ChannelSpec<V> | undefined,
+      channel: ChannelsSpec<V> | undefined,
       check: Check,
       name: "color" | "stroke" | "fill" | "dash" | "strokeWidth" | "opacity",
       defaults: () => readonly V[],
@@ -220,26 +239,35 @@ export class SeriesStyles {
       );
       // Only the series' own color waits for its rows (see `color`).
       const paint = name === "color" || name === primary;
+      // A list's entries are read by row (the series field's too); its tail, if any, by series.
+      const [byRow, tail] = seriesTail(compiled, spec.series);
       if (
-        compiled.kind === "condition" ||
-        compiled.kind === "identity" ||
-        compiled.kind === "scaled" ||
-        compiled.kind === "display" ||
-        (compiled.kind === "field" && compiled.field !== spec.series)
+        byRow &&
+        (byRow.kind === "condition" ||
+          byRow.kind === "identity" ||
+          byRow.kind === "scaled" ||
+          byRow.kind === "display" ||
+          byRow.kind === "list" ||
+          (byRow.kind === "field" && byRow.field !== spec.series))
       ) {
-        if (compiled.kind === "scaled") scaled.push(compiled);
+        scaled.push(byRow);
         // Rows' looks: runs along the series.
         parts.push({
           name: paint ? "color" : (name as keyof Look),
-          read: (rows) => rowReader(compiled, rows, defaults(), fallback(), check, at, false),
+          read: (rows) => rowReader(byRow, rows, defaults(), fallback(), check, at, false),
         });
         if (paint) rows = true;
+        if (paint && tail) tailed = true;
+        if (compiled.kind === "list" && (paint || name === "stroke" || name === "fill"))
+          listed.push(byRow as Channel<string>);
+        // A field alone colors the series by its value where it has one (a list's does not).
         if (paint && compiled.kind === "field") colorField = compiled.field;
-        if (compiled.kind === "display")
-          this.displayColors = [...(this.displayColors ?? []), compiled.field];
-        return undefined;
+        const shown = displayFields(byRow);
+        if (shown.length > 0) this.displayColors = [...(this.displayColors ?? []), ...shown];
+        // The series take the tail's output, which their rows without one fall back to.
+        return tail && this.#reader(tail, defaults, fallback);
       }
-      return this.#reader(compiled, defaults, fallback);
+      return this.#reader(tail ?? compiled, defaults, fallback);
     };
     const palette = () => this.#theme?.palette ?? [];
     const muted = () => this.#theme?.muted ?? "#999999";
@@ -286,6 +314,8 @@ export class SeriesStyles {
       };
     }
     this.#byRows = rows;
+    this.#paintTail = tailed;
+    this.#listed = listed;
     this.#colorField = colorField;
     this.#scaled = scaled;
     // Rows in band order are read whole each version; others as they are appended.
@@ -296,14 +326,49 @@ export class SeriesStyles {
 
   /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
   use(theme: Theme, paint: PaintReader): void {
+    if (theme !== this.#theme || paint !== this.#paint) this.#keys = undefined;
     this.#theme = theme;
     this.#paint = paint;
+  }
+
+  /**
+   * Keys of the colors the category fields read through scales in the
+   * color's list give the rows drawn (see `categoryKey`), for the table's
+   * version: explanatory keys, as a list splits no series. Their values are
+   * raw, for the chart's displays to write.
+   */
+  keys(): GlyphKey[] {
+    const fields = this.#keyedFields();
+    if (fields.length === 0) return [];
+    const rows = this.#rows();
+    const drawn = subset(rows);
+    const { version } = this.#table;
+    if (this.#keys?.version === version && this.#keys.subset === drawn) return this.#keys.keys;
+    const path = `${this.#where.path} color`;
+    const keys = fields.flatMap(
+      (field) => categoryKey(field, rows, this.#theme, this.#paint, path, undefined) ?? [],
+    );
+    this.#keys = { version, subset: drawn, keys };
+    return keys;
+  }
+
+  /** Whether `keys` gives keys where rows are drawn: a color list reads a scale of categories. */
+  get hasKeys(): boolean {
+    return this.#keyedFields().length > 0;
+  }
+
+  #keyedFields() {
+    return this.#listed
+      .flatMap((list) => keyedFields(list, this.#spec.series))
+      .filter(
+        (c, i, all) => all.findIndex((f) => f.field === c.field && f.scale === c.scale) === i,
+      );
   }
 
   /** What runs' looks are read with, a new object whenever the theme or a channel scale changes. */
   #lookKey(): object {
     const theme = this.#theme;
-    const scaled = scaledRevision(this.#scaled);
+    const scaled = channelRevision(this.#scaled);
     const kept = this.#runKey;
     if (kept && kept.theme === theme && kept.scaled === scaled) return kept;
     this.#runKey = { theme, scaled };
@@ -488,7 +553,7 @@ export class SeriesStyles {
    * palette's (undefined). Empty when its rows decide it (`attach` sets it).
    */
   color(id: string, given: string | undefined, label?: string): string | undefined {
-    if (this.#byRows) return "";
+    if (this.#byRows && !this.#paintTail) return "";
     return (
       this.#by?.(undefined, id)?.[this.#primary] ?? given ?? this.#paintOf(undefined, id, label)
     );
@@ -509,7 +574,7 @@ export class SeriesStyles {
     const version = this.#table.version;
     const theme = this.#theme;
     const paint = this.#paint;
-    const scaled = scaledRevision(this.#scaled);
+    const scaled = channelRevision(this.#scaled);
     if (
       this.#paintsOf?.version !== version ||
       this.#paintsOf.theme !== theme ||
@@ -553,13 +618,19 @@ export class SeriesStyles {
         message: `${path} encode: looks change within ${this.#spec.series === undefined ? "the series" : `series "${s.label}"`}, whose positions do not ascend; looks change along ascending ${this.#along}; sort the rows, or keep each series' look`,
       });
     }
-    // A color channel by rows gives every series its color; a style map by
-    // another field, the series it maps (the others keep the palette's).
+    // A color channel by rows gives every series its color; a list ending in
+    // the series' color keeps that, the series' own (its legend entry's), and
+    // its rows draw their looks by runs, even all alike (but in a stack's
+    // layers, which draw one look). A style map by another field gives the
+    // series it maps their color (the others keep the palette's).
     const primary = this.#primary;
-    if (this.#byRows)
+    const tail = this.#paintTail;
+    const alike = tail && runs!.count === 1 && first?.color !== undefined;
+    const stacked = !!(this.#spec as { stack?: unknown }).stack;
+    if (this.#byRows && !(tail && (runs!.count > 1 || alike)))
       s.color =
         read(style?.[primary] ?? this.#spec[primary] ?? first?.color, primary) ??
-        this.#theme?.muted ??
+        (tail ? undefined : this.#theme?.muted) ??
         s.color;
     else if (style?.[primary] !== undefined) s.color = read(style[primary], primary)!;
     const spec = this.#spec;
@@ -573,16 +644,23 @@ export class SeriesStyles {
       dash: style?.dash ?? this.#dash?.(s, id),
       opacity: style?.opacity ?? this.#opacity?.(s, id) ?? spec.opacity,
     };
+    // Its first run's over a list's tail, under its style map's.
     return {
-      stroke: own.stroke ?? read(first?.stroke, "stroke"),
-      strokeWidth: own.strokeWidth ?? first?.strokeWidth,
-      dash: own.dash ?? first?.dash,
-      opacity: own.opacity ?? first?.opacity ?? 1,
+      stroke: read(style?.stroke, "stroke") ?? read(first?.stroke, "stroke") ?? own.stroke,
+      strokeWidth: style?.strokeWidth ?? first?.strokeWidth ?? own.strokeWidth,
+      dash: style?.dash ?? first?.dash ?? own.dash,
+      opacity: style?.opacity ?? first?.opacity ?? own.opacity ?? 1,
       strokeOpacity: style?.strokeOpacity ?? spec.strokeOpacity,
       fillOpacity: style?.fillOpacity,
       style,
       value: this.#colorValue(s),
-      ...(runs && runs.count > 1 && { runs, own }),
+      // A stack's layers draw one look, its color given apart (but a style
+      // map's or the mark's own); others draw by runs.
+      ...(alike &&
+        stacked &&
+        style?.[primary] === undefined &&
+        spec[primary] === undefined && { color: read(first!.color, primary) }),
+      ...(runs && (runs.count > 1 || (alike && !stacked)) && { runs, own }),
     };
   }
 
@@ -601,7 +679,7 @@ export class SeriesStyles {
       style?.[this.#primary] ??
       this.#spec[this.#primary] ??
       look.color ??
-      (this.#byRows ? (this.#theme?.muted ?? "#999999") : undefined);
+      (this.#byRows && !this.#paintTail ? (this.#theme?.muted ?? "#999999") : undefined);
     const stroke = style?.stroke ?? look.stroke;
     return {
       color: color === undefined ? undefined : this.#paint(color, `${path} color`),

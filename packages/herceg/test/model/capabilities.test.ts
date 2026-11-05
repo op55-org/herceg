@@ -2507,6 +2507,35 @@ describe("capabilities: encodings", () => {
     expect(paints.filter((paint) => paint === "#00ab41")).toHaveLength(3);
   });
 
+  it("lines, areas, bars, points, and regions take channels tried in order; heatmaps none", () => {
+    const red = "#c62828";
+    // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+    const top = { condition: { when: { top: 1, field: "y" as const }, then: red } };
+    const color = [top, { value: "#999999" }];
+    const scene = featured({
+      marks: [
+        line(sites, { x: "x", y: "y", series: "site", encode: { color } }),
+        area(sites, { x: "x", y: "y", series: "site", encode: { color } }),
+        bar(sites, { x: "x", y: "y", encode: { color } }),
+        point(sites, { x: "x", y: "y", color }),
+        region(sites, { x1: "x", x2: "y", encode: { fill: color } }),
+      ],
+    });
+    const kinds = scene.panels[0]!.marks.flatMap((g) => {
+      const { stroke, fill, colors } = g as {
+        stroke?: string;
+        fill?: string;
+        colors?: { palette: readonly string[] };
+      };
+      return [stroke, fill, ...(colors?.palette ?? [])].includes(red) ? [g.kind] : [];
+    });
+    expect(new Set(kinds)).toEqual(new Set(["line", "area", "rect", "point"]));
+    const heat = { type: "heatmap", x: "x", y: "y", color: "y", encode: { color: { value: red } } };
+    expect(() => validateSpec({ marks: [heat as never] })).toThrow(
+      /a heatmap takes color as a field/,
+    );
+  });
+
   // Points' channels are bound from round 2's stream C on (test/model/contracts.test.ts).
   it("annotations take no encode in specs; points take one", () => {
     const rule = { type: "rule", y: 1, encode: { stroke: { value: "#000000" } } };

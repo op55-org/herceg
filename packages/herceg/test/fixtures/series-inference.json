@@ -131,6 +131,19 @@
       "mark": "bar",
       "options": { "color": "region", "encode": { "fill": { "field": "service" } } },
       "series": null
+    },
+    {
+      "name": "a list of channels splits no series",
+      "mark": "line",
+      "options": {
+        "encode": {
+          "color": [
+            { "condition": { "when": [">", ["field", "v"], 1], "then": "#c62828" } },
+            { "field": "region" }
+          ]
+        }
+      },
+      "series": null
     }
   ]
 }

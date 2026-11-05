@@ -59,15 +59,27 @@ export function scopeOfMark(
   if (own === undefined || !identity || !mark.table) return undefined;
   const field = identity.field;
   type Channel = { field?: string; scale?: string | object; series?: boolean };
+  type Given = Channel | readonly Channel[];
   const spec = mark.spec as {
-    color?: string | Channel;
+    color?: string | Given;
     stroke?: string;
     fill?: string;
-    encode?: { color?: Channel; stroke?: Channel; fill?: Channel };
+    encode?: { color?: Given; stroke?: Given; fill?: Given };
   };
-  const { encode } = spec;
+  // A list splits no series and stands for nothing but by the entry ending
+  // it that colors the series (their names, or the series field), as alone.
+  const one = (given: Given | undefined): Channel | undefined => {
+    if (!Array.isArray(given)) return given as Channel | undefined;
+    const last = given[given.length - 1] as Channel | undefined;
+    return last?.series || (last?.field !== undefined && last.field === field) ? last : {};
+  };
+  const encode = spec.encode && {
+    color: one(spec.encode.color),
+    stroke: one(spec.encode.stroke),
+    fill: one(spec.encode.fill),
+  };
   // A point's color may be a channel itself, as encode's is.
-  const flat = typeof spec.color === "object" ? spec.color : undefined;
+  const flat = typeof spec.color === "object" ? one(spec.color) : undefined;
   const given = encode?.color ?? flat;
   // What paints the series: the mark's own paint (a line's stroke, an area's,
   // bar's, or point's fill), flat or as a channel, wins over its color.
@@ -89,12 +101,17 @@ export function scopeOfMark(
   const color =
     named || painted || (primary && encode?.[primary]) || flat ? undefined : (spec.color as string);
   const scale = (channel?.scale as string | undefined) ?? (declared ? "color" : undefined);
+  // Where the scale is given: a list's at the index of the entry ending it.
+  const at = (name: string, given: unknown) =>
+    `${name}${Array.isArray(given) ? `[${given.length - 1}]` : ""}.scale`;
   const option =
     channel?.scale === undefined
       ? undefined
       : channel === flat
-        ? "color.scale"
-        : `encode.${channel === encode?.color ? "color" : primary}.scale`;
+        ? at("color", spec.color)
+        : channel === encode?.color
+          ? at("encode.color", spec.encode?.color)
+          : at(`encode.${primary}`, primary && spec.encode?.[primary]);
   const scaled = scale === undefined ? undefined : prefixOf(scale);
   const colored =
     channel?.field ?? (color !== undefined && mark.table.has(color) ? color : undefined);

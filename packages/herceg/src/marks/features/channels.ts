@@ -4,16 +4,23 @@
 // (channel-scales.ts) or, for colors without one, by the colors the chart's
 // field displays give them, a field's values as they are (an identity
 // scale's, checked as constants are), the series' names through a scale,
-// or a condition on each row. Every output is checked against the channel that
-// draws it (`outputProblem`, spec/channels.ts): a constant, a scale's map
-// and `unknown`, used or not, a channel scale's range, and the values an
-// identity scale reads.
+// a condition on each row (an expression, or a rank test, ranks.ts), or a
+// list of them tried in order. Every output is checked against the channel
+// that draws it (`outputProblem`, spec/channels.ts): a constant, a scale's
+// map and `unknown`, used or not, a channel scale's range, and the values
+// an identity scale reads.
 
 import { compileExpression, type Expression } from "../../data/expression.ts";
 import type { Table } from "../../data/table.ts";
 import { type ChannelName, outputProblem } from "../../spec/channels.ts";
-import type { ChannelSpec, IdentityScaleSpec } from "../../spec/encoding.ts";
-import { ChannelScale } from "./channel-scales.ts";
+import type {
+  ChannelSpec,
+  ChannelsSpec,
+  IdentityScaleSpec,
+  RankSpec,
+} from "../../spec/encoding.ts";
+import { ChannelScale, wholeTable } from "./channel-scales.ts";
+import { Rank } from "./ranks.ts";
 import type { CategoryScale } from "./scales.ts";
 
 export type Channel<V> =
@@ -30,9 +37,14 @@ export type Channel<V> =
   | {
       readonly kind: "condition";
       readonly when: (row: number) => boolean;
+      /** The rank test `when` is, whose nth value moves with the mark's rows. */
+      readonly rank?: Rank | undefined;
       readonly then: V;
-      readonly otherwise: V;
-    };
+      /** Undefined: no output where `when` fails. */
+      readonly otherwise: V | undefined;
+    }
+  /** Channels tried in order: a row takes the first one's output it has (one or more). */
+  | { readonly kind: "list"; readonly entries: readonly Channel<V>[] };
 
 /** A number field's values through a channel scale. */
 export interface ScaledChannel {
@@ -50,13 +62,17 @@ export interface ScaledChannel {
  * scale of the chart's is `IDENTITY`. A channel scale read for a `field`
  * reads that field of the mark's rows into its domain. `colors` gives a
  * number field's display colors, where the chart's field displays give it
- * some.
+ * some; `rank` a rank test over the mark's rows, which the chart brings up
+ * to date before it draws.
  */
 export type ScaleOf = ((
   name: string,
   path: string,
   field?: string,
-) => CategoryScale | ChannelScale) & { colors?(field: string): ValueColors | undefined };
+) => CategoryScale | ChannelScale) & {
+  colors?(field: string): ValueColors | undefined;
+  rank?(field: string, count: number, top: boolean): Rank;
+};
 
 /**
  * A number field's display colors as channels read them: the colors its
@@ -86,11 +102,52 @@ export function scaledOutputs(
   };
 }
 
-/** The sum of the revisions of the channel scales `channels` read, which changes whenever one does. */
-export function scaledRevision(channels: readonly (Channel<unknown> | undefined)[]): number {
+/**
+ * The sum of the revisions of what `channels` read beyond each row's own
+ * values (channel scales' domains, rank tests' nth values), which changes
+ * whenever one does.
+ */
+export function channelRevision(channels: readonly (Channel<unknown> | undefined)[]): number {
   let sum = 0;
-  for (const c of channels) if (c?.kind === "scaled") sum += c.scale.revision;
+  for (const c of channels)
+    if (c?.kind === "scaled") sum += c.scale.revision;
+    else if (c?.kind === "condition") sum += c.rank?.revision ?? 0;
+    else if (c?.kind === "list") sum += channelRevision(c.entries);
   return sum;
+}
+
+/** Whether `channel` gives every row an output: a constant, the series' names, a condition with `otherwise`. */
+function always(channel: ChannelSpec<unknown>): boolean {
+  return (
+    "value" in channel ||
+    "series" in channel ||
+    ("condition" in channel && channel.condition?.otherwise !== undefined)
+  );
+}
+
+/**
+ * A list's entries apart from the one ending it that colors the series
+ * (`tail`: the series' names, or `series`, the mark's series field):
+ * series take its output, and rows no other entry gives one. For a channel
+ * that is not a list, itself and no tail.
+ */
+export function seriesTail<V>(
+  channel: Channel<V> | undefined,
+  series: string | undefined,
+): [rows: Channel<V> | undefined, tail: Channel<V> | undefined] {
+  if (channel?.kind !== "list") return [channel, undefined];
+  const { entries } = channel;
+  const last = entries[entries.length - 1]!;
+  if (!(last.kind === "series" || (last.kind === "field" && last.field === series)))
+    return [channel, undefined];
+  const rest = entries.slice(0, -1);
+  return [rest.length === 0 ? undefined : { kind: "list", entries: rest }, last];
+}
+
+/** The fields whose display colors `channel` reads, in a list's entries too. */
+export function displayFields(channel: Channel<unknown> | undefined): string[] {
+  if (channel?.kind === "display") return [channel.field];
+  return channel?.kind === "list" ? channel.entries.flatMap(displayFields) : [];
 }
 
 /** What a scale of `{ type: "identity" }` is among the chart's scales: no mapping. */
@@ -196,17 +253,49 @@ const NUMBERS: readonly ChannelName[] = ["strokeWidth", "size", "opacity", "fill
 /**
  * Compiles channel `name` of a mark (`path` names it in messages). `check`
  * refuses values it cannot draw; `scale` names the scale a field reads by
- * default.
+ * default. A field read through scale `unread` leaves the scale's domain
+ * to place its values as rows ask for them (see the list's).
  */
 export function compileChannel<V>(
-  spec: ChannelSpec<V>,
+  given: ChannelsSpec<V>,
   table: Table | undefined,
   scales: ScaleOf,
   scale: string,
   check: Check,
   path: string,
   name: ChannelName = "color",
+  unread?: string,
 ): Channel<V> {
+  if (Array.isArray(given)) {
+    if (given.length === 0)
+      throw new TypeError(
+        `${path}: expected a channel, or channels tried in order; received an empty list`,
+      );
+    // A list ending in the series' names through a scale: its other entries'
+    // fields read through it place their values as rows ask, after the
+    // series' names (which take theirs as series are made), so the series
+    // keep the places they have through the scale alone.
+    const last = given[given.length - 1] as ChannelSpec<V> | undefined;
+    const series =
+      last && "series" in last && typeof last.scale === "string" ? last.scale : undefined;
+    // Every entry is checked, reached or not; one after an entry always giving an output is refused.
+    const entries = given.map((entry, i) => {
+      if (Array.isArray(entry))
+        throw new TypeError(
+          `${path}[${i}]: expected a channel; a list's entries are channels, so give them in one list`,
+        );
+      const at = `${path}[${i}]`;
+      const compiled = compileChannel<V>(entry, table, scales, scale, check, at, name, series);
+      if (i > 0 && always(given[i - 1]!))
+        throw new TypeError(
+          `${path}[${i}]: the channel before it always gives an output (a constant, the series' names, or a condition with otherwise); move it first, or drop it`,
+        );
+      return compiled;
+    });
+    // A list of one is still a list: it splits no series, and rows it gives no output take the mark's.
+    return { kind: "list", entries };
+  }
+  const spec = given as ChannelSpec<V>;
   if ("value" in spec) {
     check(spec.value, `${path}.value`);
     return { kind: "value", value: spec.value };
@@ -286,18 +375,50 @@ export function compileChannel<V>(
     }
     const field = categoryField(table, spec.field, `${path}.field`);
     checkOutputs(named, check, path);
-    named.read(table!, field);
+    if (named.name !== unread) named.read(table!, field);
     return { kind: "field", field, scale: named };
   }
   const { when, then, otherwise } = spec.condition;
   check(then, `${path}.condition.then`);
-  check(otherwise, `${path}.condition.otherwise`);
-  return {
-    kind: "condition",
-    when: predicate(table, when, `${path}.condition.when`),
-    then,
-    otherwise,
-  };
+  if (otherwise !== undefined) check(otherwise, `${path}.condition.otherwise`);
+  const at = `${path}.condition.when`;
+  if (typeof when === "object" && when !== null && !Array.isArray(when)) {
+    const rank = rankTest(table, when as RankSpec, scales, at);
+    return { kind: "condition", when: (row) => rank.holds(row), rank, then, otherwise };
+  }
+  return { kind: "condition", when: predicate(table, when as Expression, at), then, otherwise };
+}
+
+/** A rank test of `table`'s field over the mark's rows, or an error at `path`. */
+function rankTest(table: Table | undefined, test: RankSpec, scales: ScaleOf, path: string): Rank {
+  const top = "top" in test;
+  if (top === "bottom" in test)
+    throw new TypeError(
+      top
+        ? `${path}: a rank test takes top or bottom, not both; drop one`
+        : `${path}: expected an expression, or a rank test ({ top, field } or { bottom, field }); received ${JSON.stringify(test)}`,
+    );
+  const count = (top ? test.top : test.bottom) as number;
+  const side = top ? "top" : "bottom";
+  if (!(Number.isInteger(count) && count >= 1))
+    throw new TypeError(
+      `${path}.${side}: expected a whole number of rows from 1; received ${JSON.stringify(count)}`,
+    );
+  if (typeof test.field !== "string")
+    throw new TypeError(
+      `${path}.field: expected the name of a number or time field; received ${JSON.stringify(test.field)}`,
+    );
+  if (table?.has(test.field) && table.kind(test.field) === "category")
+    throw Object.assign(
+      new TypeError(
+        `${path}.field: field "${test.field}" holds categories; ranks are of numbers and times`,
+      ),
+      { code: "field-type" },
+    );
+  const field = table?.has(test.field)
+    ? test.field
+    : categoryField(table, test.field, `${path}.field`, "number");
+  return scales.rank?.(field, count, top) ?? new Rank(() => wholeTable(table!), field, count, top);
 }
 
 /**
@@ -384,6 +505,33 @@ export function rowReader<V>(
       at: (row) => (channel.when(row) ? 1 : 0),
       output: (row) => (channel.when(row) ? channel.then : channel.otherwise),
     };
+  if (channel.kind === "list") {
+    // Values an entry's scale leaves unmapped give no output, so the next entry is read.
+    const readers = channel.entries.map((entry, i) =>
+      rowReader(entry, table, defaults, undefined as V, check, `${path}[${i}]`, false),
+    );
+    const output = (row: number) => {
+      for (const reader of readers) {
+        const out = reader.output(row);
+        if (out !== undefined) return out;
+      }
+      return undefined;
+    };
+    // Rows' looks are their outputs, numbered as rows first take them.
+    const ids = new Map<V, number>();
+    const key = (row: number) => {
+      const out = output(row);
+      if (out === undefined) return Number.NaN;
+      let id = ids.get(out);
+      if (id === undefined) {
+        id = ids.size;
+        ids.set(out, id);
+      }
+      return id;
+    };
+    if (!counted) return { count: 0, at: key, output };
+    return { ...numbered(key, drawn, table.length), output };
+  }
   if (channel.kind === "scaled") {
     const values = table.numbers(channel.field as never);
     const of = scaledOutputs(channel);

@@ -17,6 +17,7 @@ import type { PanelDrawing } from "../layout/placer.ts";
 import type { Breaks } from "../lod/m4.ts";
 import type { RangeIndex } from "../lod/minmax-index.ts";
 import type { PointSink, Polyline } from "../lod/polyline.ts";
+import type { CustomSeries } from "../marks/custom.ts";
 import type { ContentWriter } from "../marks/features/content.ts";
 import type { itemLegends } from "../marks/features/item-legends.ts";
 import type { displayedContent } from "../marks/features/label-displays.ts";
@@ -28,7 +29,7 @@ import type { Series } from "../marks/series.ts";
 import type { TraceFrame } from "../marks/trace.ts";
 import type { Connections } from "../marks/union-stack.ts";
 import type { Geometry, Rect } from "../scene/scene.ts";
-import type { ChannelSpec, SymbolName } from "../spec/encoding.ts";
+import type { ChannelsSpec, SymbolName } from "../spec/encoding.ts";
 import type { FormatSpec, SwatchSpec } from "../spec/guides.ts";
 import type { Dash } from "../spec/spec.ts";
 import type { ResolvedHalo, TextPaint } from "../style/style.ts";
@@ -161,6 +162,11 @@ export interface CompiledFeatures {
    */
   ownParts(mark: ChartMark): readonly LegendPart[];
   /**
+   * Whether `mark` owns legend parts where it draws rows (`ownParts`), by
+   * what it reads alone: guides may name its color, with rows or none.
+   */
+  ownsKeys(mark: ChartMark): boolean;
+  /**
    * An annotation's legend entries by its labels (`Mark.labelEntries`, in
    * the mark's look): a region painted per row's in the paint of the first
    * row holding each label; others' as they are.
@@ -255,11 +261,22 @@ export interface MarkFeatures {
    */
   readonly displayColors?: readonly string[] | undefined;
   /**
-   * For custom marks: a channel's output for a row of their table (a
-   * color, a width, an opacity), undefined where the row has none or the
-   * channel is not given.
+   * For lines, areas, regions, and custom marks reading scales of
+   * categories in a list of channels (and only those): keys of their
+   * values' colors (raw, for the chart's displays to write), which the
+   * chart's legends list as the mark's own.
    */
-  encoded?(channel: "color" | "strokeWidth" | "opacity", row: number): string | number | undefined;
+  listKeys?(): readonly GlyphKey[];
+  /**
+   * For custom marks: a channel's output for a row of their table (a
+   * color, a width, an opacity) as an item of `series`, undefined where the
+   * row has none or the channel is not given.
+   */
+  encoded?(
+    channel: "color" | "strokeWidth" | "opacity",
+    row: number,
+    series?: CustomSeries,
+  ): string | number | undefined;
   /**
    * Labels placed so far, which later ones keep off (bars' labels that
    * "hide"), as painted in `paint`: past their boxes by its box's outline,
@@ -416,8 +433,8 @@ export interface SeriesFeatures {
   rows?: { readonly paints: readonly RowPaint[]; of(row: number): number } | undefined;
   /** For points: what their channels give each row (`PointLooks`), which every series of the mark shares. */
   points?: PointLooks | undefined;
-  /** For bars colored by a field other than the series': the legend's key of its values' colors. */
-  legend?(): LegendPart | undefined;
+  /** For bars colored by fields other than the series': the legend's keys of their values' colors. */
+  legends?(): LegendPart[];
 }
 
 /** How an observation of a line or area is drawn: its stroke's (or dot's) color, opacity, and width. */
@@ -446,7 +463,7 @@ export interface PointChannels {
 }
 
 export interface PointChannel<V> {
-  readonly spec: ChannelSpec<V>;
+  readonly spec: ChannelsSpec<V>;
   readonly path: string;
 }
 
@@ -459,6 +476,11 @@ export interface PointChannel<V> {
 export interface PointLooks {
   /** A row's color, an index into `colors`; -1 where it has none, which leaves it undrawn. */
   readonly color?: ((row: number) => number) | undefined;
+  /**
+   * Rows without a color of their own take their series' (a list ending
+   * in the series' color), which their legend entries show.
+   */
+  readonly bySeries?: boolean | undefined;
   /** The colors `color` indexes, as many as rows take: identity colors stay exact. */
   readonly colors: readonly string[];
   /** A row's area in square pixels; NaN where it has none. */

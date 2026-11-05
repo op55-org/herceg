@@ -12,7 +12,7 @@ import functools
 import inspect
 import math
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any, TypedDict, TypeVar
+from typing import Any, TypedDict, TypeVar, overload
 
 import numpy as np
 
@@ -24,6 +24,7 @@ from ._errors import (
     check_hints,
     checks_hints,
     hints_of,
+    is_integer,
     is_number,
     keys_shown,
     listed,
@@ -58,6 +59,16 @@ def _literal(value: Any) -> Any:
     """The JSON form of an expression operand."""
     if isinstance(value, Expr):
         return value._json
+    if isinstance(value, Rank) or (isinstance(value, Condition) and value._rank):
+        raise ChartError(
+            "expression: a rank test reads the rows of a mark, which expressions do not; "
+            'give it to a channel, as hg.when(hg.top(3, "p99"), ...) in encode'
+        )
+    if isinstance(value, Condition):
+        raise ChartError(
+            "expression: a condition without otherwise gives no value where it fails; "
+            "give otherwise"
+        )
     if value is None or isinstance(value, (bool, str)):
         return value
     if isinstance(value, np.datetime64):
@@ -218,19 +229,128 @@ def col(name: str) -> Expr:
     return Expr(["field", name])
 
 
-def when(condition: Expr, then: Any, otherwise: Any) -> Expr:
-    """``then`` where ``condition`` holds, else ``otherwise``."""
-    if not isinstance(condition, Expr):
+class Rank:
+    """A rank test, made by ``hg.top`` and ``hg.bottom``, for a channel's
+    condition: true for the rows whose value of a number or datetime column
+    is among the n largest (or smallest) of the mark's rows, before level of
+    detail, facets, and hidden series. Values tied with the nth are in;
+    missing and infinite values never are. It combines with no expression:
+    a list of channels orders rank tests and expressions."""
+
+    __slots__ = ("_json",)
+
+    def __init__(self, json: dict[str, Any]) -> None:
+        self._json = json
+
+    def to_json(self) -> dict[str, Any]:
+        """The test as the spec writes it: ``{"top": 3, "field": "p99"}``."""
+        return dict(self._json)
+
+    def __repr__(self) -> str:
+        side = "top" if "top" in self._json else "bottom"
+        return f"hg.{side}({self._json[side]!r}, {self._json['field']!r})"
+
+    def __bool__(self) -> bool:
+        raise TypeError("rank test: is not true or false in Python; give it to hg.when")
+
+    def _combined(self, _other: Any) -> Any:
+        raise ChartError(
+            "rank test: combines with no expression; give the tests to a list of channels, "
+            "which tries them in order"
+        )
+
+    __and__ = __rand__ = __or__ = __ror__ = _combined
+
+
+def _rank(side: str, n: Any, field: Any) -> Rank:
+    if not (is_integer(n) and not isinstance(n, bool) and n >= 1):
+        raise ChartError(
+            f"{side} n: expected a whole number of rows from 1; received {shown(n)}", path="n"
+        )
+    if not (isinstance(field, str) and field):
+        raise ChartError(
+            f"{side} field: expected a number or datetime column's name; received {shown(field)}",
+            path="field",
+        )
+    return Rank({side: int(n), "field": field})
+
+
+def top(n: int, field: str) -> Rank:
+    """A rank test for ``hg.when``: rows whose ``field`` is among the ``n``
+    largest of the mark's rows (ties with the nth in)."""
+    return _rank("top", n, field)
+
+
+def bottom(n: int, field: str) -> Rank:
+    """A rank test for ``hg.when``: rows whose ``field`` is among the ``n``
+    smallest of the mark's rows (ties with the nth in)."""
+    return _rank("bottom", n, field)
+
+
+class _Omitted:
+    """``when``'s ``otherwise`` left out (None is a branch of its own)."""
+
+    def __repr__(self) -> str:
+        return "<omitted>"
+
+
+_OMITTED: Any = _Omitted()
+
+
+class Condition:
+    """A channel's condition that is no expression, made by ``hg.when``
+    without ``otherwise`` or on a rank test: ``then`` where the test holds,
+    else ``otherwise``, or without it no output (the next channel of a
+    list, else the mark's fallback). Channels take it; expressions do not."""
+
+    __slots__ = ("_json", "_rank")
+
+    def __init__(self, json: dict[str, Any], rank: bool) -> None:
+        self._json = json
+        self._rank = rank
+
+    def to_json(self) -> dict[str, Any]:
+        """The condition as a channel's spec writes it: ``{"when", "then", "otherwise"?}``."""
+        return dict(self._json)
+
+    def __repr__(self) -> str:
+        return f"Condition({self._json!r})"
+
+    def __bool__(self) -> bool:
+        raise TypeError("condition: is not true or false in Python; give it to a channel")
+
+
+@overload
+def when(condition: Expr, then: Any, otherwise: Any) -> Expr: ...
+@overload
+def when(condition: Expr | Rank, then: Any) -> Condition: ...
+@overload
+def when(condition: Rank, then: Any, otherwise: Any) -> Condition: ...
+def when(condition: Expr | Rank, then: Any, otherwise: Any = _OMITTED) -> Expr | Condition:
+    """``then`` where ``condition`` holds, else ``otherwise``. In a channel,
+    ``condition`` may also be a rank test (``hg.top(3, "p99")``), and
+    ``otherwise`` may be left out: no output where the condition fails (the
+    next channel of a list, else the mark's fallback). Expressions take
+    neither, as they give every row a value."""
+    if not isinstance(condition, (Expr, Rank)):
         raise ChartError(
             "when condition: expected an expression that holds or not, such as "
-            f'hg.col("v") > 1; received {shown(condition)}',
+            'hg.col("v") > 1, or a rank test such as hg.top(3, "p99"); '
+            f"received {shown(condition)}",
             path="condition",
         )
-    branches = [
-        located(name, functools.partial(_literal, value))
-        for name, value in (("then", then), ("otherwise", otherwise))
-    ]
-    return Expr(["if", _literal(condition), *branches])
+    given = (
+        (("then", then),) if otherwise is _OMITTED else (("then", then), ("otherwise", otherwise))
+    )
+    branches = [located(name, functools.partial(_literal, value)) for name, value in given]
+    if isinstance(condition, Expr) and otherwise is not _OMITTED:
+        return Expr(["if", _literal(condition), *branches])
+    test = condition.to_json() if isinstance(condition, Rank) else condition._json
+    names = ("then", "otherwise")
+    return Condition(
+        {"when": test, **dict(zip(names, branches, strict=False))},
+        rank=isinstance(condition, Rank),
+    )
 
 
 class _Kinds:

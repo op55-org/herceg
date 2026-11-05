@@ -52,3 +52,15 @@ makes a link of each value from the row's values, URL-encoded: pinned
 tooltips draw tooltip fields' links (http, https, mailto, and relative
 URLs only), events carry them (`InspectedField.link`), and `displayOf`
 gives them to application code.
+
+Channels in `encode` (and points' flat `color`, `size`, `fillOpacity`, and
+`symbol`) also take a list of channels tried in order, each drawn item
+taking the first output, and conditions without `otherwise` (no output
+where they fail) or with a rank test as their condition (`{ top: n, field }`,
+`{ bottom: n, field }`: the n largest or smallest values of the mark's
+rows, ties in, followed as rows stream). In Python, a list of channels,
+`hg.when(condition, then)`, and `hg.top(n, field)` / `hg.bottom(n, field)`.
+Lists split no series; one ending in the series' colors keeps their
+legend entries and toggles, and scales read in a list show their key.
+Custom marks read lists through `encoded(channel, row, series)`. Heatmaps
+take no `encode`.

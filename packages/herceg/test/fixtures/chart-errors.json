@@ -153,6 +153,57 @@
       "path": "marks[0].color",
       "message": "\"red\" names both a field and a color",
       "python": "'red' names both a column and a color"
+    },
+    {
+      "name": "a channel after one that always gives an output",
+      "mark": {
+        "type": "bar",
+        "x": "region",
+        "y": "v",
+        "encode": {
+          "color": [
+            { "value": "#90a4ae" },
+            { "condition": { "when": { "top": 1, "field": "v" }, "then": "#c62828" } }
+          ]
+        }
+      },
+      "code": "invalid-option",
+      "path": "marks[0].encode.color[1]",
+      "message": "the channel before it always gives an output (a constant, the series' names, or a condition with otherwise); move it first, or drop it",
+      "python": "Encodings color[1]: the channel before it always gives an output (a constant, the series' names, or a condition with otherwise); move it first, or drop it"
+    },
+    {
+      "name": "a rank of categories",
+      "mark": {
+        "type": "bar",
+        "x": "region",
+        "y": "v",
+        "encode": {
+          "color": [
+            { "condition": { "when": { "top": 1, "field": "service" }, "then": "#c62828" } },
+            { "value": "#90a4ae" }
+          ]
+        }
+      },
+      "code": "field-type",
+      "path": "marks[0].encode.color[0].condition.when.field",
+      "message": "field \"service\" holds categories; ranks are of numbers and times",
+      "python": "column 'service' holds categories; ranks are of numbers and times"
+    },
+    {
+      "name": "a rank of a field the table does not have",
+      "mark": {
+        "type": "line",
+        "x": "t",
+        "y": "v",
+        "encode": {
+          "color": { "condition": { "when": { "bottom": 2, "field": "p99" }, "then": "#c62828" } }
+        }
+      },
+      "code": "unknown-field",
+      "path": "marks[0].encode.color.condition.when.field",
+      "message": "no field \"p99\"",
+      "python": "no column 'p99'"
     }
   ]
 }
