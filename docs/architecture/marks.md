@@ -249,13 +249,14 @@ as tests pin. No stack writes them yet.
 ## Encodings
 
 What marks draw beyond constant paint belongs to the **feature compiler**
-(`marks/features/`): channels by field, scale, or condition; scales of
+(`marks/features/`): channels by field, scale, condition, or a list of
+them; rank tests; scales of
 categories; looks by series or row (`style.by`); markers; runs
 (`continuity`, `where`); label patterns. A live chart loads it before
 drawing a configuration that uses any of it, as it loads the guide
 compiler; static output brings both (`render/compilers.ts`). The hooks in
 the core cost the line entry about 870 bytes gzip; the compiler chunk is
-about 13 KB gzip.
+about 48 KB gzip.
 
 **The contract** (`model/features.ts`):
 
@@ -286,14 +287,34 @@ Every channel compiles through `compileChannel` into one of: a constant; a
 category field through an `OrdinalScale` (outputs per dictionary code, so a
 row's value is an array lookup); a number or time field through a
 `ChannelScale` (`channel-scales.ts`); an identity scale (values as they
-are); the series' names through a scale; or a condition, compiled once and
-read per row.
+are); the series' names through a scale; a condition, compiled once and
+read per row; or a list of these.
 
 - Every output is checked against the channel drawing it (`outputProblem`
   in `spec/channels.ts`): constants, both branches of a condition, a named
   scale's `map` and `unknown` for each channel reading it, and identity
   values as rows give them.
 - Identity scales infer no series and make no legend entries.
+- **Lists** (`{ kind: "list", entries }`, one entry or more) give each
+  item the first defined output of their entries (an entry's scale gives
+  values it does not map none, so the next is read), and looks are
+  numbered by the outputs interned. An entry after one that always gives an
+  output (a constant, the series' names, a condition with `otherwise`) is
+  refused. A list never makes series: scope reads its last entry where
+  that names the series' colors (`seriesTail`), and that entry alone
+  colors series, legend swatches, and the items the other entries leave.
+  The other entries' fields read through the tail's scale add no values to
+  its domain at compile (`unread`): they take places as rows ask, after the
+  names of the series made in the frame, so those keep their palette
+  places (series made later follow, as in any shared scale). Each scale read in a list shows an explanatory key
+  (`RowStyles.keys`, `MarkFeatures.listKeys` for lines, areas, regions,
+  and custom marks, the points' `#keys`).
+- **Conditions** without `otherwise` give no output where they fail. A
+  **rank test** (`ranks.ts`, `Rank`) keeps a heap of the n rows' identities
+  over the mark's rows (`mark.rows()`), the nth first. `update()` brings it
+  up to date each frame; appends offer only the new rows while the n
+  survive the drops, and anything else reads every row again. Its
+  revision changes when the nth value does.
 - A scale's domain is its explicit `domain` (closed: others take
   `unknown`), or the fields' dictionaries in the order marks read them. A
   value keeps its place once it has one, and scales read whole tables, so
@@ -305,7 +326,8 @@ read per row.
   `update()` takes the union of their extents (cached per rows revision)
   as the domain each frame, before series resolve, and bumps the scale's
   `revision` when the domain or a ramp's colors change. Caches of looks
-  key on the sum of their channels' revisions (`scaledRevision`), so they
+  key on the sum of their channels' scale and rank revisions
+  (`channelRevision`), so they
   read again only then. Outputs are functions built once per read
   (`numberOutputs`, `colorOutputs`): numbers kept within the channel's
   limits, colors from a 256-step ramp of the stops (interpolated as

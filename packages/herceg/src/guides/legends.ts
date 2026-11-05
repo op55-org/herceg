@@ -192,13 +192,20 @@ const SERIES: readonly LegendScale[] = ["series"];
 /** Options where marks read fields through scales (`{ field, scale }`), their paints first. */
 const CHANNELS = ["color", "fill", "stroke", "size", "symbol", "fillOpacity"] as const;
 
-/** Whether `mark` reads scale `name`: through a channel, or as the chart's "color", by its series. */
-function readsScale(mark: MarkSeries["mark"], name: string): boolean {
-  if (name === "color" && mark.identity) return true;
+/** A mark's channels, each list's entries apart. */
+function channelsOf(mark: MarkSeries["mark"]): unknown[] {
   const spec = mark.spec as unknown as Record<string, unknown> & {
     encode?: Record<string, unknown>;
   };
-  return [...CHANNELS.map((key) => spec[key]), ...Object.values(spec.encode ?? {})].some(
+  return [...CHANNELS.map((key) => spec[key]), ...Object.values(spec.encode ?? {})].flatMap(
+    (channel) => (Array.isArray(channel) ? channel : [channel]),
+  );
+}
+
+/** Whether `mark` reads scale `name`: through a channel, or as the chart's "color", by its series. */
+function readsScale(mark: MarkSeries["mark"], name: string): boolean {
+  if (name === "color" && mark.identity) return true;
+  return channelsOf(mark).some(
     (channel) => (channel as { scale?: unknown } | undefined)?.scale === name,
   );
 }
@@ -210,12 +217,8 @@ function readsScale(mark: MarkSeries["mark"], name: string): boolean {
  * values (marks/features/identity.ts).
  */
 function scaleFields(mark: MarkSeries["mark"], name: string): string[] {
-  const spec = mark.spec as unknown as Record<string, unknown> & {
-    encode?: Record<string, unknown>;
-  };
-  const channels = [...CHANNELS.map((key) => spec[key]), ...Object.values(spec.encode ?? {})];
   const painting = seriesChannel(mark);
-  const fields = channels.flatMap((channel) => {
+  const fields = channelsOf(mark).flatMap((channel) => {
     const { field, scale } = (channel ?? {}) as { field?: unknown; scale?: unknown };
     return typeof field === "string" &&
       scale === name &&
@@ -230,16 +233,23 @@ function scaleFields(mark: MarkSeries["mark"], name: string): string[] {
  * The channel a mark's series take their colors through, as
  * marks/features/identity.ts reads it: one naming them (`series: true`),
  * else the mark's own paint as a channel (a line's stroke, an area's,
- * bar's, or point's fill) unless that is a constant, else its color.
+ * bar's, or point's fill) unless that is a constant, else its color; of a
+ * list, the entry ending it where it colors the series.
  */
 function seriesChannel(mark: MarkSeries["mark"]): object | undefined {
-  type Channel = { series?: boolean };
+  type Channel = { series?: boolean; field?: string };
+  const one = (given: unknown): Channel | undefined => {
+    if (!Array.isArray(given)) return given as Channel | undefined;
+    const last = given[given.length - 1] as Channel | undefined;
+    const field = mark.identity?.field;
+    return last?.series || (field !== undefined && last?.field === field) ? last : undefined;
+  };
   const spec = mark.spec as unknown as Record<string, unknown> & {
     type: string;
-    encode?: Record<string, Channel | undefined>;
+    encode?: Record<string, unknown>;
   };
   const given =
-    spec.encode?.color ?? (typeof spec.color === "object" ? (spec.color as Channel) : undefined);
+    one(spec.encode?.color) ?? (typeof spec.color === "object" ? one(spec.color) : undefined);
   if (given?.series) return given;
   const { type } = spec;
   const primary =
@@ -249,7 +259,7 @@ function seriesChannel(mark: MarkSeries["mark"]): object | undefined {
         ? "fill"
         : undefined;
   if (primary && spec[primary] !== undefined) return undefined;
-  return (primary && spec.encode?.[primary]) || given;
+  return (primary && one(spec.encode?.[primary])) || given;
 }
 
 /** The legends of `planned`, measured as the model asks (see `CompiledGuides.legends`). */
@@ -302,10 +312,14 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
       const id = places.get(mark)!;
       const { color, encode } = mark.spec as {
         color?: string;
-        encode?: { color?: { field?: string } };
+        encode?: { color?: { field?: string } | readonly { field?: string }[] };
       };
       const field = mark.identity?.field;
-      if (field !== undefined && (encode?.color?.field ?? color) === field) split.add(id);
+      // A list colors series by the entry ending it.
+      const given = encode?.color;
+      const last = Array.isArray(given) ? given[given.length - 1] : given;
+      if (field !== undefined && ((last as { field?: string })?.field ?? color) === field)
+        split.add(id);
       if (mark.labelEntries) {
         // Annotations by their labels, in the looks they draw.
         if (mark.spec.legend !== true) unlisted.add(id);
@@ -453,7 +467,7 @@ export function compiledLegends(kit: GuideKit, planned: Planned) {
         scales.map((scale) => (scale === "ramp" || scale === "key" ? "color" : scale)),
       );
       // A color splitting series is theirs, and keys of display colors are its colors'.
-      if (split.has(ref.mark) || content.features?.ownParts(mark).length) owned.add("color");
+      if (split.has(ref.mark) || content.features?.ownsKeys(mark)) owned.add("color");
       if (owned.has(ref.channel)) return;
       const has = [...owned].map((channel) => `channel: "${channel}"`).join(" or ");
       throw refused(

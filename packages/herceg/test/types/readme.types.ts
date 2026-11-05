@@ -224,6 +224,45 @@ bar(provisional, {
     opacity: { condition: { when: col("provisional").eq(true), then: 0.45, otherwise: 1 } },
   },
 });
+// Channels tried in order, conditions without otherwise, and rank tests.
+const slow = table({
+  service: serviceNames,
+  p99: p50Latency,
+  errors: p99Latency,
+  tier: serviceNames,
+});
+bar(slow, {
+  x: "service",
+  y: "p99",
+  encode: {
+    color: [
+      // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+      { condition: { when: { top: 3, field: "p99" }, then: "#c62828" } },
+      // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+      { condition: { when: col("errors").gt(0.05), then: "#ff9800" } },
+      { field: "tier", scale: "tiers" },
+    ],
+  },
+});
+bar(slow, {
+  x: "service",
+  y: "p99",
+  // @ts-expect-error ranks are of number and time fields
+  // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+  encode: { color: { condition: { when: { top: 3, field: "tier" }, then: "#c62828" } } },
+});
+line(services, {
+  x: "time",
+  y: "ms",
+  series: "service",
+  encode: {
+    color: [
+      // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+      { condition: { when: col("ms").gt(250), then: "#c62828" } },
+      { series: true, scale: "color" },
+    ],
+  },
+});
 line(sites, {
   x: "time",
   y: "gain",

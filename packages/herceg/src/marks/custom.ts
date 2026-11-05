@@ -15,13 +15,13 @@ import type { CategoryField, NumericField, PositionField, Schema, Table } from "
 import { n } from "../draw/markup.ts";
 import { shapesDrawing } from "../draw/shapes.ts";
 import type { PathShape, PlotRect, Rect, ShapesGeometry, TextShape } from "../scene/scene.ts";
-import type { ChannelSpec, RowChannelSpec } from "../spec/encoding.ts";
+import type { ChannelsSpec, RowChannelsSpec } from "../spec/encoding.ts";
 import { ChartError } from "../spec/errors.ts";
 import { dashPattern } from "../style/style.ts";
 import type { Theme } from "../theme.ts";
 import { ShapeIndex } from "./custom-shapes.ts";
 import type { DrawnMark, DrawnPart, PartBuilders, PickedItem, PickQuery } from "./drawn.ts";
-import type { ColorChannel, ItemKeyed, RowChannel } from "./encoding.ts";
+import type { ColorChannels, ItemKeyed, RowChannels } from "./encoding.ts";
 import { copiesOf, type ItemInfo } from "./layout-mark.ts";
 import { definedFields } from "./line.ts";
 import { clipBox } from "./lookups.ts";
@@ -169,13 +169,21 @@ export interface DataDrawContext<S extends Schema> extends DrawContext {
    */
   item(series: CustomSeries, row: number, draw: () => void): void;
   /**
-   * A channel's output for row `row` (`encode`): its color, width, or
-   * opacity, through the scale the channel names; undefined where the row
-   * has none (a missing value) or the mark has no such channel. A color
-   * naming the series (`{ series: true }`) is the series' `color`.
+   * A channel's output for row `row` (`encode`) as an item of `series`:
+   * its color, width, or opacity, through the scale the channel names;
+   * undefined where the row has none (a missing value, a condition without
+   * `otherwise` that fails, no entry of a list giving one) or the mark has
+   * no such channel. A color naming the series (`{ series: true }`, alone
+   * or ending a list) is `series`' `color`, and without `series` none; a
+   * list ending in the series field gives `series`' color too, and without
+   * `series` the color of the row's value.
    */
-  encoded(channel: "color", row: number): string | undefined;
-  encoded(channel: "strokeWidth" | "opacity", row: number): number | undefined;
+  encoded(channel: "color", row: number, series?: CustomSeries): string | undefined;
+  encoded(
+    channel: "strokeWidth" | "opacity",
+    row: number,
+    series?: CustomSeries,
+  ): number | undefined;
   /**
    * Whether row `row`'s item of `series` is selected, unselected (another
    * is), or neither (no selection), for looks of the selected's own: shapes
@@ -262,9 +270,9 @@ export interface CustomDataOptions<S extends Schema> extends CustomBase, ItemKey
    * field colors the series, as a line's does.
    */
   encode?: {
-    color?: ColorChannel<S>;
-    strokeWidth?: RowChannel<number, S>;
-    opacity?: RowChannel<number, S>;
+    color?: ColorChannels<S>;
+    strokeWidth?: RowChannels<number, S>;
+    opacity?: RowChannels<number, S>;
   };
   draw(context: DataDrawContext<S>): void;
 }
@@ -299,9 +307,9 @@ export interface CustomSpec {
   tooltip?: MarkTooltipSpec;
   /** The channels `draw` reads per row. */
   encode?: {
-    color?: ChannelSpec<string>;
-    strokeWidth?: RowChannelSpec<number>;
-    opacity?: RowChannelSpec<number>;
+    color?: ChannelsSpec<string>;
+    strokeWidth?: RowChannelsSpec<number>;
+    opacity?: RowChannelsSpec<number>;
   };
   legend?: false;
 }
@@ -833,8 +841,8 @@ export class CustomMark implements Mark<Frozen<CustomSpec>> {
         starts.push(start);
         ends.push(shapes.length);
       },
-      encoded: ((channel: CustomChannel, row: number) =>
-        features?.encoded?.(channel, row)) as DataDrawContext<Schema>["encoded"],
+      encoded: ((channel: CustomChannel, row: number, series?: CustomSeries) =>
+        features?.encoded?.(channel, row, series)) as DataDrawContext<Schema>["encoded"],
       items: (mark) => {
         const drawn = frame.items?.(mark);
         if (!drawn)

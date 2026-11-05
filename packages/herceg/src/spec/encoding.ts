@@ -33,17 +33,60 @@ export type SymbolName =
  * number field; or with `scale: { type: "identity" }` the value itself),
  * the series' names through a scale (`{ series: true, scale }`: series of
  * marks naming one scale share colors, legend entries, and dodged places by
- * name, as a line and the band around it do), a constant, or a
- * condition's `then` where `when` holds and its `otherwise` elsewhere.
+ * name, as a line and the band around it do), a constant, or a condition:
+ * `then` where `when` (an expression over the row, or a rank test) holds,
+ * `otherwise` elsewhere, and without `otherwise` no output there (the next
+ * channel of a list, else the mark's fallback, as for a value a scale does
+ * not map).
  */
 export type ChannelSpec<V> =
   | { field: Field; scale?: string | IdentityScaleSpec }
   | { series: true; scale: string }
   | { value: V }
-  | { condition: { when: Expression; then: V; otherwise: V } };
+  | { condition: { when: Expression | RankSpec; then: V; otherwise?: V } };
+
+/**
+ * A rank test: true for the rows whose value of `field` (numbers or times)
+ * is among the `top` (or `bottom`) n of the mark's rows, before level of
+ * detail, facets, and hidden series. Values tied with the nth are in;
+ * missing and infinite values never are.
+ */
+export type RankSpec =
+  | {
+      /** @integer @minimum 1 */
+      top: number;
+      field: Field;
+      bottom?: never;
+    }
+  | {
+      /** @integer @minimum 1 */
+      bottom: number;
+      field: Field;
+      top?: never;
+    };
+
+/**
+ * A channel, or channels tried in order: the first that gives a drawn item
+ * (a row, or in a mark of several y fields a row of one series) an output
+ * wins. A missing value, a value a scale does not map, and a failing
+ * condition without `otherwise` give none; "transparent", 0, and a dash are
+ * outputs. An entry after one that always gives an output (a constant, the
+ * series' names, a condition with `otherwise`) is refused. A list splits
+ * no series: a mark keeping its series names them (`series`).
+ */
+export type ChannelsSpec<V> = ChannelSpec<V> | ChannelList<V>;
+
+/** Channels tried in order (see `ChannelsSpec`). @minItems 1 */
+export type ChannelList<V> = readonly ChannelSpec<V>[];
 
 /** A channel of each row's own look: any but the series' names, for what has no series (regions). */
 export type RowChannelSpec<V> = Exclude<ChannelSpec<V>, { series: true }>;
+
+/** A row channel, or row channels tried in order (see `ChannelsSpec`). */
+export type RowChannelsSpec<V> = RowChannelSpec<V> | RowChannelList<V>;
+
+/** Row channels tried in order (see `ChannelsSpec`). @minItems 1 */
+export type RowChannelList<V> = readonly RowChannelSpec<V>[];
 
 /**
  * A scale that maps nothing: each row's value is the channel's output (a
@@ -85,17 +128,17 @@ export interface ChannelScaleSpec {
  * they draw (see each mark).
  */
 export interface EncodingsSpec {
-  color?: ChannelSpec<string>;
-  fill?: ChannelSpec<string>;
-  stroke?: ChannelSpec<string>;
-  dash?: ChannelSpec<Dash>;
-  symbol?: ChannelSpec<SymbolName>;
+  color?: ChannelsSpec<string>;
+  fill?: ChannelsSpec<string>;
+  stroke?: ChannelsSpec<string>;
+  dash?: ChannelsSpec<Dash>;
+  symbol?: ChannelsSpec<SymbolName>;
   /** Stroke widths in pixels. @minimum 0 */
-  strokeWidth?: ChannelSpec<number>;
+  strokeWidth?: ChannelsSpec<number>;
   /** A point's area in square pixels. @minimum 0 */
-  size?: ChannelSpec<number>;
+  size?: ChannelsSpec<number>;
   /** Opacities from 0 to 1. @minimum 0 @maximum 1 */
-  opacity?: ChannelSpec<number>;
+  opacity?: ChannelsSpec<number>;
 }
 
 /**

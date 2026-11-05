@@ -71,7 +71,21 @@ from ._chart import (
     violin,
 )
 from ._data import Matrix
-from ._derive import Derived, Expr, Ordered, View, col, derive, ordered, view, when
+from ._derive import (
+    Condition,
+    Derived,
+    Expr,
+    Ordered,
+    Rank,
+    View,
+    bottom,
+    col,
+    derive,
+    ordered,
+    top,
+    view,
+    when,
+)
 from ._encoding import (
     BarLabels,
     CalendarBreak,
@@ -221,6 +235,7 @@ __all__ = [
     "BarLabels",
     "BarStyle",
     "Binding",
+    "bottom",
     "Box",
     "boxen",
     "boxplot",
@@ -244,6 +259,7 @@ __all__ = [
     "col",
     "Colorbar",
     "colorbar",
+    "Condition",
     "Continuity",
     "contour",
     "CursorAction",
@@ -338,6 +354,7 @@ __all__ = [
     "ProvenanceSource",
     "radar",
     "RadarOptions",
+    "Rank",
     "ResetAction",
     "RowLink",
     "RowSelection",
@@ -382,6 +399,7 @@ __all__ = [
     "Title",
     "to_pdf",
     "Tokens",
+    "top",
     "Tooltip",
     "TooltipField",
     "TooltipStyle",

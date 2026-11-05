@@ -659,7 +659,7 @@
     },
     {
       "id": "forms",
-      "text": "Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.",
+      "text": "Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a list of channels' entries only up to the first that always gives an output; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.",
       "matches": [
         "needs a place",
         "one of them",
@@ -690,9 +690,21 @@
         "expected \"(top\" or \"bottom\" for an x|left\" or \"right\" for a y) axis",
         "inside-out order needs shares or a stream",
         "fiscal years start months and years",
-        "expected no anchor with a calendar interval"
+        "expected no anchor with a calendar interval",
+        "the channel before it always gives an output"
       ],
       "witnesses": [
+        {
+          "data": { "data": { "columns": { "k": ["a", "b"], "v": [1, 2] } } },
+          "marks": [
+            {
+              "type": "bar",
+              "x": "k",
+              "y": "v",
+              "encode": { "color": [{ "value": "red" }, { "field": "k" }] }
+            }
+          ]
+        },
         {
           "data": {
             "data": {
@@ -1286,7 +1298,7 @@
     {
       "id": "unread-expressions",
       "text": "An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
-      "places": ["region: marks\\[\\]\\.encode\\.color\\.condition\\.when\\[\\]"],
+      "places": ["region: marks\\[\\]\\.encode\\.color(\\[\\])?\\.condition\\.when\\[\\]"],
       "place": "region: marks[].encode.color.condition.when[]",
       "witness": {
         "data": {

@@ -36,11 +36,18 @@ number and time fields, `series` category fields.
 ## More examples
 
 ```ts
-import { bar, heatmap, point, selectionStore, rowSelection } from "herceg";
+import { bar, col, heatmap, point, selectionStore, rowSelection } from "herceg";
 
 bar(sales, { x: "region", y: ["q1", "q2"] }); // grouped bars
 point(cars, { x: "weight", y: "mpg", color: "origin", size: "power" });
 heatmap(load, { x: "hour", y: "host", color: "cpu" });
+
+// Colors tried in order: the three slowest red, then those erring amber, else their tier's.
+bar(services, { x: "service", y: "p99", encode: { color: [
+  { condition: { when: { top: 3, field: "p99" }, then: "#c62828" } },
+  { condition: { when: col("errors").gt(0.05), then: "#ff9800" } },
+  { field: "tier" },
+] } });
 
 // Fields named, their values written, and their steps colored once, for every surface.
 createChart(c, {

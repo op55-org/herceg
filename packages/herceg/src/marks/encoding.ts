@@ -66,7 +66,9 @@ export type CssColor =
  * the chart's: colors, shapes, and dashes from category fields, sizes,
  * widths, and opacities from number fields), the series' names through a
  * scale (`{ series: true, scale }`, which joins marks' series by name: a
- * line and its band), a constant, or a condition on each row.
+ * line and its band), a constant, or a condition on each row: `then` where
+ * `when` (an expression, or a rank test) holds, `otherwise` elsewhere, and
+ * without `otherwise` no output there.
  */
 export type Channel<V, S extends Schema> =
   | { field: CategoryField<S>; scale?: string }
@@ -77,10 +79,28 @@ export type Channel<V, S extends Schema> =
     }
   | { series: true; scale: string }
   | { value: V }
-  | { condition: { when: Condition; then: V; otherwise: V } };
+  | { condition: { when: Condition | RankTest<S>; then: V; otherwise?: V } };
+
+/**
+ * A rank test (see `RankSpec`): true for rows whose value of a number or
+ * time field is among the `top` (or `bottom`) n of the mark's rows, ties
+ * with the nth included.
+ */
+export type RankTest<S extends Schema> =
+  | { top: number; field: NumericField<S>; bottom?: never }
+  | { bottom: number; field: NumericField<S>; top?: never };
+
+/**
+ * A channel, or channels tried in order: the first that gives a drawn item
+ * an output wins (see `ChannelsSpec`). A list splits no series.
+ */
+export type Channels<V, S extends Schema> = Channel<V, S> | readonly Channel<V, S>[];
 
 /** A channel of each row's own look: any but the series' names (see `Channel`). */
 export type RowChannel<V, S extends Schema> = Exclude<Channel<V, S>, { series: true }>;
+
+/** A row channel, or row channels tried in order (see `Channels`). */
+export type RowChannels<V, S extends Schema> = RowChannel<V, S> | readonly RowChannel<V, S>[];
 
 /**
  * A color channel (see `Channel`), which also reads a number field without
@@ -90,6 +110,14 @@ export type RowChannel<V, S extends Schema> = Exclude<Channel<V, S>, { series: t
 export type ColorChannel<S extends Schema> =
   | Channel<string, S>
   | { field: NumberField<S>; scale?: never };
+
+/** A color channel, or color channels tried in order (see `Channels`). */
+export type ColorChannels<S extends Schema> = ColorChannel<S> | readonly ColorChannel<S>[];
+
+/** A color channel of each row's own look, or such channels tried in order: any but the series' names. */
+export type RowColorChannels<S extends Schema> =
+  | Exclude<ColorChannel<S>, { series: true }>
+  | readonly Exclude<ColorChannel<S>, { series: true }>[];
 
 /** A number or time field through the channel's own mapping: a color ramp, sizes by area, opacities. */
 export interface MappedField<S extends Schema> {
@@ -168,14 +196,14 @@ export interface AreaLabels<S extends Schema> extends SeriesLabels<S> {
 
 /** A mark's channels (each mark takes those it draws). */
 export interface Encodings<S extends Schema> {
-  color?: ColorChannel<S>;
-  fill?: ColorChannel<S>;
-  stroke?: ColorChannel<S>;
-  dash?: Channel<Dash, S>;
-  symbol?: Channel<SymbolName, S>;
-  strokeWidth?: Channel<number, S>;
-  size?: Channel<number, S>;
-  opacity?: Channel<number, S>;
+  color?: ColorChannels<S>;
+  fill?: ColorChannels<S>;
+  stroke?: ColorChannels<S>;
+  dash?: Channels<Dash, S>;
+  symbol?: Channels<SymbolName, S>;
+  strokeWidth?: Channels<number, S>;
+  size?: Channels<number, S>;
+  opacity?: Channels<number, S>;
 }
 
 /** Looks by value: by a field's value, or without `field`, by series (see `StyleMapSpec`). */

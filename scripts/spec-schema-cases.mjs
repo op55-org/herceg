@@ -315,14 +315,15 @@ const TEXT = "\u0001text";
 
 /**
  * An option's alternatives: each member of its union, through nested
- * unions and references, a factored union's forms completed with their
- * shared options.
+ * unions and references (each reference passed through added to
+ * `through`), a factored union's forms completed with their shared options.
  */
-function alternatives(given, tools) {
+function alternatives(given, tools, through = []) {
+  if (given.$ref) through.push(given.$ref);
   const schema = tools.resolve(given);
   if (schema.type === "object" && schema.properties)
     return schema.anyOf ? tools.formsOf(schema) : [schema];
-  if (schema.anyOf) return schema.anyOf.flatMap((member) => alternatives(member, tools));
+  if (schema.anyOf) return schema.anyOf.flatMap((member) => alternatives(member, tools, through));
   return [schema];
 }
 
@@ -342,13 +343,15 @@ const joined = (path, inner) =>
  * first place `expanded` (of names) sees it, and elsewhere it is set plainly.
  */
 function settings(given, tools, expanded, depth = 1, inside = []) {
-  // A type inside itself (an expression's operands) is set once.
+  // A type inside itself (an expression's operands) is set once, also
+  // where a union holds it (a condition's expression or rank test).
   if (given.$ref && inside.includes(given.$ref)) return [];
-  const within = given.$ref ? [...inside, given.$ref] : inside;
   const again = given.$ref !== undefined && expanded.has(given.$ref);
   if (given.$ref) expanded.add(given.$ref);
   const found = [];
-  const members = alternatives(given, tools);
+  const through = [];
+  const members = alternatives(given, tools, through);
+  const within = [...inside, ...through];
   for (const [i, member] of members.entries()) {
     const form = members.length > 1 ? `|${i}` : "";
     const add = (key, path, value) => found.push({ key: `${form}${key}`, path, value });

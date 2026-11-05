@@ -27,6 +27,13 @@ hg.scatter(cars, x="weight", y="mpg", series="origin", zoom="xy")
 hg.heatmap(load, x="hour", y="host", color="cpu", colors="viridis")
 hg.treemap(sales, ["region", "country"], "revenue")
 
+# Colors tried in order: the three slowest red, then those erring amber, else their tier's
+hg.Chart(services).bar(x="service", y="p99", encode=hg.Encodings(color=[
+    hg.when(hg.top(3, "p99"), "#c62828"),
+    hg.when(hg.col("errors") > 0.05, "#ff9800"),
+    hg.Channel(field="tier"),
+]))
+
 # Columns named, their values written, and their steps colored once, for every surface
 p99 = hg.FieldDisplay(label="99th percentile", format=hg.Format(duration="millisecond"),
                       thresholds=hg.Thresholds(steps=[(500, "#c62828")]))

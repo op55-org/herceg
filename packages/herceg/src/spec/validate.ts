@@ -2547,6 +2547,10 @@ const SYMBOL_NAMES = [
 ];
 const symbolName = oneOf(...SYMBOL_NAMES);
 
+/** Why heatmaps take no channels, as the mark refuses them too. */
+const HEATMAP_ENCODE =
+  "a heatmap takes color as a field; its cells reduce several rows, which conditions and lists do not read; drop encode";
+
 /** What each channel's values are. */
 const CHANNEL_VALUES = {
   color: string,
@@ -2560,10 +2564,58 @@ const CHANNEL_VALUES = {
 } satisfies ChecksOf<EncodingsSpec>;
 
 /**
+ * A rank test: `{ top: n, field }` or `{ bottom: n, field }`, n a whole
+ * number from 1.
+ */
+const rankTest: Check = (v, path) => {
+  const r = v as Record<string, unknown>;
+  if ("top" in r && "bottom" in r)
+    throw refusal(path, "a rank test takes top or bottom, not both; drop one");
+  if (!("top" in r || "bottom" in r))
+    fail(path, "an expression, or a rank test ({ top, field } or { bottom, field })", v);
+  const side = "top" in r ? "top" : "bottom";
+  const n = (count: unknown, at: string) => {
+    if (!(typeof count === "number" && Number.isInteger(count) && count >= 1))
+      throw refusal(at, `expected a whole number of rows from 1; received ${describe(count)}`);
+  };
+  checkProperties(r, path, [side, "field"], { [side]: n, field });
+};
+
+/**
  * A channel of values `value` checks: a field through a scale, the
- * series' names through one, a constant, or a condition.
+ * series' names through one, a constant, a condition (on an expression or
+ * a rank test, `otherwise` optional), or a list of them tried in order,
+ * none after one always giving an output.
  */
 function channel(value: Check): Check {
+  const one = entry(value);
+  return (v, path) => {
+    if (!Array.isArray(v)) return one(v, path);
+    if (v.length === 0) fail(path, "a channel, or channels tried in order", v);
+    for (const [i, c] of v.entries()) {
+      if (Array.isArray(c))
+        throw refusal(
+          `${path}[${i}]`,
+          "expected a channel; a list's entries are channels, so give them in one list",
+        );
+      one(c, `${path}[${i}]`);
+      const before = v[i - 1] as Record<string, unknown> | undefined;
+      if (
+        before &&
+        ("value" in before ||
+          "series" in before ||
+          (before.condition as { otherwise?: unknown } | undefined)?.otherwise !== undefined)
+      )
+        throw refusal(
+          `${path}[${i}]`,
+          "the channel before it always gives an output (a constant, the series' names, or a condition with otherwise); move it first, or drop it",
+        );
+    }
+  };
+}
+
+/** One channel of a list, or a channel alone (see `channel`). */
+function entry(value: Check): Check {
   return (v, path) => {
     object(v, path);
     const c = v as Record<string, unknown>;
@@ -2594,8 +2646,9 @@ function channel(value: Check): Check {
       checkProperties(c, path, ["condition"], {
         condition: (w, at) => {
           object(w, at);
-          checkProperties(w as Record<string, unknown>, at, ["when", "then", "otherwise"], {
-            when: expression,
+          checkProperties(w as Record<string, unknown>, at, ["when", "then"], {
+            // An expression over the row, or a rank test.
+            when: (test, here) => (isRecord(test) ? rankTest : expression)(test, here),
             // A condition's branch, not a promise's: specs hold no functions.
             // biome-ignore lint/suspicious/noThenProperty: the spec's name for the branch.
             then: value,
@@ -2609,7 +2662,7 @@ function channel(value: Check): Check {
       if (typo !== undefined) throw missing(path, "field", typo);
       fail(
         path,
-        "{ field }, { series: true }, { value }, or { condition: { when, then, otherwise } }",
+        "{ field }, { series: true }, { value }, { condition: { when, then, otherwise? } }, or a list of them",
         v,
       );
     }
@@ -2621,14 +2674,15 @@ function encodings(names: readonly (keyof EncodingsSpec)[], seriesless = false):
   const checks = Object.fromEntries(names.map((name) => [name, channel(CHANNEL_VALUES[name])]));
   return (v, path) => {
     object(v, path);
-    // Marks without series (regions) read no series' names.
+    // Marks without series (regions) read no series' names, alone or in a list.
     if (seriesless)
-      for (const [name, c] of Object.entries(v as Record<string, unknown>))
-        if (typeof c === "object" && c !== null && "series" in c)
-          throw refusal(
-            `${path}.${name}.series`,
-            "regions have no series whose names it could read; give a field, a value, or a condition",
-          );
+      for (const [name, given] of Object.entries(v as Record<string, unknown>))
+        for (const [i, c] of (Array.isArray(given) ? given : [given]).entries())
+          if (isRecord(c) && "series" in c)
+            throw refusal(
+              `${path}.${name}${Array.isArray(given) ? `[${i}]` : ""}.series`,
+              "regions have no series whose names it could read; give a field, a value, or a condition",
+            );
     properties(v as Record<string, unknown>, path, checks);
   };
 }
@@ -2976,23 +3030,26 @@ const MARKS: MarkChecks = {
       series: seriesField,
       itemKey: field,
       radius: positive,
-      size: (v, path) => (isRecord(v) ? channel(width)(v, path) : field(v, path)),
+      size: (v, path) =>
+        typeof v === "object" && v !== null ? channel(width)(v, path) : field(v, path),
       radiusRange: range,
       fill: string,
       fillOpacity: (v, path) =>
         typeof v === "string"
           ? field(v, path)
-          : isRecord(v)
+          : typeof v === "object" && v !== null
             ? channel(fraction)(v, path)
             : fraction(v, path),
       stroke: string,
       strokeWidth: width,
-      color: (v, path) => (isRecord(v) ? channel(string)(v, path) : field(v, path)),
+      color: (v, path) =>
+        typeof v === "object" && v !== null ? channel(string)(v, path) : field(v, path),
       colors: ramp,
       colorDomain: range,
       colorMidpoint: finite,
       symbol: (v, path) => {
         if (typeof v === "string") return;
+        if (Array.isArray(v)) return channel(symbolName)(v, path);
         if (!isRecord(v)) fail(path, 'a shape\'s name or { field: "..." }', v);
         // An object of none of a channel's forms is a symbol field's, `{ field }`.
         if (!["field", "series", "value", "condition"].some((key) => key in v))
@@ -3394,6 +3451,10 @@ const MARKS: MarkChecks = {
         properties(v as Record<string, unknown>, path, { reduce: oneOf("mean", "max", "min") });
       },
       label: string,
+      // Channels read rows; a cell reduces several.
+      encode: (_v, path) => {
+        throw refusal(path, HEATMAP_ENCODE);
+      },
     },
   },
   contour: {

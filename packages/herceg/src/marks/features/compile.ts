@@ -31,7 +31,7 @@ import type { ChartConfig } from "../../model/model.ts";
 import type { AreaGeometry, Geometry, GuideItem, LineGeometry } from "../../scene/scene.ts";
 import type {
   AreaLabelsSpec,
-  ChannelSpec,
+  ChannelsSpec,
   EncodingsSpec,
   LabelContent,
   MarkAnchorSpec,
@@ -84,6 +84,7 @@ import {
   type TracedEdge,
   tableRow,
 } from "./provenance.ts";
+import { Rank } from "./ranks.ts";
 import { type RowStyleSpec, RowStyles, rowLooks } from "./row-styles.ts";
 import {
   fillPieces,
@@ -176,6 +177,8 @@ function compile(
   const unmapped = new Set<string>();
   /** Declared channel scales, which map numbers onto widths, opacities, sizes, and colors. */
   const continuous = new Map<string, ChannelScale>();
+  /** Rank tests of channels, over their marks' rows: brought up to date as the chart draws. */
+  const ranks: Rank[] = [];
   for (const [name, spec] of Object.entries(config.scales ?? {})) {
     if (spec !== undefined && POSITIONS.includes(name) && "range" in spec)
       throw new kit.ChartError({
@@ -259,8 +262,16 @@ function compile(
     Object.assign(
       (name: string, path: string, field?: string) =>
         scaleFor(table, mark, panel, rows, name, path, field),
-      // A number field's colors without a scale: its display's, where the chart's give some.
-      { colors: (field: string) => fields?.of(table, field)?.values },
+      {
+        // A number field's colors without a scale: its display's, where the chart's give some.
+        colors: (field: string) => fields?.of(table, field)?.values,
+        // Over the rows the mark draws, before facets and the legend, as channel scales read them.
+        rank: (field: string, count: number, top: boolean) => {
+          const rank = new Rank(rows ?? (() => wholeTable(table!)), field, count, top);
+          ranks.push(rank);
+          return rank;
+        },
+      },
     );
   const scaleFor = (
     table: Table | undefined,
@@ -485,16 +496,20 @@ function compile(
       if (prefix && prefix !== own) prefixes.add(prefix);
     const read = readIn(mark.table, where, panel, mark.rows && (() => mark.rows!()));
     // A color channel naming series stands for them whatever paints them
-    // (scopeOfMark), so it is checked where a paint of the mark's own wins too.
-    const color = (spec as { encode?: { color?: ChannelSpec<string> } }).encode?.color;
-    if (color && "series" in color)
+    // (scopeOfMark), alone or ending a list, so it is checked where a paint
+    // of the mark's own wins too.
+    // That entry alone: the list's other entries read their scales after the series take their places.
+    const color = (spec as { encode?: { color?: ChannelsSpec<string> } }).encode?.color;
+    const listed = Array.isArray(color);
+    const last = listed ? color[color.length - 1] : color;
+    if (last && "series" in last)
       compileChannel(
-        color,
+        last,
         mark.table,
         read,
         "color",
         outputCheck("color", kit.isColor),
-        `${path} encode.color`,
+        `${path} encode.color${listed ? `[${color.length - 1}]` : ""}`,
       );
     // The declared scale series' colors follow, its places in their field's dictionary order.
     // Scopes name only scales of categories (`scopeOfMark` leaves channel scales out).
@@ -663,19 +678,27 @@ function compile(
       // Marks colored by display colors show a key of them, which they own
       // as marks own their own keys (points theirs): marks left out of
       // legends only where guides name them.
+      // Lines and areas reading a scale in a list show a key of its
+      // values, owned as display keys are.
       ownParts.clear();
-      if (fields && (config.legend !== false || !plain))
+      if (config.legend !== false || !plain)
         for (const [mark, features] of byMark) {
           const listed = mark.spec.legend !== false;
           if (!listed && plain) continue;
-          for (const field of features.displayColors ?? []) {
-            const part = fields.colorLegend(mark.table, field, (color) =>
-              paint!(color, `${mark.spec.type} color`),
-            );
-            if (!part) continue;
+          const own = (part: LegendPart | undefined) => {
+            if (!part) return;
             ownParts.set(mark, [...(ownParts.get(mark) ?? []), part]);
             if (listed && !parts.some(({ key }) => key === part.key)) parts.push(part);
-          }
+          };
+          for (const field of (fields && features.displayColors) || [])
+            own(
+              fields!.colorLegend(mark.table, field, (color) =>
+                paint!(color, `${mark.spec.type} color`),
+              ),
+            );
+          // Named and written as the field's display writes them.
+          for (const raw of features.listKeys?.() ?? [])
+            own(keyLegendWith(kit, fields?.key(mark.table!, raw.title, raw) ?? raw));
         }
       for (const [prefix, { scale, marks, reads }] of listed) {
         const domain = scale.spec?.domain;
@@ -707,6 +730,10 @@ function compile(
       return painted ? rowPainted(entries, painted) : entries;
     },
     ownParts: (mark) => ownParts.get(mark as Mark) ?? [],
+    ownsKeys(mark) {
+      const features = byMark.get(mark as Mark);
+      return !!features?.listKeys || !!(fields && features?.displayColors?.length);
+    },
     domainKeys: (mark) =>
       [...listed].flatMap(([prefix, { scale, marks }]) =>
         marks.has(mark) ? domainKeys(prefix, scale) : [],
@@ -720,6 +747,7 @@ function compile(
       for (const scale of scales.values()) scale.update();
       // Every reader of a channel scale is known: its domain spans them all, whatever their order.
       for (const [name, scale] of continuous) scale.update(p, `chart ${scalePath(name)}`);
+      for (const rank of ranks) rank.update();
       for (const features of byMark.values()) features.use(t, p);
     },
   };
@@ -1034,6 +1062,7 @@ function lineFeatures(
   return {
     ...(reach > 0 && { inset: { x: reach, y: reach }, clearDomain }),
     displayColors: styles.displayColors,
+    ...(styles.hasKeys && { listKeys: () => styles.keys() }),
     use(t, p) {
       theme = t;
       paintOf = p;
@@ -1420,19 +1449,17 @@ function barFeatures(
       identify(s, scope, undefined);
       const rows = styles.rows(s, sourceOf(s.key));
       if (!rows) return;
-      // A series of bars of one look shows it in legends that draw marks' looks.
+      // A series of bars of one look shows it in legends that draw marks' looks
+      // (its fill the series' own where a list ends in it).
       const look = rows.paints.length === 1 ? rows.paints[0] : undefined;
       const stroke = look?.stroke ?? (spec.stroke && paintOf(spec.stroke, `${path} stroke`));
       s.features = {
         rows,
-        legend: () => {
-          const key = styles.key();
-          return key && keyLegendWith(kit, key);
-        },
+        legends: () => styles.keys().map((key) => keyLegendWith(kit, key)),
         swatch: look
           ? () => ({
               type: "rect",
-              fill: look.fill ?? s.color,
+              fill: (styles.tailed ? undefined : look.fill) ?? s.color,
               ...(stroke !== undefined && { stroke }),
               fillOpacity: look.fillOpacity ?? spec.fillOpacity ?? 1,
               opacity: look.opacity ?? spec.opacity ?? 1,
@@ -1640,6 +1667,7 @@ function areaFeatures(
   return {
     continuity: unioned ? continuity : undefined,
     displayColors: styles.displayColors,
+    ...(styles.hasKeys && { listKeys: () => styles.keys() }),
     use(t, p) {
       theme = t;
       styles.use(t, p);
@@ -1687,6 +1715,12 @@ function areaFeatures(
           if (runs && marks) {
             drawn = area;
             return runAreas(styles, area, series, frame, paint, marks, reduced, spec, banded);
+          }
+          // A stack's layer whose rows all take one look keeps the series' color
+          // for its legend; an outline in the series' color follows the look.
+          if (paint.color !== undefined) {
+            if (area.stroke && spec.stroke === undefined) area.stroke = paint.color;
+            area.fill = paint.color;
           }
           if (paint.stroke !== undefined) area.stroke = paint.stroke;
           if (paint.strokeWidth !== undefined) area.strokeWidth = paint.strokeWidth;
@@ -1975,6 +2009,8 @@ function customFeatures(
       ),
     attach: (s) => identify(s, scope, undefined),
     encoded: channels.encoded,
+    ...(mark.rows && channels.hasKeys && { listKeys: () => channels.keys(mark.rows!()) }),
+    displayColors: channels.displayColors,
   };
 }
 
@@ -2019,7 +2055,9 @@ function pointFeatures(
     attach(s) {
       identify(s, scope, undefined);
       s.features = { points: styles.looks() };
+      styles.attach(s);
     },
+    displayColors: styles.displayColors,
   };
 }
 

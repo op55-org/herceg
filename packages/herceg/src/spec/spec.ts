@@ -11,7 +11,7 @@ import type {
   AreaLabelsSpec,
   AxisTitleSpec,
   BarLabelsSpec,
-  ChannelSpec,
+  ChannelsSpec,
   ContinuitySpec,
   EncodingsSpec,
   LabelLayoutSpec,
@@ -22,7 +22,7 @@ import type {
   MarkAnchorSpec,
   MarkStyleSpec,
   NameSpec,
-  RowChannelSpec,
+  RowChannelsSpec,
   SeriesLabelsSpec,
   StackSpec,
   SymbolName,
@@ -1754,11 +1754,11 @@ interface RegionStyle extends AnnotationBase, RowItems {
    * outline's. Regions are drawn in row order whatever their looks.
    */
   encode?: {
-    color?: RowChannelSpec<string>;
-    fill?: RowChannelSpec<string>;
-    stroke?: RowChannelSpec<string>;
+    color?: RowChannelsSpec<string>;
+    fill?: RowChannelsSpec<string>;
+    stroke?: RowChannelsSpec<string>;
     /** Opacities from 0 to 1. @minimum 0 @maximum 1 */
-    opacity?: RowChannelSpec<number>;
+    opacity?: RowChannelsSpec<number>;
   };
   /** Text drawn in every region (in its top left corner by default), constant or each row's `field`; it draws no leader. */
   label?: string | (LabelSpec & { leader?: never });
@@ -2770,7 +2770,7 @@ export type PointSpec = PointStyleSpec &
          * giving each point's area in square pixels.
          * @minimum 0
          */
-        size: ChannelSpec<number>;
+        size: ChannelsSpec<number>;
         radius?: never;
         radiusRange?: never;
         encode?: { size?: never };
@@ -2779,7 +2779,7 @@ export type PointSpec = PointStyleSpec &
         /** `encode.size` gives each point's area, as a `size` channel does. */
         encode: {
           /** Areas in square pixels. @minimum 0 */
-          size: ChannelSpec<number>;
+          size: ChannelsSpec<number>;
         };
         size?: never;
         radius?: never;
@@ -2806,14 +2806,14 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
    * Opacity from 0 to 1, a number field mapped from 0.15 to 1, or a
    * channel (`{ field, scale }`, a field through one of the chart's scales). @minimum 0 @maximum 1
    */
-  fillOpacity?: number | Field | ChannelSpec<number>;
+  fillOpacity?: number | Field | ChannelsSpec<number>;
   /**
    * A number or time field colored on a continuous scale (see `colors`),
    * a category field (its values' colors, and the series it names), or a
    * channel: `{ field, scale }` through one of the chart's scales, or
    * `{ field, scale: { type: "identity" } }` for colors the data holds.
    */
-  color?: Field | ChannelSpec<string>;
+  color?: Field | ChannelsSpec<string>;
   /** Colors for `color`, low to high, or a scheme name such as "viridis". @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the color ramp; the field's extent by default. */
@@ -2826,7 +2826,7 @@ interface PointStyleSpec extends SeriesBase, RowTooltip, RowItems {
    * `scale` naming one of the chart's scales that maps values to shapes),
    * or the field's name when no shape has it. A name that is both is refused.
    */
-  symbol?: string | ChannelSpec<SymbolName>;
+  symbol?: string | ChannelsSpec<SymbolName>;
   /** Channels of each point: color, fill, stroke, strokeWidth, opacity, symbol, and size. */
   encode?: Pick<
     EncodingsSpec,
@@ -2874,6 +2874,8 @@ interface HeatmapBase extends Omit<MarkBase, "axis">, Legended, RowTooltip {
   type: "heatmap";
   /** Number or time field: each cell's value, mapped to color. */
   color: Field;
+  /** Heatmaps take no channels: a cell reduces several rows, which conditions and lists do not read. */
+  encode?: never;
   /** Color ramp from low to high values, or a scheme name; defaults to the theme's. @minItems 2 */
   colors?: readonly string[] | string;
   /** The values at the ends of the ramp; the values' extent by default. */

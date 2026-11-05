@@ -37,6 +37,8 @@ import { type PaintReader, surface, type Theme } from "../theme.ts";
 import { BandShares, jitterOf, STILL } from "./dodge.ts";
 import type {
   Channel,
+  Channels,
+  ColorChannel,
   Encodings,
   FieldCoordinate,
   ItemKeyed,
@@ -110,7 +112,7 @@ export type PointSize<S extends Schema> =
        * A channel giving each point's area in square pixels, or a number
        * field sized by area as `size` is.
        */
-      size?: Channel<number, S> | MappedField<S>;
+      size?: Channels<number, S> | MappedField<S>;
       radiusRange?: never;
       encode?: { size?: never };
     }
@@ -180,7 +182,7 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
   series?: CategoryField<S> | false;
   fill?: string;
   /** Opacity from 0 to 1, a number field mapped from 0.15 to 1, or a channel. */
-  fillOpacity?: number | NumericField<S> | Channel<number, S> | MappedField<S>;
+  fillOpacity?: number | NumericField<S> | Channels<number, S> | MappedField<S>;
   /** Outline color of every point; the chart's background with only `strokeWidth`. */
   stroke?: string;
   /** Outline width in pixels: 1 with only `stroke`, none by default. */
@@ -192,7 +194,7 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
    * keeps its series' colors); or a channel, such as `{ field, scale: {
    * type: "identity" } }` for a field of colors.
    */
-  color?: PositionField<S> | Channel<string, S> | MappedField<S>;
+  color?: PositionField<S> | Channel<string, S> | MappedField<S> | readonly ColorChannel<S>[];
   /**
    * Colors for a number or time `color`, low to high, such as an imported
    * scheme (`viridis`, `rdbu`, ...). Defaults to the theme's sequential
@@ -208,15 +210,15 @@ interface PointStyle<S extends Schema> extends ItemKeyed<S>, SelectionLooks {
    * or `{ field }`, which a field named like a shape needs (with `scale`,
    * a channel). Default "circle".
    */
-  symbol?: SymbolName | CategoryField<S> | Channel<SymbolName, S>;
+  symbol?: SymbolName | CategoryField<S> | Channels<SymbolName, S>;
   /**
    * Channels of each point: color, fill, stroke, strokeWidth, opacity,
    * symbol, and size; color and size map number fields as `color` and
    * `size` do.
    */
   encode?: Pick<Encodings<S>, "fill" | "stroke" | "strokeWidth" | "opacity" | "symbol"> & {
-    color?: Channel<string, S> | MappedField<S>;
-    size?: Channel<number, S> | MappedField<S>;
+    color?: Channel<string, S> | MappedField<S> | readonly ColorChannel<S>[];
+    size?: Channels<number, S> | MappedField<S>;
   };
   /**
    * "pixel": draw opaque points whose centers share a device pixel once.
@@ -411,10 +413,19 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
     // What guides may name: the series, and the fields that color, size,
     // and shape points (a symbol field splitting series shows in its entries).
     const scales: LegendScale[] = ["series"];
-    const field = (c: PointChannel<unknown> | undefined) =>
-      c && "field" in c.spec && c.spec.field !== series;
+    // A field, alone or in a list, but the series field alone or ending a
+    // color list (`tail`), which series' entries show.
+    const field = (c: PointChannel<unknown> | undefined, tail = 0) =>
+      c &&
+      [c.spec]
+        .flat()
+        .some(
+          (e, i, all) =>
+            "field" in e &&
+            (e.field !== series || (Array.isArray(c.spec) && i < all.length - tail)),
+        );
     if (this.#toneField !== undefined) scales.push("ramp");
-    if (field(color.compiled)) scales.push("key");
+    if (field(color.compiled, 1)) scales.push("key");
     if (this.#sizeField !== undefined || field(size.compiled)) scales.push("size");
     if (field(symbol.compiled)) scales.push("symbol");
     this.legendScales = scales;
@@ -867,7 +878,8 @@ export class PointMark implements Mark<Frozen<PointSpec>> {
   ): { color: string; glyph: string; stroke?: string } {
     const looks = s.features?.points;
     const entry = {
-      color: this.#toneField === undefined && !looks?.color ? s.color : theme.muted,
+      color:
+        this.#toneField === undefined && (!looks?.color || looks.bySeries) ? s.color : theme.muted,
       glyph: legendGlyph(this.#legendSymbol(s, looks)).glyph,
     };
     const stroke = painted(paint, this.#stroke, "point stroke");
@@ -1277,6 +1289,9 @@ function pointChannels(spec: Frozen<PointSpec>, table: Table) {
             ["condition.otherwise", c.condition.otherwise],
           ]
         : []) {
+      // A condition without otherwise gives no output where it fails; the
+      // feature compiler checks what else is missing.
+      if (value === undefined) continue;
       const problem = outputProblem(name, value, () => true);
       if (problem)
         throw new ChartError({

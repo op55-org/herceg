@@ -17,7 +17,7 @@ from typing import Any, Literal, get_args
 import numpy as np
 
 from ._data import duration_ms, listlike
-from ._derive import Expr
+from ._derive import Condition, Expr
 from ._errors import (
     ChartError,
     Role,
@@ -160,8 +160,12 @@ class Channel:
         return {"value": _constant(self.value, "Channel value")}
 
 
-#: A channel option: an ``hg.Channel`` (or a dict of its options), or ``hg.when(...)``.
-ChannelOption = Channel | Expr | Mapping[str, Any]
+#: One channel: an ``hg.Channel`` (or a dict of its options), or ``hg.when(...)``.
+OneChannel = Channel | Expr | Condition | Mapping[str, Any]
+
+#: A channel option: a channel, or a list of channels tried in order (the
+#: first giving a row an output wins).
+ChannelOption = OneChannel | Sequence[OneChannel]
 
 
 def output_problem(
@@ -195,9 +199,47 @@ def output_problem(
 
 
 def channel_spec(value: Any, role: str) -> Any:
-    """A channel as the spec takes it; ``hg.when`` becomes a condition."""
+    """A channel as the spec takes it; ``hg.when`` becomes a condition, and
+    a list channels tried in order, none after one always giving an output
+    (a constant, the series' names, a condition with ``otherwise``)."""
     if value is None:
         return None
+    if listlike(value) and not isinstance(value, Mapping):
+        entries = list(value)
+        if not entries:
+            raise ChartError(
+                f"{role}: expected a channel, or channels tried in order; received an empty list"
+            )
+        if all(is_number(entry) and not isinstance(entry, bool) for entry in entries):
+            raise ChartError(
+                f"{role}: a list is channels tried in order; give a dash pattern as "
+                f"hg.Channel(value={shown(entries)})"
+            )
+        out: list[Any] = []
+        for i, entry in enumerate(entries):
+            at = f"{role}[{i}]"
+            if listlike(entry) and not isinstance(entry, (Mapping, str)):
+                raise ChartError(
+                    f"{at}: expected a channel; a list's entries are channels, so give them "
+                    "in one list"
+                )
+            spec = channel_spec(entry, at) if entry is not None else built_spec(None, Channel, at)
+            if out and _always(out[-1]):
+                raise ChartError(
+                    f"{at}: the channel before it always gives an output (a constant, the "
+                    "series' names, or a condition with otherwise); move it first, or drop it"
+                )
+            out.append(spec)
+        return out
+    if isinstance(value, Condition):
+        json = value.to_json()
+        for name in ("then", "otherwise"):
+            if name in json and (isinstance(json[name], list) or json[name] is None):
+                raise ChartError(
+                    f"{role}: a condition's {name} is a constant, such as a color or a number; "
+                    "for a column's values give hg.Channel(field=...)"
+                )
+        return {"condition": json}
     if isinstance(value, Expr):
         json = value.to_json()
         if not (isinstance(json, list) and len(json) == 4 and json[0] == "if"):
@@ -216,10 +258,22 @@ def channel_spec(value: Any, role: str) -> Any:
     return built_spec(value, Channel, role)
 
 
+def _always(spec: Mapping[str, Any]) -> bool:
+    """Whether a channel's spec gives every row an output."""
+    condition = spec.get("condition")
+    return (
+        "value" in spec
+        or "series" in spec
+        or (isinstance(condition, Mapping) and "otherwise" in condition)
+    )
+
+
 @refuses
 @dataclass
 class Encodings:
-    """A mark's channels, each an ``hg.Channel`` or ``hg.when(...)``.
+    """A mark's channels, each an ``hg.Channel`` or ``hg.when(...)``, or a
+    list of them tried in order, the first giving a row an output winning
+    (a list splits no series; give ``series`` to keep them).
     ``color`` is the primary paint: a line's stroke, and a bar's or area's
     fill; ``fill`` and ``stroke`` set those paints themselves and win over
     it. Lines take color, stroke, dash, stroke_width, and opacity; bars

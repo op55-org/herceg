@@ -320,10 +320,13 @@ class Generator {
       const declaration = property.declarations[0]?.resolve();
       const node = declaration && "type" in declaration ? declaration.type : undefined;
       // The type as declared keeps its alias, which `T | undefined` loses,
-      // where it is the same type (not a generic's parameter).
+      // where it is the same type; a generic's parameter (`otherwise?: V`)
+      // keeps it without undefined.
       const declared = node && checker.getTypeFromTypeNode(node);
-      const same = declared && sameTypes(declared, value);
-      properties[name] = this.property(property, this.of(same ? declared : value, node, at), at);
+      const defined = checker.getNonNullableType(value);
+      const kept = declared && sameTypes(declared, value) ? declared : defined;
+      const written = sameTypes(kept, value) ? kept : value;
+      properties[name] = this.property(property, this.of(written, node, at), at);
     }
     schema.properties = properties;
     if (required.length > 0) schema.required = required;
@@ -390,22 +393,24 @@ class Generator {
    * generic types' instances it is or holds as a union's member (a
    * channel's constant and condition): their own, in copies of their
    * definitions named with the bounds (`ChannelSpec<number, minimum 0>`).
-   * Where it holds neither, the numbers of its objects written out (an
+   * Where it holds no numbers, the numbers of its objects written out (an
    * intersection of instances), but through other types.
    */
   constrain(schema, where, bounds) {
     const own = members(schema);
     const instances = own.filter((s) => s.$ref && decodeURIComponent(s.$ref).includes("<"));
     let found = numbers(schema);
-    if (found.length === 0 && instances.length === 0)
-      found = own.filter((s) => s.type === "object").flatMap(numbersWithin);
+    if (found.length === 0) found = own.filter((s) => s.type === "object").flatMap(numbersWithin);
     if (found.length === 0 && instances.length === 0)
       throw new Error(`generate-spec-schema: ${where}: a number tag on no number`);
     for (const number of found) Object.assign(number, bounds);
     for (const instance of instances) instance.$ref = this.bounded(instance.$ref, bounds, where);
   }
 
-  /** A copy of the definition `$ref` names, its numbers bounded, by its name. */
+  /**
+   * A copy of the definition `$ref` names, its numbers bounded, by its
+   * name; generic instances it holds (a list's channels) are bounded copies too.
+   */
   bounded($ref, bounds, where) {
     const name = decodeURIComponent($ref.slice("#/$defs/".length));
     const said = Object.entries(bounds).map(([k, v]) => (k === "type" ? v : `${k} ${v}`));
@@ -413,9 +418,11 @@ class Generator {
     if (!this.defs.has(copy)) {
       const definition = structuredClone(this.defs.get(name));
       const held = numbersWithin(definition);
-      if (held.length === 0)
+      const inner = instancesWithin(definition);
+      if (held.length === 0 && inner.length === 0)
         throw new Error(`generate-spec-schema: ${where}: a number tag on ${name}, of no number`);
       for (const number of held) Object.assign(number, bounds);
+      for (const instance of inner) instance.$ref = this.bounded(instance.$ref, bounds, where);
       this.defs.set(copy, definition);
     }
     return `#/$defs/${encodeURIComponent(copy)}`;
@@ -549,6 +556,20 @@ function numbers(schema) {
     .flatMap((list) => [...(list.prefixItems ?? []), ...(list.items ? [list.items] : [])])
     .flatMap(members)
     .filter((s) => !s.$ref && isNumber(s));
+}
+
+/** The references to generic types' instances a definition holds, in the places `numbersWithin` reads. */
+function instancesWithin(schema) {
+  if (schema === false || schema === true) return [];
+  if (schema.$ref) return decodeURIComponent(schema.$ref).includes("<") ? [schema] : [];
+  const inner = [
+    ...Object.values(schema.properties ?? {}),
+    ...(schema.anyOf ?? []),
+    ...(schema.prefixItems ?? []),
+    ...(typeof schema.items === "object" ? [schema.items] : []),
+    ...(typeof schema.additionalProperties === "object" ? [schema.additionalProperties] : []),
+  ];
+  return inner.flatMap(instancesWithin);
 }
 
 /** The number schemas a definition holds anywhere in it, but through references. */

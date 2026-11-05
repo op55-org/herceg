@@ -25,13 +25,32 @@ ERRORS = fixture("chart-errors.json")
 IDENTITY = fixture("color-identity.json")
 
 
+def python_channel(channel: Any) -> Any:
+    """A spec channel as Python writes it: ``hg.Channel``, ``hg.when`` on an
+    expression or a rank test (``hg.top``, ``hg.bottom``), or a list of them."""
+    if isinstance(channel, list):
+        return [python_channel(entry) for entry in channel]
+    if "condition" not in channel:
+        return hg.Channel(**channel)
+    condition = channel["condition"]
+    when = condition["when"]
+    if isinstance(when, dict):
+        side = "top" if "top" in when else "bottom"
+        test: Any = getattr(hg, side)(when[side], when["field"])
+    else:
+        test = hg.Expr(when)
+    if "otherwise" in condition:
+        return hg.when(test, condition["then"], condition["otherwise"])
+    return hg.when(test, condition["then"])
+
+
 def python_args(mark: dict[str, Any]) -> dict[str, Any]:
     """A spec mark's options as the Python method takes them: channels as
-    ``hg.Channel``."""
+    ``hg.Channel`` and ``hg.when``."""
     args = {name: value for name, value in mark.items() if name not in ("type", "encode")}
     if "encode" in mark:
         args["encode"] = {
-            python_path(name): hg.Channel(**channel) for name, channel in mark["encode"].items()
+            python_path(name): python_channel(channel) for name, channel in mark["encode"].items()
         }
     return args
 

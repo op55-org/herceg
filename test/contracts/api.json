@@ -34,6 +34,11 @@
         "marker": "Python's one hg.MarkStyle serves every mark; a mark refuses what it does not take (`area style: has no marker; give \"by\"`)."
       }
     },
+    "mark heatmap python": {
+      "without": {
+        "encode": "Heatmaps take no channels (the spec's encode?: never): a cell reduces several rows, which conditions and lists do not read; Python's heatmap has no encode, and colors its cells by its color column."
+      }
+    },
     "mark rule python": {
       "choices": {
         "span": {
@@ -88,17 +93,17 @@
     },
     "mark point python color": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       }
     },
     "mark point python fillOpacity": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       }
     },
     "mark point python symbol": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       },
       "choices": {
         "value": {
@@ -1180,7 +1185,7 @@
     },
     "mark * python encode size": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       }
     },
     "settings BarLabelPlaceSpec hg.LabelPlace": {
@@ -1395,35 +1400,35 @@
         "panel": "As group."
       }
     },
-    "settings ChannelSpec<number> hg.Channel": {
+    "settings ChannelsSpec<number> hg.Channel": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       }
     },
-    "settings ChannelSpec<string> hg.Channel": {
+    "settings ChannelsSpec<string> hg.Channel": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       }
     },
-    "settings RowChannelSpec<number> hg.Channel": {
+    "settings RowChannelsSpec<number> hg.Channel": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       },
       "only": {
         "series": "Python's one hg.Channel serves every channel, so it takes series=True; region encode refuses it with a correction (`region encode.fill: regions have no series whose names it could read; give hg.Channel(field=...) or value=..., or hg.when(...)`), as the spec's validation does."
       }
     },
-    "settings RowChannelSpec<string> hg.Channel": {
+    "settings RowChannelsSpec<string> hg.Channel": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       },
       "only": {
         "series": "Python's one hg.Channel serves every channel, so it takes series=True; region encode refuses it with a correction (`region encode.fill: regions have no series whose names it could read; give hg.Channel(field=...) or value=..., or hg.when(...)`), as the spec's validation does."
       }
     },
-    "settings ChannelSpec<Dash> hg.Channel": {
+    "settings ChannelsSpec<Dash> hg.Channel": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       },
       "choices": {
         "value": {
@@ -1432,9 +1437,9 @@
         }
       }
     },
-    "settings ChannelSpec<SymbolName> hg.Channel": {
+    "settings ChannelsSpec<SymbolName> hg.Channel": {
       "without": {
-        "condition": "Python writes a condition as hg.when(condition, then, otherwise) in the channel's place, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
+        "condition": "Python writes a condition as hg.when(condition, then) or hg.when(condition, then, otherwise) in the channel's place, its condition an expression or a rank test (hg.top, hg.bottom), and channels tried in order as a list of them, not as a setting of hg.Channel. TypeScript writes the spec's { condition: { when, then, otherwise? } }, whose then key linters flag (Biome's noThenProperty); a spec holds no functions, so no condition is a thenable, and the spec keeps one form until channels take per-row expressions in every language."
       },
       "choices": {
         "value": {

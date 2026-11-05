@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Herceg chart spec",
-  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Rules and regions at a field's thresholds need the chart's fields to give that field thresholds, in a table the chart's marks read.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
+  "description": "A chart as herceg's portable spec writes it (version 1): what Python's Chart.to_spec() writes, and loadSpec and validateSpec read. Generated from the spec's TypeScript types by scripts/generate-spec-schema.mjs.\n\nvalidateSpec and loadSpec also check what this schema cannot say:\n- Fields name columns of the table an option reads, of the kind it needs: numbers, times, categories, or geometry (dodged, jittered, and swarmed points and dodged lines need a category position; a tree's color is a field of its path), and the values a channel takes as they are (a scale of type identity) are what the channel takes.\n- A string that may be a field or a constant (a color, a shape) names exactly one of them: a field of the table, or a color or shape that is no field.\n- A mark of several value fields takes no series field, and what is read once per series (a style map's field, a legend entry's field) does not change within one.\n- Names refer to what the spec declares: a mark's data, a derived table's source, and a table's origin to a table of data (which a mark of a spec of several tables names); a panel to one of panels; a scale to x, y, yRight, or one of scales, of the kind the option needs; a mark to a mark's id; a colorbar to a color scale of the chart's marks; a view's or visibility's axis and panels to the chart's; a buffer to one delivered with the spec.\n- Rules and regions at a field's thresholds need the chart's fields to give that field thresholds, in a table the chart's marks read.\n- Tables hold what their columns' types say, and what counts their rows agrees with them: columns are of one length; times are epoch milliseconds or ISO 8601 times; category codes lie within their dictionary; geometry is nested as GeoArrow nests it (offsets start at 0, ascend, and end at the count of what they divide), at longitudes within ±540 and latitudes within ±90 degrees; a selection's rows are positions among its table's; and a dendrogram labels one leaf more than it has merges.\n- A layout's cells lie within its rows and columns and do not overlap, and every panel is placed once.\n- Ranges ascend (domains, colorDomain, radiusRange, a view's extent, a gauge's and a field display's min and max, a fit box's south and north, a time break's from and to, a value mapping's between), as do bin edges, thresholds, and a gauge's bands within its range.\n- Options of a kind of chart need its marks: projection geographic marks; z, camera, and boxAspect 3D marks, whose box takes no zIndex or padding, and whose axes take a count of ticks and Intl formats; drillRoot a tree; a chart's or a panel's drag a graph.\n- Options that go together or exclude each other beyond the forms here: text at a place or following a mark, once; a radar's category and value, or its fields; dodging with neither bands nor stacks; a contour's lines or bands, and two thresholds a band; a band's labels along one of its edges; itemKey with data; a rule in the legend with a label; a dragged rule at a value; a graph's node fields with a nodes table; color options of a map with a number color field; a facet's field, or row and column; an operation's field; a range's two ends (an area's, an error bar's) placed alike; a label's leader only where labels move (overlap \"move\"); points' outline (stroke, strokeWidth) of one value; an option given once, not also through encode; series' names (series: true) only for channels that read them; a list of channels' entries only up to the first that always gives an output; a series label's attachment, side, and edge only where it does not follow its series; several value fields only along the mark's direction (several x fields with orient \"y\"); a label's content that writes its value or names its series only where the label has one; a guide's room only on y axes, whose labels an ellipsis shortens; an axis guide's side along its axis (top or bottom for x, left or right for y); a stack's inside-out order only for shares or a stream; ticks' fiscal years only by months or years, and their anchor only by elapsed time.\n- Colors are CSS colors (hex, rgb(), hsl(), var(), or names), a colors option names a known scheme, and color ramps (a theme's sequential and diverging, a scale's range of colors) are \"#rgb\" or \"#rrggbb\" colors.\n- Conditions (filter, where) give true or false, and each operator takes the number and kinds of operands it reads ([\"field\", name], numbers for \"+\").\n- A scale of scales named other than x, y, or yRight gives its type.\n- locale is a language tag, and timeZone a time zone, the JavaScript engine knows, and Intl's options (digits, currencies, units, calendars, numbering systems) are what its Intl takes.\n- Number patterns (\",.2f\") and time intervals (\"6 hours\") are written as herceg reads them; a break's dates (\"YYYY-MM-DD\") are days of the calendar, \"24:00\" ends its hours but starts none, and its weekdays and hours leave time to show (not every day, not a span of no time or of a whole day).\n- Options of a kind of value need values of that kind, which the data decides: times (time formats and intervals, breaks and seams, and a line's gaps and breaks of time) a time axis, and numbers (number formats, steps, and tick values) a linear one, or a tree's labels, which write numbers.\n- Charts are large enough for what they hold: a scale's padding in pixels leaves room in its plot, a facet's panels and a layout's tracks fit its chart, and static exports (SVG, PNG, PDF) lay out at most 16384 pixels a side and draw no selection.\n\nThis schema refuses what validateSpec takes in:\n- A 2D histogram's axis: its type has none, and validateSpec takes \"left\", where it draws anyway.\n- Intl's options, which herceg hands to Intl as given: the schema takes the values their TypeScript types name, while Intl converts others (hour12 \"true\") and a format leaves out what it does not read (a date's options in a number's).\n- Dash lengths below 0, which validateSpec takes in an option's dash (not in a dash channel's).\n- A 3D mark's zIndex of 0, the default, which its type leaves out and validateSpec takes.\n- An expression's operators, which herceg checks as it draws: where a mark does not read the option holding the expression (a region's encode.color beside its fill), it takes an operator the schema does not name.",
   "$ref": "#/$defs/ChartSpec",
   "$defs": {
     "AggregateOp": {
@@ -138,13 +138,13 @@
           "description": "Channels: color, fill, stroke, and opacity. One reading rows (a field other than the series', a condition) changes the area's look along its series (style runs), outside stacks.",
           "type": "object",
           "properties": {
-            "color": { "title": "Color", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "fill": { "title": "Fill", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
+            "color": { "title": "Color", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "fill": { "title": "Fill", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
             "opacity": {
               "title": "Opacity",
               "description": "Opacities from 0 to 1.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
             }
           },
           "additionalProperties": false
@@ -591,18 +591,18 @@
           "description": "Channels per bar: color, fill, stroke, strokeWidth, and opacity.",
           "type": "object",
           "properties": {
-            "color": { "title": "Color", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "fill": { "title": "Fill", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
+            "color": { "title": "Color", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "fill": { "title": "Fill", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
             "strokeWidth": {
               "title": "Stroke width",
               "description": "Stroke widths in pixels.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%3E"
             },
             "opacity": {
               "title": "Opacity",
               "description": "Opacities from 0 to 1.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
             }
           },
           "additionalProperties": false
@@ -1427,6 +1427,36 @@
       "type": "string",
       "enum": ["last", "mean", "sum", "min", "max"]
     },
+    "ChannelList<Dash>": {
+      "description": "Channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ChannelSpec%3CDash%3E" },
+      "minItems": 1
+    },
+    "ChannelList<SymbolName>": {
+      "description": "Channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ChannelSpec%3CSymbolName%3E" },
+      "minItems": 1
+    },
+    "ChannelList<number, minimum 0, maximum 1>": {
+      "description": "Channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E" },
+      "minItems": 1
+    },
+    "ChannelList<number, minimum 0>": {
+      "description": "Channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%3E" },
+      "minItems": 1
+    },
+    "ChannelList<string>": {
+      "description": "Channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
+      "minItems": 1
+    },
     "ChannelScaleSpec": {
       "description": "A continuous scale for channels other than position, in the chart's `scales`: it maps a number field's values onto widths, opacities, sizes (areas), or colors. Its domain is the fields' extent over the rows the marks reading it draw, unless given; `range` is its outputs at the domain's ends: two numbers, or two or more colors (\"#rrggbb\", a ramp through them, evenly spaced). Inputs past the domain extend it, or with `clamp` take its ends' outputs; colors stay at their ends. Outputs stay in what the channel takes (opacities from 0 to 1, widths and sizes from 0). Missing values, and values the scale cannot take (a log's zero or less, a square root's negatives), take the mark's own paint; points, which leave out rows missing a value they encode, leave those out.",
       "type": "object",
@@ -1458,7 +1488,7 @@
       "additionalProperties": false
     },
     "ChannelSpec<Dash>": {
-      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition's `then` where `when` holds and its `otherwise` elsewhere.",
+      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition: `then` where `when` (an expression over the row, or a rank test) holds, `otherwise` elsewhere, and without `otherwise` no output there (the next channel of a list, else the mark's fallback, as for a value a scale does not map).",
       "type": "object",
       "properties": {
         "field": { "title": "Field", "type": "string" },
@@ -1472,11 +1502,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "$ref": "#/$defs/Dash" },
             "otherwise": { "title": "Otherwise", "$ref": "#/$defs/Dash" }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -1511,7 +1544,7 @@
       "additionalProperties": false
     },
     "ChannelSpec<SymbolName>": {
-      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition's `then` where `when` holds and its `otherwise` elsewhere.",
+      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition: `then` where `when` (an expression over the row, or a rank test) holds, `otherwise` elsewhere, and without `otherwise` no output there (the next channel of a list, else the mark's fallback, as for a value a scale does not map).",
       "type": "object",
       "properties": {
         "field": { "title": "Field", "type": "string" },
@@ -1525,11 +1558,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "$ref": "#/$defs/SymbolName" },
             "otherwise": { "title": "Otherwise", "$ref": "#/$defs/SymbolName" }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -1564,7 +1600,7 @@
       "additionalProperties": false
     },
     "ChannelSpec<number, minimum 0, maximum 1>": {
-      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition's `then` where `when` holds and its `otherwise` elsewhere.",
+      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition: `then` where `when` (an expression over the row, or a rank test) holds, `otherwise` elsewhere, and without `otherwise` no output there (the next channel of a list, else the mark's fallback, as for a value a scale does not map).",
       "type": "object",
       "properties": {
         "field": { "title": "Field", "type": "string" },
@@ -1578,11 +1614,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "type": "number", "minimum": 0, "maximum": 1 },
             "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0, "maximum": 1 }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -1617,7 +1656,7 @@
       "additionalProperties": false
     },
     "ChannelSpec<number, minimum 0>": {
-      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition's `then` where `when` holds and its `otherwise` elsewhere.",
+      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition: `then` where `when` (an expression over the row, or a rank test) holds, `otherwise` elsewhere, and without `otherwise` no output there (the next channel of a list, else the mark's fallback, as for a value a scale does not map).",
       "type": "object",
       "properties": {
         "field": { "title": "Field", "type": "string" },
@@ -1631,11 +1670,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "type": "number", "minimum": 0 },
             "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0 }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -1670,7 +1712,7 @@
       "additionalProperties": false
     },
     "ChannelSpec<string>": {
-      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition's `then` where `when` holds and its `otherwise` elsewhere.",
+      "description": "A value per row: a field's value read through a scale (the channel's default scale, \"color\" for colors, the one of the chart's `scales` that `scale` names: of categories for a category field, a channel scale for a number field; or with `scale: { type: \"identity\" }` the value itself), the series' names through a scale (`{ series: true, scale }`: series of marks naming one scale share colors, legend entries, and dodged places by name, as a line and the band around it do), a constant, or a condition: `then` where `when` (an expression over the row, or a rank test) holds, `otherwise` elsewhere, and without `otherwise` no output there (the next channel of a list, else the mark's fallback, as for a value a scale does not map).",
       "type": "object",
       "properties": {
         "field": { "title": "Field", "type": "string" },
@@ -1684,11 +1726,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "type": "string" },
             "otherwise": { "title": "Otherwise", "type": "string" }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -1721,6 +1766,321 @@
         }
       ],
       "additionalProperties": false
+    },
+    "ChannelsSpec<Dash>": {
+      "description": "A channel, or channels tried in order: the first that gives a drawn item (a row, or in a mark of several y fields a row of one series) an output wins. A missing value, a value a scale does not map, and a failing condition without `otherwise` give none; \"transparent\", 0, and a dash are outputs. An entry after one that always gives an output (a constant, the series' names, a condition with `otherwise`) is refused. A list splits no series: a mark keeping its series names them (`series`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "series": { "title": "Series", "const": true },
+            "value": { "title": "Value", "$ref": "#/$defs/Dash" },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "$ref": "#/$defs/Dash" },
+                "otherwise": { "title": "Otherwise", "$ref": "#/$defs/Dash" }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            {
+              "required": ["field"],
+              "properties": {
+                "scale": {
+                  "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+                },
+                "series": false,
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["series", "scale"],
+              "properties": {
+                "field": false,
+                "scale": { "type": "string" },
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "series": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "series": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/ChannelList%3CDash%3E" }
+      ]
+    },
+    "ChannelsSpec<SymbolName>": {
+      "description": "A channel, or channels tried in order: the first that gives a drawn item (a row, or in a mark of several y fields a row of one series) an output wins. A missing value, a value a scale does not map, and a failing condition without `otherwise` give none; \"transparent\", 0, and a dash are outputs. An entry after one that always gives an output (a constant, the series' names, a condition with `otherwise`) is refused. A list splits no series: a mark keeping its series names them (`series`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "series": { "title": "Series", "const": true },
+            "value": { "title": "Value", "$ref": "#/$defs/SymbolName" },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "$ref": "#/$defs/SymbolName" },
+                "otherwise": { "title": "Otherwise", "$ref": "#/$defs/SymbolName" }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            {
+              "required": ["field"],
+              "properties": {
+                "scale": {
+                  "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+                },
+                "series": false,
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["series", "scale"],
+              "properties": {
+                "field": false,
+                "scale": { "type": "string" },
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "series": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "series": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/ChannelList%3CSymbolName%3E" }
+      ]
+    },
+    "ChannelsSpec<number, minimum 0, maximum 1>": {
+      "description": "A channel, or channels tried in order: the first that gives a drawn item (a row, or in a mark of several y fields a row of one series) an output wins. A missing value, a value a scale does not map, and a failing condition without `otherwise` give none; \"transparent\", 0, and a dash are outputs. An entry after one that always gives an output (a constant, the series' names, a condition with `otherwise`) is refused. A list splits no series: a mark keeping its series names them (`series`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "series": { "title": "Series", "const": true },
+            "value": { "title": "Value", "type": "number", "minimum": 0, "maximum": 1 },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "type": "number", "minimum": 0, "maximum": 1 },
+                "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            {
+              "required": ["field"],
+              "properties": {
+                "scale": {
+                  "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+                },
+                "series": false,
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["series", "scale"],
+              "properties": {
+                "field": false,
+                "scale": { "type": "string" },
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "series": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "series": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/ChannelList%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E" }
+      ]
+    },
+    "ChannelsSpec<number, minimum 0>": {
+      "description": "A channel, or channels tried in order: the first that gives a drawn item (a row, or in a mark of several y fields a row of one series) an output wins. A missing value, a value a scale does not map, and a failing condition without `otherwise` give none; \"transparent\", 0, and a dash are outputs. An entry after one that always gives an output (a constant, the series' names, a condition with `otherwise`) is refused. A list splits no series: a mark keeping its series names them (`series`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "series": { "title": "Series", "const": true },
+            "value": { "title": "Value", "type": "number", "minimum": 0 },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "type": "number", "minimum": 0 },
+                "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0 }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            {
+              "required": ["field"],
+              "properties": {
+                "scale": {
+                  "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+                },
+                "series": false,
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["series", "scale"],
+              "properties": {
+                "field": false,
+                "scale": { "type": "string" },
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "series": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "series": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/ChannelList%3Cnumber%2C%20minimum%200%3E" }
+      ]
+    },
+    "ChannelsSpec<string>": {
+      "description": "A channel, or channels tried in order: the first that gives a drawn item (a row, or in a mark of several y fields a row of one series) an output wins. A missing value, a value a scale does not map, and a failing condition without `otherwise` give none; \"transparent\", 0, and a dash are outputs. An entry after one that always gives an output (a constant, the series' names, a condition with `otherwise`) is refused. A list splits no series: a mark keeping its series names them (`series`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "series": { "title": "Series", "const": true },
+            "value": { "title": "Value", "type": "string" },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "type": "string" },
+                "otherwise": { "title": "Otherwise", "type": "string" }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            {
+              "required": ["field"],
+              "properties": {
+                "scale": {
+                  "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+                },
+                "series": false,
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["series", "scale"],
+              "properties": {
+                "field": false,
+                "scale": { "type": "string" },
+                "value": false,
+                "condition": false
+              }
+            },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "series": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "series": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/ChannelList%3Cstring%3E" }
+      ]
     },
     "ChartAxisSpec": {
       "description": "One of the chart's position scales (x, y, or yRight) and its axis: the scale's settings, the axis', and which panels share the scale.",
@@ -3690,6 +4050,7 @@
           "description": "Number or time field: each cell's value, mapped to color.",
           "type": "string"
         },
+        "encode": false,
         "colors": {
           "title": "Colors",
           "description": "Color ramp from low to high values, or a scheme name; defaults to the theme's.",
@@ -5024,18 +5385,18 @@
           "description": "Channels: color, stroke, dash, strokeWidth, and opacity. One reading rows (a field other than the series', a condition) changes the line's look along its series (style runs).",
           "type": "object",
           "properties": {
-            "color": { "title": "Color", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "dash": { "title": "Dash", "$ref": "#/$defs/ChannelSpec%3CDash%3E" },
+            "color": { "title": "Color", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "dash": { "title": "Dash", "$ref": "#/$defs/ChannelsSpec%3CDash%3E" },
             "strokeWidth": {
               "title": "Stroke width",
               "description": "Stroke widths in pixels.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%3E"
             },
             "opacity": {
               "title": "Opacity",
               "description": "Opacities from 0 to 1.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
             }
           },
           "additionalProperties": false
@@ -6047,13 +6408,13 @@
           "anyOf": [
             { "type": "number", "minimum": 0, "maximum": 1 },
             { "type": "string" },
-            { "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E" }
+            { "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E" }
           ]
         },
         "color": {
           "title": "Color",
           "description": "A number or time field colored on a continuous scale (see `colors`), a category field (its values' colors, and the series it names), or a channel: `{ field, scale }` through one of the chart's scales, or `{ field, scale: { type: \"identity\" } }` for colors the data holds.",
-          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/ChannelSpec%3Cstring%3E" }]
+          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" }]
         },
         "colors": {
           "title": "Colors",
@@ -6079,87 +6440,103 @@
         "symbol": {
           "title": "Symbol",
           "description": "A shape's name (\"circle\", \"square\", \"triangle\", ...), or a category field with a shape per value: `{ field }`, as herceg writes it (with `scale` naming one of the chart's scales that maps values to shapes), or the field's name when no shape has it. A name that is both is refused.",
-          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/ChannelSpec%3CSymbolName%3E" }]
+          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/ChannelsSpec%3CSymbolName%3E" }]
         },
         "encode": {
           "title": "Encode",
           "description": "Channels of each point: color, fill, stroke, strokeWidth, opacity, symbol, and size.",
           "type": "object",
           "properties": {
-            "color": { "title": "Color", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "fill": { "title": "Fill", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelSpec%3Cstring%3E" },
-            "symbol": { "title": "Symbol", "$ref": "#/$defs/ChannelSpec%3CSymbolName%3E" },
+            "color": { "title": "Color", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "fill": { "title": "Fill", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "stroke": { "title": "Stroke", "$ref": "#/$defs/ChannelsSpec%3Cstring%3E" },
+            "symbol": { "title": "Symbol", "$ref": "#/$defs/ChannelsSpec%3CSymbolName%3E" },
             "strokeWidth": {
               "title": "Stroke width",
               "description": "Stroke widths in pixels.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%3E"
             },
             "size": {
               "title": "Size",
               "description": "A point's area in square pixels. Areas in square pixels.",
-              "type": "object",
-              "properties": {
-                "field": { "title": "Field", "type": "string" },
-                "scale": {
-                  "title": "Scale",
-                  "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
-                },
-                "series": { "title": "Series", "const": true },
-                "value": { "title": "Value", "type": "number", "minimum": 0 },
-                "condition": {
-                  "title": "Condition",
-                  "type": "object",
-                  "properties": {
-                    "when": { "title": "When", "$ref": "#/$defs/Expression" },
-                    "then": { "title": "Then", "type": "number", "minimum": 0 },
-                    "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0 }
-                  },
-                  "required": ["when", "then", "otherwise"],
-                  "additionalProperties": false
-                }
-              },
               "anyOf": [
                 {
-                  "required": ["field"],
+                  "type": "object",
                   "properties": {
+                    "field": { "title": "Field", "type": "string" },
                     "scale": {
+                      "title": "Scale",
                       "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
                     },
-                    "series": false,
-                    "value": false,
-                    "condition": false
-                  }
+                    "series": { "title": "Series", "const": true },
+                    "value": { "title": "Value", "type": "number", "minimum": 0 },
+                    "condition": {
+                      "title": "Condition",
+                      "type": "object",
+                      "properties": {
+                        "when": {
+                          "title": "When",
+                          "anyOf": [
+                            { "$ref": "#/$defs/Expression" },
+                            { "$ref": "#/$defs/RankSpec" }
+                          ]
+                        },
+                        "then": { "title": "Then", "type": "number", "minimum": 0 },
+                        "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0 }
+                      },
+                      "required": ["when", "then"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "required": ["field"],
+                      "properties": {
+                        "scale": {
+                          "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+                        },
+                        "series": false,
+                        "value": false,
+                        "condition": false
+                      }
+                    },
+                    {
+                      "required": ["series", "scale"],
+                      "properties": {
+                        "field": false,
+                        "scale": { "type": "string" },
+                        "value": false,
+                        "condition": false
+                      }
+                    },
+                    {
+                      "required": ["value"],
+                      "properties": {
+                        "field": false,
+                        "scale": false,
+                        "series": false,
+                        "condition": false
+                      }
+                    },
+                    {
+                      "required": ["condition"],
+                      "properties": {
+                        "field": false,
+                        "scale": false,
+                        "series": false,
+                        "value": false
+                      }
+                    }
+                  ],
+                  "additionalProperties": false
                 },
-                {
-                  "required": ["series", "scale"],
-                  "properties": {
-                    "field": false,
-                    "scale": { "type": "string" },
-                    "value": false,
-                    "condition": false
-                  }
-                },
-                {
-                  "required": ["value"],
-                  "properties": {
-                    "field": false,
-                    "scale": false,
-                    "series": false,
-                    "condition": false
-                  }
-                },
-                {
-                  "required": ["condition"],
-                  "properties": { "field": false, "scale": false, "series": false, "value": false }
-                }
-              ],
-              "additionalProperties": false
+                { "$ref": "#/$defs/ChannelList%3Cnumber%2C%20minimum%200%3E" }
+              ]
             },
             "opacity": {
               "title": "Opacity",
               "description": "Opacities from 0 to 1.",
-              "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
+              "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
             }
           },
           "anyOf": [{ "properties": { "size": false } }, { "required": ["size"] }],
@@ -6267,7 +6644,7 @@
           "title": "Size",
           "description": "A channel through one of the chart's scales (`{ field, scale }`), giving each point's area in square pixels.",
           "anyOf": [
-            { "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%3E" },
+            { "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%3E" },
             { "type": "string" }
           ]
         },
@@ -6285,7 +6662,7 @@
           "required": ["type", "x", "y", "size"],
           "properties": {
             "encode": { "properties": { "size": false } },
-            "size": { "$ref": "#/$defs/ChannelSpec%3Cnumber%2C%20minimum%200%3E" },
+            "size": { "$ref": "#/$defs/ChannelsSpec%3Cnumber%2C%20minimum%200%3E" },
             "radius": false,
             "radiusRange": false
           }
@@ -6439,6 +6816,20 @@
       "required": ["type"],
       "additionalProperties": false
     },
+    "RankSpec": {
+      "description": "A rank test: true for the rows whose value of `field` (numbers or times) is among the `top` (or `bottom`) n of the mark's rows, before level of detail, facets, and hidden series. Values tied with the nth are in; missing and infinite values never are.",
+      "type": "object",
+      "properties": {
+        "top": { "title": "Top", "type": "integer", "minimum": 1 },
+        "field": { "title": "Field", "type": "string" },
+        "bottom": { "title": "Bottom", "type": "integer", "minimum": 1 }
+      },
+      "anyOf": [
+        { "required": ["top", "field"], "properties": { "bottom": false } },
+        { "required": ["bottom", "field"], "properties": { "top": false } }
+      ],
+      "additionalProperties": false
+    },
     "RegionSpec": {
       "description": "Shaded regions: from `x1` to `x2` across the plot's height, from `y1` to `y2` across its width, or rectangles with both; or bands at a field's thresholds. Drawn in mark order, so list them before the marks they highlight to draw them underneath.",
       "type": "object",
@@ -6481,13 +6872,13 @@
           "description": "Each row's paint, for regions of a table: `color` (the fill) or `fill`, `stroke`, and `opacity`, which scales the fill's `fillOpacity` and the outline's. Regions are drawn in row order whatever their looks.",
           "type": "object",
           "properties": {
-            "color": { "title": "Color", "$ref": "#/$defs/RowChannelSpec%3Cstring%3E" },
-            "fill": { "title": "Fill", "$ref": "#/$defs/RowChannelSpec%3Cstring%3E" },
-            "stroke": { "title": "Stroke", "$ref": "#/$defs/RowChannelSpec%3Cstring%3E" },
+            "color": { "title": "Color", "$ref": "#/$defs/RowChannelsSpec%3Cstring%3E" },
+            "fill": { "title": "Fill", "$ref": "#/$defs/RowChannelsSpec%3Cstring%3E" },
+            "stroke": { "title": "Stroke", "$ref": "#/$defs/RowChannelsSpec%3Cstring%3E" },
             "opacity": {
               "title": "Opacity",
               "description": "Opacities from 0 to 1.",
-              "$ref": "#/$defs/RowChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
+              "$ref": "#/$defs/RowChannelsSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E"
             }
           },
           "additionalProperties": false
@@ -6642,6 +7033,18 @@
       "required": ["op", "field", "as"],
       "additionalProperties": false
     },
+    "RowChannelList<number, minimum 0, maximum 1>": {
+      "description": "Row channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/RowChannelSpec%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E" },
+      "minItems": 1
+    },
+    "RowChannelList<string>": {
+      "description": "Row channels tried in order (see `ChannelsSpec`).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/RowChannelSpec%3Cstring%3E" },
+      "minItems": 1
+    },
     "RowChannelSpec<number, minimum 0, maximum 1>": {
       "description": "A channel of each row's own look: any but the series' names, for what has no series (regions).",
       "type": "object",
@@ -6656,11 +7059,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "type": "number", "minimum": 0, "maximum": 1 },
             "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0, "maximum": 1 }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -6691,11 +7097,14 @@
           "title": "Condition",
           "type": "object",
           "properties": {
-            "when": { "title": "When", "$ref": "#/$defs/Expression" },
+            "when": {
+              "title": "When",
+              "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+            },
             "then": { "title": "Then", "type": "string" },
             "otherwise": { "title": "Otherwise", "type": "string" }
           },
-          "required": ["when", "then", "otherwise"],
+          "required": ["when", "then"],
           "additionalProperties": false
         }
       },
@@ -6711,6 +7120,92 @@
         }
       ],
       "additionalProperties": false
+    },
+    "RowChannelsSpec<number, minimum 0, maximum 1>": {
+      "description": "A row channel, or row channels tried in order (see `ChannelsSpec`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "value": { "title": "Value", "type": "number", "minimum": 0, "maximum": 1 },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "type": "number", "minimum": 0, "maximum": 1 },
+                "otherwise": { "title": "Otherwise", "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            { "required": ["field"], "properties": { "value": false, "condition": false } },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/RowChannelList%3Cnumber%2C%20minimum%200%2C%20maximum%201%3E" }
+      ]
+    },
+    "RowChannelsSpec<string>": {
+      "description": "A row channel, or row channels tried in order (see `ChannelsSpec`).",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "field": { "title": "Field", "type": "string" },
+            "scale": {
+              "title": "Scale",
+              "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/IdentityScaleSpec" }]
+            },
+            "value": { "title": "Value", "type": "string" },
+            "condition": {
+              "title": "Condition",
+              "type": "object",
+              "properties": {
+                "when": {
+                  "title": "When",
+                  "anyOf": [{ "$ref": "#/$defs/Expression" }, { "$ref": "#/$defs/RankSpec" }]
+                },
+                "then": { "title": "Then", "type": "string" },
+                "otherwise": { "title": "Otherwise", "type": "string" }
+              },
+              "required": ["when", "then"],
+              "additionalProperties": false
+            }
+          },
+          "anyOf": [
+            { "required": ["field"], "properties": { "value": false, "condition": false } },
+            {
+              "required": ["value"],
+              "properties": { "field": false, "scale": false, "condition": false }
+            },
+            {
+              "required": ["condition"],
+              "properties": { "field": false, "scale": false, "value": false }
+            }
+          ],
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/RowChannelList%3Cstring%3E" }
+      ]
     },
     "RowCoordinate": {
       "description": "A place each row of a mark of rows has along an axis, read from its own value: a field on a scale (the axis' own by default), or a number field's share of a frame or pixels from its edge, as in `Coordinate`.",

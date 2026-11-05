@@ -64,6 +64,8 @@ import { unionExtent } from "./trace.ts";
 interface HeatmapCommon<S extends Schema> extends SelectionLooks {
   /** Number or time field: each cell's value, mapped to color. */
   color: NumericField<S>;
+  /** Heatmaps take no channels: a cell reduces several rows, which conditions and lists do not read. */
+  encode?: never;
   /**
    * Color ramp from low to high values, such as an imported scheme
    * (`viridis`, `rdbu`, ...). Defaults to the theme's sequential ramp, or its

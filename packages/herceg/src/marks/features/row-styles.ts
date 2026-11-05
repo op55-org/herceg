@@ -2,7 +2,9 @@
 // `style.by` per row. A row's look is found from small integers (a field's
 // dictionary code, a condition's truth), never an object per row: rows
 // with the same channel values share one look, and a series draws a
-// geometry per look its rows take.
+// geometry per look its rows take. A list ending in the series' color (see
+// `seriesTail`) gives its rows' looks by its other entries, and rows none
+// of them gives an output the series' look.
 
 import type { Table } from "../../data/table.ts";
 import type { ChartFields } from "../../fields/chart.ts";
@@ -17,12 +19,14 @@ import {
   type Channel,
   type Check,
   categoryField,
+  channelRevision,
   colorShortForm,
   compileChannel,
+  displayFields,
   outputCheck,
   rowReader,
   type ScaleOf,
-  scaledRevision,
+  seriesTail,
 } from "./channels.ts";
 import { subset } from "./runs.ts";
 
@@ -55,6 +59,8 @@ export class RowStyles {
   readonly #stroke: Channel<string> | undefined;
   readonly #width: Channel<number> | undefined;
   readonly #opacity: Channel<number> | undefined;
+  /** The entries ending lists that color the series: fill, stroke, width, opacity (see `seriesTail`). */
+  readonly #tails: readonly (Channel<unknown> | undefined)[];
   /** Each channel's check and option, for the values identity scales read. */
   readonly #checks: { check: Check; path: string }[];
   readonly #by: { field: string; map: StyleMapSpec["map"] } | undefined;
@@ -76,7 +82,7 @@ export class RowStyles {
     }
   >();
   /** Kept for a table version and the rows drawn, until the theme or paint reader changes (`use`). */
-  #key: { version: number; subset: string | undefined; key: GlyphKey | undefined } | undefined;
+  #keys: { version: number; subset: string | undefined; keys: GlyphKey[] } | undefined;
   /** The looks `looks()` last painted, and their paints with colors read. */
   #paintedOf: object | undefined;
   #paintedLooks: RowPaint[] = [];
@@ -84,7 +90,7 @@ export class RowStyles {
     | {
         version: number;
         subset: string | undefined;
-        /** The revisions of the channel scales read (`scaledRevision`). */
+        /** The revisions of the channel scales read (`channelRevision`). */
         scaled: number;
         of: Int32Array;
         paints: RowPaint[];
@@ -128,24 +134,43 @@ export class RowStyles {
     // A fill set flat wins over the color channel.
     const fill = spec.fill === undefined ? (encode.fill ?? color) : undefined;
     const fillPath = at(encode.fill ? "fill" : "color");
-    this.#fill = fill && compileChannel(fill, table, scales, "color", colorValue, fillPath);
-    this.#stroke =
+    const split = <V>(channel: Channel<V> | undefined) => seriesTail(channel, spec.series);
+    const [fillRows, fillTail] = split(
+      fill && compileChannel(fill, table, scales, "color", colorValue, fillPath),
+    );
+    const [strokeRows, strokeTail] = split(
       encode.stroke &&
-      compileChannel(encode.stroke, table, scales, "color", colorValue, at("stroke"));
-    this.#width =
+        compileChannel(encode.stroke, table, scales, "color", colorValue, at("stroke")),
+    );
+    const [widthRows, widthTail] = split(
       encode.strokeWidth &&
-      compileChannel(
-        encode.strokeWidth,
-        table,
-        scales,
-        "strokeWidth",
-        width,
-        at("strokeWidth"),
-        "strokeWidth",
-      );
-    this.#opacity =
+        compileChannel(
+          encode.strokeWidth,
+          table,
+          scales,
+          "strokeWidth",
+          width,
+          at("strokeWidth"),
+          "strokeWidth",
+        ),
+    );
+    const [opacityRows, opacityTail] = split(
       encode.opacity &&
-      compileChannel(encode.opacity, table, scales, "opacity", fraction, at("opacity"), "opacity");
+        compileChannel(
+          encode.opacity,
+          table,
+          scales,
+          "opacity",
+          fraction,
+          at("opacity"),
+          "opacity",
+        ),
+    );
+    this.#fill = fillRows;
+    this.#stroke = strokeRows;
+    this.#width = widthRows;
+    this.#opacity = opacityRows;
+    this.#tails = [fillTail, strokeTail, widthTail, opacityTail];
     this.#checks = [
       { check: colorValue, path: fillPath },
       { check: colorValue, path: at("stroke") },
@@ -158,6 +183,7 @@ export class RowStyles {
     const rowWise = (c: Channel<unknown> | undefined) =>
       c !== undefined &&
       (c.kind === "condition" ||
+        c.kind === "list" ||
         c.kind === "identity" ||
         c.kind === "scaled" ||
         c.kind === "display" ||
@@ -169,16 +195,14 @@ export class RowStyles {
 
   /** The number fields whose display colors fill and outline the rows, read without a scale. */
   get displayColors(): string[] | undefined {
-    const fields = [this.#fill, this.#stroke].flatMap((c) =>
-      c?.kind === "display" ? [c.field] : [],
-    );
+    const fields = [this.#fill, this.#stroke].flatMap(displayFields);
     return fields.length > 0 ? fields : undefined;
   }
 
   /** Reads `theme`'s palette for values the scales do not map, and colors by `paint`. */
   use(theme: Theme, paint: PaintReader): void {
     if (theme !== this.#theme || paint !== this.#paint) {
-      this.#key = undefined;
+      this.#keys = undefined;
       this.#looks = undefined;
     }
     this.#theme = theme;
@@ -210,63 +234,71 @@ export class RowStyles {
         : undefined;
     if (mapped !== undefined) return mapped;
     if (given !== undefined) return given;
-    const fill = this.#fill;
-    if (fill?.kind === "value") return fill.value;
-    if (fill?.kind === "series" || (fill?.kind === "field" && fill.field === this.#spec.series))
-      return fill.scale.output(
-        fill.kind === "series" ? (label ?? name) : name,
-        this.#theme?.palette ?? [],
-        this.#theme?.muted ?? "#999999",
-      );
-    if (fill) return this.#theme?.muted;
-    return undefined;
+    const fill = (this.#tails[0] ?? this.#fill) as Channel<string> | undefined;
+    const theme = this.#theme;
+    const muted = theme?.muted ?? "#999999";
+    const output = this.#seriesOutput(fill, name, label, theme?.palette ?? [], muted);
+    return output ?? (fill ? theme?.muted : undefined);
   }
 
   /**
-   * A key of the colors a field other than the series field gives rows: the
-   * values the rows drawn hold, in the scale's order, for the table's version,
-   * written as the field's display writes them. Keys of display colors
-   * are the chart's (`displayColors`).
+   * What a channel coloring series gives the series of `name` (its label
+   * `label`): a constant, its name through a scale, or the series field's
+   * value through one; undefined for other channels.
    */
-  key(): GlyphKey | undefined {
-    const fill = this.#fill;
-    // Colors a field holds name no values a key would list.
-    if (fill?.kind !== "field" || fill.field === this.#spec.series) return undefined;
+  #seriesOutput<V>(
+    channel: Channel<V> | undefined,
+    name: string,
+    label: string | undefined,
+    defaults: readonly V[],
+    fallback: V,
+  ): V | undefined {
+    if (channel?.kind === "value") return channel.value;
+    if (channel?.kind === "series") return channel.scale.output(label ?? name, defaults, fallback);
+    if (channel?.kind === "field" && channel.field === this.#spec.series)
+      return channel.scale.output(name, defaults, fallback);
+    return undefined;
+  }
+
+  /** Whether the fill's list ends in the series' color, which their swatches show. */
+  get tailed(): boolean {
+    return this.#tails[0] !== undefined;
+  }
+
+  /**
+   * Keys of the colors fields other than the series field give rows, alone
+   * or as a list's entries (see `categoryKey`), for the table's version.
+   * Keys of display colors are the chart's (`displayColors`).
+   */
+  keys(lists = false): GlyphKey[] {
+    const fills = this.#keyedFields(lists);
+    if (fills.length === 0) return [];
     const table = this.#table;
-    const theme = this.#theme;
     const rows = this.#drawn();
     const drawn = subset(rows);
-    if (this.#key?.version === table.version && this.#key.subset === drawn) return this.#key.key;
-    const { codes, dictionary } = table.categories(fill.field as never);
-    const held = new Uint8Array(dictionary.length);
-    const { positions } = rows;
-    const count = positions ? positions.length : codes.length;
-    for (let k = 0; k < count; k++) {
-      const code = codes[positions ? positions[k]! : k]!;
-      if (code >= 0) held[code] = 1;
-    }
-    const values = dictionary.filter((_, code) => held[code]);
-    const place = (value: string) => fill.scale.place(value) ?? Infinity;
-    values.sort((a, b) => place(a) - place(b));
-    const palette = theme?.palette ?? [];
-    const muted = theme?.muted ?? "#999999";
-    const raw: GlyphKey | undefined = values.length
-      ? {
-          title: fill.field,
-          channel: "color",
-          scale: fill.scale.name,
-          entries: values.map((label) => ({
-            label,
-            glyph: "M-4.5 -4.5h9v9h-9Z",
-            r: 4.5,
-            color: this.#paint(fill.scale.output(label, palette, muted), `${this.#path} fill`),
-          })),
-        }
-      : undefined;
-    // Named and written as the field's display writes them.
-    const key = raw && (this.#fields?.key(table, fill.field, raw) ?? raw);
-    this.#key = { version: table.version, subset: drawn, key };
-    return key;
+    if (this.#keys?.version === table.version && this.#keys.subset === drawn)
+      return this.#keys.keys;
+    const keys = fills.flatMap(
+      (fill) =>
+        categoryKey(fill, rows, this.#theme, this.#paint, `${this.#path} fill`, this.#fields) ?? [],
+    );
+    this.#keys = { version: table.version, subset: drawn, keys };
+    return keys;
+  }
+
+  /** Whether `keys(lists)` gives keys where rows are drawn, by the channels alone. */
+  hasKeys(lists = false): boolean {
+    return this.#keyedFields(lists).length > 0;
+  }
+
+  #keyedFields(lists: boolean) {
+    // An outline's list keys its scales too (an outline's field alone does
+    // not, as before lists); with `lists`, so does a fill's list alone.
+    const of = (c: Channel<string> | undefined, alone: boolean) =>
+      alone || c?.kind === "list" ? keyedFields(c, this.#spec.series) : [];
+    return [...of(this.#fill, !lists), ...of(this.#stroke, false)].filter(
+      (c, i, all) => all.findIndex((f) => f.field === c.field && f.scale === c.scale) === i,
+    );
   }
 
   /** A series' look by its name (`style.by` without a field), over the mark's. */
@@ -285,20 +317,21 @@ export class RowStyles {
   #seriesPaint(name: string, label: string): RowPaint | undefined {
     const theme = this.#theme;
     const byRow = this.byRow;
-    const value = <V>(channel: Channel<V> | undefined, defaults: readonly V[], fallback: V) =>
-      channel?.kind === "series"
-        ? channel.scale.output(label, defaults, fallback)
-        : byRow
-          ? undefined
-          : channel?.kind === "value"
-            ? channel.value
-            : channel?.kind === "field"
-              ? channel.scale.output(name, defaults, fallback)
-              : undefined;
+    // A list's tail colors the series' rows other entries give no output.
+    const value = <V>(
+      channel: Channel<V> | undefined,
+      tail: Channel<unknown> | undefined,
+      defaults: readonly V[],
+      fallback: V,
+    ) =>
+      tail || channel?.kind === "series" || !byRow
+        ? this.#seriesOutput((tail as Channel<V>) ?? channel, name, label, defaults, fallback)
+        : undefined;
+    const [, stroke, width, opacity] = this.#tails;
     const paint = definedOf({
-      stroke: value(this.#stroke, theme?.palette ?? [], theme?.muted ?? "#999999"),
-      strokeWidth: value(this.#width, [], 1),
-      opacity: value(this.#opacity, [], 1),
+      stroke: value(this.#stroke, stroke, theme?.palette ?? [], theme?.muted ?? "#999999"),
+      strokeWidth: value(this.#width, width, [], 1),
+      opacity: value(this.#opacity, opacity, [], 1),
     });
     return Object.keys(paint).length ? paint : undefined;
   }
@@ -389,7 +422,7 @@ export class RowStyles {
     const theme = this.#theme;
     const rows = this.#drawn();
     const drawn = subset(rows);
-    const scaled = scaledRevision([this.#fill, this.#stroke, this.#width, this.#opacity]);
+    const scaled = channelRevision([this.#fill, this.#stroke, this.#width, this.#opacity]);
     if (
       this.#looks?.version === table.version &&
       this.#looks.subset === drawn &&
@@ -465,6 +498,71 @@ export class RowStyles {
 }
 
 /**
+ * The category fields a channel reads through scales, other than the series
+ * field, whose colors keys show: the channel's own, or each a list reads
+ * (once per field and scale; a scale read in a list keys its values, though
+ * rows taking an earlier entry's output do not show them).
+ */
+export function keyedFields<V>(
+  channel: Channel<V> | undefined,
+  series: string | undefined,
+): Extract<Channel<V>, { kind: "field" }>[] {
+  const fields: Extract<Channel<V>, { kind: "field" }>[] = [];
+  // A list's entries before a tail coloring the series are each keyed, the series field's too.
+  const listed = channel?.kind === "list";
+  for (const c of listed ? channel.entries : [channel])
+    if (
+      c?.kind === "field" &&
+      (listed || c.field !== series) &&
+      !fields.some((f) => f.field === c.field && f.scale === c.scale)
+    )
+      fields.push(c);
+  return fields;
+}
+
+/**
+ * A key of the colors `channel` gives the rows a mark draws (`rows`): the
+ * values they hold, in the scale's order, written as the field's display
+ * writes them; undefined for none.
+ */
+export function categoryKey(
+  channel: Extract<Channel<string>, { kind: "field" }>,
+  rows: MarkRows,
+  theme: Theme | undefined,
+  paint: PaintReader,
+  path: string,
+  fields: ChartFields | undefined,
+): GlyphKey | undefined {
+  const { table, positions } = rows;
+  const { codes, dictionary } = table.categories(channel.field as never);
+  const held = new Uint8Array(dictionary.length);
+  const count = positions ? positions.length : codes.length;
+  for (let k = 0; k < count; k++) {
+    const code = codes[positions ? positions[k]! : k]!;
+    if (code >= 0) held[code] = 1;
+  }
+  const values = dictionary.filter((_, code) => held[code]);
+  if (values.length === 0) return undefined;
+  const place = (value: string) => channel.scale.place(value) ?? Infinity;
+  values.sort((a, b) => place(a) - place(b));
+  const palette = theme?.palette ?? [];
+  const muted = theme?.muted ?? "#999999";
+  const raw: GlyphKey = {
+    title: channel.field,
+    channel: "color",
+    scale: channel.scale.name,
+    entries: values.map((label) => ({
+      label,
+      glyph: "M-4.5 -4.5h9v9h-9Z",
+      r: 4.5,
+      color: paint(channel.scale.output(label, palette, muted), path),
+    })),
+  };
+  // Named and written as the field's display writes them.
+  return fields?.key(table, channel.field, raw) ?? raw;
+}
+
+/**
  * The looks of a mark drawing a shape per row of its table, without series
  * (regions): its rows' channels (`encode`), read as bars' rows are.
  */
@@ -474,7 +572,7 @@ export function rowLooks(
   scales: ScaleOf,
   path: string,
   isColor: (value: string) => boolean,
-): Pick<MarkFeatures, "displayColors"> & {
+): Pick<MarkFeatures, "displayColors" | "listKeys"> & {
   use(theme: Theme, paint: PaintReader): void;
   rowLooks(): RowLooks | undefined;
 } {
@@ -483,10 +581,11 @@ export function rowLooks(
       `${path} encode: channels read the rows of a table; give the mark one, or drop encode`,
     );
   for (const [name, channel] of Object.entries(spec.encode ?? {}))
-    if (channel && "series" in channel)
-      throw new TypeError(
-        `${path} encode.${name}: regions have no series whose names it could read; give a field, a value, or a condition`,
-      );
+    for (const [i, c] of (Array.isArray(channel) ? channel : [channel]).entries())
+      if (c && "series" in c)
+        throw new TypeError(
+          `${path} encode.${name}${Array.isArray(channel) ? `[${i}]` : ""}: regions have no series whose names it could read; give a field, a value, or a condition`,
+        );
   // Every row of the table, kept while its version is.
   let rows: MarkRows | undefined;
   const drawn = () => {
@@ -498,6 +597,8 @@ export function rowLooks(
     use: (theme, paint) => styles.use(theme, paint),
     rowLooks: () => styles.looks(),
     displayColors: styles.displayColors,
+    // Scales a list reads key their values (a field alone does not: a region's legend lists labels).
+    ...(styles.hasKeys(true) && { listKeys: () => styles.keys(true) }),
   };
 }
 

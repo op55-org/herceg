@@ -1460,6 +1460,80 @@ for (const through of ["identity", "a channel scale"] as const)
     { warmup: 3, samples: 20 },
   );
 
+// Channels' forms on 100,000 points' colors, compiled and drawn: one
+// condition with otherwise (the baseline), the same colors from a list of
+// a condition without otherwise and a constant, a list of three entries,
+// and a rank test (the 1,000 largest). Then a line of 100,000 rows colored
+// by a rank test, appending 100 rows a frame, against a condition: the
+// rank reads only the rows appended.
+const RED = "#c62828";
+const GREY = "#90a4ae";
+const AMBER = "#ff9800";
+const colorForms = {
+  "a condition": {
+    // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+    condition: { when: col("v").gt(0.99), then: RED, otherwise: GREY },
+  },
+  "a list of two": [
+    // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+    { condition: { when: col("v").gt(0.99), then: RED } },
+    { value: GREY },
+  ],
+  "a list of three": [
+    // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+    { condition: { when: col("v").gt(0.99), then: RED } },
+    // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+    { condition: { when: col("v").lt(0.01), then: AMBER } },
+    { value: GREY },
+  ],
+  "a rank test": [
+    // biome-ignore lint/suspicious/noThenProperty: a condition's branch, as specs name it.
+    { condition: { when: { top: 1000, field: "v" as const }, then: RED } },
+    { value: GREY },
+  ],
+} as const;
+for (const [form, color] of Object.entries(colorForms))
+  measure(
+    `channels: 100k points, color by ${form}, chart and scene`,
+    () => {
+      const chart = new ChartModel(
+        { marks: [point(scaled, { x: "x", y: "y", color })] },
+        undefined,
+        staticCompilers(),
+      );
+      chart.setSize(800, 600, 1);
+      chart.scene(estimateText);
+    },
+    { warmup: 3, samples: 20 },
+  );
+for (const form of ["a condition", "a rank test"] as const) {
+  const streamed = table({
+    t: Float64Array.from({ length: SCALED }, (_, i) => i),
+    v: Float64Array.from({ length: SCALED }, (_, i) => ((i * 31) % 1000) / 1000),
+  });
+  const chart = new ChartModel(
+    { marks: [line(streamed, { x: "t", y: "v", encode: { color: colorForms[form] } })] },
+    undefined,
+    staticCompilers(),
+  );
+  chart.setSize(800, 600, 1);
+  chart.scene(estimateText);
+  let t = SCALED;
+  const batch = { t: new Float64Array(100), v: new Float64Array(100) };
+  measure(
+    `channels: 100k-row line, color by ${form}, append 100 rows and scene`,
+    () => {
+      for (let i = 0; i < 100; i++) {
+        batch.t[i] = t;
+        batch.v[i] = ((t++ * 31) % 1000) / 1000;
+      }
+      streamed.append(batch);
+      chart.scene(estimateText);
+    },
+    { warmup: 5, samples: 40 },
+  );
+}
+
 // Writing 10,000 values in each form a format takes, as tooltips, labels,
 // and grids write them one at a time: Intl options and d3-like patterns
 // (the baselines), text around a pattern, durations, and prefixed units;

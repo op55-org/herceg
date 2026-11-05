@@ -449,8 +449,15 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
       spec.fill === undefined
         ? (encode?.fill ?? encode?.color ?? (table.has(spec.color ?? "") && { field: spec.color }))
         : undefined;
+    // A field, alone or in a list (an outline's too), but the series field ending a list.
+    const keyed = (c: typeof fill | NonNullable<typeof encode>["stroke"]) =>
+      [c]
+        .flat()
+        .some((e, i, all) => e && "field" in e && (e.field !== series || i < all.length - 1));
     this.legendScales =
-      fill && "field" in fill && fill.field !== series ? ["series", "key"] : ["series"];
+      keyed(fill) || (Array.isArray(encode?.stroke) && keyed(encode.stroke))
+        ? ["series", "key"]
+        : ["series"];
     this.zero = this.#horizontal ? "x" : "y";
     this.tooltip = this.#horizontal ? "y" : "x";
     if (spec.stack === "fill")
@@ -1073,8 +1080,7 @@ export class BarMark implements Mark<Frozen<BarSpec>> {
 
   /** A key of the colors a field gives the bars' rows (the feature compiler's), as points list theirs. */
   legends(series: readonly Series[]): LegendPart[] {
-    const part = series[0]?.features?.legend?.();
-    return part ? [part] : [];
+    return series[0]?.features?.legends?.() ?? [];
   }
 
   /** Room past the bars' ends for their labels; stacked labels, and those placed inside, sit inside. */

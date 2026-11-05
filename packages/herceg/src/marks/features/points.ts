@@ -6,7 +6,9 @@
 // a row missing a value a channel reads, as they leave out rows missing any
 // value they encode; a value a scale leaves unmapped takes the channel's
 // fallback: the theme's muted color, no shape drawn, the mark's own size,
-// opaque.
+// opaque. A list takes, for each row, its first entry's output the row
+// has, else the channel's fallback; one ending in the series' color (see
+// `seriesTail`) gives rows without another output their series' color.
 
 import type { Table } from "../../data/table.ts";
 import { CYCLE, SYMBOLS, symbolReach } from "../../draw/symbol-shapes.ts";
@@ -21,14 +23,17 @@ import type { Series } from "../series.ts";
 import {
   type Channel,
   type Check,
+  channelRevision,
   compileChannel,
+  displayFields,
   outputCheck,
   type ScaleOf,
   scaledOutputs,
-  scaledRevision,
+  seriesTail,
 } from "./channels.ts";
 import { sourceOf } from "./identity.ts";
 import { markerPath } from "./markers.ts";
+import { keyedFields } from "./row-styles.ts";
 import { subset } from "./runs.ts";
 
 /** Legend glyphs: circles of this radius, other shapes reaching at most KEY_REACH (as points' series). */
@@ -56,6 +61,12 @@ export class PointStyles {
   /** The color channel, where rows take colors of their own; else the series' colors are its. */
   readonly #color: Compiled<string> | undefined;
   readonly #seriesColor: Channel<string> | undefined;
+  /** Whether the color channel is a list ending in the series' color, which rows without another take. */
+  readonly #tail: boolean;
+  /** With `#tail`: each series' color's index among the looks' colors, by its source, as series attach. */
+  readonly #seriesTones = new Map<string, number>();
+  /** The looks' colors' indexes, made as rows (and series) take colors. */
+  #tone: ((color: string) => number) | undefined;
   readonly #size: Compiled<number> | undefined;
   readonly #opacity: Compiled<number> | undefined;
   readonly #symbol: Compiled<SymbolName> | undefined;
@@ -92,20 +103,25 @@ export class PointStyles {
       if (!given) return undefined;
       const at = `${path} ${given.path}`;
       const { spec } = given;
-      if (name !== "color" && "series" in spec)
-        throw new TypeError(
-          `${at}: { series: true } names series through a scale, which points' ${name === "symbol" ? "shapes" : "sizes and opacities"} do not read; give a field`,
-        );
-      // Categories' sizes and opacities have no default: a scale says them.
-      if (
-        (name === "size" || name === "opacity") &&
-        "field" in spec &&
-        spec.scale === undefined &&
-        table.kind(spec.field) === "category"
-      )
-        throw new TypeError(
-          `${at}.field: field "${spec.field}" holds categories, which ${name === "size" ? "sizes" : "opacities"} read through a scale mapping them; give scale, the name of one of the chart's scales`,
-        );
+      for (const [i, entry] of (Array.isArray(spec) ? spec : [spec]).entries()) {
+        const where = Array.isArray(spec) ? `${at}[${i}]` : at;
+        if (name !== "color" && "series" in entry)
+          throw new TypeError(
+            `${where}: { series: true } names series through a scale, which points' ${name === "symbol" ? "shapes" : "sizes and opacities"} do not read; give a field`,
+          );
+        // Categories' sizes and opacities have no default: a scale says them
+        // (a missing field is refused as the channel compiles).
+        if (
+          (name === "size" || name === "opacity") &&
+          "field" in entry &&
+          entry.scale === undefined &&
+          table.has(entry.field) &&
+          table.kind(entry.field) === "category"
+        )
+          throw new TypeError(
+            `${where}.field: field "${entry.field}" holds categories, which ${name === "size" ? "sizes" : "opacities"} read through a scale mapping them; give scale, the name of one of the chart's scales`,
+          );
+      }
       const check = outputCheck(name, kit.isColor);
       return {
         channel: compileChannel(spec, table, scales, name, check, at, name),
@@ -114,14 +130,19 @@ export class PointStyles {
       };
     };
     const color = compile(own.color, "color");
-    // A constant, the series field, and the series' names color series, not rows.
+    // A constant, the series field, and the series' names color series, not
+    // rows; a list's rows its other entries, and its series its tail.
+    const [byRow, tail] = seriesTail(color?.channel, series);
     const bySeries =
+      !tail &&
       color &&
       (color.channel.kind === "value" ||
         color.channel.kind === "series" ||
         (color.channel.kind === "field" && color.channel.field === series));
-    this.#color = bySeries ? undefined : color;
-    this.#seriesColor = bySeries ? color.channel : undefined;
+    this.#color = bySeries || !byRow ? undefined : color && { ...color, channel: byRow };
+    this.#seriesColor = bySeries ? color.channel : tail;
+    // A list of the tail alone colors series as the tail alone does.
+    this.#tail = tail !== undefined && byRow !== undefined;
     this.#size = compile(own.size, "size");
     this.#opacity = compile(own.opacity, "opacity");
     this.#symbol = compile(own.symbol, "symbol");
@@ -141,13 +162,30 @@ export class PointStyles {
    */
   seriesColor(name: string, label: string | undefined): string | undefined {
     const theme = this.#theme;
-    if (this.#color) return theme?.muted;
     const channel = this.#seriesColor;
-    if (!channel || !theme) return undefined;
+    if (!channel) return this.#color ? theme?.muted : undefined;
+    if (!theme) return undefined;
     if (channel.kind === "value") return channel.value;
     if (channel.kind !== "field" && channel.kind !== "series") return undefined;
     const value = channel.kind === "series" ? (label ?? name) : name;
     return channel.scale.output(value, theme.palette, theme.muted);
+  }
+
+  /** The number fields whose display colors a color list reads, which the chart's legends key. */
+  get displayColors(): string[] | undefined {
+    const c = this.#color?.channel;
+    const fields = c?.kind === "list" ? displayFields(c) : [];
+    return fields.length > 0 ? fields : undefined;
+  }
+
+  /**
+   * Takes series `s`'s color among the looks' colors, which its rows that
+   * no other entry of a color list ending in the series' color take.
+   */
+  attach(s: Series): void {
+    if (!this.#tail) return;
+    this.looks();
+    this.#seriesTones.set(sourceOf(s.key), this.#tone!(s.color));
   }
 
   /** How far points reach past their centers at most, outlines included: automatic padding's room. */
@@ -161,7 +199,7 @@ export class PointStyles {
     const rows = this.#rows();
     const drawn = subset(rows);
     // Outputs through channel scales change with their domains, which other marks' rows may move.
-    const scaled = scaledRevision([this.#color, this.#size, this.#opacity].map((c) => c?.channel));
+    const scaled = channelRevision([this.#color, this.#size, this.#opacity].map((c) => c?.channel));
     if (
       this.#looks?.version === table.version &&
       this.#looks.subset === drawn &&
@@ -173,24 +211,44 @@ export class PointStyles {
     const own = this.#own;
     const colors: string[] = [];
     const indexes = new Map<string, number>();
-    const color =
+    const tone = (value: string) => {
+      const painted = paint(value, this.#color!.path);
+      let index = indexes.get(painted);
+      if (index === undefined) {
+        index = colors.push(painted) - 1;
+        indexes.set(painted, index);
+      }
+      return index;
+    };
+    this.#tone = tone;
+    this.#seriesTones.clear();
+    const muted = theme?.muted ?? "#999999";
+    // A list ending in the series' color leaves the rows no other entry colors to it.
+    let color =
       this.#color &&
       this.#outputs(
         rows,
         this.#color,
         theme?.palette ?? [],
-        theme?.muted ?? "#999999",
-        (value) => {
-          const painted = paint(value, this.#color!.path);
-          let index = indexes.get(painted);
-          if (index === undefined) {
-            index = colors.push(painted) - 1;
-            indexes.set(painted, index);
-          }
-          return index;
-        },
+        muted,
+        tone,
         -1,
+        this.#tail ? () => -1 : undefined,
       );
+    if (color && this.#tail) {
+      // Rows no other entry colors take their series' color, as series attach.
+      const byRow = color;
+      const series = this.#series;
+      const codes = series === undefined ? undefined : table.categories(series as never);
+      const tones = this.#seriesTones;
+      color = (row) => {
+        const at = byRow(row);
+        if (at >= 0) return at;
+        const code = codes ? codes.codes[row]! : 0;
+        const source = codes ? codes.dictionary[code] : tones.keys().next().value;
+        return (source === undefined ? undefined : tones.get(source)) ?? tone(muted);
+      };
+    }
     const fallback = Math.PI * own.radius * own.radius;
     const area = this.#size && this.#outputs(rows, this.#size, [], fallback, Number, Number.NaN);
     const opacity = this.#opacity && this.#outputs(rows, this.#opacity, [], 1, Number, Number.NaN);
@@ -201,6 +259,7 @@ export class PointStyles {
     const symbol = this.#symbol?.channel;
     const looks = {
       color,
+      bySeries: this.#tail,
       colors,
       area,
       opacity,
@@ -220,8 +279,11 @@ export class PointStyles {
   /**
    * A channel's output for each row through `of`, `none` for a row missing
    * the value it reads; values a scale leaves unmapped take `fallback`, or
-   * where it is undefined, `none`. Identity values are checked at the rows
-   * the mark draws.
+   * where it is undefined, `none`. Rows no output reaches (a failing
+   * condition without otherwise, a list none of whose entries gives one)
+   * take `unmet()`: `fallback`'s by default, or `none` without one; a list's
+   * entries pass them on. Identity values are checked at the rows the mark
+   * draws.
    */
   #outputs<V>(
     rows: MarkRows,
@@ -230,6 +292,7 @@ export class PointStyles {
     fallback: V | undefined,
     of: (value: V) => number,
     none: number,
+    unmet = () => (fallback === undefined ? none : of(fallback)),
   ): Rows {
     const table = this.#table;
     if (channel.kind === "value") {
@@ -237,8 +300,38 @@ export class PointStyles {
       return () => value;
     }
     if (channel.kind === "condition") {
-      const [then, otherwise] = [of(channel.then), of(channel.otherwise)];
+      const then = of(channel.then);
+      const otherwise = channel.otherwise === undefined ? unmet() : of(channel.otherwise);
       return (row) => (channel.when(row) ? then : otherwise);
+    }
+    if (channel.kind === "list") {
+      // Values an entry's scale leaves unmapped give no output, so the next entry is read.
+      const entries = channel.entries.map((entry, i) =>
+        this.#outputs(
+          rows,
+          { channel: entry, check, path: `${path}[${i}]` },
+          defaults,
+          undefined,
+          of,
+          none,
+          () => none,
+        ),
+      );
+      const rest = unmet();
+      return (row) => {
+        for (const entry of entries) {
+          const out = entry(row);
+          if (!(out === none || Number.isNaN(out))) return out;
+        }
+        return rest;
+      };
+    }
+    if (channel.kind === "display") {
+      // Values without a display color give none.
+      const values = table.numbers(channel.field as never);
+      const { colors, index } = channel.colors;
+      const tones = colors.map((color) => of(color as V));
+      return (row) => tones[index(values[row]!) - 1] ?? none;
     }
     if (channel.kind === "series") return () => none;
     if (channel.kind === "scaled") {
@@ -308,46 +401,47 @@ export class PointStyles {
     const key = <V>(
       compiled: Compiled<V> | undefined,
       channel: GlyphKey["channel"],
-      entry: (value: string) => GlyphKey["entries"][number],
+      entry: (
+        value: string,
+        c: Extract<Channel<V>, { kind: "field" }>,
+      ) => GlyphKey["entries"][number],
     ) => {
-      const c = compiled?.channel;
-      if (c?.kind !== "field" || c.field === this.#series) return;
-      const { codes, dictionary } = this.#table.categories(c.field as never);
-      const held = heldCodes(rows, codes, dictionary.length) ?? new Uint8Array(dictionary.length);
-      if (!rows.positions) for (const code of codes) if (code >= 0) held[code] = 1;
-      const placeOf = (value: string) => c.scale.place(value) ?? Infinity;
-      let values = dictionary
-        .filter((_, code) => held[code])
-        .sort((a, b) => placeOf(a) - placeOf(b));
-      // A declared domain whole, then values held outside it.
-      const domain = c.scale.spec?.domain;
-      if (domain) values = [...domain, ...values.filter((value) => !domain.includes(value))];
-      const raw: GlyphKey = {
-        title: c.field,
-        channel,
-        scale: c.scale.name,
-        entries: values.map((value) => entry(value)),
-      };
-      // Named and written as the field's display writes them.
-      keys.push(this.#fields?.key(this.#table, c.field, raw) ?? raw);
+      // A field alone, or a list's: each scale read in a list keys its values.
+      for (const c of keyedFields(compiled?.channel, this.#series)) {
+        const { codes, dictionary } = this.#table.categories(c.field as never);
+        const held = heldCodes(rows, codes, dictionary.length) ?? new Uint8Array(dictionary.length);
+        if (!rows.positions) for (const code of codes) if (code >= 0) held[code] = 1;
+        const placeOf = (value: string) => c.scale.place(value) ?? Infinity;
+        let values = dictionary
+          .filter((_, code) => held[code])
+          .sort((a, b) => placeOf(a) - placeOf(b));
+        // A declared domain whole, then values held outside it.
+        const domain = c.scale.spec?.domain;
+        if (domain) values = [...domain, ...values.filter((value) => !domain.includes(value))];
+        const raw: GlyphKey = {
+          title: c.field,
+          channel,
+          scale: c.scale.name,
+          entries: values.map((value) => entry(value, c)),
+        };
+        // Named and written as the field's display writes them.
+        keys.push(this.#fields?.key(this.#table, c.field, raw) ?? raw);
+      }
     };
     const circle = markerPath(kit, "circle", 0, 0, KEY_RADIUS);
-    key(this.#color, "color", (label) => {
-      const c = this.#color!.channel as Extract<Channel<string>, { kind: "field" }>;
+    key(this.#color, "color", (label, c) => {
       const theme = this.#theme;
       const output = c.scale.output(label, theme?.palette ?? [], theme?.muted ?? "#999999");
       return { label, glyph: circle, r: KEY_RADIUS, color: this.#paint(output, this.#color!.path) };
     });
-    key(this.#symbol, "shape", (label) => {
-      const c = this.#symbol!.channel as Extract<Channel<SymbolName>, { kind: "field" }>;
+    key(this.#symbol, "shape", (label, c) => {
       const shape = c.scale.output(label, SHAPES, undefined as unknown as SymbolName);
       if (shape === undefined) return { label, glyph: "", r: 0 };
       const reach = symbolReach(shape);
       const r = Math.min(KEY_RADIUS, KEY_REACH / reach);
       return { label, glyph: markerPath(kit, shape, 0, 0, r), r: r * reach, shape };
     });
-    key(this.#size, "size", (label) => {
-      const c = this.#size!.channel as Extract<Channel<number>, { kind: "field" }>;
+    key(this.#size, "size", (label, c) => {
       const area = c.scale.output(label, [], Math.PI * this.#own.radius ** 2);
       const r = Math.sqrt(area / Math.PI);
       return { label, glyph: markerPath(kit, "circle", 0, 0, r), r };
@@ -360,8 +454,14 @@ export class PointStyles {
     const table = this.#table;
     const named = new Set<string>();
     let text = "";
-    for (const compiled of [this.#color, this.#size, this.#opacity, this.#symbol]) {
-      const c = compiled?.channel;
+    // The fields of a list's entries too, each once.
+    const channels = [this.#color, this.#size, this.#opacity, this.#symbol].flatMap(
+      (compiled): readonly (Channel<unknown> | undefined)[] => {
+        const c = compiled?.channel as Channel<unknown> | undefined;
+        return c?.kind === "list" ? c.entries : [c];
+      },
+    );
+    for (const c of channels) {
       if (!c || (c.kind !== "field" && c.kind !== "identity" && c.kind !== "scaled")) continue;
       if (c.field === this.#series || named.has(c.field)) continue;
       named.add(c.field);
@@ -380,15 +480,13 @@ export class PointStyles {
   #reach(rows: MarkRows): number {
     const own = this.#own;
     const table = this.#table;
-    const most = <V>(
-      compiled: Compiled<V> | undefined,
-      defaults: readonly V[],
-      fallback: V,
-    ): V[] => {
-      const c = compiled?.channel;
+    const most = <V>(c: Channel<V> | undefined, defaults: readonly V[], fallback: V): V[] => {
       if (!c) return [];
       if (c.kind === "value") return [c.value];
-      if (c.kind === "condition") return [c.then, c.otherwise];
+      if (c.kind === "condition") return [c.then, c.otherwise ?? fallback];
+      // A list's entries', and the fallback rows none of them gives an output take.
+      if (c.kind === "list")
+        return [...c.entries.flatMap((entry) => most(entry, defaults, fallback)), fallback];
       if (c.kind === "identity") {
         if (c.numbers) return (extentOf(rows, c.field) ?? []) as V[];
         const { codes, dictionary } = table.categories(c.field as never);
@@ -411,9 +509,9 @@ export class PointStyles {
         (unknown as V | undefined) ?? fallback,
       ];
     };
-    const areas = most(this.#size, [], Math.PI * own.radius ** 2);
+    const areas = most(this.#size?.channel, [], Math.PI * own.radius ** 2);
     const radius = areas.length > 0 ? Math.sqrt(Math.max(...areas) / Math.PI) : own.radius;
-    const shapes = this.#symbol ? most(this.#symbol, SHAPES, own.shape) : [own.shape];
+    const shapes = this.#symbol ? most(this.#symbol.channel, SHAPES, own.shape) : [own.shape];
     const reach = Math.max(
       0,
       ...shapes.filter((s) => SYMBOLS.includes(s)).map((s) => symbolReach(s)),

@@ -41,7 +41,7 @@ import {
   thresholdPlace,
 } from "./annotation.ts";
 import type { DrawnMark, PartBuilders } from "./drawn.ts";
-import type { ColorChannel, ItemKeyed, RowChannel } from "./encoding.ts";
+import type { ItemKeyed, RowChannels, RowColorChannels } from "./encoding.ts";
 import type { PartText } from "./features/part-text.ts";
 import {
   grown,
@@ -133,10 +133,10 @@ export type RegionDataOptions<S extends Schema> = RegionStyle &
      * Regions are drawn in row order whatever their looks.
      */
     encode?: {
-      color?: Exclude<ColorChannel<S>, { series: true }>;
-      fill?: Exclude<ColorChannel<S>, { series: true }>;
-      stroke?: Exclude<ColorChannel<S>, { series: true }>;
-      opacity?: RowChannel<number, S>;
+      color?: RowColorChannels<S>;
+      fill?: RowColorChannels<S>;
+      stroke?: RowColorChannels<S>;
+      opacity?: RowChannels<number, S>;
     };
   };
 

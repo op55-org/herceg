@@ -395,8 +395,8 @@ hg.heatmap(color=grid, x=xs, y=ys)  # a 2D array: row i, column j at y[i], x[j]
 ## Encodings
 
 `color` and the flat paint options are short forms. Channels beyond them
-go in `encode`: a field through a named scale, a constant, or a condition
-on each row.
+go in `encode`: a field through a named scale, a constant, a condition on
+each row, or a list of these tried in order.
 
 ```ts
 bar(sites, {
@@ -426,6 +426,9 @@ hg.Chart(sales).line(x="month", y="units", encode=hg.Encodings(
 | `{ series: true, scale }` | `hg.Channel(series=True, scale=)` | The series' names through a scale, for series that are not a field's values. |
 | `{ value }` | `hg.Channel(value=)` | A constant. |
 | `{ condition: { when, then, otherwise } }` | `hg.when(cond, then, otherwise)` | `then` where the expression holds, `otherwise` elsewhere. |
+| `{ condition: { when, then } }` | `hg.when(cond, then)` | `then` where it holds, and no output elsewhere. |
+| `{ condition: { when: { top: n, field }, then } }` | `hg.when(hg.top(n, field), then)` | A [rank test](#lists-and-rank-tests): `then` for the rows among the `n` largest of a number or time field (`bottom`: smallest). |
+| `[channel, ...]` | `[...]` | [Channels tried in order](#lists-and-rank-tests): each item takes the first output. |
 
 | Mark | Channels |
 | --- | --- |
@@ -437,7 +440,75 @@ hg.Chart(sales).line(x="month", y="units", encode=hg.Encodings(
 | Custom marks | `color`, `strokeWidth`, `opacity`, which `draw` reads ([Custom marks](#custom-marks)) |
 
 Every output is checked against the channel that draws it: a scale mapping
-shapes read as colors is refused.
+shapes read as colors is refused. Heatmaps take no `encode`: their cells
+reduce several rows, which channels do not read.
+
+### Lists and rank tests
+
+A list of channels gives each drawn item (a row; in a mark of several y
+fields, a row of one series) the first output an entry has for it. A
+missing value, a value the entry's scale does not map, and a condition
+without `otherwise` that fails give no output, so the next entry is read;
+an item no entry colors takes the mark's own paint. `"transparent"`, `0`,
+and a dash are outputs. A rank test holds for the rows whose value is among
+the `n` largest (`top`) or smallest (`bottom`) of the rows the mark draws,
+before facets and the legend's hiding: values tied with the nth are in, and
+missing and infinite values never are.
+
+```ts
+bar(services, {
+  x: "service",
+  y: "p99",
+  encode: {
+    color: [
+      { condition: { when: { top: 3, field: "p99" }, then: "#c62828" } }, // the three slowest
+      { condition: { when: col("errors").gt(0.05), then: "#ff9800" } },
+      { field: "tier", scale: "tiers" },
+    ],
+  },
+});
+line(latency, {
+  x: "time",
+  y: "p99",
+  series: "service",
+  // Over the SLO in red; elsewhere each series' own color.
+  encode: { color: [{ condition: { when: col("p99").gt(250), then: "#c62828" } }, { series: true, scale: "color" }] },
+});
+```
+
+```python
+hg.Chart(services).bar(x="service", y="p99", encode=hg.Encodings(color=[
+    hg.when(hg.top(3, "p99"), "#c62828"),
+    hg.when(hg.col("errors") > 0.05, "#ff9800"),
+    hg.Channel(field="tier", scale="tiers"),
+]))
+```
+
+- **Order.** An entry after one that always gives an output (a constant,
+  the series' names, a condition with `otherwise`) is refused, naming it:
+  move it first or drop it.
+- **Series.** A list splits no series; series are those `series` or
+  several y fields make. A list ending in the series' colors (`{ series:
+  true, scale }`, or the series field) colors the series and the items the
+  entries before it leave, and the legend's entries and toggles are those
+  of that channel alone. Entries reading the scale the series' colors come
+  through share its places, a value keeping one color: values take places
+  as they are first drawn, so the series drawn first keep the places they
+  have alone, and series arriving later follow values drawn before them. A line or area reads its list per observation, as
+  [looks along a line](#channel-scales) do.
+- **Keys.** Each scale a list reads (a field through a scale of
+  categories, or a field display's thresholds) shows its key in the
+  legend: entries that explain colors, without toggles. A list of one entry
+  is a list too: it splits no series, and rows it gives no output take the
+  mark's own paint.
+- **Streaming.** A rank test keeps the n rows' identities: appended rows
+  are read alone, while dropping one of the n, a view's rows, replaced
+  values, or a reset read every row again.
+- **Custom marks.** `encoded(channel, row, series?)` gives a row's output;
+  with the series, a list ending in the series' colors gives that series'
+  color where its other entries give none. Without it, the row reads the
+  whole list: the series' names give no output, the series field its
+  value's color.
 
 ### Channel scales
 
@@ -644,7 +715,7 @@ draws has no place.
   scales, as a Marimekko's cells (one region mark, one row a cell). They
   are drawn and picked in row order; `opacity` scales the fill's and the
   outline's. Regions have no series, so their channels read fields,
-  values, or conditions, not series' names. With `legend: true` and a
+  values, conditions, or lists of them, not series' names. With `legend: true` and a
   label field, each entry is in the paint of the first row holding its
   label. A constant region takes no `encode`.
 
@@ -840,7 +911,7 @@ custom(requests, {
 | `path`, `rect`, `circle`, `line`, `text` | Shapes, each with an optional style (`fill`, `stroke`, `strokeWidth`, `opacity`, `dash`); they paint the same in SVG and on a canvas. |
 | `table`, `series` | With a table: the series to draw (hidden ones left out), each with `label`, `color`, `x` and `y` columns, `length`, `rows`, and `rowAt(k)`. |
 | `item(series, row, draw)` | The shapes `draw` makes are that row's item: picked by their shapes (inside a fill, on a stroke), read by tooltips and the keyboard, dimmed while a selection leaves the row out, and named in events by `itemKey`. |
-| `encoded(channel, row)` | The row's output of an `encode` channel (`color`, `strokeWidth`, `opacity`) through the chart's scales; undefined where the row has none. A `color` of the series' names colors series (`series.color`); widths and opacities read fields, values, or conditions. |
+| `encoded(channel, row, series?)` | The row's output of an `encode` channel (`color`, `strokeWidth`, `opacity`) through the chart's scales; undefined where the row has none. A `color` of the series' names colors series (`series.color`), given as `series`, also as a list's last entry; widths and opacities read fields, values, conditions, or lists of them. |
 | `selection(series, row)` | `"selected"`, `"unselected"`, or undefined while no selection is highlighted, for looks of the selected's own. |
 | `items(mark)` | Copies of the items a pie, funnel, treemap, or sunburst drew in the panel, as `getItems` gives them; a custom mark beside it without `x` and `y` draws in pixels by them ([marks beside layout marks](hierarchy-and-flow.md#marks-beside-layout-marks)). |
 
