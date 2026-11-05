@@ -8,6 +8,7 @@
 import type { Expression } from "../data/expression.ts";
 import type { RowView } from "../data/row-view.ts";
 import type { Table } from "../data/table.ts";
+import type { ChartFields } from "../fields/chart.ts";
 import type { MeasureText } from "../layout/text.ts";
 import type { CompiledFeatures } from "../model/features.ts";
 import type { ItemViews } from "../model/item-views.ts";
@@ -347,6 +348,8 @@ export interface LayoutMark extends ChartMark {
   readonly otherTables?: readonly Table[];
   /** What the values are, for tooltip headers: the value field, or "Count". */
   readonly measure: string;
+  /** The field `measure` names, where it is one: what the chart's field displays label. */
+  readonly measureField?: string | undefined;
   /**
    * What the mark's items stand for, for their colors, legend entries, and
    * visibility (see `Mark.identity`): a pie's slices, its category field's
@@ -360,8 +363,16 @@ export interface LayoutMark extends ChartMark {
     theme: Theme,
     paint: PaintReader,
   ): LegendEntry[];
-  /** Legends of color scales and size keys, for marks encoding values that way. */
-  legends?(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[];
+  /**
+   * Legends of color scales and size keys, for marks encoding values that
+   * way, titled and written as the chart's field displays (`fields`) do.
+   */
+  legends?(
+    theme: Theme,
+    locale: string | undefined,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): LegendPart[];
   /** The scales of its that guides may name, as `Mark.legendScales` (a map's color ramp). */
   readonly legendScales?: readonly LegendScale[];
   draw(frame: LayoutFrame): LayoutResult;
@@ -592,10 +603,11 @@ export function heldText(
   of: number,
   measure: { field: string; held: number; of: number } | undefined,
   format: (value: number) => string,
+  amount = format,
 ): string {
   const text = `; ${format(rows)} of ${format(of)} ${of === 1 ? "row" : "rows"} selected`;
   return measure
-    ? `${text}, ${measure.field} ${format(measure.held)} of ${format(measure.of)}`
+    ? `${text}, ${measure.field} ${amount(measure.held)} of ${amount(measure.of)}`
     : text;
 }
 

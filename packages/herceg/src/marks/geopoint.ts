@@ -6,6 +6,7 @@
 import type { CategoryField, NumberField, Schema, Table } from "../data/table.ts";
 import { pointDrawing } from "../draw/point.ts";
 import { symbolPath } from "../draw/symbols.ts";
+import type { ChartFields } from "../fields/chart.ts";
 import { formatNumber } from "../format/format.ts";
 import { extendExtent, type GeoExtent, type ProjectionPlan } from "../geo/project.ts";
 import { ItemViews } from "../model/item-views.ts";
@@ -147,6 +148,7 @@ export class GeoPointMark implements GeoLayer {
   readonly spec: Frozen<GeoPointSpec & { readonly series?: string }>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   readonly identity: ItemSources | undefined;
   readonly reach: number;
   readonly #sizeField: string | undefined;
@@ -218,6 +220,7 @@ export class GeoPointMark implements GeoLayer {
     this.table = table;
     this.#sizeField = spec.size;
     this.measure = this.#sizeField ?? this.#toneField ?? spec.label ?? "Location";
+    this.measureField = this.#sizeField ?? this.#toneField;
     // Groups of a series field stand for its values, as series of it do.
     this.identity =
       this.spec.series === undefined
@@ -305,17 +308,32 @@ export class GeoPointMark implements GeoLayer {
   }
 
   /** Its scales' legends, which guides naming the mark show. */
-  legends(theme: Theme, locale: string | undefined, paint: PaintReader): LegendPart[] {
-    return legendParts(...this.scales(theme, locale, paint));
+  legends(
+    theme: Theme,
+    locale: string | undefined,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): LegendPart[] {
+    return legendParts(...this.scales(theme, locale, paint, fields));
   }
 
-  scales(theme: Theme, locale: string | undefined, paint: PaintReader): [ColorRamp[], GlyphKey[]] {
+  scales(
+    theme: Theme,
+    locale: string | undefined,
+    paint: PaintReader,
+    fields?: ChartFields,
+  ): [ColorRamp[], GlyphKey[]] {
     const ramps: ColorRamp[] = [];
     const keys: GlyphKey[] = [];
+    // Titled by their fields' labels, their values in their formats.
+    const of = (name: string | undefined) =>
+      name === undefined ? undefined : fields?.of(this.table, name);
     const scale = this.#scale(theme, paint);
     if (scale) {
       const { domain, midpoint } = scale;
-      ramps.push({ stops: scale.legendStops(), domain, midpoint, title: this.spec.color! });
+      const field = of(this.#toneField);
+      const title = field?.label ?? this.spec.color!;
+      ramps.push({ stops: scale.legendStops(), domain, midpoint, title, field });
     }
     const field = this.#sizeField;
     const extent = field !== undefined && this.table.extent(field as never);
@@ -332,12 +350,15 @@ export class GeoPointMark implements GeoLayer {
       const nearest = (target: number) =>
         ticks.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a), extent[1]);
       const values = [...new Set([0.25, 0.5, 1].map((f) => nearest(lo + (hi - lo) * f)))];
+      const size = of(field);
+      const plain = (value: number) => formatNumber(value, locale);
+      const write = size?.writer(undefined, plain) ?? plain;
       keys.push({
-        title: field!,
+        title: size?.label ?? field!,
         channel: "size",
         entries: values.map((value) => {
           const r = radius(value);
-          return { label: formatNumber(value, locale), glyph: symbolPath("circle", 0, 0, r), r };
+          return { label: write(value), glyph: symbolPath("circle", 0, 0, r), r };
         }),
       });
     }
@@ -545,16 +566,27 @@ export class GeoPointMark implements GeoLayer {
     const tones =
       this.#toneField === undefined ? undefined : table.numbers(this.#toneField as never);
     const format = (value: number) => formatNumber(value, locale);
+    // Names, values, and fields' labels as the fields' displays write them, where the chart has any.
+    const fieldText = frame.features?.fields?.items(table);
+    const label = (field: string) => fieldText?.label(field) ?? field;
+    const name = fieldText?.value(spec.labelField);
+    const size = fieldText?.value(this.#sizeField) ?? format;
+    const tone = fieldText?.value(this.#toneField) ?? format;
     const nameOf = (row: number) => {
       const code = names ? names.codes[row]! : -1;
-      return code >= 0 ? names!.dictionary[code]! : `${spec.label ?? "Point"} ${row + 1}`;
+      const named = names?.dictionary[code];
+      if (named !== undefined) return name?.(named) ?? named;
+      // Missing: its display's missing text, where it gives one, else its place.
+      const place = `${spec.label ?? "Point"} ${row + 1}`;
+      return fieldText?.value(spec.labelField, undefined, place)?.(null) ?? place;
     };
-    const measure = this.measure;
+    const measure = this.measureField === undefined ? this.measure : label(this.measureField);
     const itemOf = (point: number): LayoutItem => {
       const row = drawn.rows[point]!;
       const parts: string[] = [];
-      if (sizes) parts.push(format(sizes[row]!));
-      if (tones) parts.push(sizes ? `${spec.color} ${format(tones[row]!)}` : format(tones[row]!));
+      if (sizes) parts.push(size(sizes[row]!));
+      if (tones)
+        parts.push(sizes ? `${label(spec.color!)} ${tone(tones[row]!)}` : tone(tones[row]!));
       if (parts.length === 0) parts.push(coordinates(lon[row]!, lat[row]!, locale));
       const [px, py, r] = [
         drawn.coords[point * 2]!,
@@ -633,7 +665,7 @@ export class GeoPointMark implements GeoLayer {
         if (sizes) {
           let largest = drawn.reading[0]!;
           for (const row of drawn.reading) if (sizes[row]! > sizes[largest]!) largest = row;
-          text += ` sized by ${this.#sizeField}; largest ${nameOf(largest)} (${format(sizes[largest]!)})`;
+          text += ` sized by ${label(this.#sizeField!)}; largest ${nameOf(largest)} (${size(sizes[largest]!)})`;
         }
         return `${text}.`;
       },

@@ -133,16 +133,26 @@ export function headerTexts(
   source: Table,
 ): ((group: number, depth: number) => string)[] {
   const by = groups.by as readonly string[];
-  // Keys as the first column showing their field writes its values, or plainly.
-  const formats = by.map(
-    (field) =>
-      layout.find((column) => column.field === field)?.content.format ??
-      valueFormatter(source.kind(field) as "number" | "time" | "category", undefined, settings),
-  );
-  const missing = settings.missing || "(missing)";
+  // Keys as the first column showing their field writes its values, or plainly
+  // (through the field's display, where the grid has field displays).
+  const formats = by.map((field) => {
+    const content = layout.find((column) => column.field === field)?.content;
+    return (
+      content?.key ??
+      content?.format ??
+      valueFormatter(
+        source.kind(field) as "number" | "time" | "category",
+        undefined,
+        settings,
+        field,
+        source,
+      )
+    );
+  });
   const value = (group: number, depth: number, k: number, format = formats[k]!) => {
     const key = groups.keyOf(group, depth)[k]!;
-    return key === null ? missing : format(key);
+    // Displays write missing keys themselves.
+    return key === null && !settings.fields ? "(missing)" : format(key);
   };
   const count = numberFormatter({ maximumFractionDigits: 0 }, settings.locale);
   const tables = by.map((field) => groups.tableOf(field));
@@ -152,7 +162,8 @@ export function headerTexts(
         `${value(group, depth, depth)} (${count(groups.size(group, depth))})`;
     const k = by.indexOf(column.field);
     if (k >= 0)
-      return (group, depth) => (k <= depth ? value(group, depth, k, column.content.format) : "");
+      return (group, depth) =>
+        k <= depth ? value(group, depth, k, column.content.key ?? column.content.format) : "";
     const aggregate = groups.aggregates.find(({ name }) => name === column.content.aggregate);
     if (!aggregate) return () => "";
     const { name, op, field } = aggregate;
@@ -160,7 +171,7 @@ export function headerTexts(
     // The column's format suits aggregates of its own field that keep its kind, not counts.
     const format =
       field === column.field && kind === column.kind && op !== "count"
-        ? column.content.format
+        ? (column.content.amount ?? column.content.format)
         : valueFormatter(kind, undefined, settings);
     return (group, depth) => format(tables[depth]!.numbers(name)[group]!);
   });

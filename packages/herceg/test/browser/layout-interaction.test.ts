@@ -21,6 +21,7 @@ import { treemap } from "../../src/marks/treemap.ts";
 import { ChartModel, type ItemInspection } from "../../src/model/model.ts";
 import { panels } from "../../src/model/panels.ts";
 import { rowSelection } from "../../src/model/row-selection.ts";
+import { renderToSVG } from "../../src/render/static.ts";
 import { chartState } from "../../src/state.ts";
 import { brushOf } from "../helpers/selections.ts";
 import { accessibilityTree, MOUSE, modelOf, pageOrigin, realMouse } from "./helpers.ts";
@@ -711,6 +712,70 @@ describe("treemaps and sunbursts", () => {
     const at = chart.root.getBoundingClientRect();
     await click(chart, box.left - at.left + box.width / 2, box.top - at.top + box.height / 2);
     expect(drills.at(-1)!.key).toBe('[0,"Europe"]');
+  });
+
+  it("name nodes through field displays, drilling and reporting by raw values", async () => {
+    const chart = await mount({
+      marks: [treemap(sales(), { path: ["region", "country"], value: "revenue" })],
+      interaction: { zoom: true },
+      fields: {
+        region: {
+          label: "Region",
+          mappings: [
+            { value: "Europe", text: "EU" },
+            { value: "Asia", text: "APAC" },
+          ],
+        },
+        revenue: {
+          label: "Revenue",
+          format: { style: "currency", currency: "USD", maximumFractionDigits: 0 },
+        },
+      },
+    });
+    const drills = heard(chart, "drill");
+    const eu = itemNamed(chart, "EU");
+    expect(eu.key).toBe('[0,"Europe"]');
+    expect(eu.points[0]!.text).toMatch(/^\$70 /);
+    expect(chart.root.querySelector("svg")!.textContent).toContain("APAC");
+    // The static SVG writes what the page does (its legend in SVG, the page's in HTML).
+    const texts = (root: ParentNode) =>
+      [...new Set([...root.querySelectorAll("text")].map((text) => text.textContent))].sort();
+    const exported = new DOMParser().parseFromString(renderToSVG(chart), "image/svg+xml");
+    expect(texts(exported)).toEqual(texts(chart.root));
+    await click(chart, ...corner(eu));
+    expect(drills).toEqual([
+      {
+        key: '[0,"Europe"]',
+        path: [{ key: '[0,"Europe"]', label: "Europe" }],
+        cause: "pointer",
+        revision: chart.revision,
+      },
+    ]);
+    const live = chart.root.querySelector("[aria-live]")!;
+    expect(live.textContent).toMatch(/^EU\. Treemap of Revenue by Region \/ country in EU:/);
+    expect(chart.root.querySelector("nav")!.textContent).toContain("EU");
+    const france = itemNamed(chart, "EU / France");
+    expect(france.key).toBe('[0,"Europe","France"]');
+    expect(france.points[0]!.text).toBe("$50 (71.4% in EU)");
+  });
+
+  it("announce the node drilled into without breadcrumbs, as its names are written", async () => {
+    for (const fields of [undefined, { region: { mappings: [{ value: "Europe", text: "EU" }] } }]) {
+      const chart = await mount({
+        marks: [
+          treemap(sales(), { path: ["region", "country"], value: "revenue", breadcrumbs: false }),
+        ],
+        interaction: { zoom: true },
+        ...(fields && { fields }),
+      });
+      await click(chart, ...corner(itemNamed(chart, fields ? "EU" : "Europe")));
+      expect(chart.root.querySelector("nav")?.textContent ?? "").toBe("");
+      const live = chart.root.querySelector("[aria-live]")!;
+      expect(live.textContent).toMatch(fields ? /^EU\. / : /^Europe\. /);
+      // The next chart takes this one's place in the frame.
+      for (const done of mounted.splice(0)) done.destroy();
+      for (const host of hosts.splice(0)) host.remove();
+    }
   });
 
   it("open the node read with Enter, go up with Backspace, and the whole tree with 0", async () => {

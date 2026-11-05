@@ -1,6 +1,7 @@
 import { category, count, groupRows, mean, rowView, table } from "herceg";
+import { type CompiledFields, compileFields } from "herceg/fields";
 import { createGridModel, type Grid as HercegGrid } from "herceg/grid";
-import { act, Profiler, StrictMode, useMemo } from "react";
+import { act, Profiler, StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { userEvent } from "vitest/browser";
@@ -192,6 +193,50 @@ describe("<Grid>", () => {
     data.append({ id: [3], ms: [1] });
     await frames();
     expect(grid().getAttribute("aria-rowcount")).toBe("5");
+  });
+
+  it("takes new field displays through its model, without a new grid or a render", async () => {
+    const data = requests(3);
+    let renders = 0;
+    function Requests({ fields }: { fields: CompiledFields }) {
+      // Made once with the first displays; later ones go through the model.
+      const [model] = useState(() =>
+        createGridModel({
+          data: rowView(data),
+          fields,
+          columns: [{ field: "id" }, { field: "ms" }],
+        }),
+      );
+      useEffect(() => model.setFields(fields), [model, fields]);
+      return (
+        <Profiler id="grid" onRender={() => renders++}>
+          <Grid model={model} ariaLabel="Requests" style={{ height: 300 }} />
+        </Profiler>
+      );
+    }
+    const headers = () =>
+      [...host.querySelectorAll("[role=columnheader]")].map((cell) => cell.firstChild?.textContent);
+    act(() => root.render(<Requests fields={compileFields({ ms: { label: "Latency" } })} />));
+    const made = grid();
+    expect(headers()).toEqual(["id", "Latency"]);
+    act(() =>
+      root.render(
+        <Requests
+          fields={compileFields({
+            ms: { label: "Latency", format: { duration: "millisecond" } },
+            id: { label: "Request" },
+          })}
+        />,
+      ),
+    );
+    await frames();
+    expect(grid()).toBe(made);
+    expect(headers()).toEqual(["Request", "Latency"]);
+    expect(firstCells()).toEqual(["0", "1", "2"]);
+    expect(
+      host.querySelector('.hg-body [aria-rowindex="3"] [aria-colindex="2"]')!.textContent,
+    ).toBe("37ms");
+    expect(renders).toBe(2);
   });
 
   it("shows groups as a tree grid, expanding and streaming without rendering React", async () => {

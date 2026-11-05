@@ -6,6 +6,7 @@
 
 import type { TimeZone } from "../format/zone.ts";
 import { guideFields } from "../guides/fields.ts";
+import { itemLegends } from "../marks/features/item-legends.ts";
 import { displayedContent } from "../marks/features/label-displays.ts";
 import { naming } from "../marks/features/names.ts";
 import { type ChartFieldKit, type ChartFields, chartFields } from "./chart.ts";
@@ -39,4 +40,4 @@ export function chartFieldsOf(
   return made;
 }
 
-export { displayedContent, guideFields, naming };
+export { displayedContent, guideFields, itemLegends, naming };

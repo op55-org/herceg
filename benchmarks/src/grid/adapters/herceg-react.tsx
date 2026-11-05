@@ -13,7 +13,8 @@ import { hercegHandle, hercegTable, THEME } from "./herceg.ts";
 
 export const adapter: Adapter = {
   id: "herceg-react",
-  renderer: "DOM rows and cells, mounted through @herceg/react/grid (React 19)",
+  renderer:
+    "DOM rows and cells written through field displays, mounted through @herceg/react/grid (React 19)",
   processing: { sort: "native (row view)", filter: "native (row view, expression)" },
   prepare: hercegTable,
   mount: (container, fixture, input) =>

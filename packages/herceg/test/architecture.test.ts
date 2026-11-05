@@ -6,6 +6,7 @@ const SRC = join(import.meta.dirname, "..", "src");
 // The chart engine must run without a DOM (servers, workers, Python exports).
 const CORE = [
   "data",
+  "fields",
   "geo",
   "grid",
   "scale",
@@ -29,6 +30,7 @@ const DISPLAYS = [
   "fields/check.ts",
   "format/intl-options.ts",
   "guides/fields.ts",
+  "marks/features/item-legends.ts",
   "marks/features/label-displays.ts",
   "marks/features/names.ts",
 ];

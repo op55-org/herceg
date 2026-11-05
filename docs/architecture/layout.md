@@ -193,6 +193,20 @@ compilers (`render/compilers.ts`).
   displays (`CompiledFeatures.fields`), gauges, heatmaps, and points their
   fields' displays through `useFormats`, and band axes the categories'
   text.
+- **Layout marks** ask the compiled displays for their items' text
+  (`ChartFields.items(table)`, an `ItemText`: values, amounts, fields'
+  labels, and a tree's names per level) only where the chart has
+  displays, and write as they do without them otherwise, so the code
+  that writes through displays stays in the chunk. Keys, hiding, drills,
+  and selections read the raw values. Their legends are named by the
+  display code (`itemLegends`, `marks/features/item-legends.ts`), which
+  the feature compiler calls each scene (`listDomains`) and which writes
+  the entries and parts the model keeps, legend shown or not: an entry layout items stand for takes its value's text where every
+  mark sharing it writes it alike (`ChartFields.entry`; entries a series'
+  own label parts name keep their names), and ramps and size keys are
+  written through the marks' `legends(..., fields)`, keeping their keys,
+  by which subplots' legends own them; a part several marks share is
+  written only where they all write it alike.
 
 ## Legends and visibility
 

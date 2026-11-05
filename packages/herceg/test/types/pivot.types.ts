@@ -54,6 +54,8 @@ const model = createPivotGridModel({
   selectionStore: selectionStore(requests),
 });
 expectTypeOf(model).toEqualTypeOf<PivotGridModel<Requests>>();
+// @ts-expect-error pivot grids take no field displays yet
+model.setFields(undefined);
 createPivotGridModel({
   data: pivot,
   // @ts-expect-error aggregates by the pivot's names

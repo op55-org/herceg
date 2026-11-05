@@ -3004,7 +3004,7 @@ export class ChartModel {
    */
   #furniture(
     drawn: readonly LegendEntry[],
-    parts: readonly LegendPart[],
+    parts: LegendPart[],
     measure: MeasureText,
     yLabels: boolean,
     yOver = 0,
@@ -3014,8 +3014,8 @@ export class ChartModel {
   ): Furniture {
     const config = this.#config;
     const { width, height } = this;
-    // A declared domain lists every value, drawn or not.
-    const entries = this.#featured?.listDomains(drawn, !this.#compiled?.legends) ?? drawn;
+    // A declared domain lists every value, drawn or not; displays write layout items' entries and parts.
+    const entries = this.#featured?.listDomains(drawn, !this.#compiled?.legends, parts) ?? drawn;
     this.#entries = entries;
     // Parts that start rows of their own (keys) follow the others (ramps),
     // in the legend and in the chart's description alike.

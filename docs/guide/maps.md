@@ -143,7 +143,10 @@ hg.Chart(countries, zoom=True, brush="lasso",
 ## Readings and performance
 
 - Tooltips and the arrow keys report a region's name and value (or
-  category) and a point's name and size, regions first in row order. The
+  category) and a point's name and size, regions first in row order, each
+  written through the chart's [field displays](fields.md#layout-marks)
+  where it has them (the color ramp and the size key take the fields'
+  labels and formats too). The
   pointer finds the last-drawn point within 3 px, else the last-drawn region
   containing it (holes excluded).
 - The description summarizes each layer: the regions' value range with the

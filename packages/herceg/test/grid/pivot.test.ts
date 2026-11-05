@@ -86,6 +86,10 @@ describe("pivot grids", () => {
       "Total, n",
       "Total, Latency",
     ]);
+    // Menus and announcements name each column whole.
+    expect(model.columns.map(({ id }) => model.columnTitle(id!))).toEqual(
+      model.columns.map(({ title }) => title),
+    );
     expect(headings(model)).toEqual([
       undefined,
       "api",

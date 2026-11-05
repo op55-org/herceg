@@ -8,6 +8,7 @@ import { category } from "../../src/data/column.ts";
 import { rowView } from "../../src/data/row-view.ts";
 import { type Table, table } from "../../src/data/table.ts";
 import { createGrid, type Grid } from "../../src/dom/grid.ts";
+import { type CompiledFields, compileFields } from "../../src/fields.ts";
 import { createGridModel, type GridColumn, MIN_COLUMN_WIDTH } from "../../src/grid/model.ts";
 import { MOUSE, realMouse } from "./helpers.ts";
 
@@ -27,12 +28,13 @@ function mount(
   columns: readonly GridColumn[],
   data: Table = requests(200),
   size = "width:600px;height:300px",
+  fields?: CompiledFields,
 ): Grid {
   const host = document.createElement("div");
   host.style.cssText = size;
   document.body.append(host);
   hosts.push(host);
-  const model = createGridModel({ data: rowView(data), columns, locale: "en-US" });
+  const model = createGridModel({ data: rowView(data), columns, locale: "en-US", fields });
   const grid = createGrid(host, { model, ariaLabel: "Requests" });
   grids.push(grid);
   return grid;
@@ -466,6 +468,35 @@ describe("column menus", () => {
     expect(said(grid)).toBe("at hidden");
     // The focus goes to the nearest shown column's header.
     expect(document.activeElement).toBe(header(grid, "id"));
+  });
+
+  it("title headers and the menu's columns by fields' labels, described by their descriptions", async () => {
+    const fields = compileFields({
+      ms: { label: "Latency", description: "Time to the last byte." },
+      at: { label: "Time" },
+    });
+    const columns = [
+      { field: "id" },
+      { field: "ms" },
+      { field: "at", hidden: true },
+      { field: "host" },
+    ];
+    const grid = mount(columns as GridColumn[], requests(20), undefined, fields);
+    expect(headers(grid)).toEqual(["id", "Latency", "host"]);
+    expect(header(grid, "Latency").title).toBe("Time to the last byte.");
+    expect(header(grid, "id").hasAttribute("title")).toBe(false);
+    grid.focusCell(-1, "id");
+    await userEvent.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    const labels = items(grid)
+      .filter((element) => element.getAttribute("role") === "menuitemcheckbox")
+      .map((element) => element.firstChild?.textContent);
+    expect(labels).toEqual(["id", "Latency", "Time", "host"]);
+    await userEvent.keyboard("{Escape}");
+    // New displays rewrite the headers in place.
+    grid.model.setFields(undefined);
+    await frames();
+    expect(headers(grid)).toEqual(["id", "ms", "host"]);
+    expect(header(grid, "ms").hasAttribute("title")).toBe(false);
   });
 
   it("show hidden columns again with their checks, staying open, and keep the last one shown", async () => {

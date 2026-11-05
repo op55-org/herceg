@@ -41,7 +41,16 @@ focus keeps to its row; when the row leaves it goes to the row now at its
 index.
 
 **Formatting** reads values through one Intl formatter per column, made
-once (`format/format.ts` caches them), and keeps no strings.
+once (`format/format.ts` caches them), and keeps no strings. A grid given
+field displays (`fields`, compiled by `compileFields` in `herceg/fields`)
+asks them for each column's display instead (`CompiledFields.column`,
+`fields/grid.ts`): its title, description, cell text, key text, and
+aggregate text. The display code lives in `herceg/fields`, so grids
+without displays load none of it; the grid core only stores the compiled
+displays and calls them. A category column's texts are kept per
+dictionary entry, written the first time a cell shows the entry (a
+`WeakMap` keyed by the dictionary, reset by its compaction revision), so
+a mapping runs once per category value shown, not once per drawn cell.
 
 Models are held weakly by what they follow, so a model no one keeps stops
 on its own; `dispose()` stops it at once.

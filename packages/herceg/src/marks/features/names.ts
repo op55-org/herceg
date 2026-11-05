@@ -13,6 +13,7 @@ import type { NamePart } from "../../spec/encoding.ts";
 import type { Mark } from "../mark.ts";
 import type { Series } from "../series.ts";
 import type { MarkScope } from "./identity.ts";
+import type { ItemNames } from "./item-legends.ts";
 
 /** Where a mark's names are worked out: its name in messages, its index, and its id or index. */
 interface NamedAt {
@@ -31,7 +32,9 @@ interface NamedAt {
  * entries a color field's values stand for, the table and field of each
  * mark sharing them, as the chart's marks are named: an entry is named by
  * the text their displays all write (`ChartFields.entry`), else by its raw
- * value. Throws, naming the
+ * value. `items` learns the fields the mark names its entries by, and the
+ * entries its own parts name, which displays never rename (see
+ * `itemLegends`). Throws, naming the
  * part, for parts a name cannot read; undefined where nothing names them.
  */
 export function naming(
@@ -42,9 +45,11 @@ export function naming(
   fields: ChartFields | undefined,
   at: NamedAt,
   entries: Map<string, [Table, string][]>,
+  items: ItemNames | undefined,
 ): (<F extends MarkFeatures>(features: F) => F) | undefined {
   const label = (mark.spec as { label?: unknown }).label;
   const parts = Array.isArray(label) ? (label as readonly NamePart[]) : undefined;
+  if (scope) items?.series(scope.color, mark.table, scope.field);
   if (!fields && !parts) return undefined;
   const table = mark.table;
   const series = mark.identity?.field;
@@ -148,6 +153,7 @@ export function naming(
       // the marks sharing it write it where they all write it alike.
       if (s.entryLabel !== undefined && shared !== undefined)
         s.entryLabel = fields?.entry(entries.get(shared)!, s.entryLabel) ?? s.entryLabel;
+      else if (parts && s.entry !== undefined) items?.own(s.entry);
       // A range's low end is its first field's (a band's low field; an error
       // bar's low end, or its center).
       const field = valueField(s);

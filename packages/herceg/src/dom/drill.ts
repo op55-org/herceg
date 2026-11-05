@@ -151,8 +151,9 @@ export class Controls implements ChartControls {
     const items = model.items;
     items?.by(cause, () => items.setDrillRoot(key, panel));
     const say = () => {
-      const path = model.items?.drillRoot(panel)?.path ?? [];
-      const where = path.length > 0 ? path.map(({ label }) => label).join(" / ") : "The whole tree";
+      // Its steps as its breadcrumbs name them (through the fields' displays), drawn or not.
+      const path = model.items?.result(panel)?.drill?.labels ?? [];
+      const where = path.length > 0 ? path.join(" / ") : "The whole tree";
       // Facet panels share the root: one goes, they all go.
       const shared = model.config.facet ? ", in every panel" : "";
       this.#host.announce(`${where}${shared}. ${model.layoutSummary(panel) ?? ""}`.trim());

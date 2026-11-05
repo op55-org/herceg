@@ -9,6 +9,7 @@
 import type { GroupKey } from "../data/groups.ts";
 import type { SortKey } from "../data/order.ts";
 import type { Schema } from "../data/table.ts";
+import type { CompiledFields } from "../fields/display.ts";
 import type { TimeZone } from "../format/zone.ts";
 import {
   type ColumnContent,
@@ -33,8 +34,14 @@ export interface GridSettings {
   locale?: string;
   /** Zone times are shown in: "UTC", an IANA zone, or "local" (the default). */
   timeZone?: TimeZone;
-  /** Text of missing values; empty by default. */
-  missing?: string;
+  /**
+   * Field displays (`compileFields(rules)` from `herceg/fields`): headers
+   * take their fields' labels and descriptions, and cells and group rows
+   * write values through them (missing text, mappings, every format).
+   * Without them, numbers and times are written with Intl options, and
+   * missing values are empty.
+   */
+  fields?: CompiledFields | undefined;
   /** How clicks select rows (see `GridSelectionOptions`). */
   selection?: GridSelectionOptions;
 }
@@ -210,7 +217,8 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
     this.settings = {
       locale: options.locale,
       timeZone: options.timeZone ?? "local",
-      missing: options.missing ?? "",
+      missing: "",
+      fields: options.fields,
     };
   }
 
@@ -245,6 +253,29 @@ export abstract class BaseGridModel<S extends Schema = Schema> {
 
   /** Replaces the columns: their order, widths, pins, formats, aggregates, and which are hidden. */
   abstract setColumns(columns: readonly GridColumn<S>[]): void;
+
+  /**
+   * Writes headers, cells, and group rows through these field displays
+   * (`compileFields(rules)`), or without any; the columns' layout, the
+   * sort, groups, selection, and scroll stay.
+   */
+  setFields(fields: CompiledFields | undefined): void {
+    this.settings.fields = fields;
+    this.setColumns(this.columns);
+  }
+
+  /**
+   * What column `id`, shown or hidden, is called in menus and announcements:
+   * its title, else its field's label, else its field; a pivot's value
+   * column with its value ("api, Latency (ms)").
+   */
+  columnTitle(id: string): string {
+    this.generated();
+    const content = this.#contents.get(id);
+    if (!content) return id;
+    const { title, heading } = content;
+    return heading ? `${heading.title}, ${title}` : title;
+  }
 
   /**
    * Sets a column's width, in CSS pixels, no narrower than

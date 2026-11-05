@@ -9,6 +9,7 @@
 // move to a chunk of its own (see model/guides.ts, `GUIDE_KIT`).
 
 import type { Table } from "../../data/table.ts";
+import type { ItemText } from "../../fields/chart.ts";
 import { formatWriter } from "../../format/patterns.ts";
 import type { FeatureKit } from "../../model/features.ts";
 import type { TextItem } from "../../scene/scene.ts";
@@ -23,7 +24,10 @@ export type WrittenParts = readonly { text: string; style: PartStyle | undefined
 
 /**
  * Writes a label's parts for node `node` of `view`, valued `value`,
- * numbers for `locale`; `row` gives the one row the node stands for.
+ * numbers for `locale`; `row` gives the one row the node stands for. With
+ * the chart's field displays, fields' values (the tree's names among them,
+ * `view`'s raw) are written as `text` writes them, and the value without a
+ * format of its own as `amount` does.
  */
 export type ContentWriter = (
   view: TreeView,
@@ -31,6 +35,8 @@ export type ContentWriter = (
   value: number,
   row: () => number | undefined,
   locale: string | undefined,
+  text?: ItemText,
+  amount?: (value: number) => string,
 ) => WrittenParts;
 
 /** What tree marks draw their labels of parts and styles with. */
@@ -117,6 +123,8 @@ type PartWriter = (
   value: number,
   row: () => number | undefined,
   locale: string | undefined,
+  text?: ItemText,
+  amount?: (value: number) => string,
 ) => string;
 
 function writer(
@@ -147,34 +155,47 @@ function writer(
     styles[i] = spec.style;
     if (spec.value) {
       const write = number(spec.format, where);
-      return (_view, _node, value, _row, locale) =>
-        Number.isFinite(value) ? write(value, locale) : "";
+      // Without a format of its own, as the value field's display writes it.
+      return (_view, _node, value, _row, locale, _text, amount) =>
+        Number.isFinite(value)
+          ? !spec.format && amount
+            ? amount(value)
+            : write(value, locale)
+          : "";
     }
     const field = spec.field!;
+    // A name of the tree, a value of this field, through its display where the chart has one.
+    const name = (value: string, text: ItemText | undefined) =>
+      oneLine(text?.value(field)?.(value) ?? value);
     const level = path?.indexOf(field) ?? -1;
     if (level >= 0)
-      return (view, node) => {
+      return (view, node, _value, _row, _locale, text) => {
         // The item's own name at its level, an ancestor's below it, nothing above.
         const depth = view.prefix.length + view.tree.depth[node]!;
         if (depth <= level) return "";
-        if (level < view.prefix.length) return oneLine(view.prefix[level]!);
+        if (level < view.prefix.length) return name(view.prefix[level]!, text);
         let at = node;
         while (view.prefix.length + view.tree.depth[at]! > level + 1) at = view.tree.parent[at]!;
-        return oneLine(view.tree.names[at]!);
+        return name(view.tree.names[at]!, text);
       };
     // A drilled view's root keeps its name; the whole tree's has none.
-    if (field === tree?.node) return (view, node) => oneLine(view.tree.names[node]!);
+    if (field === tree?.node)
+      return (view, node, _value, _row, _locale, text) => name(view.tree.names[node]!, text);
     if (field === tree?.parent)
-      return (view, node) => {
+      return (view, node, _value, _row, _locale, text) => {
         const parent = view.tree.parent[node]!;
-        if (parent >= 0) return oneLine(view.tree.names[parent]!);
+        if (parent >= 0) return name(view.tree.names[parent]!, text);
         // A drilled view's root: its parent is the step before it on the path.
-        return view.prefix.length > 1 ? oneLine(view.prefix.at(-2)!) : "";
+        return view.prefix.length > 1 ? name(view.prefix.at(-2)!, text) : "";
       };
     const write = table.kind(field) === "number" ? number(spec.format, where) : undefined;
-    return (_view, _node, _value, row, locale) => {
+    return (_view, _node, _value, row, locale, text) => {
       const at = row();
       const read = at === undefined ? null : table.value(field as never, at);
+      // Through the field's display, where it has one, the part's own format over its format.
+      const own = spec.format && write && ((value: number) => write(value, locale));
+      const shown = at === undefined ? undefined : text?.value(field, own);
+      if (shown) return oneLine(shown(read));
       return read === null
         ? ""
         : typeof read === "number"
@@ -182,6 +203,9 @@ function writer(
           : oneLine(String(read));
     };
   });
-  return (view, node, value, row, locale) =>
-    writers.map((write, i) => ({ text: write(view, node, value, row, locale), style: styles[i] }));
+  return (view, node, value, row, locale, text, amount) =>
+    writers.map((write, i) => ({
+      text: write(view, node, value, row, locale, text, amount),
+      style: styles[i],
+    }));
 }

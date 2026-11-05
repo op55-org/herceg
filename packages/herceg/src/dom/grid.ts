@@ -607,6 +607,8 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
       cell.element.toggleAttribute("data-moving", cell.id === moving);
       if (!this.#place(cell, column, layout) && !changed) continue;
       setText(cell.text, column.title);
+      // The field's description: a tooltip, and the header's accessible description.
+      setAttribute(cell.element, "title", column.content.description);
       const at = sort.findIndex(({ field }) => field === column.field);
       const order = at < 0 ? undefined : (sort[at]!.order ?? "ascending");
       const mark = order
@@ -1120,8 +1122,10 @@ export class Grid<S extends Schema = Schema, M extends BaseGridModel<S> = GridMo
 
   #announceSort() {
     const model = this.model;
-    const title = (field: string) =>
-      model.columns.find((column) => column.field === field)?.title ?? field;
+    const title = (field: string) => {
+      const column = model.columns.find((column) => column.field === field);
+      return column ? model.columnTitle(column.id ?? field) : field;
+    };
     const keys = model.sort;
     this.#say(
       keys.length === 0
@@ -1197,9 +1201,12 @@ export function placeCell(
   setAttribute(element, "data-align", column.align);
 }
 
-/** Sets an attribute unless it has the value; an empty value for `data-` attributes removes it. */
-export function setAttribute(target: Element, name: string, value: string) {
-  if (value === "" && name.startsWith("data-")) {
+/**
+ * Sets an attribute unless it has the value; no value, or an empty one for
+ * `data-` attributes, removes it.
+ */
+export function setAttribute(target: Element, name: string, value: string | undefined) {
+  if (value === undefined || (value === "" && name.startsWith("data-"))) {
     if (target.hasAttribute(name)) target.removeAttribute(name);
   } else if (target.getAttribute(name) !== value) target.setAttribute(name, value);
 }

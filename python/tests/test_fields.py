@@ -458,3 +458,41 @@ def test_gauges_check_bands_against_the_ends_their_value_column_may_give():
     )
     with pytest.raises(hg.ChartError, match=r"^gauge min: expected a finite min below"):
         hg.Chart(loads, fields=displays).gauge("load", min=300, max=200)
+
+
+SALES = {
+    "region": ["eu", "as", "eu", "am"],
+    "country": ["fr", "jp", "es", "us"],
+    "revenue": [40_000, 30_000, 20_000, 10_000],
+}
+REGIONS = {
+    "region": hg.FieldDisplay(
+        label="Region",
+        mappings=[
+            hg.Mapping(value="eu", text="Europe"),
+            hg.Mapping(value="as", text="Asia"),
+            hg.Mapping(value="am", text="Americas"),
+        ],
+    ),
+    "revenue": hg.FieldDisplay(label="Revenue", format=hg.Format(number=",.0f", prefix="$")),
+}
+
+
+def test_layout_marks_name_their_items_through_the_displays():
+    pie = hg.Chart(SALES, fields=REGIONS, width=500, height=300).pie("region", "revenue")
+    drawn = set(texts(pie))
+    assert {"Europe", "Asia"} <= drawn
+    assert "eu" not in drawn
+    assert "Pie of Revenue by Region: 3 slices totaling $100,000." in pie.to_svg()
+    tree = hg.Chart(SALES, fields=REGIONS, width=500, height=300).treemap(
+        ["region", "country"], "revenue"
+    )
+    assert "Europe" in texts(tree)
+    assert "Treemap of Revenue by Region / country" in tree.to_svg()
+    flows = {"from": ["a", "a"], "to": ["b", "c"], "amount": [5, 3]}
+    names = hg.FieldDisplay(
+        match=hg.Match(field=["from", "to"]),
+        mappings=[hg.Mapping(value="a", text="Coal"), hg.Mapping(value="b", text="Power")],
+    )
+    sankey = hg.Chart(flows, fields=[names], width=500, height=300).sankey("from", "to", "amount")
+    assert {"Coal 8", "Power 5", "c 3"} <= set(texts(sankey))

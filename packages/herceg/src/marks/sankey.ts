@@ -122,6 +122,7 @@ export class SankeyMark implements LayoutMark {
   readonly spec: Frozen<SankeySpec>;
   readonly table: Table;
   readonly measure: string;
+  readonly measureField: string | undefined;
   /**
    * Clicks select a link's rows or a node's (its links'), and a selection
    * of them is drawn as a share of each link.
@@ -150,6 +151,7 @@ export class SankeyMark implements LayoutMark {
     }
     this.table = table;
     this.measure = spec.value ?? "Count";
+    this.measureField = spec.value;
   }
 
   /**
@@ -328,6 +330,22 @@ export class SankeyMark implements LayoutMark {
     const { bounds, theme, locale } = frame;
     const flows = this.#graph(frame.rows);
     const { names, graph } = flows;
+    // Names as the source and target fields' displays write them where they
+    // agree, totals in the value field's format, where the chart has displays.
+    const { table, spec } = this;
+    const measured = spec.value;
+    const fields = frame.features?.fields;
+    const fieldText = fields?.items(table);
+    const amount = fieldText?.amount(measured) ?? ((value: number) => formatNumber(value, locale));
+    const label = fieldText?.label(measured!) ?? measured;
+    const texts =
+      fields?.names(
+        [
+          [table, spec.source],
+          [table, spec.target],
+        ],
+        names,
+      ) ?? names;
     const layout = this.#layout(flows, bounds);
     const { boxes, order, status, sourceY, targetY, thickness } = layout;
     const { source, target } = graph;
@@ -427,23 +445,22 @@ export class SankeyMark implements LayoutMark {
       );
     }
     if (this.spec.labels ?? true)
-      geometry.push(...sankeyLabels(layout, names, frame, this.spec.halo));
+      geometry.push(...sankeyLabels(layout, texts, frame, this.spec.halo, amount));
 
     const nodeItem = (node: number): LayoutItem => {
       const [x0, y0, x1, y1] = boxes.subarray(node * 4, node * 4 + 4) as unknown as number[];
       const into = layout.inflow[node]!;
       const out = layout.outflow[node]!;
-      const format = (value: number) => formatNumber(value, locale);
+      const format = amount;
       const outline = new SvgPath();
       outline.rect(x0!, y0!, x1! - x0!, y1! - y0!);
-      const field = this.spec.value;
       // The selection's rows of the node's links, and what they bring in and take out.
       const selection = !nodes
         ? ""
-        : heldText(nodes.rows[node]!, nodes.of[node]!, undefined, format) +
-          (field === undefined
+        : heldText(nodes.rows[node]!, nodes.of[node]!, undefined, (n) => formatNumber(n, locale)) +
+          (measured === undefined
             ? ""
-            : `, ${field} ${[
+            : `, ${label} ${[
                 into > 0 ? `${format(nodes.into[node]!)} of ${format(into)} in` : "",
                 out > 0 ? `${format(nodes.out[node]!)} of ${format(out)} out` : "",
               ]
@@ -451,7 +468,7 @@ export class SankeyMark implements LayoutMark {
                 .join(", ")}`);
       return {
         key: nodeKey(node),
-        label: names[node]!,
+        label: texts[node]!,
         color: colors[node]!,
         value: Math.max(into, out),
         text:
@@ -470,22 +487,23 @@ export class SankeyMark implements LayoutMark {
       const [x0, x1] = ends(link);
       const s = source[link]!;
       const t = target[link]!;
-      const field = this.spec.value;
-      const format = (value: number) => formatNumber(value, locale);
       const value = graph.value[link]!;
       return {
         key: JSON.stringify([frame.id, names[s], names[t]]),
-        label: `${names[s]} → ${names[t]}`,
+        label: `${texts[s]} → ${texts[t]}`,
         color: colors[s]!,
         value,
         text:
-          format(value) +
+          amount(value) +
           (held
             ? heldText(
                 held.rows[link]!,
                 held.of[link]!,
-                field === undefined ? undefined : { field, held: held.sums[link]!, of: value },
-                format,
+                measured === undefined
+                  ? undefined
+                  : { field: label!, held: held.sums[link]!, of: value },
+                (n) => formatNumber(n, locale),
+                amount,
               )
             : ""),
         px: (x0 + x1) / 2,
@@ -592,7 +610,7 @@ export class SankeyMark implements LayoutMark {
         soles ??= this.#solesOf(flows, frame.rows, status);
         return found.link === undefined ? soles.nodes.of(found.node) : soles.links.of(found.link);
       },
-      summary: () => this.#summary(layout, names, graph, links, locale),
+      summary: () => this.#summary(layout, texts, graph, links, amount, label),
     };
   }
 
@@ -601,9 +619,10 @@ export class SankeyMark implements LayoutMark {
     names: readonly string[],
     graph: SankeyGraph,
     links: readonly number[],
-    locale: string | undefined,
+    amount: (value: number) => string,
+    label: string | undefined,
   ): string {
-    const what = this.spec.value === undefined ? "row counts" : this.spec.value;
+    const what = label ?? "row counts";
     // Links come from rows with positive, finite values, so a link without a
     // finite value is one whose total overflowed.
     let cycles = 0;
@@ -621,7 +640,7 @@ export class SankeyMark implements LayoutMark {
     let largest = links[0]!;
     for (const link of links) if (graph.value[link]! > graph.value[largest]!) largest = link;
     const flow = `${names[graph.source[largest]!]} → ${names[graph.target[largest]!]}`;
-    return `Sankey of ${what}: ${count(layout.order.length, "node", "nodes")} in ${count(layout.columns, "column", "columns")} and ${count(links.length, "flow", "flows")}; the largest flow is ${flow}, ${formatNumber(graph.value[largest]!, locale)}.${left}`;
+    return `Sankey of ${what}: ${count(layout.order.length, "node", "nodes")} in ${count(layout.columns, "column", "columns")} and ${count(links.length, "flow", "flows")}; the largest flow is ${flow}, ${amount(graph.value[largest]!)}.${left}`;
   }
 }
 
@@ -701,8 +720,9 @@ function sankeyLabels(
   names: readonly string[],
   frame: LayoutFrame,
   halo: Halo | undefined,
+  amount: (value: number) => string,
 ): Geometry[] {
-  const { bounds, theme, measure, locale } = frame;
+  const { bounds, theme, measure } = frame;
   const { columns, columnX, nodeWidth, column, boxes, order } = layout;
   const font = `${theme.fontSize}px ${theme.font}`;
   const lineHeight = Math.round(theme.fontSize * 1.25);
@@ -744,7 +764,7 @@ function sankeyLabels(
       const width = shared ? gap / 2 - LABEL_GAP - 2 : gap - 2 * LABEL_GAP;
       if (width <= 0) continue;
       const name = oneLineText(names[node]!);
-      const full = `${name} ${formatNumber(value(node), locale)}`;
+      const full = `${name} ${amount(value(node))}`;
       const text = measure(full, font) <= width ? full : labelFor(name, width, measure, font);
       if (!text) continue;
       placed.push(y);
