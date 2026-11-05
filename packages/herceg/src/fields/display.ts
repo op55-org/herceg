@@ -13,6 +13,7 @@ import type { DisplayedKind, FieldDisplay, MissingDisplay, ValueMapping } from "
 import type { FormatSpec } from "../spec/guides.ts";
 import { checkFormat, holds, misfit } from "./check.ts";
 import type { ColumnDisplay, GridColumnSettings } from "./grid.ts";
+import { type LinkRows, type LinkWrite, linker, type RowLink } from "./links.ts";
 import type { FieldDisplays, FieldOf, Resolved } from "./rules.ts";
 
 /** The chart's code a display writes with (see `GuideKit`): its formatters and zone arithmetic. */
@@ -69,6 +70,15 @@ export interface DisplayedField<K extends DisplayedKind = DisplayedKind> {
    * gives one, which surfaces draw in their own paint.
    */
   color(value: ReadValue<K>): string | undefined;
+  /**
+   * Row `row`'s link, as the field's `link` makes it from `table` (a row
+   * view's: its table's row `row`): its URL, and its text, written as
+   * `text` writes values; undefined where the field has no link, the row
+   * misses a value its URL reads, or the URL's scheme is not http, https,
+   * mailto, or none (relative).
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: a table of any schema holding the field.
+  link(table: Table<any> | RowView<any> | LinkRows, row: number): RowLink | undefined;
 }
 
 /**
@@ -124,7 +134,8 @@ export const DATE_TIME = { dateStyle: "medium", timeStyle: "short" } as const;
 
 /**
  * `field`'s display from `resolved`, writing with `kit` where `settings`
- * says; `surface` names the settings in messages ("displayOf").
+ * says, and its link's other fields as `textOf(table, name)` writes them;
+ * `surface` names the settings in messages ("displayOf").
  */
 export function displayed<K extends DisplayedKind>(
   field: FieldOf & { kind: K },
@@ -138,6 +149,7 @@ export function displayed<K extends DisplayedKind>(
     missing: fallback = "–",
   }: DisplaySettings,
   surface: string,
+  textOf: (table: LinkRows, name: string) => LinkWrite,
 ): DisplayedField<K> {
   const { name, kind } = field;
   const display = settings as ResolvedDisplay;
@@ -167,7 +179,20 @@ export function displayed<K extends DisplayedKind>(
   const text = (value: ReadValue<K>) =>
     (missingValue(kind, value) ? undefined : mapped?.(value!)?.text) ?? format(value);
   const color = colorer(kind, display, mapped) ?? (() => undefined);
-  return { field: name, kind, label, description, min, max, text, format, color };
+  const linked = display.link && linker(display.link, name, `${surface} ${from.link}.link`, textOf);
+  return {
+    field: name,
+    kind,
+    label,
+    description,
+    min,
+    max,
+    text,
+    format,
+    color,
+    link: (table, row) =>
+      linked?.("source" in table ? table.source : table, row, text as LinkWrite),
+  };
 }
 
 /** The text of missing values a display's `missing` gives, if it gives one. */

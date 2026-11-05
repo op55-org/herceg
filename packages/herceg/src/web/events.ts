@@ -246,6 +246,8 @@ export interface InspectionPayload {
       kind: string;
       value: number | string | null;
       text: string;
+      color?: string;
+      link?: { url: string; text: string };
     }[];
   }[];
   /** An item's data by field (a 3D chart's point): numbers, times in epoch ms, and categories. */

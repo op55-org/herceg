@@ -8,7 +8,14 @@
 // property meant where one is close, so misspellings do not go unnoticed.
 
 import { checkBins } from "../data/bins.ts";
-import { checkKinds, KINDS, keyPath, rangeProblem, regexProblem } from "../fields/check.ts";
+import {
+  checkKinds,
+  KINDS,
+  keyPath,
+  rangeProblem,
+  regexProblem,
+  urlProblem,
+} from "../fields/check.ts";
 import { NUMBER_OPTIONS, TIME_OPTIONS } from "../format/intl-options.ts";
 import { formatWriter, formOf } from "../format/patterns.ts";
 import { calendarInterval } from "../guides/ticks.ts";
@@ -1066,7 +1073,7 @@ const missingDisplay: Check = (v, path) => {
   properties(shown, path, { text: string, color: displayColor } satisfies ChecksOf<MissingDisplay>);
 };
 
-/** A field display's settings; links are checked, and drawn by nothing yet. */
+/** A field display's settings. */
 const DISPLAY: ChecksOf<FieldDisplay> = {
   label: orFalse(string),
   description: orFalse(string),
@@ -1081,6 +1088,8 @@ const DISPLAY: ChecksOf<FieldDisplay> = {
     checkProperties(v as Record<string, unknown>, path, ["url"], {
       url: (url, at) => {
         if (typeof url !== "string") linkParts(url, at);
+        const problem = urlProblem(url as string | readonly unknown[]);
+        if (problem) throw refusal(at, problem);
       },
       text: linkParts,
     } satisfies ChecksOf<FieldLink>);

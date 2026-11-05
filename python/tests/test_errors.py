@@ -272,6 +272,11 @@ SLOTS: dict[str, tuple[str, Any, dict[str, Any]]] = {
         lambda o: _chart(fields=[hg.FieldDisplay(match="v", thresholds=o)]),
         {"steps": [(1.5, "#c62828")]},
     ),
+    "Link": (
+        "fields[0].link",
+        lambda o: _chart(fields=[hg.FieldDisplay(match="v", link=o)]),
+        {"url": "/v"},
+    ),
     "AtThresholds": (
         "marks[1].y",
         lambda o: _chart(
@@ -383,7 +388,7 @@ READ = {"InspectedField", "InspectedPoint", "Inspection", "RowSelection", "Brush
 READ |= {"Viewport", "ViewEdge", "ViewportEvent", "ScaleInstance", "ScaleView"}
 READ |= {"SelectEvent", "SelectionOwner", "VisibilityState", "PanelVisibility"}
 READ |= {"InputEvent", "Pointer", "Box", "ItemTarget", "AxisLabelTarget"}
-READ |= {"LegendEntryTarget", "PlotTarget"}
+READ |= {"LegendEntryTarget", "PlotTarget", "RowLink"}
 # Selections, which events report and charts and widgets take.
 READ |= {"ItemSelection", "SeriesSelection", "ItemReference", "SeriesReference"}
 # Pins, which events report and widgets take, and moves of items.

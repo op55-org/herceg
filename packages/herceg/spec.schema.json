@@ -2873,6 +2873,11 @@
             { "const": false }
           ]
         },
+        "link": {
+          "title": "Link",
+          "description": "A link from each value: pinned tooltips draw it, and `displayOf` gives it.",
+          "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }]
+        },
         "label": {
           "title": "Label",
           "description": "The field's name where surfaces name it; its name by default.",
@@ -2887,8 +2892,7 @@
           "title": "Missing",
           "description": "How missing values show: their text (\"–\" by default), or their text and color.",
           "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/MissingDisplay" }, { "const": false }]
-        },
-        "link": { "title": "Link", "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }] }
+        }
       },
       "additionalProperties": false
     },
@@ -2904,7 +2908,7 @@
       ]
     },
     "FieldLink": {
-      "description": "A link from each value: a URL, constant or made of parts (whose values are written raw and URL-encoded), and its text, made of parts. No surface draws links yet; they are checked, and planned for tooltips, grid cells, and `displayOf`.",
+      "description": "A link from each value: a URL, constant or made of parts, and its text. URL parts write values raw and URL-encoded (numbers as digits, times as epoch milliseconds, categories as they are); a row missing a value they read has no link. Text parts write values through their displays; the value's own text by default. Only http, https, mailto, and relative URLs are links: others are written as text.",
       "type": "object",
       "properties": {
         "url": {
@@ -2968,7 +2972,6 @@
           "description": "How missing values show: their text (\"–\" by default), or their text and color.",
           "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/MissingDisplay" }, { "const": false }]
         },
-        "link": { "title": "Link", "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }] },
         "format": {
           "title": "Format",
           "description": "How values are written: number forms for numbers, time forms for times.",
@@ -2995,6 +2998,11 @@
             { "type": "array", "items": { "$ref": "#/$defs/ValueMapping" } },
             { "const": false }
           ]
+        },
+        "link": {
+          "title": "Link",
+          "description": "A link from each value: pinned tooltips draw it, and `displayOf` gives it.",
+          "anyOf": [{ "$ref": "#/$defs/FieldLink" }, { "const": false }]
         }
       },
       "additionalProperties": false

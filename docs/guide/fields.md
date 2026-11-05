@@ -12,6 +12,7 @@ by name, regular expression, kind, and table.
 - [How a value is written](#how-a-value-is-written)
 - [Mappings](#mappings)
 - [Colors](#colors)
+- [Links](#links)
 - [Charts](#charts)
 - [Axes](#axes)
 - [Names](#names)
@@ -44,9 +45,11 @@ by name, regular expression, kind, and table.
   of a category field, gauges' bands and dials, and tooltip fields'
   swatches; legends show a key of the colors; rules and regions stand at a
   field's thresholds.
+- Displays link values ([Links](#links)): pinned tooltips draw tooltip
+  fields' links, events carry them, and `displayOf` gives them to
+  application code. Grid cells do not draw links yet.
 - Python builds and checks `hg.FieldDisplay`, `hg.Match`, `hg.Mapping`,
-  `hg.Thresholds`, and `hg.AtThresholds`.
-- Links from displays are planned ([roadmap](../roadmap.md)).
+  `hg.Thresholds`, `hg.AtThresholds`, and `hg.Link`.
 - Every format form a display takes (durations, SI and binary prefixes,
   text around number patterns) works today wherever charts take a format:
   see [Formats](axes-and-legends.md#formats).
@@ -62,7 +65,7 @@ by name, regular expression, kind, and table.
 | `missing` | The text of missing values (null, NaN, and missing times): "–" by default; or `{ text, color }`, either or both. |
 | `mappings` | Values written as given text, colored in a given color, or both (see [Mappings](#mappings)). |
 | `thresholds` | A number field's colors by step (see [Colors](#colors)). |
-| `link` | A link built from the row's values. Typed and checked; no surface draws links yet. |
+| `link` | A link from each value, made of the row's values (see [Links](#links)). |
 
 Every setting also takes `false`, which resets it to its default, as if no
 earlier rule had given it.
@@ -208,6 +211,68 @@ base band by `"base"`), so adding a step renames no other: events report
 them as items of their mark, `item: '["slo","500"]'` for a rule with id
 "slo", with no rows. Rules at thresholds cannot be dragged.
 
+## Links
+
+A display's `link` makes a link of each value: a `url`, constant or made
+of parts, and its `text`, made of parts (the value's text by default).
+A part is literal text, `{ field }` (a field of the same row), or
+`{ value: true }` (the field's own value).
+
+```ts
+import type { FieldDisplays } from "herceg/fields";
+
+const fields: FieldDisplays = {
+  trace: {
+    label: "Trace",
+    link: {
+      url: ["https://traces.example.com/trace/", { value: true }, "?span=", { field: "span" }],
+      text: ["Trace ", { value: true }],
+    },
+  },
+};
+createChart(element, {
+  fields,
+  tooltip: { pin: "click" },
+  marks: [line(requests, { x: "time", y: "latency", tooltip: { fields: ["trace"] } })],
+});
+```
+
+- **URLs write raw values**, URL-encoded: numbers as digits, times as
+  epoch milliseconds, categories as they are; never their formats or
+  mappings, which are for people. A row missing a value its URL reads has
+  no link, and its value is written as text. A constant `url` is taken as
+  it is. A field whose values are whole URLs cannot be linked as they are:
+  its value is encoded as one part.
+- **Text writes values through their displays**: `{ value: true }` as the
+  surface writes the value (a tooltip field's own `format` included),
+  `{ field }` through that field's display, missing values as their
+  missing text.
+- **Schemes.** Only http, https, mailto, and relative URLs are links. A
+  URL of another scheme (`javascript:`, `data:`, in any case, after
+  spaces, control characters, tabs, or newlines, as browsers read it) is
+  never drawn as a link: where values make it, the value is written as
+  text; where the URL gives it as text (a constant URL, or its first part),
+  the display is refused.
+- **Tooltips.** A tooltip field with a link writes the link's text. Once
+  the tooltip is pinned (`tooltip: { pin: "click" }`, or Enter on the
+  keyboard's cursor) it is a link (`<a target="_blank" rel="noopener
+  noreferrer">`), opening in a new tab or window beside the chart, which
+  keeps its state; Tab reaches it from the pinned tooltip (Option-Tab in
+  Safari, which reaches links so), and content drawn again keeps the focus
+  on the link in its place. A sandboxed frame (a notebook's or Streamlit's)
+  decides whether new windows open.
+- **Events.** Hover and click events' inspections carry each tooltip
+  field's link (`InspectedField.link`, `{ url, text }`); targets do not.
+- **Static output** writes a tooltip field's link text in SVG titles, as
+  unpinned tooltips do, and draws no links.
+- **Grids** do not draw links yet: `compileFields(...).column(...)` gives
+  each column's `link(table, row)` for the cells that will.
+- A field a part names must be in the table of the field linked: the
+  surface reading the link refuses it as it first reads that table
+  (`chart fields.trace.link.url[3].field: no field "span" in the table of
+  "trace"; the table has ...`). Surfaces that draw no links (axes,
+  legends) never read them.
+
 ## Charts
 
 A chart's `fields` applies to every mark it draws. Each surface writes a
@@ -344,7 +409,8 @@ whatever `fields.latency.label` says.
   and `{ label }` writes a field's label. Bars' value labels and annotations' labels of a field
   write through the displays without parts.
 - Tooltip fields take their value's display color as a swatch beside the
-  value (`InspectedField.color`).
+  value (`InspectedField.color`), and their link's text, a link once the
+  tooltip is pinned (`InspectedField.link`; see [Links](#links)).
 - Gauges take the value field's `label`, `format`, `min`, and `max`, each
   under the gauge's own; an end the gauge does not give comes from the
   display, and ends that cross are refused, naming where each is given.
@@ -383,7 +449,8 @@ Grids take displays through `herceg/fields` alone, compiled once:
 `model.setFields(...)` to change them. Headers read fields' labels and
 descriptions, cells write through the displays, and group rows write keys
 and aggregates by operation and kind. Grids without `fields` load none of
-it. See [Grids](grids.md#field-displays).
+it. See [Grids](grids.md#field-displays). Grid cells do not draw links
+yet ([Links](#links)).
 
 ## Reading displays in TypeScript
 
@@ -398,6 +465,8 @@ latency.label; // "Latency"
 latency.text(66_000); // "1m 6s"
 latency.text(Number.NaN); // "–"
 latency.color(66_000); // its step's color, or undefined
+displayOf(fields, { table: requests, field: "trace" }).link(requests, 0);
+// { url: "https://traces.example.com/trace/4bf92f35?span=s1", text: "Trace 4bf92f35" }
 
 // A field by name and kind, of a table by name, as specs name them.
 const quota = [{ match: { table: "quotas", field: "bytes_in" }, label: "Quota" }];
@@ -412,7 +481,9 @@ displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; 
   still apply, and the surface's own `missing` text, for fields whose
   displays give none ("–" by default).
 - A display's `text(value)` writes a value, and `color(value)` gives its
-  display color (undefined for none); `format(value)` writes a value
+  display color (undefined for none); `link(table, row)` gives a row's
+  link (undefined for none, a value its URL reads missing, or a scheme
+  links do not take), its text written as `text` writes; `format(value)` writes a value
   computed from the field's values (a sum, a mean) in its format and
   missing text, without the mappings. `settings.defaultFormat` gives a
   surface's format where neither its own nor the field's applies (grids'
@@ -421,8 +492,9 @@ displayOf(quota, { field: "bytes_in", kind: "number", table: "quotas" }).label; 
   `displayOf`, for surfaces resolving many fields, and `column(...)`, what
   a grid column shows through them (`ColumnDisplay`), which grids call.
 - `fieldsOf(table, displays)` writes rules for a table's fields, each
-  display typed by its field's kind and checked against the schema; the
-  rules match that table's fields wherever they are drawn.
+  display typed by its field's kind and checked against the schema, its
+  link's `{ field }` parts typed by the table's fields; the rules match
+  that table's fields wherever they are drawn.
 
 ```ts
 const fields = fieldsOf(requests, {
@@ -498,7 +570,15 @@ p99 = hg.FieldDisplay(
   `hg.LabelPart(label=...)`. `herceg.express` names single series and
   titles axes by `hg.LabelPart(label=column)` when given `fields=`, so
   the displays' labels name them.
-- Links (`hg.Link`) come with the surfaces that draw them.
+- `hg.Link(url=..., text=...)` links each value: `url` a URL or a list of
+  parts, `text` a list of parts, each text, `hg.LabelPart(field=...)`, or
+  `hg.LabelPart(value=True)` (or a dict of those arguments). A URL given
+  with a scheme links do not take is refused. Charts send the columns links
+  read, of the rules matching a column they send, through derived tables;
+  events' `InspectedField.link` is an `hg.RowLink(url, text)`. A widget's
+  `update(fields=...)` refuses a link reading a column the chart did not
+  send, since a live chart holds only the columns it sent: give such links
+  when the chart is made.
 
 ```python
 chart = hg.Chart(requests, fields={"latency": hg.FieldDisplay(label="Latency", format=hg.Format(duration="millisecond"))})
@@ -528,6 +608,9 @@ wrong, and what to give instead.
 | Percent steps without bounds | `chart fields.cpu: percent thresholds (fields[1]) need min and max; give both` |
 | Thresholds on a category field | `chart fields.status.thresholds: "status" holds categories; thresholds are for number fields; color categories with mappings` |
 | A mapping with neither text nor color | `chart fields.status.mappings[0]: give text, color, or both` |
+| A URL given with a scheme links do not take | `chart fields.trace.link.url: "javascript:void(0)" has a scheme links do not take; give an http, https, mailto, or relative URL` |
+| A link part naming a field its table lacks (as a tooltip first reads it) | `chart fields.trace.link.url[3].field: no field "span" in the table of "trace"; the table has "time", "latency", "trace"` |
+| Python, a part that is no link part | `Link url[1] format: URLs take values raw, and text through their displays; drop format` |
 | A color channel on a number field with no display colors | `bar (mark 0) encode.color.field: field "p99" holds numbers, and fields give it no colors; name a channel scale (a scale of the chart's with a range), take its values as colors (scale: { type: "identity" }), or give fields.p99 thresholds or mappings with colors` |
 | One value, two colors (the chart's drawing error) | `chart fields: "503" of "status" is "#c62828" (fields[0]) and "#ff0000" (fields[1]); one value has one color` |
 | A place at a field without thresholds | `rule (mark 1) y.thresholds: fields give "p99" no thresholds; give fields.p99.thresholds, or place the rule at a value` |

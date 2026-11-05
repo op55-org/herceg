@@ -1741,18 +1741,20 @@
         "fields": "hg.radar's fields are its value columns (fields=[\"speed\", \"power\"]), as the radar mark's are; field displays go to hg.Chart(fields=...)."
       }
     },
+    "settings LinkPart hg.LabelPart": {
+      "only": {
+        "series": "Python's one hg.LabelPart serves labels' content, series' names, axes' titles, and links' parts; a link's part is text, (field=...), or (value=True) (`Link url[1]: a link's part is text, a column (field=), or the value (value=True); give one of them`), as the spec's LinkPart is.",
+        "label": "As series.",
+        "format": "A link's parts write values raw in its URL and through their displays in its text (`Link url[1] format: URLs take values raw, and text through their displays; drop format`), as the spec's LinkPart has no format.",
+        "style": "As format (`Link url[1] style: ...; drop style`)."
+      }
+    },
     "chart python fields": {
-      "without": {
-        "link": "No surface draws a field's link yet; hg.FieldDisplay takes link when one does."
-      },
       "untyped": {
         "missing": "Python takes missing values as text, or a dict of their text and color (`missing={\"text\": \"n/a\", \"color\": \"#9e9e9e\"}`), checked as hg.FieldDisplay is made, rather than an object of its own."
       }
     },
     "chart update fields": {
-      "without": {
-        "link": "As chart python fields'."
-      },
       "untyped": {
         "missing": "Python takes missing values as text, or a dict of their text and color (`missing={\"text\": \"n/a\", \"color\": \"#9e9e9e\"}`), checked as hg.FieldDisplay is made, rather than an object of its own."
       }

@@ -209,7 +209,7 @@ function titleOf(inspection: AxisInspection): string {
     inspection.label,
     ...inspection.points.map(
       ({ label, text, fields = [] }) =>
-        `${label}: ${[text, ...fields.map((field) => `${field.label}: ${field.text}`)].join(", ")}`,
+        `${label}: ${[text, ...fields.map((field) => `${field.label}: ${field.link?.text ?? field.text}`)].join(", ")}`,
     ),
   ].join("\n");
 }

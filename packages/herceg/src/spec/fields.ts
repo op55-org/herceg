@@ -80,15 +80,29 @@ export type MissingDisplay = { text: string; color?: string } | { text?: string;
 export type LinkPart = string | { field: string; value?: never } | { value: true; field?: never };
 
 /**
- * A link from each value: a URL, constant or made of parts (whose values
- * are written raw and URL-encoded), and its text, made of parts. No
- * surface draws links yet; they are checked, and planned for tooltips,
- * grid cells, and `displayOf`.
+ * A link from each value: a URL, constant or made of parts, and its text.
+ * URL parts write values raw and URL-encoded (numbers as digits, times as
+ * epoch milliseconds, categories as they are); a row missing a value they
+ * read has no link. Text parts write values through their displays; the
+ * value's own text by default. Only http, https, mailto, and relative URLs
+ * are links: others are written as text.
  */
 export interface FieldLink {
   /** @examples ["https://status.example.com"] */
   url: string | readonly LinkPart[];
   text?: readonly LinkPart[];
+}
+
+/** A part of a link whose `{ field }` parts name fields `F`. */
+type PartOf<F extends string> =
+  | string
+  | { field: F; value?: never }
+  | { value: true; field?: never };
+
+/** A link (`FieldLink`) whose `{ field }` parts name fields `F`: a table's, in `fieldsOf`. */
+export interface FieldLinkOf<F extends string> {
+  url: string | readonly PartOf<F>[];
+  text?: readonly PartOf<F>[];
 }
 
 /**
@@ -102,11 +116,11 @@ interface DisplayBase {
   description?: string | false;
   /** How missing values show: their text ("–" by default), or their text and color. */
   missing?: string | MissingDisplay | false;
-  link?: FieldLink | false;
 }
 
-/** A number field's display. */
-export interface NumberFieldDisplay extends DisplayBase {
+/** A number field's display, its link's parts naming fields `F`. */
+export interface NumberFieldDisplay<F extends string = string> extends DisplayBase {
+  link?: FieldLinkOf<F> | false;
   format?: NumberFormatSpec | false;
   /**
    * The field's lower bound, which gauges, color ramps, percent
@@ -120,14 +134,19 @@ export interface NumberFieldDisplay extends DisplayBase {
   mappings?: readonly NumberMapping[] | false;
 }
 
-/** A time field's display. */
-export interface TimeFieldDisplay extends DisplayBase {
+/** A time field's display, its link's parts naming fields `F`. */
+export interface TimeFieldDisplay<F extends string = string> extends DisplayBase {
+  link?: FieldLinkOf<F> | false;
   format?: TimeFormatSpec | false;
   mappings?: readonly NumberMapping[] | false;
 }
 
-/** A category field's display: its values are written as they are, or as mapped. */
-export interface CategoryFieldDisplay extends DisplayBase {
+/**
+ * A category field's display: its values are written as they are, or as
+ * mapped; its link's parts naming fields `F`.
+ */
+export interface CategoryFieldDisplay<F extends string = string> extends DisplayBase {
+  link?: FieldLinkOf<F> | false;
   mappings?: readonly CategoryMapping[] | false;
 }
 
@@ -148,6 +167,8 @@ export interface FieldDisplay extends DisplayBase {
   /** Colors of its values by step (numbers). */
   thresholds?: Thresholds | false;
   mappings?: readonly ValueMapping[] | false;
+  /** A link from each value: pinned tooltips draw it, and `displayOf` gives it. */
+  link?: FieldLink | false;
 }
 
 /**

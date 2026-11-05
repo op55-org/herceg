@@ -44,4 +44,8 @@ lines, areas, and regions colored by the field without a scale, points and
 heatmaps without a ramp of their own, series of category fields, gauges'
 bands, and tooltip fields' swatches, with a key in the legend; rules and
 regions stand at a field's thresholds (`{ thresholds: "p99" }`,
-`hg.AtThresholds` in Python).
+`hg.AtThresholds` in Python). A display's `link` (`hg.Link` in Python)
+makes a link of each value from the row's values, URL-encoded: pinned
+tooltips draw tooltip fields' links (http, https, mailto, and relative
+URLs only), events carry them (`InspectedField.link`), and `displayOf`
+gives them to application code.

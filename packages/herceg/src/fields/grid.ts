@@ -6,6 +6,7 @@
 
 import type { FormatSpec } from "../spec/guides.ts";
 import type { DisplayedField, FieldColumns } from "./display.ts";
+import type { LinkRows, RowLink } from "./links.ts";
 
 /** What a grid column shows through its field's display (see `CompiledFields.column`). */
 export interface ColumnDisplay {
@@ -26,6 +27,11 @@ export interface ColumnDisplay {
   key(value: string | number | null): string;
   /** An aggregate of the field's values in its units (a sum, a mean) as text: its format, without mappings. */
   amount(value: number): string;
+  /**
+   * Row `row`'s link of `table`, its text written as cells write values
+   * (see `DisplayedField.link`): what link cells draw.
+   */
+  link(table: LinkRows, row: number): RowLink | undefined;
 }
 
 /** A grid column's field, and its own settings that its display takes. */
@@ -54,6 +60,7 @@ export function columnDisplay(
     format: text as ColumnDisplay["format"],
     key: key as ColumnDisplay["key"],
     amount: shown.format as ColumnDisplay["amount"],
+    link: shown.link as ColumnDisplay["link"],
     text: (table, position) => {
       if (kind !== "category") return text(table.numbers(field)[position]!);
       const { codes, dictionary, revision } = table.categories(field);
